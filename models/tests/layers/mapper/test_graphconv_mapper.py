@@ -25,8 +25,7 @@ from anemoi.models.layers.mapper import GNNBaseMapper
 from anemoi.models.layers.mapper import GNNForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
-
-from ...distributed._distributed_runner import _run_distributed_test
+from tests.distributed._distributed_runner import _run_distributed_test
 
 
 class ConcreteGNNBaseMapper(GNNBaseMapper):
@@ -394,6 +393,8 @@ def _test_gnn_mapper_matches_unsharded_rank(
     group: dist.ProcessGroup,
     mapper_kind: str,
     keep_x_dst_sharded: bool,
+    source_is_sharded: bool,
+    gradient_checkpointing: bool,
 ) -> None:
     """Compare mapper outputs and the derivatives of one globally normalized loss."""
     torch.set_num_threads(1)
@@ -422,6 +423,8 @@ def _test_gnn_mapper_matches_unsharded_rank(
         layer_kernels=load_layer_kernels(instance=False),
     ).to(device)
     subject = deepcopy(reference)
+    # Keep the reference uncheckpointed to also verify backward recomputation.
+    subject.gradient_checkpointing = gradient_checkpointing
     reference_params = dict(reference.named_parameters())
     subject_params = dict(subject.named_parameters())
     assert reference_params.keys() == subject_params.keys()
@@ -473,14 +476,15 @@ def _test_gnn_mapper_matches_unsharded_rank(
         remote_src_gradient[src_start:src_stop].abs() > 10 * allowed_gradient_error
     ).any(), f"Remote source-gradient contributions are too small to test communication on rank {rank}"
 
-    # Distributed execution starts with owned node rows and full edge inputs.
-    local_src_input = x_src[src_start:src_stop].clone().requires_grad_(True)
+    # Source input may be replicated; destination inputs are owned rows.
+    # Anemoi prepares source and edge shards internally from these declared layouts.
+    distributed_src_input = (x_src[src_start:src_stop] if source_is_sharded else x_src).clone().requires_grad_(True)
     local_dst_input = x_dst[dst_start:dst_stop].clone().requires_grad_(True)
     full_edge_input = edge_attr.clone().requires_grad_(True)
     distributed_result = subject(
-        (local_src_input, local_dst_input),
+        (distributed_src_input, local_dst_input),
         1,
-        BipartiteGraphShardInfo(src_nodes=src_splits, dst_nodes=dst_splits),
+        BipartiteGraphShardInfo(src_nodes=src_splits if source_is_sharded else None, dst_nodes=dst_splits),
         full_edge_input,
         edge_index,
         model_comm_group=group,
@@ -495,23 +499,24 @@ def _test_gnn_mapper_matches_unsharded_rank(
         msg=lambda details: f"destination output on rank {rank}\n{details}",
     )
 
-    # Gather backward splits by owner. Each rank uses only its destination terms;
-    # source output stays local, so its objective uses that owned slice as well.
+    # Gather backward splits by owner. Use only owned source/destination terms
+    # even when those outputs are gathered, so the rank losses sum to the reference.
     owned_dst_output = distributed_dst_output if keep_x_dst_sharded else distributed_dst_output[dst_start:dst_stop]
     local_loss = (
         dst_weights[dst_start:dst_stop] * (owned_dst_output - dst_target[dst_start:dst_stop]).square()
     ).sum() / dst_weights.numel()
     if is_forward_mapper:
-        local_src_output = distributed_result[0]
+        distributed_src_output = distributed_result[0]
         torch.testing.assert_close(
-            local_src_output,
-            reference_src_output[src_start:src_stop],
+            distributed_src_output,
+            reference_src_output[src_start:src_stop] if source_is_sharded else reference_src_output,
             **tolerances,
             msg=lambda details: f"source output on rank {rank}\n{details}",
         )
+        owned_src_output = distributed_src_output if source_is_sharded else distributed_src_output[src_start:src_stop]
         local_loss = (
             local_loss
-            + (src_weights[src_start:src_stop] * (local_src_output - src_target[src_start:src_stop]).square()).sum()
+            + (src_weights[src_start:src_stop] * (owned_src_output - src_target[src_start:src_stop]).square()).sum()
             / src_weights.numel()
         )
     local_loss.backward()
@@ -520,12 +525,12 @@ def _test_gnn_mapper_matches_unsharded_rank(
     torch.testing.assert_close(combined_loss, global_loss.detach(), **tolerances)
 
     # Compare completed activation gradients and partial parameter contributions.
-    assert local_src_input.grad is not None, "Missing distributed source-input gradient"
+    assert distributed_src_input.grad is not None, "Missing distributed source-input gradient"
     assert local_dst_input.grad is not None, "Missing distributed destination-input gradient"
     assert reference_dst_input.grad is not None, "Missing reference destination-input gradient"
     torch.testing.assert_close(
-        local_src_input.grad,
-        reference_src_input.grad[src_start:src_stop],
+        distributed_src_input.grad,
+        reference_src_input.grad[src_start:src_stop] if source_is_sharded else reference_src_input.grad,
         **gradient_tolerances,
         msg=lambda details: f"source-input gradient on rank {rank}\n{details}",
     )
@@ -560,15 +565,31 @@ def _test_gnn_mapper_matches_unsharded_rank(
 
 
 @pytest.mark.distributed
-@pytest.mark.parametrize("mapper_kind", ["forward", "backward"], ids=["forward-mapper", "backward-mapper"])
+@pytest.mark.parametrize(
+    ("mapper_kind", "source_is_sharded", "gradient_checkpointing"),
+    [
+        pytest.param("forward", True, False, id="forward-mapper-sharded-source"),
+        pytest.param("forward", False, False, id="forward-mapper-replicated-source"),
+        pytest.param("backward", True, False, id="backward-mapper-sharded-source"),
+        pytest.param("forward", False, True, id="forward-mapper-replicated-source-checkpointed"),
+    ],
+)
 @pytest.mark.parametrize("keep_x_dst_sharded", [True, False], ids=["sharded-destinations", "gathered-destinations"])
 def test_gnn_mapper_matches_unsharded(
-    distributed_backend: str, distributed_world_size: int, mapper_kind: str, keep_x_dst_sharded: bool
+    distributed_backend: str,
+    distributed_world_size: int,
+    mapper_kind: str,
+    keep_x_dst_sharded: bool,
+    source_is_sharded: bool,
+    gradient_checkpointing: bool,
 ) -> None:
-    """Owned node inputs and full edges reproduce unsharded mapper outputs, loss and gradients.
+    """Mapper source layout and destination gathering preserve reference outputs and gradients.
 
     Both mapper directions run with local or gathered destination outputs. The
-    forward mapper's objective also includes its local source updates.
+    forward mapper preserves replicated or sharded source layout; its objective
+    includes the source updates owned by each rank.
+    Replicated-source cases also exercise checkpointed distributed execution
+    against an uncheckpointed reference.
     """
     _run_distributed_test(
         _test_gnn_mapper_matches_unsharded_rank,
@@ -576,4 +597,44 @@ def test_gnn_mapper_matches_unsharded(
         world_size=distributed_world_size,
         mapper_kind=mapper_kind,
         keep_x_dst_sharded=keep_x_dst_sharded,
+        source_is_sharded=source_is_sharded,
+        gradient_checkpointing=gradient_checkpointing,
     )
+
+
+def test_forward_mapper_replicated_sources_without_group() -> None:
+    """An unspecified source partition is equivalent to a single full partition without communication."""
+    edge_index = torch.tensor([[0, 2, 1], [0, 0, 1]], dtype=torch.long)
+    edge_attr = torch.arange(9, dtype=torch.float32).reshape(3, 3) / 7
+    torch.manual_seed(29)
+    mapper = GNNForwardMapper(
+        in_channels_src=3,
+        in_channels_dst=4,
+        num_channels=8,
+        num_chunks=1,
+        mlp_extra_layers=0,
+        edge_dim=3,
+        gradient_checkpointing=False,
+        layer_kernels=load_layer_kernels(instance=False),
+    )
+    generator = torch.Generator().manual_seed(37)
+    src = torch.randn(3, 3, generator=generator)
+    dst = torch.randn(2, 4, generator=generator)
+    reference_src = src.clone().requires_grad_(True)
+    reference_dst = dst.clone().requires_grad_(True)
+    actual_src = src.clone().requires_grad_(True)
+    actual_dst = dst.clone().requires_grad_(True)
+    reference_output = mapper(
+        (reference_src, reference_dst),
+        1,
+        BipartiteGraphShardInfo(src_nodes=[src.size(0)], dst_nodes=[dst.size(0)]),
+        edge_attr,
+        edge_index,
+    )
+    actual_output = mapper((actual_src, actual_dst), 1, BipartiteGraphShardInfo(), edge_attr, edge_index)
+    for actual, expected in zip(actual_output, reference_output):
+        torch.testing.assert_close(actual, expected)
+    sum(output.square().sum() for output in reference_output).backward()
+    sum(output.square().sum() for output in actual_output).backward()
+    torch.testing.assert_close(actual_src.grad, reference_src.grad)
+    torch.testing.assert_close(actual_dst.grad, reference_dst.grad)
