@@ -239,7 +239,6 @@ def _wire_training_module(
     obj.config = config
     obj.n_step_input = dict.fromkeys(data_indices, n_step_input)
     obj.n_step_output = dict.fromkeys(data_indices, n_step_output)
-    obj.loss_gradient_scaling = False
     obj.grid_dim = -2
     obj.model_comm_group = None
     obj.model_comm_group_size = 1
@@ -562,7 +561,6 @@ def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
     shard_sizes = [1, 1]
 
     module._evaluate_loss = BaseTrainingModule._evaluate_loss
-    module.loss_gradient_scaling = False
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
@@ -599,7 +597,6 @@ def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
     shard_sizes = [1, 1]
 
     module._evaluate_loss = BaseTrainingModule._evaluate_loss
-    module.loss_gradient_scaling = False
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
@@ -644,7 +641,6 @@ def test_base_compute_loss_passes_none_shard_sizes_when_gathered() -> None:
     shard_sizes = [1, 1]
 
     module._evaluate_loss = BaseTrainingModule._evaluate_loss
-    module.loss_gradient_scaling = False
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
@@ -696,7 +692,6 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     combined_loss = CombinedLoss(multiscale_loss)
 
     module._evaluate_loss = BaseTrainingModule._evaluate_loss
-    module.loss_gradient_scaling = False
     module.loss = {"data": combined_loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
@@ -749,7 +744,6 @@ def test_edm_transport_compute_loss_forwards_standard_loss_kwargs() -> None:
     weights = {"data": torch.tensor([0.25])}
 
     module._evaluate_loss = BaseTrainingModule._evaluate_loss
-    module.loss_gradient_scaling = False
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
@@ -785,7 +779,6 @@ def test_edm_transport_compute_loss_forwards_sharding_metadata_when_requested() 
     weights = {"data": torch.tensor([0.25])}
 
     module._evaluate_loss = BaseTrainingModule._evaluate_loss
-    module.loss_gradient_scaling = False
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2

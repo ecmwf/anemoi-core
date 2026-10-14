@@ -191,7 +191,6 @@ def test_edm_loss_passes_sparse_weights_and_preserves_gradients() -> None:
     module = SimpleNamespace(
         loss={"obs": WeightedMSELoss()},
         model_comm_group=None,
-        loss_gradient_scaling=False,
         _evaluate_loss=BaseTrainingModule._evaluate_loss,
     )
     weights = {"obs": [torch.full((2, 1), 2.0), torch.full((3, 1), 3.0)]}

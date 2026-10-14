@@ -33,8 +33,6 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
-from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
-from anemoi.training.losses.scaler_tensor import with_loss_gradient_scaling
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
@@ -63,6 +61,7 @@ if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.models.distributed.shapes import DatasetShardSizes
     from anemoi.models.distributed.shapes import ShardSizes
+    from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
     from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
     from anemoi.training.losses.scalers.base_scaler import BaseScaler
     from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
@@ -150,7 +149,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     - `BaseLoss`
     - `IndexCollection`
     - `CosineLRScheduler`
-    - `create_scalers`, `with_loss_gradient_scaling`
+    - `create_scalers`
 
     """
 
@@ -320,14 +319,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_indices[dataset_name],
             )
 
-        # Rescales the per-channel loss gradients; applied to the prediction in _evaluate_loss.
-        self.loss_gradient_scaling = config.training.loss_gradient_scaling
-        # The channel weights are summed over the grid points a rank holds, so a model split across
-        # GPUs would weight each channel differently from the same model on one GPU.
-        assert not (self.loss_gradient_scaling and config.system.hardware.num_gpus_per_model > 1), (
-            "training.loss_gradient_scaling is not supported yet when the model is split across GPUs "
-            f"(system.hardware.num_gpus_per_model={config.system.hardware.num_gpus_per_model})."
-        )
+        # Loss gradient scaling (arXiv:2306.06079, section 4.3.2) has been removed for now, to be revisited.
+        # The config key stays so existing configs validate; asking for it fails loudly.
+        if config.training.loss_gradient_scaling:
+            msg = "training.loss_gradient_scaling is temporarily unavailable; set it to false."
+            raise NotImplementedError(msg)
 
         self.is_first_step = True
 
@@ -714,15 +710,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         loss: Callable,
         pred: Source,
         target: Source,
-        *,
-        gradient_scaling: bool = False,
         **kwargs,
     ) -> torch.Tensor:
-        """Check training precision before promoting inputs and evaluating the loss.
-
-        With gradient_scaling, the gradient of the loss with respect to pred is rescaled
-        per channel (see training.loss_gradient_scaling).
-        """
+        """Check training precision before promoting inputs and evaluating the loss."""
         full_precision = (torch.float32, torch.float64)
         assert (
             pred.dtype in full_precision
@@ -733,8 +723,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         dtype = torch.promote_types(torch.promote_types(pred.dtype, target.dtype), torch.float32)
         pred = pred.map_data(lambda data: data.to(dtype))
         target = target.map_data(lambda data: data.to(dtype))
-        if gradient_scaling:
-            pred = with_loss_gradient_scaling(pred)
         with torch.autocast(device_type=pred.device.type, enabled=False):
             return loss(pred, target, **kwargs)
 
@@ -839,7 +827,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 grid_shard_sizes=self._grid_shard_sizes(y),
             )
 
-        return self._evaluate_loss(loss, y_pred, y, gradient_scaling=self.loss_gradient_scaling, **loss_kwargs)
+        return self._evaluate_loss(loss, y_pred, y, **loss_kwargs)
 
     def _compute_metrics(
         self,

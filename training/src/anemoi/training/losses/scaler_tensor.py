@@ -12,7 +12,6 @@ import logging
 import uuid
 from collections.abc import Callable
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 from typing import Any
 from typing import Self
 
@@ -22,51 +21,7 @@ from torch import nn
 from anemoi.models.data import TensorLayout
 from anemoi.training.utils.enums import TensorDim
 
-if TYPE_CHECKING:
-    from anemoi.models.data.sources import Source
-
 LOGGER = logging.getLogger(__name__)
-
-
-def grad_scaler(grad: torch.Tensor, grid_dim: int) -> torch.Tensor:
-    """Scales the loss gradient with respect to the prediction, channel by channel.
-
-    Uses the formula in https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
-
-    Parameters
-    ----------
-    grad : torch.Tensor
-        Gradient of the loss with respect to the prediction, variables on the last axis.
-    grid_dim : int
-        Axis of ``grad`` holding the grid, summed over to weight each channel.
-
-    Returns
-    -------
-    torch.Tensor
-        Re-scaled gradient.
-    """
-    channels = grad.shape[-1]  # number of channels
-    channel_weights = torch.reciprocal(torch.sum(torch.abs(grad), dim=grid_dim, keepdim=True))  # channel-wise weights
-    return (channels * channel_weights) / torch.sum(channel_weights, dim=-1, keepdim=True) * grad
-
-
-def with_loss_gradient_scaling(pred: "Source") -> "Source":
-    """Return ``pred`` with :func:`grad_scaler` applied to the gradient that flows back from the loss.
-
-    The hook sits on an alias of the prediction data, so only the loss's gradient is rescaled,
-    not gradient reaching the same tensor through other paths (e.g. later rollout steps).
-    Predictions that do not require grad (validation) are returned unchanged.
-    """
-
-    def alias_with_hook(data: torch.Tensor) -> torch.Tensor:
-        if not data.requires_grad:
-            return data
-        alias = data.view_as(data)
-        grid_dim = pred.layout.axis("grid", ndim=data.ndim)
-        alias.register_hook(lambda grad: grad_scaler(grad, grid_dim))
-        return alias
-
-    return pred.map_data(alias_with_hook)
 
 
 def reshape_scaler(dims: tuple[str, ...], scaler: torch.Tensor, layout: TensorLayout) -> torch.Tensor:

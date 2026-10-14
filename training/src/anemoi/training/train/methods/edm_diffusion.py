@@ -101,13 +101,7 @@ class EDMDiffusionTransportObjective(TransportObjective):
                 grid_shard_sizes=self.module._grid_shard_sizes(y),
             )
 
-        return self.module._evaluate_loss(
-            loss,
-            y_pred,
-            y,
-            gradient_scaling=self.module.loss_gradient_scaling,
-            **loss_kwargs,
-        )
+        return self.module._evaluate_loss(loss, y_pred, y, **loss_kwargs)
 
     def _noise_target(
         self,

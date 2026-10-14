@@ -830,7 +830,7 @@ class BaseTrainingSchema(BaseModel):
     weight_averaging: WeightAveragingSchema | None = Field(default=None)
     "Config for weight averaging (SWA or EMA). Set to null to disable."
     loss_gradient_scaling: bool = False
-    "Dynamic rescaling of the loss gradient. Not yet tested."
+    "Dynamic rescaling of the loss gradient. Temporarily unavailable: must be false."
     scalers: DatasetDict[dict[str, ScalerSchema]]
     "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: DatasetDict[dict[str, LossSchemas] | None]

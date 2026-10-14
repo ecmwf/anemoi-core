@@ -1150,10 +1150,9 @@ individual loss config.
 There is also generic functions that are useful for losses in
 ``anemoi/training/losses/utils.py``.
 
-``grad_scaler`` is used to automatically scale the loss gradients in the
-loss function using the formula in https://arxiv.org/pdf/2306.06079.pdf,
-section 4.3.2. This can be switched on in the config by setting the
-option ``config.training.loss_gradient_scaling=True``.
+Loss gradient scaling (https://arxiv.org/pdf/2306.06079.pdf, section
+4.3.2) is temporarily unavailable: ``config.training.loss_gradient_scaling``
+must be ``False``. We expect it to be reintroduced in a future PR.
 
 ``ScaleTensor`` is a class that can record and apply arbitrary scaling
 factors to tensors. It supports relative indexing, combining multiple
