@@ -60,7 +60,7 @@ def load_graph_from_file(graph_filename: Path | str) -> HeteroData:
 
 
 def validate_loaded_graph(graph_data: HeteroData, required_dataset_names: list[str]) -> None:
-    """Ensure the loaded graph contains the required dataset node types."""
+    """Ensure the loaded graph contains the required dataset nodes names."""
     missing = [n for n in required_dataset_names if n not in graph_data.node_types]
     if missing:
         msg = (
