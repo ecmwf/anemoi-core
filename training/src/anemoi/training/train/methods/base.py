@@ -711,10 +711,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         losses : dict[str, torch.nn.Module]
             Losses or metrics to check, keyed by the name used in the error message.
         """
+        # Only the leaf losses compute anything: a container such as CombinedLoss keeps its own
+        # (unused) ignore_nans=False even when all of its children ignore NaNs.
         intolerant = [
             name
             for name, loss in losses.items()
-            if any(getattr(module, "ignore_nans", True) is False for module in loss.modules())
+            if any(
+                getattr(leaf, "ignore_nans", True) is False
+                for leaf in (loss.iter_leaf_losses() if isinstance(loss, BaseLoss) else loss.modules())
+            )
         ]
         if not intolerant:
             return
