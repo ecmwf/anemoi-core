@@ -8,8 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-import importlib
-
 import pytest
 import torch
 import torch.nn as nn
@@ -566,46 +564,28 @@ def test_GraphTransformerProcessorBlock_forward_backward(init_proc, block):
         ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
 
 
-@pytest.fixture
-def test_GraphTransformerProcessorBlock_chunking(init_proc, block, monkeypatch):
-    (
-        in_channels,
-        _hidden_dim,
-        _out_channels,
-        edge_dim,
-        _bias,
-        _activation,
-        _num_heads,
-        _num_chunks,
-        _backend,
-        _edge_pre_mlp,
-    ) = init_proc
-    # Initialize GraphTransformerProcessorBlock
-    block = block
+@pytest.mark.parametrize("num_chunks", [2, 3, 7])
+def test_GraphTransformerProcessorBlock_chunking(init_proc, block, monkeypatch, num_chunks):
+    in_channels, edge_dim = init_proc[0], init_proc[3]
+    num_nodes = 10
 
-    # Generate random input tensor
-    x = torch.randn((10, in_channels))
-    edge_attr = torch.randn((10, edge_dim))
-    edge_index = torch.randint(1, 10, (2, 10))
-    shapes = (10, 10, 10)
-    batch_size = 1
-    size = 10
-    num_chunks = torch.randint(2, 10, (1,)).item()
+    # inference chunking assumes dst-sorted edges (as provided by the graph providers)
+    edge_index = torch.randint(0, num_nodes, (2, 30))
+    edge_index = edge_index[:, torch.argsort(edge_index[1], stable=True)]
+    x = torch.randn((num_nodes, in_channels))
+    edge_attr = torch.randn((edge_index.shape[1], edge_dim))
+    shard_info = GraphShardInfo(nodes=[num_nodes], edges=[edge_index.shape[1]])
 
-    # manually set to non-training mode
+    # inference chunking is only active outside training
     block.eval()
 
-    # result with chunks
-    monkeypatch.setenv("ANEMOI_INFERENCE_NUM_CHUNKS", str(num_chunks))
-    importlib.reload(anemoi.models.layers.block)
-    out_chunked, _ = block(x, edge_attr, edge_index, shapes, batch_size, size)
-    # result without chunks, reload block for new env variable
-    monkeypatch.setenv("ANEMOI_INFERENCE_NUM_CHUNKS", "1")
-    importlib.reload(anemoi.models.layers.block)
-    out, _ = block(x, edge_attr, edge_index, shapes, batch_size, size)
+    monkeypatch.setattr(anemoi.models.layers.block, "NUM_CHUNKS_INFERENCE_PROCESSOR", num_chunks)
+    out_chunked, _ = block(x, edge_attr, edge_index, shard_info, 1, num_nodes)
+    monkeypatch.setattr(anemoi.models.layers.block, "NUM_CHUNKS_INFERENCE_PROCESSOR", 1)
+    out, _ = block(x, edge_attr, edge_index, shard_info, 1, num_nodes)
 
     assert out.shape == out_chunked.shape, f"out.shape ({out.shape}) != out_chunked.shape ({out_chunked.shape})"
-    assert torch.allclose(out, out_chunked, atol=1e-4), "out != out_chunked"
+    assert torch.allclose(out, out_chunked, atol=1e-5), "out != out_chunked"
 
 
 @pytest.fixture
