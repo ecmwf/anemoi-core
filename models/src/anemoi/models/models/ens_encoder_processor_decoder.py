@@ -266,6 +266,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             ensemble_size=ensemble_size,
             grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             grid_shard_sizes=shard_sizes_hidden,
+            # with explicit precision (bf16 weights, no autocast) the noise must match the noise MLP weights
+            noise_dtype=compute_dtype if compute_dtype is not None else torch.float32,
             model_comm_group=model_comm_group,
         )
 
