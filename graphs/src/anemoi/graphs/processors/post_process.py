@@ -23,6 +23,9 @@ from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.graphs.utils import NodesAxis
 from anemoi.graphs.utils import get_edge_attributes
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
+import numpy as np
+from scipy.spatial import cKDTree
 
 LOGGER = logging.getLogger(__name__)
 
@@ -421,3 +424,75 @@ class RemoveSelfEdges(BaseEdgeMaskingProcessor):
         assert self.source_name == self.target_name, "Self-edge removal requires source and target node sets to match."
         edge_index = graph[self.edges_name].edge_index
         return edge_index[0] != edge_index[1]
+
+
+class RemoveEdgesCrossingArea(BaseEdgeMaskingProcessor):
+    """Remove crossing edges from an edge store.
+    
+    For each edge, we will take a given number of middle points (if 1 only the midpoint)
+    to check if the edge crosses any area. The check is done based on whether the closest
+    point to any of the middle points is in the restricted area.
+    """
+
+    def __init__(
+        self,
+        source_name: str,
+        target_name: str,
+        reference_nodes_name: str,
+        reference_attribute_name: str,
+        num_middle_points: int = 1,
+        source_mask_attr_name: str | None = None,
+        target_mask_attr_name: str | None = None,
+    ) -> None:
+        super().__init__(source_name, target_name)
+        if num_middle_points < 1:
+            raise ValueError(f"num_middle_points must be >= 1, got {num_middle_points}.")
+        self.source_name = source_name
+        self.target_name = target_name
+        self.num_middle_points = num_middle_points
+        self.reference_nodes_name = reference_nodes_name
+        self.reference_attribute_name = reference_attribute_name
+        self.source_mask_attr_name = source_mask_attr_name
+        self.target_mask_attr_name = target_mask_attr_name
+
+    @staticmethod
+    def _get_xyz_coordinates(graph: HeteroData, nodes_name: str) -> np.ndarray:
+        return latlon_rad_to_cartesian_np(graph[nodes_name].x.detach().cpu().numpy().astype(np.float64))
+
+    @staticmethod
+    def _get_node_attr(graph: HeteroData, nodes_name: str, attr_name: str, dtype = torch.bool) -> np.ndarray:
+        return graph[nodes_name][attr_name].detach().cpu().numpy().reshape(-1).astype(dtype)
+
+    def compute_mask(self, graph: HeteroData) -> torch.Tensor:
+        edge_index = graph[(self.source_name, "to", self.target_name)].edge_index
+        src, dst = edge_index.detach().cpu().numpy()
+        keep = np.ones(src.shape[0], dtype=bool)
+
+        # 1. Reference grid: KD-tree over ALL its points; the attribute says which are restricted.
+        restricted = self._get_node_attr(graph, self.reference_nodes_name, self.reference_attribute_name, bool)
+        if not restricted.any():
+            return torch.from_numpy(keep)
+        tree = cKDTree(self._get_xyz_coordinates(graph, self.reference_nodes_name))
+
+        # 2. Which edges to check (all by default).
+        check = np.ones_like(keep)
+        if self.source_mask_attr_name is not None:
+            check &= self._get_node_attr(graph, self.source_name, self.source_mask_attr_name, bool)[src]
+        if self.target_mask_attr_name is not None:
+            check &= self._get_node_attr(graph, self.target_name, self.target_mask_attr_name, bool)[dst]
+        idx = np.flatnonzero(check)
+        if idx.size == 0:
+            return torch.from_numpy(keep)
+
+        # 3. Sample points along each checked edge and look up their nearest reference point.
+        a = self._get_xyz_coordinates(graph, self.source_name)[src[idx]]
+        b = self._get_xyz_coordinates(graph, self.target_name)[dst[idx]]
+        crosses = np.zeros(idx.size, dtype=bool)
+        for t in np.arange(1, self.num_middle_points + 1) / (self.num_middle_points + 1):
+            p = (1.0 - t) * a + t * b
+            p /= np.maximum(np.linalg.norm(p, axis=1, keepdims=True), 1e-12)  # back onto the sphere
+            _, nearest = tree.query(p, workers=-1)
+            crosses |= restricted[nearest]
+
+        keep[idx[crosses]] = False
+        return torch.from_numpy(keep)
