@@ -244,18 +244,18 @@ def test_rollout_changes_between_epochs(rollout: dict[str, int], expected: bool)
     assert _make_datamodule(task).rollout_changes_between_epochs is expected
 
 
-def test_training_sampler_shuffles_by_base_seed_and_epoch() -> None:
+def test_training_batch_sampler_shuffles_by_base_seed_and_epoch() -> None:
     """The training order is the same for the same base seed and epoch and changes between epochs."""
     datamodule = _make_datamodule(_fixed_rollout_task())
     dataset = SampleIndexDataset(40)
 
-    sampler = datamodule._get_sampler(dataset, "training")
-    assert sampler.sampler.seed == derive_seed(1000, SeedContext.DATALOADER)
-    order_epoch_0 = _flatten(sampler)
+    batch_sampler = datamodule._get_batch_sampler(dataset, "training")
+    assert batch_sampler.sampler.seed == derive_seed(1000, SeedContext.DATALOADER)
+    order_epoch_0 = _flatten(batch_sampler)
 
     datamodule.epoch = 3
-    order_epoch_3 = _flatten(datamodule._get_sampler(dataset, "training"))
-    repeated_order_epoch_3 = _flatten(datamodule._get_sampler(dataset, "training"))
+    order_epoch_3 = _flatten(datamodule._get_batch_sampler(dataset, "training"))
+    repeated_order_epoch_3 = _flatten(datamodule._get_batch_sampler(dataset, "training"))
 
     assert sorted(order_epoch_0) == list(range(40))
     assert order_epoch_0 != list(range(40))
@@ -263,15 +263,15 @@ def test_training_sampler_shuffles_by_base_seed_and_epoch() -> None:
     assert repeated_order_epoch_3 == order_epoch_3
 
 
-def test_validation_sampler_keeps_order() -> None:
+def test_validation_batch_sampler_keeps_order() -> None:
     """Validation and test samples are not shuffled."""
     datamodule = _make_datamodule(_fixed_rollout_task())
 
     for stage in ("validation", "test"):
-        assert _flatten(datamodule._get_sampler(SampleIndexDataset(6), stage)) == list(range(6))
+        assert _flatten(datamodule._get_batch_sampler(SampleIndexDataset(6), stage)) == list(range(6))
 
 
-def test_sampler_splits_samples_between_sample_groups(mocker: MockFixture) -> None:
+def test_batch_sampler_splits_samples_between_sample_groups(mocker: MockFixture) -> None:
     """Each sample group gets an equal, separate share of the samples."""
     datamodule = _make_datamodule(_fixed_rollout_task())
     datamodule.trainer = mocker.Mock()
@@ -280,18 +280,18 @@ def test_sampler_splits_samples_between_sample_groups(mocker: MockFixture) -> No
     shares = []
     for rank in range(3):
         datamodule.trainer.distributed_sampler_kwargs = {"num_replicas": 3, "rank": rank}
-        shares.append(_flatten(datamodule._get_sampler(dataset, "training")))
+        shares.append(_flatten(datamodule._get_batch_sampler(dataset, "training")))
 
     assert [len(share) for share in shares] == [3, 3, 3]
     assert len(set().union(*shares)) == 9
 
 
-def test_sampler_uses_single_group_without_distributed_strategy(mocker: MockFixture) -> None:
+def test_batch_sampler_uses_single_group_without_distributed_strategy(mocker: MockFixture) -> None:
     """Without a distributed strategy one rank loads all samples."""
     datamodule = _make_datamodule(_fixed_rollout_task())
     datamodule.trainer = mocker.Mock(distributed_sampler_kwargs=None)
 
-    assert sorted(_flatten(datamodule._get_sampler(SampleIndexDataset(5), "training"))) == list(range(5))
+    assert sorted(_flatten(datamodule._get_batch_sampler(SampleIndexDataset(5), "training"))) == list(range(5))
 
 
 class _InterruptError(Exception):
@@ -352,7 +352,7 @@ def _fit(
     mocker.patch("anemoi.training.data.datamodule.compute_relative_date_indices", return_value={})
     datamodule = _make_datamodule(_fixed_rollout_task(), batch_size=3, num_workers=2, persistent_workers=True)
     datamodule.__dict__.update(ds_train=SampleIndexDataset(40), ds_valid=SampleIndexDataset(6))
-    mocker.patch.object(datamodule, "_sampler_group", return_value={"num_replicas": 2, "rank": 1})
+    mocker.patch.object(datamodule, "_sample_groups", return_value={"num_replicas": 2, "rank": 1})
     module = _RecordingModule()
     trainer = pl.Trainer(
         accelerator="cpu",

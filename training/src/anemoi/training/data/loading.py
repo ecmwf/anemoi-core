@@ -10,8 +10,8 @@
 from abc import ABC
 from abc import abstractmethod
 
-from torch.utils.data import BatchSampler
 from torch.utils.data import Dataset
+from torchdata.stateful_dataloader.sampler import BatchSampler
 from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
 
 from anemoi.training.data.data_reader import BaseAnemoiReader
@@ -20,11 +20,11 @@ from anemoi.training.utils.time_indices import TimeIndices
 
 
 class DataLoadingPolicy(ABC):
-    """Builds the dataset and sampler consumed by one dataloader stage.
+    """Builds the dataset and batch sampler consumed by one dataloader stage.
 
     A policy owns both the dataset layout (e.g. one synchronized dataset vs.
-    several independently indexed ones) and the sampler that orders/shards its
-    samples, so the two always stay consistent with each other.
+    several independently indexed ones) and the batch sampler that orders, shards
+    and batches its samples, so the two always stay consistent with each other.
     """
 
     @abstractmethod
@@ -45,10 +45,15 @@ class DataLoadingPolicy(ABC):
             Precomputed relative date indices for each data reader.
         fake_dataloading : bool, optional
             Load one real sample and reuse it for subsequent accesses, by default False.
+
+        Returns
+        -------
+        Dataset
+            Map-style dataset that returns one sample for each index.
         """
 
     @abstractmethod
-    def build_sampler(
+    def build_batch_sampler(
         self,
         dataset: Dataset,
         *,
@@ -61,6 +66,17 @@ class DataLoadingPolicy(ABC):
     ) -> BatchSampler:
         """Build the batch sampler that orders, shards and batches the dataset's samples.
 
+        The returned batch sampler must meet two conditions:
+
+        * Its ``sampler`` attribute has a ``set_epoch(epoch)`` method that selects
+          the shuffle of an epoch. The datamodule calls it when it builds a
+          dataloader, and Lightning calls it at the start of every epoch.
+        * Its batches depend only on the seed and the epoch. A resumed run restores
+          the position saved by torchdata's stateful ``BatchSampler``, or, if the
+          batch sampler keeps no state, replays the batches of the epoch and skips
+          the ones already trained on. Both give the same remaining batches only if
+          the order is reproducible.
+
         Parameters
         ----------
         dataset : Dataset
@@ -68,7 +84,7 @@ class DataLoadingPolicy(ABC):
         num_replicas : int
             Number of sample groups the dataset is split across.
         rank : int
-            Sample group this sampler produces indices for.
+            Sample group this batch sampler produces batches for.
         shuffle : bool
             Shuffle the samples.
         seed : int
@@ -77,11 +93,16 @@ class DataLoadingPolicy(ABC):
             Number of samples per batch.
         drop_last : bool
             Drop the remaining samples if they don't divide evenly across sample groups.
+
+        Returns
+        -------
+        BatchSampler
+            Batch sampler that hands out lists of sample indices for this sample group.
         """
 
 
 class SynchronizedLoadingPolicy(DataLoadingPolicy):
-    """Default policy: one synchronized dataset and a stock distributed sampler.
+    """Default policy: one synchronized dataset and a distributed sampler split into batches.
 
     Every sample contains data from every reader, and the samplers of a sample
     group all hand out the same indices in the same (shuffled) order.
@@ -100,7 +121,7 @@ class SynchronizedLoadingPolicy(DataLoadingPolicy):
             fake_dataloading=fake_dataloading,
         )
 
-    def build_sampler(
+    def build_batch_sampler(
         self,
         dataset: Dataset,
         *,

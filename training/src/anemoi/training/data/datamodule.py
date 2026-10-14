@@ -14,8 +14,8 @@ from typing import Any
 
 import pytorch_lightning as pl
 from hydra.utils import instantiate
-from torch.utils.data import BatchSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
+from torchdata.stateful_dataloader.sampler import BatchSampler
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -115,7 +115,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     @cached_property
     def loading_policy(self) -> DataLoadingPolicy:
-        """Return the policy that builds the dataset and sampler for each stage."""
+        """Return the policy that builds the dataset and batch sampler for each stage."""
         return instantiate(self.config.dataloader.loading_policy)
 
     @cached_property
@@ -185,7 +185,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         rollout = getattr(self.task, "rollout", None)
         return rollout is not None and rollout.epoch_increment > 0
 
-    def _sampler_group(self) -> dict[str, int]:
+    def _sample_groups(self) -> dict[str, int]:
         """Return the number of sample groups and the group of this rank.
 
         All ranks of a group train on the same samples. Without a distributed
@@ -196,26 +196,26 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             return {"num_replicas": 1, "rank": 0}
         return trainer.distributed_sampler_kwargs
 
-    def _get_sampler(self, ds: MultiDataset, stage: str) -> BatchSampler:
+    def _get_batch_sampler(self, ds: MultiDataset, stage: str) -> BatchSampler:
         """Create the batch sampler that splits the samples between sample groups.
 
         Every group gets the same number of samples. The training shuffle depends
-        only on the base seed and the epoch. The sampler counts the samples it has
-        handed out; Lightning saves this count, which is the same on every rank, so
-        training can resume in the middle of an epoch.
+        only on the base seed and the epoch. The batch sampler counts the samples it
+        has handed out; Lightning saves this count, which is the same on every rank,
+        so training can resume in the middle of an epoch.
         """
-        sampler = self.loading_policy.build_sampler(
+        batch_sampler = self.loading_policy.build_batch_sampler(
             ds,
-            **self._sampler_group(),
-            shuffle=stage == "training",
+            **self._sample_groups(),
+            shuffle=(stage == "training"),
             seed=derive_seed(get_base_seed(), SeedContext.DATALOADER),
             batch_size=self.config.dataloader.batch_size[stage],
             drop_last=True,
         )
         # Lightning sets the epoch when an epoch starts, but a resumed run builds
         # its first dataloader before that, so the restored epoch is set here.
-        sampler.sampler.set_epoch(self.epoch)
-        return sampler
+        batch_sampler.sampler.set_epoch(self.epoch)
+        return batch_sampler
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> StatefulDataLoader:
         """Create DataLoader for multi-dataset."""
@@ -233,7 +233,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         return StatefulDataLoader(
             ds,
-            batch_sampler=self._get_sampler(ds, stage),
+            batch_sampler=self._get_batch_sampler(ds, stage),
             num_workers=self.config.dataloader.num_workers[stage],
             pin_memory=self.config.dataloader.pin_memory,
             prefetch_factor=self.config.dataloader.prefetch_factor,

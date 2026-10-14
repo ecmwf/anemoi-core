@@ -128,7 +128,10 @@ Lightning resumes it into an empty epoch.
 -  **Data order.** The training shuffle depends only on the base seed and the
    epoch. The dataloader counts the samples it has handed out, and this count is
    stored in the checkpoint, so a resumed run continues with the next batch. This
-   works with and without ``dataloader.persistent_workers``.
+   works with and without ``dataloader.persistent_workers``. The resumed run must
+   use the same ``dataloader.num_workers.training``: the stored dataloader position
+   depends on the number of workers, and a resumed run with a different number
+   stops with an error when it starts loading data.
 -  **Model randomness.** The random number generators are seeded at the start of
    every training batch from the base seed, the model communication group, the
    epoch, and the batch number. Random numbers used by stochastic parts of the model,

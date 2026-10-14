@@ -68,11 +68,13 @@ Data Loading Policy
 --------------------
 
 The ``DataLoadingPolicy`` pairs the dataset construction above with the
-sampler that orders, shards and batches its samples, so the two always
+batch sampler that orders, shards and batches its samples, so the two always
 stay consistent with each other. It is selected via the
-``dataloader.loading_policy`` config entry; ``SynchronizedLoadingPolicy``
-is the default, building one synchronized ``MultiDataset`` and a stock
-distributed sampler.
+``dataloader.loading_policy`` config entry. The default,
+``SynchronizedLoadingPolicy``, builds one synchronized ``MultiDataset`` and
+splits the samples of a distributed sampler into batches with torchdata's
+``BatchSampler``, which remembers its position so that training can resume
+in the middle of an epoch.
 
 API Reference
 =============

@@ -124,7 +124,10 @@ class LoaderSet(BaseModel):
 
 
 class DataLoadingPolicySchema(GenericSchema):
-    """Hydra instantiation config for the DataLoadingPolicy that builds the dataset and sampler for each stage."""
+    """Hydra instantiation config for the DataLoadingPolicy that builds the dataset and batch sampler for each stage."""
+
+    target_: str = Field(default="anemoi.training.data.loading.SynchronizedLoadingPolicy", alias="_target_")
+    """Hydra target class of the policy."""
 
 
 class DataLoaderSchema(PydanticBaseModel):
@@ -139,8 +142,8 @@ class DataLoaderSchema(PydanticBaseModel):
     "Keep dataloader workers alive between epochs instead of starting new ones every epoch."
     fake_dataloading: bool = Field(default=False)
     "Load one real sample per worker and reuse it for subsequent accesses."
-    loading_policy: DataLoadingPolicySchema
-    "Hydra config for the DataLoadingPolicy that builds the dataset and sampler for each stage."
+    loading_policy: DataLoadingPolicySchema = Field(default_factory=DataLoadingPolicySchema)
+    "Hydra config for the DataLoadingPolicy that builds the dataset and batch sampler for each stage."
     num_workers: LoaderSet
     "Number of process per-GPU for batch distribution."
     batch_size: LoaderSet
