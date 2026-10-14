@@ -463,36 +463,47 @@ class RemoveEdgesCrossingArea(BaseEdgeMaskingProcessor):
     def _get_node_attr(graph: HeteroData, nodes_name: str, attr_name: str, dtype = torch.bool) -> np.ndarray:
         return graph[nodes_name][attr_name].detach().cpu().numpy().reshape(-1).astype(dtype)
 
+    def get_area_mask(self, graph: HeteroData) -> torch.Tensor:
+        mask = graph[self.reference_nodes_name][self.reference_attribute_name]
+        mask = mask.detach().cpu().to(torch.bool).reshape(-1)
+        return mask
+
     def compute_mask(self, graph: HeteroData) -> torch.Tensor:
         edge_index = graph[(self.source_name, "to", self.target_name)].edge_index
-        src, dst = edge_index.detach().cpu().numpy()
-        keep = np.ones(src.shape[0], dtype=bool)
+        src, dst = edge_index.detach().cpu()
+        keep = torch.ones(src.shape[0], dtype=bool)
 
         # 1. Reference grid: KD-tree over ALL its points; the attribute says which are restricted.
-        restricted = self._get_node_attr(graph, self.reference_nodes_name, self.reference_attribute_name, bool)
-        if not restricted.any():
-            return torch.from_numpy(keep)
+        area_mask = self.get_area_mask(graph)
+        if not area_mask.any():
+            return keep
         tree = cKDTree(self._get_xyz_coordinates(graph, self.reference_nodes_name))
 
         # 2. Which edges to check (all by default).
         check = np.ones_like(keep)
         if self.source_mask_attr_name is not None:
-            check &= self._get_node_attr(graph, self.source_name, self.source_mask_attr_name, bool)[src]
+            check &= self._get_node_attr(graph, self.source_name, self.source_mask_attr_name)[src]
         if self.target_mask_attr_name is not None:
-            check &= self._get_node_attr(graph, self.target_name, self.target_mask_attr_name, bool)[dst]
+            check &= self._get_node_attr(graph, self.target_name, self.target_mask_attr_name)[dst]
         idx = np.flatnonzero(check)
         if idx.size == 0:
-            return torch.from_numpy(keep)
+            return keep
 
         # 3. Sample points along each checked edge and look up their nearest reference point.
         a = self._get_xyz_coordinates(graph, self.source_name)[src[idx]]
         b = self._get_xyz_coordinates(graph, self.target_name)[dst[idx]]
-        crosses = np.zeros(idx.size, dtype=bool)
+        crosses = torch.zeros(idx.size, dtype=torch.bool)
         for t in np.arange(1, self.num_middle_points + 1) / (self.num_middle_points + 1):
             p = (1.0 - t) * a + t * b
             p /= np.maximum(np.linalg.norm(p, axis=1, keepdims=True), 1e-12)  # back onto the sphere
             _, nearest = tree.query(p, workers=-1)
-            crosses |= restricted[nearest]
+            crosses |= area_mask[nearest]
 
         keep[idx[crosses]] = False
-        return torch.from_numpy(keep)
+        return keep
+
+
+class RemoveEdgesOutsideArea(RemoveEdgesCrossingArea):
+    """Remove the edges outside a mask."""
+    def get_area_mask(self, graph: HeteroData) -> torch.Tensor:
+        return ~super().get_area_mask(graph)
