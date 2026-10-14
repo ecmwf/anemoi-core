@@ -9,6 +9,7 @@
 
 
 import logging
+import os
 from abc import abstractmethod
 from collections.abc import Sequence
 
@@ -155,7 +156,11 @@ class BaseDDPStrategy(DDPStrategy):
 
         # Register fp32 gradient reduction hook if the precision plugin provides one
         # (e.g. bf16 training with fp32 gradient all-reduce).
-        if hasattr(self.precision_plugin, "get_ddp_communication_hook"):
+        # ANEMOI_BF16_GRAD_REDUCE=1 keeps the all-reduce in bf16 (half the bytes, lower precision).
+        bf16_grad_reduce = os.environ.get("ANEMOI_BF16_GRAD_REDUCE", "0") == "1"
+        if bf16_grad_reduce:
+            LOGGER.info("ANEMOI_BF16_GRAD_REDUCE=1: gradients are all-reduced in their parameter dtype")
+        if hasattr(self.precision_plugin, "get_ddp_communication_hook") and not bf16_grad_reduce:
             hook = self.precision_plugin.get_ddp_communication_hook()
             # self.model is the DDP-wrapped model after super().configure_ddp()
             self.model.register_comm_hook(state=self.model.process_group, hook=hook)
