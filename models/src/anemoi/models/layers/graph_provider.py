@@ -202,6 +202,9 @@ class StaticGraphProvider(BaseGraphProvider):
 
         self._edge_dim = edge_attr_tensor.shape[1] + trainable_size
 
+        # Without trainable edge parameters the (sharded) edges are static, so they are built once
+        self._edges_cache: dict = {}
+
     @property
     def edge_dim(self) -> int:
         """Return the edge dimension."""
@@ -286,9 +289,27 @@ class StaticGraphProvider(BaseGraphProvider):
             edge_shard_sizes is a list of per-rank partition sizes when shard_edges=True,
             otherwise None.
         """
+        if self.trainable.trainable is None:
+            return self._get_static_edges(batch_size, shard_edges, model_comm_group)
         if act_checkpoint:
             return checkpoint(self._get_edges_impl, batch_size, shard_edges, model_comm_group, use_reentrant=False)
         return self._get_edges_impl(batch_size, shard_edges, model_comm_group)
+
+    def _get_static_edges(
+        self,
+        batch_size: int,
+        shard_edges: bool,
+        model_comm_group: Optional[ProcessGroup],
+    ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
+        """Return cached edges; valid because nothing in them is trainable."""
+        comm_spec = None
+        if model_comm_group is not None:
+            comm_spec = (model_comm_group.size(), torch.distributed.get_rank(group=model_comm_group))
+        key = (batch_size, shard_edges, comm_spec, self.edge_attr.device, self.edge_attr.dtype)
+        if key not in self._edges_cache:
+            with torch.no_grad():
+                self._edges_cache = {key: self._get_edges_impl(batch_size, shard_edges, model_comm_group)}
+        return self._edges_cache[key]
 
 
 class NoOpGraphProvider(BaseGraphProvider):

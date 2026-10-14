@@ -40,6 +40,8 @@ class TrainableTensor(nn.Module):
         self.register_parameter("trainable", trainable)
 
     def forward(self, x: Tensor, batch_size: int) -> Tensor:
+        if self.trainable is None and batch_size == 1:
+            return x  # nothing to concatenate, avoid copying the full tensor
         latent = [einops.repeat(x, "e f -> (repeat e) f", repeat=batch_size)]
         if self.trainable is not None:
             latent.append(einops.repeat(self.trainable.to(x.device), "e f -> (repeat e) f", repeat=batch_size))

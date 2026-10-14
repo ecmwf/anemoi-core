@@ -28,8 +28,9 @@ from anemoi.models.distributed.halo import HaloInfo
 from anemoi.models.distributed.halo import build_halo_info_bipartite
 from anemoi.models.distributed.halo import cache_specs as halo_cache_specs
 from anemoi.models.distributed.khop_edges import ANEMOI_DEBUG_SHARDING
+from anemoi.models.distributed.khop_edges import ChunkPlan
 from anemoi.models.distributed.khop_edges import GraphPartition
-from anemoi.models.distributed.khop_edges import build_graph_partition
+from anemoi.models.distributed.khop_edges import build_chunk_plan
 from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
@@ -317,19 +318,32 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             halo_info=halo_info,
         )
 
-        # build a second GraphPartition for local chunking within this shard
+        # build a chunk plan for local chunking within this shard
         num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
-        chunk_partition = build_graph_partition(
-            edge_index,
-            num_parts=num_chunks,
-            num_nodes=(x_src.shape[0], x_dst.shape[0]),
-        )
+        num_nodes = (x_src.shape[0], x_dst.shape[0])
+        if halo_info is not None:
+            # edge_index is the static halo_info.edge_index_local, so the plan can be reused across steps
+            cache_key = ("chunk_plan", num_chunks, num_nodes)
+            chunk_plan = halo_info.cache.get(cache_key)
+            if chunk_plan is None:
+                chunk_plan = build_chunk_plan(edge_index, num_parts=num_chunks, num_nodes=num_nodes)
+                if self.proc.graph_attention_backend == "triton":
+                    # prime the per-chunk CSC layouts now rather than inside the checkpointed chunks
+                    for chunk_id in range(chunk_plan.num_parts):
+                        chunk_size = (
+                            chunk_plan.src_ids[chunk_id].size(0),
+                            chunk_plan.partition.dst_splits[chunk_id],
+                        )
+                        self.proc.cached_csc(chunk_plan.cache[chunk_id], chunk_plan.edge_index[chunk_id], chunk_size)
+                halo_info.cache[cache_key] = chunk_plan
+        else:
+            chunk_plan = build_chunk_plan(edge_index, num_parts=num_chunks, num_nodes=num_nodes)
 
-        return x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition
+        return x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_plan
 
     def run_processor_chunk(
         self,
-        chunk_partition: GraphPartition,
+        chunk_plan: ChunkPlan,
         chunk_id: int,
         x: tuple[Tensor, Tensor],
         edge_attr: Tensor,
@@ -341,8 +355,8 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         **kwargs,
     ) -> Tensor:
         # O(1) slicing: extract subgraph for this chunk
-        (x_src_chunk, x_dst_chunk), edge_attr_chunk, edge_index_chunk, cond_chunk = chunk_partition.materialise(
-            chunk_id, x, edge_attr, edge_index, cond=cond
+        (x_src_chunk, x_dst_chunk), edge_attr_chunk, edge_index_chunk, cond_chunk = chunk_plan.materialise(
+            chunk_id, x, edge_attr, cond=cond
         )
         chunk_size = (x_src_chunk.shape[0], x_dst_chunk.shape[0])
 
@@ -358,6 +372,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             chunk_size,
             model_comm_group,
             cond=cond_chunk,
+            csc_cache=chunk_plan.cache[chunk_id],
             **kwargs,
         )
 
@@ -415,7 +430,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
                 model_comm_group,
             )
 
-        x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition = maybe_checkpoint(
+        x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_plan = maybe_checkpoint(
             self.prepare_edge_sharding_wrapper,
             self.gradient_checkpointing,
             x,
@@ -432,12 +447,12 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         out_type = torch.get_autocast_gpu_dtype() if torch.is_autocast_enabled() else x_dst.dtype
         out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=out_type)
 
-        for chunk_id in range(chunk_partition.num_parts):
-            dst_range = chunk_partition._get_dst_range(chunk_id)
+        for chunk_id in range(chunk_plan.num_parts):
+            dst_range = chunk_plan.partition._get_dst_range(chunk_id)
             out_dst[dst_range] = maybe_checkpoint(
                 self.run_processor_chunk,
                 self.gradient_checkpointing,
-                chunk_partition,
+                chunk_plan,
                 chunk_id,
                 (x_src, x_dst),
                 edge_attr,
