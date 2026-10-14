@@ -79,10 +79,16 @@ def _make_datamodule(
                 "pin_memory": False,
                 "prefetch_factor": 1,
                 "persistent_workers": persistent_workers,
+                "loading_policy": {"_target_": "anemoi.training.data.loading.SynchronizedLoadingPolicy"},
             },
         },
     )
     return datamodule
+
+
+def _flatten(batches: object) -> list[int]:
+    """Flatten the batches a BatchSampler yields into a flat list of sample indices."""
+    return [index for batch in batches for index in batch]
 
 
 def _attach_statistics_reader(
@@ -191,6 +197,7 @@ def test_get_dataset_loads_time_steps_of_current_rollout(mocker: MockFixture) ->
     """Datasets load the time steps that the task needs when they are constructed."""
     datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
     datamodule.task = mocker.Mock()
+    datamodule.__dict__["loading_policy"] = mocker.Mock()
 
     data_reader = object()
     create_dataset = mocker.patch("anemoi.training.data.datamodule.create_dataset", return_value=data_reader)
@@ -198,14 +205,13 @@ def test_get_dataset_loads_time_steps_of_current_rollout(mocker: MockFixture) ->
         "anemoi.training.data.datamodule.compute_relative_date_indices",
         return_value={"data": [0, 1]},
     )
-    multi_dataset = mocker.patch("anemoi.training.data.datamodule.MultiDataset")
 
     datamodule._get_dataset({"data": object()}, label="validation")
 
     create_dataset.assert_called_once()
-    multi_dataset.assert_called_once_with(
-        data_readers={"data": data_reader},
-        relative_date_indices={"data": [0, 1]},
+    datamodule.loading_policy.build_dataset.assert_called_once_with(
+        {"data": data_reader},
+        {"data": [0, 1]},
     )
 
 
@@ -244,12 +250,12 @@ def test_training_sampler_shuffles_by_base_seed_and_epoch() -> None:
     dataset = SampleIndexDataset(40)
 
     sampler = datamodule._get_sampler(dataset, "training")
-    assert sampler.seed == derive_seed(1000, SeedContext.DATALOADER)
-    order_epoch_0 = list(sampler)
+    assert sampler.sampler.seed == derive_seed(1000, SeedContext.DATALOADER)
+    order_epoch_0 = _flatten(sampler)
 
     datamodule.epoch = 3
-    order_epoch_3 = list(datamodule._get_sampler(dataset, "training"))
-    repeated_order_epoch_3 = list(datamodule._get_sampler(dataset, "training"))
+    order_epoch_3 = _flatten(datamodule._get_sampler(dataset, "training"))
+    repeated_order_epoch_3 = _flatten(datamodule._get_sampler(dataset, "training"))
 
     assert sorted(order_epoch_0) == list(range(40))
     assert order_epoch_0 != list(range(40))
@@ -262,7 +268,7 @@ def test_validation_sampler_keeps_order() -> None:
     datamodule = _make_datamodule(_fixed_rollout_task())
 
     for stage in ("validation", "test"):
-        assert list(datamodule._get_sampler(SampleIndexDataset(6), stage)) == list(range(6))
+        assert _flatten(datamodule._get_sampler(SampleIndexDataset(6), stage)) == list(range(6))
 
 
 def test_sampler_splits_samples_between_sample_groups(mocker: MockFixture) -> None:
@@ -274,7 +280,7 @@ def test_sampler_splits_samples_between_sample_groups(mocker: MockFixture) -> No
     shares = []
     for rank in range(3):
         datamodule.trainer.distributed_sampler_kwargs = {"num_replicas": 3, "rank": rank}
-        shares.append(list(datamodule._get_sampler(dataset, "training")))
+        shares.append(_flatten(datamodule._get_sampler(dataset, "training")))
 
     assert [len(share) for share in shares] == [3, 3, 3]
     assert len(set().union(*shares)) == 9
@@ -285,7 +291,7 @@ def test_sampler_uses_single_group_without_distributed_strategy(mocker: MockFixt
     datamodule = _make_datamodule(_fixed_rollout_task())
     datamodule.trainer = mocker.Mock(distributed_sampler_kwargs=None)
 
-    assert sorted(datamodule._get_sampler(SampleIndexDataset(5), "training")) == list(range(5))
+    assert sorted(_flatten(datamodule._get_sampler(SampleIndexDataset(5), "training"))) == list(range(5))
 
 
 class _InterruptError(Exception):
