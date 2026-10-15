@@ -200,6 +200,9 @@ class SphericalInputNoise(nn.Module):
 
     # Whether channels may name spread variables; only the conditioned subclass reads them.
     _reads_spread = False
+    # Per-channel tabulated spectra (None: kT). A class-level default keeps models pickled
+    # before it existed loadable.
+    _coefficient_variance: Optional[Tensor] = None
 
     def __init__(
         self,

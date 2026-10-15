@@ -9,6 +9,7 @@
 
 import logging
 import math
+import pickle
 from types import SimpleNamespace
 
 import numpy as np
@@ -45,6 +46,19 @@ def input_noise() -> SphericalInputNoise:
         num_time_steps=N_STEP_INPUT,
         num_grid_points=NUM_POINTS,
     )
+
+
+def test_noise_pickled_before_tabulated_spectra_draws_the_same_noise(input_noise):
+    """A model saved before ``_coefficient_variance`` existed still loads and uses ``kT``."""
+
+    old = pickle.loads(pickle.dumps(input_noise))
+    del old.__dict__["_coefficient_variance"]  # as pickled before the attribute existed
+    old = pickle.loads(pickle.dumps(old))
+
+    for noise in (input_noise, old):
+        noise.advance(fcstep=0, batch_size=1, ensemble_size=2, seed=7)
+
+    assert torch.equal(old.sample(), input_noise.sample())
 
 
 class _NodeAttributes(nn.Module):
