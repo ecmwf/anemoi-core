@@ -19,8 +19,9 @@ from urllib.parse import urlparse
 
 import mlflow.entities
 
-from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
+from anemoi.training.diagnostics.mlflow.utils import check_params_length
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
+from anemoi.training.diagnostics.mlflow.utils import get_max_params_length
 from anemoi.training.diagnostics.mlflow.utils import rewrite_lineage
 from anemoi.training.diagnostics.mlflow.utils import update_run_id
 
@@ -122,15 +123,9 @@ def _log_tags(
 
 def _log_params(client: mlflow.MlflowClient, run_dct: dict[str, Any], run_id: str, batch_size: int) -> None:
     def get_data(run_dct: dict[str, Any], args: Any = None) -> list[mlflow.entities.Param]:  # noqa: ARG001
+        # the params length is checked on the source run in MlFlowSync.sync
         cleaned_run_dct = clean_config_params(run_dct["params"])
         LOGGER.info("Logging %s parameters", len(cleaned_run_dct))
-        if len(cleaned_run_dct) > MAX_PARAMS_LENGTH:
-            msg = (
-                f"Too many params: {len(cleaned_run_dct)} > {MAX_PARAMS_LENGTH}",
-                "Please revisit the fields being logged and add redundant or irrelevant "
-                "ones to the clean_config_params function.",
-            )
-            raise ValueError(msg)
         return [mlflow.entities.Param(k, v) for k, v in cleaned_run_dct.items()]
 
     def log_data(run_id: str, params: dict[str, Any]) -> None:
@@ -282,6 +277,17 @@ class MlFlowSync:
             run_type=run_type,
         )
 
+    @staticmethod
+    def check_params_length(params: dict[str, Any]) -> None:
+        """Check the source run params against the run's own `max_params_length`.
+
+        Done on the source params, before the run ids are rewritten, so that the
+        params added by the sync do not count towards the limit, and before the
+        destination run is created, so that no empty run is left on failure.
+        """
+        num_params = len(clean_config_params(dict(params)))
+        check_params_length(num_params, get_max_params_length(params))
+
     def sync(
         self,
     ) -> None:
@@ -319,6 +325,8 @@ class MlFlowSync:
 
         run_info = mlflow_utils.strip_underscores(run.info)
         src_user_id = run_info["user_id"]
+
+        self.check_params_length(run.data.params)
 
         exp_id = self._get_dst_experiment_id(dest_mlflow_client=dest_mlflow_client)
         dst_run = dest_mlflow_client.create_run(exp_id)
