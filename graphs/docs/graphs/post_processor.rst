@@ -222,7 +222,7 @@ restricted area.
 This is useful for domains that are physically disconnected, such as the
 ocean, where an edge builder with no knowledge of the land/sea boundary
 connects nodes that should not exchange information. A typical example
-is ``DelaunayEdges`` applied to an ocean mesh, which connects basins
+is ``SphericalDelaunayEdges`` applied to an ocean mesh, which connects basins
 across narrow land barriers.
 
 .. code:: yaml

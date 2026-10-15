@@ -7,12 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Delaunay mesh edges for irregular (e.g. ocean) domains.
-
-Implements the edge construction described in Holmberg et al., "Njord: A
-Probabilistic Graph Neural Network for Ensemble Ocean Forecasting", Appendix C.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -28,13 +22,20 @@ from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 LOGGER = logging.getLogger(__name__)
 
 
-class DelaunayEdges(BaseEdgeBuilder):
+class SphericalDelaunayEdges(BaseEdgeBuilder):
     """Same-level mesh edges from a spherical Delaunay triangulation.
 
     Intended for node sets without a regular structure, such as
     :class:`~anemoi.graphs.nodes.KMeansClusteredNodes`. To drop the edges that
     cross land, follow this builder with the ``RemoveEdgesCrossingArea``
     post-processor; to drop the longest edges, use ``RestrictEdgeLength``.
+
+    This builder is not meant for global, regularly structured node sets. There,
+    the resulting connectivity is close to what ``KNNEdges`` or ``CutOffEdges``
+    already give, at a noticeably higher computational cost. It pays off for
+    irregular domains (ocean, land-only, regional masks) as described in Holmberg
+    et al., "Njord: A Probabilistic Graph Neural Network for Ensemble Ocean
+    Forecasting".
 
     Parameters
     ----------
@@ -64,7 +65,7 @@ class DelaunayEdges(BaseEdgeBuilder):
         )
 
     @staticmethod
-    def get_delaunay_pairs(xyz: np.ndarray) -> np.ndarray:
+    def _get_delaunay_pairs(xyz: np.ndarray) -> np.ndarray:
         """Unique undirected edges of the spherical Delaunay triangulation."""
         hull = ConvexHull(xyz)
 
@@ -81,7 +82,7 @@ class DelaunayEdges(BaseEdgeBuilder):
         """Compute the edge indices based on Delaunay triangulation of the given nodes."""
         xyz = latlon_rad_to_cartesian_np(source_nodes.x.detach().cpu().numpy().astype(np.float64))
 
-        pairs = self.get_delaunay_pairs(xyz)
+        pairs = self._get_delaunay_pairs(xyz)
 
         # Edges are directed in anemoi. Add both directions.
         edge_index = np.concatenate([pairs.T, pairs[:, ::-1].T], axis=1)

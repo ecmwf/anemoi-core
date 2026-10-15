@@ -4,7 +4,7 @@
  Delaunay Edges
 #################
 
-The ``DelaunayEdges`` method builds the connections within a single set
+The ``SphericalDelaunayEdges`` method builds the connections within a single set
 of nodes from a spherical Delaunay triangulation. It is the counterpart
 of the multi-scale edge builders for meshes that have no regular
 structure, such as the ones produced by :ref:`kmeans_clusters`.
@@ -22,7 +22,7 @@ YAML configuration:
      -  source_name: hidden
         target_name: hidden
         edge_builders:
-        - _target_: anemoi.graphs.edges.DelaunayEdges
+        - _target_: anemoi.graphs.edges.SphericalDelaunayEdges
 
 .. note::
 
@@ -44,7 +44,7 @@ longest ones with ``RestrictEdgeLength``. See
      -  source_name: hidden
         target_name: hidden
         edge_builders:
-        - _target_: anemoi.graphs.edges.DelaunayEdges
+        - _target_: anemoi.graphs.edges.SphericalDelaunayEdges
 
    post_processors:
    - _target_: anemoi.graphs.processors.RemoveEdgesCrossingArea

@@ -77,5 +77,11 @@ class KMeansClusteredNodes(BaseNodeBuilder):
         return super().register_nodes(graph)
 
     def get_coordinates(self) -> torch.Tensor:
-        """Get the coordinates of the K-means cluster centers in latitude and longitude (radians)."""
+        """Get the coordinates of the K-means cluster centers in latitude and longitude (radians).
+        
+        Returns
+        -------
+        torch.Tensor of shape (num_clusters, 2)
+            Coordinates of the K-means cluster centers in latitude and longitude (radians).
+        """
         return torch.tensor(self.kmeans_cluster.get_clusters(self.ratio, **self.kmeans_kwargs), dtype=torch.float32)

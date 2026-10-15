@@ -115,7 +115,7 @@ class ICONTopologicalEdgeSchema(BaseModel):
 
 
 class DelaunayEdgeSchema(BaseModel):
-    target_: Literal["anemoi.graphs.edges.DelaunayEdges"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.graphs.edges.SphericalDelaunayEdges"] = Field(..., alias="_target_")
     "Delaunay triangulation based edges implementation from anemoi.graphs.edges."
     source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
