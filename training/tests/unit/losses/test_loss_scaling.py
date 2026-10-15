@@ -22,6 +22,8 @@ from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.scalers.spectral import SpectralDimensionScaler
+from anemoi.training.losses.scalers.variable_tendency import StdevTendencyScaler
+from anemoi.training.losses.scalers.variable_tendency import VarTendencyScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -657,3 +659,111 @@ def test_uniform_spectral_scaler(n_spectral_modes: int, spectral_dims: int) -> N
     assert values[0].item() == pytest.approx(
         1.0 / n_spectral_modes,
     ), f"Expected values to be {1.0/n_spectral_modes}, got {values[0]}"
+
+
+@pytest.mark.parametrize(
+    ("scaler_cls", "expected"),
+    [
+        (StdevTendencyScaler, [2.0, 10.0, 5.0]),
+        (VarTendencyScaler, [4.0, 100.0, 25.0]),
+    ],
+)
+def test_tendency_scaler_scales_every_prognostic_from_data_space_statistics(
+    scaler_cls: type[StdevTendencyScaler],
+    expected: list[float],
+) -> None:
+    """Each prognostic is scaled by its own statistics, including the one at data index 0."""
+    config = DictConfig({"forcing": ["lsm"], "diagnostic": [], "target": []})
+    data_indices = IndexCollection(config, {"a": 0, "lsm": 1, "b": 2, "c": 3})
+
+    scaler = scaler_cls(
+        data_indices=data_indices,
+        statistics={"stdev": [10.0, 40.0, 20.0, 30.0]},
+        statistics_tendencies={"lead_times": ["6h"], "6h": {"stdev": [5.0, 10.0, 2.0, 6.0]}},
+        timestep="6h",
+    )
+
+    torch.testing.assert_close(scaler.get_scaling_values(), torch.tensor(expected))
+
+
+def test_tendency_scaler_without_tendency_statistics_leaves_scaling_at_one() -> None:
+    """A dataset with no tendency statistics leaves every column unscaled."""
+    config = DictConfig({"forcing": ["lsm"], "diagnostic": [], "target": []})
+    data_indices = IndexCollection(config, {"a": 0, "lsm": 1, "b": 2, "c": 3})
+
+    with pytest.warns(UserWarning, match="no tendency statistics"):
+        scaler = StdevTendencyScaler(
+            data_indices=data_indices,
+            statistics={"stdev": [10.0, 40.0, 20.0, 30.0]},
+            statistics_tendencies=None,
+        )
+
+    torch.testing.assert_close(scaler.get_scaling_values(), torch.ones(3))
+
+
+_LAYOUT_STATISTICS = {"stdev": [4.0, 7.0, 20.0, 1.0, 3.0]}
+_LAYOUT_TENDENCIES = {"lead_times": ["6h"], "6h": {"stdev": [2.0, 7.0, 2.0, 1.0, 3.0]}}
+_LAYOUT_SCALERS = {
+    "general": {
+        "_target_": "anemoi.training.losses.scalers.GeneralVariableLossScaler",
+        "weights": {"default": 1, "a": 3, "b": 5, "c": 7},
+    },
+    "tendency": {"_target_": "anemoi.training.losses.scalers.StdevTendencyScaler"},
+    "level": {
+        "_target_": "anemoi.training.losses.scalers.LinearVariableLevelScaler",
+        "group": "pl",
+        "slope": 0.001,
+        "y_intercept": 0.0,
+    },
+}
+
+
+def _scalings_by_name(data_indices: IndexCollection, graph: HeteroData) -> dict[str, dict[str, float]]:
+    scalers, _ = create_scalers(
+        DictConfig(_LAYOUT_SCALERS),
+        data_indices=data_indices,
+        graph_data=graph,
+        statistics=_LAYOUT_STATISTICS,
+        statistics_tendencies=_LAYOUT_TENDENCIES,
+        metadata_extractor=ExtractVariableGroupAndLevel(DictConfig({"default": "sfc", "pl": ["a", "c"]})),
+        output_mask=NoOutputMask(),
+    )
+    index_to_name = {idx: name for name, idx in data_indices.data.output.name_to_index.items()}
+    names = [index_to_name[i] for i in data_indices.data.output.full.tolist()]
+    return {key: dict(zip(names, scalers[key][1].tolist(), strict=True)) for key in _LAYOUT_SCALERS}
+
+
+def test_variable_scalers_with_interspersed_target(graph_with_nodes: HeteroData) -> None:
+    """With a target between two prognostics, every scaling lands on its own variable's column."""
+    name_to_index = {"a_500": 0, "b_target": 1, "c_850": 2, "d_forc": 3, "e_diag": 4}
+    data_indices = IndexCollection(
+        DictConfig({"forcing": ["d_forc"], "diagnostic": ["e_diag"], "target": ["b_target"]}),
+        name_to_index,
+    )
+    scalings = _scalings_by_name(data_indices, graph_with_nodes)
+
+    assert list(scalings["tendency"]) == ["a_500", "b_target", "c_850", "e_diag"]
+    # Tendency: a at data index 0 is scaled (4/2); the target and the diagnostic keep 1.
+    assert scalings["tendency"] == pytest.approx({"a_500": 2.0, "b_target": 1.0, "c_850": 10.0, "e_diag": 1.0})
+    assert scalings["level"] == pytest.approx({"a_500": 0.5, "b_target": 1.0, "c_850": 0.85, "e_diag": 1.0})
+    assert scalings["general"] == pytest.approx({"a_500": 3.0, "b_target": 1.0, "c_850": 7.0, "e_diag": 1.0})
+
+
+def test_variable_scalers_by_name_do_not_depend_on_targets(graph_with_nodes: HeteroData) -> None:
+    """Looked up by name, each variable scaling is the same whether or not a target variable exists."""
+    name_to_index = {"a_500": 0, "b_target": 1, "c_850": 2, "d_forc": 3, "e_diag": 4}
+    with_target = IndexCollection(
+        DictConfig({"forcing": ["d_forc"], "diagnostic": ["e_diag"], "target": ["b_target"]}),
+        name_to_index,
+    )
+    # Without the target, b_target is an ordinary forcing (not in the loss).
+    without_target = IndexCollection(
+        DictConfig({"forcing": ["d_forc", "b_target"], "diagnostic": ["e_diag"], "target": []}),
+        name_to_index,
+    )
+    a = _scalings_by_name(with_target, graph_with_nodes)
+    b = _scalings_by_name(without_target, graph_with_nodes)
+
+    for key in _LAYOUT_SCALERS:
+        common = {name: a[key][name] for name in b[key]}
+        assert common == pytest.approx(b[key]), key

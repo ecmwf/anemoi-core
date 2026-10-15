@@ -300,11 +300,16 @@ def _apply_scalers(
             error_msg = f"Scaler {key!r} not found in valid scalers: {list(scalers.keys())}"
             raise ValueError(error_msg)
         if key in ["stdev_tendency", "var_tendency"]:
-            for var_key, idx in data_indices.model.output.name_to_index.items():
-                if idx in data_indices.model.output.prognostic and data_indices.data.output.name_to_index.get(
-                    var_key,
-                ):
-                    scaling = scalers[key][1][idx]
+            # Tendency scalers are laid out like data.output; log each prognostic by name.
+            prognostic_idx = set(data_indices.model.output.prognostic.tolist())
+            prognostic_names = {
+                name for name, idx in data_indices.model.output.name_to_index.items() if idx in prognostic_idx
+            }
+            index_to_name = {idx: name for name, idx in data_indices.data.output.name_to_index.items()}
+            for position, raw_idx in enumerate(data_indices.data.output.full.tolist()):
+                var_key = index_to_name[raw_idx]
+                if var_key in prognostic_names:
+                    scaling = scalers[key][1][position]
                     LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
         loss_function.add_scaler(*scalers[key], name=key)
 

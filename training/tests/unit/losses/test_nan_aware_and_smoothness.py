@@ -8,16 +8,22 @@
 # nor does it submit to any jurisdiction.
 
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.losses import BandNaNAwareMSELoss
 from anemoi.training.losses import GraphLaplacianSmoothnessLoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import NaNAwareMSELoss
+from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.scalers.variable import GeneralVariableLossScaler
+from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 # ── NaNAwareMSELoss ───────────────────────────────────────────────────────
@@ -53,6 +59,71 @@ def test_nan_aware_mse_fully_nan_variable() -> None:
 
 def test_nan_aware_mse_does_not_support_sharding() -> None:
     assert NaNAwareMSELoss().supports_sharding is False
+
+
+# ── BandNaNAwareMSELoss ───────────────────────────────────────────────────
+
+
+def _band_graph() -> HeteroData:
+    lats = torch.tensor([-60.0, -30.0, -10.0, 0.0, 10.0, 30.0, 60.0, 90.0])
+    graph = HeteroData()
+    graph["data"].x = torch.deg2rad(torch.stack([lats, torch.zeros_like(lats)], dim=-1))
+    return graph
+
+
+@pytest.mark.parametrize(
+    ("lat_min", "lat_max", "cells"),
+    [(-90.0, -20.0, [0, 1]), (-20.0, 20.0, [2, 3, 4]), (20.0, 90.0, [5, 6, 7])],
+)
+def test_band_nan_aware_mse_is_band_mean(lat_min: float, lat_max: float, cells: list[int]) -> None:
+    graph = _band_graph()
+    band = BandNaNAwareMSELoss(lat_min, lat_max, graph_data=graph, data_node_name="data")
+    band.add_scaler(TensorDim.GRID, torch.full((8,), 1.0 / 8), name="node_weights")
+    pred = torch.randn(1, 1, 1, 8, 2, generator=torch.Generator().manual_seed(0))
+    target = torch.randn(1, 1, 1, 8, 2, generator=torch.Generator().manual_seed(1))
+    target[..., 1, 0] = torch.nan
+    target[..., 4, 1] = torch.nan
+
+    out = band(pred, target, squash=False)
+
+    for var in range(2):
+        valid = [c for c in cells if not torch.isnan(target[0, 0, 0, c, var])]
+        expected = torch.mean((pred[0, 0, 0, valid, var] - target[0, 0, 0, valid, var]) ** 2)
+        torch.testing.assert_close(out[var], expected)
+
+
+def test_band_nan_aware_mse_ignores_outside_band() -> None:
+    graph = _band_graph()
+    band = BandNaNAwareMSELoss(-90.0, -20.0, graph_data=graph, data_node_name="data")
+    pred = torch.zeros(1, 1, 1, 8, 1)
+    target = torch.zeros(1, 1, 1, 8, 1)
+    target[..., 2:, :] = 100.0  # large errors outside the SH band only
+    assert band(pred, target).item() == 0.0
+
+
+def test_band_nan_aware_mse_from_factory() -> None:
+    graph = _band_graph()
+    data_indices = IndexCollection(DictConfig({"forcing": [], "diagnostic": []}), {"a": 0})
+    config = DictConfig(
+        {"_target_": "anemoi.training.losses.BandNaNAwareMSELoss", "lat_min": -20.0, "lat_max": 20.0, "scalers": []},
+    )
+    metric = get_loss_function(config, scalers={}, data_indices=data_indices, graph_data=graph, data_node_name="data")
+    inner = getattr(metric, "loss", metric)
+    assert isinstance(inner, BandNaNAwareMSELoss)
+    assert int(inner.in_band.sum()) == 3
+    pred, target = torch.zeros(1, 1, 1, 8, 1), torch.ones(1, 1, 1, 8, 1)
+    out = metric(pred, target, pred_layout=IndexSpace.MODEL_OUTPUT, target_layout=IndexSpace.DATA_OUTPUT)
+    torch.testing.assert_close(out, torch.tensor(8.0))  # N * band mean without node weights
+
+
+def test_band_nan_aware_mse_rejects_bad_bands() -> None:
+    graph = _band_graph()
+    with pytest.raises(ValueError, match="below"):
+        BandNaNAwareMSELoss(20.0, -20.0, graph_data=graph, data_node_name="data")
+    with pytest.raises(ValueError, match="no grid point"):
+        BandNaNAwareMSELoss(70.0, 80.0, graph_data=graph, data_node_name="data")
+    with pytest.raises(ValueError, match="graph_data"):
+        BandNaNAwareMSELoss(-20.0, 20.0)
 
 
 # ── GraphLaplacianSmoothnessLoss ──────────────────────────────────────────
@@ -132,3 +203,47 @@ def test_general_variable_scaler_per_level_fallback(
     assert by_name["z_500"] == 800  # full-name override wins
     assert by_name["z_850"] == 700  # base-variable fallback
     assert by_name["tp"] == 1.0  # default fallback
+
+
+def _val_metrics_module(metrics: dict) -> SimpleNamespace:
+    return SimpleNamespace(
+        model=SimpleNamespace(post_processors={"data": lambda x, **_kw: x}),
+        metrics={"data": torch.nn.ModuleDict(metrics)},
+        val_metric_ranges={"data": {"a": [0], "b": [1], "all": [0, 1]}},
+        model_comm_group=None,
+    )
+
+
+def test_band_metric_keys_limit_logged_ranges() -> None:
+    from anemoi.training.train.methods.base import BaseTrainingModule
+
+    graph = _band_graph()
+    module = _val_metrics_module(
+        {
+            "mse": NaNAwareMSELoss(),
+            "mse_sh": BandNaNAwareMSELoss(-90.0, -20.0, graph_data=graph, data_node_name="data", metric_keys=["a"]),
+        },
+    )
+    pred, target = torch.zeros(1, 1, 1, 8, 2), torch.ones(1, 1, 1, 8, 2)
+
+    logged = BaseTrainingModule.calculate_val_metrics(module, pred, target, dataset_name="data", step=0)
+
+    assert sorted(logged) == [
+        "mse_metric/data/a/1",
+        "mse_metric/data/all/1",
+        "mse_metric/data/b/1",
+        "mse_sh_metric/data/a/1",
+    ]
+
+
+def test_unknown_metric_keys_raise() -> None:
+    from anemoi.training.train.methods.base import BaseTrainingModule
+
+    graph = _band_graph()
+    metrics = torch.nn.ModuleDict(
+        {"mse_sh": BandNaNAwareMSELoss(-90.0, -20.0, graph_data=graph, data_node_name="data", metric_keys=["z_500"])},
+    )
+    module = SimpleNamespace()
+    with pytest.raises(ValueError, match="z_500"):
+        BaseTrainingModule._check_metric_keys(module, metrics, {"a": [0], "all": [0]})
+    BaseTrainingModule._check_metric_keys(module, torch.nn.ModuleDict({"mse": NaNAwareMSELoss()}), {"a": [0]})

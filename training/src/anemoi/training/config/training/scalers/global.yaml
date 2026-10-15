@@ -45,6 +45,15 @@ datasets:
       nodes_attribute_name: area_weight
       norm: unit-sum
 
+    # Static (grid, variable) weights from an offline observation-density file (obs_density.py),
+    # to balance the loss between densely and sparsely observed regions (e.g. NH vs SH radiosondes).
+    # Build the file on the training period, with --areas matching node_weights (uniform for
+    # UniformWeights). Training losses only: validation metrics cannot be scaled over variables.
+    # obs_density:
+    #   _target_: anemoi.training.losses.scalers.ObsDensityScaler
+    #   weights_path: /path/obs_density/weights_bands_alpha0.5_cap10.npz
+    #   variables: ["z_*", "t_*", "u_*", "v_*"]  # optional fnmatch patterns; default = all in file
+
     # Scaler for spectral loss functions (adapt number of spectral modes and possibly spectral dimensions)
     # spectral_dim_mean:
     #   _target_: anemoi.training.losses.scalers.SpectralDimensionScaler

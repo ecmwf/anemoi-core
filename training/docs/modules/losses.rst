@@ -1038,6 +1038,86 @@ Then reference it from the loss:
             nlat: 192 # o96 grid
             scalers: ['pressure_level', 'general_variable', 'spectral_dim_mean']
 
+Observation Density Scaler
+==========================
+
+With ``ignore_nans: True`` the loss sums the error over the valid grid
+cells, so each region's share of a variable's loss equals its share of
+the observations. For upper-air radiosonde and aircraft targets the
+northern extratropics hold about 80 % of the valid cells, so they
+dominate training although verification usually weights regions by
+area.
+
+:class:`~anemoi.training.losses.scalers.ObsDensityScaler` multiplies each
+cell's loss by a static, per-variable weight computed offline from the
+observation density over the training period. The scaler spans the grid
+and variable dimensions and is sliced like any other grid scaler when the
+grid is sharded.
+
+The weights file is built in two steps by ``obs_density.py`` (in
+``ai-obs-experimental-data/scripts``):
+
+#. ``count`` scans the dataset once over the **training period** and
+   stores how often each cell is valid for each variable.
+
+#. ``weights`` turns the counts into weights for a given ``--mode``,
+   ``--alpha`` and ``--max-weight``, and writes an ``.npz`` file and a
+   ``_report.json`` with the band shares before and after weighting.
+
+The main options are:
+
+-  ``alpha``: 0 leaves the loss unchanged and 1 gives the NH (20-90N),
+   Tropics (20S-20N) and SH (90-20S) bands loss shares equal to their
+   area. Intermediate values interpolate geometrically.
+
+-  ``mode``: ``bands`` (recommended) uses one density per band, blended
+   over a few degrees at 20N and 20S. ``hybrid`` and ``kernel`` also
+   redistribute within a band, which gives isolated stations (for example
+   Southern Ocean islands) weights up to the cap and makes gradients
+   noisier.
+
+-  ``max_weight``: the cap relative to the mean observation weight.
+
+-  ``areas``: must match the node weights used in the loss. Use
+   ``uniform`` when the graph ``area_weight`` is ``UniformWeights`` and
+   ``voronoi`` for area weights. The scaler logs a warning when the file
+   and the graph disagree, and it logs the band loss shares the weights
+   reach under the graph's node weights.
+
+The file is normalised so that, for every variable, the expected loss
+magnitude over the training observations is unchanged. Tuned
+``general_variable`` weights therefore keep their meaning, and the scaler
+does not accept a ``norm``. Always-valid variables (analyses, forcings)
+get a weight of exactly 1.
+
+.. code:: yaml
+
+   # config.training.scalers.datasets.data
+   obs_density:
+      _target_: anemoi.training.losses.scalers.ObsDensityScaler
+      weights_path: /path/obs_density/weights_bands_alpha0.5_cap10.npz
+      variables: ["z_*", "t_*", "u_*", "v_*"]  # optional; default: all in the file
+      # default_weight: 1.0     # loss variables not in the file or not selected
+      # rename: {old: new}      # extra file-name -> training-name mapping
+
+   # config.training.training_loss.datasets.data (on the leaf loss)
+   scalers: ['stdev_tendency', 'general_variable', 'node_weights', 'obs_density']
+
+The scaler checks that the file's latitudes and longitudes match the
+graph nodes (``check_coordinates``, ``coordinate_tolerance_deg``), which
+catches a different dataset, grid, cutout or ordering. It cannot check
+the period: build the file from the same dataset version and training
+dates, which are logged from the file.
+
+.. note::
+
+   The scaler is for training losses only. Validation metrics may not be
+   scaled over the variable dimension, so keep them unweighted. The
+   validation **loss** is reweighted and is not comparable between runs
+   that use different weights files. The startup variable-scaling log
+   shows the weights of the first grid point only; use the scaler's own
+   per-band summary instead.
+
 Custom Scalers
 ==============
 

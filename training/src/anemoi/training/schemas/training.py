@@ -247,6 +247,26 @@ class SpectralDimensionScalerSchema(BaseModel):
     "Normalisation method applied to the scaler values."
 
 
+class ObsDensityScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.ObsDensityScaler"] = Field(..., alias="_target_")
+    weights_path: str = Field(example="/path/obs_density/weights_bands_alpha0.5_cap10.npz")
+    "Weights file written by obs_density.py weights, built on the training period of the dataset."
+    variables: list[str] | None = Field(default=None, example=["z_*", "t_*", "u_*", "v_*"])
+    "Variables (fnmatch patterns allowed) to weight. Default: every variable in the file."
+    default_weight: NonNegativeFloat = Field(default=1.0)
+    "Weight for loss variables not in the file or not selected."
+    rename: dict[str, str] | None = Field(default=None)
+    "Extra mapping from file variable names to training variable names."
+    check_coordinates: bool = Field(default=True)
+    "Check that the file's grid matches the graph nodes."
+    coordinate_tolerance_deg: NonNegativeFloat = Field(default=1e-3)
+    "Largest allowed coordinate difference in degrees."
+    node_weights_attribute: str | None = Field(default="area_weight")
+    "Graph node attribute used as the loss node weights (logging and area-method check only)."
+    norm: None = Field(default=None)
+    "Must be None: the weights file already keeps each variable's expected loss magnitude."
+
+
 ScalerSchema = (
     GeneralVariableLossScalerSchema
     | VariableLevelScalerSchema
@@ -259,6 +279,7 @@ ScalerSchema = (
     | LeadTimeDecayScalerSchema
     | ReweightedGraphNodeAttributeScalerSchema
     | SpectralDimensionScalerSchema
+    | ObsDensityScalerSchema
 )
 
 
@@ -628,6 +649,19 @@ class GraphSmoothnessLossSchema(BaseLossSchema):
     "Optional path to a file containing an edge_index tensor."
 
 
+class BandNaNAwareMSELossSchema(BaseLossSchema):
+    """Schema for BandNaNAwareMSELoss (validation metric restricted to a latitude band)."""
+
+    target_: Literal["anemoi.training.losses.BandNaNAwareMSELoss"] = Field(..., alias="_target_")
+    "Latitude-band NaN-aware MSE target."
+    lat_min: float = Field(ge=-90.0, le=90.0, example=-90.0)
+    "Southern band edge in degrees (inclusive)."
+    lat_max: float = Field(ge=-90.0, le=90.0, example=-20.0)
+    "Northern band edge in degrees (exclusive, except at 90)."
+    metric_keys: list[str] | None = Field(default=None, example=["z_500", "t_850", "u_250", "t_250"])
+    "Log only these metric keys (variables from training.metrics, or group keys such as pl_t). Default: all."
+
+
 class RefractivityLevelSchema(BaseModel):
     """One GNSS-RO refractivity observation level for RefractivityOperatorLoss."""
 
@@ -719,6 +753,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.GraphLaplacianSmoothnessLoss": "graph_smoothness",
     "anemoi.training.losses.RefractivityOperatorLoss": "refractivity_operator",
     "anemoi.training.losses.TargetIdentityLoss": "target_identity",
+    "anemoi.training.losses.BandNaNAwareMSELoss": "band_nan_aware_mse",
     "anemoi.training.losses.GraphVariogramScoreLoss": "graph_variogram_score",
     "anemoi.training.losses.GraphEdgeCRPSLoss": "graph_edge_crps",
     "anemoi.training.losses.GraphEdgeEnergyScoreLoss": "graph_edge_energy_score",
@@ -768,6 +803,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
             | Annotated[RefractivityOperatorLossSchema, Tag("refractivity_operator")]
             | Annotated[TargetIdentityLossSchema, Tag("target_identity")]
+            | Annotated[BandNaNAwareMSELossSchema, Tag("band_nan_aware_mse")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
             Discriminator(_loss_discriminator),
@@ -831,6 +867,7 @@ LossSchemas = Annotated[
     | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
     | Annotated[RefractivityOperatorLossSchema, Tag("refractivity_operator")]
     | Annotated[TargetIdentityLossSchema, Tag("target_identity")]
+    | Annotated[BandNaNAwareMSELossSchema, Tag("band_nan_aware_mse")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),

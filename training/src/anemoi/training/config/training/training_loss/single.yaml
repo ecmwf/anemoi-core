@@ -5,6 +5,7 @@ datasets:
     # A selection of available scalers are listed in training/scalers.
     # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
     # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
+    # An ObsDensityScaler (training/scalers) only takes effect when listed here, e.g. add 'obs_density'.
     scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
     ignore_nans: False
 

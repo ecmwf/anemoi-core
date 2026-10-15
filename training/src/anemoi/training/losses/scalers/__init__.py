@@ -11,6 +11,7 @@ from .base_scaler import TensorDim
 from .loss_weights_mask import NaNMaskScaler
 from .node_attributes import GraphNodeAttributeScaler
 from .node_attributes import ReweightedGraphNodeAttributeScaler
+from .obs_density import ObsDensityScaler
 from .scalers import create_scalers
 from .spectral import SpectralDimensionScaler
 from .time_step import LeadTimeDecayScaler
@@ -34,6 +35,7 @@ __all__ = [
     "NaNMaskScaler",
     "NoTendencyScaler",
     "NoVariableLevelScaler",
+    "ObsDensityScaler",
     "PolynomialVariableLevelScaler",
     "ReluVariableLevelScaler",
     "ReweightedGraphNodeAttributeScaler",

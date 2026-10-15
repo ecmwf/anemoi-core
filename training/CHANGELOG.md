@@ -12,8 +12,13 @@ Keep it human-readable, your future self will thank you!
 
 ### Features
 
+* **training:** Add `ObsDensityScaler`: static per-cell, per-variable loss weights loaded from an offline observation-density file, to balance the loss between densely and sparsely observed regions (e.g. NH vs SH radiosondes). Checks the file's grid against the graph and logs the band loss shares reached; training losses only.
 * **models,training:** Add `model.categorical_embeddings`: learned embeddings for integer-coded inputs such as satellite report types, used in the `AnemoiModelEncProcDec` encoder input and in DA instrument correctors (`training.corrector.categorical_embedding_dim` / `categorical_unknown_prob`). Includes MISSING (0.0/NaN) and UNKNOWN rows, and training-time UNKNOWN replacement. Variables must use the `none` normaliser.
 * **training:** Add `ignore_variables_metadata` to `variable_groups`, to derive a variable's parameter and level from its name instead of the dataset's `variables_metadata`. For datasets whose metadata sets `param` to the full variable name (e.g. `param: z_500`) with `levtype: sfc` throughout, which otherwise puts every level and channel in its own group.
+
+### Bug Fixes
+
+* **training:** Tendency scalers (`StdevTendencyScaler`, `VarTendencyScaler`) now scale the prognostic variable at data index 0, which was silently left at 1.0. Tendency and variable-level scalers now write each value at its variable's column in the loss tensor (data.output layout), so scalings no longer shift columns when `target` variables sit between outputs. **This changes the baseline** for configs that use a tendency scaler: the dataset's first variable (e.g. `z_1000`) now gets its stdev/tendency-stdev weight, and runs with `target` variables change further.
 
 ## [0.16.0](https://github.com/ecmwf/anemoi-core/compare/training-0.15.0...training-0.16.0) (2026-08-11)
 

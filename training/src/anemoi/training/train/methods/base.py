@@ -67,6 +67,11 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
+def validation_metric_keys(metric: torch.nn.Module) -> list[str] | None:
+    """Metric keys a validation metric restricts its logging to (None: every metric range)."""
+    return getattr(getattr(metric, "loss", metric), "metric_keys", None)
+
+
 class BaseTrainingModule(pl.LightningModule, ABC):
     """Abstract base class for Anemoi GNN forecasters using PyTorch Lightning.
 
@@ -300,6 +305,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_node_name=data_node_name,
                 normalizer=self._dataset_normalizer(dataset_name),
             )
+            self._check_metric_keys(self.metrics[dataset_name], self.val_metric_ranges[dataset_name])
             self._initialise_updating_scalers(
                 scalers=dataset_scalers,
                 updating_scalers=dataset_updating_scalars,
@@ -440,6 +446,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 for metric_name, val_metric_config in validation_metrics_configs.items()
             },
         )
+
+    def _check_metric_keys(self, metrics: torch.nn.ModuleDict, metric_ranges: dict) -> None:
+        """Fail at build time if a metric asks for metric keys that are never computed."""
+        for metric_name, metric in metrics.items():
+            keys = validation_metric_keys(metric)
+            missing = sorted(set(keys or []) - set(metric_ranges))
+            if missing:
+                msg = (
+                    f"Validation metric {metric_name!r}: metric_keys {missing} are not metric ranges. Use variable "
+                    f"names listed in training.metrics, or group keys such as {sorted(metric_ranges)[:5]}."
+                )
+                raise ValueError(msg)
 
     def _check_bounding_normalisers(self) -> None:
         """Fail loudly if a bounding restates a normalisation method the data normaliser does not use.
@@ -1122,7 +1140,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 BaseLoss,
             ), f"Validation metric {metric_name!r} must inherit BaseLoss, got {type(metric)}"
 
+            metric_keys = validation_metric_keys(metric)
             for mkey, indices in val_metric_ranges.items():
+                if metric_keys is not None and mkey not in metric_keys:
+                    continue
                 metric_step_name = f"{metric_name}_metric/{dataset_name}/{mkey}{suffix}"
                 if metric.has_scaler_for_dim(TensorDim.VARIABLE):
                     exception_msg = (
