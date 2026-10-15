@@ -94,7 +94,7 @@ class AnemoiEvaluator(AnemoiTrainer):
         )
 
         if self.config.diagnostics.print_memory_summary:
-            LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))
+            LOGGER.info("memory summary: %s", torch.cuda.memory_summary())
 
         LOGGER.debug("---- DONE. ----")
 
