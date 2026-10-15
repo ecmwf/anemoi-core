@@ -14,16 +14,16 @@ import logging
 import numpy as np
 import torch
 from scipy.spatial import ConvexHull
-from scipy.spatial import QhullError
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
+from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 
 LOGGER = logging.getLogger(__name__)
 
 
-class SphericalDelaunayEdges(BaseEdgeBuilder):
+class SphericalDelaunayEdges(BaseEdgeBuilder, NodeMaskingMixin):
     """Same-level mesh edges from a spherical Delaunay triangulation.
 
     Intended for node sets without a regular structure, such as
@@ -44,6 +44,10 @@ class SphericalDelaunayEdges(BaseEdgeBuilder):
         The name of the source nodes.
     target_name : str
         The name of the target nodes. Must match `source_name`.
+    source_mask_attr_name : str | None
+        The name of the source mask attribute to filter edge connections.
+    target_mask_attr_name : str | None
+        The name of the target mask attribute to filter edge connections.
     """
 
     def __init__(
@@ -58,6 +62,7 @@ class SphericalDelaunayEdges(BaseEdgeBuilder):
                 f"'{source_name}' -> '{target_name}'). Use KNNEdges/CutOffEdges "
                 f"between sets."
             )
+
         super().__init__(source_name, target_name, **kwargs)
 
     def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
@@ -87,11 +92,13 @@ class SphericalDelaunayEdges(BaseEdgeBuilder):
 
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Compute the edge indices based on Delaunay triangulation of the given nodes."""
-        xyz = latlon_rad_to_cartesian_np(source_nodes.x.detach().cpu().numpy().astype(np.float64))
+        latlons, _ = self.get_node_coordinates(source_nodes, target_nodes)
+        xyz = latlon_rad_to_cartesian_np(latlons.detach().cpu().numpy().astype(np.float64))
 
         pairs = self._get_delaunay_pairs(xyz)
 
         # Edges are directed in anemoi. Add both directions.
         edge_index = np.concatenate([pairs.T, pairs[:, ::-1].T], axis=1)
 
-        return torch.from_numpy(np.ascontiguousarray(edge_index))
+        edge_index = torch.from_numpy(np.ascontiguousarray(edge_index))
+        return self.undo_masking_edge_index(edge_index, source_nodes, target_nodes)
