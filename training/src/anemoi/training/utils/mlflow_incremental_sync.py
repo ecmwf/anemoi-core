@@ -248,7 +248,7 @@ class MlFlowIncrementalSync:
             return None
         # The training writes the params just after creating the run: a sync running in
         # between finds none of the run-id params the lineage rewrite needs. Skip until then.
-        if not LINEAGE_PARAMS <= run.params.keys():
+        if not run.params.keys() >= LINEAGE_PARAMS:
             LOGGER.info("Offline run %s has no run-id params yet (training starting), not syncing it yet", run_id)
             return None
 
