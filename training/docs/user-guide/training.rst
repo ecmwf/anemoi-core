@@ -141,9 +141,13 @@ Lightning resumes it into an empty epoch.
 When the rollout changes between epochs (``rollout.epoch_increment > 0``), the
 number of samples changes with it, and the dataloaders are rebuilt every epoch.
 
-The same data and random numbers do not necessarily make the complete training run
-bitwise reproducible: some GPU kernels used by the model may produce results that
-differ slightly between runs.
+The same data and random numbers do not guarantee bitwise identical results. Two
+things can prevent this:
+
+-  Some GPU kernels add up results, such as gradients, in an order that can change
+   between runs.
+-  With several GPUs, the gradients of all GPUs are summed in an order that can
+   change between runs, for example when a run is resumed.
 
 Step 5: Execute Training
 ========================
