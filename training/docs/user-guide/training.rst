@@ -147,7 +147,11 @@ things can prevent this:
 -  Some GPU kernels add up results, such as gradients, in an order that can change
    between runs.
 -  With several GPUs, the gradients of all GPUs are summed in an order that can
-   change between runs, for example when a run is resumed.
+   change between runs, for example when a run is resumed. Setting
+   ``training.strategy.static_graph: false`` and
+   ``training.strategy.find_unused_parameters: true`` keeps this order fixed, so a
+   resumed run continues bitwise identically if the GPU kernels are reproducible.
+   These settings may make training slower.
 
 Step 5: Execute Training
 ========================

@@ -57,6 +57,9 @@ strategy:
   read_group_size: ${dataloader.read_group_size}
   use_local_synchronization: True
   broadcast_buffers: False
+  # must be False when accum_grad_batches > 1
+  static_graph: True
+  find_unused_parameters: False
 
 # loss functions
 

@@ -689,10 +689,7 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def strategy(self) -> Any:
-        return instantiate(
-            self.config.training.strategy,
-            static_graph=not self.config.training.accum_grad_batches > 1,
-        )
+        return instantiate(self.config.training.strategy)
 
     @cached_property
     def fit_parameters(self) -> Any:

@@ -55,6 +55,9 @@ strategy:
   read_group_size: ${dataloader.read_group_size}
   use_local_synchronization: True
   broadcast_buffers: False
+  # must be False when accum_grad_batches > 1
+  static_graph: True
+  find_unused_parameters: False
 
 # dynamic rescaling of the loss gradient
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
