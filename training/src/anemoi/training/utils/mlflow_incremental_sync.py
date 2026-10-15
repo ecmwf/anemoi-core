@@ -51,8 +51,9 @@ from mlflow.utils.mlflow_tags import MLFLOW_USER
 from mlflow.utils.validation import MAX_METRICS_PER_BATCH
 from mlflow.utils.validation import MAX_PARAMS_TAGS_PER_BATCH
 
-from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
+from anemoi.training.diagnostics.mlflow.utils import check_params_length
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
+from anemoi.training.diagnostics.mlflow.utils import get_max_params_length
 from anemoi.training.diagnostics.mlflow.utils import rewrite_lineage
 
 LOGGER = logging.getLogger(__name__)
@@ -248,7 +249,7 @@ class MlFlowIncrementalSync:
             return None
         # The training writes the params just after creating the run: a sync running in
         # between finds none of the run-id params the lineage rewrite needs. Skip until then.
-        if not LINEAGE_PARAMS <= run.params.keys():
+        if not run.params.keys() >= LINEAGE_PARAMS:
             LOGGER.info("Offline run %s has no run-id params yet (training starting), not syncing it yet", run_id)
             return None
 
@@ -333,13 +334,9 @@ class MlFlowIncrementalSync:
 
     @staticmethod
     def _check_params_length(params: dict[str, str]) -> None:
-        count = len(clean_config_params(dict(params)))
-        if count > MAX_PARAMS_LENGTH:
-            msg = (
-                f"Too many params: {count} > {MAX_PARAMS_LENGTH}. Please revisit the fields being logged "
-                "and add redundant or irrelevant ones to the clean_config_params function."
-            )
-            raise ValueError(msg)
+        # The run's own limit, as for the one-shot sync: a run trained with a raised
+        # `max_params_length` must sync with it too.
+        check_params_length(len(clean_config_params(dict(params))), get_max_params_length(params))
 
     def _log_params(self, dst_run_id: str, params: dict[str, str], server_params: dict[str, str]) -> int:
         new_params = [Param(key, value) for key, value in params.items() if key not in server_params]

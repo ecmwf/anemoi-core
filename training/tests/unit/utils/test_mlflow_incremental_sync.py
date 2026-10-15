@@ -30,7 +30,7 @@ from mlflow.entities import RunStatus
 from mlflow.entities import RunTag
 from mlflow.exceptions import MlflowException
 
-from anemoi.training.utils import mlflow_incremental_sync
+from anemoi.training.diagnostics.mlflow.utils import MAX_PARAMS_LENGTH_PARAM
 from anemoi.training.utils.mlflow_incremental_sync import SYNC_TAG
 from anemoi.training.utils.mlflow_incremental_sync import MlFlowIncrementalSync
 
@@ -295,16 +295,17 @@ def test_rejected_batch_is_retried_without_known_points(store: Path, server: Fak
     assert server.points(dst, "loss") == [(1, 0), (2, 1), (3, 2)]
 
 
-def test_too_many_params_fails_before_creating_the_run(
-    store: Path,
-    server: FakeServer,
-    mocker: "MockerFixture",
-) -> None:
-    mocker.patch.object(mlflow_incremental_sync, "MAX_PARAMS_LENGTH", 2)
-    write_run(store, PARENT, params={"a": "1", "b": "2"})
-    with pytest.raises(ValueError, match="Too many params"):
+def test_too_many_params_fails_before_creating_the_run(store: Path, server: FakeServer) -> None:
+    write_run(store, PARENT, params={MAX_PARAMS_LENGTH_PARAM: "2", "a": "1", "b": "2"})
+    with pytest.raises(ValueError, match=r"Too many params: \d+ > 2\."):
         make_sync(store, server).sync(PARENT)
     assert server.runs == {}
+
+
+def test_params_length_uses_the_run_limit(store: Path, server: FakeServer, mocker: "MockerFixture") -> None:
+    mocker.patch("anemoi.training.diagnostics.mlflow.utils.MAX_PARAMS_LENGTH", 2)
+    write_run(store, PARENT, params={MAX_PARAMS_LENGTH_PARAM: "10", "a": "1", "b": "2"})
+    assert make_sync(store, server).sync(PARENT) in server.runs
 
 
 def test_artifacts_missing_or_resized_are_uploaded(store: Path, server: FakeServer, mocker: "MockerFixture") -> None:
