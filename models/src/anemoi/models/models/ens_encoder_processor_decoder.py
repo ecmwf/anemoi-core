@@ -126,13 +126,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     ):
         ensemble_size = batch_ens_size // batch_size
         return super()._assemble_output(
-            x_out,
-            x_skip,
-            batch_size,
-            batch_ens_size,
-            ensemble_size,
-            dtype,
-            dataset_name,
+            x_out=x_out,
+            x_skip=x_skip,
+            batch_size=batch_size,
+            ensemble_size=ensemble_size,
+            dtype=dtype,
+            dataset_name=dataset_name,
         )
 
     def forward(

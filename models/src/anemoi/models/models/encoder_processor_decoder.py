@@ -170,7 +170,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             ``(x_data_latent, x_skip, grid_shard_sizes)`` where ``x_data_latent`` is the encoder
             source input, and ``x_skip`` is the residual to add to the decoder output.
         """
-        x_skip, node_attributes_data, grid_shard_sizes = self._pepare_input(
+        x_skip, node_attributes_data, grid_shard_sizes = self._prepare_input_components(
             x,
             batch_size=batch_size,
             grid_shard_sizes=grid_shard_sizes,
