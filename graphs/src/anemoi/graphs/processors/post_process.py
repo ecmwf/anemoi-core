@@ -307,17 +307,43 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         Name of the source nodes of edges to remove.
     target_name: str
         Name of the target nodes of edges to remove.
+    source_mask_attr_name: str, optional
+        Boolean node attribute on the source nodes. The post-processing is
+        restricted to the edges leaving a True source node. By default, all
+        edges are post-processed.
+    target_mask_attr_name: str, optional
+        Boolean node attribute on the target nodes. The post-processing is
+        restricted to the edges arriving at a True target node. By default, all
+        edges are post-processed.
     """
 
     def __init__(
         self,
         source_name: str,
         target_name: str,
+        source_mask_attr_name: str | None = None,
+        target_mask_attr_name: str | None = None,
     ) -> None:
         self.source_name = source_name
         self.target_name = target_name
+        self.source_mask_attr_name = source_mask_attr_name
+        self.target_mask_attr_name = target_mask_attr_name
         self.edges_name = (self.source_name, "to", self.target_name)
         super().__init__()
+
+    def get_edges_to_process(self, graph: HeteroData) -> torch.Tensor:
+        """Boolean mask over the edges selected by the source/target node masks."""
+        edge_index = graph[self.edges_name].edge_index.cpu()
+        selection = torch.ones(edge_index.shape[1], dtype=torch.bool)
+        cases = [
+            (self.source_mask_attr_name, self.source_name, 0),
+            (self.target_mask_attr_name, self.target_name, 1),
+        ]
+        for mask_attr_name, nodes_name, i in cases:
+            if mask_attr_name is not None:
+                attr_mask = graph[nodes_name][mask_attr_name].detach().cpu().to(torch.bool).reshape(-1)
+                selection &= attr_mask[edge_index[i]]
+        return selection
 
     def removing_edges(self, graph: HeteroData, mask: torch.Tensor) -> HeteroData:
         """Remove edges based on the mask passed."""
@@ -394,10 +420,8 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
     ) -> None:
-        super().__init__(source_name, target_name)
+        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
         self.treshold = max_length_km
-        self.source_mask_attr_name = source_mask_attr_name
-        self.target_mask_attr_name = target_mask_attr_name
 
     def compute_mask(self, graph: HeteroData) -> torch.Tensor:
         source_nodes = graph[self.source_name]
@@ -405,16 +429,7 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         edge_index = graph[self.edges_name].edge_index
         lengths = EARTH_RADIUS * EdgeLength()(x=(source_nodes, target_nodes), edge_index=edge_index)
         mask = torch.where(lengths > self.treshold, False, True).squeeze().cpu()
-        cases = [
-            (self.source_mask_attr_name, source_nodes, 0),
-            (self.target_mask_attr_name, target_nodes, 1),
-        ]
-        for mask_attr_name, nodes, i in cases:
-            if mask_attr_name:
-                attr_mask = nodes[mask_attr_name].squeeze()
-                edge_mask = attr_mask[edge_index[i]].cpu()
-                mask = torch.logical_or(mask, ~edge_mask)
-        return mask
+        return torch.logical_or(mask, ~self.get_edges_to_process(graph))
 
 
 class RemoveSelfEdges(BaseEdgeMaskingProcessor):
@@ -465,24 +480,16 @@ class RemoveEdgesCrossingArea(BaseEdgeMaskingProcessor):
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
     ) -> None:
-        super().__init__(source_name, target_name)
+        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
         if num_middle_points < 1:
             raise ValueError(f"num_middle_points must be >= 1, got {num_middle_points}.")
-        self.source_name = source_name
-        self.target_name = target_name
         self.num_middle_points = num_middle_points
         self.reference_nodes_name = reference_nodes_name
         self.reference_attribute_name = reference_attribute_name
-        self.source_mask_attr_name = source_mask_attr_name
-        self.target_mask_attr_name = target_mask_attr_name
 
     @staticmethod
     def _get_xyz_coordinates(graph: HeteroData, nodes_name: str) -> np.ndarray:
         return latlon_rad_to_cartesian_np(graph[nodes_name].x.detach().cpu().numpy().astype(np.float64))
-
-    @staticmethod
-    def _get_node_attr(graph: HeteroData, nodes_name: str, attr_name: str, dtype=torch.bool) -> np.ndarray:
-        return graph[nodes_name][attr_name].detach().cpu().numpy().reshape(-1).astype(dtype)
 
     def get_area_mask(self, graph: HeteroData) -> torch.Tensor:
         mask = graph[self.reference_nodes_name][self.reference_attribute_name]
@@ -490,9 +497,8 @@ class RemoveEdgesCrossingArea(BaseEdgeMaskingProcessor):
         return mask
 
     def compute_mask(self, graph: HeteroData) -> torch.Tensor:
-        edge_index = graph[(self.source_name, "to", self.target_name)].edge_index
-        src, dst = edge_index.detach().cpu()
-        keep = torch.ones(src.shape[0], dtype=bool)
+        src, dst = graph[self.edges_name].edge_index.detach().cpu()
+        keep = torch.ones(src.shape[0], dtype=torch.bool)
 
         # 1. Reference grid: KD-tree over ALL its points; the attribute says which are restricted.
         area_mask = self.get_area_mask(graph)
@@ -501,12 +507,7 @@ class RemoveEdgesCrossingArea(BaseEdgeMaskingProcessor):
         tree = cKDTree(self._get_xyz_coordinates(graph, self.reference_nodes_name))
 
         # 2. Which edges to check (all by default).
-        check = np.ones_like(keep)
-        if self.source_mask_attr_name is not None:
-            check &= self._get_node_attr(graph, self.source_name, self.source_mask_attr_name)[src]
-        if self.target_mask_attr_name is not None:
-            check &= self._get_node_attr(graph, self.target_name, self.target_mask_attr_name)[dst]
-        idx = np.flatnonzero(check)
+        idx = np.flatnonzero(self.get_edges_to_process(graph).numpy())
         if idx.size == 0:
             return keep
 
