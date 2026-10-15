@@ -14,6 +14,7 @@ import logging
 import numpy as np
 import torch
 from scipy.spatial import ConvexHull
+from scipy.spatial import QhullError
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
@@ -67,6 +68,12 @@ class SphericalDelaunayEdges(BaseEdgeBuilder):
     @staticmethod
     def _get_delaunay_pairs(xyz: np.ndarray) -> np.ndarray:
         """Unique undirected edges of the spherical Delaunay triangulation."""
+        if len(xyz) < 4:
+            raise ValueError(
+                f"A spherical Delaunay triangulation needs at least 4 nodes, got {len(xyz)}. "
+                f"Use a finer node set, or KNNEdges/CutOffEdges."
+            )
+
         hull = ConvexHull(xyz)
 
         # Facet planes satisfy n.x + offset <= 0 inside the hull. Real spherical
