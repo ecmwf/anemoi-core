@@ -43,6 +43,7 @@ class FakeTrajectoryDataset:
     ) -> None:
         self.shape = (num_base_dates, variables, ensemble, steps, gridpoints)
         self._data = np.random.default_rng(42).standard_normal(self.shape).astype(np.float32)
+        self.read_keys: list = []
         self.step_frequency = step_frequency
         self.base_dates = np.datetime64("2020-01-01T00", "s") + np.arange(num_base_dates) * np.timedelta64(1, "D")
         self.steps = np.arange(steps) * np.timedelta64(step_frequency or datetime.timedelta(hours=6))
@@ -62,6 +63,8 @@ class FakeTrajectoryDataset:
         return {}
 
     def __getitem__(self, key: object) -> np.ndarray:
+        """Return (variables, ensemble, steps, gridpoints) for a scalar init index, or index with a tuple."""
+        self.read_keys.append(key)
         return self._data[key]
 
 
@@ -179,6 +182,53 @@ class TestTrajectoryDataReaderGetSample:
         assert sample.data.shape == (3, 2, 5, 3)
         torch.testing.assert_close(sample.data, full.data[:, :, 5:])
         torch.testing.assert_close(sample.coordinates, full.coordinates[5:])
+
+    def test_get_sample_without_grid_shard_keeps_the_full_grid(self) -> None:
+        reader = _make_reader(variables=3, ensemble=2, steps=24, gridpoints=10)
+        sample = reader.get_sample(0, [0, 1])
+        assert sample.data.shape == (2, 2, 10, 3)
+
+    @pytest.mark.parametrize(
+        ("positions", "step_slice", "steps"),
+        [
+            pytest.param([5, 6, 7, 8], slice(5, 9, 1), [5, 6, 7, 8], id="contiguous"),
+            pytest.param([0, 6, 12], slice(0, 18, 6), [0, 6, 12], id="strided"),
+            pytest.param(slice(2, 5), slice(2, 5, 1), [2, 3, 4], id="slice-input"),
+        ],
+    )
+    def test_evenly_spaced_positions_read_only_those_steps(
+        self,
+        positions: list[int] | slice,
+        step_slice: slice,
+        steps: list[int],
+    ) -> None:
+        """Evenly spaced steps are read with one step slice, not by loading the whole forecast."""
+        reader = _make_reader(num_base_dates=4, variables=3, ensemble=2, steps=24, gridpoints=10)
+        data = reader.get_data(1, positions)
+
+        assert reader.data.read_keys == [(1, slice(None), slice(None), step_slice, slice(None))]
+        expected = np.transpose(reader.data._data[1][:, :, steps, :], (2, 1, 3, 0))
+        np.testing.assert_array_equal(data.numpy(), expected)
+
+    @pytest.mark.parametrize(
+        ("positions", "steps"),
+        [
+            pytest.param([0, 6, 13], [0, 6, 13], id="irregular"),
+            pytest.param(slice(5, 1, -2), [5, 3], id="reversed-slice"),
+        ],
+    )
+    def test_irregular_positions_fall_back_to_full_read(self, positions: list[int] | slice, steps: list[int]) -> None:
+        reader = _make_reader(num_base_dates=4, variables=3, ensemble=2, steps=24, gridpoints=10)
+        data = reader.get_data(2, positions)
+
+        assert reader.data.read_keys == [2]
+        expected = np.transpose(reader.data._data[2][:, :, steps, :], (2, 1, 3, 0))
+        np.testing.assert_array_equal(data.numpy(), expected)
+
+
+# ---------------------------------------------------------------------------
+# create_dataset factory
+# ---------------------------------------------------------------------------
 
 
 class TestCreateDatasetWithTrajectory:

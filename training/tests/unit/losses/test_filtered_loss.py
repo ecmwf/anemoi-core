@@ -587,3 +587,38 @@ class TestScalerIndicesRemapping:
 
         torch.testing.assert_close(loss, torch.tensor(0.0))
         assert "Metric selection is empty; forward() will return zeros for this call." in caplog.text
+
+
+@pytest.mark.parametrize(
+    "indices",
+    [
+        pytest.param(list(range(6)), id="all-in-order"),
+        pytest.param([2, 3, 4], id="contiguous-block"),
+        pytest.param([4, 0, 2], id="non-contiguous"),
+        pytest.param([5], id="single"),
+    ],
+)
+def test_select_variables_matches_advanced_indexing(indices: list[int]) -> None:
+    """Variable selection must give the same values and gradients as ``x[..., indices]``.
+
+    The mapper filters through ``Source.select_variables``, which uses ``index_select``
+    rather than advanced indexing: its sort-based backward is slow on GPU.
+    """
+    x_ref = torch.randn(2, 3, 1, 7, 6, requires_grad=True)
+    x_new = x_ref.detach().clone().requires_grad_(True)
+    weights = torch.randn(2, 3, 1, 7, len(indices))
+
+    ref = x_ref[..., indices]
+    new = _gridded_source_view(x_new).select_variables(indices).data
+    torch.testing.assert_close(new, ref)
+
+    (ref * weights).sum().backward()
+    (new * weights).sum().backward()
+    torch.testing.assert_close(x_new.grad, x_ref.grad)
+
+
+def test_select_variables_slice_does_not_copy() -> None:
+    """A slice selection stays a view of the original storage."""
+    x = torch.randn(2, 3, 1, 7, 6)
+    selected = _gridded_source_view(x).select_variables(slice(None)).data
+    assert selected.data_ptr() == x.data_ptr()
