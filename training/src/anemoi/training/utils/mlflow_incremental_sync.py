@@ -60,6 +60,8 @@ LOGGER = logging.getLogger(__name__)
 SYNC_TAG = "sync.offline_run_id"
 TERMINAL_STATUSES = ("FINISHED", "FAILED", "KILLED")
 MAX_LINEAGE_DEPTH = 10
+#: Params read by ``rewrite_lineage``; a run is synced only once they are written.
+LINEAGE_PARAMS = frozenset({"config.training.fork_run_id", "metadata.run_id"})
 
 
 def _read_tree(root: Path) -> dict[str, str]:
@@ -212,7 +214,8 @@ class MlFlowIncrementalSync:
         Returns
         -------
         str | None
-            The server run id, or None when the run is deleted and was not synced.
+            The server run id, or None when the run was not synced: it is deleted, or its
+            params are not written yet (the training is starting).
         """
         if status is not None and status not in TERMINAL_STATUSES:
             msg = f"status must be one of {TERMINAL_STATUSES}, got {status!r}"
@@ -242,6 +245,11 @@ class MlFlowIncrementalSync:
         run = OfflineRun(self.store, run_id)
         if run.meta.get("lifecycle_stage") == "deleted":
             LOGGER.warning("Not syncing run %s: it is deleted", run_id)
+            return None
+        # The training writes the params just after creating the run: a sync running in
+        # between finds none of the run-id params the lineage rewrite needs. Skip until then.
+        if not LINEAGE_PARAMS <= run.params.keys():
+            LOGGER.info("Offline run %s has no run-id params yet (training starting), not syncing it yet", run_id)
             return None
 
         dst_run_id = self.find_run(run_id)

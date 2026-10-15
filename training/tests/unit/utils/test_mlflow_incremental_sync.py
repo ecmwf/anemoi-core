@@ -172,8 +172,12 @@ def write_run(
     metrics: dict | None = None,
     status: int = RUNNING,
     deleted: bool = False,
+    with_params: bool = True,
 ) -> Path:
-    """Write (or extend) an offline run the way the MLflow file store lays it out."""
+    """Write (or extend) an offline run the way the MLflow file store lays it out.
+
+    ``with_params=False`` writes no base params, like a run the training has just created.
+    """
     path = store / "123" / run_id
     meta = {
         "run_id": run_id,
@@ -186,6 +190,8 @@ def write_run(
     path.mkdir(parents=True, exist_ok=True)
     (path / "meta.yaml").write_text(yaml.safe_dump(meta))
     base_params = {"config.training.run_id": run_id, "config.training.fork_run_id": "None", "metadata.run_id": run_id}
+    if not with_params:
+        base_params = {}
     for kind, values in (("params", base_params | (params or {})), ("tags", tags or {})):
         for key, value in values.items():
             (path / kind / key).parent.mkdir(parents=True, exist_ok=True)
@@ -407,6 +413,19 @@ def test_deleted_run_is_not_synced(store: Path, server: FakeServer) -> None:
     write_run(store, PARENT, deleted=True)
     assert make_sync(store, server).sync(PARENT) is None
     assert server.runs == {}
+
+
+def test_run_without_params_is_skipped_until_ready(store: Path, server: FakeServer) -> None:
+    # a sync running between the training creating the run and writing its params
+    write_run(store, PARENT, with_params=False, metrics={"loss": lines((1, 1.0, 0))})
+    assert make_sync(store, server).sync(PARENT) is None
+    assert server.runs == {}
+
+    write_run(store, PARENT)
+    dst = make_sync(store, server).sync(PARENT)
+    assert list(server.runs) == [dst]
+    assert server.runs[dst]["params"]["config.training.run_id"] == dst
+    assert server.points(dst, "loss") == [(1, 0)]
 
 
 def test_several_server_runs_for_one_offline_run_fail(store: Path, server: FakeServer) -> None:
