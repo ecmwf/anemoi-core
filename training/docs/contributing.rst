@@ -390,3 +390,14 @@ reuse the same helper and pass their own ``test_case`` string so their
 results land in a sibling directory (e.g. ``.../training/accuracy/lam/``).
 See the "Local Benchmarking" section of the benchmarking user guide for
 more details on the config file layout.
+
+#########################
+ Configuration migrations
+#########################
+
+Contributors to PRs that update the configuration structure (adding new keys,
+moving keys, deleting keys, ...) are expected to provide a configuration migration to
+help users update their configs.
+
+See :ref:`contributing config migrations <contributing-config-migrations>` for more
+information.
