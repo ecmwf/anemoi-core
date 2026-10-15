@@ -417,6 +417,16 @@ class HydrostaticGeopotential(BaseBounding):
     pressure ladder with the trapezoidal layer-mean virtual temperature (exact for a virtual
     temperature linear in ln p).
 
+    With ``msl_anchor`` set, the anchor is instead diagnosed from the mean-sea-level pressure
+    head by the same relation over the layer from sea level (Phi = 0) to ``levels[0]``,
+
+        Phi(p_0) = R_d * T_v(p_0) * ln(msl / p_0),
+
+    and ``z_<levels[0]>`` is overwritten too. msl is far more densely observed (SYNOP, ships,
+    buoys) than radiosonde ``z_<levels[0]>``, and the msl and z heads become mutually consistent.
+    The layer is taken isothermal at ``T_v(p_0)``; a standard lapse rate would shift the
+    ~100 m layer by well under 1 m.
+
     The layer reads normalised model outputs, works in float32 physical units (geopotential at
     50 hPa exceeds the fp16 range) and writes back normalised values. Boundings receive only
     dataset statistics, so the per-variable normalisation method must be restated here; the
@@ -429,6 +439,9 @@ class HydrostaticGeopotential(BaseBounding):
         - _target_: anemoi.models.layers.bounding.HydrostaticGeopotential
           levels: [1000, 925, 850, 700, 500, 400, 300, 250, 200, 150, 100, 70, 50]
           normalizer: {z: min-max, t: mean-std, q: mean-std}
+          # optional: anchor on msl instead of z_1000 (the normaliser must then name msl too)
+          # msl_anchor: msl
+          # normalizer: {z: min-max, t: mean-std, q: mean-std, msl: mean-std}
     """
 
     def __init__(
@@ -443,6 +456,8 @@ class HydrostaticGeopotential(BaseBounding):
         temperature_prefix: str = "t",
         humidity_prefix: str = "q",
         geopotential_units: str = "m2/s2",
+        msl_anchor: Optional[str] = None,
+        msl_units: str = "Pa",
         check_finite: bool = False,
         variables: Optional[list[str]] = None,  # noqa: ARG002 - derived from levels; accepted for kwarg compatibility
     ) -> None:
@@ -464,6 +479,12 @@ class HydrostaticGeopotential(BaseBounding):
             Variable-name prefixes of the ladder.
         geopotential_units : {"m2/s2", "m"}
             Units of the ``z`` variables (geopotential or geopotential height).
+        msl_anchor : str, optional
+            Name of a mean-sea-level pressure output variable. If given, the anchor geopotential
+            is diagnosed from it and ``z_<levels[0]>`` is overwritten as well; ``normalizer`` must
+            then give a method for this name.
+        msl_units : {"Pa", "hPa"}
+            Units of the ``msl_anchor`` variable.
         check_finite : bool
             Raise if the integrated column is non-finite (adds a device sync; debug only).
         variables : list[str], optional
@@ -480,7 +501,11 @@ class HydrostaticGeopotential(BaseBounding):
             raise ValueError(f"levels must be strictly decreasing (anchor first) with >= 2 entries, got {levels}")
         if geopotential_units not in ("m2/s2", "m"):
             raise ValueError(f"geopotential_units must be 'm2/s2' or 'm', got {geopotential_units!r}")
+        if msl_units not in ("Pa", "hPa"):
+            raise ValueError(f"msl_units must be 'Pa' or 'hPa', got {msl_units!r}")
         prefixes = {"z": geopotential_prefix, "t": temperature_prefix, "q": humidity_prefix}
+        if msl_anchor is not None:
+            prefixes["msl"] = msl_anchor
         missing_methods = [p for p in prefixes.values() if p not in normalizer]
         if missing_methods:
             raise ValueError(
@@ -495,9 +520,18 @@ class HydrostaticGeopotential(BaseBounding):
         self.check_finite = check_finite
         self.virtual_temp_coeff = VIRTUAL_TEMP_COEFF
         self.g0 = G0
+        self.r_d = R_D
+        self.msl_anchor = msl_anchor
+        # msl in Pa over the anchor level in Pa.
+        self.msl_scale = 1.0 if msl_units == "Pa" else 100.0
+        self.anchor_pressure = 100.0 * levels[0]
+        # First overwritten ladder level: the anchor stays free unless it is diagnosed from msl.
+        self.first_derived = 0 if msl_anchor is not None else 1
 
-        names = {key: [f"{prefix}_{level}" for level in levels] for key, prefix in prefixes.items()}
-        self.variables = names["z"][1:]  # the overwritten (derived) heads
+        names = {key: [f"{prefix}_{level}" for level in levels] for key, prefix in prefixes.items() if key != "msl"}
+        if msl_anchor is not None:
+            names["msl"] = [msl_anchor]
+        self.variables = names["z"][self.first_derived :]  # the overwritten (derived) heads
         missing = [n for group in names.values() for n in group if n not in name_to_index]
         if missing:
             raise ValueError(f"HydrostaticGeopotential: variables missing from the model output: {missing}")
@@ -534,7 +568,7 @@ class HydrostaticGeopotential(BaseBounding):
             self.register_buffer(f"{key}_add", torch.tensor(add, dtype=torch.float32), persistent=True)
         p = torch.tensor(levels, dtype=torch.float64)
         self.register_buffer("layer_factor", (R_D * torch.log(p[:-1] / p[1:])).to(torch.float32), persistent=True)
-        self.data_index = self.z_index[1:]
+        self.data_index = self.z_index[self.first_derived :]
 
     def _physical(self, x: torch.Tensor, key: str) -> torch.Tensor:
         index = getattr(self, f"{key}_index")
@@ -547,18 +581,23 @@ class HydrostaticGeopotential(BaseBounding):
         t = self._physical(x, "t")
         q = self._physical(x, "q").clamp_min(0.0)
         tv = t * (1.0 + self.virtual_temp_coeff * q)
-        phi0 = self._physical(x, "z")[..., :1]
-        if self.geopotential_units == "m":
-            phi0 = phi0 * self.g0
+        if self.msl_anchor is not None:
+            # Clamp only guards the log against a wildly unphysical untrained head.
+            msl = (self._physical(x, "msl") * self.msl_scale).clamp_min(1.0)
+            phi0 = self.r_d * tv[..., :1] * torch.log(msl / self.anchor_pressure)
+        else:
+            phi0 = self._physical(x, "z")[..., :1]
+            if self.geopotential_units == "m":
+                phi0 = phi0 * self.g0
         dphi = 0.5 * (tv[..., :-1] + tv[..., 1:]) * self.layer_factor
         return torch.cat([phi0, phi0 + torch.cumsum(dphi, dim=-1)], dim=-1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         with torch.autocast(device_type=x.device.type, enabled=False):
-            phi = self.integrate(x)[..., 1:]
+            phi = self.integrate(x)[..., self.first_derived :]
             z_phys = phi / self.g0 if self.geopotential_units == "m" else phi
             # Renormalise BEFORE casting back: physical geopotential overflows fp16, O(1) values do not.
-            z_norm = z_phys * self.z_mul[1:] + self.z_add[1:]
+            z_norm = z_phys * self.z_mul[self.first_derived :] + self.z_add[self.first_derived :]
             if self.check_finite and not torch.isfinite(z_norm).all():
                 raise RuntimeError("HydrostaticGeopotential: non-finite integrated column; check anchor and t/q.")
         x[..., self.data_index] = z_norm.to(x.dtype)

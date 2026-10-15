@@ -38,6 +38,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     # ``AnemoiModelEncProcDec.__init_subclass__`` clear this flag. The override does
     # honour ``skip_input``, so opt back in explicitly.
     supports_skip_input: bool = True
+    # ``_assemble_input`` and ``_calculate_input_dim`` are overridden, which would otherwise
+    # make ``AnemoiModelEncProcDec.__init_subclass__`` clear this flag. Both build on the
+    # parent: the input width comes from ``super()._calculate_input_dim`` and
+    # ``_assemble_input`` embeds the categorical columns, so opt back in explicitly.
+    supports_categorical_embeddings: bool = True
 
     def __init__(
         self,
@@ -102,6 +107,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
+
+        # After the residual, which reads the raw columns: swap raw categorical codes for embeddings.
+        # getattr: models pickled before categorical embeddings existed lack the attribute.
+        if dataset_name in getattr(self, "categorical_embeddings", {}):
+            x = self._embed_categorical_inputs(x, dataset_name)
 
         # add data positional info (lat/lon)
         x_data_latent = torch.cat(
