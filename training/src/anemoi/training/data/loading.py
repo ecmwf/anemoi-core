@@ -15,8 +15,13 @@ from torchdata.stateful_dataloader.sampler import BatchSampler
 from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
 
 from anemoi.training.data.data_reader import BaseAnemoiReader
+from anemoi.training.data.multidataset import MixedFrequencyDataset
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.relative_time_indices import compute_model_relative_date_indices
+from anemoi.training.data.relative_time_indices import compute_relative_date_indices
+from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.time_indices import TimeIndices
+from anemoi.utils.dates import frequency_to_timedelta
 
 
 class DataLoadingPolicy(ABC):
@@ -26,6 +31,16 @@ class DataLoadingPolicy(ABC):
     several independently indexed ones) and the batch sampler that orders, shards
     and batches its samples, so the two always stay consistent with each other.
     """
+
+    def relative_date_indices(
+        self,
+        task: BaseTask,
+        data_readers: dict[str, BaseAnemoiReader],
+        *,
+        mode: str,
+    ) -> dict[str, list[int]]:
+        """Return the reader-native time indices required by the task."""
+        return compute_relative_date_indices(task, data_readers, mode=mode)
 
     @abstractmethod
     def build_dataset(
@@ -144,3 +159,34 @@ class SynchronizedLoadingPolicy(DataLoadingPolicy):
         # the BatchSampler wrapping it only groups a group's own share into batches, and should
         # always keep its last, possibly incomplete, batch.
         return BatchSampler(sampler, batch_size=batch_size, drop_last=False)
+
+
+class MixedFrequencyLoadingPolicy(SynchronizedLoadingPolicy):
+    """Synchronize readers with different native frequencies on a shared model grid."""
+
+    def __init__(self, frequency: str) -> None:
+        self.frequency = frequency_to_timedelta(frequency)
+
+    def relative_date_indices(
+        self,
+        task: BaseTask,
+        data_readers: dict[str, BaseAnemoiReader],
+        *,
+        mode: str,
+    ) -> list[int]:
+        del data_readers
+        return compute_model_relative_date_indices(task, self.frequency, mode=mode)
+
+    def build_dataset(
+        self,
+        data_readers: dict[str, BaseAnemoiReader],
+        relative_date_indices: list[int],
+        *,
+        fake_dataloading: bool = False,
+    ) -> MixedFrequencyDataset:
+        return MixedFrequencyDataset(
+            data_readers=data_readers,
+            relative_date_indices=relative_date_indices,
+            frequency=self.frequency,
+            fake_dataloading=fake_dataloading,
+        )
