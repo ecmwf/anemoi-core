@@ -28,6 +28,7 @@ from omegaconf import OmegaConf
 from torch.testing import assert_close
 
 from anemoi.training.diagnostics.benchmark_server import _is_repo_on_branch
+from anemoi.training.diagnostics.benchmark_server import mark_mlflow_run_used
 from anemoi.training.diagnostics.benchmark_server import prune_mlflow_runs
 from anemoi.training.diagnostics.benchmark_server import track_accuracy_final_loss
 from anemoi.training.train.train import AnemoiTrainer
@@ -43,7 +44,7 @@ LOGGER = logging.getLogger(__name__)
 
 @pytest.mark.mlflow
 @pytest.mark.slow
-def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
+def test_accuracy(tmp_path: Path, mlflow_server: str, pytestconfig: pytest.Config) -> None:
 
     # compose leaves interpolations such as
     # system.input.graph = ${system.output.root}/... unresolved; they depend on
@@ -75,8 +76,13 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
 
     client = AnemoiMlflowClient(mlflow_server, authentication=True)
 
+    # Record every change of reference_id in config/CHANGELOG.md.
     reference_id: Final = "8b3bc3d3bd6947318cb825d777c9d750"
     metric: Final = "train_multi_dataset_loss_step"
+    # Optional override (e.g. from workflow_dispatch) to try out a candidate reference.
+    compare_id: Final = pytestconfig.getoption("accuracy_reference_id") or reference_id
+    if compare_id != reference_id:
+        LOGGER.info("Comparing against overridden reference run %s", compare_id)
 
     # Printed so a failing run's ID can be promoted to the new reference_id.
     LOGGER.info("Run ID from trainer: %s", trainer.run_id)
@@ -119,7 +125,9 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
             ),
         )
 
-    assert_similar(trainer.run_id, reference_id)
+    # Mark the reference as read, so pruning keeps it while it is still compared against.
+    mark_mlflow_run_used(client, compare_id)
+    assert_similar(trainer.run_id, compare_id)
 
     # Additionally push a scalar summary of the run to the anemoi benchmark
     # server (data@ecmwf.int), mirroring the pattern used by test_benchmark.py.
