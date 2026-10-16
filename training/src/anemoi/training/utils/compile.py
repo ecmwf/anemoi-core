@@ -151,7 +151,7 @@ def prepare_compilation(
             "Could not disable torch compile LRU cache because torch version is < 2.10.0. This may"
             "result in runtime errors when using torch.compile() alongside activation checkpointing. If you encounter"
             "errors, consider either upgrading to torch >= 2.10.0, or disabling torch.compile() (model.compile=[])"
-            " or disabling activation checkpointing (e.g. model.processor.gradient_checkpointing=False).",
+            " or disabling activation checkpointing (e.g. model.processor.gradient_checkpointing=False)."
             "For more information, see 'https://github.com/pytorch/pytorch/issues/166926'",
         )
 

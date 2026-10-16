@@ -1,10 +1,10 @@
-name: distributed-primitive-tests-hpc-gpu
+name: distributed-tests-hpc
 
 on:
   workflow_dispatch:
 
 jobs:
-  distributed-primitive-tests:
+  distributed-tests:
     runs-on: hpc
     timeout-minutes: 60
     steps:
@@ -24,19 +24,19 @@ jobs:
             pip install --upgrade pip
             pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
 
-            python3 -m pytest -q models/tests/distributed/test_communication_primitives.py \
+            python3 -m pytest -q models/tests/distributed \
               --distributed \
               --distributed-backend=all \
-              --distributed-world-size=2
+              --distributed-world-size=4
 
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
-            #SBATCH --job-name=anemoi_core_dist_primitives
+            #SBATCH --job-name=anemoi_core_distributed_pytest
             #SBATCH --nodes=1
             #SBATCH --ntasks=1
             #SBATCH --cpus-per-task=4
-            #SBATCH --gpus-per-node=2
+            #SBATCH --gpus-per-node=4
             #SBATCH --time=00:30:00
             #SBATCH --qos=ng
             #SBATCH --mem=64G

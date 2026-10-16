@@ -5,8 +5,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import pytest
+
+from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
+from anemoi.training.diagnostics.mlflow.utils import MAX_PARAMS_LENGTH_PARAM
+from anemoi.training.diagnostics.mlflow.utils import check_params_length
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 from anemoi.training.diagnostics.mlflow.utils import expand_iterables
+from anemoi.training.diagnostics.mlflow.utils import get_max_params_length
 
 
 def test_clean_config_params() -> None:
@@ -89,3 +95,22 @@ def test_expand_iterables_with_omegaconf() -> None:
     }
     # Note that ListConfig and plain list are comparible and that ListConfig (and lists) of primitives are preserved
     assert isinstance(expanded["a"][0], ListConfig)
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({MAX_PARAMS_LENGTH_PARAM: "5000"}, 5000),
+        ({MAX_PARAMS_LENGTH_PARAM: 5000}, 5000),
+        ({}, MAX_PARAMS_LENGTH),
+        ({MAX_PARAMS_LENGTH_PARAM: "None"}, MAX_PARAMS_LENGTH),
+    ],
+)
+def test_get_max_params_length(params: dict, expected: int) -> None:
+    assert get_max_params_length(params) == expected
+
+
+def test_check_params_length() -> None:
+    check_params_length(3, 3)
+    with pytest.raises(ValueError, match=r"Too many params: 4 > 3"):
+        check_params_length(4, 3)
