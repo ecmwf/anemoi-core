@@ -219,10 +219,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.data_indices = data_indices
 
-        # Save only what is needed in current restore paths (resume, load_weights_only, transfer
-        # learning) to keep checkpoints slim.
         self.save_hyperparameters(
-            ignore=["graph_data", "statistics", "statistics_tendencies", "supporting_arrays"],
+            ignore=list(config.diagnostics.checkpoint.exclude_hyperparameters),
         )
 
         self.statistics_tendencies = statistics_tendencies
