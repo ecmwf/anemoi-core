@@ -1,3 +1,0 @@
-Performance upgrades
-graph_attention_backend: triton
-gradient_checkpointing: False
