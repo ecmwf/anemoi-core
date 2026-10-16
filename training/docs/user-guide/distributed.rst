@@ -288,6 +288,15 @@ to the number of GPUs you wish to parallelise the ensemble members
 across and ``config.training.ensemble_size_per_device`` to the number of
 ensemble members per GPU.
 
+Both strategies pass ``static_graph`` and ``find_unused_parameters`` on
+to PyTorch's ``DistributedDataParallel``. ``static_graph: true``, the
+default, tells it that the same parameters are trained in every step; it
+must be ``false`` when ``config.training.accum_grad_batches`` is larger
+than 1. With ``static_graph: false`` and ``find_unused_parameters:
+true``, the gradients of all GPUs are summed in the same order in every
+step, so a resumed run continues bitwise identically, at some cost in
+speed.
+
 **********
  Examples
 **********
