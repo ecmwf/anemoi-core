@@ -7,13 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""S3-compatible checkpoint source.
-
-Downloads checkpoint data from an S3 bucket via
-``anemoi.utils.remote.s3.download_file``, which is backed by obstore and
-handles endpoint URLs, credentials, and per-bucket configuration from
-``~/.config/anemoi/settings.toml``. Supports AWS S3 and S3-compatible
-stores (MinIO, Ceph, EWC).
+"""S3-compatible checkpoint source (AWS S3, MinIO, Ceph, EWC).
 
 Example
 -------

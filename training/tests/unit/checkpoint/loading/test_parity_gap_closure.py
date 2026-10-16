@@ -31,6 +31,7 @@ from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
 from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
 
@@ -134,7 +135,7 @@ def test_single_dataset_metadata_raises() -> None:
     checkpoint = {"hyper_parameters": {"data_indices": _index_collection({"2t": 0})}}
 
     with pytest.raises(TypeError, match="migration sync"):
-        WeightsOnlyLoader()._preserve_anemoi_metadata(model, checkpoint)
+        preserve_anemoi_metadata(model, checkpoint)
 
 
 @pytest.mark.asyncio

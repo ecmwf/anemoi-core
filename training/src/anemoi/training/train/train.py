@@ -33,6 +33,9 @@ from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.graphs.utils import load_graph_from_file
 from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.checkpoint.runner import checkpoint_pipeline_configured
+from anemoi.training.checkpoint.runner import remove_temporary_checkpoints
+from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
@@ -59,15 +62,11 @@ PL_VERSION = version.parse(pl.__version__)
 def _write_run_identity(config: DictConfig, run_id: str | None, fork_run_id: str | None) -> None:
     """Serialize the resolved run identity onto the config for the MLflow-sync contract.
 
-    ``training.run_id`` / ``training.fork_run_id`` were removed from the schema. Internal
-    consumers (the MLflow logger, the ``run_id`` resolution, ``_update_paths`` and the
-    dry-run gate) read :attr:`AnemoiTrainer._run_identity` — resolved from the
-    ``training.checkpoint.source`` RunIdSource — not these keys. This write exists solely so
-    the flattened config hyperparameters carry ``config.training.run_id`` /
-    ``config.training.fork_run_id``, which ``MlFlowSync`` indexes by literal key when
-    rewriting offline->online runs. The write runs under a temporary struct unlock so the
-    keys can be (re)created even when the config is struct-locked, restoring the prior
-    struct flag afterwards.
+    ``MlFlowSync`` indexes ``config.training.run_id`` / ``config.training.fork_run_id``
+    by literal key when rewriting offline->online runs, and those keys were removed
+    from the schema, so this writes them back for that one consumer. Everything
+    internal reads :attr:`AnemoiTrainer._run_identity` instead. Runs under a
+    temporary struct unlock, restoring the prior flag.
     """
     prior_struct = OmegaConf.is_struct(config)
     OmegaConf.set_struct(config, False)
@@ -120,10 +119,9 @@ class AnemoiTrainer(ABC):
                     _blas_backend,
                 )
 
-        # A configured ``training.checkpoint.source`` is the single trigger. The
-        # removed ``run_id`` / ``fork_run_id`` / ``system.input.warm_start`` keys
-        # are now expressed as a ``RunIdSource`` (resume/fork) or ``LocalSource``
-        # (explicit file) under that block.
+        # A configured ``training.checkpoint.source`` is the single trigger: the
+        # removed run_id / fork_run_id / warm_start keys are now a RunIdSource
+        # (resume/fork) or a LocalSource (explicit file) under that block.
         self.start_from_checkpoint = (
             OmegaConf.select(self.config, "training.checkpoint.source", default=None) is not None
         )
@@ -131,13 +129,8 @@ class AnemoiTrainer(ABC):
 
         self.parent_uuid = None
 
-        # Serialize the resolved run identity onto the config for the MLflow params /
-        # ``MlFlowSync`` contract only: ``MlFlowSync`` indexes ``config.training.run_id`` /
-        # ``config.training.fork_run_id`` by literal key when rewriting offline->online
-        # runs. Internal consumers (the logger, output paths, dry-run gate and the
-        # :attr:`run_id` resolution) read :attr:`_run_identity` — resolved from the
-        # ``training.checkpoint.source`` RunIdSource — never these written-back keys.
-        _write_run_identity(self.config, run_id=self.run_id, fork_run_id=self._run_identity[1])
+        # For the MLflow params / MlFlowSync contract only (see _write_run_identity).
+        _write_run_identity(self.config, run_id=self.run_id, fork_run_id=self._fork_run_id)
         LOGGER.info("Run id: %s", self.config.training.run_id)
 
         # Get the server2server lineage
@@ -415,25 +408,14 @@ class AnemoiTrainer(ABC):
         training_method_cfg = self.config.training.method
         model = instantiate_with_runtime_kwargs(training_method_cfg, **kwargs)  # Task -> pl.LightningModule
 
-        # Declarative checkpoint pipeline (opt-in via ``training.checkpoint``): when
-        # configured, the source -> loading -> modifier pipeline owns weight loading
-        # and model modification. Without ``training.checkpoint`` this is a fresh run.
-        # The legacy load_weights_only / transfer_learning / submodules_to_freeze keys
-        # are rejected at config validation (schemas.base_schema._DEPRECATED_KEYS).
-        if self._checkpoint_pipeline_configured():
+        # With ``training.checkpoint`` configured the source -> loading -> modifier
+        # pipeline owns weight loading; without it this is a fresh run. The legacy
+        # load_weights_only / transfer_learning / submodules_to_freeze keys are
+        # rejected at config validation (schemas.base_schema._DEPRECATED_KEYS).
+        if checkpoint_pipeline_configured(self.config):
             return self._load_via_checkpoint_pipeline(model)
 
         return model
-
-    def _checkpoint_pipeline_configured(self) -> bool:
-        """Return whether a declarative checkpoint pipeline is configured.
-
-        ``True`` when ``training.checkpoint`` is present (a ``source``, ``loading``
-        and/or ``modifiers`` block). When absent, :meth:`model` is a fresh run; the
-        legacy ``load_weights_only`` / ``transfer_learning`` / ``submodules_to_freeze``
-        keys are rejected at config validation.
-        """
-        return OmegaConf.select(self.config, "training.checkpoint", default=None) is not None
 
     def _load_via_checkpoint_pipeline(
         self,
@@ -461,14 +443,8 @@ class AnemoiTrainer(ABC):
             The same module, with checkpoint weights loaded (unless resuming) and
             any modifier stages applied.
         """
-        from anemoi.training.checkpoint import build_checkpoint_pipeline
-        from anemoi.training.checkpoint.base import CheckpointContext
-
-        context = CheckpointContext(model=model, config=self.config)
-        # Runtime, logger-derived server-to-server lineage cannot reach a RunIdSource
-        # through Hydra; the builder injects it into the source config before
-        # instantiation (a no-op for non-RunIdSource sources).
-        pipeline = build_checkpoint_pipeline(
+        result = run_checkpoint_pipeline(
+            model,
             self.config,
             parent_run_server2server=getattr(self, "parent_run_server2server", None),
             fork_run_server2server=getattr(self, "fork_run_server2server", None),
@@ -479,70 +455,58 @@ class AnemoiTrainer(ABC):
             load_checkpoint=self.start_from_checkpoint,
         )
 
-        # execute_sync, not asyncio.run: this runs inside a cached_property, and
-        # asyncio.run raises "cannot be called from a running event loop" whenever the
-        # trainer is constructed from an already-async context (a Jupyter kernel, an
-        # asyncio job launcher, or an `async def test_` under this repo's
-        # asyncio_mode = auto). execute_sync detects a running loop and offloads to a
-        # thread; with no loop running it is the identical call.
-        executed = pipeline.execute_sync(context)
-        loaded_model = executed.model
+        # What :attr:`last_checkpoint` hands to Trainer.fit(ckpt_path=) on a resume.
+        self._resolved_checkpoint_path = result.checkpoint_path
+        self._temporary_checkpoint_files = result.temporary_files
 
-        # The file the source stage resolved is what Lightning's ckpt_path reads on a
-        # resume. Only the path escapes; the loaded dict stays local to this call.
-        self._resolved_checkpoint_path = executed.checkpoint_path
-
-        # Downloads a source kept on disk (so Lightning can read them at fit) are
-        # deleted by :meth:`_remove_temporary_checkpoints` once training finishes.
-        self._temporary_checkpoint_files = list(executed.temporary_files)
-
-        # When a loading strategy applied weights, keep the current config's data
-        # indices and run the transfer-learning compatibility checks (they live on
-        # the trainer because they need the datamodule and data indices).
-        # A resume loads nothing here (same architecture, same data), so there is
-        # no checkpoint metadata on the model to compare against yet.
-        if getattr(loaded_model, "weights_initialized", False):
-            loaded_model.data_indices = self.data_indices
-            self._validate_transfer_learning_datasets(loaded_model)
-            self._validate_transfer_learning_units(loaded_model)
-        return loaded_model
+        # A resume loads nothing here, so there is no checkpoint metadata on the
+        # model to compare against yet.
+        if result.weights_loaded:
+            result.model.data_indices = self.data_indices
+            self._validate_transfer_learning_datasets(result.model)
+            self._validate_transfer_learning_units(result.model)
+        return result.model
 
     def _remove_temporary_checkpoints(self) -> None:
         """Delete the checkpoint downloads the source stage kept for ``Trainer.fit(ckpt_path=)``."""
-        from anemoi.training.checkpoint.sources.base import remove_temporary_file
-
-        for path in getattr(self, "_temporary_checkpoint_files", []):
-            remove_temporary_file(path)
+        remove_temporary_checkpoints(getattr(self, "_temporary_checkpoint_files", []))
         self._temporary_checkpoint_files = []
 
     @cached_property
     def _run_identity(self) -> tuple[str | None, str | None]:
         """Resolved ``(run_id, fork_run_id)`` from the configured checkpoint source.
 
-        The ``training.checkpoint.source`` RunIdSource is the single source of truth for
-        run lineage (resume vs fork); this reads it via
-        :func:`~anemoi.training.checkpoint.sources.run.run_identity_from_config`. Every
-        run-identity consumer — the MLflow logger (:attr:`_logger_kwargs`), the
-        :attr:`run_id` resolution, the output paths (:meth:`_update_paths`) and the
-        dry-run gate — reads this instead of the config, so the trainer never mutates
-        the config to communicate the identity (a ``LocalSource`` / no source yields
-        ``(None, None)`` — a fresh run).
+        The ``training.checkpoint.source`` RunIdSource is the single source of truth
+        for run lineage, and every consumer — the MLflow logger, :attr:`run_id`,
+        :meth:`_update_paths`, the dry-run gate — reads this rather than the config,
+        so the trainer never mutates the config to communicate the identity. A
+        ``LocalSource``, or no source, yields ``(None, None)``: a fresh run.
         """
         from anemoi.training.checkpoint.sources.run import run_identity_from_config
 
         return run_identity_from_config(self.config)
 
+    @property
+    def _resume_run_id(self) -> str | None:
+        """The run this job resumes, when the configured source resumes one."""
+        return self._run_identity[0]
+
+    @property
+    def _fork_run_id(self) -> str | None:
+        """The run this job forks from, when the configured source forks one."""
+        return self._run_identity[1]
+
     @cached_property
     def run_id(self) -> str:
         """Unique identifier for the current run."""
-        resume_run_id = self._run_identity[0]
+        resume_run_id = self._resume_run_id
 
         # Resume: reuse the run id being resumed.
         if resume_run_id:
             return resume_run_id
 
         # Fork or a fresh run: let MLflow mint a new id (the run is tagged as forked
-        # when _run_identity[1] is set), otherwise fall back to a random uuid4.
+        # when _fork_run_id is set), otherwise fall back to a random uuid4.
         if self.logger and self.logger.logger_name == "mlflow":
             return self.mlflow_logger.run_id
 
@@ -755,9 +719,9 @@ class AnemoiTrainer(ABC):
                 self.lineage_run,
             )
             self.config.system.output.plots = Path(self.config.system.output.plots, self.lineage_run)
-        elif self._run_identity[1]:
+        elif self._fork_run_id:
             # WHEN USING MANY NODES/GPUS
-            self.lineage_run = self.parent_run_server2server or self._run_identity[1]
+            self.lineage_run = self.parent_run_server2server or self._fork_run_id
             # Only rank non zero in the forked run will go here
             self.config.system.output.checkpoints.root = Path(
                 self.config.system.output.checkpoints.root,

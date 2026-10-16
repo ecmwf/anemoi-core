@@ -9,20 +9,12 @@
 
 """Core abstractions for checkpoint pipeline.
 
-This module provides the fundamental building blocks for the checkpoint
-pipeline system. It defines the context object that carries state through
-the pipeline and the abstract base class for all pipeline stages.
-
-The checkpoint pipeline follows a simple pattern:
-1. A CheckpointContext is created with initial state
-2. The context is passed through a series of PipelineStage implementations
-3. Each stage modifies the context and passes it to the next stage
-4. The final context contains the result of all transformations
+A :class:`CheckpointContext` carries state through a series of
+:class:`PipelineStage` implementations; each stage mutates the context and
+returns it for the next one.
 
 Example
 -------
->>> from anemoi.training.checkpoint import CheckpointContext, PipelineStage
->>>
 >>> class MyStage(PipelineStage):
 ...     async def process(self, context: CheckpointContext) -> CheckpointContext:
 ...         context.update_metadata(processed_by='MyStage')
