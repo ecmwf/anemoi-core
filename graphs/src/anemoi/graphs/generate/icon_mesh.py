@@ -190,7 +190,7 @@ class ICONMultiMesh:
         selected_vertex_coarse = scipy.sparse.diags(np.ones(num_vertices), dtype=bool)
 
         # coarsen edge-vertex list from level `ilevel -> ilevel - 1`:
-        for ilevel in reversed(range(max(self.min_level,1), self.reflvl_vertex.max() + 1)):
+        for ilevel in reversed(range(max(self.min_level, 1), self.reflvl_vertex.max() + 1)):
             LOGGER.debug(f"  edges[{ilevel}] = {edge_vertices[0].shape[0] : >9}")
 
             # define edge selection matrix (selecting only edges of which have
