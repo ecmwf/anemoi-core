@@ -54,6 +54,7 @@ dependencies = [
   "tqdm>=4.65",
   "zarr>=2.14.2",
   "tabulate>=0.9",
+  "datashader>=0.17",
 ]
 # Optional extras: pip install anemoi-training[azure,tests], etc.
 optional-dependencies.all = [ "anemoi-training[remote]" ]
