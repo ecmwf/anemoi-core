@@ -12,42 +12,16 @@ import logging
 import numpy as np
 import torch
 from sklearn.neighbors import NearestNeighbors
-from torch_geometric.data.storage import NodeStorage
 from torch_geometric.nn import knn
 
-from anemoi.graphs.edges.builders.base import BaseDistanceEdgeBuilders
+from anemoi.graphs.edges.builders.euclidean.base import BaseDistanceEdgeBuilders
 from anemoi.graphs.utils import intersect_edges
 
 LOGGER = logging.getLogger(__name__)
 
 
-class KNNEdges(BaseDistanceEdgeBuilders):
-    """Computes KNN based edges and adds them to the graph.
-
-    It uses as reference the target nodes.
-
-    Attributes
-    ----------
-    source_name : str
-        The name of the source nodes.
-    target_name : str
-        The name of the target nodes.
-    num_nearest_neighbours : int
-        Number of nearest neighbours.
-    source_mask_attr_name : str | None
-        The name of the source mask attribute to filter edge connections.
-    target_mask_attr_name : str | None
-        The name of the target mask attribute to filter edge connections.
-
-    Methods
-    -------
-    register_edges(graph)
-        Register the edges in the graph.
-    register_attributes(graph, config)
-        Register attributes in the edges of the graph.
-    update_graph(graph, attrs_config)
-        Update the graph with the edges.
-    """
+class BaseKNNEdges(BaseDistanceEdgeBuilders):
+    """Base class for KNN-based edges."""
 
     def __init__(
         self,
@@ -69,26 +43,74 @@ class KNNEdges(BaseDistanceEdgeBuilders):
             self.target_name,
         )
 
-    def _compute_edge_index_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
-        edge_index = knn(source_coords, target_coords, k=self.num_nearest_neighbours)
-        edge_index = torch.flip(edge_index, [0])
+    def prepare_method_kwargs(self, *_args, **_kwargs) -> dict:
+        """Prepare keyword arguments for computing edge index."""
+        return {"num_nearest_neighbours": self.num_nearest_neighbours}
+
+    def _compute_edge_index_pyg(
+        self,
+        source_coords: torch.Tensor,
+        target_coords: torch.Tensor,
+        num_nearest_neighbours: int,
+        skip_flip: bool = False,
+    ) -> torch.Tensor:
+        """Compute the edge index using PyG's KNN implementation.
+
+        Parameters
+        ----------
+        source_coords : torch.Tensor
+            The coordinates of the source nodes.
+        target_coords : torch.Tensor
+            The coordinates of the target nodes.
+        num_nearest_neighbours : int
+            The number of nearest neighbours to connect to each target node.
+        skip_flip : bool, optional
+            Whether to skip flipping the edge index. Defaults to False. This is
+            useful to avoid duplicated operations in reversed edge builders.
+
+        Returns
+        -------
+        torch.Tensor
+            The computed edge index.
+        """
+        edge_index = knn(source_coords, target_coords, k=num_nearest_neighbours)
+        if not skip_flip:
+            edge_index = torch.flip(edge_index, [0])
         return edge_index
 
-    def _compute_adj_matrix_sklearn(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> np.ndarray:
+    def _compute_adj_matrix_sklearn(
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor, num_nearest_neighbours: int
+    ) -> np.ndarray:
+        """Compute the adjacency matrix using sklearn's KNN implementation.
+
+        Parameters
+        ----------
+        source_coords : torch.Tensor
+            The coordinates of the source nodes.
+        target_coords : torch.Tensor
+            The coordinates of the target nodes.
+        num_nearest_neighbours : int
+            The number of nearest neighbours to consider for each target node.
+
+        Returns
+        -------
+        np.ndarray
+            The computed adjacency matrix.
+        """
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
         nearest_neighbour.fit(source_coords.cpu())
         adj_matrix = nearest_neighbour.kneighbors_graph(
             target_coords.cpu(),
-            n_neighbors=self.num_nearest_neighbours,
+            n_neighbors=num_nearest_neighbours,
         ).tocoo()
 
         return adj_matrix
 
 
-class ReversedKNNEdges(KNNEdges):
+class KNNEdges(BaseKNNEdges):
     """Computes KNN based edges and adds them to the graph.
 
-    It uses as reference the source nodes.
+    It uses as reference the target nodes.
 
     Attributes
     ----------
@@ -97,7 +119,7 @@ class ReversedKNNEdges(KNNEdges):
     target_name : str
         The name of the target nodes.
     num_nearest_neighbours : int
-        Number of nearest neighbours.
+        Number of nearest neighbours to connect to each target node.
     source_mask_attr_name : str | None
         The name of the source mask attribute to filter edge connections.
     target_mask_attr_name : str | None
@@ -113,21 +135,42 @@ class ReversedKNNEdges(KNNEdges):
         Update the graph with the edges.
     """
 
-    def get_cartesian_node_coordinates(
-        self, source_nodes: NodeStorage, target_nodes: NodeStorage
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        source_coords, target_coords = super().get_cartesian_node_coordinates(source_nodes, target_nodes)
-        return target_coords, source_coords
 
-    def undo_masking_adj_matrix(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):
-        adj_matrix = adj_matrix.T
-        return super().undo_masking_adj_matrix(adj_matrix, source_nodes, target_nodes)
+class ReversedKNNEdges(KNNEdges):
+    """Computes KNN based edges and adds them to the graph.
 
-    def undo_masking_edge_index(
-        self, edge_index: torch.Tensor, source_nodes: NodeStorage, target_nodes: NodeStorage
+    It uses as reference the source nodes.
+
+    Attributes
+    ----------
+    source_name : str
+        The name of the source nodes.
+    target_name : str
+        The name of the target nodes.
+    num_nearest_neighbours : int
+        Number of nearest neighbours to connect to each source node.
+    source_mask_attr_name : str | None
+        The name of the source mask attribute to filter edge connections.
+    target_mask_attr_name : str | None
+        The name of the target mask attribute to filter edge connections.
+
+    Methods
+    -------
+    register_edges(graph)
+        Register the edges in the graph.
+    register_attributes(graph, config)
+        Register attributes in the edges of the graph.
+    update_graph(graph, attrs_config)
+        Update the graph with the edges.
+    """
+
+    def compute_edge_index_from_coords(
+        self,
+        source_coords: torch.Tensor,
+        target_coords: torch.Tensor,
+        **kwargs,
     ) -> torch.Tensor:
-        edge_index = torch.flip(edge_index, [0])
-        return super().undo_masking_edge_index(edge_index, source_nodes, target_nodes)
+        return super().compute_edge_index_from_coords(target_coords, source_coords, skip_flip=True, **kwargs)
 
 
 class MutualKNNEdges(BaseDistanceEdgeBuilders):
@@ -201,26 +244,45 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
             self.target_name,
         )
 
-    def _compute_edge_index_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
+    def prepare_method_kwargs(self, *_args, **_kwargs) -> dict:
+        """Prepare keyword arguments for computing edge index."""
+        return {
+            "num_nearest_neighbours": self.num_nearest_neighbours,
+            "reversed_num_nearest_neighbours": self.reversed_num_nearest_neighbours,
+        }
+
+    def _compute_edge_index_pyg(
+        self,
+        source_coords: torch.Tensor,
+        target_coords: torch.Tensor,
+        num_nearest_neighbours: int,
+        reversed_num_nearest_neighbours: int,
+    ) -> torch.Tensor:
         # Forward: for each target node, its nearest source nodes.
         # knn(x=source, y=target) -> rows (target_idx, source_idx); flip -> (source, target).
-        forward = torch.flip(knn(source_coords, target_coords, k=self.num_nearest_neighbours), [0])
+        forward = torch.flip(knn(source_coords, target_coords, k=num_nearest_neighbours), [0])
         # Reversed: for each source node, its nearest target nodes.
         # knn(x=target, y=source) -> rows (source_idx, target_idx); already (source, target).
-        reversed_ = knn(target_coords, source_coords, k=self.reversed_num_nearest_neighbours)
+        reversed_ = knn(target_coords, source_coords, k=reversed_num_nearest_neighbours)
         return intersect_edges(forward, reversed_)
 
-    def _compute_adj_matrix_sklearn(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> np.ndarray:
+    def _compute_adj_matrix_sklearn(
+        self,
+        source_coords: torch.Tensor,
+        target_coords: torch.Tensor,
+        num_nearest_neighbours: int,
+        reversed_num_nearest_neighbours: int,
+    ) -> np.ndarray:
         # Forward adjacency: rows = target, cols = source.
         forward_nn = NearestNeighbors(metric="euclidean", n_jobs=4)
         forward_nn.fit(source_coords.cpu())
-        forward = forward_nn.kneighbors_graph(target_coords.cpu(), n_neighbors=self.num_nearest_neighbours).tocsr()
+        forward = forward_nn.kneighbors_graph(target_coords.cpu(), n_neighbors=num_nearest_neighbours).tocsr()
 
         # Reversed adjacency: rows = source, cols = target.
         reversed_nn = NearestNeighbors(metric="euclidean", n_jobs=4)
         reversed_nn.fit(target_coords.cpu())
         reversed_ = reversed_nn.kneighbors_graph(
-            source_coords.cpu(), n_neighbors=self.reversed_num_nearest_neighbours
+            source_coords.cpu(), n_neighbors=reversed_num_nearest_neighbours
         ).tocsr()
 
         # Keep only edges present in both directions (transpose reversed_ to rows = target).
