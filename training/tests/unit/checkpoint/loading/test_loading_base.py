@@ -115,8 +115,10 @@ class TestPreserveAnemoiMetadata:
         simple_model: nn.Module,
     ) -> None:
         """_ckpt_model_name_to_index should be set on the model when checkpoint has data_indices."""
-        data_indices = Mock()
-        data_indices.name_to_index = {"temperature": 0, "pressure": 1}
+        index_collection = Mock()
+        index_collection.name_to_index = {"temperature": 0, "pressure": 1}
+        # Multi-dataset shape: data_indices is dict[str, IndexCollection].
+        data_indices = {"era5": index_collection}
 
         checkpoint_data: dict[str, Any] = {
             "state_dict": simple_model.state_dict(),
@@ -130,7 +132,7 @@ class TestPreserveAnemoiMetadata:
 
         # After restoration, it should be set
         assert hasattr(simple_model, "_ckpt_model_name_to_index")
-        assert simple_model._ckpt_model_name_to_index == {"temperature": 0, "pressure": 1}
+        assert simple_model._ckpt_model_name_to_index == {"era5": {"temperature": 0, "pressure": 1}}
 
     def test_skips_gracefully_when_no_data_indices(
         self,

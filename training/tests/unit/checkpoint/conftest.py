@@ -123,18 +123,6 @@ def complex_state_dict(complex_model: ComplexModel) -> dict:
 
 
 @pytest.fixture
-def sample_optimizer(simple_model: SimpleModel) -> torch.optim.Adam:
-    """Create a sample optimizer for testing."""
-    return torch.optim.Adam(simple_model.parameters(), lr=1e-3)
-
-
-@pytest.fixture
-def sample_scheduler(sample_optimizer: torch.optim.Adam) -> torch.optim.lr_scheduler.StepLR:
-    """Create a sample scheduler for testing."""
-    return torch.optim.lr_scheduler.StepLR(sample_optimizer, step_size=10)
-
-
-@pytest.fixture
 def lightning_checkpoint(sample_state_dict: dict) -> dict:
     """Create a mock Lightning checkpoint."""
     return {
@@ -163,12 +151,6 @@ def pytorch_checkpoint(sample_state_dict: dict) -> dict:
         "best_accuracy": 0.89,
         "training_time": 3600,
     }
-
-
-@pytest.fixture
-def minimal_checkpoint(sample_state_dict: dict) -> dict:
-    """Create a minimal checkpoint with just state dict."""
-    return sample_state_dict
 
 
 @pytest.fixture
@@ -263,13 +245,6 @@ def network_urls() -> dict[str, str]:
         "server_error": "https://httpbin.org/status/500",  # Returns 500
         "large_file": "https://httpbin.org/bytes/10485760",  # 10MB file
     }
-
-
-@pytest.fixture(autouse=True)
-def _cleanup_temp_files(tmp_path: Path) -> None:
-    """Automatically cleanup temporary files after each test."""
-    # Cleanup happens automatically with tmp_path, but we can add custom cleanup here if needed
-    _ = tmp_path  # Use the parameter to prevent unused argument warnings
 
 
 # Custom markers for test categorization

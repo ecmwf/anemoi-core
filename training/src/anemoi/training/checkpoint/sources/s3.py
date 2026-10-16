@@ -27,13 +27,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import pickle
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
-
-import torch
 
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 
@@ -46,8 +43,10 @@ LOGGER = logging.getLogger(__name__)
 class S3Source(CheckpointSource):
     """Checkpoint source for S3-compatible storage.
 
-    Downloads a checkpoint file from an S3 bucket to a temporary location,
-    loads it with PyTorch, and cleans up the temporary file. Download is
+    Downloads a checkpoint file from an S3 bucket to a node-local temporary
+    location and loads it with PyTorch. The download is kept on disk and
+    registered on the context so ``Trainer.fit(ckpt_path=)`` can read it on a
+    resume; the trainer deletes it once training has finished. Download is
     delegated to ``anemoi.utils.remote.s3.download_file`` (obstore-backed),
     which handles endpoint URLs, credentials, and per-bucket configuration
     from ``~/.config/anemoi/settings.toml``.
@@ -68,6 +67,50 @@ class S3Source(CheckpointSource):
     def __init__(self, url: str | None = None) -> None:
         self.url = url
 
+    async def resolve(self, context: CheckpointContext) -> Path:
+        """Download the S3 object to a temporary file and publish its path.
+
+        The file is kept (and registered on ``context.temporary_files``) so a
+        resume can hand it to ``Trainer.fit(ckpt_path=)``; a failed download is
+        removed before the error propagates.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Pipeline context. If ``self.url`` is None, the URL is read
+            from ``context.config["url"]``. ``checkpoint_path`` is set to
+            the download.
+
+        Returns
+        -------
+        Path
+            The downloaded checkpoint file.
+
+        Raises
+        ------
+        CheckpointNotFoundError
+            If the S3 object does not exist.
+        CheckpointSourceError
+            If download fails (credentials, network, missing optional dep).
+        """
+        url = self._resolve_url(context)
+        self._parse_s3_url(url)
+
+        LOGGER.info("Downloading checkpoint from %s", url)
+
+        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as tmp_fd:
+            tmp_path = Path(tmp_fd.name)
+
+        try:
+            await self._download_from_s3(url, tmp_path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+        self._keep_download(context, tmp_path)
+        context.checkpoint_path = tmp_path
+        return tmp_path
+
     async def process(self, context: CheckpointContext) -> CheckpointContext:
         """Download and load a checkpoint from S3.
 
@@ -75,13 +118,15 @@ class S3Source(CheckpointSource):
         ----------
         context : CheckpointContext
             Pipeline context. If ``self.url`` is None, the URL is read
-            from ``context.config["url"]``.
+            from ``context.config["url"]``. ``checkpoint_path`` is set to
+            the downloaded file, which stays on disk until the trainer
+            deletes it.
 
         Returns
         -------
         CheckpointContext
-            Context with ``checkpoint_data``, ``checkpoint_format``,
-            and source metadata populated.
+            Context with ``checkpoint_path``, ``checkpoint_data``,
+            ``checkpoint_format``, and source metadata populated.
 
         Raises
         ------
@@ -92,35 +137,11 @@ class S3Source(CheckpointSource):
         CheckpointLoadError
             If the downloaded file cannot be loaded by PyTorch.
         """
-        from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-
         url = self._resolve_url(context)
         bucket, key = self._parse_s3_url(url)
 
-        LOGGER.info("Downloading checkpoint from %s", url)
-
-        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as tmp_fd:
-            tmp_path = Path(tmp_fd.name)
-
-        try:
-            await self._download_from_s3(url, tmp_path)
-
-            try:
-                raw_data = await asyncio.to_thread(
-                    torch.load,
-                    tmp_path,
-                    weights_only=False,
-                    map_location="cpu",
-                )
-            except (OSError, RuntimeError, EOFError, ValueError, pickle.UnpicklingError) as e:
-                raise CheckpointLoadError(tmp_path, e) from e
-
-            self._load_and_populate(context, raw_data)
-
-        finally:
-            if tmp_path.exists():
-                tmp_path.unlink()
-                LOGGER.debug("Cleaned up temporary file %s", tmp_path)
+        path = await self.resolve(context)
+        await self._load_from_path(context, path)
 
         context.update_metadata(
             source_type="s3",

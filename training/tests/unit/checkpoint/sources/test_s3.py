@@ -7,9 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Gate sources-g4: S3Source.
-
-CANONICAL GATE TEST — DO NOT MODIFY.
+"""Tests for S3Source.
 
 S3Source downloads via ``anemoi.utils.remote.s3.download_file`` (obstore-backed).
 boto3 is not a dependency.
@@ -131,17 +129,54 @@ async def test_s3_source_raises_when_obstore_missing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_s3_source_cleans_up_temp_file_on_failure() -> None:
-    """Temp file must be cleaned up even if loading fails."""
+async def test_s3_source_keeps_download_and_publishes_path_on_load_failure() -> None:
+    """The download is kept and its path is on the context, even when loading fails.
+
+    A resume hands the path to ``Trainer.fit(ckpt_path=)`` after the pipeline
+    returns; the trainer deletes the file once training has finished, via
+    ``context.temporary_files``.
+    """
     source = S3Source(url="s3://bucket/corrupt.ckpt")
     context = CheckpointContext()
+    downloaded: list[Path] = []
 
     def fake_download(_url: str, target: str, *_args: object, **_kwargs: object) -> None:
+        downloaded.append(Path(target))
         Path(target).write_text("not a valid checkpoint")
 
     fake_module = _fake_anemoi_utils_s3(fake_download)
-    with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointLoadError):
-        await source.process(context)
+    try:
+        with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointLoadError):
+            await source.process(context)
+
+        assert downloaded[0].exists()
+        assert context.checkpoint_path == downloaded[0]
+        assert context.temporary_files == [downloaded[0]]
+    finally:
+        for path in downloaded:
+            path.unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_s3_source_resolve_downloads_without_loading() -> None:
+    """``resolve`` produces the local file for ``Trainer.fit(ckpt_path=)`` and loads nothing."""
+    source = S3Source(url="s3://bucket/model.ckpt")
+    context = CheckpointContext()
+
+    def fake_download(_url: str, target: str, *_args: object, **_kwargs: object) -> None:
+        torch.save({"state_dict": {}}, target)
+
+    fake_module = _fake_anemoi_utils_s3(fake_download)
+    with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}):
+        path = await source.resolve(context)
+
+    try:
+        assert path.exists()
+        assert context.checkpoint_path == path
+        assert context.temporary_files == [path]
+        assert context.checkpoint_data is None
+    finally:
+        path.unlink(missing_ok=True)
 
 
 @pytest.mark.network

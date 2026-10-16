@@ -37,6 +37,48 @@ async def test_local_source_loads_checkpoint(sample_checkpoint: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_local_source_resolve_publishes_canonical_path_without_loading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``resolve`` expands ``~``, canonicalises, publishes the path, and reads no file.
+
+    The published path is what the trainer hands to ``Trainer.fit(ckpt_path=)``, so it
+    must be the file that was checked, not the ``~`` form the config carried.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    torch.save({"state_dict": {}}, tmp_path / "model.ckpt")
+
+    def _no_load(*_args: object, **_kwargs: object) -> None:
+        msg = "resolve must not load the checkpoint"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(torch, "load", _no_load)
+
+    context = CheckpointContext()
+    path = await LocalSource(path="~/model.ckpt").resolve(context)
+
+    assert path == (tmp_path / "model.ckpt").resolve()
+    assert context.checkpoint_path == path
+    assert context.checkpoint_data is None
+    assert context.temporary_files == []
+
+
+@pytest.mark.asyncio
+async def test_local_source_process_publishes_the_resolved_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After a load, ``context.checkpoint_path`` is the canonical file, not the configured spelling."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    torch.save({"state_dict": {}}, tmp_path / "model.ckpt")
+
+    result = await LocalSource(path="~/model.ckpt").process(CheckpointContext())
+
+    assert result.checkpoint_path == (tmp_path / "model.ckpt").resolve()
+
+
+@pytest.mark.asyncio
 async def test_local_source_raises_not_found_error(tmp_path: Path) -> None:
     """Must raise CheckpointNotFoundError (Phase 1 type), NOT FileNotFoundError."""
     source = LocalSource()
@@ -78,3 +120,16 @@ async def test_local_source_handles_empty_file(tmp_path: Path) -> None:
     context = CheckpointContext(checkpoint_path=empty)
     with pytest.raises(Exception):  # noqa: B017, PT011  # CheckpointLoadError or CheckpointValidationError
         await source.process(context)
+
+
+@pytest.mark.asyncio
+async def test_local_source_resolves_a_relative_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A relative path is published absolute, so a later chdir cannot invalidate what Lightning receives."""
+    ckpt = tmp_path / "last.ckpt"
+    torch.save({"state_dict": {"layer.weight": torch.zeros(2, 2)}}, ckpt)
+    monkeypatch.chdir(tmp_path)
+
+    result = await LocalSource().process(CheckpointContext(checkpoint_path="last.ckpt"))
+
+    assert Path(result.checkpoint_path).is_absolute()
+    assert Path(result.checkpoint_path).is_file()

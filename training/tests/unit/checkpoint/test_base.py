@@ -41,15 +41,12 @@ class TestCheckpointContext:
         assert context.checkpoint_path is None
         assert context.checkpoint_data is None
         assert context.model is None
-        assert context.optimizer is None
-        assert context.scheduler is None
         assert context.metadata == {}
         assert context.config is None
 
     def test_context_initialization_with_values(self, tmp_path: Path) -> None:
         """Test context initialization with values."""
         model = SimpleModel()
-        optimizer = torch.optim.Adam(model.parameters())
         config = DictConfig({"key": "value"})
         checkpoint_path = tmp_path / "checkpoint.pt"
 
@@ -57,7 +54,6 @@ class TestCheckpointContext:
             checkpoint_path=checkpoint_path,
             checkpoint_data={"epoch": 10},
             model=model,
-            optimizer=optimizer,
             metadata={"training": True},
             config=config,
         )
@@ -65,7 +61,6 @@ class TestCheckpointContext:
         assert context.checkpoint_path == checkpoint_path
         assert context.checkpoint_data == {"epoch": 10}
         assert context.model == model
-        assert context.optimizer == optimizer
         assert context.metadata == {"training": True}
         assert context.config == config
 

@@ -1,0 +1,10 @@
+# Loading strategy — resume an interrupted run. The checkpoint is loaded once, by
+# Trainer.fit(ckpt_path=): weights, optimizer, scheduler and training progress
+# (epoch, global_step) together. The pipeline only resolves the source to a local
+# file (a remote download is kept until training finishes) and runs any modifiers.
+# Selecting no loading strategy at all has the same effect.
+# The model has to match the checkpoint exactly: Lightning loads the state dict
+# strictly, so a changed architecture (an extra decoder, a resized layer) fails
+# naming the missing or unexpected keys. For a changed model use weights_only
+# (skip_mismatched: true) or transfer_learning instead.
+_target_: anemoi.training.checkpoint.loading.strategies.WarmStartLoader
