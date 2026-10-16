@@ -1035,10 +1035,18 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
             if auxiliary_tensor is not None:
                 auxiliary_by_suffix = {
                     suffix: aux
-                    for _, _, aux, suffix in pl_module.plot_adapter.iter_plot_samples(data, auxiliary_tensor)
+                    for _, _, aux, suffix in pl_module.plot_adapter.iter_plot_samples(
+                        data,
+                        auxiliary_tensor,
+                        dataset_name=dataset_name,
+                    )
                 }
 
-            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(
+                data,
+                output_tensor,
+                dataset_name=dataset_name,
+            ):
                 fig = self.plot_fn(
                     **spatial_inputs,
                     x=x,

@@ -76,6 +76,15 @@ splits the samples of a distributed sampler into batches with torchdata's
 ``BatchSampler``, which remembers its position so that training can resume
 in the middle of an epoch.
 
+Datasets with different native frequencies can use the same sampler and
+checkpointing path by selecting ``MixedFrequencyLoadingPolicy`` and setting
+the shared model-grid frequency explicitly::
+
+   dataloader:
+     loading_policy:
+       _target_: anemoi.training.data.loading.MixedFrequencyLoadingPolicy
+       frequency: ${data.frequency}
+
 API Reference
 =============
 

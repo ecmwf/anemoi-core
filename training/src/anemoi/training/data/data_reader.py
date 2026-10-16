@@ -22,6 +22,7 @@ from anemoi.datasets import open_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
+from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
@@ -82,6 +83,17 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
 
     normalized["dataset_config"] = base_dataset_config
     return normalized
+
+
+def dates_to_unix_ns(dates: object) -> np.ndarray | None:
+    dates_array = np.asarray(dates)
+    if np.issubdtype(dates_array.dtype, np.datetime64):
+        return dates_array.astype("datetime64[ns]").astype(np.int64, copy=False)
+
+    try:
+        return np.array([np.datetime64(date_value, "ns").astype(np.int64) for date_value in dates], dtype=np.int64)
+    except (TypeError, ValueError):
+        return None
 
 
 class BaseAnemoiReader:
@@ -454,6 +466,149 @@ class TrajectoryDataset(BaseAnemoiReader):
         tree.add(f"Steps per initialisation: {self.sequence_length()}")
         tree.add(f"Sampling: {self.default_sampling}")
         return tree
+
+
+class RelativeTimeReader:
+    """Reader wrapper that resolves sample indices to native dataset time indices."""
+
+    def __init__(
+        self,
+        reader: BaseAnemoiReader,
+        *,
+        native_relative_indices: np.ndarray,
+        model_relative_indices: np.ndarray | None = None,
+        frequency_seconds: int | None = None,
+        anchor_dates_ns: np.ndarray | None = None,
+    ) -> None:
+        self.reader = reader
+        self.native_relative_indices = np.asarray(native_relative_indices, dtype=np.int64)
+        self.model_relative_indices = (
+            None if model_relative_indices is None else np.asarray(model_relative_indices, dtype=np.int64)
+        )
+        self.frequency_seconds = frequency_seconds
+        self.anchor_dates_ns = None if anchor_dates_ns is None else np.asarray(anchor_dates_ns, dtype=np.int64)
+        self._logged_previous_time_fallback = False
+
+    def __getattr__(self, name: str):
+        return getattr(self.reader, name)
+
+    @cached_property
+    def dates_ns(self) -> np.ndarray | None:
+        return dates_to_unix_ns(self.reader.dates)
+
+    @cached_property
+    def available_native_dates(self) -> tuple[np.ndarray, np.ndarray] | None:
+        if self.dates_ns is None:
+            return None
+        available_mask = np.ones(len(self.dates_ns), dtype=bool)
+        missing = np.asarray(sorted(self.reader.missing), dtype=np.int64)
+        available_mask[missing[(missing >= 0) & (missing < len(available_mask))]] = False
+        available_indices = np.flatnonzero(available_mask)
+        return available_indices, self.dates_ns[available_indices]
+
+    @cached_property
+    def date_to_native_index(self) -> dict[int, int] | None:
+        if self.available_native_dates is None:
+            return None
+        available_indices, available_dates_ns = self.available_native_dates
+        return {int(date_ns): int(idx) for idx, date_ns in zip(available_indices, available_dates_ns, strict=True)}
+
+    @property
+    def uses_mixed_frequency_alignment(self) -> bool:
+        return (
+            self.model_relative_indices is not None
+            and self.frequency_seconds is not None
+            and self.anchor_dates_ns is not None
+            and self.dates_ns is not None
+            and self.date_to_native_index is not None
+        )
+
+    def get_sample(
+        self,
+        sequence: int,
+        position: int,
+        grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> torch.Tensor:
+        if not self.uses_mixed_frequency_alignment:
+            time_indices = self.resolve_dense_time_indices(position)
+            return self.reader.get_sample(sequence, time_indices, grid_shard_indices)
+        return self.get_mixed_frequency_sample(sequence, position, grid_shard_indices)
+
+    def resolve_dense_time_indices(self, position: int) -> TimeIndices:
+        absolute_indices = position + self.native_relative_indices
+        if len(absolute_indices) == 1:
+            start = int(absolute_indices[0])
+            return slice(start, start + 1, 1)
+
+        diffs = np.diff(absolute_indices)
+        if len(diffs) > 0 and np.all(diffs == diffs[0]):
+            step = int(diffs[0])
+            start = int(absolute_indices[0])
+            stop = int(absolute_indices[-1] + step)
+            return slice(start, stop, step)
+
+        return absolute_indices.tolist()
+
+    def resolve_mixed_frequency_time_indices(self, position: int) -> TimeIndices:
+        if not self.uses_mixed_frequency_alignment:
+            dense_time_indices = self.resolve_dense_time_indices(position)
+            if isinstance(dense_time_indices, slice):
+                return list(range(dense_time_indices.start, dense_time_indices.stop, dense_time_indices.step))
+            return dense_time_indices
+
+        if not (0 <= position < len(self.anchor_dates_ns)):
+            return [-1] * len(self.model_relative_indices)
+
+        anchor_date_ns = int(self.anchor_dates_ns[position])
+        offsets_ns = self.model_relative_indices.astype(np.int64, copy=False) * self.frequency_seconds * 1_000_000_000
+        requested_dates_ns = anchor_date_ns + offsets_ns
+        resolved_native_indices = np.array(
+            [self.date_to_native_index.get(int(date_ns), -1) for date_ns in requested_dates_ns],
+            dtype=np.int64,
+        )
+        missing_mask = resolved_native_indices < 0
+        if np.any(missing_mask):
+            available_indices, dates_ns = self.available_native_dates
+            dates_ns = dates_ns.astype(np.int64, copy=False)
+            if len(dates_ns) == 0:
+                return [-1] * len(self.model_relative_indices)
+            missing_dates_ns = requested_dates_ns[missing_mask]
+            available_positions = np.searchsorted(dates_ns, missing_dates_ns, side="right") - 1
+            valid_previous = available_positions >= 0
+            clipped_positions = np.clip(available_positions, 0, len(dates_ns) - 1)
+            ages_ns = missing_dates_ns - dates_ns[clipped_positions]
+            tolerance_ns = max(1, frequency_to_seconds(self.reader.frequency) * 1_000_000_000)
+            within_tolerance = valid_previous & (ages_ns <= tolerance_ns)
+            resolved_native_indices[missing_mask] = np.where(
+                within_tolerance,
+                available_indices[clipped_positions],
+                -1,
+            )
+            if np.any(within_tolerance) and not self._logged_previous_time_fallback:
+                LOGGER.debug(
+                    "Mixed-frequency alignment for dataset '%s' used the previous native timestamp "
+                    "for %d requested times within a %d-second tolerance.",
+                    getattr(self.reader, "data", self.reader.__class__.__name__),
+                    int(np.count_nonzero(within_tolerance)),
+                    tolerance_ns // 1_000_000_000,
+                )
+                self._logged_previous_time_fallback = True
+
+        if len(resolved_native_indices) == 1:
+            return resolved_native_indices.tolist()
+        return resolved_native_indices.tolist()
+
+    def get_mixed_frequency_sample(
+        self,
+        sequence: int,
+        position: int,
+        grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> torch.Tensor:
+        time_indices = self.resolve_mixed_frequency_time_indices(position)
+        if any(index < 0 for index in time_indices):
+            msg = "Mixed-frequency sample contains an unresolved native time index."
+            raise RuntimeError(msg)
+        return self.reader.get_sample(sequence, time_indices, grid_shard_indices)
 
 
 def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
