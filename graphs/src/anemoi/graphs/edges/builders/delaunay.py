@@ -14,6 +14,7 @@ import logging
 import numpy as np
 import torch
 from scipy.spatial import ConvexHull
+from scipy.spatial import QhullError
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
@@ -79,7 +80,14 @@ class SphericalDelaunayEdges(BaseEdgeBuilder, NodeMaskingMixin):
                 f"Use a finer node set, or KNNEdges/CutOffEdges."
             )
 
-        hull = ConvexHull(xyz)
+        try:
+            hull = ConvexHull(xyz)
+        except QhullError as e:
+            raise ValueError(
+                "The spherical Delaunay triangulation failed on a degenerate node set "
+                "(the nodes are coplanar, or too close to each other). Use a node set "
+                "spanning more than a great circle, or KNNEdges/CutOffEdges."
+            ) from e
 
         # Facet planes satisfy n.x + offset <= 0 inside the hull. Real spherical
         # Delaunay triangles have the origin inside (offset < 0). For a regional

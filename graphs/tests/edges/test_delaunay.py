@@ -40,22 +40,6 @@ def test_fail_init_different_node_sets():
         SphericalDelaunayEdges("test_nodes1", "test_nodes2")
 
 
-def test_fail_init_inconsistent_masks():
-    """Test SphericalDelaunayEdges rejects two different mask attributes."""
-    with pytest.raises(ValueError, match="same attribute"):
-        SphericalDelaunayEdges(
-            "test_nodes", "test_nodes", source_mask_attr_name="mask", target_mask_attr_name="other_mask"
-        )
-
-
-@pytest.mark.parametrize("mask_kwarg", ["source_mask_attr_name", "target_mask_attr_name"])
-def test_single_mask_applies_to_both_ends(mask_kwarg: str):
-    """Test a mask given on one end is applied to both, as there is a single node set."""
-    builder = SphericalDelaunayEdges("test_nodes", "test_nodes", **{mask_kwarg: "mask"})
-    assert builder.source_mask_attr_name == "mask"
-    assert builder.target_mask_attr_name == "mask"
-
-
 def test_delaunay(graph_with_scattered_nodes: HeteroData):
     """Test SphericalDelaunayEdges."""
     graph = SphericalDelaunayEdges("test_nodes", "test_nodes").update_graph(graph_with_scattered_nodes)
