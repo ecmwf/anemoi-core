@@ -14,6 +14,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.residual import NoSkipConnection
 from anemoi.models.layers.residual import ScalarOrnsteinConnection
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.layers.residual import SpectralOrnsteinConnection
@@ -183,6 +184,23 @@ def test_skipconnection(flat_data):
     expected_out = flat_data[:, -1, ...]
 
     assert torch.allclose(out, expected_out), "SkipConnection did not return the expected output."
+
+
+@pytest.mark.parametrize("n_step_output", [None, 3])
+def test_noskipconnection_matches_skipconnection_shape(flat_data, n_step_output):
+    out = NoSkipConnection().forward(flat_data, n_step_output=n_step_output)
+    expected_shape = SkipConnection().forward(flat_data, n_step_output=n_step_output).shape
+
+    assert out.shape == expected_shape
+    assert out.dtype == flat_data.dtype
+    assert not out.any(), "NoSkipConnection must return zeros."
+
+
+def test_noskipconnection_adds_nothing_to_output(flat_data):
+    x_out = torch.randn(11, 1, 5, 2, 3)
+    x_skip = NoSkipConnection().forward(flat_data, n_step_output=1)
+
+    assert torch.equal(x_out + x_skip, x_out)
 
 
 # ── ScalarOrnsteinConnection tests ───────────────────────────────────────

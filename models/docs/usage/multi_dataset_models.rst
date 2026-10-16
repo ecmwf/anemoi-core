@@ -214,7 +214,9 @@ first batch.
 ********************************
 
 ``bounding``, ``output_mask`` and ``residual`` are configured
-**per dataset** under a ``datasets`` key:
+**per dataset** under a ``datasets`` key. Input-only datasets (encoded
+but not decoded) can be left out of ``residual``; they default to
+:class:`~anemoi.models.layers.residual.NoSkipConnection`:
 
 .. code:: yaml
 
