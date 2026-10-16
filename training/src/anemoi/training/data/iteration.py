@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import itertools
 import logging
 import os
 from collections.abc import Generator
@@ -137,6 +138,92 @@ class CrossDatasetIteration(BaseIteration):
             for name, indices in dataset.valid_date_indices.items()
         }
         samples = [(name, int(index)) for name, indices in dataset_indices.items() for index in indices]
+        if dataset.shuffle and len(dataset_indices) > 1:
+            order = dataset.rng.choice(len(samples), size=len(samples), replace=False)
+            samples = [samples[int(index)] for index in order]
+
+        LOGGER.debug(
+            (
+                "Worker pid %d, label %s, worker id %d, global_rank %d, "
+                "model comm group %d, group_rank %d, seed comm group id %d, using indices[0:10]: %s"
+            ),
+            os.getpid(),
+            dataset.label,
+            dataset.worker_id,
+            dataset.global_rank,
+            dataset.model_comm_group_id,
+            dataset.model_comm_group_rank,
+            dataset.sample_comm_group_id,
+            samples[:10],
+        )
+        return samples
+
+
+class MixedIteration(BaseIteration):
+    """Mixing cross-dataset iteration logic and base iteration logic."""
+
+    def __init__(self, iteration_mapping: dict[str, list]):
+        self.iteration_mapping = iteration_mapping
+
+    def compute_anchors(
+        self,
+        dataset: "MultiDataset",
+        relative_date_indices: dict[str, TimeIndices],
+    ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+
+        # Create groups of datasets that will be sampled together
+        groups = list(itertools.product(*self.iteration_mapping.values()))
+        self.groups_dict = {"group_" + str(i): group for i, group in enumerate(groups)}
+        self.group_labels = list(self.groups_dict.keys())
+
+        anchors = {}
+        for group, datasets_in_group in self.groups_dict.items():
+            for dataset_label in datasets_in_group:
+                if dataset_label in dataset.data_readers:
+                    group_anchors = compute_valid_anchors(
+                        {dataset_label: dataset.data_readers[dataset_label]},
+                        relative_date_indices,
+                    )
+                else:
+                    msg = f"Dataset label '{dataset_label}' not found in data readers."
+                    LOGGER.warning(msg)
+                    group_anchors = []
+            if len(group_anchors) > 0:
+                anchors[group] = group_anchors
+
+        return anchors, {group_name: np.arange(len(values), dtype=np.int64) for group_name, values in anchors.items()}
+
+    def sample(
+        self,
+        dataset: "MultiDataset",
+        index: tuple[str, int],
+    ) -> dict[str, torch.Tensor]:
+        """Load one sample from the selected dataset."""
+        group_name, sample_index = index
+
+        sequence, position = (int(value) for value in dataset.anchors[group_name][sample_index])
+
+        return {
+            dataset_name: dataset.data_readers[dataset_name].get_sample(
+                sequence,
+                offset_time_indices(position, dataset.relative_date_indices[dataset_name]),
+                self._grid_indices(dataset, dataset_name),
+            )
+            for dataset_name in self.groups_dict[group_name]
+            if dataset_name in dataset.dataset_names
+        }
+
+    def _sample_indices(self, dataset: "MultiDataset") -> list[tuple[str, int]]:
+        dataset_indices = {
+            group_name: (
+                dataset.rng.choice(indices, size=len(indices), replace=False)[dataset.chunk_index_range[group_name]]
+                if dataset.shuffle
+                else indices[dataset.chunk_index_range[group_name]]
+            )
+            for group_name, indices in dataset.valid_date_indices.items()
+        }
+        samples = [(group_name, int(index)) for group_name, indices in dataset_indices.items() for index in indices]
+
         if dataset.shuffle and len(dataset_indices) > 1:
             order = dataset.rng.choice(len(samples), size=len(samples), replace=False)
             samples = [samples[int(index)] for index in order]
