@@ -99,9 +99,8 @@ class ICONMultiMesh:
         self.reflvl_vertex = reflvl_vertex
         self.max_level = max_level if max_level is not None else reflvl_vertex.max()
         assert self.max_level <= reflvl_vertex.max()
-        # _get_hierarchy_of_icon_edge_graphs requires min_level >= 1
-        self.min_level = min_level if min_level is not None else 1
-        assert self.min_level >= 1
+        self.min_level = min_level if min_level is not None else 0
+        assert self.min_level >= 0
         assert self.min_level <= self.max_level
 
         # restrict edge-vertex list to multi_mesh level "max_level":
@@ -191,7 +190,7 @@ class ICONMultiMesh:
         selected_vertex_coarse = scipy.sparse.diags(np.ones(num_vertices), dtype=bool)
 
         # coarsen edge-vertex list from level `ilevel -> ilevel - 1`:
-        for ilevel in reversed(range(self.min_level, self.reflvl_vertex.max() + 1)):
+        for ilevel in reversed(range(max(self.min_level,1), self.reflvl_vertex.max() + 1)):
             LOGGER.debug(f"  edges[{ilevel}] = {edge_vertices[0].shape[0] : >9}")
 
             # define edge selection matrix (selecting only edges of which have
