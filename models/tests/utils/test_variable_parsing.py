@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.utils.variables import parse_feature_name
+from anemoi.models.utils.variable_parsing import parse_feature_name
 
 
 class TestParseFeatureName:

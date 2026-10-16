@@ -16,7 +16,7 @@ import torch.utils.checkpoint
 
 from anemoi.models.layers.cls_pooling import ClsSelfAttentionPool
 from anemoi.models.layers.set_transformer import PMA
-from anemoi.models.utils.variables import parse_feature_name
+from anemoi.models.utils.variable_parsing import parse_feature_name
 
 
 class Tokenizer:
@@ -65,9 +65,6 @@ class FeatureTokenizer(nn.Module):
         self.register_buffer("has_level", torch.tensor(tokenizer.has_level, dtype=torch.bool))
         self.no_level_embedding = nn.Parameter(torch.randn(dim))
 
-        # learned nonlinear representation of the value itself, alongside the raw scalar -
-        # the raw scalar alone leaves all the work of extracting a useful representation to
-        # the attention that follows; this gives the value its own capacity to do that first.
         self.value_encoder = nn.Sequential(
             nn.Linear(1, dim),
             nn.SiLU(),
@@ -151,6 +148,24 @@ class PMAEmbedder(nn.Module):
     """Turns a node's raw per-variable values into a single vector via attention pooling over
     the variables as a set, so the resulting encoding doesn't depend on a fixed variable count
     or order.
+
+    Pools with PMA (Pooling by Multihead Attention, Lee et al. 2019): a learned query vector
+    cross-attends over the variable tokens. The query is a parameter, not derived from the
+    input, and the variable tokens do not attend back to it or to each other - only the
+    query's output is kept as the node embedding.
+
+    Algorithm::
+
+        tokens = []
+        for param in variables:
+            level_encoding = level_pe[param] if param.has_level else no_level_embedding
+            token = concat(value[param], value_encoder(value[param]), embedding(param), level_encoding, frame_id)
+            tokens.append(token)
+
+        tokens_proj = Linear(tokens)
+        node_embedding = MHA(key=tokens_proj, value=tokens_proj, query=learned_query)
+
+        output = concat(node_embedding, node_attributes_data)
     """
 
     def __init__(self, feature_names, dim, d_model, nhead):
@@ -187,9 +202,27 @@ class PMAEmbedder(nn.Module):
 class DeepSetEmbedder(nn.Module):
     """Turns a node's raw per-variable values into a single vector via Deep Sets pooling
     (Zaheer et al. 2017): each variable is tokenized and transformed independently (phi), then
-    aggregated by mean - no cross-variable interaction during pooling, unlike attention-based
-    pooling. Supports a reduced feature_names subset naturally, since phi doesn't depend on the
-    total variable count and mean needs no padding/masking for a smaller set.
+    aggregated by a permutation-invariant mean - cheap and simple to train, with no
+    cross-variable interaction during pooling, unlike attention-based pooling. Supports a
+    reduced feature_names subset naturally, since phi doesn't depend on the total variable
+    count and mean needs no padding/masking for a smaller set.
+
+    rho is applied residually because the mean alone gives the gradient no direct path back
+    to phi's output.
+
+    Algorithm::
+
+        tokens = []
+        for param in variables:
+            level_encoding = level_pe[param] if param.has_level else no_level_embedding
+            token = concat(value[param], value_encoder(value[param]), embedding(param), level_encoding)
+            tokens.append(token)
+
+        mlp_out = MLP(tokens)                    # per variable
+        agg = mean(mlp_out)
+        node_embedding = agg + MLP(LayerNorm(agg))
+
+        output = concat(node_embedding, node_attributes_data)
     """
 
     def __init__(self, feature_names, dim, d_model):
@@ -200,15 +233,11 @@ class DeepSetEmbedder(nn.Module):
             nn.SiLU(),
             nn.Linear(d_model, d_model),
         )
-        # rho is residual - same pattern as ClsSelfAttentionPool's residual - since the mean
-        # alone gives the gradient no direct path back to phi's output.
         self.rho = nn.Sequential(
             nn.Linear(d_model, d_model),
             nn.SiLU(),
             nn.Linear(d_model, d_model),
         )
-        # pre-LN, same reasoning as ClsSelfAttentionPool's norm: normalizes what rho sees,
-        # not the residual path itself.
         self.rho_norm = nn.LayerNorm(d_model)
         self.output_dim = d_model
 
@@ -216,8 +245,6 @@ class DeepSetEmbedder(nn.Module):
         """x: (batch, time, ensemble, grid, vars) -> (batch ensemble grid, time d_model + attrs)"""
         batch, n_time, ensemble, grid, _n_vars = x.shape
         x_vars = einops.rearrange(x, "batch time ensemble grid vars -> (batch time ensemble grid) vars")
-        # no frame_idx (deliberate, as in HierarchicalEmbedder): held constant so it carries no
-        # information, rather than modifying FeatureTokenizer to drop the column outright.
         frame_idx = torch.zeros(x_vars.shape[0], device=x.device)
         encodings = self.feature_tokenizer(x_vars, frame_idx, feature_names=feature_names)
         agg = self.phi(encodings).mean(dim=1)
@@ -234,11 +261,26 @@ class DeepSetEmbedder(nn.Module):
 
 
 class HierarchicalEmbedder(nn.Module):
-    """Pools a node's raw per-variable values in two stages: first the variables at each
-    height/pressure level into one token per level, then the level tokens into one final
-    embedding - instead of pooling every variable across every level at once. Lets the model
-    treat "which physical variable" (level-independent) and "which level" (added only once
-    the per-level summary already exists) as separate concerns.
+    """Pools a node's raw per-variable values in two stages, each a multihead attention call:
+    first the variables at each height/pressure level into one token per level, then the level
+    tokens into one final embedding - instead of pooling every variable across every level at
+    once. Lets the model treat "which physical variable" (level-independent) and "which level"
+    (added only once the per-level summary already exists) as separate concerns.
+
+    Algorithm::
+
+        level_tokens = []   # stage 1
+        for level, level_group in level_groups:
+            tokens = []
+            for param in level_group:
+                token = Linear(value[param]) + Linear(embedding(param))
+                tokens.append(token)
+            level_tokens.append(multihead_attention(tokens) + level_pe[level])
+
+        level_tokens = stack(level_tokens)
+        node_embedding = multihead_attention(level_tokens)      # stage 2
+
+        output = concat(node_embedding, node_attributes_data)
     """
 
     def __init__(self, feature_names, hidden_dim, d_model, nhead):
@@ -249,8 +291,6 @@ class HierarchicalEmbedder(nn.Module):
         self.variable_embedding = nn.Embedding(tokenizer.num_variables, hidden_dim)
         self.register_buffer("variable_idx", torch.tensor(tokenizer.variable_idx))
 
-        # group feature indices by level (0 = no-level, from parse_feature_name) - fixed at
-        # construction time from feature_names, one group becomes one stage-1 token.
         groups: dict[float, list[int]] = {}
         for i, level in enumerate(tokenizer.levels):
             groups.setdefault(level, []).append(i)
@@ -258,10 +298,6 @@ class HierarchicalEmbedder(nn.Module):
         group_levels = torch.tensor(sorted(groups.keys()), dtype=torch.float32)
         self.register_buffer("level_pe", sinusoidal_positional_encoding(group_levels, d_model))
 
-        # groups have different sizes (a level with 5 variables vs. one with 2) - pad every
-        # group to the largest one's size so stage 1 runs as a single batched call instead of
-        # one Python-level call per level; group_mask marks the padding to be excluded from
-        # attention. Fixed at construction time from feature_names, like level_groups itself.
         self.max_group_size = max(len(group) for group in self.level_groups)
         n_groups = len(self.level_groups)
         group_idx_padded = torch.zeros(n_groups, self.max_group_size, dtype=torch.long)
@@ -272,9 +308,6 @@ class HierarchicalEmbedder(nn.Module):
         self.register_buffer("group_idx_padded", group_idx_padded)
         self.register_buffer("group_mask", group_mask)
 
-        # split into two projections (instead of one Linear over the concatenation) so the
-        # variable-embedding term can be added via broadcasting - concatenation would force
-        # materializing variable_embedding at full (n_rows, ...) size first.
         self.variable_proj = nn.Linear(hidden_dim, d_model, bias=False)
         self.value_proj = nn.Linear(1, d_model)
         self.stage1_pool = ClsSelfAttentionPool(d_model, nhead)
@@ -292,14 +325,6 @@ class HierarchicalEmbedder(nn.Module):
         n_rows = x_vars.shape[0]
         n_groups = len(self.level_groups)
 
-        # Stage 1 gathers every group's (padded) values and variable embeddings at once - shape
-        # (rows, n_groups, max_group_size, ...) - instead of once per group in a Python loop.
-        # variable_embedding has no row dimension (identity doesn't vary by row), so
-        # variable_proj(variable_embedding) is computed once and broadcast-added below, instead
-        # of expanding it to match rows and concatenating (which would force that expansion into
-        # real memory). Row-chunked (like ClsSelfAttentionPool's own internal chunking) so this
-        # intermediate stays bounded to one chunk's worth - a single-shot construction across
-        # all of O96's rows at once materializes tens of GB.
         variable_embedding = self.variable_embedding(self.variable_idx[self.group_idx_padded])
         variable_component = self.variable_proj(variable_embedding).unsqueeze(0)
 
@@ -310,13 +335,8 @@ class HierarchicalEmbedder(nn.Module):
             values = x_vars_chunk[:, self.group_idx_padded].unsqueeze(-1)
             tokens = self.value_proj(values) + variable_component
 
-            # flatten (row, group) into one batch dim for a single stage1_pool call per chunk;
-            # group_mask is the same for every row, so it's expanded (not repeated) to match.
             tokens = tokens.reshape(n_rows_chunk * n_groups, self.max_group_size, -1)
             mask = self.group_mask.unsqueeze(0).expand(n_rows_chunk, -1, -1).reshape(n_rows_chunk * n_groups, -1)
-            # gradient checkpointing: recomputes stage1_pool's activations during backward
-            # instead of retaining them, trading compute for the training-time memory that
-            # retaining them across every one of O96's row-chunks would otherwise need.
             pooled = torch.utils.checkpoint.checkpoint(self.stage1_pool, tokens, mask, use_reentrant=False)
             level_tokens_chunks.append(pooled.reshape(n_rows_chunk, n_groups, -1))
         level_tokens = torch.cat(level_tokens_chunks, dim=0)
@@ -337,10 +357,32 @@ class HierarchicalEmbedder(nn.Module):
 
 class LinearGroupedEmbedder(nn.Module):
     """Turns a node's raw per-variable values into a single vector via a plain Linear per
-    pressure level (assuming every level has the same fixed variable set, in a fixed order -
-    no attention, no padding/masking needed for that part) plus a separate Linear for the
-    surface/single-level group, then attention-pools the resulting tokens (one per level, plus
-    the surface token) into the final embedding.
+    pressure level plus a separate Linear for the surface/single-level group, then
+    attention-pools the resulting tokens (one per level, plus the surface token) into the
+    final embedding.
+
+    Relies on a fixed assumption for within-level pooling: every pressure level always has
+    the same set of variables, in a known order (in O96 ERA5: u, v, q, t, w, z at every
+    level), so no attention or padding/masking is needed for that stage. Attention is kept
+    only for the second stage, which combines the much smaller set of per-level tokens.
+
+    Algorithm::
+
+        for level in pressure_levels:
+            input = stack(value[param] for param in level.params)   # fixed order, e.g. u, v, q, t, w, z
+            level_token[level] = Linear(input) + level_pe[level]
+
+        surface_input = stack(value[param] for param in surface.params)
+        surface_token = Linear(surface_input)
+
+        tokens = concat(level_token for each level, surface_token)
+        node_embedding = multihead_attention(tokens)
+
+        output = concat(node_embedding, node_attributes_data)
+
+    Limitations: per node, this is only agnostic to which pressure levels are used. The level
+    and surface tokens only make sense if the physical variables making them up are consistent
+    across levels, since level_proj and surface_proj are fixed-width Linears.
     """
 
     def __init__(self, feature_names, d_model, nhead):

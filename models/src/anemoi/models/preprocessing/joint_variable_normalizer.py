@@ -11,7 +11,7 @@ from typing import Optional
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing.normalizer import InputNormalizer
-from anemoi.models.utils.variables import parse_feature_name
+from anemoi.models.utils.variable_parsing import parse_feature_name
 
 
 class JointVariableNormalizer(InputNormalizer):
