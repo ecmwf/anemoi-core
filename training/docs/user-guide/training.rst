@@ -153,6 +153,13 @@ things can prevent this:
    resumed run continues bitwise identically if the GPU kernels are reproducible.
    These settings may make training slower.
 
+Metrics that PyTorch Lightning averages over an epoch, such as the epoch value of
+the training loss, can differ for the epoch in which a run was resumed: Lightning
+does not store their running means in the checkpoint, so these values only cover
+the steps after the resume. Validation metrics logged for every batch are logged at
+Lightning's count of validation batches in the current job, which starts again at
+zero after a resume, so their values appear shifted.
+
 Step 5: Execute Training
 ========================
 
