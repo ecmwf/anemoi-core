@@ -27,6 +27,7 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.layers.embedder import FlattenInputTransform
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.transport import EdmSettings
@@ -88,6 +89,16 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         output_dim = super()._calculate_output_dim(dataset_name)
         input_dim = base_input_dim + output_dim  # input history plus corrupted target
         return input_dim
+
+    def _build_input_transforms(self, model_config: DotDict) -> None:
+        super()._build_input_transforms(model_config)
+        for dataset_name, transform in self.input_transform.items():
+            if not isinstance(transform, FlattenInputTransform):
+                msg = (
+                    f"{type(self).__name__} only supports FlattenInputTransform as input_transform, "
+                    f"got {type(transform).__name__} for dataset '{dataset_name}'."
+                )
+                raise ValueError(msg)
 
     def _create_noise_conditioning_mlp(self) -> nn.Sequential:
         mlp = nn.Sequential()

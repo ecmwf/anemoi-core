@@ -97,8 +97,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         # add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
+                self.input_transform[dataset_name](x, node_attributes_data),
                 torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1) * fcstep,
             ),
             dim=-1,  # feature dimension

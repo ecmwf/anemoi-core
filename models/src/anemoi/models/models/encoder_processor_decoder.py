@@ -34,24 +34,6 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
-    def __init__(self, *, model_config, **kwargs) -> None:
-        # Stashed here (before BaseGraphModel.__init__ runs) so _calculate_shapes_and_indices
-        # can build self.input_transform early - see the override below for why.
-        self._model_config = model_config
-        super().__init__(model_config=model_config, **kwargs)
-
-    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        # input_dim depends on input_transform's output width (see _calculate_input_dim
-        # below), but BaseGraphModel computes input_dim before _build_networks would
-        # otherwise construct input_transform - so build it here first instead.
-        self._build_input_transform(self._model_config)
-        super()._calculate_shapes_and_indices(data_indices)
-
-    def _calculate_input_dim(self, dataset_name: str) -> int:
-        output_dim = getattr(self.input_transform, "output_dim", None)
-        per_step = output_dim if output_dim is not None else self.num_input_channels[dataset_name]
-        return self.n_step_input * per_step + self.node_attributes.attr_ndims[dataset_name]
-
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
         # Encoder data -> hidden
@@ -156,28 +138,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
             )
 
-    def _build_input_transform(self, model_config: DotDict) -> None:
-        # feature_names must match the columns of the raw input tensor `x` at _assemble_input
-        # time - that's the model's INPUT set (forcing + prognostic) in raw column order, not
-        # every variable in the dataset: diagnostic-only variables (e.g. tp, cp) are predicted,
-        # never part of `x`, so including them here would size input_transform wider than `x`
-        # actually is.
-        # TODO: single-dataset only for now; multi-dataset would need this as a ModuleDict, like
-        # self.encoder/self.decoder, since each dataset can have a different variable set.
-        (dataset_name,) = self.dataset_names
-        feature_names = self.data_indices[dataset_name].model.input.ordered_names
-        # `or` (not `.get(key, default)` alone) because the Pydantic schema round-trip makes
-        # this key present-but-None for configs that never set it, not absent - `.get` only
-        # falls back to its default when the key is missing entirely.
-        input_transform_config = model_config.model.get("input_transform") or {
-            "_target_": "anemoi.models.layers.embedder.FlattenInputTransform"
-        }
-        self.input_transform = instantiate(
-            input_transform_config,
-            feature_names=feature_names,
-            _recursive_=False,
-        )
-
     def _assemble_input(
         self,
         x: torch.Tensor,
@@ -224,7 +184,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
-        x_vars = self.input_transform(x, node_attributes_data)
+        x_vars = self.input_transform[dataset_name](x, node_attributes_data)
 
         return x_vars, x_skip, grid_shard_sizes
 

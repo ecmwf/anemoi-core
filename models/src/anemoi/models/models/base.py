@@ -81,6 +81,7 @@ class BaseGraphModel(nn.Module):
         self._build_encoder_routing(model_config.encoders)
         self._build_decoder_routing(model_config.decoders)
 
+        self._build_input_transforms(model_config)
         self._calculate_shapes_and_indices(data_indices)
 
         self._assert_model_routing()
@@ -227,9 +228,35 @@ class BaseGraphModel(nn.Module):
                 hidden_name in self._graph_data.node_types
             ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
 
+    def _build_input_transforms(self, model_config: DotDict) -> None:
+        """Build the per-dataset transform that turns raw input variables into encoder features.
+
+        Built before the input dimensions are computed because an embedder changes the
+        per-timestep feature width the encoder sees. One transform per dataset, since each
+        dataset can have a different variable set.
+        """
+        # The Pydantic schema round-trip leaves this key present but None when unset,
+        # so ``.get`` with a default would not fall back.
+        input_transform_config = model_config.model.get("input_transform") or {
+            "_target_": "anemoi.models.layers.embedder.FlattenInputTransform"
+        }
+        self.input_transform = nn.ModuleDict(
+            {
+                dataset_name: instantiate(
+                    input_transform_config,
+                    feature_names=self.data_indices[dataset_name].model.input.ordered_names,
+                    _recursive_=False,
+                )
+                for dataset_name in self.dataset_names
+            }
+        )
+
     def _calculate_input_dim(self, dataset_name: str) -> int:
         """Calculate the encoder input dimension for a given dataset."""
-        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
+        per_step = getattr(self.input_transform[dataset_name], "output_dim", None)
+        if per_step is None:
+            per_step = self.num_input_channels[dataset_name]
+        return self.n_step_input * per_step + self.node_attributes.attr_ndims[dataset_name]
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
