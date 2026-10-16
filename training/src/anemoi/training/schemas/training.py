@@ -20,6 +20,7 @@ from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
+from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import Tag
 from pydantic import field_validator
@@ -408,27 +409,47 @@ class MultiscaleConfigOnTheFlySchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    num_scales: int | None = None
-    base_num_nearest_neighbours: int | None = None
-    base_sigma: float | None = None
-    scale_factor: int | None = None
-    smoothers: dict[str, dict] | None = None
+    smoothers: dict[str, dict] = Field(min_length=1)
+    """KNN smoothers from coarsest to finest, each with ``num_nearest_neighbours`` and ``sigma``. The full resolution
+    is added last."""
+
+
+class MultiscaleConfigSpectralSchema(BaseModel):
+    """Spectral multiscale config: each scale keeps what lies at or below a spectral cutoff."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    transform: Literal["octahedral_sht", "reduced_sht", "regular_sht", "fft2d", "dct2d"]
+    cutoffs: list[PositiveInt | PositiveFloat] = Field(min_length=1)
+    """Increasing cutoffs, one per scale; a full-resolution scale is added last. Integer truncations for the
+    spherical harmonic transforms, frequencies in cycles per grid spacing for ``fft2d`` and ``dct2d``."""
+    nlat: PositiveInt | None = None
+    "Number of latitudes, for ``octahedral_sht`` and ``regular_sht``."
+    grid: str | None = None
+    "Name of the reduced Gaussian grid (e.g. ``n320``), for ``reduced_sht``."
+    x_dim: PositiveInt | None = None
+    "Number of grid points along x, for ``fft2d`` and ``dct2d``."
+    y_dim: PositiveInt | None = None
+    "Number of grid points along y, for ``fft2d`` and ``dct2d``."
 
     @model_validator(mode="after")
-    def check_num_scales_or_smoothers(self) -> Self:
-        if self.smoothers is not None:
-            return self
-
-        if self.num_scales is None:
-            msg = "MultiscaleConfigOnTheFlySchema requires either 'num_scales' or 'smoothers'."
-            raise ValueError(msg)
-
-        missing = [name for name in ("base_num_nearest_neighbours", "base_sigma") if getattr(self, name) is None]
-        if missing:
+    def check_grid_and_cutoffs(self) -> Self:
+        grid_keys = {
+            "octahedral_sht": {"nlat"},
+            "regular_sht": {"nlat"},
+            "reduced_sht": {"grid"},
+            "fft2d": {"x_dim", "y_dim"},
+            "dct2d": {"x_dim", "y_dim"},
+        }[self.transform]
+        given = {key for key in ("nlat", "grid", "x_dim", "y_dim") if getattr(self, key) is not None}
+        if given != grid_keys:
             msg = (
-                "MultiscaleConfigOnTheFlySchema with 'num_scales' requires "
-                f"{', '.join(repr(name) for name in missing)}."
+                f"MultiscaleConfigSpectralSchema with transform '{self.transform}' takes the grid keys "
+                f"{sorted(grid_keys)}, got {sorted(given)}."
             )
+            raise ValueError(msg)
+        if self.transform.endswith("_sht") and not all(isinstance(cutoff, int) for cutoff in self.cutoffs):
+            msg = f"MultiscaleConfigSpectralSchema cutoffs for '{self.transform}' must be integers, got {self.cutoffs}."
             raise ValueError(msg)
         return self
 
@@ -476,8 +497,12 @@ class MultiScaleLossSchema(BaseModel):
         | BaseLossSchema
     )
     weights: list[float]
-    multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
+    multiscale_config: (
+        MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | MultiscaleConfigSpectralSchema | None
+    ) = None
     sparse_projector_num_chunks: PositiveInt = 1
+    check_scale_order: bool = True
+    "Check that the scales run from coarsest to finest. Turn off only when an unusual order is intended."
     # Deprecated: pass inside multiscale_config instead.
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
@@ -502,12 +527,12 @@ class MultiScaleLossSchema(BaseModel):
 
     @model_validator(mode="after")
     def check_no_deprecated_mixed_with_on_the_fly(self) -> Self:
-        if isinstance(self.multiscale_config, MultiscaleConfigOnTheFlySchema) and (
+        if isinstance(self.multiscale_config, MultiscaleConfigOnTheFlySchema | MultiscaleConfigSpectralSchema) and (
             self.loss_matrices is not None or self.loss_matrices_path is not None
         ):
             msg = (
                 "Deprecated top-level 'loss_matrices'/'loss_matrices_path' must not be combined "
-                "with an on-the-fly 'multiscale_config'. Move file-based keys inside a disk-mode "
+                "with an on-the-fly or spectral 'multiscale_config'. Move file-based keys inside a disk-mode "
                 "multiscale_config, or remove the deprecated fields."
             )
             raise ValueError(msg)

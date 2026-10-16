@@ -54,38 +54,6 @@ def _knn_edge_cfg(
     }
 
 
-def _expand_smoother_config(cfg: dict | Any) -> dict[str, dict]:
-    """Return an explicit ``{name: spec}`` smoothers dict from cfg.
-
-    Accepts either an already-explicit ``smoothers`` mapping or a compact
-    geometric-progression spec (``num_scales``, ``base_num_nearest_neighbours``,
-    ``base_sigma``, …).
-    """
-    if OmegaConf.is_config(cfg):
-        cfg = OmegaConf.to_container(cfg, resolve=True)
-
-    smoothers = cfg.get("smoothers")
-    if smoothers:
-        return dict(smoothers)
-
-    num_scales = cfg.get("num_scales")
-    if num_scales is None:
-        return {}
-
-    base_neighbours = cfg["base_num_nearest_neighbours"]
-    base_sigma = cfg["base_sigma"]
-    scale_factor = cfg.get("scale_factor", 2)
-
-    smoothers = {}
-    for i in range(num_scales):
-        factor = scale_factor**i
-        smoothers[f"smooth_{factor}x"] = {
-            "num_nearest_neighbours": base_neighbours * factor,
-            "sigma": round(base_sigma * factor, 5),
-        }
-    return smoothers
-
-
 def build_node_to_node_projection_subgraph(
     graph_data: HeteroData,
     source_node_name: str,

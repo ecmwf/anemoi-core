@@ -346,14 +346,17 @@ def ensemble_config(
     return cfg, url_dataset
 
 
-@pytest.fixture
-def ensemble_graph_multiscale_config(
-    testing_modifications_with_temp_dir: DictConfig,
+def _ensemble_multiscale_config(
+    testing_modifications: DictConfig,
     get_tmp_path: GetTmpPath,
+    multiscale_config: dict,
+    num_scales: int,
+    job_name: str,
 ) -> tuple[DictConfig, str]:
+    """Ensemble CRPS config whose training loss and validation metric use ``multiscale_config``."""
     overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
 
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_ensemble_graph"):
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name=job_name):
         template = compose(config_name="ensemble_crps", overrides=overrides)
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
@@ -362,22 +365,13 @@ def ensemble_graph_multiscale_config(
     tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
     use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
 
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    cfg.training.training_loss.datasets.data.weights = [1.0, 1.0, 1.0, 1.0, 1.0]
-    cfg.training.training_loss.datasets.data.multiscale_config = {
-        "num_scales": 4,
-        "base_num_nearest_neighbours": 16,
-        "base_sigma": 0.01570,
-        "scale_factor": 2,
-    }
-
-    cfg.training.validation_metrics.datasets.data.multiscale.weights = [1.0, 1.0, 1.0, 1.0, 1.0]
-    cfg.training.validation_metrics.datasets.data.multiscale.multiscale_config = {
-        "num_scales": 4,
-        "base_num_nearest_neighbours": 16,
-        "base_sigma": 0.01570,
-        "scale_factor": 2,
-    }
+    cfg = OmegaConf.merge(template, testing_modifications, use_case_modifications)
+    for loss_cfg in (
+        cfg.training.training_loss.datasets.data,
+        cfg.training.validation_metrics.datasets.data.multiscale,
+    ):
+        loss_cfg.weights = [1.0] * num_scales
+        loss_cfg.multiscale_config = multiscale_config
 
     cfg.diagnostics.plot.callbacks = []
     OmegaConf.resolve(cfg)
@@ -386,6 +380,41 @@ def ensemble_graph_multiscale_config(
     cfg.task.multistep_input = 3
     cfg.task.multistep_output = 2
     return cfg, url_dataset
+
+
+@pytest.fixture
+def ensemble_graph_multiscale_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    smoothers = {
+        "smooth_8x": {"num_nearest_neighbours": 128, "sigma": 0.1256},
+        "smooth_4x": {"num_nearest_neighbours": 64, "sigma": 0.0628},
+        "smooth_2x": {"num_nearest_neighbours": 32, "sigma": 0.0314},
+        "smooth_1x": {"num_nearest_neighbours": 16, "sigma": 0.0157},
+    }
+    return _ensemble_multiscale_config(
+        testing_modifications_with_temp_dir,
+        get_tmp_path,
+        {"smoothers": smoothers},
+        num_scales=5,
+        job_name="test_ensemble_graph",
+    )
+
+
+@pytest.fixture
+def ensemble_spectral_multiscale_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    # The test dataset is on the O96 octahedral grid: 192 latitudes, so up to T95.
+    return _ensemble_multiscale_config(
+        testing_modifications_with_temp_dir,
+        get_tmp_path,
+        {"transform": "octahedral_sht", "nlat": 192, "cutoffs": [23, 47, 95]},
+        num_scales=4,
+        job_name="test_ensemble_spectral",
+    )
 
 
 @pytest.fixture
