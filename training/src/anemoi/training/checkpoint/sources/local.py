@@ -9,9 +9,6 @@
 
 """Local filesystem checkpoint source.
 
-Loads checkpoint data from a local file path and populates the pipeline
-context with the loaded data and detected format.
-
 Example
 -------
 >>> source = LocalSource()
@@ -68,8 +65,10 @@ class LocalSource(CheckpointSource):
 
         Applies ``expanduser().resolve()`` and publishes the result on
         ``context.checkpoint_path``, so what the trainer later hands to
-        ``Trainer.fit(ckpt_path=)`` is the file that was checked, independent of
-        ``~`` or the working directory.
+        ``Trainer.fit(ckpt_path=)`` is the file that was checked. A relative path
+        resolves against the process working directory, which is where the
+        training command was launched (the shipped config leaves
+        ``hydra.job.chdir`` unset); prefer an absolute path.
 
         Parameters
         ----------

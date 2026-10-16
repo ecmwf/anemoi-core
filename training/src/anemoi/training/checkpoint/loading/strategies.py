@@ -19,6 +19,9 @@ import torch
 
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.loading.base import LoadingStrategy
+from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
+from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
+from anemoi.training.checkpoint.loading.base import warn_on_hparams_divergence
 
 if TYPE_CHECKING:
     from typing import Any
@@ -103,9 +106,9 @@ class WeightsOnlyLoader(LoadingStrategy):
             except RuntimeError as e:
                 raise CheckpointLoadError(context.checkpoint_path or "<in-memory checkpoint>", e) from e
 
-        self._warn_on_hparams_divergence(context)
-        self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
-        self._extract_variables_metadata(context.model, context.checkpoint_data)
+        warn_on_hparams_divergence(context.checkpoint_data, context.config)
+        preserve_anemoi_metadata(context.model, context.checkpoint_data)
+        extract_checkpoint_variables_metadata(context.model, context.checkpoint_data)
         self._mark_weights_loaded(context.model)
 
         context.metadata["loading_strategy"] = "weights_only"
@@ -118,10 +121,9 @@ class WeightsOnlyLoader(LoadingStrategy):
     def _shape_mismatched_keys(model: Any, state_dict: dict[str, Any]) -> dict[str, str]:
         """Keys present in both model and checkpoint whose tensor shapes differ.
 
-        Deliberately narrower than
+        Narrower than
         :func:`~anemoi.training.checkpoint.loading.utils.filter_state_dict`, which
-        also drops keys the target lacks. Those are exactly what ``strict``
-        governs, so dropping them here would silently override the user's choice.
+        also drops keys the target lacks — that is ``strict``'s business.
 
         Parameters
         ----------
@@ -272,8 +274,8 @@ class TransferLearningLoader(LoadingStrategy):
         except RuntimeError as e:
             raise CheckpointLoadError(context.checkpoint_path or "<in-memory checkpoint>", e) from e
 
-        self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
-        self._extract_variables_metadata(context.model, context.checkpoint_data)
+        preserve_anemoi_metadata(context.model, context.checkpoint_data)
+        extract_checkpoint_variables_metadata(context.model, context.checkpoint_data)
         self._mark_weights_loaded(context.model)
 
         context.metadata["loading_strategy"] = "transfer_learning"

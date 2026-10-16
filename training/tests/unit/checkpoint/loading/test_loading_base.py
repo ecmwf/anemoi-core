@@ -20,6 +20,7 @@ import torch.nn as nn
 
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.loading.base import LoadingStrategy
+from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
 
 if TYPE_CHECKING:
     from typing import Any
@@ -102,18 +103,14 @@ class TestExtractStateDict:
 
 
 # ---------------------------------------------------------------------------
-# _preserve_anemoi_metadata
+# preserve_anemoi_metadata
 # ---------------------------------------------------------------------------
 
 
 class TestPreserveAnemoiMetadata:
-    """Tests for LoadingStrategy._preserve_anemoi_metadata."""
+    """Tests for preserve_anemoi_metadata."""
 
-    def test_sets_attribute_when_data_indices_present(
-        self,
-        loader: _StubLoader,
-        simple_model: nn.Module,
-    ) -> None:
+    def test_sets_attribute_when_data_indices_present(self, simple_model: nn.Module) -> None:
         """_ckpt_model_name_to_index should be set on the model when checkpoint has data_indices."""
         index_collection = Mock()
         index_collection.name_to_index = {"temperature": 0, "pressure": 1}
@@ -128,36 +125,28 @@ class TestPreserveAnemoiMetadata:
         # Fresh model should NOT have the attribute
         assert not hasattr(simple_model, "_ckpt_model_name_to_index")
 
-        loader._preserve_anemoi_metadata(simple_model, checkpoint_data)
+        preserve_anemoi_metadata(simple_model, checkpoint_data)
 
         # After restoration, it should be set
         assert hasattr(simple_model, "_ckpt_model_name_to_index")
         assert simple_model._ckpt_model_name_to_index == {"era5": {"temperature": 0, "pressure": 1}}
 
-    def test_skips_gracefully_when_no_data_indices(
-        self,
-        loader: _StubLoader,
-        simple_model: nn.Module,
-    ) -> None:
+    def test_skips_gracefully_when_no_data_indices(self, simple_model: nn.Module) -> None:
         """Should not raise or set attribute when hyper_parameters lacks data_indices."""
         checkpoint_data: dict[str, Any] = {
             "state_dict": simple_model.state_dict(),
             "hyper_parameters": {"lr": 1e-4},
         }
 
-        loader._preserve_anemoi_metadata(simple_model, checkpoint_data)
+        preserve_anemoi_metadata(simple_model, checkpoint_data)
 
         assert not hasattr(simple_model, "_ckpt_model_name_to_index")
 
-    def test_skips_when_no_hyper_parameters(
-        self,
-        loader: _StubLoader,
-        simple_model: nn.Module,
-    ) -> None:
+    def test_skips_when_no_hyper_parameters(self, simple_model: nn.Module) -> None:
         """Should not raise when checkpoint has no hyper_parameters at all."""
         checkpoint_data: dict[str, Any] = {"state_dict": simple_model.state_dict()}
 
-        loader._preserve_anemoi_metadata(simple_model, checkpoint_data)
+        preserve_anemoi_metadata(simple_model, checkpoint_data)
 
         assert not hasattr(simple_model, "_ckpt_model_name_to_index")
 

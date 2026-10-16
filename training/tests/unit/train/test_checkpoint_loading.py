@@ -24,6 +24,7 @@ from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import reject_unsupported_warm_start
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+from anemoi.training.checkpoint.runner import checkpoint_pipeline_configured
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
@@ -687,14 +688,11 @@ def test_validate_transfer_learning_units_dataset_not_in_checkpoint() -> None:
 
 
 def test_checkpoint_pipeline_configured_detects_training_checkpoint() -> None:
-    """``_checkpoint_pipeline_configured`` is True only when training.checkpoint is set."""
-    configured = SimpleNamespace(
-        config=OmegaConf.create({"training": {"checkpoint": {"loading": {"_target_": "x"}}}}),
-    )
-    assert AnemoiTrainer._checkpoint_pipeline_configured(configured) is True
+    """``checkpoint_pipeline_configured`` is True only when training.checkpoint is set."""
+    configured = OmegaConf.create({"training": {"checkpoint": {"loading": {"_target_": "x"}}}})
+    assert checkpoint_pipeline_configured(configured) is True
 
-    absent = SimpleNamespace(config=OmegaConf.create({"training": {}}))
-    assert AnemoiTrainer._checkpoint_pipeline_configured(absent) is False
+    assert checkpoint_pipeline_configured(OmegaConf.create({"training": {}})) is False
 
 
 def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> None:
@@ -860,11 +858,8 @@ def test_validate_transfer_learning_units_ignore_units_option() -> None:
 
 def test_checkpoint_pipeline_configured_false_when_keyless() -> None:
     """No ``training.checkpoint`` key (or an explicit null) is not pipeline-configured."""
-    empty = SimpleNamespace(config=OmegaConf.create({"training": {}}))
-    assert AnemoiTrainer._checkpoint_pipeline_configured(empty) is False
-
-    explicit_none = SimpleNamespace(config=OmegaConf.create({"training": {"checkpoint": None}}))
-    assert AnemoiTrainer._checkpoint_pipeline_configured(explicit_none) is False
+    assert checkpoint_pipeline_configured(OmegaConf.create({"training": {}})) is False
+    assert checkpoint_pipeline_configured(OmegaConf.create({"training": {"checkpoint": None}})) is False
 
 
 def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -888,8 +883,6 @@ def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pyte
         datamodule=SimpleNamespace(statistics={}, statistics_tendencies={}),
         supporting_arrays=object(),
     )
-    trainer._checkpoint_pipeline_configured = AnemoiTrainer._checkpoint_pipeline_configured.__get__(trainer)
-
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         result = AnemoiTrainer.model.func(trainer)

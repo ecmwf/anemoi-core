@@ -358,6 +358,11 @@ Local files
 ``path`` understands ``~`` (your home directory) and follows symbolic links. If
 the file is not there you get a clear ``CheckpointNotFoundError``.
 
+A relative ``path`` is resolved against the directory you launched the training
+command from. The shipped config does not set ``hydra.job.chdir``, so Hydra
+leaves the working directory alone. Prefer an absolute path: a job script that
+``cd``\ s elsewhere before launching would otherwise look somewhere else.
+
 .. tip::
 
    ``path`` is optional. If you omit it, ``LocalSource`` uses a path that an

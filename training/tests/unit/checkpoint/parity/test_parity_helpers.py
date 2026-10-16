@@ -23,7 +23,6 @@ import logging
 import sys
 import types
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 
 import pytest
 import torch
@@ -32,6 +31,7 @@ from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.loading import base as loading_base
+from anemoi.training.checkpoint.loading import strategies
 from anemoi.training.checkpoint.loading.base import apply_checkpoint_format_migrations
 from anemoi.training.checkpoint.loading.base import apply_trainable_edge_perm_migration
 from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
@@ -39,9 +39,6 @@ from anemoi.training.checkpoint.loading.base import refresh_checkpoint_processor
 from anemoi.training.checkpoint.loading.base import warn_on_hparams_divergence
 from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
-
-if TYPE_CHECKING:
-    from anemoi.training.checkpoint.loading.base import LoadingStrategy
 
 
 class _MiniModel(nn.Module):
@@ -211,15 +208,15 @@ def test_extract_variables_metadata_none_checkpoint_is_a_safe_noop() -> None:
 
 
 def _install_order_recorders(
-    loader: LoadingStrategy,
     model: nn.Module,
     calls: list[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Replace the shared correction functions, the metadata wrappers and the model load with order recorders.
+    """Replace the shared correction functions, the metadata steps and the model load with order recorders.
 
-    The three corrections are recorded at module level (``apply_checkpoint_corrections``
-    calls them by name); the metadata steps are recorded on the loader. The real
+    Both the corrections and the metadata steps are module-level functions, patched
+    where each is looked up: the corrections in ``loading.base`` (``apply_checkpoint_corrections``
+    calls them by name), the metadata steps in ``loading.strategies``. The real
     ``_extract_state_dict`` and ``_mark_weights_loaded`` stay live so the strategy still
     performs an actual (recorded) ``load_state_dict`` call.
     """
@@ -236,17 +233,17 @@ def _install_order_recorders(
 
         monkeypatch.setattr(loading_base, function_name, _correction_recorder)
 
-    metadata_wrappers = {
-        "_warn_on_hparams_divergence": "warn",
-        "_preserve_anemoi_metadata": "preserve",
-        "_extract_variables_metadata": "extract",
+    metadata_steps = {
+        "warn_on_hparams_divergence": "warn",
+        "preserve_anemoi_metadata": "preserve",
+        "extract_checkpoint_variables_metadata": "extract",
     }
-    for method_name, label in metadata_wrappers.items():
+    for function_name, label in metadata_steps.items():
 
         def _recorder(*_args: object, _label: str = label, **_kwargs: object) -> None:
             calls.append(_label)
 
-        setattr(loader, method_name, _recorder)
+        monkeypatch.setattr(strategies, function_name, _recorder)
 
     original_load = model.load_state_dict
 
@@ -269,7 +266,7 @@ async def test_weights_only_invokes_shared_parity_functions_in_order(monkeypatch
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": model.state_dict()})
     loader = WeightsOnlyLoader()
     calls: list[str] = []
-    _install_order_recorders(loader, model, calls, monkeypatch)
+    _install_order_recorders(model, calls, monkeypatch)
 
     await loader.process(context)
 
@@ -283,13 +280,13 @@ async def test_transfer_learning_invokes_shared_parity_functions_without_hparams
     """TransferLearningLoader runs the same corrections but omits the hparams warning.
 
     This is the corrected sequence for the aspect: it is NOT identical to
-    WeightsOnlyLoader because ``_warn_on_hparams_divergence`` is not invoked here.
+    WeightsOnlyLoader because ``warn_on_hparams_divergence`` is not invoked here.
     """
     model = _MiniModel()
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": model.state_dict()})
     loader = TransferLearningLoader(skip_mismatched=True)
     calls: list[str] = []
-    _install_order_recorders(loader, model, calls, monkeypatch)
+    _install_order_recorders(model, calls, monkeypatch)
 
     await loader.process(context)
 

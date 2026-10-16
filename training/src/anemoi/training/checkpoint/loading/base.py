@@ -9,31 +9,17 @@
 
 """Abstract base class for checkpoint loading strategies.
 
-Loading strategies are responsible for applying checkpoint data to a
-model. Different strategies handle different use cases: warm start
-(resume training), cold start (fresh optimiser), transfer learning
-(partial weight loading), and weights-only loading.
+A loading strategy applies checkpoint data to a model: warm start (resume),
+cold start (fresh optimiser), transfer learning (partial load), weights-only.
 
 Wiring to the Lightning trainer
 -------------------------------
-This module defines the strategy contract. ``AnemoiTrainer.model`` builds and
-runs the pipeline at model-construction time, so a configured
-``training.checkpoint`` loading strategy owns weight loading. For the
-weights-only, transfer-learning and cold-start paths Lightning never sees the
-checkpoint (its ``ckpt_path`` restore is suppressed), so each strategy must
-itself apply every correction that ``BaseTrainingModule.on_load_checkpoint``
-would have applied — otherwise the loaded state dict would silently differ from
-what a Lightning resume produces.
-
-Those corrections are one function, :func:`apply_checkpoint_corrections`, with
-one fixed order: format migrations, the trainable-edge-permutation migration,
-then the processor-statistics refresh. The pipeline strategies call it on the
-dict a source produced (via :meth:`LoadingStrategy._apply_corrections`);
-``BaseTrainingModule.on_load_checkpoint`` calls it on the dict Lightning is
-about to load. The metadata steps (:func:`preserve_anemoi_metadata`,
-:func:`extract_checkpoint_variables_metadata`) and the weights-only hparams
-check (:func:`warn_on_hparams_divergence`) stay separate because they read the
-checkpoint rather than change it.
+On the weights-only, transfer-learning and cold-start paths Lightning never sees
+the checkpoint (``ckpt_path`` is suppressed) so the strategy must itself apply
+every correction ``BaseTrainingModule.on_load_checkpoint`` would have applied,
+or the loaded state dict silently differs from what a resume produces. Those
+corrections are one function with one fixed order,
+:func:`apply_checkpoint_corrections`, called by both.
 
 Example
 -------
@@ -65,15 +51,9 @@ LOGGER = logging.getLogger(__name__)
 class LoadingStrategy(PipelineStage):
     """Abstract base class for all checkpoint loading strategies.
 
-    Loading strategies form the orchestration layer of the checkpoint
-    pipeline. They receive a context with loaded checkpoint data and
-    apply it to the model according to a specific strategy.
-
-    Subclasses must implement the ``process`` method. Several convenience
-    methods are provided for common operations:
+    Subclasses implement ``process``, with some helpers.
 
     - ``_extract_state_dict``: Extract model state dict from checkpoint data
-    - ``_preserve_anemoi_metadata``: Preserve Anemoi-specific model metadata
     - ``_mark_weights_loaded``: Flag the model as having loaded weights
 
     Examples
@@ -82,7 +62,7 @@ class LoadingStrategy(PipelineStage):
     ...     async def process(self, context: CheckpointContext) -> CheckpointContext:
     ...         state_dict = self._extract_state_dict(context)
     ...         # ... filter and apply compatible weights ...
-    ...         self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
+    ...         preserve_anemoi_metadata(context.model, context.checkpoint_data)
     ...         self._mark_weights_loaded(context.model)
     ...         return context
     """
@@ -110,8 +90,8 @@ class LoadingStrategy(PipelineStage):
         Parameters
         ----------
         context : CheckpointContext
-            Pipeline context with ``checkpoint_data`` populated by
-            a prior source stage and ``model`` set to the target model.
+            Pipeline context with ``checkpoint_data`` populated by a prior source
+            stage and ``model`` set to the target model.
 
         Returns
         -------
@@ -121,34 +101,33 @@ class LoadingStrategy(PipelineStage):
         Raises
         ------
         CheckpointLoadError
-            If weights cannot be loaded into the model
+            If weights cannot be loaded into the model.
         CheckpointIncompatibleError
-            If the checkpoint is incompatible with the model architecture
+            If the checkpoint is incompatible with the model architecture.
         """
 
     def _extract_state_dict(self, context: CheckpointContext) -> dict[str, Any]:
-        """Extract the model state dict from checkpoint data in context.
+        """Extract the model state dict from ``context.checkpoint_data``.
 
-        Delegates to :func:`anemoi.training.checkpoint.formats.extract_state_dict`
-        which handles various checkpoint structures (Lightning, PyTorch,
-        raw state dicts).
+        Delegates to :func:`anemoi.training.checkpoint.formats.extract_state_dict`,
+        which handles the Lightning, PyTorch and raw state dict shapes.
 
         Parameters
         ----------
         context : CheckpointContext
-            Pipeline context with ``checkpoint_data`` populated
+            Pipeline context with ``checkpoint_data`` populated.
 
         Returns
         -------
         dict[str, Any]
-            Extracted model state dictionary
+            Extracted model state dictionary.
 
         Raises
         ------
         CheckpointLoadError
             If the source stage deferred its error to rank 0 on this rank.
         CheckpointValidationError
-            If no valid state dict can be found in checkpoint data
+            If no valid state dict can be found in checkpoint data.
         """
         from anemoi.training.checkpoint.formats import extract_state_dict
 
@@ -194,17 +173,6 @@ class LoadingStrategy(PipelineStage):
         LOGGER.error(msg)
         raise CheckpointLoadError(context.checkpoint_path or "<deferred to rank 0>", RuntimeError(msg))
 
-    def _preserve_anemoi_metadata(
-        self,
-        model: nn.Module,
-        checkpoint_data: dict[str, Any],
-    ) -> None:
-        """Restore Anemoi metadata onto the model.
-
-        Thin wrapper over :func:`preserve_anemoi_metadata`, which ``BaseTrainingModule.on_load_checkpoint`` also calls.
-        """
-        preserve_anemoi_metadata(model, checkpoint_data)
-
     def _apply_corrections(self, context: CheckpointContext) -> None:
         """Run :func:`apply_checkpoint_corrections` on ``context.checkpoint_data``.
 
@@ -223,49 +191,25 @@ class LoadingStrategy(PipelineStage):
         )
 
     def _mark_weights_loaded(self, model: nn.Module) -> None:
-        """Mark the model as having successfully loaded weights.
+        """Set ``model.weights_initialized = True``.
 
-        Sets ``model.weights_initialized = True``. Downstream checks read
-        this attribute to detect a source stage that ran without any
-        loading strategy applying weights. Two readers treat it differently:
-
+        This is how a source stage that ran without any strategy applying weights
+        is detected.
         - ``CheckpointPipeline._verify_weights_loaded`` treats it as a
-          **gate**: if a source stage was configured but the flag is False,
-          it raises ``CheckpointLoadError`` rather than train on random
-          weights.
-        - ``validation.validate_pipeline_health`` treats it as a health
-          **finding** (collected into the issues list).
-
-        Both readers exempt a resume, where the weights arrive at
-        ``Trainer.fit(ckpt_path=)`` and no strategy runs. The trainer also reads
-        the flag to decide whether the transfer-learning validators have a loaded
-        checkpoint to compare against.
-
-        A strategy that forgets to call ``_mark_weights_loaded`` after a
-        source has run will therefore trip the pipeline gate. Tests that
-        construct a context without a real source stage are unaffected.
+        gate and raises rather than train on random weights.
+        - ``validation.validate_pipeline_health`` treats it as a health finding.
+        The trainer reads it to decide whether the transfer-learning validators have
+        anything to compare against. All three exempt a resume, where the weights
+        arrive at ``Trainer.fit(ckpt_path=)``. A strategy that forgets to call this
+        therefore trips the gate.
 
         Parameters
         ----------
         model : nn.Module
-            Model to mark as weight-loaded
+            Model to mark as weight-loaded.
         """
         model.weights_initialized = True
         LOGGER.debug("Marked model weights as initialized")
-
-    def _extract_variables_metadata(self, model: nn.Module, checkpoint_data: dict[str, Any]) -> None:
-        """Populate ``model._ckpt_variables_metadata`` from the checkpoint.
-
-        Thin wrapper over :func:`extract_checkpoint_variables_metadata`.
-        """
-        extract_checkpoint_variables_metadata(model, checkpoint_data)
-
-    def _warn_on_hparams_divergence(self, context: CheckpointContext) -> None:
-        """Warn when the checkpoint's stored hyper-parameters differ from the run config.
-
-        Thin wrapper over :func:`warn_on_hparams_divergence`.
-        """
-        warn_on_hparams_divergence(context.checkpoint_data, context.config)
 
 
 # Candidate import paths for the chunking_fix migration. Try the friendly
@@ -330,16 +274,14 @@ def _has_migration_ledger(checkpoint: dict[str, Any]) -> bool:
 def _outstanding_migrations(migrator: Any, checkpoint: dict[str, Any]) -> list[str] | None:
     """Names of the migrations this checkpoint is missing, in application order.
 
-    ``Migrator._resolve_migrations`` diffs the checkpoint's ledger against the
-    newest compatibility group. It reads the ledger only: no file is touched and
-    the checkpoint is not mutated.
+    ``Migrator._resolve_migrations`` diffs the ledger against the newest
+    compatibility group, reading only: no file is touched, nothing is mutated.
 
-    This has to be asked of the *whole* ledger, not of one migration by name.
+    Asked of the *whole* ledger, never of one migration by name:
     ``register_migrations`` stamps every migration the writing version knew, not
-    the ones it applied, so any checkpoint written after a given migration
-    shipped records it. Keying on a single name (for instance ``chunking_fix``)
-    would report "up to date" for every checkpoint written since that migration
-    existed, and every newer migration would be silently skipped.
+    the ones it applied, so keying on a single name would report "up to date" for
+    every checkpoint written since that migration shipped and skip all the newer
+    ones in silence.
 
     Parameters
     ----------
@@ -427,11 +369,10 @@ def _chunking_fix_applicable(checkpoint: dict[str, Any]) -> bool:
     """Whether the checkpoint exposes the processor geometry ``chunking_fix`` reads.
 
     The migration indexes ``config.model.processor.num_layers`` / ``num_chunks``
-    and divides by the latter. Processors that do not declare both — notably
-    ``NoOpProcessor`` (autoencoders) and ``PointWiseMLPProcessor`` — are simply not
-    candidates. Screening for the geometry up front keeps "not applicable" separate
-    from "the migration is broken", so a genuine migration bug still surfaces
-    instead of being absorbed by a broad ``except``.
+    and divides by the latter, so a processor declaring neither (``NoOpProcessor``,
+    ``PointWiseMLPProcessor``) is not a candidate. Screening up front keeps "not
+    applicable" distinct from "the migration is broken", which a broad ``except``
+    would absorb.
     """
     try:
         processor = checkpoint["hyper_parameters"]["config"].model.processor
@@ -500,14 +441,10 @@ def _inject_model_weights(
 
 
 # ---------------------------------------------------------------------------
-# Shared Lightning-parity functions.
-#
-# These context-free functions are the single home for the checkpoint-load
-# corrections. :func:`apply_checkpoint_corrections` composes the three that
-# change the checkpoint; both the pipeline loading strategies (via
-# ``LoadingStrategy._apply_corrections``) and the trainer's Lightning hook
-# (``BaseTrainingModule.on_load_checkpoint``) call it, so the algorithm and its
-# order live in exactly one place.
+# Shared Lightning-parity functions: the single home for the checkpoint-load
+# corrections. Both the pipeline loading strategies and the trainer's
+# ``on_load_checkpoint`` hook call apply_checkpoint_corrections, so the algorithm
+# and its order live in exactly one place.
 # ---------------------------------------------------------------------------
 
 

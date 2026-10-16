@@ -79,25 +79,18 @@ RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
 
 
 def is_rank_zero() -> bool:
-    """Best-effort rank-0 detection without coupling to Lightning.
+    """Whether this process is rank 0, using Lightning's own rank detection.
 
-    Reads the launcher rank variables in ``lightning_fabric``'s priority order
-    (:data:`RANK_ENV_VARS`). A process with no rank variable set (single-process /
-    unit test) is treated as rank 0, and a malformed value — non-integer or
-    negative — is treated conservatively as rank 0 so a missing-checkpoint error
-    is never silently swallowed.
+    No rank variable set (single process, unit test) counts as rank 0, as does a
+    malformed one, so a missing-checkpoint error is never silently swallowed.
     """
-    import os
+    from lightning_fabric.utilities.rank_zero import _get_rank
 
-    for var in RANK_ENV_VARS:
-        value = os.environ.get(var)
-        if value is not None and value.strip():
-            try:
-                parsed = int(value)
-            except ValueError:
-                return True
-            return parsed <= 0
-    return True
+    try:
+        rank = _get_rank()
+    except ValueError:  # a launcher variable that is not an integer
+        return True
+    return rank is None or rank <= 0
 
 
 def source_class_from_config(source_cfg: Any) -> type[CheckpointSource] | None:
@@ -143,7 +136,12 @@ def source_class_from_config(source_cfg: Any) -> type[CheckpointSource] | None:
 
 
 def remove_temporary_file(path: Path) -> None:
-    """Delete a download a source kept on disk; a file that is already gone is fine."""
+    """Delete a download a source kept on disk.
+
+    Never raises: the path is per-process (a :func:`tempfile.NamedTemporaryFile`),
+    but this also runs from ``atexit``, so a file already gone is fine and an
+    ``OSError`` is only warned about.
+    """
     try:
         path.unlink(missing_ok=True)
     except OSError as exc:

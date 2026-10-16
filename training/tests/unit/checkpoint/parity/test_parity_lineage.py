@@ -59,7 +59,7 @@ def _paths_namespace(
     checkpoints_root: str,
     plots: str,
 ) -> SimpleNamespace:
-    """Minimal ``self`` for ``AnemoiTrainer._update_paths`` (reads run_id + _run_identity)."""
+    """Minimal ``self`` for ``AnemoiTrainer._update_paths`` (reads run_id + the run-identity accessors)."""
     config = OmegaConf.create(
         {
             "system": {"output": {"checkpoints": {"root": checkpoints_root}, "plots": plots}},
@@ -70,6 +70,8 @@ def _paths_namespace(
         run_id=run_id,
         parent_run_server2server=parent_run_server2server,
         _run_identity=(run_id, fork_run_id),
+        _resume_run_id=run_id,
+        _fork_run_id=fork_run_id,
         config=config,
     )
 
@@ -144,6 +146,8 @@ def _dry_run_namespace(
         logger=SimpleNamespace(logger_name="mlflow"),
         mlflow_logger=SimpleNamespace(_parent_dry_run=parent_dry_run),
         _run_identity=(None, fork_run_id),
+        _resume_run_id=None,
+        _fork_run_id=fork_run_id,
         config=config,
     )
 
@@ -434,14 +438,14 @@ def test_run_identity_noop_then_uuid_fallthrough() -> None:
     # No RunIdSource configured -> no run identity, and run_id falls through to uuid4.
     assert run_identity_from_config(OmegaConf.create({"training": {}})) == (None, None)
 
-    ns = SimpleNamespace(_run_identity=(None, None), logger=None)
+    ns = SimpleNamespace(_run_identity=(None, None), _resume_run_id=None, _fork_run_id=None, logger=None)
     run_id = AnemoiTrainer.run_id.func(ns)
     assert len(run_id) == 36
     assert str(uuid.UUID(run_id)) == run_id
 
 
 def test_run_id_is_uuid_for_keyless_run() -> None:
-    ns = SimpleNamespace(_run_identity=(None, None), logger=None)
+    ns = SimpleNamespace(_run_identity=(None, None), _resume_run_id=None, _fork_run_id=None, logger=None)
 
     run_id = AnemoiTrainer.run_id.func(ns)
 
