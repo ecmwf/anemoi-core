@@ -209,7 +209,7 @@ accuracy tests.
 Workflow tests maintain functionality in key use-cases for Anemoi, e.g. ensuring that
 the interface to train a model has not changed. These tests can be fairly cheap, taking
 order minutes, and therefore cover a broad spectrum of different use-cases. As with
-system-level tests, this creates opportunities for organisation-specific tests. For 
+system-level tests, this creates opportunities for organisation-specific tests. For
 8 of 12 ECMWF/TAC/58(26)11
 example, one of the workflow tests is an example of training AICON, contributed by
 DWD.
@@ -241,7 +241,7 @@ Unit tests being cheap, are run at a high frequency, typically on every contribu
 active pull request into Anemoi. Integration tests, with a larger computational footprint
 are run before code is merged into Anemoi and are run before significant code
 contributions and every night. System level tests, with a yet larger footprint, are also
-run every night, currently using the latest version of each Anemoi package. 
+run every night, currently using the latest version of each Anemoi package.
 ECMWF/TAC/58(26)11 9 of 12
 Figure 2: Anemoi testing has evolved into a layered framework that combines frequent unit checks, broader
 integration tests and nightly system-level workflows. This organisation improves confidence before code is merged,
@@ -268,7 +268,7 @@ example enabling an additional decoder to fine-tune a forecasting model to outpu
 more variables or higher resolution observation data. This also includes the number of
 time-slices that models can ingest and output, a development spearheaded by RMI.
 Anemoi now features a range of flavours of Continuous Ranked Probability Score
-(CRPS) optimisation variations, e.g. minimising the CRPS in a spectral space or across 
+(CRPS) optimisation variations, e.g. minimising the CRPS in a spectral space or across
 10 of 12 ECMWF/TAC/58(26)11
 multiple length scales, and different diffusion variants. This enables the community to
 explore together the optimal approaches for high resolution probabilistic modelling.
@@ -351,7 +351,7 @@ emerging six-monthly review meeting is a first step; the value of a wider period
 community forum, open to operational services, research organisations and other
 contributors, could also be considered as the ecosystem develops.
 Key to Anemoi’s continued success will be the balance between incorporating and
-enabling scientific advances without compromising operational reliability. The current 
+enabling scientific advances without compromising operational reliability. The current
 12 of 12 ECMWF/TAC/58(26)11
 developments in testing and governance aim to support this goal. The next phase
 should therefore clarify the respective responsibilities for strategic direction, technical
@@ -369,11 +369,11 @@ The Committee is invited to comment on the work described in this paper
 
 I think the balance between rapid adoption and operational resilience is not a contradiction, I rather think the two things go hand in hand - a flexible framework is usually built on stable and reliable interfaces, something that we don’t see much in Anemoi
 
-The Anemoi Trainer orchestrates training, it loads training method, task and model and runs the training. But there are no clearly defined interfaces - between these components. Which means that adding new features becomes tedious and error prone. Whereas had we had stable interfaces it would be easy to implement new models/training methods that would slot into the AnemoiTrainer. The issue that I have is that instead of working on building a stable interface where developing new features would be easy, instead the effort is focused on brute forcing new features that are implemented without interfaces. 
+The Anemoi Trainer orchestrates training, it loads training method, task and model and runs the training. But there are no clearly defined interfaces - between these components. Which means that adding new features becomes tedious and error prone. Whereas had we had stable interfaces it would be easy to implement new models/training methods that would slot into the AnemoiTrainer. The issue that I have is that instead of working on building a stable interface where developing new features would be easy, instead the effort is focused on brute forcing new features that are implemented without interfaces.
 
-The model interface has a lot of functionality and it constructs the model, and the model has to be very closely tied to the existing anemoi model. Had we instead had an interface without any coupling to the model, adopting to new advances in the field would be easier and it would be easier to experiment with new ideas. And at the same time a reliable interface is almost synonymous with a stable system. I think ECMWFs primary role should be exposing interfaces for the anemoi framework and let the users implement the functionality they want rather than implementing the features for them. 
+The model interface has a lot of functionality and it constructs the model, and the model has to be very closely tied to the existing anemoi model. Had we instead had an interface without any coupling to the model, adopting to new advances in the field would be easier and it would be easier to experiment with new ideas. And at the same time a reliable interface is almost synonymous with a stable system. I think ECMWFs primary role should be exposing interfaces for the anemoi framework and let the users implement the functionality they want rather than implementing the features for them.
 
-This is also what they need to do, if they want anemoi to live up to the second paragraph in 2. Who is anemoi for. One clear example of this is their consideration for deprecating the graph models because they were too hard to maintain. With an interface between model and framework the model should be trivial to maintain. 
+This is also what they need to do, if they want anemoi to live up to the second paragraph in 2. Who is anemoi for. One clear example of this is their consideration for deprecating the graph models because they were too hard to maintain. With an interface between model and framework the model should be trivial to maintain.
 
 As they say in the paper they have done a very very very good job in optimising for speed in anemoi. And I think the TRUE conflict is actually not between stability / flexibility but rather speed / flexibility as there might be many of the optimizations that are rather bespoke.
 
@@ -419,4 +419,3 @@ NOTES ON THE ORIGINAL COMMENT
 - Points 2 and 3 are the strongest but are only asserted. One concrete, checkable example (e.g. the autoencoder being a config combination of task, model and graph with nothing validating it, or the abstract task base class defining no abstract methods) would make the argument much harder to dismiss.
 
 - Point 6 is new: the original makes a critique but no request. Since the paper invites comments on v1 readiness criteria, tying the critique to a concrete, actionable ask makes it more likely to be acted on.
-

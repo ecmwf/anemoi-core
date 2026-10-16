@@ -47,7 +47,8 @@ class TestHierarchicalEmbedder:
     def test_row_chunking_matches_unchunked_result(self):
         """Stage 1 splits rows into chunks bounded by ClsSelfAttentionPool._MAX_CHUNK // n_groups
         - forcing a tiny chunk size (so a small batch still spans several chunks) must give the
-        same result as the default, effectively unchunked size."""
+        same result as the default, effectively unchunked size.
+        """
         torch.manual_seed(0)
         embedder = HierarchicalEmbedder(FEATURE_NAMES, hidden_dim=7, d_model=8, nhead=2)
         embedder.eval()

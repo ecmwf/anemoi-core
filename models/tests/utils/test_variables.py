@@ -20,14 +20,16 @@ class TestParseFeatureName:
     def test_near_surface_diagnostic_has_no_level(self):
         """'10u'/'2t' are metres-above-ground diagnostics, not a pressure-level position -
         must not collide with an unrelated pressure level sharing the same number (e.g. a
-        hypothetical 't_2' would otherwise be grouped with '2t' as if both were 'level 2')."""
+        hypothetical 't_2' would otherwise be grouped with '2t' as if both were 'level 2').
+        """
         assert parse_feature_name("10u") == ("u", 0, False)
         assert parse_feature_name("2t") == ("t", 0, False)
 
     def test_variable_only_unaffected_by_has_level(self):
         """variable_only=True groups by physical variable regardless of level type - used by
         JointVariableNormalizer, which intentionally pools statistics across '2t' and 't_850'
-        as the same physical variable 't'."""
+        as the same physical variable 't'.
+        """
         assert parse_feature_name("10u", variable_only=True) == "u"
         assert parse_feature_name("2t", variable_only=True) == "t"
         assert parse_feature_name("q_850", variable_only=True) == "q"

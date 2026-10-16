@@ -18,7 +18,7 @@ for param in variables:
     token = concat(value[param], value_encoder(value[param]), embedding(param), level_encoding, frame_id)
     tokens.append(token)
 
-tokens_proj = Linear(tokens) 
+tokens_proj = Linear(tokens)
 
 # learned_query is a learned parameter, not built from the input
 node_embedding = MHA(key=tokens_proj, value=tokens_proj, query=learned_query)

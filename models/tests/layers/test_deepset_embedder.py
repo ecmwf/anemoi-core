@@ -65,7 +65,8 @@ class TestDeepSetEmbedder:
 
     def test_forward_identical_frames_give_identical_output(self):
         """No frame_idx by design: identical raw values at different timesteps must tokenize
-        identically (unlike PMAEmbedder, which deliberately distinguishes them)."""
+        identically (unlike PMAEmbedder, which deliberately distinguishes them).
+        """
         d_model = 16
         embedder = DeepSetEmbedder(FEATURE_NAMES, dim=8, d_model=d_model)
         node_attributes_data = torch.randn(1, 2)

@@ -9,8 +9,8 @@
 
 import torch
 
-from anemoi.models.layers.embedder import PMAEmbedder
 from anemoi.models.layers.embedder import FlattenInputTransform
+from anemoi.models.layers.embedder import PMAEmbedder
 
 FEATURE_NAMES = ["2t", "q_850", "q_500", "lsm"]
 

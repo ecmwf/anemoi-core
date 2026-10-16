@@ -44,7 +44,8 @@ class TestClsSelfAttentionPool:
     def test_padding_mask_matches_unpadded_result(self):
         """A padded, masked row must give the same result as running its real tokens alone -
         the padding must have zero effect, not just zero attention weight in isolation (the
-        residual's mean has to exclude it too)."""
+        residual's mean has to exclude it too).
+        """
         torch.manual_seed(0)
         pool = ClsSelfAttentionPool(dim=8, nhead=2)
         pool.eval()
@@ -63,7 +64,8 @@ class TestClsSelfAttentionPool:
     def test_padding_mask_batched_matches_per_row_unpadded(self):
         """Batching several differently-sized rows together (via padding) must give the same
         per-row result as running each row's real tokens through unbatched - the scenario
-        HierarchicalEmbedder actually uses this for (levels with different variable counts)."""
+        HierarchicalEmbedder actually uses this for (levels with different variable counts).
+        """
         torch.manual_seed(1)
         pool = ClsSelfAttentionPool(dim=8, nhead=2)
         pool.eval()
