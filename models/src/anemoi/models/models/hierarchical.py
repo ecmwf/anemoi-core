@@ -30,6 +30,8 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
     """Message passing hierarchical graph neural network."""
 
+    supports_multiple_hidden_meshes = False
+
     def _build_networks(self, model_config):
         """Builds the model components."""
         # Encoder data -> hidden

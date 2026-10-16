@@ -1,0 +1,88 @@
+---
+defaults:
+  - scalers: multidomain
+  - training_loss: multidomain
+  - optimization: default
+  - weight_averaging: null
+
+run_id: null
+fork_run_id: null
+load_weights_only: False
+update_ds_stats_on_ckpt_load:
+  states: False
+  tendencies: True
+
+transfer_learning: False
+
+check_variables_compatibility:
+  ignore_units: False
+  ignore_processing_period: False
+
+deterministic: False
+precision: 16-mixed
+accum_grad_batches: 1
+
+num_sanity_val_steps: 6
+
+gradient_clip:
+  val: 32.
+  algorithm: value
+
+method:
+  _target_: anemoi.training.train.methods.SingleTraining
+
+strategy:
+  _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+  num_gpus_per_model: ${system.hardware.num_gpus_per_model}
+  read_group_size: ${dataloader.read_group_size}
+  use_local_synchronization: True
+  broadcast_buffers: False
+
+loss_gradient_scaling: False
+
+validation_metrics:
+  datasets:
+    sg_1:
+      mse:
+        _target_: anemoi.training.losses.MSELoss
+        scalers: ["node_weights", "time_steps"]
+        ignore_nans: True
+      mse_inside_lam_contribution:
+        _target_: anemoi.training.losses.MSELoss
+        scalers: ["limited_area_mask", "node_weights", "time_steps"]
+        ignore_nans: True
+      mse_outside_lam_contribution:
+        _target_: anemoi.training.losses.MSELoss
+        scalers: ["outside_lam_mask", "node_weights", "time_steps"]
+        ignore_nans: True
+      mse_inside_lam:
+        _target_: anemoi.training.losses.MSELoss
+        scalers: ["lam_node_weights", "time_steps"]
+        ignore_nans: True
+
+    sg_2: ${training.validation_metrics.datasets.sg_1}
+
+variable_groups:
+  datasets:
+    sg_1:
+      default: sfc
+      pl:
+        param: [q, t, u, v, w, z]
+
+    sg_2: ${training.variable_groups.datasets.sg_1}
+
+metrics:
+  datasets:
+    sg_1:
+      - z_500
+      - t_850
+      - u_850
+      - v_850
+
+    sg_2: ${training.metrics.datasets.sg_1}
+
+max_epochs: null
+max_steps: 150000
+
+
+submodules_to_freeze: []

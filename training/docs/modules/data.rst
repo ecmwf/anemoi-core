@@ -76,6 +76,32 @@ splits the samples of a distributed sampler into batches with torchdata's
 ``BatchSampler``, which remembers its position so that training can resume
 in the middle of an epoch.
 
+Multi-Domain
+------------
+
+``CrossDatasetLoadingPolicy`` builds one independently indexed
+``MultiDataset`` per domain. Its batch sampler visits domains in round-robin
+order and keeps every batch domain-homogeneous, including when the configured
+batch size is greater than one. The readers may use different grids and date
+ranges.
+
+Select it in the dataloader configuration::
+
+   dataloader:
+     loading_policy:
+       _target_: anemoi.training.data.loading.CrossDatasetLoadingPolicy
+
+Common variables are checked for metadata compatibility when training starts.
+Flat encoder-processor-decoder models can route each domain through its own
+hidden mesh while sharing the encoder, processor, and decoder weights. Each
+mapped hidden node set must have corresponding domain-to-hidden,
+hidden-to-hidden, and hidden-to-domain edges in the graph. Hidden node and edge
+feature dimensions must match because the model weights remain shared.
+
+With the current distributed strategy, domain-specific trainable node and edge
+features must be disabled because the active domain, and therefore the active
+graph-specific parameters, changes between batches.
+
 API Reference
 =============
 

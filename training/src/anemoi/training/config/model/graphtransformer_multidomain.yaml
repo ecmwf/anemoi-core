@@ -1,0 +1,132 @@
+num_channels: 1024
+cpu_offload: False
+
+keep_batch_sharded: True
+
+model:
+  _target_: anemoi.models.models.AnemoiModelEncProcDec
+  hidden_nodes_name:
+    sg_1: sg_1_hidden
+    sg_2: sg_2_hidden
+  latent_skip: True
+
+layer_kernels:
+  LayerNorm:
+    _target_: torch.nn.LayerNorm
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
+  QueryNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+  KeyNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+
+processor:
+  _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+  num_channels: ${model.num_channels}
+  trainable_size: ${model.edge_trainable_parameters.hidden2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  num_layers: 16
+  num_chunks: 4
+  mlp_hidden_ratio: 4
+  mlp_implementation: mlp
+  num_heads: 16
+  qk_norm: False
+  cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+  graph_attention_backend: "triton"
+  edge_pre_mlp: False
+
+encoders:
+  "0":
+    source_datasets: [ "sg_1", "sg_2" ]
+    dataset_fusing_strategy: "not_supported"
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+      num_channels: ${model.num_channels}
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
+      sub_graph_edge_attributes: ${model.attributes.edges}
+      num_chunks: 4
+      mlp_hidden_ratio: 4
+      mlp_implementation: mlp
+      num_heads: 16
+      qk_norm: False
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"
+      edge_pre_mlp: False
+
+
+latent_aggregator:
+  _target_: anemoi.models.layers.aggregator.SumAggregator
+
+decoders:
+  "0":
+    target_datasets: [ "sg_1", "sg_2" ]
+    target_node_features: ["encoded_data"]
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+      num_channels: ${model.num_channels}
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
+      sub_graph_edge_attributes: ${model.attributes.edges}
+      num_chunks: 4
+      mlp_hidden_ratio: 4
+      mlp_implementation: mlp
+      num_heads: 16
+      initialise_data_extractor_zero: False
+      qk_norm: False
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"
+      edge_pre_mlp: False
+
+
+residual:
+  datasets:
+    sg_1:
+      _target_: anemoi.models.layers.residual.SkipConnection
+      step: -1
+    sg_2: ${model.residual.datasets.sg_1}
+
+output_mask:
+  datasets:
+    sg_1:
+      _target_: anemoi.training.utils.masks.NoOutputMask
+    sg_2: ${model.output_mask.datasets.sg_1}
+
+node_trainable_parameters:
+  sg_1: 0
+  sg_1_hidden: 0
+  sg_2: 0
+  sg_2_hidden: 0
+
+edge_trainable_parameters:
+  data2hidden: 0
+  hidden2hidden: 0
+  hidden2data: 0
+compile:
+  - module: anemoi.models.layers.conv.GraphTransformerConv
+
+attributes:
+  edges:
+    - edge_length
+    - edge_dirs
+  nodes: []
+
+# Bounding configuration
+bounding:
+  datasets:
+    sg_1:
+      - _target_: anemoi.models.layers.bounding.ReluBounding
+        variables:
+          - tp
+    sg_2: ${model.bounding.datasets.sg_1}

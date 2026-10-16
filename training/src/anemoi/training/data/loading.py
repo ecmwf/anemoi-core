@@ -9,11 +9,15 @@
 
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Iterator
 
+from torch.utils.data import ConcatDataset
 from torch.utils.data import Dataset
+from torch.utils.data import Sampler
 from torchdata.stateful_dataloader.sampler import BatchSampler
 from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
 
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.utils.time_indices import TimeIndices
@@ -144,3 +148,163 @@ class SynchronizedLoadingPolicy(DataLoadingPolicy):
         # the BatchSampler wrapping it only groups a group's own share into batches, and should
         # always keep its last, possibly incomplete, batch.
         return BatchSampler(sampler, batch_size=batch_size, drop_last=False)
+
+
+class CrossDataset(ConcatDataset):
+    """Concatenated domains exposing the dataset metadata used by Anemoi."""
+
+    def __init__(self, datasets: list[MultiDataset]) -> None:
+        super().__init__(datasets)
+        self.data_readers = {name: reader for dataset in datasets for name, reader in dataset.data_readers.items()}
+
+    @property
+    def statistics(self) -> dict:
+        return {name: reader.statistics for name, reader in self.data_readers.items()}
+
+    @property
+    def metadata(self) -> dict:
+        return {name: reader.metadata for name, reader in self.data_readers.items()}
+
+    @property
+    def supporting_arrays(self) -> dict:
+        return {name: reader.supporting_arrays for name, reader in self.data_readers.items()}
+
+    @property
+    def data(self) -> dict:
+        return {name: reader.data for name, reader in self.data_readers.items()}
+
+    @property
+    def name_to_index(self) -> dict:
+        return {name: reader.name_to_index for name, reader in self.data_readers.items()}
+
+    def set_relative_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
+        for dataset in self.datasets:
+            dataset.set_relative_date_indices(
+                {name: relative_date_indices[name] for name in dataset.data_readers},
+            )
+        self.cumulative_sizes = self.cumsum(self.datasets)
+
+    def set_reader_group_info(self, reader_group_rank: int, shard_sizes: dict[str, ShardSizes]) -> None:
+        for dataset in self.datasets:
+            dataset.set_reader_group_info(reader_group_rank, shard_sizes)
+
+
+class CrossDatasetLoadingPolicy(DataLoadingPolicy):
+    """Each sample comes from exactly one domain; batches are domain-homogeneous."""
+
+    def build_dataset(
+        self,
+        data_readers: dict[str, BaseAnemoiReader],
+        relative_date_indices: dict[str, TimeIndices],
+        *,
+        fake_dataloading: bool = False,
+    ) -> ConcatDataset:
+        domains = [
+            MultiDataset(
+                {name: reader},
+                {name: relative_date_indices[name]},
+                fake_dataloading=fake_dataloading,
+            )
+            for name, reader in data_readers.items()
+        ]
+        return CrossDataset(domains)
+
+    def build_batch_sampler(
+        self,
+        dataset: ConcatDataset,
+        *,
+        num_replicas: int,
+        rank: int,
+        shuffle: bool,
+        seed: int,
+        batch_size: int,
+        drop_last: bool,
+    ) -> "CrossDatasetBatchSampler":
+        return CrossDatasetBatchSampler(
+            dataset,
+            num_replicas=num_replicas,
+            rank=rank,
+            shuffle=shuffle,
+            seed=seed,
+            batch_size=batch_size,
+            drop_last=drop_last,
+        )
+
+
+class CrossDatasetBatchSampler(Sampler[list[int]]):
+    """Round-robin whole, domain-homogeneous batches across independently sampled domains."""
+
+    def __init__(
+        self,
+        dataset: ConcatDataset,
+        *,
+        num_replicas: int,
+        rank: int,
+        shuffle: bool,
+        seed: int,
+        batch_size: int,
+        drop_last: bool,
+    ) -> None:
+        self.batch_size = batch_size
+        self._domain_offsets = [0, *dataset.cumulative_sizes[:-1]]
+        self._domain_samplers = [
+            StatefulDistributedSampler(
+                domain,
+                num_replicas=num_replicas,
+                rank=rank,
+                shuffle=shuffle,
+                seed=seed,
+                drop_last=drop_last,
+            )
+            for domain in dataset.datasets
+        ]
+        self._next_domain = 0
+
+    def __iter__(self) -> Iterator[list[int]]:
+        domain_batches = [
+            iter(BatchSampler(sampler, batch_size=self.batch_size, drop_last=False))
+            for sampler in self._domain_samplers
+        ]
+        active = list(range(len(domain_batches)))
+        while active:
+            position = next(
+                (position for position, index in enumerate(active) if index >= self._next_domain),
+                0,
+            )
+            domain_index = active[position]
+            try:
+                local_batch = next(domain_batches[domain_index])
+            except StopIteration:
+                active.remove(domain_index)
+                continue
+            self._next_domain = active[(position + 1) % len(active)]
+            offset = self._domain_offsets[domain_index]
+            yield [offset + index for index in local_batch]
+
+    def __len__(self) -> int:
+        return sum(-(-len(sampler) // self.batch_size) for sampler in self._domain_samplers)
+
+    def set_epoch(self, epoch: int) -> None:
+        for sampler in self._domain_samplers:
+            sampler.set_epoch(epoch)
+        self._next_domain = 0
+
+    def state_dict(self) -> dict:
+        return {
+            "domain_samplers": [sampler.state_dict() for sampler in self._domain_samplers],
+            "next_domain": self._next_domain,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        for sampler, sampler_state in zip(
+            self._domain_samplers,
+            state_dict["domain_samplers"],
+            strict=True,
+        ):
+            sampler.load_state_dict(sampler_state)
+        self._next_domain = state_dict["next_domain"]
+
+    @property
+    def sampler(self) -> "CrossDatasetBatchSampler":
+        """Expose the epoch setter under the same interface as torchdata's BatchSampler."""
+        return self
