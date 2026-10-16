@@ -22,7 +22,6 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
 from anemoi.models.migrations import Migrator
-from anemoi.models.preprocessing.imputer import BaseImputer
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 from anemoi.utils.checkpoints import save_metadata
 
@@ -32,14 +31,6 @@ trainable_edge_perm_fix_migration = importlib.import_module(
 ).migrate
 
 LOGGER = logging.getLogger(__name__)
-
-
-def clear_imputer_runtime_state(model: torch.nn.Module) -> None:
-    """Clear imputer state before serialising a model."""
-    for module in model.modules():
-        if isinstance(module, BaseImputer):
-            module.nan_locations = None
-            module.loss_mask_training = None
 
 
 def _filter_state_dict_size_mismatches(
@@ -61,12 +52,12 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
     Parameters
     ----------
     lightning_checkpoint_path : str
-        path to lightning checkpoint
+        path to lightning checkpoint.
 
     Returns
     -------
     tuple[torch.nn.Module, dict]
-        pytorch model, metadata
+        pytorch model, metadata.
 
     """
     from anemoi.training.train.methods.base import BaseTrainingModule
@@ -87,21 +78,20 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
     Parameters
     ----------
     model : torch.nn.Module
-        Pytorch model
+        Pytorch model.
     metadata : dict
-        Anemoi Metadata to inject into checkpoint
+        Anemoi Metadata to inject into checkpoint.
     save_path : Path | str
-        Directory to save anemoi checkpoint
+        Directory to save anemoi checkpoint.
 
     Returns
     -------
     Path
-        Path to saved checkpoint
+        Path to saved checkpoint.
     """
     save_path = Path(save_path)
     inference_filepath = save_path.parent / f"inference-{save_path.name}"
 
-    clear_imputer_runtime_state(model)
     torch.save(model, inference_filepath)
     save_metadata(inference_filepath, metadata)
     return inference_filepath
@@ -118,9 +108,6 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     # apply chunking migration (fails silently otherwise leading to hard to debug issues)
     # this is due to loading with strict=False, planning to make this more robust in the future
     checkpoint = chunking_fix_migration(checkpoint)
-
-    # Refresh processor stats from the current dataset if configured.
-    model._update_checkpoint_state_dict_for_load(checkpoint)
 
     # Filter out layers with size mismatch
     state_dict = checkpoint["state_dict"]
@@ -166,7 +153,7 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str, base_target: s
     Parameters
     ----------
     module : torch.nn.Module
-        Pytorch model
+        Pytorch model.
     target_name : str
         The name of the submodule to freeze. Examples: "encoder", "encoder.lam".
     base_target : str

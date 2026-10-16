@@ -10,6 +10,9 @@
 import pytest
 import torch
 
+from anemoi.models.data import Source
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources import GriddedSource
 from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.kcrps import CRPS
@@ -36,6 +39,18 @@ def _make_crps_loss() -> CRPS:
     return loss
 
 
+def _gridded_source_view(data: torch.Tensor) -> Source:
+    """Wrap a ``(bs, time, ens, latlon, nvar)`` tensor in the source view the losses take."""
+    return GriddedSource(
+        name="data",
+        data=data,
+        variables=[f"variable_{index}" for index in range(data.shape[-1])],
+        statistics={},
+        coordinates=torch.zeros(data.shape[3], 2, device=data.device),
+        layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
+    )
+
+
 # Shapes used throughout: (bs=1, time=3, ens=1, latlon=4, nvar=2)
 BS, TIME, ENS, LATLON, NVAR = 1, 3, 1, 4, 2
 # CRPS requires ens > 1
@@ -49,7 +64,7 @@ def pred() -> torch.Tensor:
 
 @pytest.fixture
 def target() -> torch.Tensor:
-    return torch.rand(BS, TIME, LATLON, NVAR)
+    return torch.rand(BS, TIME, ENS, LATLON, NVAR)
 
 
 # ---------------------------------------------------------------------------
@@ -77,14 +92,14 @@ def test_stores_loss_and_agg_types() -> None:
 @pytest.mark.parametrize("agg_op", ["mean", "min", "max", "diff"])
 def test_returns_scalar_tensor(agg_op: str, pred: torch.Tensor, target: torch.Tensor) -> None:
     wrapper = TimeAggregateLossWrapper([agg_op], _make_loss())
-    result = wrapper(pred, target)
+    result = wrapper(_gridded_source_view(pred), _gridded_source_view(target))
     assert isinstance(result, torch.Tensor)
     assert result.numel() == 1
 
 
 def test_multiple_agg_ops_return_scalar(pred: torch.Tensor, target: torch.Tensor) -> None:
     wrapper = TimeAggregateLossWrapper(["mean", "max", "diff"], _make_loss())
-    result = wrapper(pred, target)
+    result = wrapper(_gridded_source_view(pred), _gridded_source_view(target))
     assert result.numel() == 1
 
 
@@ -95,7 +110,7 @@ def test_multiple_agg_ops_return_scalar(pred: torch.Tensor, target: torch.Tensor
 
 def test_empty_aggregation_returns_zero(pred: torch.Tensor, target: torch.Tensor) -> None:
     wrapper = TimeAggregateLossWrapper([], _make_loss())
-    result = wrapper(pred, target)
+    result = wrapper(_gridded_source_view(pred), _gridded_source_view(target))
     assert torch.allclose(result, torch.zeros(1))
 
 
@@ -112,9 +127,9 @@ def test_loss_accumulates_across_agg_ops(pred: torch.Tensor, target: torch.Tenso
     wrapper_diff = TimeAggregateLossWrapper(["diff"], inner)
     wrapper_both = TimeAggregateLossWrapper(["mean", "diff"], inner)
 
-    loss_mean = wrapper_mean(pred, target)
-    loss_diff = wrapper_diff(pred, target)
-    loss_both = wrapper_both(pred, target)
+    loss_mean = wrapper_mean(_gridded_source_view(pred), _gridded_source_view(target))
+    loss_diff = wrapper_diff(_gridded_source_view(pred), _gridded_source_view(target))
+    loss_both = wrapper_both(_gridded_source_view(pred), _gridded_source_view(target))
 
     assert torch.allclose(loss_both, (loss_mean + loss_diff) / 2, atol=1e-6)
 
@@ -129,7 +144,7 @@ def test_diff_aggregation_computes_temporal_differences() -> None:
     inner = _make_loss()
 
     pred = torch.rand(BS, TIME, ENS, LATLON, NVAR)
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
 
     pred_diff = pred[:, 1:, ...] - pred[:, :-1, ...]
     target_diff = target[:, 1:, ...] - target[:, :-1, ...]
@@ -138,8 +153,11 @@ def test_diff_aggregation_computes_temporal_differences() -> None:
     # The wrapper iterates per diff-step to handle time scalers correctly.
     expected = torch.tensor(0.0)
     for step in range(pred_diff.shape[1]):
-        expected = expected + inner(pred_diff[:, step : step + 1, ...], target_diff[:, step : step + 1, ...])
-    result = wrapper_diff(pred, target)
+        expected = expected + inner(
+            _gridded_source_view(pred_diff[:, step : step + 1, ...]),
+            _gridded_source_view(target_diff[:, step : step + 1, ...]),
+        )
+    result = wrapper_diff(_gridded_source_view(pred), _gridded_source_view(target))
 
     assert torch.allclose(result, expected, atol=1e-6)
 
@@ -153,7 +171,7 @@ def test_diff_aggregation_computes_temporal_differences() -> None:
 def test_reduction_aggregation_reduces_time_dim(agg_op: str) -> None:
     inner = _make_loss()
     pred = torch.rand(BS, TIME, ENS, LATLON, NVAR)
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
 
     if agg_op == "min":
         pred_agg = torch.amin(pred, dim=1, keepdim=True)
@@ -165,8 +183,8 @@ def test_reduction_aggregation_reduces_time_dim(agg_op: str) -> None:
         pred_agg = torch.mean(pred, dim=1, keepdim=True)
         target_agg = torch.mean(target, dim=1, keepdim=True)
 
-    expected = inner(pred_agg, target_agg)
-    result = TimeAggregateLossWrapper([agg_op], inner)(pred, target)
+    expected = inner(_gridded_source_view(pred_agg), _gridded_source_view(target_agg))
+    result = TimeAggregateLossWrapper([agg_op], inner)(_gridded_source_view(pred), _gridded_source_view(target))
 
     assert torch.allclose(result, expected, atol=1e-6)
 
@@ -182,7 +200,7 @@ def test_crps_returns_scalar_tensor(agg_op: str) -> None:
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
     target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
     wrapper = TimeAggregateLossWrapper([agg_op], _make_crps_loss())
-    result = wrapper(pred, target)
+    result = wrapper(_gridded_source_view(pred), _gridded_source_view(target))
     assert isinstance(result, torch.Tensor)
     assert result.numel() == 1
 
@@ -192,7 +210,7 @@ def test_crps_multiple_agg_ops_return_scalar() -> None:
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
     target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
     wrapper = TimeAggregateLossWrapper(["mean", "diff"], _make_crps_loss())
-    result = wrapper(pred, target)
+    result = wrapper(_gridded_source_view(pred), _gridded_source_view(target))
     assert result.numel() == 1
 
 
@@ -202,9 +220,12 @@ def test_crps_loss_accumulates_across_agg_ops() -> None:
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
     target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
 
-    loss_mean = TimeAggregateLossWrapper(["mean"], inner)(pred, target)
-    loss_diff = TimeAggregateLossWrapper(["diff"], inner)(pred, target)
-    loss_both = TimeAggregateLossWrapper(["mean", "diff"], inner)(pred, target)
+    loss_mean = TimeAggregateLossWrapper(["mean"], inner)(_gridded_source_view(pred), _gridded_source_view(target))
+    loss_diff = TimeAggregateLossWrapper(["diff"], inner)(_gridded_source_view(pred), _gridded_source_view(target))
+    loss_both = TimeAggregateLossWrapper(["mean", "diff"], inner)(
+        _gridded_source_view(pred),
+        _gridded_source_view(target),
+    )
 
     assert torch.allclose(loss_both, (loss_mean + loss_diff) / 2, atol=1e-6)
 
@@ -226,8 +247,8 @@ def test_crps_reduction_reduces_time_dim(agg_op: str) -> None:
         pred_agg = torch.mean(pred, dim=1, keepdim=True)
         target_agg = torch.mean(target, dim=1, keepdim=True)
 
-    expected = inner(pred_agg, target_agg)
-    result = TimeAggregateLossWrapper([agg_op], inner)(pred, target)
+    expected = inner(_gridded_source_view(pred_agg), _gridded_source_view(target_agg))
+    result = TimeAggregateLossWrapper([agg_op], inner)(_gridded_source_view(pred), _gridded_source_view(target))
 
     assert torch.allclose(result, expected, atol=1e-6)
 
@@ -239,8 +260,12 @@ def test_crps_wrapper_forwards_explicit_squash_mode() -> None:
     pred_mean = torch.mean(pred, dim=1, keepdim=True)
     target_mean = torch.mean(target, dim=1, keepdim=True)
 
-    expected = inner(pred_mean, target_mean, squash_mode="avg")
-    result = TimeAggregateLossWrapper(["mean"], inner)(pred, target, squash_mode="avg")
+    expected = inner(_gridded_source_view(pred_mean), _gridded_source_view(target_mean), squash_mode="avg")
+    result = TimeAggregateLossWrapper(["mean"], inner)(
+        _gridded_source_view(pred),
+        _gridded_source_view(target),
+        squash_mode="avg",
+    )
 
     assert torch.allclose(result, expected, atol=1e-6)
 
@@ -253,7 +278,7 @@ def test_crps_wrapper_forwards_explicit_squash_mode() -> None:
 def test_unknown_agg_op_raises(pred: torch.Tensor, target: torch.Tensor) -> None:
     wrapper = TimeAggregateLossWrapper(["sum"], _make_loss())
     with pytest.raises(ValueError, match="Unknown aggregation type"):
-        wrapper(pred, target)
+        wrapper(_gridded_source_view(pred), _gridded_source_view(target))
 
 
 # ---------------------------------------------------------------------------
@@ -269,10 +294,10 @@ def test_ignore_nans_flag() -> None:
 
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
     pred.requires_grad_()
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
     target[..., 0, 0] = torch.nan
 
-    result = wrapper(pred, target)
+    result = wrapper(_gridded_source_view(pred), _gridded_source_view(target))
     assert torch.isfinite(result).all(), "Expected finite loss with ignore_nans=True"
     (grad,) = torch.autograd.grad(result, pred, retain_graph=True)
     assert torch.isfinite(grad).all(), "Expected finite gradients"
@@ -285,10 +310,10 @@ def test_default_no_ignore_nans() -> None:
 
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
     pred.requires_grad_()
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
     target[..., 0, 0] = torch.nan
 
-    result = wrapper(pred, target)
+    result = wrapper(_gridded_source_view(pred), _gridded_source_view(target))
     assert torch.isnan(result).any(), "Expected nan in loss with ignore_nans=False"
 
 
@@ -316,7 +341,7 @@ def test_update_scaler_delegates_to_inner_loss() -> None:
     wrapper = TimeAggregateLossWrapper(["mean"], inner)
     new_grid = torch.ones(4) * 2.0
     wrapper.update_scaler("unit_grid", new_grid, override=True)
-    assert torch.allclose(inner.scaler.get_scaler_tensor("unit_grid"), new_grid)
+    assert torch.allclose(inner.scaler.tensors["unit_grid"][1], new_grid)
 
 
 def test_has_scaler_for_dim_delegates() -> None:

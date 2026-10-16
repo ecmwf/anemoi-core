@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from typing import List
 from typing import Optional
 
 import torch
@@ -242,8 +241,9 @@ def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup]
     # All-reduce.
     input_format = get_memory_format(input_)
     if use_fp32:
+        # Sum in at least float32; wider types such as float64 keep their own precision.
         dtype = input_.dtype
-        inputf_ = input_.float().contiguous(memory_format=input_format)
+        inputf_ = input_.to(torch.promote_types(dtype, torch.float32)).contiguous(memory_format=input_format)
         dist.all_reduce(inputf_, group=group)
         input_ = inputf_.to(dtype)
     else:
@@ -295,11 +295,11 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
 
 @torch.library.custom_op("anemoi_distributed::alltoall", mutates_args=())
 def _alltoall_op(
-    input_list: List[Tensor],
-    output_shapes_flat: List[int],
+    input_list: list[Tensor],
+    output_shapes_flat: list[int],
     ndim: int,
     group_name: str,
-) -> List[Tensor]:
+) -> list[Tensor]:
     """torch.compile-traceable wrapper around the list-based ``dist.all_to_all``.
 
     torch.compile() cannot trace ``dist.all_to_all`` with list inputs.

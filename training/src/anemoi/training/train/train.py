@@ -27,13 +27,7 @@ from omegaconf import OmegaConf
 from packaging import version
 from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
-from torch_geometric.data import HeteroData
 
-from anemoi.graphs.create import GraphCreator
-from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
-from anemoi.graphs.utils import load_graph_from_file
-from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import CallbacksContext
@@ -43,7 +37,6 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
@@ -136,11 +129,7 @@ class AnemoiTrainer(ABC):
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
         datamodule = AnemoiDatasetsDataModule(self.config, self.task)
-
-        # Log information for each dataset
-        for name, data in datamodule.ds_train.data.items():
-            LOGGER.info("Dataset '%s' - Number of variables: %s", name, len(data.variables))
-            LOGGER.info("Dataset '%s' - Variables: %s", name, str(data.variables))
+        LOGGER.info("Logging training dataset information: \n%s", datamodule.ds_train)
         return datamodule
 
     @cached_property
@@ -185,81 +174,6 @@ class AnemoiTrainer(ABC):
     def _dataset_names(self) -> list[str]:
         """Dataset names derived from the dataloader training config."""
         return list(get_multiple_datasets_config(self.config.dataloader.training).keys())
-
-    @cached_property
-    def graph_data(self) -> HeteroData:
-        """Graph data built or loaded for the current trainer config."""
-        dataset_names = self._dataset_names
-        graph_cfg = self.config.graph
-        graph_path = self.config.system.input.graph
-        save_path = Path(graph_path) if graph_path else None
-
-        # Existing-graph mode: path given but no nodes/edges defined — load as-is.
-        is_existing = (
-            graph_path is not None
-            and not graph_cfg.overwrite
-            and not getattr(graph_cfg, "nodes", None)
-            and not getattr(graph_cfg, "edges", None)
-        )
-        if is_existing:
-            if not save_path.exists():
-                msg = f"Existing graph file not found: {save_path}"
-                raise FileNotFoundError(msg)
-            graph = load_graph_from_file(save_path)
-            fused = uses_fused_dataset_graph(graph, dataset_names)
-            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
-            validate_loaded_graph(graph, required)
-            return graph
-
-        # Build mode: expand config and create graph via GraphCreator.
-        graph_config = OmegaConf.create(OmegaConf.to_container(graph_cfg, resolve=False))
-
-        if not uses_fused_dataset_graph(graph_cfg, dataset_names):
-            if len(dataset_names) == 1:
-                dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
-                dataset_name = dataset_names[0]
-                reader_cfg = dataset_configs[dataset_name].dataset_config
-                dataset_path = reader_cfg["dataset"] if isinstance(reader_cfg, (DictConfig, dict)) else reader_cfg
-                if dataset_path is None:
-                    msg = f"Dataset source is None for dataset '{dataset_name}'."
-                    raise ValueError(msg)
-                data_node_cfg = graph_config.get("nodes", {}).get(DEFAULT_DATASET_NAME)
-                if (
-                    data_node_cfg is not None
-                    and hasattr(data_node_cfg, "node_builder")
-                    and hasattr(data_node_cfg.node_builder, "dataset")
-                ):
-                    # Build the dataset value for the graph node builder.
-                    # Start with the bare dataset path, then merge any keys from
-                    # dataset_config that are not part of DatasetConfigSchema
-                    # (e.g. check_variables_compatibility).  Schema-managed keys
-                    # are excluded to avoid forwarding complex validated objects
-                    # or None defaults (e.g. select: None, frequency: Frequency(...)).
-                    graph_dataset_value: str | dict = {"dataset": dataset_path}
-                    if isinstance(reader_cfg, (DictConfig, dict)):
-                        _schema_keys = set(DatasetConfigSchema.model_fields.keys())
-                        graph_dataset_value.update(
-                            {k: v for k, v in dict(reader_cfg).items() if k not in _schema_keys and v is not None},
-                        )
-                    data_node_cfg.node_builder.dataset = graph_dataset_value
-            else:
-                msg = (
-                    "Multiple datasets require a fused graph config with one node group per dataset. "
-                    f"Received datasets {dataset_names} but graph nodes "
-                    f"{list(graph_cfg.nodes.keys())}."
-                )
-                raise ValueError(msg)
-
-        # Try loading existing saved graph before rebuilding.
-        overwrite = graph_cfg.get("overwrite", False)
-        if save_path and save_path.exists() and not overwrite:
-            fused = uses_fused_dataset_graph(graph_cfg, dataset_names)
-            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
-            graph = load_graph_from_file(save_path)
-            validate_loaded_graph(graph, required)
-            return graph
-
-        return GraphCreator(graph_config).create(save_path=save_path, overwrite=overwrite)
 
     def _validate_transfer_learning_datasets(
         self,
@@ -362,7 +276,7 @@ class AnemoiTrainer(ABC):
             "config": self.config,
             "task": self.task,
             "data_indices": self.data_indices,
-            "graph_data": self.graph_data,
+            "data_types": {name: reader.data_type for name, reader in self.datamodule.ds_train.data_readers.items()},
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,
@@ -587,9 +501,9 @@ class AnemoiTrainer(ABC):
 
     def _log_information(self) -> None:
         # Log number of variables (features) per dataset
-        for dataset_name, data in self.datamodule.ds_train.data.items():
+        for dataset_name, variables in self.datamodule.ds_train.variables.items():
             num_forcing_features = len(self.data_indices[dataset_name].forcing)
-            num_fc_features = len(data.variables) - num_forcing_features
+            num_fc_features = len(variables) - num_forcing_features
             LOGGER.info("Dataset '%s' - Total number of prognostic variables: %d", dataset_name, num_fc_features)
             LOGGER.info(
                 "Dataset '%s' - Total number of auxiliary variables: %d",
@@ -678,8 +592,22 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def strategy(self) -> Any:
+        """Returns the distributed training strategy.
+
+        Runs with at least one tabular observation dataset build a dynamic graph per batch  and route each sample
+        through per-dataset encoders/decoders that may be unused when a dataset has no observations in a batch.
+        """
+        if any(dr.data_type == "tabular" for dr in self.datamodule.ds_train.data_readers.values()):
+            # If not all datasets are static, we set find_unused_parameters=True and static_graph=False.
+            return instantiate(
+                self.config.training.strategy,
+                find_unused_parameters=True,
+                static_graph=False,
+            )
+
         return instantiate(
             self.config.training.strategy,
+            find_unused_parameters=False,
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
@@ -749,7 +677,7 @@ class AnemoiTrainer(ABC):
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path=None, config_name="config")
+@hydra.main(version_base=None, config_path=None, config_name="temporal_downscaler_ensemble")
 def main(config: DictConfig) -> None:
     AnemoiTrainer(config).train()
 

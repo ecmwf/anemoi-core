@@ -149,7 +149,7 @@ class IndexCollection:
             return
 
         if ckpt_name_to_index == data_name_to_index:
-            LOGGER.info("The order of the variables in the model matches the order in the data.")
+            LOGGER.debug("The order of the variables in the model matches the order in the data.")
             LOGGER.debug("%s, %s", ckpt_name_to_index, data_name_to_index)
             return
 

@@ -55,6 +55,11 @@ class BaseMapper(nn.Module, ABC):
     specialized for their mapper type.
     """
 
+    # Whether ``forward`` returns the updated source-node latent (width ``num_channels``) rather
+    # than passing the source input through. It sets the width of the ``encoded_data`` decoder
+    # target feature.
+    returns_src_latent: bool = False
+
     def __init__(
         self,
         *,
@@ -130,6 +135,9 @@ class BaseMapper(nn.Module, ABC):
             is expected to already have the right edges for its local destination nodes.
         **kwargs : dict
             Additional keyword arguments passed to the mapper implementation.
+            When supported, ``cond=(cond_src, cond_dst)`` must have the same node
+            ordering and sharding as ``x``. The mapper transforms conditioning
+            alongside its corresponding node features.
 
         Returns
         -------
@@ -359,7 +367,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         )
 
         out_channels = self.out_channels_dst if self.out_channels_dst is not None else self.hidden_dim
-        out_type = torch.get_autocast_gpu_dtype() if torch.is_autocast_enabled() else x_dst.dtype
+        out_type = torch.get_autocast_dtype("cuda") if torch.is_autocast_enabled() else x_dst.dtype
         out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=out_type)
 
         for chunk_id in range(chunk_partition.num_parts):
@@ -395,6 +403,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
         **kwargs,
     ) -> PairTensor:
         x_src, x_dst = x
@@ -412,6 +421,10 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         x_src, shard_sizes_src = ensure_sharded(x_src, 0, shard_sizes_src, model_comm_group)
         x_dst, shard_sizes_dst = ensure_sharded(x_dst, 0, shard_sizes_dst, model_comm_group)
         edge_attr, shard_sizes_edges = ensure_sharded(edge_attr, 0, shard_sizes_edges, model_comm_group)
+        if cond is not None:
+            cond_src, _ = ensure_sharded(cond[0], 0, shard_info.src_nodes, model_comm_group)
+            cond_dst, _ = ensure_sharded(cond[1], 0, shard_info.dst_nodes, model_comm_group)
+            cond = (cond_src, cond_dst)
         size = (sum(shard_sizes_src), sum(shard_sizes_dst))
 
         # update ShardInfo
@@ -432,6 +445,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             size=size,
             model_comm_group=model_comm_group,
             edges_are_dst_sorted=edges_are_dst_sorted,
+            cond=cond,
             **kwargs,
         )
 
@@ -872,6 +886,8 @@ class GNNBaseMapper(BaseMapper, ABC):
 class GNNForwardMapper(GNNBaseMapper):
     """Graph Neural Network Mapper data -> hidden."""
 
+    returns_src_latent = True
+
     def __init__(
         self,
         *,
@@ -1062,8 +1078,21 @@ class GNNBackwardMapper(GNNBaseMapper):
             mlp_implementation=mlp_implementation,
         )
 
+        self.emb_nodes_dst = None
+        if in_channels_dst != num_channels:
+            self.emb_nodes_dst = MLP(
+                in_features=in_channels_dst,
+                hidden_dim=mlp_hidden_dim,
+                out_features=num_channels,
+                layer_kernels=self.layer_factory,
+                n_extra_layers=mlp_extra_layers + 1,
+                mlp_implementation=mlp_implementation,
+            )
+
     def pre_process(self, x):
         x_src, x_dst = x
+        if self.emb_nodes_dst is not None:
+            x_dst = self.emb_nodes_dst(x_dst)
         return x_src, x_dst
 
     def post_process(self, x_dst):
@@ -1285,7 +1314,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "scaled_dot_product_attention",
-        softcap: Optional[float] = None,
+        softcap: float = 0.0,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
         cpu_offload: bool = False,
@@ -1378,6 +1407,10 @@ class TransformerBaseMapper(BaseMapper, ABC):
         # Ensure src and dst are sharded
         x_src, shard_sizes_src = ensure_sharded(x_src, 0, shard_sizes_src, model_comm_group)
         x_dst, shard_sizes_dst = ensure_sharded(x_dst, 0, shard_sizes_dst, model_comm_group)
+        if cond is not None:
+            cond_src, _ = ensure_sharded(cond[0], 0, shard_info.src_nodes, model_comm_group)
+            cond_dst, _ = ensure_sharded(cond[1], 0, shard_info.dst_nodes, model_comm_group)
+            cond = (cond_src, cond_dst)
 
         shard_info = BipartiteGraphShardInfo(
             src_nodes=shard_sizes_src,
@@ -1444,7 +1477,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
         dropout_p: float = 0.0,
         mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "scaled_dot_product_attention",
-        softcap: float = None,
+        softcap: float = 0.0,
         use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
         window_size: Optional[int] = None,
@@ -1567,7 +1600,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         dropout_p: float = 0.0,
         mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "scaled_dot_product_attention",
-        softcap: float = None,
+        softcap: float = 0.0,
         use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
         window_size: Optional[int] = None,

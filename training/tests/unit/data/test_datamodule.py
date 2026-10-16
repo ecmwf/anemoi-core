@@ -26,6 +26,8 @@ from anemoi.training.tasks.base import BaseTask
 class TinyIterableDataset(IterableDataset):
     """Minimal iterable dataset for DataLoader construction tests."""
 
+    valid_date_indices = (0,)  # read by AnemoiDatasetsDataModule._get_dataloader for logging
+
     def __iter__(self) -> Iterator[int]:
         yield 0
 
@@ -151,7 +153,8 @@ def test_persistent_workers_are_disabled_for_rollout_schedule(
 
     assert [loader.persistent_workers for loader in loaders] == [False] * len(loaders)
     assert datamodule.config.dataloader.persistent_workers is True
-    assert caplog.messages == [
+    # Logged once, although three dataloaders are built.
+    assert [message for message in caplog.messages if "persistent_workers" in message] == [
         "Disabling dataloader.persistent_workers because the rollout changes between epochs.",
     ]
 
@@ -206,7 +209,7 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
     datamodule.task.steps.return_value = ({}, {})
 
     data_reader = object()
-    create_dataset = mocker.patch("anemoi.training.data.datamodule.create_dataset", return_value=data_reader)
+    create_reader = mocker.patch("anemoi.training.data.datamodule.create_reader", return_value=data_reader)
     mocker.patch(
         "anemoi.training.data.datamodule.compute_relative_date_indices",
         return_value={"data": [0, 1]},
@@ -215,7 +218,7 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
 
     datamodule._get_dataset({"data": object()}, shuffle=False, label="validation")
 
-    create_dataset.assert_called_once()
+    create_reader.assert_called_once()
     multi_dataset.assert_called_once_with(
         data_readers={"data": data_reader},
         relative_date_indices={"data": [0, 1]},

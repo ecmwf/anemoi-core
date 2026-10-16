@@ -9,16 +9,18 @@
 
 
 import logging
+from collections.abc import Callable
 from functools import cached_property
 from typing import Any
 
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
+from anemoi.models.data import Batch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.readers import create_reader
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
@@ -75,8 +77,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
 
         stats_by_dataset: dict[str, dict | None] = {}
-        for dataset_name, dataset in self.ds_train.data_readers.items():
-            stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
+        for dataset_name, reader in self.ds_train.data_readers.items():
+            stats_by_lead = {lead_time: reader.statistics_tendencies(lead_time) for lead_time in lead_times}
             if all(stats is None for stats in stats_by_lead.values()):
                 stats_by_dataset[dataset_name] = None
                 continue
@@ -85,6 +87,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         if not any(stats is not None for stats in stats_by_dataset.values()):
             return None
+
         return stats_by_dataset
 
     @cached_property
@@ -129,14 +132,14 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         shuffle: bool = True,
         label: str = "generic",
     ) -> MultiDataset:
-        data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
+        data_readers = {name: create_reader(data_reader) for name, data_reader in config.items()}
         relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
         dataset_options = {}
         dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
         if dataloader_config.get("fake_dataloading", False):
             dataset_options["fake_dataloading"] = True
 
-        return MultiDataset(
+        dataset = MultiDataset(
             data_readers=data_readers,
             relative_date_indices=relative_date_indices,
             shuffle=shuffle,
@@ -145,6 +148,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             rollout=len(tuple(self.task.steps(label))),
             **dataset_options,
         )
+        LOGGER.info(
+            "%s dataset has %d valid samples after applying relative date indices %s.",
+            label.capitalize(),
+            len(dataset.valid_date_indices),
+            relative_date_indices,
+        )
+        return dataset
 
     def set_epoch(self, epoch: int) -> None:
         """Set the datamodule epoch and synchronize datasets settings."""
@@ -191,11 +201,25 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             return False
         return persistent_workers
 
+    def _make_collate_fn(self, ds: MultiDataset) -> Callable[[list[dict]], Batch]:
+        del ds  # each BaseSample carries everything collation needs
+        return Batch.collate
+
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""
         assert stage in {"training", "validation", "test"}
 
         extra = {}
+        batch_size = self.config.dataloader.batch_size[stage]
+        num_workers = self.config.dataloader.num_workers[stage]
+
+        LOGGER.info(
+            "Creating %s dataloader from %d valid samples (batch_size=%d, num_workers=%d).",
+            stage,
+            len(ds.valid_date_indices),
+            batch_size,
+            num_workers,
+        )
 
         if self.config.dataloader.get("multiprocessing_context", None) is not None:
             import multiprocessing
@@ -207,12 +231,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         return DataLoader(
             ds,
-            batch_size=self.config.dataloader.batch_size[stage],
-            num_workers=self.config.dataloader.num_workers[stage],
+            batch_size=batch_size,
+            num_workers=num_workers,
             pin_memory=self.config.dataloader.pin_memory,
             worker_init_fn=worker_init_func,
             prefetch_factor=self.config.dataloader.prefetch_factor,
             persistent_workers=self._use_persistent_workers,
+            collate_fn=self._make_collate_fn(ds),
             **extra,
         )
 
@@ -239,6 +264,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         for dataset_name in self.dataset_names:
             metadata["metadata_inference"][dataset_name] = {}
+            reader = self.ds_train.data_readers[dataset_name]
+            metadata["metadata_inference"][dataset_name]["data_type"] = reader.data_type
+
+            if reader.data_type == "gridded":
+                metadata["metadata_inference"][dataset_name]["grid_size"] = reader.grid_size
 
             name_to_index = {
                 "input": data_indices[dataset_name].model.input.name_to_index,

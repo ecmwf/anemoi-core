@@ -78,7 +78,7 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
             The cut-off radius in Cartesian coordinates on unit sphere.
         """
         if self.cutoff_distance_km is not None:
-            LOGGER.info(
+            LOGGER.debug(
                 "Using %s (with radius = %.1f km [direct]) between %s and %s.",
                 self.__class__.__name__,
                 self.cutoff_distance_km,
@@ -93,7 +93,7 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
             # Use factor-based approach
             reference_dist = get_grid_reference_distance(reference_coords, use_cartesian=False)
             radius = reference_dist * self.cutoff_factor
-            LOGGER.info(
+            LOGGER.debug(
                 "Using %s (with radius = %.1f km [factor=%.2f]) between %s and %s.",
                 self.__class__.__name__,
                 radius * EARTH_RADIUS,
@@ -255,15 +255,9 @@ class ReversedCutOffEdges(BaseCutOffEdges):
         Update the graph with the edges.
     """
 
+    reversed_search = True
+
     def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
         """Prepare keyword arguments for computing edge index."""
         radius = self.get_cutoff_radius(reference_coords=source_coords)
         return {"radius": radius} | super().prepare_method_kwargs(source_coords, target_coords)
-
-    def compute_edge_index_from_coords(
-        self,
-        source_coords: torch.Tensor,
-        target_coords: torch.Tensor,
-        **kwargs,
-    ) -> torch.Tensor:
-        return super().compute_edge_index_from_coords(target_coords, source_coords, skip_flip=True, **kwargs)
