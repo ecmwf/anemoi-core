@@ -7,18 +7,34 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
+
 import torch
 from torch import Tensor
 
-# check if triton is installed
-# If pytorch is installed on CPU then torch is not available
+LOGGER = logging.getLogger(__name__)
+
+
+class DummyModule:
+    """Dummy module to allow import of Triton modules when Triton is not available."""
+
+    def __getattribute__(self, name):
+        return DummyModule()
+
+    def __call__(self, *_, **__):
+        return DummyModule()
+
+    def __getitem__(self, key):
+        return DummyModule()
+
+
 try:
     import triton
     import triton.language as tl
-except ImportError:
-    raise ValueError(
-        "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
-    )
+except ImportError as e:
+    LOGGER.warning("Triton failed to import, do NOT attempt to use Triton backend: %s", e)
+    triton = DummyModule()
+    tl = DummyModule()
 
 
 @triton.jit
@@ -400,6 +416,27 @@ def graph_transformer_attention(
     edge_dst: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Opaque custom op wrapping the Triton GraphTransformer attention.
+
+    Parameters
+    ----------
+    q : Tensor
+        Query tensor for destination nodes.
+    k : Tensor
+        Key tensor for source nodes.
+    v : Tensor
+        Value tensor for source nodes.
+    e : Tensor
+        Edge feature tensor.
+    row : Tensor
+        Source indices grouped by destination.
+    colptr : Tensor
+        Compressed sparse column pointers.
+    rowptr : Tensor
+        Compressed sparse row pointers.
+    edge_ids : Tensor
+        Edge indices grouped by source.
+    edge_dst : Tensor
+        Destination indices grouped by source.
 
     Returns
     -------
