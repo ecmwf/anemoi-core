@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import quote
 
-os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 # Required for deterministic cuBLAS (torch.use_deterministic_algorithms, enabled via
 # config.training.deterministic below). Must be set before CUDA is initialised, i.e.
 # before torch is imported transitively by the anemoi imports below.
@@ -61,6 +60,8 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
 
     config.system.output.root = str(tmp_path)
     config.diagnostics.log.mlflow.tracking_uri = mlflow_server
+    # The loss curve is compared with a reference run trained with the same seed.
+    config.training.seed = 42
     # Drive pl.Trainer(deterministic=True), which sets torch.use_deterministic_algorithms
     # and cudnn.deterministic. Combined with the module-level CUBLAS/cudnn settings, this
     # makes the loss curve reproducible on identical hardware/CUDA versions.
@@ -74,7 +75,7 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
 
     client = AnemoiMlflowClient(mlflow_server, authentication=True)
 
-    reference_id: Final = "eddb276a2bbd40f6a856b465cc9a995d"
+    reference_id: Final = "8b3bc3d3bd6947318cb825d777c9d750"
     metric: Final = "train_multi_dataset_loss_step"
 
     # Printed so a failing run's ID can be promoted to the new reference_id.
