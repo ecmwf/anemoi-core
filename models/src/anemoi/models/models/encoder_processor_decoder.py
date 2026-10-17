@@ -184,16 +184,44 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
-        # normalize and add data positional info (lat/lon)
-        x_data_latent = torch.cat(
-            (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
-            ),
-            dim=-1,  # feature dimension
+        x_vars = self.input_transform[dataset_name](x, node_attributes_data)
+
+        return x_vars, x_skip, grid_shard_sizes
+
+    def _assemble_targets(
+        self,
+        x_input_data: Tensor,
+        x_encoded_data: Tensor | None,
+        batch_size: int,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        model_comm_group: ProcessGroup | None = None,
+        dataset_name: str | None = None,
+    ) -> tuple[Tensor, ShardSizes]:
+        """Assemble the decoder destination features for a single dataset.
+
+        Concatenates the feature blocks listed in ``decoders_target_input`` for this dataset's
+        decoder into the per-node vector fed to the decoder as ``x_dst``.
+
+        Returns
+        -------
+        tuple[Tensor, ShardSizes]
+            ``(x_target_latent, grid_shard_sizes)`` where ``x_target_latent`` has width
+            ``target_dim[dataset_name]``.
+        """
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+
+        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+
+        x_target_latent = self.decoders_target_input[self.dataset2decoder[dataset_name]].tensor(
+            x_input_data,
+            x_encoded_data,
+            batch_size=batch_size,
+            grid_shard_sizes=grid_shard_sizes,
+            model_comm_group=model_comm_group,
+            dataset_name=dataset_name,
         )
 
-        return x_data_latent, x_skip, grid_shard_sizes
+        return x_target_latent, grid_shard_sizes
 
     def _assemble_targets(
         self,

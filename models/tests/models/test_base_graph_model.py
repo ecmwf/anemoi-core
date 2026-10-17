@@ -40,7 +40,7 @@ class _IndexGroup(SimpleNamespace):
 def _make_data_indices() -> dict:
     dataset_indices = SimpleNamespace(
         model=SimpleNamespace(
-            input=_IndexGroup(prognostic=[0], forcing=[]),
+            input=_IndexGroup(prognostic=[0], forcing=[], ordered_names=["var"]),
             output=_IndexGroup(prognostic=[0], full=[0], diagnostic=[], name_to_index={"var": 0}),
             _forcing=[],
         ),

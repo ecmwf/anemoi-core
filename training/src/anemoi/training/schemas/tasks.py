@@ -65,6 +65,23 @@ class OffsetForecasterSchema(BaseModel):
     "The val loss is averaged over the training rollout only."
 
 
+class OffsetForecasterSchema(BaseModel):
+    """Configuration for the offset-based forecasting task."""
+
+    target_: Literal["anemoi.training.tasks.OffsetForecaster"] = Field(..., alias="_target_")
+    "Task class path for the offset-based forecasting task."
+    input_offsets: list[str] = Field(example=["-6H", "0H"], min_length=1)
+    "Input time offsets as duration strings."
+    output_offsets: list[str] = Field(example=["6H"], min_length=1)
+    "Output time offsets as duration strings."
+    rollout_shift: str = Field(default="default", example="6H")
+    "Time shift applied to the offsets between rollout steps. 'default' infers the largest valid shift."
+    rollout: RolloutSchema = Field(...)
+    "Rollout configuration for autoregressive training."
+    validation_rollout: NonNegativeInt | None = Field(default=None, example=[None, 6, 12])
+    "Number of rollouts to use for validation. If unset, validation uses the training rollout."
+
+
 class AutoencoderTaskSchema(BaseModel):
     """Configuration for autoencoding tasks."""
 
