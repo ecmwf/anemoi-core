@@ -97,7 +97,10 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             Default number of chunks for multiscale smoothing.
             ``1`` means processing all fields in one go.
         ignore_nans : bool
-            Passed to :class:`BaseLoss`; ignored by the wrapper itself.
+            Passed to :class:`BaseLoss`. The wrapper also enables it when the per-scale loss
+            ignores NaNs. When enabled, NaN targets are filled with 0 before smoothing and set
+            back to NaN in every scale afterwards, so the per-scale loss masks only the original
+            NaN points.
         loss_matrices_path : Path | str | None
             Deprecated.  Pass inside *multiscale_config* instead.
         loss_matrices : list[Path | str] | None
@@ -344,6 +347,11 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             raise NotImplementedError(msg)
         channel_shard_sizes_pred = None
         channel_shard_sizes_y = None
+        # Smoothing a NaN target spreads the NaN over the filter stencil, so the per-scale loss
+        # would mask a halo around every missing point. So we fill the target before smoothing and
+        # restore the NaNs for each loss scale. The mask is taken in the grid-sharded layout.
+        target_nan_mask = torch.isnan(y.data) if self.ignore_nans else None
+        y_data = y.data if target_nan_mask is None else y.data.masked_fill(target_nan_mask, 0.0)
         is_model_sharded = grid_shard_sizes is not None
         if is_model_sharded:
             # go to full sequence dimension for smoothing
@@ -354,13 +362,13 @@ class MultiscaleLossWrapper(BaseLossWrapper):
                 channel_shard_sizes_y,
             ) = self._prepare_for_smoothing(
                 y_pred_ens.data,
-                y.data,
+                y_data,
                 group,
                 grid_shard_sizes,
             )
         else:
             y_pred_ens_for_smooth = y_pred_ens.data
-            y_for_smooth = y.data
+            y_for_smooth = y_data
 
         weighted_losses = []
         prev_y_pred_ens = None
@@ -408,6 +416,9 @@ class MultiscaleLossWrapper(BaseLossWrapper):
 
             prev_y_pred_ens = current_y_pred_ens
             prev_y = current_y
+
+            if target_nan_mask is not None:
+                y_tmp = y_tmp.masked_fill(target_nan_mask, float("nan"))
 
             # sharding kwargs - only pass if the loss needs them
             sharding_kwargs = (

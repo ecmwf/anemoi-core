@@ -380,6 +380,135 @@ def test_multiscale_loss_forwards_extra_kwargs() -> None:
     ]
 
 
+class RecordingNaNLoss(BaseLoss):
+    """Per-scale loss that ignores NaNs and records the targets it receives."""
+
+    def __init__(self) -> None:
+        super().__init__(ignore_nans=True)
+        self.targets: list[torch.Tensor] = []
+
+    def forward(
+        self,
+        pred: GriddedSource,
+        target: GriddedSource,
+        squash: bool = True,
+        **kwargs: object,
+    ) -> torch.Tensor:
+        del pred, squash, kwargs
+        self.targets.append(target.data.clone())
+        return torch.tensor(0.0)
+
+
+def _ring_smoother() -> ProjectionGraphProvider:
+    """Smoother over a 4-node ring: each node averages itself and one neighbour."""
+    graph = HeteroData()
+    graph["src"].num_nodes = 4
+    graph["dst"].num_nodes = 4
+    graph[("src", "to", "dst")].edge_index = torch.tensor([[0, 0, 1, 1, 2, 2, 3, 3], [0, 1, 1, 2, 2, 3, 3, 0]])
+    graph[("src", "to", "dst")].edge_weight = torch.ones(8) / 2
+    return ProjectionGraphProvider(
+        graph=graph,
+        edges_name=("src", "to", "dst"),
+        edge_weight_attribute="edge_weight",
+        row_normalize=False,
+    )
+
+
+def _nan_target_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Random ensemble prediction and a target with one missing value at grid point 1."""
+    generator = torch.Generator().manual_seed(0)
+    pred = torch.randn((1, 1, 2, 4, 2), generator=generator)
+    target = torch.randn((1, 1, 1, 4, 2), generator=generator)
+    nan_mask = torch.zeros_like(target, dtype=torch.bool)
+    nan_mask[0, 0, 0, 1, 0] = True
+    return pred, target.masked_fill(nan_mask, float("nan")), nan_mask
+
+
+def test_multiscale_masks_only_original_nan_targets(mocker: MockerFixture) -> None:
+    """NaN targets are filled before smoothing and masked per scale, without a halo."""
+    provider = _ring_smoother()
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        return_value=[provider, None],
+    )
+    weights = [1.0, 2.0]
+    multiscale_loss = MultiscaleLossWrapper(per_scale_loss=CRPS(ignore_nans=True), weights=weights)
+    pred, target, nan_mask = _nan_target_inputs()
+
+    loss = multiscale_loss(_view(pred), _view(target))
+
+    # Expected: smooth the 0-filled target densely, then mask only the original NaN point.
+    smoothing = provider.projection_matrix.to_dense()
+    filled = target.masked_fill(nan_mask, 0.0)
+    smooth_pred = torch.einsum("gh,btehc->btegc", smoothing, pred)
+    smooth_target = torch.einsum("gh,btehc->btegc", smoothing, filled)
+    bands = [(smooth_pred, smooth_target), (pred - smooth_pred, filled - smooth_target)]
+    crps = CRPS(ignore_nans=True)
+    expected = sum(
+        weight * crps(_view(band_pred), _view(band_target.masked_fill(nan_mask, float("nan"))))
+        for weight, (band_pred, band_target) in zip(weights, bands, strict=True)
+    )
+
+    assert torch.isfinite(loss)
+    torch.testing.assert_close(loss, expected)
+
+
+def test_multiscale_nan_fill_leaves_finite_targets_unchanged(mocker: MockerFixture) -> None:
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        return_value=[_ring_smoother(), None],
+    )
+    pred, target, nan_mask = _nan_target_inputs()
+    target = target.masked_fill(nan_mask, 0.5)
+
+    loss_ignoring_nans = MultiscaleLossWrapper(per_scale_loss=CRPS(ignore_nans=True), weights=[1.0, 2.0])
+    loss_plain = MultiscaleLossWrapper(per_scale_loss=CRPS(), weights=[1.0, 2.0])
+
+    assert torch.equal(
+        loss_ignoring_nans(_view(pred), _view(target)),
+        loss_plain(_view(pred), _view(target)),
+    )
+
+
+def test_multiscale_nan_target_without_ignore_nans_gives_nan(mocker: MockerFixture) -> None:
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        return_value=[_ring_smoother(), None],
+    )
+    multiscale_loss = MultiscaleLossWrapper(per_scale_loss=CRPS(), weights=[1.0, 2.0])
+    pred, target, _ = _nan_target_inputs()
+
+    assert torch.isnan(multiscale_loss(_view(pred), _view(target)))
+
+
+def test_multiscale_sharded_smooths_filled_target_and_restores_nans(mocker: MockerFixture) -> None:
+    """With sharding, the filled target is smoothed and NaNs are restored in the grid-sharded layout."""
+    per_scale_loss = RecordingNaNLoss()
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        return_value=[None, None],
+    )
+    multiscale_loss = MultiscaleLossWrapper(per_scale_loss=per_scale_loss, weights=[1.0, 1.0])
+    pred, target, nan_mask = _nan_target_inputs()
+    prepare = mocker.patch.object(
+        multiscale_loss,
+        "_prepare_for_smoothing",
+        side_effect=lambda p, y, *_args: (p, y, [1, 1], [1, 1]),
+    )
+    mocker.patch(
+        "anemoi.training.losses.multiscale.all_to_all_transpose",
+        side_effect=lambda x, *_args: x,
+    )
+
+    multiscale_loss(_view(pred), _view(target), group=FakeGroup(size=2), grid_shard_sizes=[2, 2])
+
+    smoothed_target = prepare.call_args.args[1]
+    torch.testing.assert_close(smoothed_target, target.masked_fill(nan_mask, 0.0))
+    assert len(per_scale_loss.targets) == 2
+    for received in per_scale_loss.targets:
+        assert torch.equal(torch.isnan(received), nan_mask)
+
+
 def test_deepcopy_multiscale_loss_does_not_raise(mocker: MockerFixture) -> None:
     """deepcopy(MultiscaleLossWrapper) must not raise with CSR smoothing matrices."""
     import copy
