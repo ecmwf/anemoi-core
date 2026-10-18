@@ -51,6 +51,7 @@ _trainable_edge_perm_fix_migration = importlib.import_module(
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from collections.abc import Mapping
 
     from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
@@ -695,6 +696,63 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         with torch.autocast(device_type=pred.device.type, enabled=False):
             return loss(pred, target, **kwargs)
 
+    @staticmethod
+    def _nan_flags_per_variable(source: Source, variables: Mapping[str, Any]) -> tuple[list[int], torch.Tensor] | None:
+        """Return the positions in ``source`` of the ``variables`` it holds, and whether each contains a NaN.
+
+        The flags stay on the device, so callers can check several sources with a single sync.
+        Returns ``None`` if ``source`` holds none of ``variables``.
+        """
+        indices = [i for i, name in enumerate(source.variables) if name in variables]
+        if not indices:
+            return None
+        samples = source.data if source.is_tabular else [source.data]
+        nan_per_variable = torch.zeros(len(indices), dtype=torch.bool, device=samples[0].device)
+        for sample in samples:
+            variables_axis = source.layout.axis("variables", ndim=sample.ndim)
+            values = sample.index_select(variables_axis, torch.as_tensor(indices, device=sample.device))
+            nan_per_variable |= torch.isnan(values.movedim(variables_axis, -1)).reshape(-1, len(indices)).any(dim=0)
+        return indices, nan_per_variable
+
+    @staticmethod
+    def _variables_with_nans(source: Source, indices: list[int], nan_per_variable: torch.Tensor) -> list[str]:
+        """Return the names of the flagged variables."""
+        return [source.variables[i] for i, has_nan in zip(indices, nan_per_variable.tolist(), strict=True) if has_nan]
+
+    def _check_nan_inputs(self, batch: Batch) -> None:
+        """Fail loudly when model inputs still contain NaNs after preprocessing.
+
+        The model has no NaN handling: one NaN input spreads through the graph and makes the whole
+        prediction NaN. Losses with ``ignore_nans=True`` then mask every point and report a loss of 0
+        with no gradient, so training silently stops learning. Missing input values must be filled
+        by an imputer in the dataset's processors. Only the model's input variables are checked.
+
+        Parameters
+        ----------
+        batch : Batch
+            Preprocessed model inputs.
+        """
+        flags = {
+            name: self._nan_flags_per_variable(source, self.data_indices[name].model.input.name_to_index)
+            for name, source in batch.items()
+            if name in self.data_indices
+        }
+        flags = {name: flag for name, flag in flags.items() if flag is not None}
+        if not flags or not bool(torch.cat([nan_per_variable for _, nan_per_variable in flags.values()]).any()):
+            return
+
+        nan_inputs = {
+            name: nan_variables
+            for name, flag in flags.items()
+            if (nan_variables := self._variables_with_nans(batch[name], *flag))
+        }
+        msg = (
+            f"Model inputs contain NaNs after preprocessing: {nan_inputs}. The model cannot handle NaN inputs: "
+            "the whole prediction becomes NaN, and losses with ignore_nans=True then report 0. Add an imputer "
+            "(e.g. anemoi.models.preprocessing.imputer.InputImputer) for these variables to the dataset's processors."
+        )
+        raise ValueError(msg)
+
     def _check_nan_targets(self, y: Source, dataset_name: str, losses: dict[str, torch.nn.Module]) -> None:
         """Fail loudly when targets contain NaNs that a loss or metric cannot handle.
 
@@ -724,22 +782,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if not intolerant:
             return
 
-        output_variables = self.data_indices[dataset_name].model.output.name_to_index
-        indices = [i for i, name in enumerate(y.variables) if name in output_variables]
-        if not indices:
-            return
-        samples = y.data if y.is_tabular else [y.data]
-        nan_per_variable = torch.zeros(len(indices), dtype=torch.bool, device=samples[0].device)
-        for sample in samples:
-            variables_axis = y.layout.axis("variables", ndim=sample.ndim)
-            values = sample.index_select(variables_axis, torch.as_tensor(indices, device=sample.device))
-            nan_per_variable |= torch.isnan(values.movedim(variables_axis, -1)).reshape(-1, len(indices)).any(dim=0)
-        if not bool(nan_per_variable.any()):
+        flags = self._nan_flags_per_variable(y, self.data_indices[dataset_name].model.output.name_to_index)
+        if flags is None or not bool(flags[1].any()):
             return
 
-        nan_variables = [
-            y.variables[i] for i, has_nan in zip(indices, nan_per_variable.tolist(), strict=True) if has_nan
-        ]
+        nan_variables = self._variables_with_nans(y, *flags)
         msg = (
             f"Dataset '{dataset_name}': the targets of {nan_variables} contain NaNs, but {intolerant} "
             "use ignore_nans=False, so they would be NaN. Targets are not imputed; set ignore_nans: True "
@@ -976,8 +1023,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         return processed_batch
 
     def preprocess_inputs(self, batch: Batch) -> Batch:
-        """Transform selected model inputs into model-input space."""
-        return self._map_dataset_processors(batch, self.model.pre_processors)
+        """Transform selected model inputs into model-input space, and check that no NaNs are left."""
+        processed = self._map_dataset_processors(batch, self.model.pre_processors)
+        self._check_nan_inputs(processed)
+        return processed
 
     def preprocess_targets(self, batch: Batch) -> Batch:
         """Normalize selected targets while preserving missing values."""
