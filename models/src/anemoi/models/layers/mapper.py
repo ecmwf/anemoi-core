@@ -967,6 +967,50 @@ class GNNForwardMapper(GNNBaseMapper):
             mlp_implementation=mlp_implementation,
         )
 
+    def mapper_forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_info: BipartiteGraphShardInfo,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        model_comm_group: Optional[ProcessGroup] = None,
+        keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
+        **kwargs,
+    ) -> PairTensor:
+        """Update source features while preserving their input layout."""
+
+        x_src, x_dst = x
+        shard_sizes_src = shard_info.src_nodes
+        src_is_sharded = shard_info.src_is_sharded()
+
+        if not src_is_sharded:
+            # Retain the source partition for gathering the updated rows below.
+            x_src, shard_sizes_src = ensure_sharded(x_src, 0, shard_sizes_src, model_comm_group)
+            shard_info = BipartiteGraphShardInfo(
+                src_nodes=shard_sizes_src,
+                dst_nodes=shard_info.dst_nodes,
+                edges=shard_info.edges,
+            )
+
+        x_src, x_dst = super().mapper_forward(
+            (x_src, x_dst),
+            batch_size,
+            shard_info,
+            edge_attr,
+            edge_index,
+            model_comm_group,
+            keep_x_dst_sharded,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+            **kwargs,
+        )
+        # Restore the input source layout independently of the destination layout.
+        if not src_is_sharded:
+            x_src = gather_tensor(x_src, 0, shard_sizes_src, model_comm_group)
+
+        return x_src, x_dst
+
     def pre_process(self, x):
         x_src, x_dst = x
         x_src = self.emb_nodes_src(x_src)
