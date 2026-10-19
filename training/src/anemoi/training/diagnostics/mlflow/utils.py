@@ -8,11 +8,20 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from collections import deque
+from collections.abc import Mapping
 from typing import Any
 
 from omegaconf import DictConfig
 from omegaconf import ListConfig
+
+from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
+
+LOGGER = logging.getLogger(__name__)
+
+# Flattened param under which a run logs its own `diagnostics.log.mlflow.max_params_length`
+MAX_PARAMS_LENGTH_PARAM = "config.diagnostics.log.mlflow.max_params_length"
 
 
 class FixedLengthSet:
@@ -141,3 +150,61 @@ def clean_config_params(params: dict[str, Any]) -> dict[str, Any]:
     for key in keys_to_remove:
         del params[key]
     return params
+
+
+def get_max_params_length(params: Mapping[str, Any]) -> int:
+    """Get the maximum number of params a run was allowed to log.
+
+    The value is read from the run's own logged config so that the limit
+    applied when syncing a run is the one applied when training it.
+
+    Parameters
+    ----------
+    params : Mapping[str, Any]
+        Flattened params of the run, as logged to MLflow.
+
+    Returns
+    -------
+    int
+        The run's `max_params_length`, or `MAX_PARAMS_LENGTH` if it was not logged.
+    """
+    value = params.get(MAX_PARAMS_LENGTH_PARAM)
+    if value is None:
+        LOGGER.info("%s not found in run params, using default %s", MAX_PARAMS_LENGTH_PARAM, MAX_PARAMS_LENGTH)
+        return MAX_PARAMS_LENGTH
+    try:
+        max_params_length = int(value)
+    except (TypeError, ValueError):
+        LOGGER.warning(
+            "Invalid %s=%r in run params, using default %s",
+            MAX_PARAMS_LENGTH_PARAM,
+            value,
+            MAX_PARAMS_LENGTH,
+        )
+        return MAX_PARAMS_LENGTH
+    LOGGER.info("Using max_params_length=%s from run params", max_params_length)
+    return max_params_length
+
+
+def check_params_length(num_params: int, max_params_length: int) -> None:
+    """Raise if there are more params than allowed.
+
+    Parameters
+    ----------
+    num_params : int
+        Number of params to log, after `clean_config_params`.
+    max_params_length : int
+        Maximum number of params allowed.
+
+    Raises
+    ------
+    ValueError
+        If `num_params` exceeds `max_params_length`.
+    """
+    if num_params > max_params_length:
+        msg = (
+            f"Too many params: {num_params} > {max_params_length}. "
+            "Please revisit the fields being logged and add redundant or irrelevant ones to the "
+            "clean_config_params function, or increase `diagnostics.log.mlflow.max_params_length`."
+        )
+        raise ValueError(msg)

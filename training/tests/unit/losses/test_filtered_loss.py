@@ -547,3 +547,32 @@ class TestScalerIndicesRemapping:
 
         torch.testing.assert_close(loss, torch.tensor(0.0))
         assert "Metric selection is empty; forward() will return zeros for this call." in caplog.text
+
+
+@pytest.mark.parametrize(
+    "indices",
+    [
+        pytest.param(list(range(6)), id="all-in-order"),
+        pytest.param([2, 3, 4], id="contiguous-block"),
+        pytest.param([4, 0, 2], id="non-contiguous"),
+        pytest.param([5], id="single"),
+    ],
+)
+def test_select_variables_matches_advanced_indexing(indices: list[int]) -> None:
+    """_select_variables must give the same values and gradients as ``x[..., indices]``."""
+    x_ref = torch.randn(2, 3, 1, 7, 6, requires_grad=True)
+    x_new = x_ref.detach().clone().requires_grad_(True)
+    weights = torch.randn(2, 3, 1, 7, len(indices))
+
+    ref = x_ref[..., indices]
+    new = LossVariableMapper._select_variables(x_new, indices)
+    torch.testing.assert_close(new, ref)
+
+    (ref * weights).sum().backward()
+    (new * weights).sum().backward()
+    torch.testing.assert_close(x_new.grad, x_ref.grad)
+
+
+def test_select_variables_all_in_order_does_not_copy() -> None:
+    x = torch.randn(2, 4, 5)
+    assert LossVariableMapper._select_variables(x, list(range(5))) is x
