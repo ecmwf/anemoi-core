@@ -49,7 +49,7 @@ def test_cross_dataset_sampler_preserves_domain_order_across_sample_groups() -> 
 def test_cross_dataset_sampler_without_shuffle_preserves_domain_and_index_order() -> None:
     sampler = make_sampler((4, 3), shuffle=False, batch_size=2)
 
-    assert list(sampler) == [[0, 1], [4, 5], [2, 3], [6]]
+    assert list(sampler) == [[0, 1], [2, 3], [4, 5], [6]]
 
 
 def test_cross_dataset_sampler_repeats_for_same_seed_and_epoch() -> None:
@@ -74,13 +74,13 @@ def test_cross_dataset_sampler_matches_single_domain_sampler_order() -> None:
 
 
 def test_cross_dataset_sampler_resumes_at_each_batch_boundary() -> None:
-    expected = list(make_sampler((6, 4), shuffle=False, batch_size=2))
+    expected = list(make_sampler((6, 4), batch_size=2))
 
     for stop_after in range(len(expected) + 1):
-        sampler = make_sampler((6, 4), shuffle=False, batch_size=2)
+        sampler = make_sampler((6, 4), batch_size=2)
         iterator = iter(sampler)
         consumed = [next(iterator) for _ in range(stop_after)]
-        resumed = make_sampler((6, 4), shuffle=False, batch_size=2)
+        resumed = make_sampler((6, 4), batch_size=2)
         resumed.load_state_dict(sampler.state_dict())
 
         assert consumed + list(resumed) == expected

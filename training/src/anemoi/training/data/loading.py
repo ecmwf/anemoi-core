@@ -11,6 +11,7 @@ from abc import ABC
 from abc import abstractmethod
 from collections.abc import Iterator
 
+import numpy as np
 from torch.utils.data import ConcatDataset
 from torch.utils.data import Dataset
 from torch.utils.data import Sampler
@@ -232,7 +233,11 @@ class CrossDatasetLoadingPolicy(DataLoadingPolicy):
 
 
 class CrossDatasetBatchSampler(Sampler[list[int]]):
-    """Round-robin whole, domain-homogeneous batches across independently sampled domains."""
+    """Randomly interleave whole, domain-homogeneous batches of independently sampled domains.
+
+    The domain order is a shuffle of every domain's batches that depends only on the seed and the
+    epoch, so all ranks visit the same domain at each step.
+    """
 
     def __init__(
         self,
@@ -246,6 +251,9 @@ class CrossDatasetBatchSampler(Sampler[list[int]]):
         drop_last: bool,
     ) -> None:
         self.batch_size = batch_size
+        self.seed = seed
+        self.shuffle = shuffle
+        self._epoch = 0
         self._domain_offsets = [0, *dataset.cumulative_sizes[:-1]]
         self._domain_samplers = [
             StatefulDistributedSampler(
@@ -258,41 +266,43 @@ class CrossDatasetBatchSampler(Sampler[list[int]]):
             )
             for domain in dataset.datasets
         ]
-        self._next_domain = 0
+        self._batches_yielded = 0
+
+    def _domain_order(self) -> list[int]:
+        """Domain of each batch of the epoch, shuffled reproducibly from the seed and the epoch."""
+        order = np.repeat(np.arange(len(self._domain_samplers)), self._domain_batch_counts())
+        if self.shuffle:
+            np.random.default_rng([self.seed, self._epoch]).shuffle(order)
+        return order.tolist()
+
+    def _domain_batch_counts(self) -> list[int]:
+        return [-(-len(sampler) // self.batch_size) for sampler in self._domain_samplers]
 
     def __iter__(self) -> Iterator[list[int]]:
         domain_batches = [
             iter(BatchSampler(sampler, batch_size=self.batch_size, drop_last=False))
             for sampler in self._domain_samplers
         ]
-        active = list(range(len(domain_batches)))
-        while active:
-            position = next(
-                (position for position, index in enumerate(active) if index >= self._next_domain),
-                0,
-            )
-            domain_index = active[position]
-            try:
-                local_batch = next(domain_batches[domain_index])
-            except StopIteration:
-                active.remove(domain_index)
-                continue
-            self._next_domain = active[(position + 1) % len(active)]
+        for domain_index in self._domain_order()[self._batches_yielded :]:
+            local_batch = next(domain_batches[domain_index])
+            self._batches_yielded += 1
             offset = self._domain_offsets[domain_index]
             yield [offset + index for index in local_batch]
+        self._batches_yielded = 0
 
     def __len__(self) -> int:
-        return sum(-(-len(sampler) // self.batch_size) for sampler in self._domain_samplers)
+        return sum(self._domain_batch_counts())
 
     def set_epoch(self, epoch: int) -> None:
         for sampler in self._domain_samplers:
             sampler.set_epoch(epoch)
-        self._next_domain = 0
+        self._epoch = epoch
+        self._batches_yielded = 0
 
     def state_dict(self) -> dict:
         return {
             "domain_samplers": [sampler.state_dict() for sampler in self._domain_samplers],
-            "next_domain": self._next_domain,
+            "batches_yielded": self._batches_yielded,
         }
 
     def load_state_dict(self, state_dict: dict) -> None:
@@ -302,7 +312,7 @@ class CrossDatasetBatchSampler(Sampler[list[int]]):
             strict=True,
         ):
             sampler.load_state_dict(sampler_state)
-        self._next_domain = state_dict["next_domain"]
+        self._batches_yielded = state_dict["batches_yielded"]
 
     @property
     def sampler(self) -> "CrossDatasetBatchSampler":

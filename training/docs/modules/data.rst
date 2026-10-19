@@ -80,7 +80,7 @@ Multi-Domain
 ------------
 
 ``CrossDatasetLoadingPolicy`` builds one independently indexed
-``MultiDataset`` per domain. Its batch sampler visits domains in round-robin
+``MultiDataset`` per domain. Its batch sampler visits domains in a random (seeded)
 order and keeps every batch domain-homogeneous, including when the configured
 batch size is greater than one. The readers may use different grids and date
 ranges.
