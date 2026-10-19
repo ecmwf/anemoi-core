@@ -50,6 +50,12 @@ from anemoi.training.utils.masks import build_output_masks
 from anemoi.training.utils.resolve_config import is_container
 from anemoi.training.utils.resolve_config import is_mapping
 from anemoi.training.utils.resolve_config import is_sequence
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import choose_base_seed
+from anemoi.training.utils.seeding import derive_seed
+from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.seeding import seed_random_generators
+from anemoi.training.utils.seeding import set_base_seed
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 
@@ -520,14 +526,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         }
 
         if not self.config.training.load_weights_only:
+            # Checkpoint conversion loads the module without creating a Trainer; only a
+            # training run that continues from the checkpoint takes over its seed.
+            trainer = getattr(self, "_trainer", None)
+            if trainer is not None:
+                self._restore_base_seed(checkpoint)
             self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
 
             # Anemoi constructs the task and datasets from the config before Lightning
             # restores their checkpoint state. Now that the checkpoint rollout is restored,
             # update any constructed datasets so workers load the required input and target
-            # time steps. Checkpoint conversion loads the module without creating a Trainer
-            # or datamodule, so only synchronize if a datamodule is attached.
-            trainer = getattr(self, "_trainer", None)
+            # time steps. Checkpoint conversion creates no datamodule either, so only
+            # synchronize if a datamodule is attached.
             if trainer is not None and trainer.datamodule is not None:
                 trainer.datamodule.sync_dataset_state()
 
@@ -536,6 +546,35 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             checkpoint,
             self._ckpt_model_name_to_index,
         )
+
+    def _restore_base_seed(self, checkpoint: dict) -> None:
+        """Continue with the checkpoint's base seed, unless ``training.seed`` sets one.
+
+        The chosen seed replaces the one picked at start-up, before the data order and
+        the random numbers of the training steps are derived from it. It also goes into
+        the run metadata, together with the trainer seed derived from it, so that the
+        checkpoints of this run store the seed it trains with.
+        """
+        checkpoint_seed = checkpoint["hyper_parameters"]["metadata"].get("base_seed")
+        if checkpoint_seed is None:
+            # Checkpoints from older versions store no base seed. The run keeps the seed it
+            # started with, which all ranks already share.
+            LOGGER.warning(
+                "The checkpoint stores no base seed; training continues with base seed %d, "
+                "and the run does not continue exactly.",
+                get_base_seed(),
+            )
+            return
+
+        base_seed = choose_base_seed(self.config.training.seed, checkpoint_seed)
+        set_base_seed(base_seed)
+        LOGGER.info("Training continues with base seed %d", base_seed)
+
+        trainer_seed = derive_seed(base_seed, SeedContext.TRAINER)
+        metadata = self.hparams["metadata"]
+        for entry in (metadata, metadata["metadata_inference"]):
+            entry["base_seed"] = base_seed
+            entry["seed"] = trainer_seed
 
     def _update_scaler_for_dataset(
         self,
@@ -1203,6 +1242,27 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         return metrics
 
+    def on_train_batch_start(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
+        """Seed the random number generators for this training batch.
+
+        The seed depends only on the base seed, the model communication group, the
+        epoch and the batch, so a run resumed from a checkpoint draws the same random
+        numbers as an uninterrupted run. Ranks of one model group share the seed and
+        stay in step; different groups, such as different ensemble members, draw
+        different numbers. Seeding takes well under a millisecond and runs on the
+        host only, hence does not slow down training.
+        """
+        del batch
+        seed = derive_seed(
+            get_base_seed(),
+            SeedContext.TRAINING_BATCH,
+            self.model_comm_group_id,
+            self.current_epoch,
+            batch_idx,
+        )
+        seed_random_generators(seed)
+        LOGGER.debug("Epoch %d, batch %d: random number generators seeded with %d", self.current_epoch, batch_idx, seed)
+
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         del batch_idx
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
@@ -1304,12 +1364,25 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         super().on_train_start()
         self.task.log_training_state()
 
+    def _ran_all_batches_of_epoch(self) -> bool:
+        """Whether the epoch that is ending trained on all of its batches.
+
+        Training that stops early, for example on max_steps or a time limit, also
+        ends the current epoch. The checkpoint saved at the end of training then
+        resumes inside that epoch.
+        """
+        batches_run = self.trainer.fit_loop.epoch_loop.batch_progress.current.ready
+        return batches_run == self.trainer.num_training_batches
+
     def on_train_epoch_end(self) -> None:
-        self.task.on_train_epoch_end(current_epoch=self.current_epoch)
-        # Default epoch checkpoints are saved at validation end, before this
-        # hook. On resume Lightning finishes the saved epoch here, advancing the
-        # dataloader before newly created workers derive the seed for that epoch.
-        self.trainer.datamodule.set_epoch(self.current_epoch + 1)
+        # The rollout and the data shuffle move on only after a full epoch, so that
+        # a run resumed inside an epoch keeps that epoch's rollout and shuffle.
+        if self._ran_all_batches_of_epoch():
+            self.task.on_train_epoch_end(current_epoch=self.current_epoch)
+            # Default epoch checkpoints are saved at validation end, before this
+            # hook. On resume Lightning finishes the saved epoch here, so the
+            # datamodule also reaches the next epoch before its dataloaders are used.
+            self.trainer.datamodule.set_epoch(self.current_epoch + 1)
         super().on_train_epoch_end()
 
     def configure_optimizers(
