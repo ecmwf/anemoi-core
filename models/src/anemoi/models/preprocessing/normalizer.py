@@ -101,6 +101,19 @@ class InputNormalizer(BasePreprocessor):
             if value.ndim != 1 or value.shape[0] != len(name_to_index):
                 raise ValueError(f"Statistic {key!r} must contain one value per variable.")
 
+        # Optionally reuse the statistics of one variable for another (e.g. cp, sf -> tp, so that a
+        # FractionBounding of cp by tp is a physical fraction). Every remapped variable takes the
+        # source's original statistics, so the result does not depend on the order of the mapping.
+        stats_index = list(range(len(name_to_index)))
+        for name, source in self.remap.items():
+            if name not in name_to_index:
+                continue
+            if source not in name_to_index:
+                msg = f"Cannot normalise {name!r} with the statistics of {source!r}: {source!r} is not in this view."
+                raise ValueError(msg)
+            stats_index[name_to_index[name]] = name_to_index[source]
+        values = {key: value[stats_index] for key, value in values.items()}
+
         norm_mul = torch.ones(len(name_to_index), dtype=torch.float32, device=device)
         norm_add = torch.zeros(len(name_to_index), dtype=torch.float32, device=device)
         eps = 1e-8

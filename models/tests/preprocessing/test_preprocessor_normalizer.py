@@ -265,3 +265,66 @@ def test_tabular_multiple_tensors(input_normalizer, normalized_payload) -> None:
     assert len(out.data) == 2
     for tensor in out.data:
         assert torch.allclose(tensor, normalized_payload)
+
+
+@pytest.fixture()
+def remap_normalizer():
+    config = DictConfig(
+        {
+            "default": "mean-std",
+            "remap": {"x": "z", "y": "x"},
+            "min-max": ["x"],
+            "max": ["y"],
+            "none": ["z"],
+            "mean-std": ["q"],
+        },
+    )
+    return InputNormalizer(config=config)
+
+
+def test_normalize_remap(remap_normalizer, make_view, base_payload) -> None:
+    """x uses z's statistics; y uses x's original statistics, not the remapped ones."""
+    out = remap_normalizer(make_view(base_payload))
+    expected = torch.Tensor([[0.0, 2 / 11, 3.0, -0.5, 1 / 7], [5 / 9, 7 / 11, 8.0, 4.5, 0.5]])
+    torch.testing.assert_close(view_data_2d(out), expected)
+
+
+def test_normalize_remap_inverse_roundtrip(remap_normalizer, make_view, base_payload) -> None:
+    transformed = remap_normalizer(make_view(base_payload), in_place=False)
+    restored = remap_normalizer(transformed, inverse=True, in_place=False)
+    torch.testing.assert_close(view_data_2d(restored), base_payload)
+
+
+def test_remap_keeps_physical_fraction(make_view) -> None:
+    """With cp and sf normalised by tp's stdev, a normalised fraction of tp is the same physical fraction."""
+    config = DictConfig({"default": "none", "std": ["tp", "cp", "sf"], "remap": {"cp": "tp", "sf": "tp"}})
+    normalizer = InputNormalizer(config=config)
+    statistics = {key: np.array([2.4e-3, 1.3e-3, 3.9e-4]) for key in ("mean", "stdev", "minimum", "maximum")}
+    payload = torch.Tensor([[4.0e-3, 1.0e-3, 4.0e-3]])
+    out = view_data_2d(normalizer(make_view(payload, variables=["tp", "cp", "sf"], statistics=statistics)))
+    torch.testing.assert_close(out[:, 1:] / out[:, :1], payload[:, 1:] / payload[:, :1])
+
+
+def test_remap_does_not_modify_statistics(make_view, base_payload) -> None:
+    config = DictConfig({"default": "mean-std", "remap": {"x": "z"}})
+    normalizer = InputNormalizer(config=config)
+    statistics = {key: torch.as_tensor(value, dtype=torch.float32) for key, value in STATISTICS.items()}
+    original = {key: value.clone() for key, value in statistics.items()}
+    normalizer(make_view(base_payload, statistics=statistics))
+    for key, value in statistics.items():
+        torch.testing.assert_close(value, original[key])
+
+
+def test_remap_skips_variables_absent_from_view(remap_normalizer, make_view, base_payload) -> None:
+    """A view without the remapped variable (e.g. inputs without diagnostic cp) is normalised as usual."""
+    statistics = {key: value[[2, 3, 4]] for key, value in STATISTICS.items()}
+    view = make_view(base_payload[:, [2, 3, 4]], variables=["z", "q", "other"], statistics=statistics)
+    out = remap_normalizer(view)
+    torch.testing.assert_close(view_data_2d(out), torch.Tensor([[3.0, -0.5, 1 / 7], [8.0, 4.5, 0.5]]))
+
+
+def test_remap_without_source_variable_raises(remap_normalizer, make_view, base_payload) -> None:
+    statistics = {key: value[[0, 3]] for key, value in STATISTICS.items()}
+    view = make_view(base_payload[:, [0, 3]], variables=["x", "q"], statistics=statistics)
+    with pytest.raises(ValueError, match="'z' is not in this view"):
+        remap_normalizer(view)
