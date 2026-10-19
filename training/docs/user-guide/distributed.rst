@@ -307,7 +307,10 @@ must be ``false`` when ``config.training.accum_grad_batches`` is larger
 than 1. With ``static_graph: false`` and ``find_unused_parameters:
 true``, the gradients of all GPUs are summed in the same order in every
 step, so a resumed run continues bitwise identically, at some cost in
-speed.
+speed. Runs with tabular (observation) datasets must use
+``static_graph: false`` and ``find_unused_parameters: true``: a dataset
+with no observations in a batch leaves its encoder and decoder without
+gradients in that step. Training stops with an error otherwise.
 
 **********
  Examples

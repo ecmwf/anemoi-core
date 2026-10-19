@@ -34,6 +34,7 @@ from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
+from anemoi.training.distributed.strategy import BaseDDPStrategy
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -605,18 +606,24 @@ class AnemoiTrainer(ABC):
     def strategy(self) -> Any:
         """Returns the distributed training strategy.
 
-        Runs with at least one tabular observation dataset build a dynamic graph per batch  and route each sample
+        Runs with at least one tabular observation dataset build a dynamic graph per batch and route each sample
         through per-dataset encoders/decoders that may be unused when a dataset has no observations in a batch.
+        DDP must then look for parameters without gradients in every step, so these runs need
+        ``static_graph: false`` and ``find_unused_parameters: true`` in ``training.strategy``.
         """
-        if any(dr.data_type == "tabular" for dr in self.datamodule.ds_train.data_readers.values()):
-            # If not all datasets are static, we set find_unused_parameters=True and static_graph=False.
-            return instantiate(
-                self.config.training.strategy,
-                find_unused_parameters=True,
-                static_graph=False,
-            )
-
-        return instantiate(self.config.training.strategy)
+        strategy = instantiate(self.config.training.strategy)
+        has_tabular = any(dr.data_type == "tabular" for dr in self.datamodule.ds_train.data_readers.values())
+        if has_tabular and isinstance(strategy, BaseDDPStrategy):
+            # A setting missing from the config takes DDP's own default, which is false for both.
+            strategy_config = self.config.training.strategy
+            if strategy_config.get("static_graph", False) or not strategy_config.get("find_unused_parameters", False):
+                msg = (
+                    "Training with tabular datasets needs training.strategy.static_graph: false and "
+                    "training.strategy.find_unused_parameters: true, because parameters of a dataset's "
+                    "encoder and decoder get no gradient when the dataset has no observations in a batch."
+                )
+                raise ValueError(msg)
+        return strategy
 
     @cached_property
     def fit_parameters(self) -> Any:
