@@ -39,6 +39,13 @@ with `accuracy_reference_id` set to its run ID, before committing it.
 
 Changes to the benchmark tests (`test_benchmark.py`) and their configurations (`benchmark/`). Also documents performance changes from underlying model optimisations.
 
+## 2026-10-14 - Improved loss and data reader performance ([#1469](https://github.com/ecmwf/anemoi-core/pull/1469))
+
+- Commit: 3452dec6caa6629615b17b6ca862a4766c411958
+- Benchmark changed: No
+- Performance change: Throughput and memory improvement for temporal downscaler model
+- Reason: LossVariableMapper expensive indexing replaced with index\_select. Improved dataloading when using Trajectory datasets. Performance increased from 3.86it/s to 4.8it/s
+
 ## 2026-07-22 - Merged multiscale loss optimisation ([#1212](https://github.com/ecmwf/anemoi-core/pull/1212))
 
 
