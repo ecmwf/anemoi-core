@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
@@ -34,7 +34,7 @@ _TEST_URL = "https://example.com/model.ckpt"
 _DOWNLOAD_TARGET = "anemoi.training.checkpoint.utils.download_with_retry"
 
 
-def _make_download_side_effect(state_dict: dict) -> AsyncMock:
+def _make_download_side_effect(state_dict: dict) -> MagicMock:
     """Create a side effect that writes a valid checkpoint to dest.
 
     The returned callable has the same signature as ``download_with_retry``
@@ -42,7 +42,7 @@ def _make_download_side_effect(state_dict: dict) -> AsyncMock:
     path argument.
     """
 
-    async def _side_effect(
+    def _side_effect(
         url: str,  # noqa: ARG001
         dest: Path,
         **kwargs: Any,  # noqa: ARG001
@@ -50,7 +50,7 @@ def _make_download_side_effect(state_dict: dict) -> AsyncMock:
         torch.save({"state_dict": state_dict}, dest)
         return dest
 
-    return AsyncMock(side_effect=_side_effect)
+    return MagicMock(side_effect=_side_effect)
 
 
 @pytest.fixture
@@ -95,27 +95,27 @@ class TestHTTPSourceProcess:
     """Tests for HTTPSource.process()."""
 
     @patch(_DOWNLOAD_TARGET)
-    async def test_successful_download_and_load(
+    def test_successful_download_and_load(
         self,
-        mock_download: AsyncMock,
+        mock_download: MagicMock,
         source: HTTPSource,
         simple_state_dict: dict,
     ) -> None:
         mock_download.side_effect = _make_download_side_effect(simple_state_dict).side_effect
 
         context = CheckpointContext()
-        result = await source.process(context)
+        result = source.process(context)
 
-        mock_download.assert_awaited_once()
+        mock_download.assert_called_once()
         assert result.checkpoint_data is not None
         assert "state_dict" in result.checkpoint_data
         assert result.metadata["source_type"] == "http"
         assert result.metadata["source_url"] == _TEST_URL
 
     @patch(_DOWNLOAD_TARGET)
-    async def test_download_passes_retry_and_timeout(
+    def test_download_passes_retry_and_timeout(
         self,
-        mock_download: AsyncMock,
+        mock_download: MagicMock,
         simple_state_dict: dict,
     ) -> None:
         """Verify max_retries and timeout are forwarded to download_with_retry."""
@@ -123,16 +123,16 @@ class TestHTTPSourceProcess:
 
         source = HTTPSource(url=_TEST_URL, max_retries=7, timeout=120)
         context = CheckpointContext()
-        await source.process(context)
+        source.process(context)
 
         _, kwargs = mock_download.call_args
         assert kwargs["max_retries"] == 7
         assert kwargs["timeout"] == 120
 
     @patch(_DOWNLOAD_TARGET)
-    async def test_source_error_propagates(
+    def test_source_error_propagates(
         self,
-        mock_download: AsyncMock,
+        mock_download: MagicMock,
         source: HTTPSource,
     ) -> None:
         """CheckpointSourceError from download_with_retry should propagate."""
@@ -145,12 +145,12 @@ class TestHTTPSourceProcess:
         context = CheckpointContext()
 
         with pytest.raises(CheckpointSourceError):
-            await source.process(context)
+            source.process(context)
 
     @patch(_DOWNLOAD_TARGET)
-    async def test_timeout_error_propagates(
+    def test_timeout_error_propagates(
         self,
-        mock_download: AsyncMock,
+        mock_download: MagicMock,
         source: HTTPSource,
     ) -> None:
         mock_download.side_effect = CheckpointTimeoutError(
@@ -161,17 +161,17 @@ class TestHTTPSourceProcess:
         context = CheckpointContext()
 
         with pytest.raises(CheckpointTimeoutError):
-            await source.process(context)
+            source.process(context)
 
     @patch(_DOWNLOAD_TARGET)
-    async def test_corrupt_download_raises_load_error(
+    def test_corrupt_download_raises_load_error(
         self,
-        mock_download: AsyncMock,
+        mock_download: MagicMock,
         source: HTTPSource,
     ) -> None:
         """If downloaded file isn't a valid checkpoint, raise CheckpointLoadError."""
 
-        async def _write_garbage(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
+        def _write_garbage(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
             dest.write_text("not a checkpoint")
             return dest
 
@@ -180,12 +180,12 @@ class TestHTTPSourceProcess:
         context = CheckpointContext()
 
         with pytest.raises(CheckpointLoadError):
-            await source.process(context)
+            source.process(context)
 
     @patch(_DOWNLOAD_TARGET)
-    async def test_download_is_kept_and_published_on_success(
+    def test_download_is_kept_and_published_on_success(
         self,
-        mock_download: AsyncMock,
+        mock_download: MagicMock,
         source: HTTPSource,
         simple_state_dict: dict,
     ) -> None:
@@ -195,7 +195,7 @@ class TestHTTPSourceProcess:
         """
         created_paths: list[Path] = []
 
-        async def _track_and_save(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
+        def _track_and_save(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
             created_paths.append(dest)
             torch.save({"state_dict": simple_state_dict}, dest)
             return dest
@@ -204,7 +204,7 @@ class TestHTTPSourceProcess:
 
         context = CheckpointContext()
         try:
-            result = await source.process(context)
+            result = source.process(context)
 
             assert len(created_paths) == 1
             assert created_paths[0].exists(), "The download must be kept for Trainer.fit(ckpt_path=)"
@@ -214,15 +214,15 @@ class TestHTTPSourceProcess:
             created_paths[0].unlink(missing_ok=True)
 
     @patch(_DOWNLOAD_TARGET)
-    async def test_download_is_kept_and_published_on_load_failure(
+    def test_download_is_kept_and_published_on_load_failure(
         self,
-        mock_download: AsyncMock,
+        mock_download: MagicMock,
         source: HTTPSource,
     ) -> None:
         """A download that fails to load is also kept."""
         created_paths: list[Path] = []
 
-        async def _track_and_corrupt(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
+        def _track_and_corrupt(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
             created_paths.append(dest)
             dest.write_text("corrupt")
             return dest
@@ -232,7 +232,7 @@ class TestHTTPSourceProcess:
         context = CheckpointContext()
         try:
             with pytest.raises(CheckpointLoadError):
-                await source.process(context)
+                source.process(context)
 
             assert len(created_paths) == 1
             assert created_paths[0].exists()
@@ -242,15 +242,15 @@ class TestHTTPSourceProcess:
             created_paths[0].unlink(missing_ok=True)
 
     @patch(_DOWNLOAD_TARGET)
-    async def test_failed_download_leaves_no_file_behind(
+    def test_failed_download_leaves_no_file_behind(
         self,
-        mock_download: AsyncMock,
+        mock_download: MagicMock,
         source: HTTPSource,
     ) -> None:
         """A failed download is removed."""
         created_paths: list[Path] = []
 
-        async def _track_and_fail(url: str, dest: Path, **kwargs: Any) -> Path:
+        def _track_and_fail(url: str, dest: Path, **kwargs: Any) -> Path:
             del kwargs
             created_paths.append(dest)
             msg = "connection reset"
@@ -260,7 +260,7 @@ class TestHTTPSourceProcess:
 
         context = CheckpointContext()
         with pytest.raises(CheckpointSourceError):
-            await source.process(context)
+            source.process(context)
 
         assert len(created_paths) == 1
         assert not created_paths[0].exists()
@@ -268,19 +268,19 @@ class TestHTTPSourceProcess:
 
     @patch(_DOWNLOAD_TARGET)
     @patch("anemoi.training.checkpoint.utils.calculate_checksum")
-    async def test_checksum_mismatch_raises(
+    def test_checksum_mismatch_raises(
         self,
-        mock_checksum: AsyncMock,
-        mock_download: AsyncMock,
+        mock_checksum: MagicMock,
+        mock_download: MagicMock,
         simple_state_dict: dict,
     ) -> None:
         """Checksum mismatch raises CheckpointValidationError and removes the file."""
         created_paths: list[Path] = []
         save = _make_download_side_effect(simple_state_dict).side_effect
 
-        async def _track_and_save(url: str, dest: Path, **kwargs: Any) -> Path:
+        def _track_and_save(url: str, dest: Path, **kwargs: Any) -> Path:
             created_paths.append(dest)
-            return await save(url, dest, **kwargs)
+            return save(url, dest, **kwargs)
 
         mock_download.side_effect = _track_and_save
         mock_checksum.return_value = "wrong_checksum"
@@ -289,7 +289,7 @@ class TestHTTPSourceProcess:
         context = CheckpointContext()
 
         with pytest.raises(CheckpointValidationError, match="Checksum mismatch"):
-            await source.process(context)
+            source.process(context)
 
         assert len(created_paths) == 1
         assert not created_paths[0].exists()
@@ -297,10 +297,10 @@ class TestHTTPSourceProcess:
 
     @patch(_DOWNLOAD_TARGET)
     @patch("anemoi.training.checkpoint.utils.calculate_checksum")
-    async def test_checksum_match_succeeds(
+    def test_checksum_match_succeeds(
         self,
-        mock_checksum: AsyncMock,
-        mock_download: AsyncMock,
+        mock_checksum: MagicMock,
+        mock_download: MagicMock,
         simple_state_dict: dict,
     ) -> None:
         """Matching checksum should proceed normally."""
@@ -309,7 +309,7 @@ class TestHTTPSourceProcess:
 
         source = HTTPSource(url=_TEST_URL, expected_checksum="correct_checksum")
         context = CheckpointContext()
-        result = await source.process(context)
+        result = source.process(context)
 
         assert result.checkpoint_data is not None
 

@@ -33,8 +33,7 @@ def _fake_index_collection(name_to_index: dict[str, int]) -> object:
     return type("IndexCollection", (), {"name_to_index": name_to_index})()
 
 
-@pytest.mark.asyncio
-async def test_multi_dataset_data_indices_builds_dataset_keyed_dict() -> None:
+def test_multi_dataset_data_indices_builds_dataset_keyed_dict() -> None:
     """Dict-of-IndexCollections shape produces a dict-of-name_to_index attribute."""
     era5 = {"temperature": 0, "wind_u": 1}
     metno = {"temperature": 0, "humidity": 1, "pressure": 2}
@@ -49,13 +48,12 @@ async def test_multi_dataset_data_indices_builds_dataset_keyed_dict() -> None:
     model = _Model()
 
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    await WeightsOnlyLoader().process(context)
+    WeightsOnlyLoader().process(context)
 
     assert model._ckpt_model_name_to_index == {"era5": era5, "metno": metno}
 
 
-@pytest.mark.asyncio
-async def test_single_dataset_legacy_shape_raises() -> None:
+def test_single_dataset_legacy_shape_raises() -> None:
     """Legacy single-IndexCollection shape raises ``TypeError``. Migrate it first."""
     name_to_index = {"temperature": 0, "wind_u": 1, "wind_v": 2}
     checkpoint_data = {
@@ -66,11 +64,10 @@ async def test_single_dataset_legacy_shape_raises() -> None:
 
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
     with pytest.raises(TypeError, match="migration sync"):
-        await WeightsOnlyLoader().process(context)
+        WeightsOnlyLoader().process(context)
 
 
-@pytest.mark.asyncio
-async def test_empty_dict_data_indices_does_not_set_attribute() -> None:
+def test_empty_dict_data_indices_does_not_set_attribute() -> None:
     """An empty dict is not a usable multi-dataset payload; leave attribute unset."""
     checkpoint_data = {
         "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
@@ -79,13 +76,12 @@ async def test_empty_dict_data_indices_does_not_set_attribute() -> None:
     model = _Model()
 
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    await WeightsOnlyLoader().process(context)
+    WeightsOnlyLoader().process(context)
 
     assert not hasattr(model, "_ckpt_model_name_to_index")
 
 
-@pytest.mark.asyncio
-async def test_multi_dataset_dict_entries_missing_name_to_index_skips() -> None:
+def test_multi_dataset_dict_entries_missing_name_to_index_skips() -> None:
     """Dict whose values lack .name_to_index is unusable; leave attribute unset."""
     checkpoint_data = {
         "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
@@ -94,6 +90,6 @@ async def test_multi_dataset_dict_entries_missing_name_to_index_skips() -> None:
     model = _Model()
 
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    await WeightsOnlyLoader().process(context)
+    WeightsOnlyLoader().process(context)
 
     assert not hasattr(model, "_ckpt_model_name_to_index")

@@ -101,14 +101,13 @@ def _ckpt_without_hparams() -> dict:
     return {"state_dict": _state_dict()}
 
 
-@pytest.mark.asyncio
-async def test_migration_invoked_exactly_once_per_process(
+def test_migration_invoked_exactly_once_per_process(
     fake_chunking_migration: MagicMock,
 ) -> None:
     """WeightsOnlyLoader.process() calls the migration helper exactly once."""
     context = CheckpointContext(model=_Model(), checkpoint_data=_ckpt())
 
-    await WeightsOnlyLoader().process(context)
+    WeightsOnlyLoader().process(context)
 
     assert fake_chunking_migration.call_count == 1
     assert context.checkpoint_data["_migration_applied"] is True
@@ -151,14 +150,13 @@ def test_apply_trainable_edge_perm_migration_runs_model_dependent_migration(
     assert context.checkpoint_data["_model"] is model
 
 
-@pytest.mark.asyncio
-async def test_edge_perm_migration_invoked_during_process(
+def test_edge_perm_migration_invoked_during_process(
     fake_edge_perm_migration: MagicMock,
 ) -> None:
     """``process`` applies the edge-permutation migration once."""
     context = CheckpointContext(model=_Model(), checkpoint_data=_ckpt())
 
-    await WeightsOnlyLoader().process(context)
+    WeightsOnlyLoader().process(context)
 
     assert fake_edge_perm_migration.call_count == 1
     assert context.checkpoint_data["_edge_perm_applied"] is True
@@ -360,14 +358,13 @@ def test_raw_state_dict_save_is_not_migrated(spy_chunking_migration: MagicMock) 
     assert context.checkpoint_data is ckpt
 
 
-@pytest.mark.asyncio
-async def test_real_chunking_fix_leaves_autoencoder_checkpoint_intact() -> None:
+def test_real_chunking_fix_leaves_autoencoder_checkpoint_intact() -> None:
     """The real ``chunking_fix`` does not change a NoOpProcessor checkpoint."""
     ckpt = _ckpt(_processor())  # NoOpProcessor: no num_layers, no num_chunks
     original = {k: v.clone() for k, v in ckpt["state_dict"].items()}
     context = CheckpointContext(model=_Model(), checkpoint_data=ckpt)
 
-    await WeightsOnlyLoader(strict=False).process(context)
+    WeightsOnlyLoader(strict=False).process(context)
 
     for key, value in original.items():
         assert torch.equal(context.checkpoint_data["state_dict"][key], value), f"{key} was rewritten"
@@ -463,8 +460,7 @@ def test_unreadable_ledger_is_treated_as_unknown_not_current(
         pytest.param(2, True, id="ledger from before chunking_fix"),
     ],
 )
-@pytest.mark.asyncio
-async def test_autoencoder_checkpoint_behind_the_ledger_is_not_migrated_on_a_pipeline_load(
+def test_autoencoder_checkpoint_behind_the_ledger_is_not_migrated_on_a_pipeline_load(
     caplog: pytest.LogCaptureFixture,
     spy_chunking_migration: MagicMock,
     recorded: int,
@@ -483,7 +479,7 @@ async def test_autoencoder_checkpoint_behind_the_ledger_is_not_migrated_on_a_pip
     context = CheckpointContext(model=model, checkpoint_data=ckpt)
 
     with caplog.at_level(logging.WARNING):
-        await WeightsOnlyLoader().process(context)
+        WeightsOnlyLoader().process(context)
 
     spy_chunking_migration.assert_not_called()
     assert ("behind the installed anemoi-models" in caplog.text) is expect_warning

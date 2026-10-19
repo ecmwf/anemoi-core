@@ -170,9 +170,9 @@ def fake_migrations(monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, MagicMo
     return chunking, edge_perm
 
 
-async def _new_path(model: nn.Module, checkpoint: dict[str, Any]) -> nn.Module:
+def _new_path(model: nn.Module, checkpoint: dict[str, Any]) -> nn.Module:
     context = CheckpointContext(model=model, checkpoint_data=checkpoint, config=_run_config())
-    await TransferLearningLoader(skip_mismatched=True).process(context)
+    TransferLearningLoader(skip_mismatched=True).process(context)
     return context.model
 
 
@@ -190,8 +190,7 @@ def _assert_same_model(legacy: nn.Module, pipeline: nn.Module) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_ledgerless_checkpoint_loads_identically_to_the_legacy_path(
+def test_ledgerless_checkpoint_loads_identically_to_the_legacy_path(
     fake_migrations: tuple[MagicMock, MagicMock],
 ) -> None:
     """A checkpoint with no ledger gives the same result on both paths."""
@@ -205,15 +204,14 @@ async def test_ledgerless_checkpoint_loads_identically_to_the_legacy_path(
         chunking,
         edge_perm,
     )
-    pipeline = await _new_path(_Model(), {**checkpoint, "state_dict": dict(checkpoint["state_dict"])})
+    pipeline = _new_path(_Model(), {**checkpoint, "state_dict": dict(checkpoint["state_dict"])})
 
     assert chunking.call_count == 2  # once per path
     assert edge_perm.call_count == 2
     _assert_same_model(legacy, pipeline)
 
 
-@pytest.mark.asyncio
-async def test_shape_mismatch_is_skipped_identically_to_the_legacy_path(
+def test_shape_mismatch_is_skipped_identically_to_the_legacy_path(
     fake_migrations: tuple[MagicMock, MagicMock],
 ) -> None:
     """Both paths skip a resized layer and keep its initial values."""
@@ -235,15 +233,14 @@ async def test_shape_mismatch_is_skipped_identically_to_the_legacy_path(
         chunking,
         edge_perm,
     )
-    pipeline = await _new_path(pipeline_model, {**checkpoint, "state_dict": dict(checkpoint["state_dict"])})
+    pipeline = _new_path(pipeline_model, {**checkpoint, "state_dict": dict(checkpoint["state_dict"])})
 
     # The head did not transfer in either path.
     assert legacy.head.weight.shape == (2, 4)
     _assert_same_model(legacy, pipeline)
 
 
-@pytest.mark.asyncio
-async def test_pipeline_skips_a_migration_the_legacy_path_reapplied(
+def test_pipeline_skips_a_migration_the_legacy_path_reapplied(
     monkeypatch: pytest.MonkeyPatch,
     fake_migrations: tuple[MagicMock, MagicMock],
 ) -> None:
@@ -268,6 +265,6 @@ async def test_pipeline_skips_a_migration_the_legacy_path_reapplied(
         for migration in Migrator()._grouped_migrations[-1]
     ]
 
-    await _new_path(_Model(), checkpoint)
+    _new_path(_Model(), checkpoint)
 
     spy.assert_not_called()

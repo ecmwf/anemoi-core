@@ -13,7 +13,7 @@ Example
 -------
 >>> source = LocalSource()
 >>> context = CheckpointContext(checkpoint_path=Path("/models/epoch_50.ckpt"))
->>> result = await source.process(context)
+>>> result = source.process(context)
 >>> assert result.checkpoint_data is not None
 """
 
@@ -46,7 +46,7 @@ class LocalSource(CheckpointSource):
     --------
     >>> source = LocalSource()
     >>> context = CheckpointContext(checkpoint_path=Path("/models/model.ckpt"))
-    >>> result = await source.process(context)
+    >>> result = source.process(context)
     >>> result.checkpoint_format
     'lightning'
 
@@ -58,7 +58,7 @@ class LocalSource(CheckpointSource):
     def __init__(self, path: str | Path | None = None) -> None:
         self.path = path
 
-    async def resolve(self, context: CheckpointContext) -> Path:
+    def resolve(self, context: CheckpointContext) -> Path:
         """Resolve the checkpoint path to an absolute file and set it on the context.
 
         A relative path is relative to the launch directory. Use an absolute path.
@@ -98,7 +98,7 @@ class LocalSource(CheckpointSource):
         context.checkpoint_path = path
         return path
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Resolve and load checkpoint data from a local file.
 
         Parameters
@@ -120,10 +120,10 @@ class LocalSource(CheckpointSource):
         CheckpointLoadError
             If the file cannot be loaded by PyTorch
         """
-        path = await self.resolve(context)
+        path = self.resolve(context)
 
         LOGGER.info("Loading checkpoint from local path: %s", path)
-        await self._load_from_path(context, path)
+        self._load_from_path(context, path)
 
         context.update_metadata(
             source_type="local",

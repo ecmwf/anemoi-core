@@ -384,8 +384,7 @@ def test_on_train_start_logs_effective_rollout_step(caplog: pytest.LogCaptureFix
     assert caplog.messages == ["Effective task rollout step: 2."]
 
 
-@pytest.mark.asyncio
-async def test_weights_only_pipeline_load_starts_rollout_schedule_from_config() -> None:
+def test_weights_only_pipeline_load_starts_rollout_schedule_from_config() -> None:
     """Loading only weights starts the rollout schedule at rollout.start.
 
     A weights-only load does not call ``on_load_checkpoint``, so the task state is not restored.
@@ -401,7 +400,7 @@ async def test_weights_only_pipeline_load_starts_rollout_schedule_from_config() 
         "state_dict": {f"model.{key}": value.clone() for key, value in module.model.state_dict().items()},
     }
 
-    await WeightsOnlyLoader(strict=True).process(CheckpointContext(model=module, checkpoint_data=checkpoint))
+    WeightsOnlyLoader(strict=True).process(CheckpointContext(model=module, checkpoint_data=checkpoint))
 
     assert task.rollout.step == 2
     assert task.rollout._last_increased_epoch == -1
@@ -1098,13 +1097,13 @@ class _KeepingSource(CheckpointSource):
 
     kept: Path
 
-    async def resolve(self, context: CheckpointContext) -> Path:
+    def resolve(self, context: CheckpointContext) -> Path:
         self._keep_download(context, self.kept)
         context.checkpoint_path = self.kept
         return self.kept
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
-        await self._load_from_path(context, await self.resolve(context))
+    def process(self, context: CheckpointContext) -> CheckpointContext:
+        self._load_from_path(context, self.resolve(context))
         return context
 
 
@@ -1367,46 +1366,3 @@ def test_on_load_checkpoint_is_quiet_for_an_up_to_date_ledger(caplog: pytest.Log
         BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
     assert "behind the installed anemoi-models" not in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_load_via_checkpoint_pipeline_works_inside_a_running_event_loop(tmp_path: Path) -> None:
-    """Building the model in a running event loop does not raise.
-
-    This test is ``async``, so it runs in a live loop (for example, Jupyter).
-    """
-    torch.manual_seed(0)
-    model = torch.nn.Linear(4, 2)
-    new_state = {key: torch.randn_like(value) for key, value in model.state_dict().items()}
-
-    run_id = "run_async"
-    ckpt_dir = tmp_path / run_id
-    ckpt_dir.mkdir(parents=True)
-    torch.save({"state_dict": new_state}, ckpt_dir / "last.ckpt")
-
-    cfg = OmegaConf.create(
-        {
-            "training": {
-                "checkpoint": {
-                    "source": {"_target_": _RUNSOURCE, "run_id": run_id},
-                    "loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader", "strict": False},
-                },
-            },
-            "system": {"output": {"checkpoints": {"root": str(ckpt_dir)}}},
-        },
-    )
-    trainer = SimpleNamespace(
-        config=cfg,
-        data_indices={"data": DummyIndex()},
-        start_from_checkpoint=True,
-        parent_run_server2server=None,
-        fork_run_server2server=None,
-        _validate_transfer_learning_datasets=lambda _model: None,
-        _validate_transfer_learning_units=lambda _model: None,
-    )
-
-    result = AnemoiTrainer._load_via_checkpoint_pipeline(trainer, model)
-
-    assert result is model
-    for key, value in new_state.items():
-        assert torch.equal(result.state_dict()[key], value)

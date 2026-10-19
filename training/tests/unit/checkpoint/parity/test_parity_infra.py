@@ -17,12 +17,10 @@ exception messages.
 from __future__ import annotations
 
 import sys
+import urllib.error
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock
-from unittest.mock import Mock
 from unittest.mock import patch
 
-import aiohttp
 import pytest
 import torch.nn as nn
 
@@ -53,7 +51,7 @@ class MockStage(PipelineStage):
         self.name = name
         self.process_called = False
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         self.process_called = True
         context.update_metadata(**{f"stage_{self.name}": "processed"})
         return context
@@ -62,7 +60,7 @@ class MockStage(PipelineStage):
 class _MemoryErrorStage(PipelineStage):
     """Stage whose process raises MemoryError."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:  # noqa: ARG002
+    def process(self, context: CheckpointContext) -> CheckpointContext:  # noqa: ARG002
         msg = "out of memory"
         raise MemoryError(msg)
 
@@ -70,7 +68,7 @@ class _MemoryErrorStage(PipelineStage):
 class _CheckpointErrorStage(PipelineStage):
     """Stage whose process raises a plain CheckpointError."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:  # noqa: ARG002
+    def process(self, context: CheckpointContext) -> CheckpointContext:  # noqa: ARG002
         msg = "stage boom"
         raise CheckpointError(msg)
 
@@ -148,78 +146,35 @@ def test_is_format_available_false_for_unsupported_formats() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _session_raising_on_enter(error: Exception) -> AsyncMock:
-    """Make a mock ClientSession whose ``session.get`` raises ``error`` on enter."""
-    get_context = AsyncMock()
-    get_context.__aenter__ = AsyncMock(side_effect=error)
-    get_context.__aexit__ = AsyncMock(return_value=None)
-
-    session = AsyncMock()
-    session.get = Mock(return_value=get_context)
-    session.__aenter__ = AsyncMock(return_value=session)
-    session.__aexit__ = AsyncMock(return_value=None)
-    return session
+def _http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError("https://example.com/a.ckpt", code, "error", {}, None)
 
 
-def _session_raising_on_status(error: Exception) -> AsyncMock:
-    """Make a mock ClientSession whose ``raise_for_status`` raises ``error``."""
-    response = Mock()
-    response.raise_for_status = Mock(side_effect=error)
-    response.headers = {"content-length": "0"}
-
-    get_context = AsyncMock()
-    get_context.__aenter__ = AsyncMock(return_value=response)
-    get_context.__aexit__ = AsyncMock(return_value=None)
-
-    session = AsyncMock()
-    session.get = Mock(return_value=get_context)
-    session.__aenter__ = AsyncMock(return_value=session)
-    session.__aexit__ = AsyncMock(return_value=None)
-    return session
-
-
-async def test_download_timeout_maps_to_checkpoint_timeout_error(tmp_path: Path) -> None:
+def test_download_timeout_maps_to_checkpoint_timeout_error(tmp_path: Path) -> None:
     """A timeout on the final attempt maps to CheckpointTimeoutError."""
-    session = _session_raising_on_enter(TimeoutError("timed out"))
     dest = tmp_path / "model.ckpt"
 
-    with patch("aiohttp.ClientSession", return_value=session), pytest.raises(CheckpointTimeoutError):
-        await download_with_retry("https://example.com/model.ckpt", dest, max_retries=1, timeout=5)
+    with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")), pytest.raises(CheckpointTimeoutError):
+        download_with_retry("https://example.com/model.ckpt", dest, max_retries=1, timeout=5)
 
 
-async def test_client_error_4xx_no_retry_but_5xx_retries(tmp_path: Path) -> None:
+def test_client_error_4xx_no_retry_but_5xx_retries(tmp_path: Path) -> None:
     """4xx raises immediately (1 attempt); 5xx retries before raising."""
-    err_404 = aiohttp.ClientResponseError(
-        request_info=Mock(real_url="https://example.com/a.ckpt"),
-        history=(),
-        status=404,
-        message="Not Found",
-    )
-    session_404 = _session_raising_on_status(err_404)
     with (
-        patch("aiohttp.ClientSession", return_value=session_404),
-        patch("asyncio.sleep", new=AsyncMock()),
+        patch("urllib.request.urlopen", side_effect=_http_error(404)) as urlopen_404,
+        patch("time.sleep"),
         pytest.raises(CheckpointSourceError),
     ):
-        await download_with_retry("https://example.com/a.ckpt", tmp_path / "a.ckpt", max_retries=3, timeout=5)
-    assert session_404.get.call_count == 1
+        download_with_retry("https://example.com/a.ckpt", tmp_path / "a.ckpt", max_retries=3, timeout=5)
+    assert urlopen_404.call_count == 1
 
-    err_503 = aiohttp.ClientResponseError(
-        request_info=Mock(real_url="https://example.com/b.ckpt"),
-        history=(),
-        status=503,
-        message="Service Unavailable",
-    )
-    session_503 = _session_raising_on_status(err_503)
     with (
-        patch("aiohttp.ClientSession", return_value=session_503),
-        patch("asyncio.sleep", new=AsyncMock()),
+        patch("urllib.request.urlopen", side_effect=_http_error(503)) as urlopen_503,
+        patch("time.sleep"),
         pytest.raises(CheckpointSourceError),
     ):
-        await download_with_retry("https://example.com/b.ckpt", tmp_path / "b.ckpt", max_retries=2, timeout=5)
-    assert session_503.get.call_count == 2
-
-    assert session_503.get.call_count > session_404.get.call_count
+        download_with_retry("https://example.com/b.ckpt", tmp_path / "b.ckpt", max_retries=2, timeout=5)
+    assert urlopen_503.call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -248,50 +203,35 @@ def test_add_stage_instantiates_config_and_rejects_invalid(tmp_path: Path) -> No
         CheckpointPipeline([]).add_stage({"_target_": "nonexistent.module.DoesNotExist"})
 
 
-async def test_execute_sync_uses_thread_pool_inside_running_loop() -> None:
-    """execute_sync works when called from within a running event loop."""
-    stage1 = MockStage("a")
-    stage2 = MockStage("b")
-    pipeline = CheckpointPipeline([stage1, stage2])
-
-    # The test runs in an event loop, so execute_sync must use a thread pool.
-    result = pipeline.execute_sync(CheckpointContext(model=nn.Linear(2, 2)))
-
-    assert stage1.process_called
-    assert stage2.process_called
-    assert result.metadata["stage_0_MockStage"] == "completed"
-    assert result.metadata["stage_1_MockStage"] == "completed"
-
-
-async def test_memory_error_reraised_even_with_continue_on_error() -> None:
+def test_memory_error_reraised_even_with_continue_on_error() -> None:
     """With continue_on_error, MemoryError propagates but CheckpointError does not."""
     memory_pipeline = CheckpointPipeline([_MemoryErrorStage()], continue_on_error=True)
     with pytest.raises(MemoryError):
-        await memory_pipeline.execute_async(CheckpointContext(model=nn.Linear(2, 2)))
+        memory_pipeline.execute(CheckpointContext(model=nn.Linear(2, 2)))
 
     error_pipeline = CheckpointPipeline([_CheckpointErrorStage()], continue_on_error=True)
-    result = await error_pipeline.execute_async(CheckpointContext(model=nn.Linear(2, 2)))
+    result = error_pipeline.execute(CheckpointContext(model=nn.Linear(2, 2)))
     stage_values = [v for k, v in result.metadata.items() if k.startswith("stage_")]
     assert any("failed" in str(v) for v in stage_values)
 
 
-async def test_completed_markers_recorded_for_successful_stages() -> None:
+def test_completed_markers_recorded_for_successful_stages() -> None:
     """Successful stages record 'completed' markers in metadata."""
     pipeline = CheckpointPipeline([MockStage("a"), MockStage("b")])
-    result = await pipeline.execute_async(CheckpointContext(model=nn.Linear(2, 2)))
+    result = pipeline.execute(CheckpointContext(model=nn.Linear(2, 2)))
 
     assert result.metadata["stage_0_MockStage"] == "completed"
     assert result.metadata["stage_1_MockStage"] == "completed"
 
 
-async def test_pre_execution_validation_degrades_on_import_error() -> None:
+def test_pre_execution_validation_degrades_on_import_error() -> None:
     """The pipeline skips validation if the validation module does not import."""
     pipeline = CheckpointPipeline([MockStage("only")])
     context = CheckpointContext(model=nn.Linear(2, 2))
 
     # A None entry in sys.modules causes ImportError.
     with patch.dict(sys.modules, {"anemoi.training.checkpoint.validation": None}):
-        result = await pipeline.execute(context)
+        result = pipeline.execute(context)
 
     assert result.metadata["validation_performed"] is False
     assert result.metadata["validation_skipped"] == "module_unavailable"

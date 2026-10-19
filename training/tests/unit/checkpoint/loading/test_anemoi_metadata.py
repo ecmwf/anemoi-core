@@ -9,7 +9,6 @@
 
 """Tests for Anemoi metadata handling during checkpoint loading."""
 
-import pytest
 import torch
 import torch.nn as nn
 
@@ -24,8 +23,7 @@ class ModelWithMetadata(nn.Module):
         self._ckpt_model_name_to_index = None
 
 
-@pytest.mark.asyncio
-async def test_preserves_ckpt_model_name_to_index() -> None:
+def test_preserves_ckpt_model_name_to_index() -> None:
     """All loaders must preserve _ckpt_model_name_to_index from hyper_parameters."""
     model = ModelWithMetadata()
     name_to_index = {"temperature": 0, "wind_u": 1, "wind_v": 2}
@@ -37,6 +35,6 @@ async def test_preserves_ckpt_model_name_to_index() -> None:
 
     loader = WeightsOnlyLoader()
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await loader.process(context)
+    result = loader.process(context)
 
     assert result.model._ckpt_model_name_to_index == {"era5": name_to_index}

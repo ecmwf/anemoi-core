@@ -16,7 +16,6 @@ checkpoint to the destination path.
 from __future__ import annotations
 
 import argparse
-import inspect
 import pickle
 import shutil
 from pathlib import Path
@@ -70,25 +69,25 @@ def _clear_rank_env(monkeypatch: pytest.MonkeyPatch, keep: Iterable[str] = ()) -
 # ---------------------------------------------------------------------------
 
 
-async def test_local_source_explicit_path_overrides_context_checkpoint_path(tmp_path: Path) -> None:
+def test_local_source_explicit_path_overrides_context_checkpoint_path(tmp_path: Path) -> None:
     """An explicit ``path=`` has priority over ``context.checkpoint_path``."""
     configured = _write_state_dict_ckpt(tmp_path / "configured" / "model.ckpt")
     other = _write_state_dict_ckpt(tmp_path / "other" / "other.ckpt")
 
     context = CheckpointContext(checkpoint_path=other)
-    result = await LocalSource(path=configured).process(context)
+    result = LocalSource(path=configured).process(context)
 
     assert result.checkpoint_path == configured
     assert result.metadata["source_path"] == str(configured.resolve())
 
 
-async def test_local_source_expands_tilde_in_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_local_source_expands_tilde_in_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``~`` is expanded and the recorded path is absolute."""
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_state_dict_ckpt(tmp_path / "model.ckpt")
 
     context = CheckpointContext(checkpoint_path="~/model.ckpt")
-    result = await LocalSource().process(context)
+    result = LocalSource().process(context)
 
     source_path = result.metadata["source_path"]
     assert source_path.startswith("/")
@@ -96,19 +95,19 @@ async def test_local_source_expands_tilde_in_path(tmp_path: Path, monkeypatch: p
     assert source_path == str((tmp_path / "model.ckpt").resolve())
 
 
-async def test_local_source_resolves_symlink_to_canonical_path(tmp_path: Path) -> None:
+def test_local_source_resolves_symlink_to_canonical_path(tmp_path: Path) -> None:
     """A symlink resolves to its target path."""
     actual = _write_state_dict_ckpt(tmp_path / "actual.ckpt")
     link = tmp_path / "link.ckpt"
     link.symlink_to(actual)
 
     context = CheckpointContext(checkpoint_path=link)
-    result = await LocalSource().process(context)
+    result = LocalSource().process(context)
 
     assert result.metadata["source_path"] == str(actual.resolve())
 
 
-async def test_local_source_missing_file_lists_similar_files(tmp_path: Path) -> None:
+def test_local_source_missing_file_lists_similar_files(tmp_path: Path) -> None:
     """A missing file gives suggestions for other checkpoints in its directory."""
     directory = tmp_path / "ckpts"
     directory.mkdir()
@@ -117,16 +116,16 @@ async def test_local_source_missing_file_lists_similar_files(tmp_path: Path) -> 
 
     context = CheckpointContext(checkpoint_path=directory / "missing.ckpt")
     with pytest.raises(CheckpointNotFoundError) as excinfo:
-        await LocalSource().process(context)
+        LocalSource().process(context)
 
     assert "similar files" in str(excinfo.value)
 
 
-async def test_local_source_missing_parent_directory_reports_missing_directory(tmp_path: Path) -> None:
+def test_local_source_missing_parent_directory_reports_missing_directory(tmp_path: Path) -> None:
     """A missing parent directory gives the 'Directory does not exist' hint."""
     context = CheckpointContext(checkpoint_path=tmp_path / "no_such_dir" / "model.ckpt")
     with pytest.raises(CheckpointNotFoundError) as excinfo:
-        await LocalSource().process(context)
+        LocalSource().process(context)
 
     assert "Directory does not exist" in str(excinfo.value)
 
@@ -157,7 +156,7 @@ def _make_garbage_ckpt(tmp_path: Path) -> Path:
         (_make_garbage_ckpt, pickle.UnpicklingError),
     ],
 )
-async def test_local_source_wraps_load_errors(
+def test_local_source_wraps_load_errors(
     tmp_path: Path,
     factory: Callable[[Path], Path],
     expected_type: type[Exception],
@@ -167,12 +166,12 @@ async def test_local_source_wraps_load_errors(
     context = CheckpointContext(checkpoint_path=bad_path)
 
     with pytest.raises(CheckpointLoadError) as excinfo:
-        await LocalSource().process(context)
+        LocalSource().process(context)
 
     assert isinstance(excinfo.value.original_error, expected_type)
 
 
-async def test_local_source_loads_lightning_metadata_requiring_weights_only_false(tmp_path: Path) -> None:
+def test_local_source_loads_lightning_metadata_requiring_weights_only_false(tmp_path: Path) -> None:
     """LocalSource loads Lightning metadata that ``weights_only=True`` rejects."""
     ckpt = {
         "pytorch-lightning_version": "2.2.0",
@@ -188,7 +187,7 @@ async def test_local_source_loads_lightning_metadata_requiring_weights_only_fals
         torch.load(path, weights_only=True, map_location="cpu")
 
     context = CheckpointContext(checkpoint_path=path)
-    result = await LocalSource().process(context)
+    result = LocalSource().process(context)
 
     assert result.checkpoint_data is not None
     for key in ("callbacks", "hyper_parameters", "pytorch-lightning_version"):
@@ -196,7 +195,7 @@ async def test_local_source_loads_lightning_metadata_requiring_weights_only_fals
     assert result.checkpoint_format == "lightning"
 
 
-async def test_local_source_s3_scheme_path_treated_as_local_missing(
+def test_local_source_s3_scheme_path_treated_as_local_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -204,7 +203,7 @@ async def test_local_source_s3_scheme_path_treated_as_local_missing(
     monkeypatch.chdir(tmp_path)
     context = CheckpointContext(checkpoint_path="s3://bucket/model.ckpt")
     with pytest.raises(CheckpointNotFoundError):
-        await LocalSource().process(context)
+        LocalSource().process(context)
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +249,7 @@ def test_checkpoint_not_found_error_is_deterministic(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("rank_var", ["LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"])
-async def test_run_source_defers_on_nonzero_rank_from_fallback_var(
+def test_run_source_defers_on_nonzero_rank_from_fallback_var(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     rank_var: str,
@@ -260,13 +259,13 @@ async def test_run_source_defers_on_nonzero_rank_from_fallback_var(
     monkeypatch.setenv(rank_var, "1")
 
     context = CheckpointContext(config=_run_config(tmp_path / "job" / "checkpoints"))
-    result = await RunIdSource(run_id="run_missing").process(context)
+    result = RunIdSource(run_id="run_missing").process(context)
 
     assert result.checkpoint_path is None
     assert result.checkpoint_data is None
 
 
-async def test_run_source_rank_precedence_rank_over_local_rank(
+def test_run_source_rank_precedence_rank_over_local_rank(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -276,13 +275,13 @@ async def test_run_source_rank_precedence_rank_over_local_rank(
     monkeypatch.setenv("LOCAL_RANK", "0")
 
     context = CheckpointContext(config=_run_config(tmp_path / "job" / "checkpoints"))
-    result = await RunIdSource(run_id="run_missing").process(context)
+    result = RunIdSource(run_id="run_missing").process(context)
 
     assert result.checkpoint_path is None
 
 
 @pytest.mark.parametrize("rank_value", ["abc", "-1"])
-async def test_run_source_invalid_rank_treated_as_rank_zero(
+def test_run_source_invalid_rank_treated_as_rank_zero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     rank_value: str,
@@ -293,10 +292,10 @@ async def test_run_source_invalid_rank_treated_as_rank_zero(
 
     context = CheckpointContext(config=_run_config(tmp_path / "job" / "checkpoints"))
     with pytest.raises(RuntimeError, match="run_missing"):
-        await RunIdSource(run_id="run_missing").process(context)
+        RunIdSource(run_id="run_missing").process(context)
 
 
-async def test_run_source_sets_resolved_checkpoint_path_metadata(
+def test_run_source_sets_resolved_checkpoint_path_metadata(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -306,7 +305,7 @@ async def test_run_source_sets_resolved_checkpoint_path_metadata(
     resolved = _write_state_dict_ckpt(tmp_path / "job" / "run_A" / "last.ckpt")
 
     context = CheckpointContext(config=_run_config(root))
-    result = await RunIdSource(run_id="run_A").process(context)
+    result = RunIdSource(run_id="run_A").process(context)
 
     assert isinstance(result.metadata["resolved_checkpoint_path"], str)
     assert result.metadata["resolved_checkpoint_path"] == str(resolved)
@@ -346,7 +345,7 @@ def test_detect_format_is_deterministic_across_calls() -> None:
     assert first == second == "lightning"
 
 
-async def test_local_source_path_expansion_is_deterministic(
+def test_local_source_path_expansion_is_deterministic(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -354,8 +353,8 @@ async def test_local_source_path_expansion_is_deterministic(
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_state_dict_ckpt(tmp_path / "model.ckpt")
 
-    first = await LocalSource().process(CheckpointContext(checkpoint_path="~/model.ckpt"))
-    second = await LocalSource().process(CheckpointContext(checkpoint_path="~/model.ckpt"))
+    first = LocalSource().process(CheckpointContext(checkpoint_path="~/model.ckpt"))
+    second = LocalSource().process(CheckpointContext(checkpoint_path="~/model.ckpt"))
 
     assert first.metadata["source_path"] == second.metadata["source_path"]
 
@@ -379,11 +378,6 @@ def test_load_and_populate_mutates_context_in_place() -> None:
 def test_all_sources_subclass_checkpoint_source() -> None:
     for source_cls in (LocalSource, RunIdSource, HTTPSource, S3Source):
         assert issubclass(source_cls, CheckpointSource)
-
-
-def test_all_sources_process_is_async() -> None:
-    for source_cls in (LocalSource, RunIdSource, HTTPSource, S3Source):
-        assert inspect.iscoroutinefunction(source_cls.process)
 
 
 def test_supports_is_staticmethod_on_string_dispatched_sources() -> None:
@@ -479,7 +473,7 @@ def test_http_supports_rejects_local_path() -> None:
 def _copy_download_stub(source_file: Path, recorded: list[Path]) -> Callable[..., Awaitable[Path]]:
     """Make a fake ``download_with_retry`` that copies ``source_file``."""
 
-    async def _fake_download(*, url: str, dest: Path, max_retries: int, timeout: int) -> Path:  # noqa: ARG001
+    def _fake_download(*, url: str, dest: Path, max_retries: int, timeout: int) -> Path:  # noqa: ARG001
         recorded.append(Path(dest))
         shutil.copyfile(source_file, dest)
         return Path(dest)
@@ -488,7 +482,7 @@ def _copy_download_stub(source_file: Path, recorded: list[Path]) -> Callable[...
 
 
 def _garbage_download_stub(recorded: list[Path]) -> Callable[..., Awaitable[Path]]:
-    async def _fake_download(*, url: str, dest: Path, max_retries: int, timeout: int) -> Path:  # noqa: ARG001
+    def _fake_download(*, url: str, dest: Path, max_retries: int, timeout: int) -> Path:  # noqa: ARG001
         recorded.append(Path(dest))
         Path(dest).write_bytes(b"\x00not a checkpoint\xff")
         return Path(dest)
@@ -496,7 +490,7 @@ def _garbage_download_stub(recorded: list[Path]) -> Callable[..., Awaitable[Path
     return _fake_download
 
 
-async def test_http_source_checksum_match_loads_and_sets_metadata(tmp_path: Path) -> None:
+def test_http_source_checksum_match_loads_and_sets_metadata(tmp_path: Path) -> None:
     """A correct checksum loads the checkpoint and records HTTP metadata."""
     good = _write_state_dict_ckpt(tmp_path / "good.ckpt")
     checksum = calculate_checksum(good)
@@ -504,7 +498,7 @@ async def test_http_source_checksum_match_loads_and_sets_metadata(tmp_path: Path
 
     source = HTTPSource(url="https://example.com/model.ckpt", expected_checksum=checksum)
     with patch("anemoi.training.checkpoint.utils.download_with_retry", _copy_download_stub(good, recorded)):
-        result = await source.process(CheckpointContext())
+        result = source.process(CheckpointContext())
 
     assert recorded, "download stub was not invoked"
     assert result.checkpoint_data is not None
@@ -512,7 +506,7 @@ async def test_http_source_checksum_match_loads_and_sets_metadata(tmp_path: Path
     assert result.metadata["source_url"] == "https://example.com/model.ckpt"
 
 
-async def test_http_source_checksum_mismatch_raises_validation_error(tmp_path: Path) -> None:
+def test_http_source_checksum_mismatch_raises_validation_error(tmp_path: Path) -> None:
     good = _write_state_dict_ckpt(tmp_path / "good.ckpt")
     recorded: list[Path] = []
 
@@ -521,24 +515,24 @@ async def test_http_source_checksum_mismatch_raises_validation_error(tmp_path: P
         patch("anemoi.training.checkpoint.utils.download_with_retry", _copy_download_stub(good, recorded)),
         pytest.raises(CheckpointValidationError) as excinfo,
     ):
-        await source.process(CheckpointContext())
+        source.process(CheckpointContext())
 
     assert "Checksum mismatch" in str(excinfo.value)
 
 
-async def test_http_source_without_checksum_loads(tmp_path: Path) -> None:
+def test_http_source_without_checksum_loads(tmp_path: Path) -> None:
     """With no expected checksum, the download loads."""
     good = _write_state_dict_ckpt(tmp_path / "good.ckpt")
     recorded: list[Path] = []
 
     source = HTTPSource(url="https://example.com/model.ckpt")
     with patch("anemoi.training.checkpoint.utils.download_with_retry", _copy_download_stub(good, recorded)):
-        result = await source.process(CheckpointContext())
+        result = source.process(CheckpointContext())
 
     assert result.checkpoint_data is not None
 
 
-async def test_http_source_keeps_download_on_load_error() -> None:
+def test_http_source_keeps_download_on_load_error() -> None:
     """A corrupt download raises CheckpointLoadError, but the file and its path are kept.
 
     The trainer deletes downloads through ``context.temporary_files``.
@@ -552,7 +546,7 @@ async def test_http_source_keeps_download_on_load_error() -> None:
             patch("anemoi.training.checkpoint.utils.download_with_retry", _garbage_download_stub(recorded)),
             pytest.raises(CheckpointLoadError),
         ):
-            await source.process(context)
+            source.process(context)
 
         assert recorded, "download stub was not invoked"
         assert recorded[0].exists()

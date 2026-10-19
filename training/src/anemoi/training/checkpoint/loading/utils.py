@@ -10,7 +10,7 @@
 """Pure utility functions for state dict manipulation.
 
 These are stateless helpers used by loading strategies. No model loading,
-no async, no pipeline wiring — just pure functions on state dicts.
+no pipeline wiring — just pure functions on state dicts.
 """
 
 from __future__ import annotations

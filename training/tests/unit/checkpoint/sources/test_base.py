@@ -27,19 +27,18 @@ def test_checkpoint_source_extends_pipeline_stage() -> None:
 class _ProcessOnlySource(CheckpointSource):
     """Source with ``process`` only, no ``resolve``."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         return context
 
 
-@pytest.mark.asyncio
-async def test_resolve_is_not_required_for_process_only_sources_but_names_them_on_resume() -> None:
+def test_resolve_is_not_required_for_process_only_sources_but_names_them_on_resume() -> None:
     """A ``process``-only source loads, but ``resolve`` raises with the class name."""
     source = _ProcessOnlySource()
     context = CheckpointContext()
 
-    assert await source.process(context) is context
+    assert source.process(context) is context
     with pytest.raises(NotImplementedError, match=r"_ProcessOnlySource.*resolve"):
-        await source.resolve(context)
+        source.resolve(context)
 
 
 def test_remove_temporary_file_tolerates_a_file_that_is_already_gone(tmp_path: Path) -> None:
@@ -59,7 +58,7 @@ def test_checkpoint_source_is_abstract() -> None:
 
 
 def test_checkpoint_source_requires_process() -> None:
-    """Subclasses must implement async process(context) -> context."""
+    """Subclasses must implement process(context) -> context."""
     import inspect
 
     method = CheckpointSource.process

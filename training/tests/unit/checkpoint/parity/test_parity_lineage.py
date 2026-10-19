@@ -14,7 +14,6 @@ The tests run on CPU with no network access. A fake writer replaces remote downl
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import uuid
 from pathlib import Path
@@ -331,7 +330,7 @@ def test_builder_malformed_source_target_raises_config_error() -> None:
 
     def _build_and_run() -> None:
         pipeline = build_checkpoint_pipeline(cfg)
-        asyncio.run(pipeline.execute(CheckpointContext(model=model, config=cfg)))
+        pipeline.execute(CheckpointContext(model=model, config=cfg))
 
     with pytest.raises(CheckpointConfigError) as excinfo:
         _build_and_run()
@@ -362,7 +361,7 @@ def test_rank_env_priority_rank_beats_local_rank(tmp_path: Path, monkeypatch: py
 
     # RANK has priority. On rank 0, a missing checkpoint raises.
     with pytest.raises(RuntimeError, match="run_missing"):
-        asyncio.run(RunIdSource(run_id="run_missing").process(context))
+        RunIdSource(run_id="run_missing").process(context)
 
 
 def test_rank_env_priority_slurm_procid_defers_when_only_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -370,7 +369,7 @@ def test_rank_env_priority_slurm_procid_defers_when_only_set(tmp_path: Path, mon
     monkeypatch.setenv("SLURM_PROCID", "1")
     context = _missing_run_context(tmp_path)
 
-    result = asyncio.run(RunIdSource(run_id="run_missing").process(context))
+    result = RunIdSource(run_id="run_missing").process(context)
     assert result.checkpoint_path is None
 
 
@@ -385,7 +384,7 @@ def test_malformed_or_negative_rank_treated_as_rank_zero(
     context = _missing_run_context(tmp_path)
 
     with pytest.raises(RuntimeError, match="run_missing"):
-        asyncio.run(RunIdSource(run_id="run_missing").process(context))
+        RunIdSource(run_id="run_missing").process(context)
 
 
 def test_resolve_path_invariant_to_dataset_count() -> None:
@@ -487,7 +486,7 @@ def test_init_writes_resolved_run_id_back_into_config(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _fake_download(url: str, dest: Path, max_retries: int, timeout: int) -> None:
+def _fake_download(url: str, dest: Path, max_retries: int, timeout: int) -> None:
     """Write a checkpoint to ``dest`` instead of a download."""
     del url, max_retries, timeout  # same signature as download_with_retry
     torch.save({"state_dict": {"weight": torch.zeros(2, 2)}}, dest)
@@ -497,7 +496,7 @@ def test_http_source_publishes_kept_download_as_checkpoint_path() -> None:
     context = CheckpointContext()
 
     with patch("anemoi.training.checkpoint.utils.download_with_retry", new=_fake_download):
-        result = asyncio.run(HTTPSource(url="https://models.example.int/model.ckpt").process(context))
+        result = HTTPSource(url="https://models.example.int/model.ckpt").process(context)
 
     try:
         # The trainer can give this path to Trainer.fit(ckpt_path=).

@@ -33,8 +33,7 @@ class TargetModel(nn.Module):
         self.new_head = nn.Linear(5, 7)  # Different output size
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_skips_mismatched_shapes() -> None:
+def test_transfer_learning_skips_mismatched_shapes() -> None:
     """Shape mismatches should be skipped, not crash."""
     target = TargetModel()
     source_state = {
@@ -49,15 +48,14 @@ async def test_transfer_learning_skips_mismatched_shapes() -> None:
         model=target,
         checkpoint_data={"state_dict": source_state},
     )
-    result = await loader.process(context)
+    result = loader.process(context)
 
     # Shared layer loaded, old_head skipped (not in target)
     assert "skipped_params" in result.metadata
     assert result.model is not None
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_filter_is_non_mutating() -> None:
+def test_transfer_learning_filter_is_non_mutating() -> None:
     """The loader does not change ``checkpoint_data``."""
     target = TargetModel()
     source_state = {
@@ -71,14 +69,13 @@ async def test_transfer_learning_filter_is_non_mutating() -> None:
 
     loader = TransferLearningLoader(skip_mismatched=True)
     context = CheckpointContext(model=target, checkpoint_data=checkpoint_data)
-    await loader.process(context)
+    loader.process(context)
 
     # Original state dict NOT mutated
     assert set(checkpoint_data["state_dict"].keys()) == original_keys
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_tracks_transferred_params() -> None:
+def test_transfer_learning_tracks_transferred_params() -> None:
     target = TargetModel()
     source_state = {
         "shared.weight": torch.randn(5, 10),
@@ -90,20 +87,19 @@ async def test_transfer_learning_tracks_transferred_params() -> None:
         model=target,
         checkpoint_data={"state_dict": source_state},
     )
-    result = await loader.process(context)
+    result = loader.process(context)
 
     assert "transferred_params" in result.metadata
     assert "shared.weight" in result.metadata["transferred_params"]
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_sets_weights_initialized() -> None:
+def test_transfer_learning_sets_weights_initialized() -> None:
     target = TargetModel()
     source_state = {"shared.weight": torch.randn(5, 10), "shared.bias": torch.randn(5)}
 
     loader = TransferLearningLoader(skip_mismatched=True)
     context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
-    result = await loader.process(context)
+    result = loader.process(context)
 
     assert getattr(result.model, "weights_initialized", False) is True
 
@@ -112,8 +108,7 @@ def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
     return [record.getMessage() for record in caplog.records if record.levelno == logging.WARNING]
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_warns_naming_each_skipped_param(caplog: pytest.LogCaptureFixture) -> None:
+def test_transfer_learning_warns_naming_each_skipped_param(caplog: pytest.LogCaptureFixture) -> None:
     """One WARNING gives each skipped tensor and its reason."""
     target = TargetModel()
     source_state = {
@@ -125,7 +120,7 @@ async def test_transfer_learning_warns_naming_each_skipped_param(caplog: pytest.
     context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
 
     with caplog.at_level(logging.WARNING):
-        await TransferLearningLoader(skip_mismatched=True).process(context)
+        TransferLearningLoader(skip_mismatched=True).process(context)
 
     warnings = _warnings(caplog)
     assert len(warnings) == 1
@@ -137,8 +132,7 @@ async def test_transfer_learning_warns_naming_each_skipped_param(caplog: pytest.
     assert "more than" not in warnings[0]  # two transferred, two skipped
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_warns_when_most_of_the_checkpoint_did_not_transfer(
+def test_transfer_learning_warns_when_most_of_the_checkpoint_did_not_transfer(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The warning says when most of the checkpoint did not transfer."""
@@ -152,7 +146,7 @@ async def test_transfer_learning_warns_when_most_of_the_checkpoint_did_not_trans
     context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
 
     with caplog.at_level(logging.WARNING):
-        result = await TransferLearningLoader(skip_mismatched=True).process(context)
+        result = TransferLearningLoader(skip_mismatched=True).process(context)
 
     warnings = _warnings(caplog)
     assert len(warnings) == 1
@@ -161,14 +155,13 @@ async def test_transfer_learning_warns_when_most_of_the_checkpoint_did_not_trans
     assert result.metadata["transferred_params"] == ["shared.weight"]
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_is_quiet_when_everything_transfers(caplog: pytest.LogCaptureFixture) -> None:
+def test_transfer_learning_is_quiet_when_everything_transfers(caplog: pytest.LogCaptureFixture) -> None:
     target = TargetModel()
     source_state = {key: torch.randn_like(value) for key, value in target.state_dict().items()}
     context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
 
     with caplog.at_level(logging.WARNING):
-        result = await TransferLearningLoader(skip_mismatched=True).process(context)
+        result = TransferLearningLoader(skip_mismatched=True).process(context)
 
     assert _warnings(caplog) == []
     assert result.metadata["skipped_params"] == {}

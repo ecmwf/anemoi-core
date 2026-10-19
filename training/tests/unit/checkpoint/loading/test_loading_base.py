@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 class _StubLoader(LoadingStrategy):
     """Minimal concrete loader for testing base class helpers."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         return context
 
 

@@ -220,8 +220,8 @@ paths.
 settings (``~/.config/anemoi/settings.toml``). Install
 ``anemoi-training[s3]``.
 
-**HTTPSource.** Install ``anemoi-training[remote]``. If you set
-``expected_checksum``, the download is verified.
+**HTTPSource.** If you set ``expected_checksum``, the download is
+verified.
 
 ********************
  Loading strategies
@@ -431,7 +431,7 @@ Example:
            self.submodules = submodules
            self.factor = factor
 
-       async def process(self, context: CheckpointContext) -> CheckpointContext:
+       def process(self, context: CheckpointContext) -> CheckpointContext:
            for name in self.submodules:
                for param in context.model.get_submodule(name).parameters():
                    param.data.mul_(self.factor)
@@ -474,7 +474,7 @@ a test can also give stage instances to ``CheckpointPipeline``.
    # or: CheckpointPipeline(stages=[source, loader, modifier])
 
    context = CheckpointContext(model=my_model, config=cfg)
-   result = pipeline.execute_sync(context)     # or: await pipeline.execute(context)
+   result = pipeline.execute(context)
 
 ``CheckpointContext`` fields:
 
@@ -636,10 +636,9 @@ Make sure that the file exists. Use an absolute path. Use ``S3Source`` or
 Missing package
 ===============
 
-``ImportError: aiohttp is required for remote checkpoint downloads.``
+``CheckpointSourceError: S3Source requires anemoi-utils[s3] ...``
 
-Install ``anemoi-training[remote]`` for HTTP(S) or
-``anemoi-training[s3]`` for S3.
+Install ``anemoi-training[s3]``.
 
 Download failed
 ===============

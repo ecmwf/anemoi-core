@@ -146,28 +146,26 @@ class TestPipelineStage:
 
         assert "Can't instantiate abstract class" in str(exc_info.value)
 
-    @pytest.mark.asyncio
-    async def test_concrete_implementation(self) -> None:
+    def test_concrete_implementation(self) -> None:
         """Test concrete implementation of PipelineStage."""
 
         class ConcreteStage(PipelineStage):
-            async def process(self, context: CheckpointContext) -> CheckpointContext:
+            def process(self, context: CheckpointContext) -> CheckpointContext:
                 context.update_metadata(processed=True)
                 return context
 
         stage = ConcreteStage()
         context = CheckpointContext()
 
-        result = await stage.process(context)
+        result = stage.process(context)
 
         assert result.metadata["processed"] is True
 
-    @pytest.mark.asyncio
-    async def test_stage_callable(self) -> None:
+    def test_stage_callable(self) -> None:
         """Test that stage can be called directly."""
 
         class CallableStage(PipelineStage):
-            async def process(self, context: CheckpointContext) -> CheckpointContext:
+            def process(self, context: CheckpointContext) -> CheckpointContext:
                 context.update_metadata(called=True)
                 return context
 
@@ -175,7 +173,7 @@ class TestPipelineStage:
         context = CheckpointContext()
 
         # Call using __call__
-        result = await stage(context)
+        result = stage(context)
 
         assert result.metadata["called"] is True
 
@@ -183,7 +181,7 @@ class TestPipelineStage:
         """Test stage string representation."""
 
         class MyCustomStage(PipelineStage):
-            async def process(self, context: CheckpointContext) -> CheckpointContext:
+            def process(self, context: CheckpointContext) -> CheckpointContext:
                 return context
 
         stage = MyCustomStage()
@@ -191,27 +189,25 @@ class TestPipelineStage:
 
         assert repr_str == "MyCustomStage()"
 
-    @pytest.mark.asyncio
-    async def test_stage_error_propagation(self) -> None:
+    def test_stage_error_propagation(self) -> None:
         """Test that errors are propagated from process method."""
         error_msg = "Test error"
 
         class ErrorStage(PipelineStage):
-            async def process(self, context: CheckpointContext) -> CheckpointContext:  # noqa: ARG002
+            def process(self, context: CheckpointContext) -> CheckpointContext:  # noqa: ARG002
                 raise ValueError(error_msg)
 
         stage = ErrorStage()
         context = CheckpointContext()
 
         with pytest.raises(ValueError, match=error_msg):
-            await stage.process(context)
+            stage.process(context)
 
-    @pytest.mark.asyncio
-    async def test_stage_modifies_context(self) -> None:
+    def test_stage_modifies_context(self) -> None:
         """Test that stages can modify context in place."""
 
         class ModifyingStage(PipelineStage):
-            async def process(self, context: CheckpointContext) -> CheckpointContext:
+            def process(self, context: CheckpointContext) -> CheckpointContext:
                 # Modify in place
                 context.metadata["modified"] = True
                 # Also add new fields
@@ -221,7 +217,7 @@ class TestPipelineStage:
         stage = ModifyingStage()
         context = CheckpointContext()
 
-        result = await stage.process(context)
+        result = stage.process(context)
 
         # Check both return value and original context
         assert result.metadata["modified"] is True

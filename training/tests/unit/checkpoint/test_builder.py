@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -206,7 +205,7 @@ def test_warm_start_resolves_the_source_only_and_emits_no_loader(
     before = {key: value.clone() for key, value in model.state_dict().items()}
 
     pipeline = build_checkpoint_pipeline(cfg)
-    executed = asyncio.run(pipeline.execute(CheckpointContext(model=model, config=cfg)))
+    executed = pipeline.execute(CheckpointContext(model=model, config=cfg))
 
     assert [type(stage).__name__ for stage in pipeline.stages] == ["ResolveOnlySource"]
     assert loads == []
@@ -228,7 +227,7 @@ def test_warm_start_still_runs_modifiers(tmp_path: Path, monkeypatch: pytest.Mon
     model = _EncoderNet()
 
     pipeline = build_checkpoint_pipeline(cfg)
-    asyncio.run(pipeline.execute(CheckpointContext(model=model, config=cfg)))
+    pipeline.execute(CheckpointContext(model=model, config=cfg))
 
     assert [type(stage).__name__ for stage in pipeline.stages] == ["ResolveOnlySource", "FreezingModifierStage"]
     assert loads == []
@@ -242,7 +241,7 @@ def test_source_without_loading_is_a_resume(tmp_path: Path, monkeypatch: pytest.
     loads = _spy_torch_load(monkeypatch)
 
     pipeline = build_checkpoint_pipeline(cfg)
-    executed = asyncio.run(pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg)))
+    executed = pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg))
 
     assert [type(stage).__name__ for stage in pipeline.stages] == ["ResolveOnlySource"]
     assert loads == []
@@ -262,7 +261,7 @@ def test_weights_only_loader_still_loads_in_the_pipeline(tmp_path: Path, monkeyp
     model = _EncoderNet()
 
     pipeline = build_checkpoint_pipeline(cfg)
-    asyncio.run(pipeline.execute(CheckpointContext(model=model, config=cfg)))
+    pipeline.execute(CheckpointContext(model=model, config=cfg))
 
     assert [type(stage).__name__ for stage in pipeline.stages] == ["LocalSource", "WeightsOnlyLoader"]
     assert len(loads) == 1
@@ -315,11 +314,11 @@ def test_resumes_via_lightning(loading: str | None, expected: bool) -> None:
 class _NothingSource(CheckpointSource):
     """Source that resolves nothing on all ranks."""
 
-    async def resolve(self, context: CheckpointContext) -> Path | None:
+    def resolve(self, context: CheckpointContext) -> Path | None:
         del context
         return None
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         return context
 
 
@@ -331,7 +330,7 @@ def test_resume_that_resolves_nothing_fails_on_rank_zero(monkeypatch: pytest.Mon
     pipeline = build_checkpoint_pipeline(cfg)
 
     with pytest.raises(CheckpointConfigError, match=r"resolved no checkpoint file"):
-        asyncio.run(pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg)))
+        pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg))
 
 
 def test_resume_with_the_run_preset_and_no_run_id_names_the_key(tmp_path: Path) -> None:
@@ -345,7 +344,7 @@ def test_resume_with_the_run_preset_and_no_run_id_names_the_key(tmp_path: Path) 
     pipeline = build_checkpoint_pipeline(cfg)
 
     with pytest.raises(CheckpointConfigError, match="requires a run_id"):
-        asyncio.run(pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg)))
+        pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg))
 
 
 def test_resume_that_resolves_nothing_defers_on_other_ranks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -359,7 +358,7 @@ def test_resume_that_resolves_nothing_defers_on_other_ranks(tmp_path: Path, monk
     )
     pipeline = build_checkpoint_pipeline(cfg)
 
-    executed = asyncio.run(pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg)))
+    executed = pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg))
 
     assert executed.checkpoint_path is None
     assert executed.metadata["checkpoint_load_owner"] == "trainer"

@@ -28,7 +28,7 @@ from anemoi.training.checkpoint.exceptions import CheckpointValidationError
 class _Source(PipelineStage):
     """Stage whose class name contains 'Source' so the health check recognises it."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         context.checkpoint_data = {"state_dict": {}}
         return context
 
@@ -36,7 +36,7 @@ class _Source(PipelineStage):
 class _LoaderMarksWeights(PipelineStage):
     """Stage that simulates a loading strategy setting weights_initialized=True."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         if context.model is not None:
             context.model.weights_initialized = True
         return context
@@ -202,10 +202,9 @@ class TestValidatePipelineHealth:
 class TestPipelineIntegration:
     """End-to-end: pipeline now finds the validation module."""
 
-    @pytest.mark.asyncio
-    async def test_validation_performed_in_metadata(self) -> None:
+    def test_validation_performed_in_metadata(self) -> None:
         pipeline = CheckpointPipeline([])
-        result = await pipeline.execute(
+        result = pipeline.execute(
             CheckpointContext(config=OmegaConf.create({"training": {}})),
         )
         # Pipeline.execute calls _perform_pre_execution_validation, which
@@ -214,9 +213,8 @@ class TestPipelineIntegration:
         assert "validation_skipped" not in result.metadata
         assert result.metadata.get("validation_environment_status") in {"ok", "warning"}
 
-    @pytest.mark.asyncio
-    async def test_health_check_passes_for_realistic_pipeline(self) -> None:
+    def test_health_check_passes_for_realistic_pipeline(self) -> None:
         model = nn.Linear(4, 2)
         pipeline = CheckpointPipeline([_Source(), _LoaderMarksWeights()])
-        result = await pipeline.execute(CheckpointContext(model=model))
+        result = pipeline.execute(CheckpointContext(model=model))
         assert validate_pipeline_health(result) is True

@@ -18,8 +18,8 @@ import logging
 import sys
 import types
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
-import pytest
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
@@ -34,6 +34,10 @@ from anemoi.training.checkpoint.loading.base import refresh_checkpoint_processor
 from anemoi.training.checkpoint.loading.base import warn_on_hparams_divergence
 from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
+
+if TYPE_CHECKING:
+    import pytest
+
 
 class _MiniModel(nn.Module):
     """Single-layer model whose state dict round-trips through a strict load."""
@@ -239,8 +243,7 @@ def _install_order_recorders(
     model.load_state_dict = _load_recorder
 
 
-@pytest.mark.asyncio
-async def test_weights_only_invokes_shared_parity_functions_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_weights_only_invokes_shared_parity_functions_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     """WeightsOnlyLoader runs the corrections, the load and the metadata steps in order.
 
     Edge-perm uses the live model and can rebuild the dict, thus it runs before refresh.
@@ -251,13 +254,12 @@ async def test_weights_only_invokes_shared_parity_functions_in_order(monkeypatch
     calls: list[str] = []
     _install_order_recorders(model, calls, monkeypatch)
 
-    await loader.process(context)
+    loader.process(context)
 
     assert calls == ["format", "edge_perm", "refresh", "load", "warn", "preserve", "extract"]
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_invokes_shared_parity_functions_without_hparams_warn(
+def test_transfer_learning_invokes_shared_parity_functions_without_hparams_warn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """TransferLearningLoader runs the same steps, but not the hparams warning."""
@@ -267,7 +269,7 @@ async def test_transfer_learning_invokes_shared_parity_functions_without_hparams
     calls: list[str] = []
     _install_order_recorders(model, calls, monkeypatch)
 
-    await loader.process(context)
+    loader.process(context)
 
     assert calls == ["format", "edge_perm", "refresh", "load", "preserve", "extract"]
     assert "warn" not in calls

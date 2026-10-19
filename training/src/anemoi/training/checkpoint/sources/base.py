@@ -38,19 +38,18 @@ the file. A resume only calls ``resolve``, because Lightning loads the file.
 Example
 -------
 >>> class LocalSource(CheckpointSource):
-...     async def resolve(self, context: CheckpointContext) -> Path:
+...     def resolve(self, context: CheckpointContext) -> Path:
 ...         context.checkpoint_path = Path(context.checkpoint_path).expanduser().resolve()
 ...         return context.checkpoint_path
 ...
-...     async def process(self, context: CheckpointContext) -> CheckpointContext:
-...         path = await self.resolve(context)
-...         await self._load_from_path(context, path)
+...     def process(self, context: CheckpointContext) -> CheckpointContext:
+...         path = self.resolve(context)
+...         self._load_from_path(context, path)
 ...         return context
 """
 
 from __future__ import annotations
 
-import asyncio
 import atexit
 import logging
 import pickle
@@ -152,15 +151,15 @@ class CheckpointSource(PipelineStage):
     ...     def __init__(self, url: str):
     ...         self.url = url
     ...
-    ...     async def resolve(self, context: CheckpointContext) -> Path:
-    ...         path = await self._download_to_temp(self.url)
+    ...     def resolve(self, context: CheckpointContext) -> Path:
+    ...         path = self._download_to_temp(self.url)
     ...         self._keep_download(context, path)
     ...         context.checkpoint_path = path
     ...         return path
     ...
-    ...     async def process(self, context: CheckpointContext) -> CheckpointContext:
-    ...         path = await self.resolve(context)
-    ...         await self._load_from_path(context, path)
+    ...     def process(self, context: CheckpointContext) -> CheckpointContext:
+    ...         path = self.resolve(context)
+    ...         self._load_from_path(context, path)
     ...         return context
     """
 
@@ -211,7 +210,7 @@ class CheckpointSource(PipelineStage):
         del parent_run_server2server, fork_run_server2server
         return source_cfg
 
-    async def resolve(self, context: CheckpointContext) -> Path | None:
+    def resolve(self, context: CheckpointContext) -> Path | None:
         """Get the checkpoint as a local file and set ``context.checkpoint_path``. Do not load it.
 
         A source that downloads must call ``_keep_download``.
@@ -238,7 +237,7 @@ class CheckpointSource(PipelineStage):
         raise NotImplementedError(msg)
 
     @abstractmethod
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Acquire checkpoint data from source and populate context.
 
         Implementations should:
@@ -268,7 +267,7 @@ class CheckpointSource(PipelineStage):
             If the fetched data cannot be parsed as a checkpoint
         """
 
-    async def _load_from_path(self, context: CheckpointContext, path: Path) -> None:
+    def _load_from_path(self, context: CheckpointContext, path: Path) -> None:
         """Load the checkpoint file at ``path`` onto the context.
 
         ``weights_only=False`` is necessary because checkpoints contain non-tensor metadata.
@@ -288,7 +287,7 @@ class CheckpointSource(PipelineStage):
         from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 
         try:
-            raw_data = await asyncio.to_thread(torch.load, path, weights_only=False, map_location="cpu")
+            raw_data = torch.load(path, weights_only=False, map_location="cpu")
         except (OSError, RuntimeError, EOFError, ValueError, pickle.UnpicklingError) as e:
             raise CheckpointLoadError(path, e) from e
 
@@ -362,11 +361,11 @@ class ResolveOnlySource(CheckpointSource):
     def __init__(self, source: CheckpointSource) -> None:
         self.source = source
 
-    async def resolve(self, context: CheckpointContext) -> Path | None:
+    def resolve(self, context: CheckpointContext) -> Path | None:
         """Delegate to the wrapped source's resolve step."""
-        return await self.source.resolve(context)
+        return self.source.resolve(context)
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Resolve the checkpoint file for ``Trainer.fit(ckpt_path=)``. Do not load it.
 
         Raises
@@ -374,7 +373,7 @@ class ResolveOnlySource(CheckpointSource):
         CheckpointConfigError
             On rank 0, if the source resolves no file. Other ranks defer the error.
         """
-        path = await self.resolve(context)
+        path = self.resolve(context)
         context.update_metadata(**{CHECKPOINT_LOAD_OWNER: "trainer"})
         if path is not None:
             LOGGER.info("Resume checkpoint resolved to %s; Trainer.fit(ckpt_path=) performs the load", path)

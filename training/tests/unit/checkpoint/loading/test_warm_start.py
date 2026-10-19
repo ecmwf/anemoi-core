@@ -42,8 +42,7 @@ def test_warm_start_keeps_its_constructor_signature() -> None:
     assert isinstance(WarmStartLoader(), LoadingStrategy)
 
 
-@pytest.mark.asyncio
-async def test_warm_start_process_refuses_to_run() -> None:
+def test_warm_start_process_refuses_to_run() -> None:
     """``process`` raises and does not change the model."""
     model = SimpleModel()
     before = {key: value.clone() for key, value in model.state_dict().items()}
@@ -54,7 +53,7 @@ async def test_warm_start_process_refuses_to_run() -> None:
         RuntimeError,
         match=r"WarmStartLoader is a marker: resume loads happen in Trainer\.fit\(ckpt_path=\)",
     ):
-        await WarmStartLoader().process(context)
+        WarmStartLoader().process(context)
 
     for key, value in before.items():
         assert torch.equal(model.state_dict()[key], value)

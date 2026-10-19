@@ -70,22 +70,20 @@ def _exact_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_weights_only_strict_loads_exact_checkpoint_tensors() -> None:
+def test_weights_only_strict_loads_exact_checkpoint_tensors() -> None:
     model = _LinearModel()
     weight = torch.arange(50, dtype=torch.float32).reshape(5, 10)
     bias = torch.arange(5, dtype=torch.float32)
     checkpoint_data = {"state_dict": {"linear.weight": weight, "linear.bias": bias}}
 
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await WeightsOnlyLoader().process(context)
+    result = WeightsOnlyLoader().process(context)
 
     assert torch.equal(result.model.linear.weight, weight)
     assert torch.equal(result.model.linear.bias, bias)
 
 
-@pytest.mark.asyncio
-async def test_weights_only_strict_raises_on_extra_checkpoint_key() -> None:
+def test_weights_only_strict_raises_on_extra_checkpoint_key() -> None:
     model = _Layer1Model()
     checkpoint_data = {
         "state_dict": {
@@ -97,11 +95,10 @@ async def test_weights_only_strict_raises_on_extra_checkpoint_key() -> None:
 
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
     with pytest.raises(CheckpointLoadError):
-        await WeightsOnlyLoader(strict=True).process(context)
+        WeightsOnlyLoader(strict=True).process(context)
 
 
-@pytest.mark.asyncio
-async def test_weights_only_non_strict_tolerates_extra_key() -> None:
+def test_weights_only_non_strict_tolerates_extra_key() -> None:
     model = _Layer1Model()
     weight = torch.full((5, 10), 4.0)
     bias = torch.full((5,), 5.0)
@@ -114,15 +111,14 @@ async def test_weights_only_non_strict_tolerates_extra_key() -> None:
     }
 
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await WeightsOnlyLoader(strict=False).process(context)
+    result = WeightsOnlyLoader(strict=False).process(context)
 
     # The extra key is ignored.
     assert torch.equal(result.model.layer1.weight, weight)
     assert torch.equal(result.model.layer1.bias, bias)
 
 
-@pytest.mark.asyncio
-async def test_weights_only_non_strict_still_raises_on_shape_mismatch() -> None:
+def test_weights_only_non_strict_still_raises_on_shape_mismatch() -> None:
     model = _Layer1Model()  # layer1.weight is (5, 10)
     checkpoint_data = {
         "state_dict": {
@@ -133,11 +129,10 @@ async def test_weights_only_non_strict_still_raises_on_shape_mismatch() -> None:
 
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
     with pytest.raises(CheckpointLoadError):
-        await WeightsOnlyLoader(strict=False).process(context)
+        WeightsOnlyLoader(strict=False).process(context)
 
 
-@pytest.mark.asyncio
-async def test_weights_only_does_not_write_training_progress_metadata() -> None:
+def test_weights_only_does_not_write_training_progress_metadata() -> None:
     model = _LinearModel()
     checkpoint_data = {
         "state_dict": _exact_state_dict(model),
@@ -146,14 +141,13 @@ async def test_weights_only_does_not_write_training_progress_metadata() -> None:
     }
 
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await WeightsOnlyLoader().process(context)
+    result = WeightsOnlyLoader().process(context)
 
     assert "epoch" not in result.metadata
     assert "global_step" not in result.metadata
 
 
-@pytest.mark.asyncio
-async def test_weights_only_populates_variables_metadata() -> None:
+def test_weights_only_populates_variables_metadata() -> None:
     model = _LinearModel()
     checkpoint_data = {
         "state_dict": _exact_state_dict(model),
@@ -164,17 +158,16 @@ async def test_weights_only_populates_variables_metadata() -> None:
     }
 
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await WeightsOnlyLoader().process(context)
+    result = WeightsOnlyLoader().process(context)
 
     assert getattr(result.model, "_ckpt_variables_metadata", None) is not None
 
 
-@pytest.mark.asyncio
-async def test_weights_only_marks_weights_initialized() -> None:
+def test_weights_only_marks_weights_initialized() -> None:
     model = _LinearModel()
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": _exact_state_dict(model)})
 
-    result = await WeightsOnlyLoader().process(context)
+    result = WeightsOnlyLoader().process(context)
 
     assert result.model.weights_initialized is True
 
@@ -189,8 +182,7 @@ def test_cold_start_inherits_strict_parameter() -> None:
     assert ColdStartLoader().strict is True
 
 
-@pytest.mark.asyncio
-async def test_cold_start_records_pretrained_from_path_value() -> None:
+def test_cold_start_records_pretrained_from_path_value() -> None:
     model = _LinearModel()
     context = CheckpointContext(
         model=model,
@@ -198,41 +190,38 @@ async def test_cold_start_records_pretrained_from_path_value() -> None:
         checkpoint_path="/path/to/pretrained.ckpt",
     )
 
-    result = await ColdStartLoader().process(context)
+    result = ColdStartLoader().process(context)
 
     assert result.metadata["pretrained_from"] == str(result.checkpoint_path)
     assert result.metadata["pretrained_from"] == "/path/to/pretrained.ckpt"
 
 
-@pytest.mark.asyncio
-async def test_cold_start_records_pretrained_from_none_when_path_unset() -> None:
+def test_cold_start_records_pretrained_from_none_when_path_unset() -> None:
     model = _LinearModel()
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": _exact_state_dict(model)})
 
-    result = await ColdStartLoader().process(context)
+    result = ColdStartLoader().process(context)
 
     assert result.metadata["pretrained_from"] is None
 
 
-@pytest.mark.asyncio
-async def test_cold_start_sets_loading_strategy_label() -> None:
+def test_cold_start_sets_loading_strategy_label() -> None:
     model = _LinearModel()
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": _exact_state_dict(model)})
 
-    result = await ColdStartLoader().process(context)
+    result = ColdStartLoader().process(context)
 
     assert result.metadata["loading_strategy"] == "cold_start"
 
 
-@pytest.mark.asyncio
-async def test_cold_start_loads_weights() -> None:
+def test_cold_start_loads_weights() -> None:
     torch.manual_seed(0)
     model = _LinearModel()
     original_weight = model.linear.weight.detach().clone()
     ckpt_state = _exact_state_dict(model)
 
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": ckpt_state})
-    result = await ColdStartLoader().process(context)
+    result = ColdStartLoader().process(context)
 
     assert not torch.equal(result.model.linear.weight, original_weight)
     assert torch.equal(result.model.linear.weight, ckpt_state["linear.weight"])
@@ -243,8 +232,7 @@ async def test_cold_start_loads_weights() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_records_missing_key_reason() -> None:
+def test_transfer_learning_records_missing_key_reason() -> None:
     target = _SharedModel()
     source_state = {
         "shared.weight": torch.full((5, 10), 1.0),
@@ -254,13 +242,12 @@ async def test_transfer_learning_records_missing_key_reason() -> None:
     }
 
     context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
-    result = await TransferLearningLoader(skip_mismatched=True).process(context)
+    result = TransferLearningLoader(skip_mismatched=True).process(context)
 
     assert result.metadata["skipped_params"]["old_head.weight"] == "Key not in target"
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_records_shape_mismatch_reason() -> None:
+def test_transfer_learning_records_shape_mismatch_reason() -> None:
     target = _SharedModel()  # shared.weight is (5, 10)
     source_state = {
         "shared.weight": torch.full((7, 10), 1.0),  # same key, different shape
@@ -268,13 +255,12 @@ async def test_transfer_learning_records_shape_mismatch_reason() -> None:
     }
 
     context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
-    result = await TransferLearningLoader(skip_mismatched=True).process(context)
+    result = TransferLearningLoader(skip_mismatched=True).process(context)
 
     assert result.metadata["skipped_params"]["shared.weight"].startswith("Shape mismatch")
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_strict_raises_on_shape_mismatch() -> None:
+def test_transfer_learning_strict_raises_on_shape_mismatch() -> None:
     target = _SharedModel()  # shared.weight is (5, 10)
     source_state = {
         "shared.weight": torch.full((7, 10), 1.0),  # same key, different shape
@@ -283,11 +269,10 @@ async def test_transfer_learning_strict_raises_on_shape_mismatch() -> None:
 
     context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
     with pytest.raises(CheckpointIncompatibleError, match="Shape mismatch"):
-        await TransferLearningLoader(skip_mismatched=False).process(context)
+        TransferLearningLoader(skip_mismatched=False).process(context)
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_strict_does_not_raise_on_missing_key() -> None:
+def test_transfer_learning_strict_does_not_raise_on_missing_key() -> None:
     target = _SharedModel()
     source_state = {
         "shared.weight": torch.full((5, 10), 1.0),  # matches target
@@ -296,14 +281,13 @@ async def test_transfer_learning_strict_does_not_raise_on_missing_key() -> None:
     }
 
     context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
-    result = await TransferLearningLoader(skip_mismatched=False).process(context)
+    result = TransferLearningLoader(skip_mismatched=False).process(context)
 
     assert result.model is target
     assert result.metadata["skipped_params"]["old_head.weight"] == "Key not in target"
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_skipped_params_maps_keys_to_reason_strings() -> None:
+def test_transfer_learning_skipped_params_maps_keys_to_reason_strings() -> None:
     target = _SharedModel()  # shared.weight is (5, 10)
     source_state = {
         "shared.weight": torch.full((7, 10), 1.0),  # same key, different shape
@@ -312,7 +296,7 @@ async def test_transfer_learning_skipped_params_maps_keys_to_reason_strings() ->
     }
 
     context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
-    result = await TransferLearningLoader(skip_mismatched=True).process(context)
+    result = TransferLearningLoader(skip_mismatched=True).process(context)
 
     skipped = result.metadata["skipped_params"]
     assert isinstance(skipped, dict)
@@ -321,19 +305,17 @@ async def test_transfer_learning_skipped_params_maps_keys_to_reason_strings() ->
     assert skipped["shared.weight"].startswith("Shape mismatch")
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_sets_loading_strategy_label() -> None:
+def test_transfer_learning_sets_loading_strategy_label() -> None:
     target = _SharedModel()
     source_state = {"shared.weight": torch.full((5, 10), 1.0), "shared.bias": torch.full((5,), 2.0)}
 
     context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
-    result = await TransferLearningLoader(skip_mismatched=True).process(context)
+    result = TransferLearningLoader(skip_mismatched=True).process(context)
 
     assert result.metadata["loading_strategy"] == "transfer_learning"
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_loads_when_no_keys_match() -> None:
+def test_transfer_learning_loads_when_no_keys_match() -> None:
     target = _SharedModel()  # keys: shared.weight, shared.bias
     source_state = {
         "encoder.weight": torch.full((4, 4), 1.0),
@@ -341,7 +323,7 @@ async def test_transfer_learning_loads_when_no_keys_match() -> None:
     }
 
     context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
-    result = await TransferLearningLoader(skip_mismatched=True).process(context)
+    result = TransferLearningLoader(skip_mismatched=True).process(context)
 
     assert result.metadata["transferred_params"] == []
     assert set(source_state) <= set(result.metadata["skipped_params"])
@@ -356,14 +338,13 @@ def test_warm_start_has_no_strict_parameter() -> None:
     assert "strict" not in inspect.signature(WarmStartLoader.__init__).parameters
 
 
-@pytest.mark.asyncio
-async def test_warm_start_is_a_marker_and_never_loads() -> None:
+def test_warm_start_is_a_marker_and_never_loads() -> None:
     """``WarmStartLoader.process`` raises, because ``Trainer.fit(ckpt_path=)`` does resume loads."""
     model = _LinearModel()
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": _exact_state_dict(model)})
 
     with pytest.raises(RuntimeError, match="WarmStartLoader is a marker"):
-        await WarmStartLoader().process(context)
+        WarmStartLoader().process(context)
 
     assert not getattr(model, "weights_initialized", False)
     assert context.metadata == {}

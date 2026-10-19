@@ -45,14 +45,14 @@ class ModelModifier(PipelineStage):
     Examples
     --------
     >>> class FreezingModifierStage(ModelModifier):
-    ...     async def process(self, context: CheckpointContext) -> CheckpointContext:
+    ...     def process(self, context: CheckpointContext) -> CheckpointContext:
     ...         for param in context.model.parameters():
     ...             param.requires_grad = False
     ...         return context
     """
 
     @abstractmethod
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Apply the modification to ``context.model``.
 
         Parameters

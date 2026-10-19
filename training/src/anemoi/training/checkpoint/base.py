@@ -14,14 +14,13 @@ Each :class:`PipelineStage` changes a :class:`CheckpointContext` and returns it.
 Example
 -------
 >>> class MyStage(PipelineStage):
-...     async def process(self, context: CheckpointContext) -> CheckpointContext:
+...     def process(self, context: CheckpointContext) -> CheckpointContext:
 ...         context.update_metadata(processed_by='MyStage')
 ...         return context
 >>>
 >>> context = CheckpointContext()
 >>> stage = MyStage()
->>> # In async context:
->>> # result = await stage.process(context)
+>>> result = stage.process(context)
 """
 
 from __future__ import annotations
@@ -257,7 +256,7 @@ class PipelineStage(ABC):
     Examples
     --------
     >>> class ValidationStage(PipelineStage):
-    ...     async def process(self, context: CheckpointContext) -> CheckpointContext:
+    ...     def process(self, context: CheckpointContext) -> CheckpointContext:
     ...         if not context.has_checkpoint_data():
     ...             raise CheckpointError("No checkpoint data to validate")
     ...         # Perform validation
@@ -270,13 +269,11 @@ class PipelineStage(ABC):
     """
 
     @abstractmethod
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Process the checkpoint context.
 
         This method should perform the stage's operation on the context
-        and return the modified context for the next stage. The method
-        is async to support I/O operations like downloading checkpoints
-        or loading from disk.
+        and return the modified context for the next stage.
 
         Implementations should:
         - Validate required context fields exist
@@ -307,23 +304,13 @@ class PipelineStage(ABC):
             If checkpoint data cannot be loaded
         CheckpointIncompatibleError
             If checkpoint is incompatible with the model
-
-        Notes
-        -----
-        The process method is async to support:
-        - Network operations (downloading from S3, HTTP, etc.)
-        - Large file I/O operations
-        - Concurrent processing when needed
-
-        If your stage doesn't need async operations, you can still
-        implement it as an async method that doesn't use await.
         """
 
     def __repr__(self) -> str:
         """String representation of stage."""
         return f"{self.__class__.__name__}()"
 
-    async def __call__(self, context: CheckpointContext) -> CheckpointContext:
+    def __call__(self, context: CheckpointContext) -> CheckpointContext:
         """Allow stage to be called directly.
 
         This convenience method allows stages to be used as callables,
@@ -342,9 +329,9 @@ class PipelineStage(ABC):
         Examples
         --------
         >>> # Instead of:
-        >>> result = await stage.process(context)
+        >>> result = stage.process(context)
         >>>
         >>> # You can write:
-        >>> result = await stage(context)
+        >>> result = stage(context)
         """
-        return await self.process(context)
+        return self.process(context)

@@ -9,15 +9,14 @@
 
 """HTTP/HTTPS checkpoint source.
 
-Downloads checkpoint data from an HTTP or HTTPS URL using async
-download with retry and exponential backoff, then loads it into
+Downloads checkpoint data from an HTTP or HTTPS URL with retry and exponential backoff, then loads it into
 the pipeline context.
 
 Example
 -------
 >>> source = HTTPSource(url="https://models.ecmwf.int/model.ckpt")
 >>> context = CheckpointContext()
->>> result = await source.process(context)
+>>> result = source.process(context)
 >>> assert result.checkpoint_data is not None
 """
 
@@ -42,7 +41,7 @@ class HTTPSource(CheckpointSource):
 
     Downloads a checkpoint file to a node-local temporary location using
     :func:`~anemoi.training.checkpoint.utils.download_with_retry`,
-    which provides async streaming with exponential-backoff retry.
+    which retries with exponential backoff.
     The file stays on disk until the trainer deletes it after training.
 
     The URL is provided at construction time (compatible with Hydra
@@ -71,7 +70,7 @@ class HTTPSource(CheckpointSource):
     ...     timeout=600,
     ... )
     >>> context = CheckpointContext()
-    >>> result = await source.process(context)
+    >>> result = source.process(context)
     """
 
     def __init__(
@@ -98,7 +97,7 @@ class HTTPSource(CheckpointSource):
         self.timeout = timeout
         self.expected_checksum = expected_checksum
 
-    async def resolve(self, context: CheckpointContext) -> Path:
+    def resolve(self, context: CheckpointContext) -> Path:
         """Download the checkpoint to a temporary file and set its path on the context.
 
         If the download or checksum fails, the file is deleted.
@@ -132,7 +131,7 @@ class HTTPSource(CheckpointSource):
             tmp_path = Path(tmp_fd.name)
 
         try:
-            await download_with_retry(
+            download_with_retry(
                 url=self.url,
                 dest=tmp_path,
                 max_retries=self.max_retries,
@@ -165,7 +164,7 @@ class HTTPSource(CheckpointSource):
         context.checkpoint_path = tmp_path
         return tmp_path
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Download and load a checkpoint from an HTTP/HTTPS URL.
 
         Parameters
@@ -188,8 +187,8 @@ class HTTPSource(CheckpointSource):
         CheckpointLoadError
             If the downloaded file cannot be loaded by PyTorch
         """
-        path = await self.resolve(context)
-        await self._load_from_path(context, path)
+        path = self.resolve(context)
+        self._load_from_path(context, path)
 
         context.update_metadata(
             source_type="http",

@@ -82,7 +82,7 @@ class _InMemorySource(CheckpointSource):
     def __init__(self, checkpoint_data: dict | None = None) -> None:
         self._data = checkpoint_data if checkpoint_data is not None else {"state_dict": {}}
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         context.checkpoint_data = self._data
         return context
 
@@ -90,7 +90,7 @@ class _InMemorySource(CheckpointSource):
 class _WeightMarkingLoader(LoadingStrategy):
     """Loader that only marks the weights as loaded."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         if context.model is not None:
             self._mark_weights_loaded(context.model)
         return context
@@ -99,14 +99,14 @@ class _WeightMarkingLoader(LoadingStrategy):
 class _NoOpStage(PipelineStage):
     """Stage that does nothing."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         return context
 
 
 class _CustomModifier(ModelModifier):
     """Modifier that freezes the full model and adds a metadata record."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         for param in context.model.parameters():
             param.requires_grad = False
         context.metadata.setdefault("modifiers_applied", []).append({"type": "custom_recording"})
@@ -116,28 +116,28 @@ class _CustomModifier(ModelModifier):
 class _CustomRestorer(CheckpointSource):
     """A ``CheckpointSource`` subclass whose name contains no 'Source'."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         return context
 
 
 class _Restorer(LoadingStrategy):
     """A ``LoadingStrategy`` subclass whose name contains no 'Loader'."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         return context
 
 
 class _LoRAAdapter(ModelModifier):
     """A ``ModelModifier`` subclass whose name contains no 'Modifier'/'Freez'."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         return context
 
 
 class _UnknownStage(PipelineStage):
     """A bare ``PipelineStage`` that belongs to no checkpoint layer."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         return context
 
 
@@ -146,13 +146,12 @@ class _UnknownStage(PipelineStage):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_freezing_multiple_submodules_in_single_call() -> None:
+def test_freezing_multiple_submodules_in_single_call() -> None:
     model = ThreeChildModel()
     names = ["encoder", "decoder", "head"]
     stage = FreezingModifierStage(submodules_to_freeze=names)
 
-    result = await stage.process(CheckpointContext(model=model))
+    result = stage.process(CheckpointContext(model=model))
 
     for name in names:
         submodule = result.model.get_submodule(name)
@@ -166,37 +165,34 @@ async def test_freezing_multiple_submodules_in_single_call() -> None:
     assert [record["name"] for record in applied[0]["frozen_modules"]] == names
 
 
-@pytest.mark.asyncio
-async def test_validate_gradients_false_skips_validation_but_still_freezes() -> None:
+def test_validate_gradients_false_skips_validation_but_still_freezes() -> None:
     model = TwoChildModel()
 
     with patch.object(FreezingModifierStage, "_validate_gradient_flow") as spy:
         stage = FreezingModifierStage(submodules_to_freeze=["encoder"], validate_gradients=False)
-        result = await stage.process(CheckpointContext(model=model))
+        result = stage.process(CheckpointContext(model=model))
 
     spy.assert_not_called()
     assert all(not p.requires_grad for p in result.model.encoder.parameters())
 
 
-@pytest.mark.asyncio
-async def test_validate_gradients_true_invokes_validation() -> None:
+def test_validate_gradients_true_invokes_validation() -> None:
     model = TwoChildModel()
 
     with patch.object(FreezingModifierStage, "_validate_gradient_flow") as spy:
         stage = FreezingModifierStage(submodules_to_freeze=["encoder"], validate_gradients=True)
-        await stage.process(CheckpointContext(model=model))
+        stage.process(CheckpointContext(model=model))
 
     spy.assert_called_once()
 
 
-@pytest.mark.asyncio
-async def test_modifiers_applied_records_param_counts_and_total() -> None:
+def test_modifiers_applied_records_param_counts_and_total() -> None:
     model = TwoChildModel()
     expected_encoder = sum(p.requires_grad for p in model.encoder.parameters())
     expected_decoder = sum(p.requires_grad for p in model.decoder.parameters())
 
     stage = FreezingModifierStage(submodules_to_freeze=["encoder", "decoder"])
-    result = await stage.process(CheckpointContext(model=model))
+    result = stage.process(CheckpointContext(model=model))
 
     entry = result.metadata["modifiers_applied"][0]
     assert entry["type"] == "freezing"
@@ -210,12 +206,11 @@ async def test_modifiers_applied_records_param_counts_and_total() -> None:
     assert entry["total_frozen_params"] == expected_encoder + expected_decoder
 
 
-@pytest.mark.asyncio
-async def test_empty_freeze_list_is_noop() -> None:
+def test_empty_freeze_list_is_noop() -> None:
     model = TwoChildModel()
     stage = FreezingModifierStage(submodules_to_freeze=[])
 
-    result = await stage.process(CheckpointContext(model=model))
+    result = stage.process(CheckpointContext(model=model))
 
     assert all(p.requires_grad for p in result.model.parameters())
     assert "modifiers_applied" not in result.metadata
@@ -255,8 +250,7 @@ def test_source_without_loader_suggests_adding_a_loading_stage(caplog: pytest.Lo
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_source_without_loaded_weights_raises_even_with_continue_on_error() -> None:
+def test_source_without_loaded_weights_raises_even_with_continue_on_error() -> None:
     for continue_on_error in (False, True):
         model = TwoChildModel()
         pipeline = CheckpointPipeline(
@@ -264,15 +258,14 @@ async def test_source_without_loaded_weights_raises_even_with_continue_on_error(
             continue_on_error=continue_on_error,
         )
         with pytest.raises(CheckpointLoadError):
-            await pipeline.execute(CheckpointContext(model=model))
+            pipeline.execute(CheckpointContext(model=model))
 
 
-@pytest.mark.asyncio
-async def test_source_with_loaded_weights_completes() -> None:
+def test_source_with_loaded_weights_completes() -> None:
     model = TwoChildModel()
     pipeline = CheckpointPipeline([_InMemorySource(), _WeightMarkingLoader()])
 
-    result = await pipeline.execute(CheckpointContext(model=model))
+    result = pipeline.execute(CheckpointContext(model=model))
 
     assert result.model.weights_initialized is True
 
@@ -344,21 +337,19 @@ def test_health_check_flags_config_validation_error() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_custom_inline_modifier_runs_and_classifies_as_modifier() -> None:
+def test_custom_inline_modifier_runs_and_classifies_as_modifier() -> None:
     model = TwoChildModel()
     modifier = _CustomModifier()
     pipeline = CheckpointPipeline([_InMemorySource(), _WeightMarkingLoader(), modifier])
 
-    result = await pipeline.execute(CheckpointContext(model=model))
+    result = pipeline.execute(CheckpointContext(model=model))
 
     assert all(not p.requires_grad for p in result.model.parameters())
     assert {"type": "custom_recording"} in result.metadata["modifiers_applied"]
     assert CheckpointPipeline._stage_role(modifier) == "modifier"
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_then_freezing_compose_in_pipeline(tmp_path: Path) -> None:
+def test_transfer_learning_then_freezing_compose_in_pipeline(tmp_path: Path) -> None:
     target = MismatchTargetModel()
     source_state = {
         "encoder.weight": torch.randn(7, 10),  # shape mismatch vs (5, 10)
@@ -377,7 +368,7 @@ async def test_transfer_learning_then_freezing_compose_in_pipeline(tmp_path: Pat
         ],
     )
 
-    result = await pipeline.execute(CheckpointContext(model=target))
+    result = pipeline.execute(CheckpointContext(model=target))
 
     # Modifier froze the encoder.
     assert all(not p.requires_grad for p in result.model.encoder.parameters())
