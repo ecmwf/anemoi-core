@@ -20,6 +20,7 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
 import anemoi.training
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
 from anemoi.training.checkpoint.builder import resumes_via_lightning
@@ -268,21 +269,31 @@ def test_weights_only_loader_still_loads_in_the_pipeline(tmp_path: Path, monkeyp
     assert model.weights_initialized is True
 
 
-def test_warm_start_from_a_remote_source_builds() -> None:
-    """A resume from a remote source builds."""
+@pytest.mark.parametrize("loading", [None, {"_target_": f"{_LOADERS}.WarmStartLoader"}])
+def test_resume_from_a_remote_source_is_rejected(loading: dict | None) -> None:
+    """Lightning needs a local file, thus a resume from S3 fails at build."""
+    checkpoint = {"source": {"_target_": _S3_SOURCE, "url": "s3://bucket/last.ckpt"}}
+    if loading is not None:
+        checkpoint["loading"] = loading
+    cfg = OmegaConf.create({"training": {"checkpoint": checkpoint}})
+    with pytest.raises(CheckpointConfigError, match="S3Source cannot resume"):
+        build_checkpoint_pipeline(cfg)
+
+
+def test_remote_source_with_a_loading_strategy_builds() -> None:
+    """A remote source with a pipeline loader is not a resume, thus it builds."""
     cfg = OmegaConf.create(
         {
             "training": {
                 "checkpoint": {
                     "source": {"_target_": _S3_SOURCE, "url": "s3://bucket/last.ckpt"},
-                    "loading": {"_target_": f"{_LOADERS}.WarmStartLoader"},
+                    "loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader"},
                 },
             },
         },
     )
     pipeline = build_checkpoint_pipeline(cfg)
-    assert [type(stage).__name__ for stage in pipeline.stages] == ["ResolveOnlySource"]
-    assert type(pipeline.stages[0].source).__name__ == "S3Source"
+    assert [type(stage).__name__ for stage in pipeline.stages] == ["S3Source", "WeightsOnlyLoader"]
 
 
 def test_warm_start_without_a_source_is_rejected() -> None:
@@ -324,8 +335,7 @@ class _NothingSource(CheckpointSource):
 
 def test_resume_that_resolves_nothing_fails_on_rank_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     """A resume that resolves no checkpoint on rank 0 raises a config error."""
-    for var in ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
-        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(rank_zero_only, "rank", 0)
     cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": f"{__name__}._NothingSource"}}}})
     pipeline = build_checkpoint_pipeline(cfg)
 
@@ -349,7 +359,7 @@ def test_resume_with_the_run_preset_and_no_run_id_names_the_key(tmp_path: Path) 
 
 def test_resume_that_resolves_nothing_defers_on_other_ranks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Non-zero ranks defer to the error on rank 0."""
-    monkeypatch.setenv("RANK", "1")
+    monkeypatch.setattr(rank_zero_only, "rank", 1)
     cfg = OmegaConf.create(
         {
             "training": {"checkpoint": {"source": {"_target_": _RUN_SOURCE, "run_id": "missing"}}},

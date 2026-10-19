@@ -22,7 +22,6 @@ from unittest.mock import patch
 
 import mlflow
 import pytest
-import torch
 import torch.nn as nn
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -31,13 +30,10 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-from anemoi.training.checkpoint.sources.http import HTTPSource
 from anemoi.training.checkpoint.sources.run import RunIdSource
 from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.seeding import get_base_seed
-
-_RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
 
 
 # ---------------------------------------------------------------------------
@@ -348,43 +344,20 @@ def _missing_run_context(tmp_path: Path) -> CheckpointContext:
     return CheckpointContext(config=OmegaConf.create({"system": {"output": {"checkpoints": {"root": str(root)}}}}))
 
 
-def _clear_rank_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in _RANK_ENV_VARS:
-        monkeypatch.delenv(var, raising=False)
+def _set_rank(monkeypatch: pytest.MonkeyPatch, rank: int) -> None:
+    monkeypatch.setattr(rank_zero_only, "rank", rank)
 
 
-def test_rank_env_priority_rank_beats_local_rank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear_rank_env(monkeypatch)
-    monkeypatch.setenv("RANK", "0")
-    monkeypatch.setenv("LOCAL_RANK", "1")
-    context = _missing_run_context(tmp_path)
-
-    # RANK has priority. On rank 0, a missing checkpoint raises.
+def test_missing_checkpoint_raises_on_rank_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_rank(monkeypatch, 0)
     with pytest.raises(RuntimeError, match="run_missing"):
-        RunIdSource(run_id="run_missing").process(context)
+        RunIdSource(run_id="run_missing").process(_missing_run_context(tmp_path))
 
 
-def test_rank_env_priority_slurm_procid_defers_when_only_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear_rank_env(monkeypatch)
-    monkeypatch.setenv("SLURM_PROCID", "1")
-    context = _missing_run_context(tmp_path)
-
-    result = RunIdSource(run_id="run_missing").process(context)
+def test_missing_checkpoint_defers_on_other_ranks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_rank(monkeypatch, 1)
+    result = RunIdSource(run_id="run_missing").process(_missing_run_context(tmp_path))
     assert result.checkpoint_path is None
-
-
-@pytest.mark.parametrize("rank_value", ["abc", "-1"])
-def test_malformed_or_negative_rank_treated_as_rank_zero(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    rank_value: str,
-) -> None:
-    _clear_rank_env(monkeypatch)
-    monkeypatch.setenv("RANK", rank_value)
-    context = _missing_run_context(tmp_path)
-
-    with pytest.raises(RuntimeError, match="run_missing"):
-        RunIdSource(run_id="run_missing").process(context)
 
 
 def test_resolve_path_invariant_to_dataset_count() -> None:
@@ -479,33 +452,6 @@ def test_init_writes_resolved_run_id_back_into_config(tmp_path: Path) -> None:
     # A new run writes its uuid into training.run_id.
     assert trainer.config.training.run_id == trainer.run_id
     assert uuid.UUID(trainer.config.training.run_id).version == 4
-
-
-# ---------------------------------------------------------------------------
-# Remote sources set the downloaded file as the checkpoint path
-# ---------------------------------------------------------------------------
-
-
-def _fake_download(url: str, dest: Path, max_retries: int, timeout: int) -> None:
-    """Write a checkpoint to ``dest`` instead of a download."""
-    del url, max_retries, timeout  # same signature as download_with_retry
-    torch.save({"state_dict": {"weight": torch.zeros(2, 2)}}, dest)
-
-
-def test_http_source_publishes_kept_download_as_checkpoint_path() -> None:
-    context = CheckpointContext()
-
-    with patch("anemoi.training.checkpoint.utils.download_with_retry", new=_fake_download):
-        result = HTTPSource(url="https://models.example.int/model.ckpt").process(context)
-
-    try:
-        # The trainer can give this path to Trainer.fit(ckpt_path=).
-        assert result.checkpoint_path is not None
-        assert result.checkpoint_path.exists()
-        assert result.temporary_files == [result.checkpoint_path]
-        assert result.checkpoint_data is not None
-    finally:
-        result.checkpoint_path.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------

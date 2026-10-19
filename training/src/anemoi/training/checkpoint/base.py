@@ -76,9 +76,6 @@ class CheckpointContext:
     pl_module : pl.LightningModule, optional
         Lightning module (Task) if loading from Lightning checkpoint.
         This preserves the full Lightning context for training resumption
-    temporary_files : list of Path
-        Downloaded files kept for ``Trainer.fit(ckpt_path=)``. The trainer deletes
-        them after training.
 
     Examples
     --------
@@ -105,7 +102,6 @@ class CheckpointContext:
     config: DictConfig | None = None
     checkpoint_format: Literal["lightning", "pytorch", "state_dict"] | None = None
     pl_module: Any | None = None  # Type hint as Any to avoid circular imports
-    temporary_files: list[Path] = field(default_factory=list)
 
     def __post_init__(self):
         """Convert ``checkpoint_path`` to a ``Path``.

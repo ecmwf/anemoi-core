@@ -109,31 +109,45 @@ def resumes_via_lightning(cfg: DictConfig) -> bool:
 
 
 def reject_unsupported_warm_start(cfg: DictConfig) -> None:
-    """Reject a warm start that has no source.
+    """Reject a resume that Lightning cannot load.
 
-    Lightning needs a file for ``ckpt_path``, and the source gives that file.
+    Lightning needs a local file for ``ckpt_path``. Only a source that implements
+    ``resolve`` (``LocalSource``, ``RunIdSource``) gives that file.
 
     Raises
     ------
     CheckpointConfigError
-        If the loader declares ``restores_training_state`` and there is no source.
+        If the loader declares ``restores_training_state`` and there is no source,
+        or if a resume uses a source that does not support it.
     """
-    if not loader_restores_training_state(cfg):
-        return
-
-    if OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None) is not None:
-        return
-
     from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+    from anemoi.training.checkpoint.sources.base import source_class_from_config
 
-    msg = (
-        "Warm start resumes through Trainer.fit(ckpt_path=), which needs a checkpoint to "
-        "read, but no training.checkpoint.source is configured. Add a source "
-        "(RunIdSource, LocalSource, S3Source or HTTPSource), or switch "
-        "training.checkpoint.loading to WeightsOnlyLoader / TransferLearningLoader / "
-        "ColdStartLoader to start fresh training state from a checkpoint."
-    )
-    raise CheckpointConfigError(msg)
+    source = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None)
+
+    if source is None:
+        if loader_restores_training_state(cfg):
+            msg = (
+                "Warm start resumes through Trainer.fit(ckpt_path=), which needs a checkpoint to "
+                "read, but no training.checkpoint.source is configured. Add a source "
+                "(RunIdSource or LocalSource), or switch training.checkpoint.loading to "
+                "WeightsOnlyLoader / TransferLearningLoader / ColdStartLoader to start fresh "
+                "training state from a checkpoint."
+            )
+            raise CheckpointConfigError(msg)
+        return
+
+    if not resumes_via_lightning(cfg):
+        return
+
+    source_cls = source_class_from_config(source)
+    if source_cls is not None and not source_cls.supports_resume():
+        msg = (
+            f"{source_cls.__name__} cannot resume a run: Trainer.fit(ckpt_path=) needs a local file. "
+            "Download the checkpoint and use LocalSource, or add a loading strategy "
+            "(WeightsOnlyLoader / TransferLearningLoader / ColdStartLoader) to load only the weights."
+        )
+        raise CheckpointConfigError(msg)
 
 
 def _resolve_only(source: Any) -> Any:

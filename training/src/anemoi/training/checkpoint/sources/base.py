@@ -32,8 +32,8 @@ Callers that want scheme-based routing should perform their own
 dispatch (e.g., by inspecting ``urlparse(uri).scheme``) before
 selecting a ``_target_``.
 
-``resolve`` gives a local checkpoint file. ``process`` calls ``resolve`` and then loads
-the file. A resume only calls ``resolve``, because Lightning loads the file.
+``process`` gets the checkpoint and loads it. A local source also implements ``resolve``,
+which only gives the local file. A resume calls only ``resolve``, because Lightning loads the file.
 
 Example
 -------
@@ -50,7 +50,6 @@ Example
 
 from __future__ import annotations
 
-import atexit
 import logging
 import pickle
 from abc import abstractmethod
@@ -58,6 +57,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.checkpoint.base import PipelineStage
 
@@ -67,23 +67,6 @@ if TYPE_CHECKING:
     from anemoi.training.checkpoint.base import CheckpointContext
 
 LOGGER = logging.getLogger(__name__)
-
-#: Launcher rank variables, in the same order as Lightning's ``_get_rank()``.
-RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
-
-
-def is_rank_zero() -> bool:
-    """Return whether this process is rank 0.
-
-    A missing or malformed rank variable counts as rank 0, so errors are not lost.
-    """
-    from lightning_fabric.utilities.rank_zero import _get_rank
-
-    try:
-        rank = _get_rank()
-    except ValueError:
-        return True
-    return rank is None or rank <= 0
 
 
 def source_class_from_config(source_cfg: Any) -> type[CheckpointSource] | None:
@@ -120,16 +103,6 @@ def source_class_from_config(source_cfg: Any) -> type[CheckpointSource] | None:
     return cls if isinstance(cls, type) and issubclass(cls, CheckpointSource) else None
 
 
-def remove_temporary_file(path: Path) -> None:
-    """Delete a downloaded checkpoint file. Never raises, because ``atexit`` also calls it."""
-    try:
-        path.unlink(missing_ok=True)
-    except OSError as exc:
-        LOGGER.warning("Could not remove temporary checkpoint %s: %s", path, exc)
-    else:
-        LOGGER.info("Removed temporary checkpoint %s", path)
-
-
 class CheckpointSource(PipelineStage):
     """Abstract base class for all checkpoint sources.
 
@@ -138,8 +111,8 @@ class CheckpointSource(PipelineStage):
     a specific source type (local file, cloud storage, HTTP endpoint,
     etc.) and populating the context for downstream stages.
 
-    Subclasses implement ``resolve`` (get a local file) and ``process``
-    (resolve, then load). Use ``_load_from_path`` to load the file.
+    Subclasses implement ``process``. Use ``_load_from_path`` to load the file.
+    A source that can give a local file for a resume also implements ``resolve``.
 
     Parameters
     ----------
@@ -151,15 +124,10 @@ class CheckpointSource(PipelineStage):
     ...     def __init__(self, url: str):
     ...         self.url = url
     ...
-    ...     def resolve(self, context: CheckpointContext) -> Path:
-    ...         path = self._download_to_temp(self.url)
-    ...         self._keep_download(context, path)
-    ...         context.checkpoint_path = path
-    ...         return path
-    ...
     ...     def process(self, context: CheckpointContext) -> CheckpointContext:
-    ...         path = self.resolve(context)
+    ...         path = self._download_to_temp(self.url)
     ...         self._load_from_path(context, path)
+    ...         path.unlink()
     ...         return context
     """
 
@@ -213,8 +181,6 @@ class CheckpointSource(PipelineStage):
     def resolve(self, context: CheckpointContext) -> Path | None:
         """Get the checkpoint as a local file and set ``context.checkpoint_path``. Do not load it.
 
-        A source that downloads must call ``_keep_download``.
-
         Parameters
         ----------
         context : CheckpointContext
@@ -235,6 +201,11 @@ class CheckpointSource(PipelineStage):
             "hand Trainer.fit(ckpt_path=) a local checkpoint file"
         )
         raise NotImplementedError(msg)
+
+    @classmethod
+    def supports_resume(cls) -> bool:
+        """Return ``True`` if the source implements ``resolve``, thus a resume can use it."""
+        return cls.resolve is not CheckpointSource.resolve
 
     @abstractmethod
     def process(self, context: CheckpointContext) -> CheckpointContext:
@@ -292,25 +263,6 @@ class CheckpointSource(PipelineStage):
             raise CheckpointLoadError(path, e) from e
 
         self._load_and_populate(context, raw_data)
-
-    def _keep_download(self, context: CheckpointContext, path: Path) -> None:
-        """Keep a downloaded file on disk for ``Trainer.fit(ckpt_path=)``.
-
-        The trainer deletes it after training. ``atexit`` deletes it if training stops early.
-
-        Parameters
-        ----------
-        context : CheckpointContext
-            Current pipeline context (mutated in place)
-        path : Path
-            The downloaded checkpoint file
-        """
-        context.temporary_files.append(path)
-        atexit.register(remove_temporary_file, path)
-        LOGGER.info(
-            "Checkpoint downloaded to %s; kept until training finishes so Trainer.fit(ckpt_path=) can read it",
-            path,
-        )
 
     def _load_and_populate(
         self,
@@ -379,7 +331,7 @@ class ResolveOnlySource(CheckpointSource):
             LOGGER.info("Resume checkpoint resolved to %s; Trainer.fit(ckpt_path=) performs the load", path)
             return context
 
-        if is_rank_zero():
+        if rank_zero_only.rank == 0:
             from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
             msg = (

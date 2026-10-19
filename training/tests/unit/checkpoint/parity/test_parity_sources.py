@@ -26,6 +26,7 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
@@ -42,9 +43,6 @@ from anemoi.training.checkpoint.utils import calculate_checksum
 if TYPE_CHECKING:
     from collections.abc import Awaitable
     from collections.abc import Callable
-    from collections.abc import Iterable
-
-_RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
 
 
 def _write_state_dict_ckpt(path: Path) -> Path:
@@ -58,10 +56,8 @@ def _run_config(root: Path) -> OmegaConf:
     return OmegaConf.create({"system": {"output": {"checkpoints": {"root": str(root)}}}})
 
 
-def _clear_rank_env(monkeypatch: pytest.MonkeyPatch, keep: Iterable[str] = ()) -> None:
-    for var in _RANK_ENV_VARS:
-        if var not in keep:
-            monkeypatch.delenv(var, raising=False)
+def _clear_rank_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(rank_zero_only, "rank", 0)
 
 
 # ---------------------------------------------------------------------------
@@ -248,51 +244,15 @@ def test_checkpoint_not_found_error_is_deterministic(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("rank_var", ["LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"])
-def test_run_source_defers_on_nonzero_rank_from_fallback_var(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    rank_var: str,
-) -> None:
-    """If RANK is not set, a non-zero fallback rank variable defers and does not raise."""
-    _clear_rank_env(monkeypatch)
-    monkeypatch.setenv(rank_var, "1")
+def test_run_source_defers_on_nonzero_rank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-zero rank defers and does not raise."""
+    monkeypatch.setattr(rank_zero_only, "rank", 1)
 
     context = CheckpointContext(config=_run_config(tmp_path / "job" / "checkpoints"))
     result = RunIdSource(run_id="run_missing").process(context)
 
     assert result.checkpoint_path is None
     assert result.checkpoint_data is None
-
-
-def test_run_source_rank_precedence_rank_over_local_rank(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """RANK has priority over LOCAL_RANK."""
-    _clear_rank_env(monkeypatch)
-    monkeypatch.setenv("RANK", "1")
-    monkeypatch.setenv("LOCAL_RANK", "0")
-
-    context = CheckpointContext(config=_run_config(tmp_path / "job" / "checkpoints"))
-    result = RunIdSource(run_id="run_missing").process(context)
-
-    assert result.checkpoint_path is None
-
-
-@pytest.mark.parametrize("rank_value", ["abc", "-1"])
-def test_run_source_invalid_rank_treated_as_rank_zero(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    rank_value: str,
-) -> None:
-    """A malformed or negative RANK counts as rank 0."""
-    _clear_rank_env(monkeypatch)
-    monkeypatch.setenv("RANK", rank_value)
-
-    context = CheckpointContext(config=_run_config(tmp_path / "job" / "checkpoints"))
-    with pytest.raises(RuntimeError, match="run_missing"):
-        RunIdSource(run_id="run_missing").process(context)
 
 
 def test_run_source_sets_resolved_checkpoint_path_metadata(
@@ -532,29 +492,20 @@ def test_http_source_without_checksum_loads(tmp_path: Path) -> None:
     assert result.checkpoint_data is not None
 
 
-def test_http_source_keeps_download_on_load_error() -> None:
-    """A corrupt download raises CheckpointLoadError, but the file and its path are kept.
-
-    The trainer deletes downloads through ``context.temporary_files``.
-    """
+def test_http_source_deletes_download_on_load_error() -> None:
+    """A corrupt download raises CheckpointLoadError, and the file is deleted."""
     recorded: list[Path] = []
     context = CheckpointContext()
 
     source = HTTPSource(url="https://example.com/model.ckpt")
-    try:
-        with (
-            patch("anemoi.training.checkpoint.utils.download_with_retry", _garbage_download_stub(recorded)),
-            pytest.raises(CheckpointLoadError),
-        ):
-            source.process(context)
+    with (
+        patch("anemoi.training.checkpoint.utils.download_with_retry", _garbage_download_stub(recorded)),
+        pytest.raises(CheckpointLoadError),
+    ):
+        source.process(context)
 
-        assert recorded, "download stub was not invoked"
-        assert recorded[0].exists()
-        assert context.checkpoint_path == recorded[0]
-        assert context.temporary_files == [recorded[0]]
-    finally:
-        for path in recorded:
-            path.unlink(missing_ok=True)
+    assert recorded, "download stub was not invoked"
+    assert not recorded[0].exists()
 
 
 # ---------------------------------------------------------------------------

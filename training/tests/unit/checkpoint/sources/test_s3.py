@@ -124,8 +124,8 @@ def test_s3_source_raises_when_obstore_missing() -> None:
     assert "anemoi-utils[s3]" in str(excinfo.value)
 
 
-def test_s3_source_keeps_download_and_publishes_path_on_load_failure() -> None:
-    """The download is kept and its path is on the context, also if loading fails."""
+def test_s3_source_deletes_download_on_load_failure() -> None:
+    """If loading fails, the download is deleted."""
     source = S3Source(url="s3://bucket/corrupt.ckpt")
     context = CheckpointContext()
     downloaded: list[Path] = []
@@ -135,37 +135,28 @@ def test_s3_source_keeps_download_and_publishes_path_on_load_failure() -> None:
         Path(target).write_text("not a valid checkpoint")
 
     fake_module = _fake_anemoi_utils_s3(fake_download)
-    try:
-        with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointLoadError):
-            source.process(context)
+    with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointLoadError):
+        source.process(context)
 
-        assert downloaded[0].exists()
-        assert context.checkpoint_path == downloaded[0]
-        assert context.temporary_files == [downloaded[0]]
-    finally:
-        for path in downloaded:
-            path.unlink(missing_ok=True)
+    assert not downloaded[0].exists()
 
 
-def test_s3_source_resolve_downloads_without_loading() -> None:
-    """``resolve`` downloads the file and loads nothing."""
+def test_s3_source_deletes_download_after_loading() -> None:
+    """``process`` loads the download and then deletes the file."""
     source = S3Source(url="s3://bucket/model.ckpt")
     context = CheckpointContext()
+    downloaded: list[Path] = []
 
     def fake_download(_url: str, target: str, *_args: object, **_kwargs: object) -> None:
+        downloaded.append(Path(target))
         torch.save({"state_dict": {}}, target)
 
     fake_module = _fake_anemoi_utils_s3(fake_download)
     with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}):
-        path = source.resolve(context)
+        source.process(context)
 
-    try:
-        assert path.exists()
-        assert context.checkpoint_path == path
-        assert context.temporary_files == [path]
-        assert context.checkpoint_data is None
-    finally:
-        path.unlink(missing_ok=True)
+    assert context.checkpoint_data is not None
+    assert not downloaded[0].exists()
 
 
 @pytest.mark.network

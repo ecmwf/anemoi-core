@@ -41,8 +41,7 @@ class HTTPSource(CheckpointSource):
 
     Downloads a checkpoint file to a node-local temporary location using
     :func:`~anemoi.training.checkpoint.utils.download_with_retry`,
-    which retries with exponential backoff.
-    The file stays on disk until the trainer deletes it after training.
+    which retries with exponential backoff. The file is deleted after loading.
 
     The URL is provided at construction time (compatible with Hydra
     instantiation) rather than via ``context.checkpoint_path``,
@@ -97,73 +96,6 @@ class HTTPSource(CheckpointSource):
         self.timeout = timeout
         self.expected_checksum = expected_checksum
 
-    def resolve(self, context: CheckpointContext) -> Path:
-        """Download the checkpoint to a temporary file and set its path on the context.
-
-        If the download or checksum fails, the file is deleted.
-
-        Parameters
-        ----------
-        context : CheckpointContext
-            Pipeline context.
-
-        Returns
-        -------
-        Path
-            The downloaded checkpoint file.
-
-        Raises
-        ------
-        CheckpointSourceError
-            If the download fails after all retries
-        CheckpointTimeoutError
-            If the download times out
-        CheckpointValidationError
-            If ``expected_checksum`` is set and does not match
-        """
-        from anemoi.training.checkpoint.utils import calculate_checksum
-        from anemoi.training.checkpoint.utils import download_with_retry
-
-        LOGGER.info("Downloading checkpoint from %s", self.url)
-
-        # The trainer deletes this file after training.
-        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as tmp_fd:
-            tmp_path = Path(tmp_fd.name)
-
-        try:
-            download_with_retry(
-                url=self.url,
-                dest=tmp_path,
-                max_retries=self.max_retries,
-                timeout=self.timeout,
-            )
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
-
-        # Checksum verification
-        if self.expected_checksum is not None:
-            actual = calculate_checksum(tmp_path)
-            if actual != self.expected_checksum:
-                from anemoi.training.checkpoint.exceptions import CheckpointValidationError
-
-                tmp_path.unlink(missing_ok=True)
-                msg = (
-                    f"Checksum mismatch for checkpoint downloaded from {self.url}. "
-                    f"Expected {self.expected_checksum}, got {actual}."
-                )
-                raise CheckpointValidationError(msg)
-            LOGGER.info("Checksum verified for %s", self.url)
-        else:
-            LOGGER.warning(
-                "No checksum provided for HTTP checkpoint download from %s. Integrity not verified.",
-                self.url,
-            )
-
-        self._keep_download(context, tmp_path)
-        context.checkpoint_path = tmp_path
-        return tmp_path
-
     def process(self, context: CheckpointContext) -> CheckpointContext:
         """Download and load a checkpoint from an HTTP/HTTPS URL.
 
@@ -175,8 +107,8 @@ class HTTPSource(CheckpointSource):
         Returns
         -------
         CheckpointContext
-            Context with ``checkpoint_path``, ``checkpoint_data``,
-            ``checkpoint_format``, and source metadata populated.
+            Context with ``checkpoint_data``, ``checkpoint_format``,
+            and source metadata populated.
 
         Raises
         ------
@@ -184,11 +116,46 @@ class HTTPSource(CheckpointSource):
             If the download fails after all retries
         CheckpointTimeoutError
             If the download times out
+        CheckpointValidationError
+            If ``expected_checksum`` is set and does not match
         CheckpointLoadError
             If the downloaded file cannot be loaded by PyTorch
         """
-        path = self.resolve(context)
-        self._load_from_path(context, path)
+        from anemoi.training.checkpoint.utils import calculate_checksum
+        from anemoi.training.checkpoint.utils import download_with_retry
+
+        LOGGER.info("Downloading checkpoint from %s", self.url)
+        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as tmp_fd:
+            tmp_path = Path(tmp_fd.name)
+
+        try:
+            download_with_retry(
+                url=self.url,
+                dest=tmp_path,
+                max_retries=self.max_retries,
+                timeout=self.timeout,
+            )
+
+            if self.expected_checksum is not None:
+                actual = calculate_checksum(tmp_path)
+                if actual != self.expected_checksum:
+                    from anemoi.training.checkpoint.exceptions import CheckpointValidationError
+
+                    msg = (
+                        f"Checksum mismatch for checkpoint downloaded from {self.url}. "
+                        f"Expected {self.expected_checksum}, got {actual}."
+                    )
+                    raise CheckpointValidationError(msg)
+                LOGGER.info("Checksum verified for %s", self.url)
+            else:
+                LOGGER.warning(
+                    "No checksum provided for HTTP checkpoint download from %s. Integrity not verified.",
+                    self.url,
+                )
+
+            self._load_from_path(context, tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
         context.update_metadata(
             source_type="http",

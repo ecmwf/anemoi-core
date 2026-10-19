@@ -12,13 +12,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from dataclasses import field
 from typing import TYPE_CHECKING
 
 from omegaconf import OmegaConf
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
     from pathlib import Path
 
     import torch.nn as nn
@@ -35,15 +33,12 @@ class PipelineResult:
         The model after all stages.
     checkpoint_path : Path, optional
         The checkpoint file that the source resolved. On a resume, Lightning loads this file.
-    temporary_files : list of Path
-        Downloads to delete after training.
     weights_loaded : bool
         ``True`` if a loading strategy loaded the weights. ``False`` on a resume.
     """
 
     model: nn.Module
     checkpoint_path: Path | None = None
-    temporary_files: list[Path] = field(default_factory=list)
     weights_loaded: bool = False
 
 
@@ -94,14 +89,5 @@ def run_checkpoint_pipeline(
     return PipelineResult(
         model=context.model,
         checkpoint_path=context.checkpoint_path,
-        temporary_files=list(context.temporary_files),
         weights_loaded=bool(getattr(context.model, "weights_initialized", False)),
     )
-
-
-def remove_temporary_checkpoints(paths: Iterable[Path]) -> None:
-    """Delete the checkpoint downloads that the source kept for ``Trainer.fit(ckpt_path=)``."""
-    from anemoi.training.checkpoint.sources.base import remove_temporary_file
-
-    for path in paths:
-        remove_temporary_file(path)

@@ -286,8 +286,10 @@ On a resume, PyTorch Lightning loads the checkpoint through
 ``trainer.fit(ckpt_path=...)``. It restores the weights, optimizer,
 scheduler and training progress in one load. The pipeline only makes the
 checkpoint available as a local file and applies the modifiers.
-``S3Source`` and ``HTTPSource`` download to a node-local temporary file.
-The trainer deletes this file after training.
+
+A resume needs ``LocalSource`` or ``RunIdSource``. ``S3Source`` and
+``HTTPSource`` delete the download after loading. Thus they cannot resume a
+run. To resume from a remote checkpoint, download it and use ``LocalSource``.
 
 Lightning loads the state dict strictly. Thus the model must agree with
 the checkpoint. If the architecture changed, use ``WeightsOnlyLoader``
@@ -550,6 +552,14 @@ A resume needs a source that resolves to a checkpoint. Do one of these:
    +training.checkpoint.source.run_id=<id>``.
 -  Set ``run_id``. The ``run`` preset sets it to ``null``.
 -  To start with a new optimizer, add a loading strategy.
+
+Remote source cannot resume
+===========================
+
+``CheckpointConfigError: S3Source cannot resume a run ...``
+
+Download the checkpoint and use ``LocalSource``. Or add a loading strategy
+to load only the weights.
 
 Stage cannot be built
 =====================

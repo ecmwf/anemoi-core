@@ -34,7 +34,6 @@ from anemoi.graphs.utils import load_graph_from_file
 from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.checkpoint.runner import checkpoint_pipeline_configured
-from anemoi.training.checkpoint.runner import remove_temporary_checkpoints
 from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import CallbacksContext
@@ -434,7 +433,6 @@ class AnemoiTrainer(ABC):
 
         # Used by ``last_checkpoint`` on a resume.
         self._resolved_checkpoint_path = result.checkpoint_path
-        self._temporary_checkpoint_files = result.temporary_files
 
         # A resume loads nothing here, so there is no metadata to check.
         if result.weights_loaded:
@@ -442,11 +440,6 @@ class AnemoiTrainer(ABC):
             self._validate_transfer_learning_datasets(result.model)
             self._validate_transfer_learning_units(result.model)
         return result.model
-
-    def _remove_temporary_checkpoints(self) -> None:
-        """Delete the temporary checkpoint downloads."""
-        remove_temporary_checkpoints(getattr(self, "_temporary_checkpoint_files", []))
-        self._temporary_checkpoint_files = []
 
     @cached_property
     def _run_identity(self) -> tuple[str | None, str | None]:
@@ -784,10 +777,7 @@ class AnemoiTrainer(ABC):
 
         LOGGER.debug("Starting training..")
 
-        try:
-            trainer.fit(**self.fit_parameters)
-        finally:
-            self._remove_temporary_checkpoints()
+        trainer.fit(**self.fit_parameters)
 
         if self.config.diagnostics.print_memory_summary:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))

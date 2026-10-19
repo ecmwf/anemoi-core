@@ -9,14 +9,11 @@
 
 """Tests for CheckpointSource base class."""
 
-from pathlib import Path
-
 import pytest
 
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.base import PipelineStage
 from anemoi.training.checkpoint.sources.base import CheckpointSource
-from anemoi.training.checkpoint.sources.base import remove_temporary_file
 
 
 def test_checkpoint_source_extends_pipeline_stage() -> None:
@@ -39,16 +36,7 @@ def test_resolve_is_not_required_for_process_only_sources_but_names_them_on_resu
     assert source.process(context) is context
     with pytest.raises(NotImplementedError, match=r"_ProcessOnlySource.*resolve"):
         source.resolve(context)
-
-
-def test_remove_temporary_file_tolerates_a_file_that_is_already_gone(tmp_path: Path) -> None:
-    """A second removal of the same file does not raise."""
-    path = tmp_path / "download.ckpt"
-    path.write_bytes(b"x")
-
-    remove_temporary_file(path)
-    assert not path.exists()
-    remove_temporary_file(path)  # must not raise
+    assert not _ProcessOnlySource.supports_resume()
 
 
 def test_checkpoint_source_is_abstract() -> None:
