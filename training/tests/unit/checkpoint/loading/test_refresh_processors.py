@@ -21,6 +21,7 @@ from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
+from anemoi.training.checkpoint.loading.base import refresh_checkpoint_processors
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
 
 
@@ -34,6 +35,7 @@ class _InnerModel(nn.Module):
         self.pre_processors_tendencies = nn.Linear(4, 4)
         self.post_processors_tendencies = nn.Linear(4, 4)
         self.body = nn.Linear(4, 4)
+        self.register_buffer("model_output_idx", torch.arange(4.0))
 
 
 class _ModelWithProcessors(nn.Module):
@@ -57,6 +59,7 @@ def _ckpt_with_stale_processors(stale_value: float) -> dict:
         state_dict[f"{prefix}.bias"] = torch.full((4,), stale_value)
     state_dict["model.body.weight"] = torch.randn(4, 4)
     state_dict["model.body.bias"] = torch.randn(4)
+    state_dict["model.model_output_idx"] = torch.full((4,), stale_value)
     return {"state_dict": state_dict}
 
 
@@ -97,6 +100,8 @@ def test_states_flag_replaces_state_processor_weights() -> None:
     assert torch.equal(state_dict["model.post_processors.bias"], model_state["post_processors.bias"])
     # Tendency processors untouched because tendencies=False
     assert torch.all(state_dict["model.pre_processors_tendencies.weight"] == 99.0)
+    # The refresh also re-injects model_output_idx from the live model.
+    assert torch.equal(state_dict["model.model_output_idx"], model_state["model_output_idx"])
 
 
 def test_tendencies_flag_replaces_tendency_processor_weights() -> None:
@@ -157,6 +162,18 @@ def test_missing_config_is_no_op() -> None:
 
     for key, original in before.items():
         assert torch.equal(context.checkpoint_data["state_dict"][key], original)
+
+
+def test_refresh_without_a_model_keeps_the_processor_entries() -> None:
+    """With no model to re-inject from, the entries stay, so that a strict load has no missing keys."""
+    checkpoint = _ckpt_with_stale_processors(99.0)
+    before = {k: v.clone() for k, v in checkpoint["state_dict"].items()}
+
+    refresh_checkpoint_processors(checkpoint, None, update_states=True, update_tendencies=True)
+
+    assert checkpoint["state_dict"].keys() == before.keys()
+    for key, original in before.items():
+        assert torch.equal(checkpoint["state_dict"][key], original)
 
 
 def test_full_process_call_applies_the_refresh() -> None:

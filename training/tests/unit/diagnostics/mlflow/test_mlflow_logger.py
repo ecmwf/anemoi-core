@@ -73,7 +73,7 @@ def default_logger(tmp_path: str, tmp_uri: str) -> AnemoiMLflowLogger:
     )
 
 
-def create_run(save_dir: str, experiment_name: str) -> str:
+def create_run(save_dir: str, experiment_name: str, *, tags: dict[str, str] | None = None, **params: str) -> str:
     import contextlib
 
     import mlflow
@@ -82,8 +82,10 @@ def create_run(save_dir: str, experiment_name: str) -> str:
     with contextlib.suppress(mlflow.exceptions.MlflowException):
         mlflow.create_experiment(experiment_name)
     mlflow.set_experiment(experiment_name)
-    with mlflow.start_run():
+    with mlflow.start_run(tags=tags or {}):
         mlflow.log_param("lr", 0.001)
+        for key, value in params.items():
+            mlflow.log_param(key, value)
         return mlflow.active_run().info.run_id
 
 
@@ -117,6 +119,67 @@ def test_offline_forked_logger(default_offline_config: omegaconf.DictConfig) -> 
         fork_run_id=fork_run_id,
     )
     assert logger_forked.tracking_uri == default_offline_config.diagnostics.log.mlflow.save_dir
+
+
+def _lineage_logger(save_dir: str, **kwargs: object) -> AnemoiMLflowLogger:
+    return AnemoiMLflowLogger(
+        experiment_name="lineage",
+        offline=True,
+        tracking_uri=None,
+        authentication=False,
+        save_dir=save_dir,
+        **kwargs,
+    )
+
+
+def _run_tags(save_dir: str, run_id: str) -> dict[str, str]:
+    import mlflow
+
+    return mlflow.MlflowClient(f"file://{save_dir}").get_run(run_id).data.tags
+
+
+def test_resume_creates_a_child_run_tagged_with_its_parent(tmp_path: str) -> None:
+    parent = create_run(tmp_path, "lineage")
+
+    child = _lineage_logger(tmp_path, run_id=parent, fork_run_id=None).run_id
+
+    assert child != parent
+    tags = _run_tags(tmp_path, child)
+    assert tags["resumedRun"] == "True"
+    assert tags["mlflow.parentRunId"] == parent
+
+
+def test_resume_without_a_child_run_continues_the_parent(tmp_path: str) -> None:
+    parent = create_run(tmp_path, "lineage")
+
+    logger = _lineage_logger(tmp_path, run_id=parent, fork_run_id=None, on_resume_create_child=False)
+
+    assert logger.run_id == parent
+    assert "mlflow.parentRunId" not in logger.tags
+
+
+def test_fork_creates_a_new_run_tagged_with_the_forked_run(tmp_path: str) -> None:
+    parent = create_run(tmp_path, "lineage")
+
+    fork = _lineage_logger(tmp_path, run_id=None, fork_run_id=parent).run_id
+
+    tags = _run_tags(tmp_path, fork)
+    assert tags["forkedRun"] == "True"
+    assert tags["forkedRunId"] == parent
+
+
+@pytest.mark.parametrize(
+    ("lineage", "attribute"),
+    [("run_id", "_parent_run_server2server"), ("fork_run_id", "_fork_run_server2server")],
+)
+def test_server2server_parent_gives_the_offline_lineage_id(tmp_path: str, lineage: str, attribute: str) -> None:
+    """A run synced from another server gives the ID of the run on the origin server."""
+    parent = create_run(tmp_path, "lineage", tags={"server2server": "True"}, **{"metadata.offline_run_id": "origin"})
+    ids = {"run_id": None, "fork_run_id": None, lineage: parent}
+
+    logger = _lineage_logger(tmp_path, **ids)
+
+    assert getattr(logger, attribute) == "origin"
 
 
 def test_mlflowlogger_params_limit(default_logger: AnemoiMLflowLogger) -> None:

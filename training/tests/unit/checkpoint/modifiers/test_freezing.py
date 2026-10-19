@@ -67,13 +67,28 @@ def test_freezing_adapter_freezes_specified_module() -> None:
     assert result.model.decoder.weight.requires_grad is True  # Untouched
 
 
-def test_freezing_adapter_updates_metadata() -> None:
+def test_freezing_several_submodules_records_param_counts() -> None:
+    """One stage freezes each listed submodule and records the counts in the list order."""
     model = SimpleModel()
-    adapter = FreezingModifierStage(submodules_to_freeze=["encoder"])
-    context = CheckpointContext(model=model)
-    result = adapter.process(context)
+    result = FreezingModifierStage(submodules_to_freeze=["decoder", "encoder"]).process(CheckpointContext(model=model))
 
-    assert "modifier" in result.metadata or "modifiers_applied" in result.metadata
+    assert not any(p.requires_grad for p in model.parameters())
+    (record,) = result.metadata["modifiers_applied"]
+    assert record["type"] == "freezing"
+    assert record["submodules"] == ["decoder", "encoder"]
+    assert record["frozen_modules"] == [
+        {"name": "decoder", "frozen_params": 2},
+        {"name": "encoder", "frozen_params": 2},
+    ]
+    assert record["total_frozen_params"] == 4
+
+
+def test_freezing_empty_list_is_a_noop() -> None:
+    model = SimpleModel()
+    result = FreezingModifierStage(submodules_to_freeze=[]).process(CheckpointContext(model=model))
+
+    assert all(p.requires_grad for p in model.parameters())
+    assert "modifiers_applied" not in result.metadata
 
 
 def test_freezing_strict_mode_raises_on_missing_submodule() -> None:
@@ -192,17 +207,6 @@ def test_freezing_metadata_accumulates_across_modifiers() -> None:
     assert len(applied) == 2
     assert applied[0]["submodules"] == ["encoder"]
     assert applied[1]["submodules"] == ["decoder"]
-
-
-def test_freezing_metadata_includes_param_counts() -> None:
-    model = SimpleModel()
-    adapter = FreezingModifierStage(submodules_to_freeze=["encoder"])
-    context = CheckpointContext(model=model)
-    result = adapter.process(context)
-
-    meta = result.metadata.get("modifier", result.metadata.get("modifiers_applied", {}))
-    meta_str = str(meta).lower()
-    assert "frozen" in meta_str or "parameters" in meta_str
 
 
 class WrappedModel(nn.Module):

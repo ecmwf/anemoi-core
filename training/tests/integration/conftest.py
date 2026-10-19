@@ -27,6 +27,7 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.testing import GetTmpPath
 from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
+from tests.helpers import resume_checkpoint_cfg
 
 LOGGER = logging.getLogger(__name__)
 
@@ -598,14 +599,7 @@ def global_config_with_checkpoint(
 
     # Resume the staged run from its last.ckpt.
     with open_dict(cfg):
-        cfg.training.checkpoint = {
-            "source": {
-                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
-                "run_id": "dummy_id",
-                "fork": False,
-            },
-            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
-        }
+        cfg.training.checkpoint = resume_checkpoint_cfg("dummy_id")
     cfg.training.max_epochs = 3
 
     cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in global training cycle test

@@ -18,10 +18,12 @@ import torch
 import torch.nn as nn
 
 from anemoi.training.checkpoint import CheckpointContext
+from anemoi.training.checkpoint.catalog import ComponentCatalog
 from anemoi.training.checkpoint import PipelineStage
 from anemoi.training.checkpoint.exceptions import CheckpointError
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 
@@ -95,6 +97,23 @@ class ComplexModel(nn.Module):
         for layer in self.processor:
             x = layer(x)
         return self.decoder(x)
+
+
+@pytest.fixture(autouse=True)
+def _reset_catalog_cache() -> Iterator[None]:
+    """Clear the class-level ``ComponentCatalog`` discovery cache before and after each test.
+
+    Some tests fill the cache with mocked discovery results.
+    """
+
+    def _reset() -> None:
+        ComponentCatalog._sources = None
+        ComponentCatalog._loaders = None
+        ComponentCatalog._modifiers = None
+
+    _reset()
+    yield
+    _reset()
 
 
 @pytest.fixture

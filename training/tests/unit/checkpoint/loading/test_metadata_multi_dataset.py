@@ -21,6 +21,7 @@ import torch.nn as nn
 
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
+from tests.helpers import FakeIndexCollection
 
 
 class _Model(nn.Module):
@@ -29,21 +30,21 @@ class _Model(nn.Module):
         self.linear = nn.Linear(10, 5)
 
 
-def _fake_index_collection(name_to_index: dict[str, int]) -> object:
-    return type("IndexCollection", (), {"name_to_index": name_to_index})()
-
-
 def test_multi_dataset_data_indices_builds_dataset_keyed_dict() -> None:
-    """Dict-of-IndexCollections shape produces a dict-of-name_to_index attribute."""
+    """Dict-of-IndexCollections shape produces dataset-keyed name_to_index and variables metadata."""
     era5 = {"temperature": 0, "wind_u": 1}
     metno = {"temperature": 0, "humidity": 1, "pressure": 2}
     data_indices = {
-        "era5": _fake_index_collection(era5),
-        "metno": _fake_index_collection(metno),
+        "era5": FakeIndexCollection(era5),
+        "metno": FakeIndexCollection(metno),
     }
+    variables_metadata = {"temperature": {"units": "K"}, "wind_u": {"units": "m s**-1"}}
     checkpoint_data = {
         "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
-        "hyper_parameters": {"data_indices": data_indices},
+        "hyper_parameters": {
+            "data_indices": data_indices,
+            "metadata": {"dataset": {"era5": {"variables_metadata": variables_metadata}}},
+        },
     }
     model = _Model()
 
@@ -51,6 +52,7 @@ def test_multi_dataset_data_indices_builds_dataset_keyed_dict() -> None:
     WeightsOnlyLoader().process(context)
 
     assert model._ckpt_model_name_to_index == {"era5": era5, "metno": metno}
+    assert model._ckpt_variables_metadata["era5"] == variables_metadata
 
 
 def test_single_dataset_legacy_shape_raises() -> None:
@@ -58,7 +60,7 @@ def test_single_dataset_legacy_shape_raises() -> None:
     name_to_index = {"temperature": 0, "wind_u": 1, "wind_v": 2}
     checkpoint_data = {
         "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
-        "hyper_parameters": {"data_indices": _fake_index_collection(name_to_index)},
+        "hyper_parameters": {"data_indices": FakeIndexCollection(name_to_index)},
     }
     model = _Model()
 

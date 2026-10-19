@@ -39,10 +39,12 @@ def test_run_source_extends_checkpoint_source() -> None:
     assert issubclass(RunIdSource, CheckpointSource)
 
 
-def test_resolve_path_resume(tmp_path: Path) -> None:
-    """Resume path is <checkpoints.root>.parent/<run_id>/last.ckpt."""
-    root = tmp_path / "job" / "checkpoints"
-    path = RunIdSource.resolve_path(_config(root), "run_A", fork=False)
+@pytest.mark.parametrize("datasets", [[], ["ds1"], ["ds1", "ds2", "ds3"]])
+def test_resolve_path_resume(tmp_path: Path, datasets: list[str]) -> None:
+    """Resume path is <checkpoints.root>.parent/<run_id>/last.ckpt, for any number of datasets."""
+    config = _config(tmp_path / "job" / "checkpoints")
+    config.dataloader = {"training": {"dataset": datasets}}
+    path = RunIdSource.resolve_path(config, "run_A", fork=False)
     assert path == tmp_path / "job" / "run_A" / "last.ckpt"
 
 

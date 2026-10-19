@@ -110,6 +110,32 @@ class TestCheckpointPipeline:
             CheckpointPipeline([BrokenStage()]).execute(CheckpointContext())
         assert isinstance(exc_info.value.__cause__, ValueError)
 
+    def test_memory_error_is_not_wrapped(self) -> None:
+        """A MemoryError propagates unchanged, so that the caller sees the real cause."""
+
+        class OutOfMemoryStage(PipelineStage):
+            def process(self, context: CheckpointContext) -> CheckpointContext:
+                del context
+                raise MemoryError
+
+        with pytest.raises(MemoryError):
+            CheckpointPipeline([OutOfMemoryStage()]).execute(CheckpointContext())
+
+    def test_add_stage_instantiates_a_config(self) -> None:
+        from anemoi.training.checkpoint.sources.local import LocalSource
+
+        pipeline = CheckpointPipeline([])
+        pipeline.add_stage({"_target_": "anemoi.training.checkpoint.sources.LocalSource", "path": "model.ckpt"})
+
+        assert isinstance(pipeline.stages[0], LocalSource)
+
+    @pytest.mark.parametrize("stage", [object(), {"_target_": "nonexistent.module.DoesNotExist"}])
+    def test_add_stage_rejects_an_invalid_stage(self, stage: object) -> None:
+        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+        with pytest.raises(CheckpointConfigError):
+            CheckpointPipeline([]).add_stage(stage)
+
     def test_add_stage(self) -> None:
         """Test adding stage to pipeline."""
         pipeline = CheckpointPipeline([])

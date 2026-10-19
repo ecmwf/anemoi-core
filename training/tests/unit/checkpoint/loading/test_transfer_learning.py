@@ -168,6 +168,17 @@ def test_transfer_learning_is_quiet_when_everything_transfers(caplog: pytest.Log
     assert result.metadata["skipped_params"] == {}
 
 
+def test_transfer_learning_loads_when_no_keys_match() -> None:
+    """A checkpoint with no matching keys loads nothing and records each key as skipped."""
+    source_state = {"encoder.weight": torch.randn(4, 4), "encoder.bias": torch.randn(4)}
+    context = CheckpointContext(model=TargetModel(), checkpoint_data={"state_dict": source_state})
+
+    result = TransferLearningLoader().process(context)
+
+    assert result.metadata["transferred_params"] == []
+    assert result.metadata["skipped_params"] == dict.fromkeys(source_state, "Key not in target")
+
+
 def test_transfer_learning_without_skip_mismatched_raises_on_a_shape_mismatch() -> None:
     source_state = {"shared.weight": torch.randn(5, 10), "new_head.weight": torch.randn(3, 5)}
     context = CheckpointContext(model=TargetModel(), checkpoint_data={"state_dict": source_state})

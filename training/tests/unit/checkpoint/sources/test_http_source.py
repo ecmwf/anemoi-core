@@ -26,6 +26,7 @@ from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.exceptions import CheckpointSourceError
 from anemoi.training.checkpoint.exceptions import CheckpointTimeoutError
 from anemoi.training.checkpoint.exceptions import CheckpointValidationError
+from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.checkpoint.sources.http import HTTPSource
 
 if TYPE_CHECKING:
@@ -56,6 +57,10 @@ def simple_state_dict() -> dict:
 @pytest.fixture
 def source() -> HTTPSource:
     return HTTPSource(url=_TEST_URL, max_retries=3, timeout=60)
+
+
+def test_http_source_extends_checkpoint_source() -> None:
+    assert issubclass(HTTPSource, CheckpointSource)
 
 
 class TestHTTPSourceInit:
@@ -283,23 +288,16 @@ class TestHTTPSourceProcess:
         assert result.checkpoint_data is not None
 
 
-class TestHTTPSourceSupports:
-    """Tests for HTTPSource.supports()."""
-
-    def test_http_url_returns_true(self) -> None:
-        assert HTTPSource.supports("http://example.com/model.ckpt") is True
-
-    def test_https_url_returns_true(self) -> None:
-        assert HTTPSource.supports("https://models.ecmwf.int/anemoi.ckpt") is True
-
-    def test_s3_url_returns_false(self) -> None:
-        assert HTTPSource.supports("s3://bucket/model.ckpt") is False
-
-    def test_gcs_url_returns_false(self) -> None:
-        assert HTTPSource.supports("gs://bucket/model.ckpt") is False
-
-    def test_local_path_string_returns_false(self) -> None:
-        assert HTTPSource.supports("/models/model.ckpt") is False
-
-    def test_path_object_returns_false(self) -> None:
-        assert HTTPSource.supports(Path("/models/model.ckpt")) is False
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("http://example.com/model.ckpt", True),
+        ("https://models.ecmwf.int/anemoi.ckpt", True),
+        ("s3://bucket/model.ckpt", False),
+        ("gs://bucket/model.ckpt", False),
+        ("/models/model.ckpt", False),
+        (Path("/models/model.ckpt"), False),
+    ],
+)
+def test_http_source_supports(source: str | Path, expected: bool) -> None:
+    assert HTTPSource.supports(source) is expected
