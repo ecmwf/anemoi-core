@@ -236,6 +236,7 @@ task:
   validation_rollout: 1
 
 training:
+  seed: 42
   run_id: null
   fork_run_id: null
   transfer_learning: False # activate to perform transfer learning
