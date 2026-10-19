@@ -112,7 +112,7 @@ peakMemoryMB: 16335.80MB (date: 2026-07-10, commit: 84b5385dc4d6b5f38457415146ed
 00:23:48 INFO PASS. Local value for avThroughputIterPerS is within 10% tolerance of the reference value (1.19iter/s local vs 1.19iter/s reference)
 00:23:48 INFO FAIL. Local value for peakMemoryMB has degraded compared to the reference value (10987.28MB local vs 10724.59MB reference)
 
-# edm_Diffusiontend 
+# edm_Diffusiontend
 00:30:11 INFO PASS. Local value for avThroughputIterPerS is within 10% tolerance of the reference value (1.66iter/s local vs 1.73iter/s reference)
 00:30:11 INFO FAIL. Local value for peakMemoryMB has degraded compared to the reference value (6539.96MB local vs 6409.62MB reference)
 ```
@@ -172,7 +172,7 @@ peakMemoryMB: 16335.80MB (date: 2026-07-10, commit: 84b5385dc4d6b5f38457415146ed
 - Commit: b40b6c610af47d15e8bb087c7bee79e692f7f2d7
 - Benchmark changed: No
 - Performance change: Increased throughput and decreased memory usage across all models
-- Reason: Throughput increased and memory usage decreased for all models. This is from merging torch compile (used in conditional layer norms and pyg.conv) and from adding the triton GT. Further speedups from the triton GT expected once the conversion step is removed. 
+- Reason: Throughput increased and memory usage decreased for all models. This is from merging torch compile (used in conditional layer norms and pyg.conv) and from adding the triton GT. Further speedups from the triton GT expected once the conversion step is removed.
 
 ## Integration tests
 
