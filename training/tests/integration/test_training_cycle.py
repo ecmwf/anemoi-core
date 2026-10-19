@@ -311,8 +311,6 @@ def test_config_validation_autoencoder(autoencoder_config: tuple[DictConfig, lis
     BaseSchema(**cfg)
 
 
-@skip_if_offline
-@pytest.mark.slow
 class _RecordTrainingStart(pl.Callback):
     """Record the epoch and global step a run starts training at."""
 
@@ -325,6 +323,8 @@ class _RecordTrainingStart(pl.Callback):
         self.global_step = trainer.global_step
 
 
+@skip_if_offline
+@pytest.mark.slow
 def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
     cfg, url = gnn_config
     get_test_archive(url)
