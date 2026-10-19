@@ -50,7 +50,8 @@ before evaluation starts:
 
 1. **``RunIdSource``** (``training/checkpoint/source=run`` with a ``run_id``) —
    resolve the last checkpoint of a run as
-   ``<checkpoints.root>/<run_id>/last.ckpt``. Raises :exc:`RuntimeError` on
+   ``<checkpoints.root>/<run_id>/last.ckpt``. Raises
+   :exc:`~anemoi.training.checkpoint.exceptions.CheckpointNotFoundError` on
    rank 0 if the file is not found.
 
 2. **``LocalSource``** (``training/checkpoint/source=local`` with a ``path``) —

@@ -121,8 +121,7 @@ Freeze the encoder
          strict: false
        modifiers:
          - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
-           submodule_root: model.model
-           submodules_to_freeze: ["encoder.0"]
+           submodules_to_freeze: ["model.model.encoder.0"]
 
 Load from S3 or HTTP
 ====================
@@ -314,10 +313,8 @@ submodules.
      checkpoint:
        modifiers:
          - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
-           submodule_root: model.model
-           submodules_to_freeze: ["encoder.0", "processor.proc.0"]
+           submodules_to_freeze: ["model.model.encoder.0", "model.model.processor.proc.0"]
            strict: false
-           validate_gradients: true
 
 .. list-table::
    :header-rows: 1
@@ -327,17 +324,13 @@ submodules.
       -  Default
       -  Description
 
-   -  -  ``submodule_root``
-      -  ``""``
-      -  The module that the names start from. For a training run, use
-         ``model.model``.
-
    -  -  ``submodules_to_freeze``
       -  ``[]``
-      -  Dot-notation names relative to ``submodule_root``. No wildcards.
-         The encoder and decoder keys come from ``model.encoders`` and
-         ``model.decoders`` (``encoder.0`` in ``graphtransformer.yaml``).
-         Processor layers are under ``processor.proc``.
+      -  Dot-notation paths from the LightningModule. No wildcards. The
+         graph model is ``model.model``. The encoder and decoder keys come
+         from ``model.encoders`` and ``model.decoders`` (``encoder.0`` in
+         ``graphtransformer.yaml``). Processor layers are under
+         ``processor.proc``.
 
    -  -  ``strict``
       -  ``false``
@@ -345,13 +338,8 @@ submodules.
          gives a warning. If no names resolve, the stage always gives an
          error.
 
-   -  -  ``validate_gradients``
-      -  ``true``
-      -  Make sure that the frozen parameters have
-         ``requires_grad=False``.
-
-To find the names, print
-``dict(model.model.model.named_modules()).keys()``.
+To find the names, print ``dict(module.named_modules()).keys()`` for the
+LightningModule.
 
 ***************************
  Migrate from old settings
@@ -451,11 +439,9 @@ Example:
            submodules: [decoder]
            factor: 0.5
 
-A custom loader must call ``self._apply_corrections(context)``. This
-applies the format migrations, the trainable-edge-permutation migration
-and the processor refresh, in that order. It also must call the metadata
-helpers in ``anemoi.training.checkpoint.loading.base``. Then the loader
-gives the same result as the built-in loaders.
+A custom loader must call ``apply_checkpoint_corrections`` and
+``preserve_anemoi_metadata`` from ``anemoi.training.checkpoint.loading.base``.
+Then the loader gives the same result as the built-in loaders.
 
 A training config accepts stages only as ``_target_`` blocks. A script or
 a test can also give stage instances to ``CheckpointPipeline``.
@@ -489,8 +475,7 @@ a test can also give stage instances to ``CheckpointPipeline``.
 -  ``config``: the Hydra config (optional).
 
 ``CheckpointPipeline`` accepts instances or ``_target_`` configs. The
-stages must be in the order source, loading, modifiers. Each stage
-records its status in ``context.metadata["stage_<n>_<class>"]``.
+stages must be in the order source, loading, modifiers.
 
 Utilities:
 
@@ -531,7 +516,7 @@ Replace the setting. See the table in `Migrate from old settings`_.
 Invalid pipeline order
 ======================
 
-``CheckpointConfigError: Invalid checkpoint pipeline composition: ...``
+``CheckpointConfigError: Invalid checkpoint pipeline [...]: use the order source -> one loader -> modifiers.``
 
 The pipeline does not accept a source after a loader, a modifier before
 a loader, or more than one loader. The config builder always uses the
@@ -570,19 +555,10 @@ Hydra cannot make the stage from ``_target_``. Make sure that the path is
 correct and that all required parameters are set. To see the cause,
 import the class and make an instance in Python.
 
-Weights not loaded
-==================
-
-``CheckpointLoadError: A checkpoint source stage was configured but the model's weights were never loaded ...``
-
-A source is set, but no stage loaded the weights. Add a ``loading``
-block. A custom loader must set ``context.model.weights_initialized =
-True``.
-
 Key mismatch
 ============
 
-``CheckpointLoadError: ... Missing key(s) / Unexpected key(s) in state_dict``
+``CheckpointIncompatibleError: strict=True and the checkpoint key set does not match the model's. ...``
 
 ``strict: true`` requires the same keys. Set ``strict: false`` or use
 ``TransferLearningLoader``. To find the different keys, use
@@ -591,7 +567,7 @@ Key mismatch
 Size mismatch
 =============
 
-``CheckpointLoadError: ... size mismatch for ...``
+``CheckpointIncompatibleError: Parameter shapes differ between checkpoint and model. ...``
 
 The checkpoint has a different set of variables. ``strict: false`` does
 not prevent this error.
@@ -601,9 +577,6 @@ not prevent this error.
    ``training.allow_variable_subset: true`` and ``skip_mismatched: true``.
    Read the ``skipped_params`` list: these parameters are not trained.
 #. Or use ``TransferLearningLoader``.
-
-With ``TransferLearningLoader`` and ``skip_mismatched: false``, the
-error is ``CheckpointIncompatibleError: Shape mismatches found ...``.
 
 Resume after an architecture change
 ===================================
@@ -621,19 +594,14 @@ Model state not found
 The file structure is not known. Use ``detect_checkpoint_format`` to
 examine the file.
 
-Checkpoint is behind anemoi-models
-==================================
+Old checkpoint format
+=====================
 
-``WARNING Checkpoint is behind the installed anemoi-models by N migration(s): ...``
-
-An older version of anemoi-models wrote the checkpoint. The load
-continues. Most migrations have no effect on the load.
-
-If the run then fails with a checkpoint-format error, run the command in
-the warning (``anemoi-models migration sync <path>``). This command
-changes the file and writes a full-size backup. Make sure that there is
-sufficient disk space. For a remote source, download the file, migrate
-it, and load it with ``LocalSource``.
+If a checkpoint from an older anemoi-models fails with a checkpoint-format
+error, migrate it with ``anemoi-models migration sync <path>``. This
+command changes the file and writes a full-size backup. Make sure that
+there is sufficient disk space. For a remote source, download the file,
+migrate it, and load it with ``LocalSource``.
 
 File not found
 ==============

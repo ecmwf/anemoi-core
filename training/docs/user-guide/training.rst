@@ -714,9 +714,8 @@ or configure it inline under ``training.checkpoint.loading``:
           _target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader
           skip_mismatched: true
 
-The ``TransferLearningLoader`` filters key and shape mismatches so that only
-compatible weights are loaded and mismatched layers are handled
-appropriately. Set ``skip_mismatched: false`` to raise
+``TransferLearningLoader`` loads only the weights with the same name and
+shape. Set ``skip_mismatched: false`` to raise
 ``CheckpointIncompatibleError`` instead of skipping mismatched weights.
 
 .. note::
@@ -824,21 +823,17 @@ decoder.
           _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
         modifiers:
           - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
-            submodule_root: model.model
             submodules_to_freeze:
-               - encoder.global
-               - processor
-               - decoder.global
+               - model.model.encoder.global
+               - model.model.processor
+               - model.model.decoder.global
             strict: false
-            validate_gradients: true
 
 .. important::
 
-   ``submodule_root`` is required to reach these modules. Paths are resolved
-   with ``torch.nn.Module.get_submodule`` relative to that root, and
-   ``model.model`` is the graph model that owns ``encoder`` / ``processor`` /
-   ``decoder`` — two attribute hops below the LightningModule the pipeline
-   passes around. Without it nothing resolves.
+   Paths are resolved with ``torch.nn.Module.get_submodule`` from the
+   LightningModule. ``model.model`` is the graph model that owns
+   ``encoder``, ``processor`` and ``decoder``.
 
    ``encoder`` and ``decoder`` are ``ModuleDict`` s keyed by the **names you
    give them** under ``model.encoders`` and ``model.decoders`` in the model
