@@ -10,6 +10,14 @@ or to the accuracy test configuration (`accuracy_testing/`).
 A candidate reference can be checked first by dispatching the HPC integration workflow
 with `accuracy_reference_id` set to its run ID, before committing it.
 
+### 2026-10-16 — exact resume and per-batch seeding ([#1433](https://github.com/ecmwf/anemoi-core/pull/1433))
+
+- Reference run: `8e284859bf914877a406407b589862e6`
+- Reason: The training data comes from a map-style dataset with a new sampler, so the samples
+  are in a different order, and the random number generators are seeded at every training
+  batch. The training is the same, but sample order and random numbers differ, so the loss
+  curve changes.
+
 ### 2026-10-09 — torch 2.11 ([#1455](https://github.com/ecmwf/anemoi-core/pull/1455))
 
 - Reference run: `8b3bc3d3bd6947318cb825d777c9d750`
