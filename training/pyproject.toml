@@ -109,12 +109,12 @@ urls.Documentation = "https://anemoi-training.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-training/"
 urls.Issues = "https://github.com/ecmwf/anemoi-training/issues"
 urls.Repository = "https://github.com/ecmwf/anemoi-training/"
-scripts."_anemoi-training-evaluate" = "anemoi.training.commands.evaluate:main"
+scripts._anemoi-training-evaluate = "anemoi.training.commands.evaluate:main"
 # command for interactive DDP (not supposed to be used directly)
 # the underscore is intentional, so it doesn't trigger autocomplete
 # Files need to be named profiler due to A005 Module `profile` is shadowing a Python builtin module
-scripts."_anemoi-training-profile" = "anemoi.training.commands.profiler:main"
-scripts."_anemoi-training-train" = "anemoi.training.commands.train:main"
+scripts._anemoi-training-profile = "anemoi.training.commands.profiler:main"
+scripts._anemoi-training-train = "anemoi.training.commands.train:main"
 # Add subcommand in the `commands` directory
 scripts.anemoi-training = "anemoi.training.__main__:main"
 
