@@ -52,55 +52,22 @@ from __future__ import annotations
 
 import logging
 import pickle
+import tempfile
 from abc import abstractmethod
+from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
-from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.checkpoint.base import PipelineStage
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Callable
 
     from anemoi.training.checkpoint.base import CheckpointContext
 
 LOGGER = logging.getLogger(__name__)
-
-
-def source_class_from_config(source_cfg: Any) -> type[CheckpointSource] | None:
-    """Return the source class from the ``_target_`` of a source config.
-
-    Parameters
-    ----------
-    source_cfg : Any
-        The source config, or ``None``.
-
-    Returns
-    -------
-    type[CheckpointSource] or None
-        ``None`` if the target is absent, cannot be imported, or is not a ``CheckpointSource``.
-    """
-    if source_cfg is None:
-        return None
-    from omegaconf import OmegaConf
-
-    target = (
-        OmegaConf.select(source_cfg, "_target_", default="")
-        if OmegaConf.is_config(source_cfg)
-        else source_cfg.get("_target_", "")
-    ) or ""
-    if not target:
-        return None
-
-    from hydra.utils import get_class
-
-    try:
-        cls = get_class(target)
-    except (ImportError, ValueError):
-        return None
-    return cls if isinstance(cls, type) and issubclass(cls, CheckpointSource) else None
 
 
 class CheckpointSource(PipelineStage):
@@ -111,7 +78,8 @@ class CheckpointSource(PipelineStage):
     a specific source type (local file, cloud storage, HTTP endpoint,
     etc.) and populating the context for downstream stages.
 
-    Subclasses implement ``process``. Use ``_load_from_path`` to load the file.
+    Subclasses implement ``process``. Use ``_load_from_path`` to load a local file
+    and ``_load_from_download`` to load a remote file.
     A source that can give a local file for a resume also implements ``resolve``.
 
     Parameters
@@ -125,58 +93,9 @@ class CheckpointSource(PipelineStage):
     ...         self.url = url
     ...
     ...     def process(self, context: CheckpointContext) -> CheckpointContext:
-    ...         path = self._download_to_temp(self.url)
-    ...         self._load_from_path(context, path)
-    ...         path.unlink()
+    ...         self._load_from_download(context, lambda path: download(self.url, path))
     ...         return context
     """
-
-    @classmethod
-    def run_identity(cls, source_cfg: Any) -> tuple[str | None, str | None]:
-        """Return ``(run_id, fork_run_id)`` for this source config.
-
-        Only ``RunIdSource`` has a run identity. Other sources return ``(None, None)``.
-
-        Parameters
-        ----------
-        source_cfg : Any
-            The source config.
-
-        Returns
-        -------
-        tuple[str | None, str | None]
-            ``(run_id, fork_run_id)``. At most one is set.
-        """
-        del source_cfg
-        return None, None
-
-    @classmethod
-    def with_run_lineage(
-        cls,
-        source_cfg: Any,
-        parent_run_server2server: str | None,
-        fork_run_server2server: str | None,
-    ) -> Any:
-        """Add the runtime lineage IDs to the source config if the source accepts them.
-
-        The default returns the config unchanged.
-
-        Parameters
-        ----------
-        source_cfg : Any
-            The source config.
-        parent_run_server2server : str or None
-            Resume lineage ID.
-        fork_run_server2server : str or None
-            Fork lineage ID.
-
-        Returns
-        -------
-        Any
-            The config to instantiate.
-        """
-        del parent_run_server2server, fork_run_server2server
-        return source_cfg
 
     def resolve(self, context: CheckpointContext) -> Path | None:
         """Get the checkpoint as a local file and set ``context.checkpoint_path``. Do not load it.
@@ -264,6 +183,24 @@ class CheckpointSource(PipelineStage):
 
         self._load_and_populate(context, raw_data)
 
+    def _load_from_download(self, context: CheckpointContext, download: Callable[[Path], None]) -> None:
+        """Download the checkpoint to a temporary file, load it, then delete the file.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Current pipeline context (mutated in place)
+        download : Callable[[Path], None]
+            Writes the checkpoint to the given path.
+        """
+        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            download(tmp_path)
+            self._load_from_path(context, tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
     def _load_and_populate(
         self,
         context: CheckpointContext,
@@ -293,58 +230,3 @@ class CheckpointSource(PipelineStage):
             "Detected checkpoint format '%s' from data keys",
             context.checkpoint_format,
         )
-
-
-#: Metadata key. ``ResolveOnlySource`` sets it to show that Lightning loads the checkpoint.
-CHECKPOINT_LOAD_OWNER = "checkpoint_load_owner"
-
-
-class ResolveOnlySource(CheckpointSource):
-    """Run only the ``resolve`` step of a source.
-
-    The builder uses this for a resume, because Lightning loads the file.
-
-    Parameters
-    ----------
-    source : CheckpointSource
-        The source to resolve.
-    """
-
-    def __init__(self, source: CheckpointSource) -> None:
-        self.source = source
-
-    def resolve(self, context: CheckpointContext) -> Path | None:
-        """Delegate to the wrapped source's resolve step."""
-        return self.source.resolve(context)
-
-    def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Resolve the checkpoint file for ``Trainer.fit(ckpt_path=)``. Do not load it.
-
-        Raises
-        ------
-        CheckpointConfigError
-            On rank 0, if the source resolves no file. Other ranks defer the error.
-        """
-        path = self.resolve(context)
-        context.update_metadata(**{CHECKPOINT_LOAD_OWNER: "trainer"})
-        if path is not None:
-            LOGGER.info("Resume checkpoint resolved to %s; Trainer.fit(ckpt_path=) performs the load", path)
-            return context
-
-        if rank_zero_only.rank == 0:
-            from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-
-            msg = (
-                f"Resume configured, but {type(self.source).__name__} resolved no checkpoint file to hand "
-                "Trainer.fit(ckpt_path=). Check the training.checkpoint.source configuration (a RunIdSource "
-                "needs run_id), or add a loading strategy if you meant to start fresh training state."
-            )
-            raise CheckpointConfigError(msg)
-        LOGGER.warning(
-            "%s resolved no checkpoint on this rank; deferring the error to rank 0",
-            type(self.source).__name__,
-        )
-        return context
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.source!r})"

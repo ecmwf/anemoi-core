@@ -112,7 +112,7 @@ def test_weights_only_skip_mismatched_does_not_drop_unexpected_keys() -> None:
     checkpoint["state_dict"]["not_a_real_layer.weight"] = torch.randn(3, 3)
 
     context = CheckpointContext(model=target, checkpoint_data=checkpoint)
-    with pytest.raises(CheckpointIncompatibleError, match="unexpected="):
+    with pytest.raises(CheckpointIncompatibleError, match="Unexpected keys"):
         WeightsOnlyLoader(strict=True, skip_mismatched=True).process(context)
 
 

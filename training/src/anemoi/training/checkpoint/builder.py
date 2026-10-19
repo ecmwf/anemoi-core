@@ -10,6 +10,7 @@
 """Build a checkpoint pipeline from the ``training.checkpoint`` config.
 
 The stage order is: source, loading, modifiers. The builder skips absent blocks.
+On a resume, there are only modifiers, because Lightning loads the checkpoint.
 If there is no checkpoint config, the pipeline is empty.
 """
 
@@ -22,6 +23,7 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.pipeline import CheckpointPipeline
+from anemoi.training.checkpoint.utils import target_class
 
 if TYPE_CHECKING:
     from typing import Any
@@ -36,54 +38,42 @@ _LOADING = "loading"
 _MODIFIERS = "modifiers"
 
 
-def _inject_run_lineage(
-    source: Any,
-    parent_run_server2server: str | None,
-    fork_run_server2server: str | None,
+def source_config(
+    cfg: DictConfig,
+    parent_run_server2server: str | None = None,
+    fork_run_server2server: str | None = None,
 ) -> Any:
-    """Add the run lineage IDs to the source config if the source accepts them.
+    """Return the source config, with the run lineage IDs added for a ``RunIdSource``.
 
     The logger sets the lineage IDs at runtime, thus they are not in the Hydra config.
-    Sources that do not accept lineage return the config unchanged.
-    """
-    from anemoi.training.checkpoint.sources.base import source_class_from_config
-
-    source_cls = source_class_from_config(source)
-    if source_cls is None:
-        return source
-    return source_cls.with_run_lineage(source, parent_run_server2server, fork_run_server2server)
-
-
-def loader_restores_training_state(cfg: DictConfig) -> bool:
-    """Return whether the configured loader declares ``restores_training_state``.
-
-    The check reads the class attribute, not the class name, so subclasses also match.
-
-    Parameters
-    ----------
-    cfg : DictConfig
-        The training config.
 
     Returns
     -------
-    bool
-        ``False`` if the ``_target_`` is absent, empty or cannot be imported.
-        The pipeline build reports an import failure.
+    Any
+        The source config, or ``None`` if there is no source.
+    """
+    from anemoi.training.checkpoint.sources.run import RunIdSource
+
+    source = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None)
+    source_cls = target_class(source)
+    if source_cls is None or not issubclass(source_cls, RunIdSource):
+        return source
+    lineage = {
+        "parent_run_server2server": parent_run_server2server,
+        "fork_run_server2server": fork_run_server2server,
+    }
+    overrides = {key: value for key, value in lineage.items() if value is not None}
+    return OmegaConf.merge(source, overrides) if overrides else source
+
+
+def _loader_restores_training_state(cfg: DictConfig) -> bool:
+    """Return whether the loader class declares ``restores_training_state``.
+
+    ``False`` if there is no loader or its ``_target_`` cannot be imported.
+    The pipeline build reports an import failure.
     """
     loading = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}", default=None)
-    if loading is None:
-        return False
-    target = OmegaConf.select(loading, "_target_", default="") or ""
-    if not target:
-        return False
-
-    from hydra.utils import get_class
-
-    try:
-        loader_cls = get_class(target)
-    except (ImportError, ValueError):
-        return False
-    return bool(getattr(loader_cls, "restores_training_state", False))
+    return bool(getattr(target_class(loading), "restores_training_state", False))
 
 
 def resumes_via_lightning(cfg: DictConfig) -> bool:
@@ -103,9 +93,7 @@ def resumes_via_lightning(cfg: DictConfig) -> bool:
         ``True`` if Lightning loads the checkpoint.
     """
     loading = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}", default=None)
-    if loading is None:
-        return True
-    return loader_restores_training_state(cfg)
+    return loading is None or _loader_restores_training_state(cfg)
 
 
 def reject_unsupported_warm_start(cfg: DictConfig) -> None:
@@ -121,12 +109,12 @@ def reject_unsupported_warm_start(cfg: DictConfig) -> None:
         or if a resume uses a source that does not support it.
     """
     from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-    from anemoi.training.checkpoint.sources.base import source_class_from_config
+    from anemoi.training.checkpoint.sources.base import CheckpointSource
 
     source = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None)
 
     if source is None:
-        if loader_restores_training_state(cfg):
+        if _loader_restores_training_state(cfg):
             msg = (
                 "Warm start resumes through Trainer.fit(ckpt_path=), which needs a checkpoint to "
                 "read, but no training.checkpoint.source is configured. Add a source "
@@ -140,21 +128,14 @@ def reject_unsupported_warm_start(cfg: DictConfig) -> None:
     if not resumes_via_lightning(cfg):
         return
 
-    source_cls = source_class_from_config(source)
-    if source_cls is not None and not source_cls.supports_resume():
+    source_cls = target_class(source)
+    if source_cls is not None and issubclass(source_cls, CheckpointSource) and not source_cls.supports_resume():
         msg = (
             f"{source_cls.__name__} cannot resume a run: Trainer.fit(ckpt_path=) needs a local file. "
             "Download the checkpoint and use LocalSource, or add a loading strategy "
             "(WeightsOnlyLoader / TransferLearningLoader / ColdStartLoader) to load only the weights."
         )
         raise CheckpointConfigError(msg)
-
-
-def _resolve_only(source: Any) -> Any:
-    """Wrap a source config so that only its ``resolve`` step runs."""
-    return OmegaConf.create(
-        {"_target_": "anemoi.training.checkpoint.sources.base.ResolveOnlySource", "source": source},
-    )
 
 
 def build_checkpoint_pipeline(
@@ -172,7 +153,7 @@ def build_checkpoint_pipeline(
         The training config. The builder reads ``source``, ``loading`` and
         ``modifiers`` under ``training.checkpoint``. All are optional.
         If Lightning loads the checkpoint (see ``resumes_via_lightning``),
-        the source only resolves and there is no loading stage.
+        there is no source or loading stage. ``run_checkpoint_pipeline`` resolves the source.
     parent_run_server2server : str, optional
         Server-to-server resume lineage ID. Only ``RunIdSource`` uses it.
     fork_run_server2server : str, optional
@@ -185,29 +166,28 @@ def build_checkpoint_pipeline(
     -------
     CheckpointPipeline
         Stages in the order source, loader, modifiers. Empty if nothing is configured.
+
+    Raises
+    ------
+    CheckpointConfigError
+        If the config gives a resume that Lightning cannot load.
     """
     if not isinstance(cfg, DictConfig):
         cfg = OmegaConf.create(cfg)
 
     reject_unsupported_warm_start(cfg)
 
-    # On resume, Lightning loads the file. The pipeline only resolves it,
-    # because a second load here would be discarded.
-    resume = resumes_via_lightning(cfg)
-
     if not load_checkpoint:
         LOGGER.info("Checkpoint acquisition and loading suppressed by the caller; modifier stages still apply")
 
     stage_configs: list[Any] = []
 
-    source = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None)
-    if source is not None and load_checkpoint:
-        source = _inject_run_lineage(source, parent_run_server2server, fork_run_server2server)
-        stage_configs.append(_resolve_only(source) if resume else source)
-
-    loading = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}", default=None)
-    if loading is not None and not resume and load_checkpoint:
-        stage_configs.append(loading)
+    # On resume, Lightning loads the file. A load here would be discarded.
+    if load_checkpoint and not resumes_via_lightning(cfg):
+        source = source_config(cfg, parent_run_server2server, fork_run_server2server)
+        if source is not None:
+            stage_configs.append(source)
+        stage_configs.append(OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}"))
 
     modifiers = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_MODIFIERS}", default=None)
     if modifiers:

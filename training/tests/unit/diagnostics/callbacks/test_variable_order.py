@@ -23,7 +23,6 @@ from anemoi.training.train.train import AnemoiTrainer
 
 
 class DummyTrainingModule(BaseTrainingModule):
-
     def __init__(self) -> None:
         pass
 
@@ -273,105 +272,19 @@ def test_on_load_checkpoint_restores_name_to_index() -> None:
     assert module._ckpt_model_name_to_index == {dataset_name: mock_name_to_index}
 
 
-# --- Tests for _check_variable_units via CheckVariableOrder ---
+# --- Unit check in on_train_start ---
 
 
-def test_check_variable_units_compatible(mocker: Any) -> None:
-    """Test that compatible units pass without error via callback."""
-    callback = CheckVariableOrder()
-    trainer = mocker.Mock()
-    trainer.datamodule.metadata = {
-        "era5": {
-            "variables_metadata": {
-                "t2m": {"units": "K"},
-                "u10": {"units": "m s**-1"},
-            },
-        },
-    }
-    trainer.datamodule.config.training.get.return_value = {}
-    pl_module = mocker.Mock()
-    pl_module._ckpt_variables_metadata = {
-        "era5": {
-            "t2m": {"units": "K"},
-            "u10": {"units": "m s**-1"},
-        },
-    }
+def test_on_train_start_checks_variable_units(
+    fake_trainer: AnemoiTrainer,
+    fake_pl_module: MagicMock,
+    callback: CheckVariableOrder,
+    name_to_index: dict,
+) -> None:
+    """``on_train_start`` raises if the checkpoint and dataset units are incompatible."""
+    fake_trainer.datamodule.ds_train.name_to_index = {"data": name_to_index}
+    fake_trainer.datamodule.metadata = {"data": {"variables_metadata": {"a": {"units": "C"}}}}
+    fake_pl_module._ckpt_variables_metadata = {"data": {"a": {"units": "K"}}}
 
-    # Should not raise
-    callback._check_variable_units(trainer, pl_module)
-
-
-def test_check_variable_units_incompatible(mocker: Any) -> None:
-    """Test that incompatible units raise ValueError via callback with dataset context."""
-    callback = CheckVariableOrder()
-    trainer = mocker.Mock()
-    trainer.datamodule.metadata = {
-        "era5": {
-            "variables_metadata": {
-                "t2m": {"units": "C"},
-                "u10": {"units": "m s**-1"},
-            },
-        },
-    }
-    trainer.datamodule.config.training.get.return_value = {}
-    pl_module = mocker.Mock()
-    pl_module._ckpt_variables_metadata = {
-        "era5": {
-            "t2m": {"units": "K"},
-            "u10": {"units": "m s**-1"},
-        },
-    }
-
-    with pytest.raises(ValueError, match="dataset 'era5'"):
-        callback._check_variable_units(trainer, pl_module)
-
-
-def test_check_variable_units_no_checkpoint_metadata(mocker: Any) -> None:
-    """Test that missing checkpoint variables_metadata warns but doesn't error."""
-    callback = CheckVariableOrder()
-    trainer = mocker.Mock()
-    trainer.datamodule.metadata = {"era5": {"variables_metadata": {"t2m": {"units": "K"}}}}
-    trainer.datamodule.config.training.get.return_value = {}
-    pl_module = mocker.Mock()
-    pl_module._ckpt_variables_metadata = None
-
-    # Should not raise
-    callback._check_variable_units(trainer, pl_module)
-
-
-def test_check_variable_units_no_dataset_metadata(mocker: Any) -> None:
-    """Test that missing dataset variables_metadata warns but doesn't error."""
-    callback = CheckVariableOrder()
-    trainer = mocker.Mock()
-    trainer.datamodule.metadata = {"era5": {}}
-    trainer.datamodule.config.training.get.return_value = {}
-    pl_module = mocker.Mock()
-    pl_module._ckpt_variables_metadata = {"era5": {"t2m": {"units": "K"}}}
-
-    # Should not raise
-    callback._check_variable_units(trainer, pl_module)
-
-
-def test_check_variable_units_ignore_units_option(mocker: Any) -> None:
-    """Test that ignore_units=True suppresses an otherwise-failing unit check."""
-    callback = CheckVariableOrder()
-    trainer = mocker.Mock()
-    trainer.datamodule.metadata = {
-        "era5": {
-            "variables_metadata": {
-                "t2m": {"units": "C"},
-                "u10": {"units": "m s**-1"},
-            },
-        },
-    }
-    trainer.datamodule.config.training.get.return_value = {"ignore_units": True, "ignore_processing_period": False}
-    pl_module = mocker.Mock()
-    pl_module._ckpt_variables_metadata = {
-        "era5": {
-            "t2m": {"units": "K"},
-            "u10": {"units": "m s**-1"},
-        },
-    }
-
-    # Should not raise because ignore_units=True
-    callback._check_variable_units(trainer, pl_module)
+    with pytest.raises(ValueError, match="dataset 'data'"):
+        callback.on_train_start(fake_trainer, fake_pl_module)

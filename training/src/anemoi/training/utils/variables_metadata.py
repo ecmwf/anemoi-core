@@ -113,6 +113,36 @@ def check_variables_metadata_compatibility(
             raise ValueError(msg) from e
 
 
+def allow_variable_subset(training_config: DictConfig) -> bool:
+    """Return ``training.allow_variable_subset`` (issue #838)."""
+    return bool(training_config.get("allow_variable_subset", False))
+
+
+def check_checkpoint_variables_metadata(
+    model: object,
+    dataset_metadata: dict[str, dict],
+    training_config: DictConfig,
+) -> None:
+    """Check the checkpoint ``variables_metadata`` of ``model`` against the dataset metadata.
+
+    The options come from ``training.allow_variable_subset`` and ``training.check_variables_compatibility``.
+
+    Raises
+    ------
+    ValueError
+        If variables have incompatible units between checkpoint and dataset.
+    """
+    options = training_config.get("check_variables_compatibility") or {}
+    if OmegaConf.is_config(options):
+        options = OmegaConf.to_container(options, resolve=True)
+    check_variables_metadata_compatibility(
+        getattr(model, "_ckpt_variables_metadata", None),
+        dataset_metadata,
+        allow_subset=allow_variable_subset(training_config),
+        **options,
+    )
+
+
 def check_loss_variable_units_compatibility(
     predicted_variables: list[str],
     target_variables: list[str],

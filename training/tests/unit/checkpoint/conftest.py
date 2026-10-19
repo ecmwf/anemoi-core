@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 import pytest
 import torch
 import torch.nn as nn
-from omegaconf import DictConfig
 
 from anemoi.training.checkpoint import CheckpointContext
 from anemoi.training.checkpoint import PipelineStage
@@ -214,35 +213,6 @@ def large_checkpoint_data() -> dict:
         "epoch": 50,
         "global_step": 10000,
         "loss_history": [0.5 - 0.001 * i for i in range(1000)],  # Large metadata
-    }
-
-
-@pytest.fixture
-def mock_config(tmp_path: Path) -> DictConfig:
-    """Create a mock configuration for testing."""
-    return DictConfig(
-        {
-            "checkpoint": {
-                "cache_dir": str(tmp_path / "checkpoints"),
-                "max_retries": 3,
-                "timeout": 300,
-            },
-            "pipeline": {
-                "continue_on_error": False,
-            },
-        },
-    )
-
-
-@pytest.fixture
-def network_urls() -> dict[str, str]:
-    """Provide test URLs for network operations."""
-    return {
-        "valid": "https://httpbin.org/bytes/1024",  # Returns 1KB of data
-        "timeout": "https://httpbin.org/delay/10",  # Delays 10 seconds
-        "not_found": "https://httpbin.org/status/404",  # Returns 404
-        "server_error": "https://httpbin.org/status/500",  # Returns 500
-        "large_file": "https://httpbin.org/bytes/10485760",  # 10MB file
     }
 
 

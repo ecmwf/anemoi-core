@@ -149,24 +149,3 @@ class TestPreserveAnemoiMetadata:
         preserve_anemoi_metadata(simple_model, checkpoint_data)
 
         assert not hasattr(simple_model, "_ckpt_model_name_to_index")
-
-
-# ---------------------------------------------------------------------------
-# _mark_weights_loaded
-# ---------------------------------------------------------------------------
-
-
-class TestMarkWeightsLoaded:
-    """Tests for LoadingStrategy._mark_weights_loaded."""
-
-    def test_sets_weights_initialized_flag(
-        self,
-        loader: _StubLoader,
-        simple_model: nn.Module,
-    ) -> None:
-        """weights_initialized should be True after calling _mark_weights_loaded."""
-        assert not getattr(simple_model, "weights_initialized", False)
-
-        loader._mark_weights_loaded(simple_model)
-
-        assert simple_model.weights_initialized is True

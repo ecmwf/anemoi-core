@@ -23,10 +23,8 @@ Example
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
-from typing import Any
 
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
@@ -68,66 +66,6 @@ class RunIdSource(CheckpointSource):
         self.parent_run_server2server = parent_run_server2server
         self.fork_run_server2server = fork_run_server2server
 
-    @classmethod
-    def run_identity(cls, source_cfg: Any) -> tuple[str | None, str | None]:
-        """Return ``(run_id, fork_run_id)`` from the source config.
-
-        Parameters
-        ----------
-        source_cfg : Any
-            The source config.
-
-        Returns
-        -------
-        tuple[str | None, str | None]
-            ``(run_id, fork_run_id)``; at most one is set.
-        """
-        from omegaconf import OmegaConf
-
-        run_id = OmegaConf.select(source_cfg, "run_id", default=None)
-        if run_id is None:
-            return None, None
-        if bool(OmegaConf.select(source_cfg, "fork", default=False)):
-            return None, run_id
-        return run_id, None
-
-    @classmethod
-    def with_run_lineage(
-        cls,
-        source_cfg: Any,
-        parent_run_server2server: str | None,
-        fork_run_server2server: str | None,
-    ) -> Any:
-        """Merge the runtime lineage IDs into the source config.
-
-        Parameters
-        ----------
-        source_cfg : Any
-            The source config.
-        parent_run_server2server : str or None
-            Resume lineage ID.
-        fork_run_server2server : str or None
-            Fork lineage ID.
-
-        Returns
-        -------
-        Any
-            The config with the non-``None`` IDs merged in.
-        """
-        from omegaconf import OmegaConf
-
-        overrides = {
-            key: value
-            for key, value in (
-                ("parent_run_server2server", parent_run_server2server),
-                ("fork_run_server2server", fork_run_server2server),
-            )
-            if value is not None
-        }
-        if not overrides:
-            return source_cfg
-        return OmegaConf.merge(source_cfg, overrides)
-
     @staticmethod
     def resolve_path(
         config: DictConfig,
@@ -163,14 +101,18 @@ class RunIdSource(CheckpointSource):
     def resolve(self, context: CheckpointContext) -> Path | None:
         """Resolve the run checkpoint path and set it on the context.
 
-        If the file is missing or not readable, rank 0 raises ``RuntimeError``.
+        If the file is missing, rank 0 raises ``CheckpointNotFoundError``.
         Other ranks set ``source_deferred`` on the context and return ``None``.
 
         Raises
         ------
         CheckpointConfigError
             If ``run_id`` is not set.
+        CheckpointNotFoundError
+            On rank 0, if the checkpoint file does not exist.
         """
+        from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
+
         if self.run_id is None:
             from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
@@ -188,38 +130,28 @@ class RunIdSource(CheckpointSource):
             self.parent_run_server2server,
             self.fork_run_server2server,
         )
-
-        if not path.exists():
+        try:
+            path = LocalSource(path).resolve(context)
+        except CheckpointNotFoundError:
             if rank_zero_only.rank == 0:
-                msg = f"Could not find checkpoint for run '{self.run_id}': {path}"
-                raise RuntimeError(msg)
+                raise
             LOGGER.warning("RunIdSource: checkpoint not found at %s; deferring the error to rank 0.", path)
+            context.checkpoint_path = None
             context.update_metadata(source_deferred=True, source_deferred_reason=f"checkpoint not found: {path}")
             return None
 
-        if not os.access(path, os.R_OK):
-            if rank_zero_only.rank == 0:
-                msg = f"Checkpoint for run '{self.run_id}' is not readable: {path}"
-                raise RuntimeError(msg)
-            LOGGER.warning("RunIdSource: checkpoint not readable at %s; deferring the error to rank 0.", path)
-            context.update_metadata(source_deferred=True, source_deferred_reason=f"checkpoint not readable: {path}")
-            return None
-
-        resolution = "fork" if self.fork else "resume"
-        LOGGER.info("RunIdSource: resolved checkpoint path (%s): %s", resolution, path)
-        context.checkpoint_path = path
-        context.update_metadata(resolved_checkpoint_path=str(path), lineage_resolution=resolution)
-        return LocalSource().resolve(context)
+        LOGGER.info("RunIdSource: resolved checkpoint path (%s): %s", "fork" if self.fork else "resume", path)
+        return path
 
     def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Resolve the run checkpoint path and load it with ``LocalSource``.
+        """Resolve the run checkpoint path and load it.
 
         If the rank defers the error to rank 0, return the context unchanged.
         """
-        if self.resolve(context) is None:
-            return context
-
-        return LocalSource().process(context)
+        path = self.resolve(context)
+        if path is not None:
+            self._load_from_path(context, path)
+        return context
 
 
 def run_identity_from_config(config: DictConfig) -> tuple[str | None, str | None]:
@@ -239,10 +171,13 @@ def run_identity_from_config(config: DictConfig) -> tuple[str | None, str | None
     """
     from omegaconf import OmegaConf
 
-    from anemoi.training.checkpoint.sources.base import source_class_from_config
+    from anemoi.training.checkpoint.utils import target_class
 
     source = OmegaConf.select(config, "training.checkpoint.source", default=None)
-    source_cls = source_class_from_config(source)
-    if source_cls is None:
+    source_cls = target_class(source)
+    if source_cls is None or not issubclass(source_cls, RunIdSource):
         return None, None
-    return source_cls.run_identity(source)
+    run_id = OmegaConf.select(source, "run_id", default=None)
+    if run_id is None:
+        return None, None
+    return (None, run_id) if OmegaConf.select(source, "fork", default=False) else (run_id, None)

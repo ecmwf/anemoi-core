@@ -79,13 +79,10 @@ class AnemoiEvaluator(AnemoiTrainer):
 
         LOGGER.debug("Starting evaluation..")
 
-        # If the pipeline loaded the weights, do not load them again in Lightning.
-        ckpt_path = None if self._skip_lightning_restore() else self.last_checkpoint
-
         trainer.validate(
             model=self.model,
             datamodule=self.datamodule,
-            ckpt_path=ckpt_path,
+            ckpt_path=self.last_checkpoint,
         )
 
         if self.config.diagnostics.print_memory_summary:

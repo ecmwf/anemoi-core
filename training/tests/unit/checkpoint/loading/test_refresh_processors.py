@@ -20,6 +20,7 @@ import torch.nn as nn
 from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.base import CheckpointContext
+from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
 
 
@@ -78,7 +79,7 @@ def test_no_op_when_both_flags_false() -> None:
     context = _build_context(states=False, tendencies=False)
     before = {k: v.clone() for k, v in context.checkpoint_data["state_dict"].items()}
 
-    WeightsOnlyLoader()._apply_corrections(context)
+    apply_checkpoint_corrections(context.checkpoint_data, context.model, context.config)
 
     for key, original in before.items():
         assert torch.equal(context.checkpoint_data["state_dict"][key], original)
@@ -88,7 +89,7 @@ def test_states_flag_replaces_state_processor_weights() -> None:
     """states=True swaps model.pre_processors.* and model.post_processors.* in place."""
     context = _build_context(states=True, tendencies=False)
 
-    WeightsOnlyLoader()._apply_corrections(context)
+    apply_checkpoint_corrections(context.checkpoint_data, context.model, context.config)
 
     state_dict = context.checkpoint_data["state_dict"]
     model_state = context.model.model.state_dict()
@@ -102,7 +103,7 @@ def test_tendencies_flag_replaces_tendency_processor_weights() -> None:
     """tendencies=True swaps the *_tendencies processor entries."""
     context = _build_context(states=False, tendencies=True)
 
-    WeightsOnlyLoader()._apply_corrections(context)
+    apply_checkpoint_corrections(context.checkpoint_data, context.model, context.config)
 
     state_dict = context.checkpoint_data["state_dict"]
     model_state = context.model.model.state_dict()
@@ -117,7 +118,7 @@ def test_tendencies_flag_replaces_tendency_processor_weights() -> None:
 def test_both_flags_replaces_all_four_processor_groups() -> None:
     context = _build_context(states=True, tendencies=True)
 
-    WeightsOnlyLoader()._apply_corrections(context)
+    apply_checkpoint_corrections(context.checkpoint_data, context.model, context.config)
 
     state_dict = context.checkpoint_data["state_dict"]
     model_state = context.model.model.state_dict()
@@ -138,7 +139,7 @@ def test_body_weights_are_not_touched() -> None:
     context = _build_context(states=True, tendencies=True)
     before_body = context.checkpoint_data["state_dict"]["model.body.weight"].clone()
 
-    WeightsOnlyLoader()._apply_corrections(context)
+    apply_checkpoint_corrections(context.checkpoint_data, context.model, context.config)
 
     assert torch.equal(context.checkpoint_data["state_dict"]["model.body.weight"], before_body)
 
@@ -152,7 +153,7 @@ def test_missing_config_is_no_op() -> None:
     )
     before = {k: v.clone() for k, v in context.checkpoint_data["state_dict"].items()}
 
-    WeightsOnlyLoader()._apply_corrections(context)
+    apply_checkpoint_corrections(context.checkpoint_data, context.model, context.config)
 
     for key, original in before.items():
         assert torch.equal(context.checkpoint_data["state_dict"][key], original)

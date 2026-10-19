@@ -37,13 +37,10 @@ from .exceptions import CheckpointValidationError
 from .pipeline import CheckpointPipeline
 from .utils import calculate_checksum
 from .utils import compare_state_dicts
-from .utils import download_with_retry
 from .utils import estimate_checkpoint_memory
 from .utils import format_size
 from .utils import get_checkpoint_metadata
 from .utils import validate_checkpoint
-from .validation import CheckpointPipelineValidator
-from .validation import validate_pipeline_health
 
 __all__ = [
     # Exceptions
@@ -55,7 +52,6 @@ __all__ = [
     "CheckpointLoadError",
     "CheckpointNotFoundError",
     "CheckpointPipeline",
-    "CheckpointPipelineValidator",
     "CheckpointSourceError",
     "CheckpointTimeoutError",
     "CheckpointValidationError",
@@ -65,10 +61,8 @@ __all__ = [
     "build_checkpoint_pipeline",
     "calculate_checksum",
     "compare_state_dicts",
-    "download_with_retry",
     "estimate_checkpoint_memory",
     "format_size",
     "get_checkpoint_metadata",
     "validate_checkpoint",
-    "validate_pipeline_health",
 ]

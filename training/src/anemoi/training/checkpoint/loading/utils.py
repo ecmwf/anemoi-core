@@ -7,11 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Pure utility functions for state dict manipulation.
-
-These are stateless helpers used by loading strategies. No model loading,
-no pipeline wiring — just pure functions on state dicts.
-"""
+"""State dict helpers for the loading strategies."""
 
 from __future__ import annotations
 
@@ -20,43 +16,25 @@ from typing import Any
 import torch
 
 
-def filter_state_dict(
-    source: dict[str, Any],
-    target: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, str]]:
-    """Filter source state dict to only include keys compatible with target.
-
-    Non-mutating: builds new dicts, never modifies the inputs.
+def shape_mismatches(target: dict[str, Any], source: dict[str, Any]) -> dict[str, str]:
+    """Return the keys in ``source`` and ``target`` whose tensor shapes differ.
 
     Parameters
     ----------
-    source : dict
-        Source state dictionary (e.g. from checkpoint)
     target : dict
-        Target state dictionary (e.g. from model)
+        Model state dict.
+    source : dict
+        Checkpoint state dict.
 
     Returns
     -------
-    tuple[dict, dict]
-        (filtered, skipped) where filtered contains compatible entries
-        and skipped maps key to a reason string for incompatible entries
+    dict[str, str]
+        Key to reason (``"Shape mismatch: <source> vs <target>"``).
     """
-    filtered: dict[str, Any] = {}
-    skipped: dict[str, str] = {}
-
-    for key, value in source.items():
-        if key not in target:
-            skipped[key] = "Key not in target"
-            continue
-
-        if (
-            isinstance(value, torch.Tensor)
-            and isinstance(target[key], torch.Tensor)
-            and value.shape != target[key].shape
-        ):
-            skipped[key] = f"Shape mismatch: {value.shape} vs {target[key].shape}"
-            continue
-
-        filtered[key] = value
-
-    return filtered, skipped
+    return {
+        key: f"Shape mismatch: {value.shape} vs {target[key].shape}"
+        for key, value in source.items()
+        if isinstance(value, torch.Tensor)
+        and isinstance(target.get(key), torch.Tensor)
+        and value.shape != target[key].shape
+    }

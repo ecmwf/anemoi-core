@@ -73,9 +73,6 @@ class CheckpointContext:
         Hydra configuration object containing pipeline settings
     checkpoint_format : str, optional
         Format of the checkpoint: 'lightning', 'pytorch', or 'state_dict'
-    pl_module : pl.LightningModule, optional
-        Lightning module (Task) if loading from Lightning checkpoint.
-        This preserves the full Lightning context for training resumption
 
     Examples
     --------
@@ -101,13 +98,9 @@ class CheckpointContext:
     metadata: dict[str, Any] = field(default_factory=dict)
     config: DictConfig | None = None
     checkpoint_format: Literal["lightning", "pytorch", "state_dict"] | None = None
-    pl_module: Any | None = None  # Type hint as Any to avoid circular imports
 
     def __post_init__(self):
-        """Convert ``checkpoint_path`` to a ``Path``.
-
-        ``validate_pipeline_health`` does the coherence checks.
-        """
+        """Convert ``checkpoint_path`` to a ``Path``."""
         from pathlib import Path
 
         if self.checkpoint_path is not None and not isinstance(self.checkpoint_path, Path):
@@ -134,56 +127,6 @@ class CheckpointContext:
         """
         self.metadata.update(kwargs)
 
-    def get_metadata(self, key: str, default: Any = None) -> Any:
-        """Get value from metadata with optional default.
-
-        Safe method to retrieve metadata values without raising KeyError.
-
-        Parameters
-        ----------
-        key : str
-            Metadata key to retrieve
-        default : Any, optional
-            Default value if key not found (default: None)
-
-        Returns
-        -------
-        Any
-            Metadata value or default if key doesn't exist
-
-        Examples
-        --------
-        >>> context = CheckpointContext(metadata={'epoch': 10})
-        >>> context.get_metadata('epoch')
-        10
-        >>> context.get_metadata('missing', 'default_value')
-        'default_value'
-        """
-        return self.metadata.get(key, default)
-
-    def has_checkpoint_data(self) -> bool:
-        """Check if checkpoint data is loaded.
-
-        This method verifies that checkpoint data exists and is not empty,
-        which is useful for stages that require checkpoint data to operate.
-
-        Returns
-        -------
-        bool
-            True if checkpoint_data is not None and not empty,
-            False otherwise
-
-        Examples
-        --------
-        >>> context = CheckpointContext()
-        >>> context.has_checkpoint_data()
-        False
-        >>> context.checkpoint_data = {'state_dict': {}}
-        >>> context.has_checkpoint_data()
-        True
-        """
-        return self.checkpoint_data is not None and len(self.checkpoint_data) > 0
-
     def __repr__(self) -> str:
         """String representation of context."""
         parts = []
@@ -194,45 +137,6 @@ class CheckpointContext:
         if self.metadata:
             parts.append(f"metadata_keys={list(self.metadata.keys())}")
         return f"CheckpointContext({', '.join(parts)})"
-
-    def validate_for_stage(self, stage_name: str, required_fields: list[str]) -> None:
-        """Validate context for a specific pipeline stage.
-
-        This method allows pipeline stages to validate that the context
-        contains all required fields before processing.
-
-        Parameters
-        ----------
-        stage_name : str
-            Name of the stage for error messages
-        required_fields : list[str]
-            List of field names that must be non-None
-
-        Raises
-        ------
-        CheckpointError
-            If any required field is missing
-
-        Examples
-        --------
-        >>> context.validate_for_stage("LoadingStage", ["model", "checkpoint_data"])
-        """
-        missing_fields = []
-
-        for field_name in required_fields:
-            field_value = getattr(self, field_name, None)
-            if field_value is None or (field_name == "checkpoint_data" and not self.has_checkpoint_data()):
-                missing_fields.append(field_name)
-
-        if missing_fields:
-            from .exceptions import CheckpointError
-
-            error_msg = (
-                f"Stage '{stage_name}' requires fields {missing_fields} to be set in the context, "
-                f"but they are missing or empty. "
-                f"Ensure previous pipeline stages populate these fields."
-            )
-            raise CheckpointError(error_msg)
 
 
 class PipelineStage(ABC):
@@ -253,7 +157,7 @@ class PipelineStage(ABC):
     --------
     >>> class ValidationStage(PipelineStage):
     ...     def process(self, context: CheckpointContext) -> CheckpointContext:
-    ...         if not context.has_checkpoint_data():
+    ...         if not context.checkpoint_data:
     ...             raise CheckpointError("No checkpoint data to validate")
     ...         # Perform validation
     ...         context.update_metadata(validated=True)

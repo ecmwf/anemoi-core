@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
+import requests
 import torch
 
 from anemoi.training.checkpoint.base import CheckpointContext
@@ -31,24 +32,18 @@ if TYPE_CHECKING:
     from typing import Any
 
 _TEST_URL = "https://example.com/model.ckpt"
-_DOWNLOAD_TARGET = "anemoi.training.checkpoint.utils.download_with_retry"
+_DOWNLOAD_TARGET = "multiurl.download"
 
 
 def _make_download_side_effect(state_dict: dict) -> MagicMock:
-    """Create a side effect that writes a valid checkpoint to dest.
-
-    The returned callable has the same signature as ``download_with_retry``
-    and writes a torch checkpoint containing *state_dict* to the ``dest``
-    path argument.
-    """
+    """Create a ``multiurl.download`` side effect that writes a checkpoint with ``state_dict``."""
 
     def _side_effect(
         url: str,  # noqa: ARG001
-        dest: Path,
+        dest: str,
         **kwargs: Any,  # noqa: ARG001
-    ) -> Path:
+    ) -> None:
         torch.save({"state_dict": state_dict}, dest)
-        return dest
 
     return MagicMock(side_effect=_side_effect)
 
@@ -118,7 +113,7 @@ class TestHTTPSourceProcess:
         mock_download: MagicMock,
         simple_state_dict: dict,
     ) -> None:
-        """Verify max_retries and timeout are forwarded to download_with_retry."""
+        """Verify max_retries and timeout are forwarded to multiurl."""
         mock_download.side_effect = _make_download_side_effect(simple_state_dict).side_effect
 
         source = HTTPSource(url=_TEST_URL, max_retries=7, timeout=120)
@@ -126,7 +121,7 @@ class TestHTTPSourceProcess:
         source.process(context)
 
         _, kwargs = mock_download.call_args
-        assert kwargs["max_retries"] == 7
+        assert kwargs["maximum_retries"] == 7
         assert kwargs["timeout"] == 120
 
     @patch(_DOWNLOAD_TARGET)
@@ -135,12 +130,8 @@ class TestHTTPSourceProcess:
         mock_download: MagicMock,
         source: HTTPSource,
     ) -> None:
-        """CheckpointSourceError from download_with_retry should propagate."""
-        mock_download.side_effect = CheckpointSourceError(
-            "http",
-            _TEST_URL,
-            ConnectionError("refused"),
-        )
+        """A request error becomes a CheckpointSourceError."""
+        mock_download.side_effect = requests.ConnectionError("refused")
 
         context = CheckpointContext()
 
@@ -153,10 +144,7 @@ class TestHTTPSourceProcess:
         mock_download: MagicMock,
         source: HTTPSource,
     ) -> None:
-        mock_download.side_effect = CheckpointTimeoutError(
-            f"Download of {_TEST_URL}",
-            60,
-        )
+        mock_download.side_effect = requests.ReadTimeout("slow")
 
         context = CheckpointContext()
 
@@ -171,9 +159,8 @@ class TestHTTPSourceProcess:
     ) -> None:
         """If downloaded file isn't a valid checkpoint, raise CheckpointLoadError."""
 
-        def _write_garbage(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
-            dest.write_text("not a checkpoint")
-            return dest
+        def _write_garbage(url: str, dest: str, **kwargs: Any) -> None:  # noqa: ARG001
+            Path(dest).write_text("not a checkpoint")
 
         mock_download.side_effect = _write_garbage
 
@@ -192,10 +179,9 @@ class TestHTTPSourceProcess:
         """The download is loaded and then deleted."""
         created_paths: list[Path] = []
 
-        def _track_and_save(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
-            created_paths.append(dest)
+        def _track_and_save(url: str, dest: str, **kwargs: Any) -> None:  # noqa: ARG001
+            created_paths.append(Path(dest))
             torch.save({"state_dict": simple_state_dict}, dest)
-            return dest
 
         mock_download.side_effect = _track_and_save
 
@@ -214,10 +200,9 @@ class TestHTTPSourceProcess:
         """A download that fails to load is also deleted."""
         created_paths: list[Path] = []
 
-        def _track_and_corrupt(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
-            created_paths.append(dest)
-            dest.write_text("corrupt")
-            return dest
+        def _track_and_corrupt(url: str, dest: str, **kwargs: Any) -> None:  # noqa: ARG001
+            created_paths.append(Path(dest))
+            Path(dest).write_text("corrupt")
 
         mock_download.side_effect = _track_and_corrupt
 
@@ -236,11 +221,11 @@ class TestHTTPSourceProcess:
         """A failed download is removed."""
         created_paths: list[Path] = []
 
-        def _track_and_fail(url: str, dest: Path, **kwargs: Any) -> Path:
-            del kwargs
-            created_paths.append(dest)
+        def _track_and_fail(url: str, dest: str, **kwargs: Any) -> None:
+            del url, kwargs
+            created_paths.append(Path(dest))
             msg = "connection reset"
-            raise CheckpointSourceError(msg, url)
+            raise requests.ConnectionError(msg)
 
         mock_download.side_effect = _track_and_fail
 
@@ -263,9 +248,9 @@ class TestHTTPSourceProcess:
         created_paths: list[Path] = []
         save = _make_download_side_effect(simple_state_dict).side_effect
 
-        def _track_and_save(url: str, dest: Path, **kwargs: Any) -> Path:
-            created_paths.append(dest)
-            return save(url, dest, **kwargs)
+        def _track_and_save(url: str, dest: str, **kwargs: Any) -> None:
+            created_paths.append(Path(dest))
+            save(url, dest, **kwargs)
 
         mock_download.side_effect = _track_and_save
         mock_checksum.return_value = "wrong_checksum"

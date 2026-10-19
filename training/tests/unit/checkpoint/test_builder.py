@@ -21,10 +21,12 @@ from omegaconf import OmegaConf
 
 import anemoi.training
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
+
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
 from anemoi.training.checkpoint.builder import resumes_via_lightning
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
 from anemoi.training.checkpoint.loading.strategies import WarmStartLoader
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.checkpoint.sources.run import RunIdSource
@@ -32,6 +34,7 @@ from anemoi.training.checkpoint.sources.run import RunIdSource
 _FREEZING_TARGET = "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
 _RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
 _LOADERS = "anemoi.training.checkpoint.loading.strategies"
+_WEIGHTS_ONLY = {"_target_": f"{_LOADERS}.WeightsOnlyLoader"}
 
 
 def _checkpoint_template_dir() -> Path:
@@ -122,34 +125,37 @@ def test_no_checkpoint_config_builds_empty_pipeline() -> None:
     assert len(pipeline.stages) == 0
 
 
+def _run_source_cfg(target: str = _RUN_SOURCE, **source: object) -> DictConfig:
+    """Return a config with a run source and a weights-only loader."""
+    return OmegaConf.create(
+        {"training": {"checkpoint": {"source": {"_target_": target, **source}, "loading": _WEIGHTS_ONLY}}},
+    )
+
+
 def test_builder_injects_server2server_into_run_source() -> None:
     """Runtime server-to-server lineage is added to a RunIdSource config."""
-    cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": _RUN_SOURCE, "run_id": "abc"}}}})
     pipeline = build_checkpoint_pipeline(
-        cfg,
+        _run_source_cfg(run_id="abc"),
         parent_run_server2server="remote-parent",
         fork_run_server2server="remote-fork",
     )
-    # A source-only config is a resume, so the stage is a resolve-only wrapper.
-    source = pipeline.stages[0].source
+    source = pipeline.stages[0]
     assert source.parent_run_server2server == "remote-parent"
     assert source.fork_run_server2server == "remote-fork"
 
 
 def test_builder_server2server_defaults_leave_run_source_untouched() -> None:
     """Without runtime lineage, RunIdSource is built from the config only."""
-    cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": _RUN_SOURCE, "run_id": "abc"}}}})
-    pipeline = build_checkpoint_pipeline(cfg)
-    source = pipeline.stages[0].source
+    source = build_checkpoint_pipeline(_run_source_cfg(run_id="abc")).stages[0]
     assert source.parent_run_server2server is None
     assert source.fork_run_server2server is None
 
 
 def test_builder_server2server_ignored_for_local_source() -> None:
     """Runtime lineage kwargs have no effect on other sources."""
-    cfg = compose_test_config(source="local")
+    cfg = compose_test_config(source="local", loading="weights_only")
     pipeline = build_checkpoint_pipeline(cfg, parent_run_server2server="remote-parent")
-    assert type(pipeline.stages[0].source).__name__.endswith("LocalSource")
+    assert type(pipeline.stages[0]).__name__ == "LocalSource"
 
 
 # --- resume: Trainer.fit(ckpt_path=) loads the checkpoint ---
@@ -199,20 +205,18 @@ def test_warm_start_resolves_the_source_only_and_emits_no_loader(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With ``restores_training_state``, the pipeline only resolves the file and loads nothing."""
+    """With ``restores_training_state``, the runner only resolves the file and loads nothing."""
     cfg, ckpt = _resume_cfg(tmp_path, f"{_LOADERS}.WarmStartLoader")
     loads = _spy_torch_load(monkeypatch)
     model = _EncoderNet()
     before = {key: value.clone() for key, value in model.state_dict().items()}
 
-    pipeline = build_checkpoint_pipeline(cfg)
-    executed = pipeline.execute(CheckpointContext(model=model, config=cfg))
+    result = run_checkpoint_pipeline(model, cfg)
 
-    assert [type(stage).__name__ for stage in pipeline.stages] == ["ResolveOnlySource"]
+    assert build_checkpoint_pipeline(cfg).stages == []
     assert loads == []
-    assert executed.checkpoint_path == ckpt.resolve()
-    assert executed.checkpoint_data is None
-    assert not getattr(model, "weights_initialized", False)
+    assert result.checkpoint_path == ckpt.resolve()
+    assert result.weights_loaded is False
     for key, value in before.items():
         assert torch.equal(model.state_dict()[key], value)
 
@@ -227,10 +231,9 @@ def test_warm_start_still_runs_modifiers(tmp_path: Path, monkeypatch: pytest.Mon
     loads = _spy_torch_load(monkeypatch)
     model = _EncoderNet()
 
-    pipeline = build_checkpoint_pipeline(cfg)
-    pipeline.execute(CheckpointContext(model=model, config=cfg))
+    run_checkpoint_pipeline(model, cfg)
 
-    assert [type(stage).__name__ for stage in pipeline.stages] == ["ResolveOnlySource", "FreezingModifierStage"]
+    assert [type(stage).__name__ for stage in build_checkpoint_pipeline(cfg).stages] == ["FreezingModifierStage"]
     assert loads == []
     assert model.encoder.weight.requires_grad is False
     assert model.decoder.weight.requires_grad is True
@@ -241,18 +244,17 @@ def test_source_without_loading_is_a_resume(tmp_path: Path, monkeypatch: pytest.
     cfg, ckpt = _resume_cfg(tmp_path, None)
     loads = _spy_torch_load(monkeypatch)
 
-    pipeline = build_checkpoint_pipeline(cfg)
-    executed = pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg))
+    result = run_checkpoint_pipeline(_EncoderNet(), cfg)
 
-    assert [type(stage).__name__ for stage in pipeline.stages] == ["ResolveOnlySource"]
+    assert build_checkpoint_pipeline(cfg).stages == []
     assert loads == []
-    assert executed.checkpoint_path == ckpt.resolve()
+    assert result.checkpoint_path == ckpt.resolve()
 
 
 def test_restoring_loader_subclass_is_treated_like_warm_start(tmp_path: Path) -> None:
     """The resume decision uses the class attribute, not the class name."""
     cfg, _ = _resume_cfg(tmp_path, _RESUME_LOADER)
-    assert [type(stage).__name__ for stage in build_checkpoint_pipeline(cfg).stages] == ["ResolveOnlySource"]
+    assert build_checkpoint_pipeline(cfg).stages == []
 
 
 def test_weights_only_loader_still_loads_in_the_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -337,10 +339,9 @@ def test_resume_that_resolves_nothing_fails_on_rank_zero(monkeypatch: pytest.Mon
     """A resume that resolves no checkpoint on rank 0 raises a config error."""
     monkeypatch.setattr(rank_zero_only, "rank", 0)
     cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": f"{__name__}._NothingSource"}}}})
-    pipeline = build_checkpoint_pipeline(cfg)
 
     with pytest.raises(CheckpointConfigError, match=r"resolved no checkpoint file"):
-        pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg))
+        run_checkpoint_pipeline(_EncoderNet(), cfg)
 
 
 def test_resume_with_the_run_preset_and_no_run_id_names_the_key(tmp_path: Path) -> None:
@@ -351,10 +352,8 @@ def test_resume_with_the_run_preset_and_no_run_id_names_the_key(tmp_path: Path) 
             "system": {"output": {"checkpoints": {"root": str(tmp_path / "ckpts")}}},
         },
     )
-    pipeline = build_checkpoint_pipeline(cfg)
-
     with pytest.raises(CheckpointConfigError, match="requires a run_id"):
-        pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg))
+        run_checkpoint_pipeline(_EncoderNet(), cfg)
 
 
 def test_resume_that_resolves_nothing_defers_on_other_ranks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -366,12 +365,9 @@ def test_resume_that_resolves_nothing_defers_on_other_ranks(tmp_path: Path, monk
             "system": {"output": {"checkpoints": {"root": str(tmp_path / "ckpts")}}},
         },
     )
-    pipeline = build_checkpoint_pipeline(cfg)
+    result = run_checkpoint_pipeline(_EncoderNet(), cfg)
 
-    executed = pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg))
-
-    assert executed.checkpoint_path is None
-    assert executed.metadata["checkpoint_load_owner"] == "trainer"
+    assert result.checkpoint_path is None
 
 
 @pytest.mark.parametrize(("template", "required_key"), [("local", "path"), ("run", "run_id")])
@@ -395,10 +391,10 @@ def test_dry_run_suppresses_acquisition_but_keeps_modifiers() -> None:
 
 
 def test_dry_run_suppresses_a_resume_too() -> None:
-    """A dry run also removes a resume source."""
+    """A dry run does not resolve a resume source. The ``run`` preset has no run_id."""
     cfg = compose_test_config(source="run")
 
-    assert build_checkpoint_pipeline(cfg, load_checkpoint=False).stages == []
+    assert run_checkpoint_pipeline(_EncoderNet(), cfg, load_checkpoint=False).checkpoint_path is None
 
 
 def test_load_checkpoint_defaults_to_acquiring() -> None:
@@ -421,10 +417,10 @@ _SITE_RUN_SOURCE = f"{__name__}.SiteRunSource"
 
 
 def test_builder_injects_server2server_into_a_run_source_subclass() -> None:
-    cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": _SITE_RUN_SOURCE, "run_id": "abc"}}}})
+    cfg = _run_source_cfg(_SITE_RUN_SOURCE, run_id="abc")
     pipeline = build_checkpoint_pipeline(cfg, parent_run_server2server="remote-parent")
 
-    source = pipeline.stages[0].source
+    source = pipeline.stages[0]
     assert isinstance(source, SiteRunSource)
     assert source.parent_run_server2server == "remote-parent"
 
@@ -442,7 +438,7 @@ def test_unresolvable_source_target_carries_no_identity_and_is_left_for_the_buil
     """The helper returns no identity; the pipeline build raises CheckpointConfigError."""
     from anemoi.training.checkpoint.sources.run import run_identity_from_config
 
-    cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": "no.such.Source", "run_id": "abc"}}}})
+    cfg = _run_source_cfg("no.such.Source", run_id="abc")
     assert run_identity_from_config(cfg) == (None, None)
     with pytest.raises(CheckpointConfigError):
         build_checkpoint_pipeline(cfg, parent_run_server2server="remote-parent")

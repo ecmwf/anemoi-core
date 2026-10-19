@@ -69,12 +69,9 @@ def test_removed_key_present_as_null_still_raises(schema_cls: type, path_parts: 
 
 
 @pytest.mark.parametrize("schema_cls", [BaseSchema, UnvalidatedBaseSchema])
-def test_submodules_to_freeze_hint_names_the_submodule_root(schema_cls: type) -> None:
-    """The ``submodules_to_freeze`` hint names ``submodule_root``.
-
-    Without the root, the paths do not resolve and nothing is frozen.
-    """
+def test_submodules_to_freeze_hint_names_the_full_path(schema_cls: type) -> None:
+    """The ``submodules_to_freeze`` hint gives paths from the LightningModule."""
     config = _nested(("training", "submodules_to_freeze"), ["encoder"])
-    with pytest.raises(ValidationError, match=r"submodule_root: model\.model") as excinfo:
+    with pytest.raises(ValidationError, match=r"model\.model\.<submodule>") as excinfo:
         schema_cls(**config)
     assert "FreezingModifierStage" in str(excinfo.value)

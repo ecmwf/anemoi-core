@@ -24,7 +24,6 @@ from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import reject_unsupported_warm_start
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-from anemoi.training.checkpoint.runner import checkpoint_pipeline_configured
 from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
@@ -669,14 +668,6 @@ def test_validate_transfer_learning_units_dataset_not_in_checkpoint() -> None:
 # --- checkpoint pipeline (training.checkpoint) ---
 
 
-def test_checkpoint_pipeline_configured_detects_training_checkpoint() -> None:
-    """``checkpoint_pipeline_configured`` is True only when training.checkpoint is set."""
-    configured = OmegaConf.create({"training": {"checkpoint": {"loading": {"_target_": "x"}}}})
-    assert checkpoint_pipeline_configured(configured) is True
-
-    assert checkpoint_pipeline_configured(OmegaConf.create({"training": {}})) is False
-
-
 def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> None:
     """The pipeline finds the run checkpoint and loads weights into the same model object."""
     torch.manual_seed(0)
@@ -820,14 +811,8 @@ def test_validate_transfer_learning_units_ignore_units_option() -> None:
 # --- runs without training.checkpoint ---
 
 
-def test_checkpoint_pipeline_configured_false_when_keyless() -> None:
-    """A missing or null ``training.checkpoint`` is not pipeline-configured."""
-    assert checkpoint_pipeline_configured(OmegaConf.create({"training": {}})) is False
-    assert checkpoint_pipeline_configured(OmegaConf.create({"training": {"checkpoint": None}})) is False
-
-
 def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without ``training.checkpoint``, ``.model`` returns the new module and gives no warning."""
+    """Without ``training.checkpoint``, the empty pipeline returns the new module and gives no warning."""
     import anemoi.training.train.train as train_module
 
     sentinel = torch.nn.Linear(2, 2)
@@ -842,37 +827,20 @@ def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pyte
         metadata={},
         datamodule=SimpleNamespace(statistics={}, statistics_tendencies={}),
         supporting_arrays=object(),
+        start_from_checkpoint=False,
+        parent_run_server2server=None,
+        fork_run_server2server=None,
     )
+    trainer._load_via_checkpoint_pipeline = AnemoiTrainer._load_via_checkpoint_pipeline.__get__(trainer)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         result = AnemoiTrainer.model.func(trainer)
 
-    # Same object, so the pipeline did not run.
     assert result is sentinel
+    assert trainer._resolved_checkpoint_path is None
 
 
 _LOADERS = "anemoi.training.checkpoint.loading.strategies"
-
-
-@pytest.mark.parametrize(
-    ("checkpoint", "expected"),
-    [
-        (None, False),
-        ({"loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader"}}, True),
-        ({"loading": {"_target_": f"{_LOADERS}.TransferLearningLoader"}}, True),
-        ({"loading": {"_target_": f"{_LOADERS}.ColdStartLoader"}}, True),
-        ({"loading": {"_target_": f"{_LOADERS}.WarmStartLoader"}}, False),
-        ({"modifiers": [{"_target_": "x"}]}, False),  # no loader: resume
-    ],
-)
-def test_skip_lightning_restore_matches_loading_strategy(
-    checkpoint: dict | None,
-    expected: bool,
-) -> None:
-    """Weights-only loads drop ckpt_path; warm start and resume keep it."""
-    training = {"checkpoint": checkpoint} if checkpoint is not None else {}
-    trainer = SimpleNamespace(config=OmegaConf.create({"training": training}))
-    assert AnemoiTrainer._skip_lightning_restore(trainer) is expected
 
 
 # --- run identity from training.checkpoint.source ---
@@ -1060,103 +1028,17 @@ def test_non_warm_start_allows_remote_source(source_target: str) -> None:
         (f"{_LOADERS}.WeightsOnlyLoader", False),
     ],
 )
-def test_fit_parameters_hands_the_resolved_path_to_lightning_only_on_resume(
+def test_last_checkpoint_is_none_after_a_pipeline_load(
     tmp_path: Path,
     loading: str | None,
     expect_ckpt_path: bool,
 ) -> None:
-    """``Trainer.fit`` gets ``last_checkpoint`` on a resume and ``None`` after a pipeline load."""
-    resolved = tmp_path / "last.ckpt"
-    checkpoint: dict = {"source": {"_target_": _LOCALSOURCE, "path": str(resolved)}}
+    """Lightning gets the checkpoint on a resume, and ``None`` if the pipeline loaded the weights."""
+    ckpt = tmp_path / "last.ckpt"
+    torch.save({"state_dict": torch.nn.Linear(2, 2).state_dict()}, ckpt)
+    checkpoint: dict = {"source": {"_target_": _LOCALSOURCE, "path": str(ckpt)}}
     if loading is not None:
         checkpoint["loading"] = {"_target_": loading}
-    trainer = SimpleNamespace(
-        config=OmegaConf.create({"training": {"checkpoint": checkpoint}}),
-        model=torch.nn.Linear(2, 2),
-        datamodule=object(),
-        last_checkpoint=resolved,
-    )
-    trainer._skip_lightning_restore = AnemoiTrainer._skip_lightning_restore.__get__(trainer)
+    trainer = _PipelineTrainer(OmegaConf.create({"training": {"checkpoint": checkpoint}}), torch.nn.Linear(2, 2))
 
-    params = AnemoiTrainer.fit_parameters.func(trainer)
-
-    assert params["ckpt_path"] == (resolved if expect_ckpt_path else None)
-    assert params["model"] is trainer.model
-
-
-def test_on_load_checkpoint_writes_a_replaced_dict_back_in_place(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The corrections change the dict that Lightning passed in, in place."""
-    import anemoi.training.train.methods.base as methods_base
-
-    replacement = {
-        "state_dict": {"replaced": torch.ones(1)},
-        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
-    }
-    monkeypatch.setattr(methods_base, "apply_checkpoint_corrections", lambda *_args, **_kwargs: replacement)
-    module = _make_dummy_module(DummyModel(["6h"], offset=1.0), update_states=False, update_tendencies=False)
-    checkpoint = {"state_dict": {"stale": torch.zeros(1)}, "hyper_parameters": {"data_indices": {"data": DummyIndex()}}}
-
-    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
-
-    assert "stale" not in checkpoint["state_dict"]
-    assert torch.equal(checkpoint["state_dict"]["replaced"], torch.ones(1))
-
-
-# --- resume hook warns about missing migrations ---
-
-
-def _shipped_migration_names() -> list[str]:
-    from anemoi.models.migrations import Migrator
-
-    return [migration.name for migration in Migrator()._grouped_migrations[-1]]
-
-
-def _ledger(*names: str) -> list[dict]:
-    from anemoi.models.migrations.migrator import MigrationMetadata
-
-    return [
-        {
-            "name": name,
-            "metadata": MigrationMetadata(versions={"migration": "1.0.0", "anemoi-models": "0.11.0"}),
-            "signature": f"signature-of-{name}",
-        }
-        for name in names
-    ]
-
-
-def _resume_checkpoint(names: list[str]) -> dict:
-    return {
-        "state_dict": {},
-        "pytorch-lightning_version": "2.6.5",
-        "migrations": _ledger(*names),
-        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
-    }
-
-
-def test_on_load_checkpoint_warns_about_an_incomplete_ledger_and_names_the_resume_file(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """On a resume, the hook warns about missing migrations and the load continues."""
-    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
-    module._trainer = SimpleNamespace(ckpt_path="/runs/abc/last.ckpt", datamodule=None)
-    checkpoint = _resume_checkpoint(_shipped_migration_names()[:3])
-
-    with caplog.at_level(logging.WARNING):
-        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
-
-    assert "behind the installed anemoi-models" in caplog.text
-    for name in _shipped_migration_names()[3:]:
-        assert name in caplog.text
-    assert "anemoi-models migration sync /runs/abc/last.ckpt" in caplog.text
-    assert module._ckpt_model_name_to_index == {"data": {}}
-
-
-def test_on_load_checkpoint_is_quiet_for_an_up_to_date_ledger(caplog: pytest.LogCaptureFixture) -> None:
-    """A checkpoint from the installed anemoi-models gives no warning."""
-    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
-    checkpoint = _resume_checkpoint(_shipped_migration_names())
-
-    with caplog.at_level(logging.WARNING):
-        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
-
-    assert "behind the installed anemoi-models" not in caplog.text
+    assert AnemoiTrainer.last_checkpoint.func(trainer) == (ckpt.resolve() if expect_ckpt_path else None)

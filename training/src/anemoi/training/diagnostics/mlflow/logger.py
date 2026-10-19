@@ -451,14 +451,13 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             tags["command"] = tags["command"] + " " + " ".join(sys.argv[1:])
 
         if config_run_id or fork_run_id:
-            "Either run_id or fork_run_id must be provided to resume a run."
             import mlflow
 
             self.auth.authenticate()
             mlflow_client = mlflow.MlflowClient(self.tracking_uri)
 
             # This block is used when a run ID is specified with child runs option activated
-            if config_run_id and on_resume_create_child and not fork_run_id:
+            if config_run_id and on_resume_create_child:
                 parent_run_id = config_run_id  # parent_run_id
                 parent_run = mlflow_client.get_run(parent_run_id)
                 run_name = parent_run.info.run_name
@@ -467,7 +466,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
                 tags["mlflow.parentRunId"] = parent_run_id
                 tags["resumedRun"] = "True"  # tags can't take boolean values
             # This block is used when a run ID is specified without child runs option activated
-            elif config_run_id and not on_resume_create_child and not fork_run_id:
+            elif config_run_id:
                 run_id = config_run_id
                 run = mlflow_client.get_run(run_id)
                 run_name = run.info.run_name

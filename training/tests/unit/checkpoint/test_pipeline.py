@@ -11,8 +11,6 @@
 
 from __future__ import annotations
 
-import logging
-from typing import TYPE_CHECKING
 from typing import Any
 
 import pytest
@@ -21,9 +19,6 @@ from anemoi.training.checkpoint import CheckpointContext
 from anemoi.training.checkpoint import CheckpointError
 from anemoi.training.checkpoint import CheckpointPipeline
 from anemoi.training.checkpoint import PipelineStage
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class MockStage(PipelineStage):
@@ -59,14 +54,6 @@ class TestCheckpointPipeline:
 
         assert len(pipeline) == 2
         assert pipeline.stages == stages
-        assert pipeline.continue_on_error is False
-
-    def test_pipeline_initialization_with_options(self) -> None:
-        """Test pipeline initialization with options."""
-        stages = [MockStage("stage1")]
-        pipeline = CheckpointPipeline(stages, continue_on_error=True)
-
-        assert pipeline.continue_on_error is True
 
     def test_pipeline_execution(self) -> None:
         """Test pipeline execution."""
@@ -89,21 +76,6 @@ class TestCheckpointPipeline:
         assert result.metadata["stage_stage2"] == "processed"
         assert result.metadata["stage_stage3"] == "processed"
 
-    def test_pipeline_execution_sync(self) -> None:
-        """Test sync pipeline execution."""
-        stage1 = MockStage("stage1")
-        stage2 = MockStage("stage2")
-
-        pipeline = CheckpointPipeline([stage1, stage2])
-
-        context = CheckpointContext()
-        result = pipeline.execute(context)
-
-        assert stage1.process_called
-        assert stage2.process_called
-        assert "stage_stage1" in result.metadata
-        assert "stage_stage2" in result.metadata
-
     def test_pipeline_execution_with_error(self) -> None:
         """Test pipeline execution with error."""
         stage1 = MockStage("stage1")
@@ -123,26 +95,20 @@ class TestCheckpointPipeline:
         assert stage1.process_called
         assert stage2.process_called
         assert not stage3.process_called
+        assert exc_info.value.details["pipeline_stage_index"] == 1
 
-    def test_pipeline_continue_on_error(self) -> None:
-        """Test pipeline continues on error when configured."""
-        stage1 = MockStage("stage1")
-        stage2 = MockStage("stage2", should_fail=True)
-        stage3 = MockStage("stage3")
+    def test_non_checkpoint_error_is_wrapped(self) -> None:
+        """A stage error that is not a CheckpointError becomes a CheckpointError."""
 
-        pipeline = CheckpointPipeline([stage1, stage2, stage3], continue_on_error=True)
+        class BrokenStage(PipelineStage):
+            def process(self, context: CheckpointContext) -> CheckpointContext:
+                del context
+                msg = "boom"
+                raise ValueError(msg)
 
-        context = CheckpointContext()
-        result = pipeline.execute(context)
-
-        # All stages should be called
-        assert stage1.process_called
-        assert stage2.process_called
-        assert stage3.process_called
-
-        # Check metadata shows failure
-        assert "stage_1_MockStage" in result.metadata
-        assert "failed" in result.metadata["stage_1_MockStage"]
+        with pytest.raises(CheckpointError, match="boom") as exc_info:
+            CheckpointPipeline([BrokenStage()]).execute(CheckpointContext())
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     def test_add_stage(self) -> None:
         """Test adding stage to pipeline."""
@@ -192,12 +158,9 @@ class TestCheckpointPipeline:
     def test_pipeline_repr(self) -> None:
         """Test pipeline string representation."""
         stages = [MockStage("stage1"), MockStage("stage2")]
-        pipeline = CheckpointPipeline(stages, continue_on_error=True)
+        pipeline = CheckpointPipeline(stages)
 
-        repr_str = repr(pipeline)
-        assert "CheckpointPipeline" in repr_str
-        assert "MockStage" in repr_str
-        assert "continue_on_error=True" in repr_str
+        assert repr(pipeline) == "CheckpointPipeline(stages=['MockStage', 'MockStage'])"
 
     def test_empty_pipeline(self) -> None:
         """Test executing empty pipeline."""
@@ -234,58 +197,6 @@ class TestCheckpointPipeline:
         assert result.metadata["key2"] == "value2"
         assert result.metadata["key3"] == "value3"
 
-    def test_pipeline_mixed_stages(self) -> None:
-        """Test pipeline with mix of instantiated stages.
-
-        Note: We test with pre-instantiated stages only, since test modules
-        are not installed as packages in CI environments. The Hydra instantiation
-        logic is tested elsewhere.
-        """
-        stage1 = MockStage("instantiated")
-        stage2 = MockStage("from_list")
-
-        pipeline = CheckpointPipeline([stage1, stage2])
-
-        assert len(pipeline) == 2
-        assert pipeline.stages[0] == stage1
-        assert isinstance(pipeline.stages[1], MockStage)
-        assert pipeline.stages[1].name == "from_list"
-
-    def test_add_stage_from_config(self) -> None:
-        """Test adding stage to pipeline.
-
-        Note: We test with pre-instantiated stages since test modules
-        are not installed as packages in CI. Hydra instantiation with
-        _target_ paths is tested with installed package classes.
-        """
-        pipeline = CheckpointPipeline([])
-
-        stage = MockStage("added_stage")
-        pipeline.add_stage(stage)
-
-        assert len(pipeline) == 1
-        assert isinstance(pipeline.stages[0], MockStage)
-        assert pipeline.stages[0].name == "added_stage"
-
-    def test_hydra_configured_pipeline_execution(self) -> None:
-        """Test executing pipeline created from config.
-
-        Note: We test with pre-instantiated stages passed to the constructor
-        since test modules are not installed as packages in CI. This still
-        tests the full pipeline execution flow.
-        """
-        stage1 = MockStage("config_stage1")
-        stage2 = MockStage("config_stage2")
-
-        # Create pipeline directly with instantiated stages
-        pipeline = CheckpointPipeline([stage1, stage2])
-        context = CheckpointContext()
-
-        result = pipeline.execute(context)
-
-        assert result.metadata["stage_config_stage1"] == "processed"
-        assert result.metadata["stage_config_stage2"] == "processed"
-
 
 class TestComposition:
     """Bad stage order or conflicts raise at construction."""
@@ -311,19 +222,19 @@ class TestComposition:
     def test_loader_before_source_raises(self) -> None:
         from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
-        with pytest.raises(CheckpointConfigError, match="comes after a loader"):
+        with pytest.raises(CheckpointConfigError, match="order source"):
             CheckpointPipeline([self._loader(), self._source()])
 
     def test_two_loaders_raise(self) -> None:
         from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
-        with pytest.raises(CheckpointConfigError, match="loading strategies"):
+        with pytest.raises(CheckpointConfigError, match="one loader"):
             CheckpointPipeline([self._source(), self._loader(), self._loader()])
 
     def test_modifier_before_loader_raises(self) -> None:
         from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
-        with pytest.raises(CheckpointConfigError, match="comes before a loader"):
+        with pytest.raises(CheckpointConfigError, match="order source"):
             CheckpointPipeline([self._source(), self._modifier(), self._loader()])
 
     def test_canonical_order_constructs(self) -> None:
@@ -332,54 +243,3 @@ class TestComposition:
 
     def test_empty_pipeline_constructs(self) -> None:
         assert len(CheckpointPipeline([])) == 0
-
-    def test_multiple_sources_warn_not_raise(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING):
-            pipeline = CheckpointPipeline([self._source(), self._source(), self._loader()])
-        assert len(pipeline) == 3
-        assert any("Multiple checkpoint sources" in record.getMessage() for record in caplog.records)
-
-
-# --- resolve-only sources ---
-
-
-def _write_checkpoint(tmp_path: Path) -> Path:
-    import torch
-
-    ckpt = tmp_path / "model.ckpt"
-    torch.save({"state_dict": {"weight": torch.zeros(2, 2), "bias": torch.zeros(2)}}, ckpt)
-    return ckpt
-
-
-def test_verify_weights_loaded_accepts_a_resolve_only_source(tmp_path: Path) -> None:
-    """A resolve-only source passes the weights check and the health check."""
-    import torch
-
-    from anemoi.training.checkpoint.sources.base import ResolveOnlySource
-    from anemoi.training.checkpoint.sources.local import LocalSource
-    from anemoi.training.checkpoint.validation import validate_pipeline_health
-
-    ckpt = _write_checkpoint(tmp_path)
-    model = torch.nn.Linear(2, 2)
-    pipeline = CheckpointPipeline([ResolveOnlySource(LocalSource(path=ckpt))])
-
-    result = pipeline.execute(CheckpointContext(model=model))
-
-    assert result.checkpoint_path == ckpt.resolve()
-    assert result.checkpoint_data is None
-    assert not getattr(model, "weights_initialized", False)
-    assert validate_pipeline_health(result) is True
-
-
-def test_verify_weights_loaded_still_rejects_a_bare_source_without_loader(tmp_path: Path) -> None:
-    """A source that loads data with no loader still raises."""
-    import torch
-
-    from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-    from anemoi.training.checkpoint.sources.local import LocalSource
-
-    ckpt = _write_checkpoint(tmp_path)
-    pipeline = CheckpointPipeline([LocalSource(path=ckpt)])
-
-    with pytest.raises(CheckpointLoadError, match="Refusing to proceed with random weights"):
-        pipeline.execute(CheckpointContext(model=torch.nn.Linear(2, 2)))

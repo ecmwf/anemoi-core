@@ -13,152 +13,41 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import time
-import urllib.error
-import urllib.request
 from typing import TYPE_CHECKING
 from typing import Any
+
+import torch
+from hydra.utils import get_class
+
+from .exceptions import CheckpointLoadError
+from .exceptions import CheckpointValidationError
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-import torch
-
-from .exceptions import CheckpointLoadError
-from .exceptions import CheckpointSourceError
-from .exceptions import CheckpointTimeoutError
-from .exceptions import CheckpointValidationError
-
 LOGGER = logging.getLogger(__name__)
 
 
-def download_with_retry(
-    url: str,
-    dest: Path,
-    max_retries: int = 3,
-    timeout: int = 300,
-    chunk_size: int = 8192,
-) -> Path:
-    """Download file with exponential backoff retry.
-
-    Downloads a file from a URL to a destination path with automatic
-    retry on failure using exponential backoff.
+def target_class(cfg: Any) -> type | None:
+    """Return the class that the ``_target_`` of ``cfg`` names.
 
     Parameters
     ----------
-    url : str
-        URL to download from
-    dest : Path
-        Destination path for downloaded file
-    max_retries : int, optional
-        Maximum number of retry attempts (default: 3)
-    timeout : int, optional
-        Timeout in seconds for each attempt (default: 300)
-    chunk_size : int, optional
-        Size of chunks to download (default: 8192)
+    cfg : Any
+        A config with a ``_target_`` key, or ``None``.
 
     Returns
     -------
-    Path
-        Path to downloaded file
-
-    Raises
-    ------
-    CheckpointSourceError
-        If download fails after all retries
-    CheckpointTimeoutError
-        If download times out
-
-    Examples
-    --------
-    >>> download_with_retry("https://example.com/model.ckpt", Path("/tmp/model.ckpt"))
+    type or None
+        ``None`` if the target is absent or cannot be imported.
     """
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
-    for attempt in range(max_retries):
-        try:
-            return _attempt_download(url, dest, chunk_size, timeout, attempt + 1, max_retries)
-        except TimeoutError as e:
-            _handle_timeout_error(e, attempt, max_retries, url, timeout)
-        except (urllib.error.URLError, ConnectionError) as e:
-            _handle_client_error(e, attempt, max_retries, url)
-        except Exception as e:
-            LOGGER.exception("Unexpected error during download")
-            msg = f"Unexpected error downloading checkpoint from {url}"
-            raise CheckpointSourceError(msg, url, e, {"attempts": attempt + 1}) from e
-
-        # Exponential backoff
-        if attempt < max_retries - 1:
-            wait_time = 2**attempt
-            LOGGER.info("Waiting %ds before retry", wait_time)
-            time.sleep(wait_time)
-
-    # Should not reach here, but just in case
-    msg = f"All {max_retries} download attempts exhausted for {url}"
-    raise CheckpointSourceError(msg, url, None, {"attempts": max_retries, "reason": "All retries exhausted"})
-
-
-def _attempt_download(
-    url: str,
-    dest: Path,
-    chunk_size: int,
-    timeout: int,
-    attempt: int,
-    max_retries: int,
-) -> Path:
-    """Attempt a single download. ``timeout`` applies to the full attempt."""
-    LOGGER.info("Download attempt %d/%d for %s", attempt, max_retries, url)
-    deadline = time.monotonic() + timeout
-
-    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 (scheme checked by HTTPSource)
-        total_size = int(response.headers.get("content-length", 0))
-        downloaded = 0
-
-        with dest.open("wb") as f:
-            while chunk := response.read(chunk_size):
-                if time.monotonic() > deadline:
-                    msg = f"Download exceeded {timeout}s"
-                    raise TimeoutError(msg)
-                f.write(chunk)
-                downloaded += len(chunk)
-
-                if total_size > 0:
-                    progress = (downloaded / total_size) * 100
-                    if downloaded % (chunk_size * 100) == 0:  # Log every 100 chunks
-                        LOGGER.debug("Download progress: %.1f%%", progress)
-
-    LOGGER.info("Successfully downloaded %s to %s", url, dest)
-    return dest
-
-
-def _handle_timeout_error(e: TimeoutError, attempt: int, max_retries: int, url: str, timeout: int) -> None:
-    """Handle timeout errors during download."""
-    LOGGER.warning("Download timeout on attempt %d/%d", attempt + 1, max_retries)
-    if attempt == max_retries - 1:
-        msg = f"Download of {url}"
-        raise CheckpointTimeoutError(
-            msg,
-            timeout,
-            {"url": url, "attempts": max_retries},
-        ) from e
-
-
-def _handle_client_error(e: OSError, attempt: int, max_retries: int, url: str) -> None:
-    """Handle client errors during download.
-
-    Raises immediately for 4xx client errors (non-retryable).
-    Only retries on 5xx server errors or connection failures.
-    """
-    LOGGER.warning("Download failed on attempt %d/%d: %s", attempt + 1, max_retries, e)
-
-    # Don't retry 4xx client errors — they are permanent failures
-    if isinstance(e, urllib.error.HTTPError) and e.code < 500:
-        msg = f"HTTP {e.code} client error downloading checkpoint from {url}"
-        raise CheckpointSourceError(msg, url, e, {"attempts": attempt + 1, "status": e.code}) from e
-
-    if attempt == max_retries - 1:
-        msg = f"HTTP error downloading checkpoint from {url}"
-        raise CheckpointSourceError(msg, url, e, {"attempts": max_retries}) from e
+    target = cfg.get("_target_") if cfg is not None else None
+    if not target:
+        return None
+    try:
+        return get_class(target)
+    except (ImportError, ValueError):
+        return None
 
 
 def validate_checkpoint(checkpoint_data: dict[str, Any], *, check_tensors: bool = False) -> bool:
@@ -377,13 +266,8 @@ def calculate_checksum(file_path: Path, algorithm: str = "sha256") -> str:
     >>> checksum = calculate_checksum(Path('model.ckpt'))
     >>> print(f"SHA256: {checksum}")
     """
-    hash_func = hashlib.new(algorithm)
-
     with file_path.open("rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            hash_func.update(chunk)
-
-    return hash_func.hexdigest()
+        return hashlib.file_digest(f, algorithm).hexdigest()
 
 
 def compare_state_dicts(
