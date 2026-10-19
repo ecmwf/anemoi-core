@@ -45,6 +45,17 @@ def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
     return edge_index, edge_index.shape[1]
 
 
+def build_regular_bipartite_graph(n_src: int, n_dst: int, degree: int) -> Tuple[torch.Tensor, int]:
+    """Build a bipartite graph where every dst node has exactly ``degree`` in-edges.
+
+    Unlike ``build_bipartite_graph`` the edge count is deterministic, which pins down
+    the mean source degree and hence the tile width the backward src pass selects.
+    """
+    edges = [(src, dst) for dst in range(n_dst) for src in torch.randperm(n_src)[:degree].tolist()]
+    edge_index = torch.tensor(edges, dtype=torch.long).t()
+    return edge_index, edge_index.shape[1]
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "n_src,n_dst,h,d",
@@ -201,7 +212,7 @@ def test_graph_transformer_attention_opcheck(n_src: int, n_dst: int, h: int, d: 
     autograd registration of the operator.
     """
     edge_index, m = build_bipartite_graph(n_src, n_dst)
-    (row, colptr), perm, (rowptr, edge_ids, edge_dst) = edge_index_to_csc(
+    (row, colptr), perm, (rowptr, _edge_ids, edge_dst_csr, csr_pos) = edge_index_to_csc(
         edge_index, num_nodes=(n_src, n_dst), reverse=True
     )
 
@@ -212,5 +223,54 @@ def test_graph_transformer_attention_opcheck(n_src: int, n_dst: int, h: int, d: 
 
     torch.library.opcheck(
         graph_transformer_attention,
-        (query, key, value, edge_attr_csc, row, colptr, rowptr, edge_ids, edge_dst),
+        (query, key, value, edge_attr_csc, row, colptr, rowptr, edge_dst_csr, csr_pos),
     )
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "degree,expected_block_e",
+    [
+        (1, 1),  # mean src degree ~1: the src pass runs untiled
+        (4, 4),  # every dst attends to every src: the src pass tiles its gathers
+    ],
+)
+@pytest.mark.parametrize("h,d", [(2, 4), (6, 6)])
+def test_graph_transformer_vs_reference_backward_src_tiling(degree: int, expected_block_e: int, h: int, d: int) -> None:
+    """Backward matches the reference for both src-pass tile widths.
+
+    The backward src pass picks ``BLOCK_E`` from the mean source degree, so both
+    branches of that heuristic need covering, with and without H/C padding.
+    """
+    n_src, n_dst = 4, 8
+    edge_index, m = build_regular_bipartite_graph(n_src, n_dst, degree)
+
+    # guard the parametrisation against the heuristic in graph_transformer_attention_backward
+    assert (4 if m >= 4 * n_src else 1) == expected_block_e
+
+    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
+
+    query = torch.randn((n_dst, h, d), requires_grad=True)
+    key = torch.randn((n_src, h, d), requires_grad=True)
+    value = torch.randn((n_src, h, d), requires_grad=True)
+    edge_attr = torch.randn((m, h, d), requires_grad=True)
+
+    edge_attr_csc = edge_attr[perm]
+    out_triton = graph_transformer_attention_conv(query, key, value, edge_attr_csc, csc, reverse)
+    out_triton.pow(2).sum().backward()
+    grads_triton = (query.grad.clone(), key.grad.clone(), value.grad.clone(), edge_attr.grad.clone())
+
+    query.grad.zero_()
+    key.grad.zero_()
+    value.grad.zero_()
+    edge_attr.grad.zero_()
+
+    gt_ref = GraphTransformerConv(out_channels=d)
+    out_ref = gt_ref.forward(query, key, value, edge_attr, edge_index)
+    out_ref.pow(2).sum().backward()
+    grads_ref = (query.grad.clone(), key.grad.clone(), value.grad.clone(), edge_attr.grad.clone())
+
+    tolerance = 1e-4
+    torch.testing.assert_close(out_triton, out_ref, atol=tolerance, rtol=0)
+    for got, expected, name in zip(grads_triton, grads_ref, ("queries", "keys", "values", "edges")):
+        torch.testing.assert_close(got, expected, atol=tolerance, rtol=0, msg=f"{name} gradient mismatch")
