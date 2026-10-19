@@ -151,7 +151,6 @@ class TestLocalSourceProcess:
 
         result = await source.process(context)
 
-        # The constructor path won, not the context path (which pointed at epoch 99).
         assert result.metadata["source_path"] == str(ckpt_file)
         assert result.checkpoint_data["epoch"] == 5
 
@@ -162,7 +161,7 @@ class TestLocalSourceProcess:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A ``~`` home-relative checkpoint path is expanded before loading."""
+        """A ``~`` path is expanded before loading."""
         monkeypatch.setenv("HOME", str(tmp_path))
         _save_checkpoint(tmp_path / "home_model.ckpt", {"state_dict": simple_state_dict})
         context = CheckpointContext(checkpoint_path="~/home_model.ckpt")
@@ -174,7 +173,7 @@ class TestLocalSourceProcess:
         assert result.metadata["source_path"] == str(tmp_path / "home_model.ckpt")
 
     async def test_symlink_path_is_resolved(self, source: LocalSource, ckpt_file: Path, tmp_path: Path) -> None:
-        """A symlinked checkpoint path is resolved to its canonical target in metadata."""
+        """A symlink path is resolved to its target in metadata."""
         link = tmp_path / "link.ckpt"
         link.symlink_to(ckpt_file)
         context = CheckpointContext(checkpoint_path=link)
@@ -191,7 +190,7 @@ class TestLocalSourceProcess:
         monkeypatch: pytest.MonkeyPatch,
         exc: type[Exception],
     ) -> None:
-        """Every torch.load failure mode is wrapped as CheckpointLoadError (not a raw error)."""
+        """Each torch.load error is wrapped as CheckpointLoadError."""
         msg = "simulated torch.load failure"
 
         def _raise(*_args: object, **_kwargs: object) -> None:

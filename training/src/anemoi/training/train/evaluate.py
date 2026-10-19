@@ -30,10 +30,7 @@ class AnemoiEvaluator(AnemoiTrainer):
     callbacks, logger, strategy).  The key differences from training are:
 
     - :meth:`pl.Trainer.validate` is called instead of :meth:`pl.Trainer.fit`.
-    - A checkpoint **must** be specified via ``training.checkpoint.source`` (a
-      ``RunIdSource`` for resume/fork, or a ``LocalSource`` for an explicit file);
-      omitting it raises a :exc:`RuntimeError` immediately rather than silently
-      evaluating a randomly-initialised model.
+    - You must set ``training.checkpoint.source``. If not, a :exc:`RuntimeError` occurs.
     - Checkpointing and weight-averaging callbacks are disabled regardless of
       the diagnostics config — evaluation is a read-only operation on a trained
       model and should never write new checkpoint files.
@@ -82,10 +79,7 @@ class AnemoiEvaluator(AnemoiTrainer):
 
         LOGGER.debug("Starting evaluation..")
 
-        # When the model is already initialised with the checkpoint weights — via a
-        # training.checkpoint loading strategy other than warm start — pass
-        # ckpt_path=None to avoid a second load. Otherwise let PL restore the full
-        # training state from the checkpoint.
+        # If the pipeline loaded the weights, do not load them again in Lightning.
         ckpt_path = None if self._skip_lightning_restore() else self.last_checkpoint
 
         trainer.validate(

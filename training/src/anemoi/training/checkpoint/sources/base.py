@@ -32,11 +32,8 @@ Callers that want scheme-based routing should perform their own
 dispatch (e.g., by inspecting ``urlparse(uri).scheme``) before
 selecting a ``_target_``.
 
-Acquisition is two steps. :meth:`CheckpointSource.resolve` makes the checkpoint
-reachable as a local file and publishes its path on the context (a download is
-kept on disk); :meth:`CheckpointSource.process` is resolve followed by the
-``torch.load``. A resume runs resolve only, because ``Trainer.fit(ckpt_path=)``
-performs the load itself.
+``resolve`` gives a local checkpoint file. ``process`` calls ``resolve`` and then loads
+the file. A resume only calls ``resolve``, because Lightning loads the file.
 
 Example
 -------
@@ -72,47 +69,36 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-#: Launcher rank variables, in the exact priority order of
-#: ``lightning_fabric.utilities.rank_zero._get_rank()``, so rank-0 detection here
-#: agrees with Lightning's.
+#: Launcher rank variables, in the same order as Lightning's ``_get_rank()``.
 RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
 
 
 def is_rank_zero() -> bool:
-    """Whether this process is rank 0, using Lightning's own rank detection.
+    """Return whether this process is rank 0.
 
-    No rank variable set (single process, unit test) counts as rank 0, as does a
-    malformed one, so a missing-checkpoint error is never silently swallowed.
+    A missing or malformed rank variable counts as rank 0, so errors are not lost.
     """
     from lightning_fabric.utilities.rank_zero import _get_rank
 
     try:
         rank = _get_rank()
-    except ValueError:  # a launcher variable that is not an integer
+    except ValueError:
         return True
     return rank is None or rank <= 0
 
 
 def source_class_from_config(source_cfg: Any) -> type[CheckpointSource] | None:
-    """Resolve a ``training.checkpoint.source`` block to its source class.
-
-    Reads ``_target_`` and imports it with :func:`hydra.utils.get_class`, so a
-    subclass (``class EcmwfRunSource(RunIdSource)``) is recognised through
-    inheritance rather than by what its name ends in. Returns ``None`` for a
-    missing, empty or unimportable target, or one that is not a
-    :class:`CheckpointSource`; the pipeline build reports those with a
-    ``CheckpointConfigError`` naming the target, so callers only need a neutral
-    answer here.
+    """Return the source class from the ``_target_`` of a source config.
 
     Parameters
     ----------
     source_cfg : Any
-        The source configuration (a mapping with ``_target_``), or ``None``.
+        The source config, or ``None``.
 
     Returns
     -------
     type[CheckpointSource] or None
-        The configured source class, when it resolves.
+        ``None`` if the target is absent, cannot be imported, or is not a ``CheckpointSource``.
     """
     if source_cfg is None:
         return None
@@ -136,12 +122,7 @@ def source_class_from_config(source_cfg: Any) -> type[CheckpointSource] | None:
 
 
 def remove_temporary_file(path: Path) -> None:
-    """Delete a download a source kept on disk.
-
-    Never raises: the path is per-process (a :func:`tempfile.NamedTemporaryFile`),
-    but this also runs from ``atexit``, so a file already gone is fine and an
-    ``OSError`` is only warned about.
-    """
+    """Delete a downloaded checkpoint file. Never raises, because ``atexit`` also calls it."""
     try:
         path.unlink(missing_ok=True)
     except OSError as exc:
@@ -158,11 +139,8 @@ class CheckpointSource(PipelineStage):
     a specific source type (local file, cloud storage, HTTP endpoint,
     etc.) and populating the context for downstream stages.
 
-    Subclasses implement ``resolve`` (make the checkpoint reachable as a
-    local file and publish its path) and ``process`` (resolve, then load).
-    The ``_load_from_path`` and ``_load_and_populate`` convenience methods
-    standardise the load and how raw checkpoint data is attached to the
-    context with format detection.
+    Subclasses implement ``resolve`` (get a local file) and ``process``
+    (resolve, then load). Use ``_load_from_path`` to load the file.
 
     Parameters
     ----------
@@ -188,21 +166,19 @@ class CheckpointSource(PipelineStage):
 
     @classmethod
     def run_identity(cls, source_cfg: Any) -> tuple[str | None, str | None]:
-        """The ``(run_id, fork_run_id)`` this source configuration expresses.
+        """Return ``(run_id, fork_run_id)`` for this source config.
 
-        Most sources carry no run identity: an explicit file or a remote object
-        says nothing about which experiment-tracker run the job belongs to.
-        :class:`~anemoi.training.checkpoint.sources.run.RunIdSource` overrides this.
+        Only ``RunIdSource`` has a run identity. Other sources return ``(None, None)``.
 
         Parameters
         ----------
         source_cfg : Any
-            The source configuration block.
+            The source config.
 
         Returns
         -------
         tuple[str | None, str | None]
-            ``(run_id, fork_run_id)``; at most one is set. ``(None, None)`` here.
+            ``(run_id, fork_run_id)``. At most one is set.
         """
         del source_cfg
         return None, None
@@ -214,58 +190,46 @@ class CheckpointSource(PipelineStage):
         parent_run_server2server: str | None,
         fork_run_server2server: str | None,
     ) -> Any:
-        """Merge runtime server-to-server lineage into the source configuration.
+        """Add the runtime lineage IDs to the source config if the source accepts them.
 
-        The lineage ids are logger-derived at run time and cannot be written in
-        the static config. Only a source that resolves a run accepts them;
-        everything else returns its configuration unchanged, so instantiation
-        never fails on an unknown keyword.
+        The default returns the config unchanged.
 
         Parameters
         ----------
         source_cfg : Any
-            The source configuration block.
+            The source config.
         parent_run_server2server : str or None
-            Runtime server-to-server resume lineage id.
+            Resume lineage ID.
         fork_run_server2server : str or None
-            Runtime server-to-server fork lineage id.
+            Fork lineage ID.
 
         Returns
         -------
         Any
-            The configuration to instantiate; unchanged here.
+            The config to instantiate.
         """
         del parent_run_server2server, fork_run_server2server
         return source_cfg
 
     async def resolve(self, context: CheckpointContext) -> Path | None:
-        """Make the checkpoint reachable as a local file and publish its path, without loading it.
+        """Get the checkpoint as a local file and set ``context.checkpoint_path``. Do not load it.
 
-        Sets ``context.checkpoint_path`` to the resolved file and returns it. A
-        source that downloads keeps the file and registers it with
-        :meth:`_keep_download` so the trainer deletes it after training. Returns
-        ``None`` when there is nothing to resolve on this rank (an error deferred
-        to rank 0), in which case ``process`` leaves the context untouched.
-
-        This is the step a resume runs on its own: ``Trainer.fit(ckpt_path=)`` loads
-        the file, so the pipeline only has to produce it.
+        A source that downloads must call ``_keep_download``.
 
         Parameters
         ----------
         context : CheckpointContext
-            Current pipeline context. May carry ``checkpoint_path`` or source
-            configuration in ``config``.
+            Current pipeline context.
 
         Returns
         -------
         Path or None
-            The local checkpoint file, or ``None`` when deferred.
+            The local checkpoint file, or ``None`` if this rank defers the error to rank 0.
 
         Raises
         ------
         NotImplementedError
-            If the source only implements ``process``; such a source cannot be
-            resumed from, because it has no local file to hand Lightning.
+            If the source does not implement ``resolve``. A resume cannot use this source.
         """
         msg = (
             f"{type(self).__name__} does not implement resolve(); a resume needs a source that can "
@@ -307,9 +271,7 @@ class CheckpointSource(PipelineStage):
     async def _load_from_path(self, context: CheckpointContext, path: Path) -> None:
         """Load the checkpoint file at ``path`` onto the context.
 
-        Loads with ``weights_only=False`` (Anemoi checkpoints carry non-tensor
-        metadata such as ``hyper_parameters``) and ``map_location="cpu"``, in a
-        worker thread, then delegates to :meth:`_load_and_populate`.
+        ``weights_only=False`` is necessary because checkpoints contain non-tensor metadata.
 
         Parameters
         ----------
@@ -333,11 +295,9 @@ class CheckpointSource(PipelineStage):
         self._load_and_populate(context, raw_data)
 
     def _keep_download(self, context: CheckpointContext, path: Path) -> None:
-        """Register a download kept on disk for ``Trainer.fit(ckpt_path=)``.
+        """Keep a downloaded file on disk for ``Trainer.fit(ckpt_path=)``.
 
-        The trainer deletes every path in ``context.temporary_files`` once
-        training has finished; ``atexit`` is the backstop for a job that never
-        reaches that point.
+        The trainer deletes it after training. ``atexit`` deletes it if training stops early.
 
         Parameters
         ----------
@@ -384,25 +344,19 @@ class CheckpointSource(PipelineStage):
         )
 
 
-#: ``context.metadata`` marker a :class:`ResolveOnlySource` sets: the checkpoint is
-#: loaded by ``Trainer.fit(ckpt_path=)``, not by a pipeline stage.
+#: Metadata key. ``ResolveOnlySource`` sets it to show that Lightning loads the checkpoint.
 CHECKPOINT_LOAD_OWNER = "checkpoint_load_owner"
 
 
 class ResolveOnlySource(CheckpointSource):
-    """Run only a source's :meth:`~CheckpointSource.resolve` step.
+    """Run only the ``resolve`` step of a source.
 
-    The builder wraps the configured source in this for a resume:
-    ``Trainer.fit(ckpt_path=)`` performs the load, so the pipeline only makes
-    the checkpoint reachable as a local file and publishes its path. The
-    context is marked (``metadata["checkpoint_load_owner"] = "trainer"``) so
-    the pipeline's "weights were loaded" check knows the weights arrive at
-    ``fit()`` rather than being missing.
+    The builder uses this for a resume, because Lightning loads the file.
 
     Parameters
     ----------
     source : CheckpointSource
-        The configured source whose resolve step runs.
+        The source to resolve.
     """
 
     def __init__(self, source: CheckpointSource) -> None:
@@ -413,14 +367,12 @@ class ResolveOnlySource(CheckpointSource):
         return await self.source.resolve(context)
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Resolve the checkpoint file for ``Trainer.fit(ckpt_path=)``; load nothing.
+        """Resolve the checkpoint file for ``Trainer.fit(ckpt_path=)``. Do not load it.
 
         Raises
         ------
         CheckpointConfigError
-            On rank 0, if the source resolved no file: a resume with nothing to
-            hand Lightning would otherwise start from scratch without a word.
-            Other ranks defer, as the sources do, so the job fails once, on rank 0.
+            On rank 0, if the source resolves no file. Other ranks defer the error.
         """
         path = await self.resolve(context)
         context.update_metadata(**{CHECKPOINT_LOAD_OWNER: "trainer"})

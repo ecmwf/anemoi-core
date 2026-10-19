@@ -146,29 +146,19 @@ class IndexCollection:
         Parameters
         ----------
         ckpt_name_to_index : dict[str, int]
-            The dictionary mapping variable names to their indices in the checkpoint/model.
+            The dictionary mapping variable names to their indices in the checkpoint.
         data_name_to_index : dict[str, int]
             The dictionary mapping variable names to their indices in the data.
         allow_subset : bool, optional
-            When True, tolerate the current data being a strict subset of the checkpoint's
-            variables (fine-tuning into a model with FEWER variables, e.g. issue #838), as
-            long as the shared variables keep the same relative order. The dropped variables
-            are logged and the check passes instead of raising, so the checkpoint's
-            variable ordering does not need to match. Default False preserves the strict
-            behaviour used by the sanity checks and normal training.
-
-            This relaxes the *check* only. The variable-dependent encoder/decoder layers
-            are re-initialised for the reduced set only by a loading strategy that skips
-            shape-mismatched parameters — ``TransferLearningLoader``, or
-            ``WeightsOnlyLoader`` / ``ColdStartLoader`` with ``skip_mismatched: true``. A
-            plain weights load still treats the shape difference as an error.
+            If True, the data can be a subset of the checkpoint variables (issue #838).
+            The shared variables must keep the same order. By default False.
+            This changes only the check. To load the weights, use a loader that skips
+            mismatched shapes (e.g. ``skip_mismatched: true``).
 
         Raises
         ------
         ValueError
-            If the variable order in the model and data is verifiably different. When
-            allow_subset is True this is still raised if the current data introduces new
-            variables or reorders the shared ones.
+            If the variable order in the model and data is verifiably different.
         """
         if ckpt_name_to_index is None:
             LOGGER.info("No variable order to compare. Skipping variable order check.")
@@ -208,11 +198,7 @@ class IndexCollection:
         if only_in_data:
             LOGGER.warning("Variables only in data: %s", only_in_data)
 
-        # Fine-tuning into a model with FEWER variables (issue #838): the current data is a
-        # strict subset of the checkpoint's variables. This is a legitimate reduction as long
-        # as the shared variables keep the same relative order, because the loading strategy
-        # re-initialises the variable-dependent layers for the reduced set. Their absolute
-        # indices are allowed to shift (removing variables re-indexes the survivors).
+        # Subset of the checkpoint variables (issue #838). Only the relative order must match.
         if allow_subset and keys2 and not only_in_data:
             ckpt_order = sorted(common_keys, key=ckpt_name_to_index.__getitem__)
             data_order = sorted(common_keys, key=data_name_to_index.__getitem__)

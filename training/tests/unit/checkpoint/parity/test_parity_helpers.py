@@ -7,14 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Edge-case coverage for the shared Lightning-parity helpers in ``loading.base``.
+"""Edge-case tests for the shared checkpoint-load helpers in ``loading.base``.
 
-These context-free functions are the single home for the checkpoint-load parity
-steps, shared between the pipeline loading strategies (via
-``apply_checkpoint_corrections``) and ``BaseTrainingModule.on_load_checkpoint``.
-The tests here drive the guard and error-tolerance branches that the existing
-suites do not reach, plus the end-to-end ordering of the shared functions inside
-two concrete loaders.
+The tests cover guard and error branches, and the call order inside two loaders.
 """
 
 from __future__ import annotations
@@ -49,14 +44,14 @@ class _MiniModel(nn.Module):
 
 
 def _install_fake_migration_module(module_name: str, migrate: object) -> types.ModuleType:
-    """Build a stand-in module exposing ``migrate`` for injection into ``sys.modules``."""
+    """Make a fake module with a ``migrate`` attribute for ``sys.modules``."""
     module = types.ModuleType(module_name)
     module.migrate = migrate
     return module
 
 
 def _hparams_warning_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
-    """Return only the captured records that report an hparams divergence."""
+    """Return the records that report an hparams divergence."""
     return [record for record in caplog.records if "hparams differ" in record.getMessage()]
 
 
@@ -64,7 +59,7 @@ def _hparams_warning_records(caplog: pytest.LogCaptureFixture) -> list[logging.L
 
 
 def test_format_migration_swallows_attribute_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An ``AttributeError`` from the migration is treated as an incomplete-shape no-op."""
+    """An ``AttributeError`` from the migration is a no-op."""
 
     def _migrate(_checkpoint: dict) -> dict:
         msg = "config"
@@ -81,13 +76,13 @@ def test_format_migration_swallows_attribute_error(monkeypatch: pytest.MonkeyPat
 
 
 def test_edge_perm_migration_none_checkpoint_returns_none() -> None:
-    """A ``None`` checkpoint short-circuits before any migration is resolved."""
+    """A ``None`` checkpoint returns ``None``."""
     model = _MiniModel()
     assert apply_trainable_edge_perm_migration(None, model) is None
 
 
 def test_edge_perm_migration_noop_when_module_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When neither edge-perm import path resolves, the checkpoint is returned untouched."""
+    """If no edge-perm module imports, the checkpoint is returned unchanged."""
     for module_name in loading_base._TRAINABLE_EDGE_PERM_PATHS:
         monkeypatch.setitem(sys.modules, module_name, None)
 
@@ -97,7 +92,7 @@ def test_edge_perm_migration_noop_when_module_unavailable(monkeypatch: pytest.Mo
 
 
 def test_edge_perm_migration_swallows_key_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A ``KeyError`` from the edge-perm migration is tolerated as an incomplete-shape no-op."""
+    """A ``KeyError`` from the edge-perm migration is a no-op."""
 
     def _migrate(_checkpoint: dict, _model: nn.Module) -> dict:
         msg = "hyper_parameters"
@@ -115,10 +110,9 @@ def test_edge_perm_migration_swallows_key_error(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_refresh_processors_none_model_keeps_the_entries() -> None:
-    """With ``model=None`` nothing can be re-injected, so nothing is dropped either.
+    """With ``model=None``, the processor entries stay in the state dict.
 
-    Dropping the processor entries without replacements would hand a strict load a
-    checkpoint with missing keys; the drop and the re-injection are one operation.
+    A drop without re-injection causes missing keys in a strict load.
     """
     checkpoint = {
         "state_dict": {
@@ -137,7 +131,7 @@ def test_refresh_processors_none_model_keeps_the_entries() -> None:
 
 
 def test_refresh_processors_none_checkpoint_is_noop() -> None:
-    """A ``None`` checkpoint hits the guard before ``checkpoint.get`` and returns cleanly."""
+    """A ``None`` checkpoint is a no-op."""
     model = _MiniModel()
     assert refresh_checkpoint_processors(None, model, update_states=True, update_tendencies=False) is None
 
@@ -146,7 +140,7 @@ def test_refresh_processors_none_checkpoint_is_noop() -> None:
 
 
 def test_warn_noop_when_checkpoint_none(caplog: pytest.LogCaptureFixture) -> None:
-    """A ``None`` checkpoint short-circuits with no divergence warning."""
+    """A ``None`` checkpoint gives no warning."""
     run_config = OmegaConf.create({"model": {"layers": 1}})
     with caplog.at_level(logging.WARNING):
         warn_on_hparams_divergence(None, run_config)
@@ -154,7 +148,7 @@ def test_warn_noop_when_checkpoint_none(caplog: pytest.LogCaptureFixture) -> Non
 
 
 def test_warn_noop_when_hyper_parameters_not_mapping(caplog: pytest.LogCaptureFixture) -> None:
-    """A non-dict ``hyper_parameters`` is rejected by the isinstance guard, no warning."""
+    """A non-dict ``hyper_parameters`` gives no warning."""
     run_config = OmegaConf.create({"model": {"layers": 1}})
     with caplog.at_level(logging.WARNING):
         warn_on_hparams_divergence({"hyper_parameters": [1, 2, 3]}, run_config)
@@ -162,7 +156,7 @@ def test_warn_noop_when_hyper_parameters_not_mapping(caplog: pytest.LogCaptureFi
 
 
 def test_warn_noop_when_checkpoint_config_none(caplog: pytest.LogCaptureFixture) -> None:
-    """A checkpoint-side ``hyper_parameters.config`` of ``None`` returns early, no warning."""
+    """A ``None`` ``hyper_parameters.config`` gives no warning."""
     run_config = OmegaConf.create({"model": {"layers": 1}})
     with caplog.at_level(logging.WARNING):
         warn_on_hparams_divergence({"hyper_parameters": {"config": None}}, run_config)
@@ -173,7 +167,7 @@ def test_warn_skips_when_to_container_raises(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A comparison failure in ``OmegaConf.to_container`` degrades to a silent no-op."""
+    """An error in ``OmegaConf.to_container`` gives no warning."""
 
     def _raise(*_args: object, **_kwargs: object) -> None:
         msg = "cannot resolve"
@@ -192,12 +186,7 @@ def test_warn_skips_when_to_container_raises(
 
 
 def test_extract_variables_metadata_none_checkpoint_is_a_safe_noop() -> None:
-    """With ``name_to_index`` set and ``checkpoint_data=None`` the call is a safe no-op.
-
-    It guards on a ``None`` checkpoint (like ``warn_on_hparams_divergence``) instead of
-    dereferencing it, so it stays safe to call unconditionally after a load that produced
-    no checkpoint data, and it must not populate ``_ckpt_variables_metadata``.
-    """
+    """A ``None`` checkpoint does not set ``_ckpt_variables_metadata``."""
     model = SimpleNamespace(_ckpt_model_name_to_index={"era5": {"2t": 0}})
     extract_checkpoint_variables_metadata(model, None)
     assert not hasattr(model, "_ckpt_variables_metadata")
@@ -211,13 +200,10 @@ def _install_order_recorders(
     calls: list[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Replace the shared correction functions, the metadata steps and the model load with order recorders.
+    """Replace the corrections, metadata steps and model load with call recorders.
 
-    Both the corrections and the metadata steps are module-level functions, patched
-    where each is looked up: the corrections in ``loading.base`` (``apply_checkpoint_corrections``
-    calls them by name), the metadata steps in ``loading.strategies``. The real
-    ``_extract_state_dict`` and ``_mark_weights_loaded`` stay live so the strategy still
-    performs an actual (recorded) ``load_state_dict`` call.
+    Each function is patched where it is looked up: corrections in ``loading.base``,
+    metadata steps in ``loading.strategies``. The real ``load_state_dict`` still runs.
     """
     corrections = {
         "apply_checkpoint_format_migrations": "format",
@@ -255,11 +241,9 @@ def _install_order_recorders(
 
 @pytest.mark.asyncio
 async def test_weights_only_invokes_shared_parity_functions_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
-    """WeightsOnlyLoader runs the corrections (in their one order) and the metadata steps around the load.
+    """WeightsOnlyLoader runs the corrections, the load and the metadata steps in order.
 
-    The order inside the corrections is format migrations, edge-perm, refresh: the
-    order ``on_load_checkpoint`` has always used for ``ckpt_path`` loads, and the safe
-    one, since edge-perm takes the live model and may rebuild the dict.
+    Edge-perm uses the live model and can rebuild the dict, thus it runs before refresh.
     """
     model = _MiniModel()
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": model.state_dict()})
@@ -276,11 +260,7 @@ async def test_weights_only_invokes_shared_parity_functions_in_order(monkeypatch
 async def test_transfer_learning_invokes_shared_parity_functions_without_hparams_warn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """TransferLearningLoader runs the same corrections but omits the hparams warning.
-
-    This is the corrected sequence for the aspect: it is NOT identical to
-    WeightsOnlyLoader because ``warn_on_hparams_divergence`` is not invoked here.
-    """
+    """TransferLearningLoader runs the same steps, but not the hparams warning."""
     model = _MiniModel()
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": model.state_dict()})
     loader = TransferLearningLoader(skip_mismatched=True)

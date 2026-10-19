@@ -58,7 +58,7 @@ _RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
 
 
 class SiteRunSource(RunIdSource):
-    """A site-specific subclass whose ``_target_`` does not end in ``RunIdSource``."""
+    """Subclass with a ``_target_`` that does not end in ``RunIdSource``."""
 
 
 _SITE_RUN_SOURCE = f"{__name__}.SiteRunSource"
@@ -91,12 +91,7 @@ def _mock_client(mocker: "MockerFixture") -> "MockType":
 
 
 def test_prepare_mlflow_run_id_returns_the_run_it_attached_to(mocker: "MockerFixture") -> None:
-    """Attaching to an existing run returns that run, not None.
-
-    The caller unpacks two values and writes them to the metadata file the launch
-    script reads, so returning None raised ``TypeError: cannot unpack non-sequence
-    NoneType object`` and left that file unwritten.
-    """
+    """Attaching to an existing run returns that run, not None."""
     client = _mock_client(mocker)
     config = _prepare_config({"_target_": _RUN_SOURCE, "run_id": "run-abc", "fork": False})
 
@@ -104,16 +99,11 @@ def test_prepare_mlflow_run_id_returns_the_run_it_attached_to(mocker: "MockerFix
 
     assert (run_id, experiment_id) == ("run-abc", "exp-7")
     client.get_run.assert_called_once_with("run-abc")
-    # Attaching must not mint a second run.
     client.create_run.assert_not_called()
 
 
 def test_prepare_mlflow_run_id_forking_mints_a_new_run(mocker: "MockerFixture") -> None:
-    """A fork starts a new run, so it falls through to creating one.
-
-    Positive control for the test above: proves the attach path is selected by the
-    source's ``fork`` flag rather than being taken unconditionally.
-    """
+    """A fork creates a new run."""
     client = _mock_client(mocker)
     client.create_run.return_value = SimpleNamespace(info=SimpleNamespace(run_id="run-new"))
     config = _prepare_config({"_target_": _RUN_SOURCE, "run_id": "run-abc", "fork": True})
@@ -125,11 +115,7 @@ def test_prepare_mlflow_run_id_forking_mints_a_new_run(mocker: "MockerFixture") 
 
 
 def test_prepare_mlflow_run_id_attaches_through_a_run_source_subclass(mocker: "MockerFixture") -> None:
-    """Run identity comes from the source class, so a subclass attaches like its parent.
-
-    A match on the end of the ``_target_`` string treated ``SiteRunSource`` as an
-    ordinary source and minted a fresh run for a config that named an existing one.
-    """
+    """A ``RunIdSource`` subclass attaches to the existing run."""
     client = _mock_client(mocker)
     config = _prepare_config({"_target_": _SITE_RUN_SOURCE, "run_id": "run-abc", "fork": False})
 

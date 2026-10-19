@@ -33,9 +33,7 @@ Example
 ...     WeightsOnlyLoader(strict=False),
 ... ])
 >>>
->>> # Or, in a training run, build it from the declarative config. The trainer
->>> # reads ``training.checkpoint.{source,loading,modifiers}`` and assembles the
->>> # stages in that fixed order:
+>>> # Or build it from ``training.checkpoint.{source,loading,modifiers}``:
 >>> from anemoi.training.checkpoint import build_checkpoint_pipeline
 >>> pipeline = build_checkpoint_pipeline(cfg)  # cfg.training.checkpoint.*
 >>>
@@ -45,17 +43,14 @@ Example
 
 Execution
 ---------
-The pipeline runs once during model construction, before ``trainer.fit()``:
-``AnemoiTrainer.model`` calls :func:`build_checkpoint_pipeline` on
-``training.checkpoint.*`` and then :meth:`CheckpointPipeline.execute_sync`, so
-checkpoint loading happens exactly once at startup and never inside the training
-loop. Outside the trainer the same pipeline can be driven directly::
+``AnemoiTrainer.model`` runs the pipeline once, before ``trainer.fit()``.
+To run it outside the trainer::
 
-    pipeline = build_checkpoint_pipeline(config)  # reads training.checkpoint.*
+    pipeline = build_checkpoint_pipeline(config)
     context = CheckpointContext(model=model)
 
-    result = await pipeline.execute(context)   # from an async context
-    result = pipeline.execute_sync(context)    # from a sync context (manages the loop)
+    result = await pipeline.execute(context)   # async
+    result = pipeline.execute_sync(context)    # sync
 
     model = result.model
 """
@@ -207,16 +202,7 @@ class CheckpointPipeline:
 
     @staticmethod
     def _stage_role(stage: Any) -> str | None:
-        """Classify a stage by its checkpoint-pipeline layer.
-
-        Returns ``"source"``, ``"loader"``, ``"modifier"``, or ``None`` for a
-        stage that belongs to no known layer. Classification is by ``isinstance``
-        against the layer base classes — the robust contract — rather than by
-        class-name substring, so a correctly-subclassed stage is recognised
-        regardless of what it is named (e.g. a ``Restorer(LoadingStrategy)``).
-        The base-class imports are local so importing this module does not pull
-        in the layer subpackages.
-        """
+        """Return ``"source"``, ``"loader"``, ``"modifier"`` or ``None`` for a stage."""
         from anemoi.training.checkpoint.loading.base import LoadingStrategy
         from anemoi.training.checkpoint.modifiers.base import ModelModifier
         from anemoi.training.checkpoint.sources.base import CheckpointSource
@@ -230,13 +216,10 @@ class CheckpointPipeline:
         return None
 
     def _validate_pipeline_composition(self) -> None:
-        """Validate pipeline composition: raise on ordering/conflict violations, warn/suggest otherwise.
+        """Check the stage order and count.
 
-        Stage ordering (source before loader, modifier after loader) and a single
-        loading strategy are structural invariants: a violation is a hard
-        ``CheckpointConfigError`` at construction. Multiple sources and missing
-        stages are advisory (warn / info) — the builder always emits stages in the
-        canonical order, so only hand-built or misconfigured pipelines are bitten.
+        Raise ``CheckpointConfigError`` for a wrong order or more than one loader.
+        Log a warning for other problems.
         """
         if not self.stages:
             LOGGER.warning(
@@ -287,7 +270,7 @@ class CheckpointPipeline:
             )
 
     def _check_duplicate_stages(self, roles: list[str | None], stage_names: list[str], violations: list[str]) -> None:
-        """Multiple loading strategies conflict; flag as a violation."""
+        """More than one loading strategy is a violation."""
         loaders = [stage_names[i] for i, role in enumerate(roles) if role == "loader"]
         if len(loaders) > 1:
             violations.append(
@@ -296,7 +279,7 @@ class CheckpointPipeline:
             )
 
     def _warn_multiple_sources(self, roles: list[str | None], stage_names: list[str]) -> None:
-        """Multiple sources are redundant but not fatal (the pipeline runs them in sequence)."""
+        """Warn if there is more than one source."""
         sources = [stage_names[i] for i, role in enumerate(roles) if role == "source"]
         if len(sources) > 1:
             LOGGER.warning(
@@ -442,13 +425,7 @@ class CheckpointPipeline:
 
         This prevents silently proceeding with a randomly-initialised model
         when ``continue_on_error=True`` swallowed the loading failure.
-        ``weights_initialized`` is advisory for other readers, but the pipeline
-        treats it as a gate here: a configured source with no applied weights is
-        a hard error, not a warning.
-
-        A resume is the exception: a resolve-only source publishes the file for
-        ``Trainer.fit(ckpt_path=)`` and marks the context, so the weights arrive
-        at ``fit()`` and are not missing.
+        A resume is exempt, because ``Trainer.fit(ckpt_path=)`` loads the weights.
         """
         from anemoi.training.checkpoint.sources.base import CHECKPOINT_LOAD_OWNER
 

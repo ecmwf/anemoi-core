@@ -7,18 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Loading-layer parity behaviours from the legacy load paths.
-
-Covers the loading-strategy parity with ``on_load_checkpoint``:
-
-- weights-only loading is strict by default (missing keys fail);
-- a strict-load failure surfaces as ``CheckpointLoadError``;
-- a warning fires when the checkpoint's stored model hparams diverge from the run config;
-- the runtime ``trainable_edge_perm`` migration is referenced/applied on load;
-- ``model_output_idx`` buffers are re-injected from the live model during the processor refresh;
-- a pre-multi-dataset single ``IndexCollection`` checkpoint is rejected with a ``TypeError``;
-- a transfer-learning load populates ``_ckpt_variables_metadata``.
-"""
+"""Tests that the loading strategies behave the same as ``on_load_checkpoint``."""
 
 from __future__ import annotations
 
@@ -57,7 +46,7 @@ def _index_collection(name_to_index: dict[str, int]) -> object:
 
 @pytest.mark.asyncio
 async def test_weights_only_default_is_strict() -> None:
-    """A missing-key checkpoint fails by default (default strict=True)."""
+    """Missing keys raise ``CheckpointLoadError`` by default."""
     model = _Tiny()
     partial = {key: value for key, value in _full_state(model).items() if key.startswith("encoder.")}
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": partial})
@@ -68,7 +57,7 @@ async def test_weights_only_default_is_strict() -> None:
 
 @pytest.mark.asyncio
 async def test_weights_only_non_strict_accepts_partial() -> None:
-    """strict=False keeps the lenient fill-model behaviour for partial checkpoints."""
+    """``strict=False`` accepts a partial checkpoint."""
     model = _Tiny()
     partial = {key: value for key, value in _full_state(model).items() if key.startswith("encoder.")}
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": partial})
@@ -80,7 +69,7 @@ async def test_weights_only_non_strict_accepts_partial() -> None:
 
 @pytest.mark.asyncio
 async def test_hparams_divergence_warns(caplog: pytest.LogCaptureFixture) -> None:
-    """Diverging checkpoint model hparams (with coinciding shapes) produce a warning."""
+    """Different model hparams in the checkpoint cause a warning."""
     model = _Tiny()
     checkpoint = {
         "state_dict": _full_state(model),
@@ -105,15 +94,14 @@ def test_model_output_idx_reinjected_during_refresh() -> None:
             self.register_buffer("model_output_idx", torch.tensor([1.0]))
 
     class _Wrapper(nn.Module):
-        """LightningModule-shaped: ``context.model`` is the LightningModule, ``.model`` the inner."""
+        """LightningModule-like wrapper."""
 
         def __init__(self) -> None:
             super().__init__()
             self.model = _WithOutputIdx()
 
     model = _Wrapper()
-    # The checkpoint is keyed at LightningModule level (``model.<...>``), matching the
-    # wrapper's own state_dict keys; the refresh re-injects from the inner ``.model``.
+    # Checkpoint keys start with ``model.``, as in a LightningModule.
     state_dict = {key: torch.full_like(value, 9.0) for key, value in model.state_dict().items()}
     context = CheckpointContext(
         model=model,
@@ -130,7 +118,7 @@ def test_model_output_idx_reinjected_during_refresh() -> None:
 
 
 def test_single_dataset_metadata_raises() -> None:
-    """A pre-multi-dataset single IndexCollection is rejected with a TypeError."""
+    """A single IndexCollection raises ``TypeError``."""
     model = _Tiny()
     checkpoint = {"hyper_parameters": {"data_indices": _index_collection({"2t": 0})}}
 
@@ -140,7 +128,7 @@ def test_single_dataset_metadata_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_transfer_learning_sets_variables_metadata() -> None:
-    """A transfer-learning load populates ``_ckpt_variables_metadata`` from the checkpoint."""
+    """Transfer learning sets ``_ckpt_variables_metadata``."""
     model = _Tiny()
     checkpoint = {
         "state_dict": _full_state(model),

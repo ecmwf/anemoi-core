@@ -130,12 +130,7 @@ async def test_s3_source_raises_when_obstore_missing() -> None:
 
 @pytest.mark.asyncio
 async def test_s3_source_keeps_download_and_publishes_path_on_load_failure() -> None:
-    """The download is kept and its path is on the context, even when loading fails.
-
-    A resume hands the path to ``Trainer.fit(ckpt_path=)`` after the pipeline
-    returns; the trainer deletes the file once training has finished, via
-    ``context.temporary_files``.
-    """
+    """The download is kept and its path is on the context, also if loading fails."""
     source = S3Source(url="s3://bucket/corrupt.ckpt")
     context = CheckpointContext()
     downloaded: list[Path] = []
@@ -159,7 +154,7 @@ async def test_s3_source_keeps_download_and_publishes_path_on_load_failure() -> 
 
 @pytest.mark.asyncio
 async def test_s3_source_resolve_downloads_without_loading() -> None:
-    """``resolve`` produces the local file for ``Trainer.fit(ckpt_path=)`` and loads nothing."""
+    """``resolve`` downloads the file and loads nothing."""
     source = S3Source(url="s3://bucket/model.ckpt")
     context = CheckpointContext()
 

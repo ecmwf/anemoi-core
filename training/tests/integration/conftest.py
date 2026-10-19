@@ -596,9 +596,7 @@ def global_config_with_checkpoint(
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     torch.save(new_ckpt, checkpoint_dir / "last.ckpt")
 
-    # Resume the staged run via the checkpoint pipeline surface (the legacy
-    # ``training.run_id`` key was removed): a RunIdSource (fork=false) resolves the
-    # run's last.ckpt and a WarmStartLoader restores it.
+    # Resume the staged run from its last.ckpt.
     with open_dict(cfg):
         cfg.training.checkpoint = {
             "source": {

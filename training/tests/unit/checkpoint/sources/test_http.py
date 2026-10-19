@@ -44,11 +44,7 @@ async def test_http_source_uses_download_with_retry() -> None:
 
 @pytest.mark.asyncio
 async def test_http_source_resolve_keeps_download_without_loading() -> None:
-    """``resolve`` downloads to a kept temporary file, publishes it, and loads nothing.
-
-    That is what a resume needs: a local file for ``Trainer.fit(ckpt_path=)``. The
-    file is registered on ``context.temporary_files`` for the trainer to delete.
-    """
+    """``resolve`` downloads to a temporary file, records it, and loads nothing."""
     source = HTTPSource(url="https://example.com/model.ckpt")
     context = CheckpointContext()
 

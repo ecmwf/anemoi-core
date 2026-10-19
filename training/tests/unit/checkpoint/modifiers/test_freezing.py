@@ -44,9 +44,7 @@ class TwoBranchModel(nn.Module):
 class BranchModel(nn.Module):
     """A sub-model with a direct child and a nested ``Sequential``.
 
-    Used under a two-entry ``ModuleDict`` to mirror the #1159 dot-path fixture,
-    so the stage is exercised on a deep dot-path (``a.sequential.0``) and a bare
-    branch name (``a``).
+    Used in a two-entry ``ModuleDict`` to test dot-paths (#1159).
     """
 
     def __init__(self):
@@ -122,17 +120,12 @@ async def test_freezing_dot_notation_submodule() -> None:
 async def test_freezing_bare_name_does_not_match_nested() -> None:
     """A bare name resolves only a direct child, never nested submodules.
 
-    Same dot-path semantics introduced in #1159. The resolving ``encoder.data``
-    is paired with the non-resolving bare ``data`` so the config as a whole is
-    not inert: a run where *nothing* resolves is now refused outright, which is
-    asserted separately.
+    ``encoder.data`` resolves, so that the config is not fully inert.
     """
     model = TwoBranchModel()
     adapter = FreezingModifierStage(submodules_to_freeze=["data", "encoder.data"], strict=False)
     result = await adapter.process(CheckpointContext(model=model))
 
-    # The dot path froze its target; the bare name matched nothing, so the
-    # identically-named child under the other branch is untouched.
     assert result.model.encoder["data"].weight.requires_grad is False
     assert result.model.decoder["data"].weight.requires_grad is True
 
@@ -162,21 +155,18 @@ async def test_freezing_already_frozen_module_is_not_missing() -> None:
 
 @pytest.mark.asyncio
 async def test_freezing_dot_path_into_branch_skips_missing() -> None:
-    """A dot-path into a ModuleDict branch freezes only that entry; a missing path is skipped (#1159)."""
+    """A dot-path freezes only its ModuleDict entry. A missing path is skipped."""
     model = TwoBranchModel()
     adapter = FreezingModifierStage(submodules_to_freeze=["encoder.data", "missing.path"], strict=False)
     await adapter.process(CheckpointContext(model=model))
 
-    assert model.encoder["data"].weight.requires_grad is False  # frozen via dot-path
-    assert model.decoder["data"].weight.requires_grad is True  # untouched sibling branch
+    assert model.encoder["data"].weight.requires_grad is False
+    assert model.decoder["data"].weight.requires_grad is True
 
 
 @pytest.mark.asyncio
 async def test_freezing_deep_dot_path_targets_single_branch() -> None:
-    """A deep dot-path freezes only that submodule; siblings and the other branch stay trainable.
-
-    Ports the #1159 dot-path test for ``a.sequential.0``.
-    """
+    """A deep dot-path freezes only that submodule; siblings and the other branch stay trainable."""
     model = nn.ModuleDict({"a": BranchModel(), "b": BranchModel()})
     adapter = FreezingModifierStage(submodules_to_freeze=["a.sequential.0"])
     result = await adapter.process(CheckpointContext(model=model))
@@ -191,10 +181,7 @@ async def test_freezing_deep_dot_path_targets_single_branch() -> None:
 
 @pytest.mark.asyncio
 async def test_freezing_branch_name_freezes_whole_subtree() -> None:
-    """A bare branch name freezes the entire branch, leaving the sibling branch trainable.
-
-    Ports the #1159 dot-path test for ``a``.
-    """
+    """A bare branch name freezes the entire branch, leaving the sibling branch trainable."""
     model = nn.ModuleDict({"a": BranchModel(), "b": BranchModel()})
     adapter = FreezingModifierStage(submodules_to_freeze=["a"])
     result = await adapter.process(CheckpointContext(model=model))
@@ -246,11 +233,7 @@ async def test_freezing_metadata_includes_param_counts() -> None:
 
 
 class WrappedModel(nn.Module):
-    """Mirrors the real nesting: LightningModule -> interface -> graph model.
-
-    ``encoder`` / ``processor`` / ``decoder`` live two attribute hops below the
-    object handed to the stage, which is what ``submodule_root`` addresses.
-    """
+    """Copies the real nesting: LightningModule -> interface -> graph model."""
 
     def __init__(self):
         super().__init__()
@@ -261,12 +244,7 @@ class WrappedModel(nn.Module):
 
 @pytest.mark.asyncio
 async def test_freezing_resolves_paths_against_submodule_root() -> None:
-    """With a root set, paths address the graph model, not the LightningModule.
-
-    Without this the documented configs froze nothing: ``encoder`` does not
-    exist on the LightningModule, ``get_submodule`` raised AttributeError, and
-    with the shipped ``strict: false`` the only trace was a log line.
-    """
+    """With a root set, paths start at the graph model, not the LightningModule."""
     model = WrappedModel()
     adapter = FreezingModifierStage(
         submodules_to_freeze=["encoder.data"],
@@ -277,13 +255,13 @@ async def test_freezing_resolves_paths_against_submodule_root() -> None:
 
     assert result.model.model.model.encoder["data"].weight.requires_grad is False
     assert result.model.model.model.decoder["data"].weight.requires_grad is True
-    # The root is a lookup base, not a freeze target: siblings are untouched.
+    # The root is not frozen.
     assert result.model.model.pre_processors.weight.requires_grad is True
 
 
 @pytest.mark.asyncio
 async def test_freezing_records_frozen_params_under_root() -> None:
-    """The recorded parameter count reflects the real submodule, not zero."""
+    """The recorded parameter count is that of the real submodule."""
     model = WrappedModel()
     adapter = FreezingModifierStage(
         submodules_to_freeze=["encoder.data"],
@@ -299,15 +277,10 @@ async def test_freezing_records_frozen_params_under_root() -> None:
 
 @pytest.mark.asyncio
 async def test_freezing_raises_when_nothing_resolves() -> None:
-    """A config that freezes nothing is an error even when strict is False.
-
-    ``strict`` tolerates *one* missing name. It has never meant "tolerate a
-    config that is entirely inert" — that is the silent no-op which let every
-    documented freezing config train all parameters unnoticed.
-    """
+    """A config that freezes nothing raises, also when strict is False."""
     model = TwoBranchModel()
     adapter = FreezingModifierStage(submodules_to_freeze=["encoder", "decoder"], submodule_root="", strict=False)
-    # Sanity: these DO resolve here, so the negative case below is not vacuous.
+    # Control: these paths resolve.
     await adapter.process(CheckpointContext(model=TwoBranchModel()))
 
     inert = FreezingModifierStage(submodules_to_freeze=["processor", "nope"], strict=False)
@@ -317,7 +290,7 @@ async def test_freezing_raises_when_nothing_resolves() -> None:
 
 @pytest.mark.asyncio
 async def test_freezing_raises_when_submodule_root_does_not_resolve() -> None:
-    """A root that does not exist is a config error, not a silent fallback."""
+    """A root that does not exist raises a config error."""
     adapter = FreezingModifierStage(submodules_to_freeze=["encoder"], submodule_root="model.model")
 
     with pytest.raises(CheckpointConfigError, match="submodule_root"):
@@ -326,7 +299,7 @@ async def test_freezing_raises_when_submodule_root_does_not_resolve() -> None:
 
 @pytest.mark.asyncio
 async def test_freezing_raises_without_a_model() -> None:
-    """No model on the context is a config error rather than an AttributeError."""
+    """No model on the context raises a config error."""
     adapter = FreezingModifierStage(submodules_to_freeze=["encoder"])
 
     with pytest.raises(CheckpointConfigError, match=r"context\.model is None"):
@@ -335,20 +308,14 @@ async def test_freezing_raises_without_a_model() -> None:
 
 @pytest.mark.asyncio
 async def test_gradient_validation_sees_the_rooted_modules(caplog: pytest.LogCaptureFixture) -> None:
-    """Gradient validation resolves against the same root as the freeze.
+    """Gradient validation uses the same root as the freeze.
 
-    Pointed at the unresolved model it misses every path and silently passes, making
-    the safety net as vacuous as the bug it exists to catch. Driven through
-    ``process()`` so the module under test is the one ``process`` chose, not one this
-    test resolved for it.
-
-    A parameter is re-armed by a stand-in "modifier" that runs between the freeze and
-    the validation, so validation has something real to complain about.
+    A stub makes one parameter trainable again before validation, so validation must warn.
     """
     model = WrappedModel()
 
     class _ReArmingFreeze(FreezingModifierStage):
-        """Freezes, then re-arms one parameter before validation runs."""
+        """Freezes, then makes one parameter trainable again."""
 
         def _freeze_submodule_by_name(self, module: nn.Module, target_name: str) -> int | None:
             frozen = super()._freeze_submodule_by_name(module, target_name)

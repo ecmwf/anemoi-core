@@ -769,19 +769,14 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
 
 
 class CheckpointPipelineSchema(BaseModel):
-    """Declarative checkpoint pipeline consumed by ``build_checkpoint_pipeline``.
-
-    Each block is a Hydra ``_target_`` config: at most one acquisition ``source`` and
-    one ``loading`` strategy, plus an ordered list of ``modifiers`` applied after
-    loading. A ``None`` field configures no checkpoint pipeline (a fresh run).
-    """
+    """Checkpoint pipeline config. Each block is a Hydra ``_target_`` config."""
 
     source: GenericSchema | None = Field(default=None)
-    "Acquisition source stage (LocalSource / RunIdSource / S3Source / HTTPSource)."
+    "Source of the checkpoint (LocalSource, RunIdSource, S3Source or HTTPSource)."
     loading: GenericSchema | None = Field(default=None)
-    "Loading strategy stage (WeightsOnlyLoader / TransferLearningLoader / WarmStartLoader / ColdStartLoader)."
+    "Loading strategy (WeightsOnlyLoader, TransferLearningLoader, WarmStartLoader or ColdStartLoader)."
     modifiers: list[GenericSchema] | None = Field(default=None)
-    "Ordered model-modifier stages applied after loading (e.g. FreezingModifierStage)."
+    "Model modifiers, applied in order after loading (e.g. FreezingModifierStage)."
 
 
 class BaseTrainingSchema(BaseModel):
@@ -792,17 +787,12 @@ class BaseTrainingSchema(BaseModel):
     )
     "Options forwarded to ``Variable.check_compatibility`` when checking checkpoint vs. current dataset (fine-tuning)."
     allow_variable_subset: bool = Field(default=False)
-    "Allow fine-tuning into a model with FEWER variables (issue #838). When True, a checkpoint"
-    " whose variable set is a superset of the current dataset's is accepted instead of raising,"
-    " provided the shared variables keep the same relative order; the variable-dependent layers"
-    " are re-initialised for the reduced set. Default False keeps the strict variable-order check."
+    "Allow fine-tuning on a subset of the checkpoint variables (issue #838)."
+    " The shared variables must keep the same order. Variable-dependent layers are re-initialised."
     update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
     "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
     checkpoint: CheckpointPipelineSchema | None = Field(default=None)
-    "Checkpoint pipeline configuration consumed by build_checkpoint_pipeline: an"
-    " acquisition source under `source`, a loading strategy under `loading`, and/or an"
-    " ordered list of model `modifiers`, each a Hydra `_target_` block. None configures"
-    " no checkpoint pipeline (a fresh run)."
+    "Checkpoint pipeline: `source`, `loading` and `modifiers`. If None, the run starts from scratch."
     deterministic: bool = Field(default=False)
     "This flag sets torch.backends.cudnn.deterministic. It may reduce nondeterminism, but does not guarantee exact"
     " reproducibility."

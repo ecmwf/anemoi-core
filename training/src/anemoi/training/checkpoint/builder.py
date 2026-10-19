@@ -7,19 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Build a checkpoint pipeline from a training configuration.
+"""Build a checkpoint pipeline from the ``training.checkpoint`` config.
 
-This module turns the declarative ``training.checkpoint`` configuration into an
-executable :class:`~anemoi.training.checkpoint.pipeline.CheckpointPipeline`. All
-pipeline stages (source, loading, modifiers) live under that one namespace. It is the single
-place that knows the configuration namespace and the canonical stage order, so a
-caller (the trainer, or a test) can obtain a ready-to-run pipeline from a config
-object without hand-assembling stages.
-
-Stage order is fixed: the acquisition source first, then the loading strategy,
-then any model-modifier stages in the order they are listed. Absent blocks are
-skipped; a configuration with no checkpoint section yields an empty (no-op)
-pipeline and the run starts from freshly initialised weights.
+The stage order is: source, loading, modifiers. The builder skips absent blocks.
+If there is no checkpoint config, the pipeline is empty.
 """
 
 from __future__ import annotations
@@ -37,11 +28,7 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-# Configuration namespace for the checkpoint pipeline, kept together so the field
-# names can be changed in a single edit without touching the build logic. All three
-# stages live under ``training.checkpoint``: ``source`` and ``loading`` are single
-# ``_target_`` objects (exactly one source, exactly one loader); ``modifiers`` is an
-# ordered list of ``_target_`` objects applied in list order after loading.
+# Config keys under ``training.checkpoint``. ``modifiers`` is a list, applied in order.
 _TRAINING = "training"
 _CHECKPOINT = "checkpoint"
 _SOURCE = "source"
@@ -54,16 +41,10 @@ def _inject_run_lineage(
     parent_run_server2server: str | None,
     fork_run_server2server: str | None,
 ) -> Any:
-    """Merge runtime server-to-server lineage onto a source config that accepts it.
+    """Add the run lineage IDs to the source config if the source accepts them.
 
-    The lineage ids are logger-derived at runtime and cannot be expressed in the
-    static Hydra config, so the trainer passes them to the builder. Which sources
-    accept them is the source class's business
-    (:meth:`~anemoi.training.checkpoint.sources.base.CheckpointSource.with_run_lineage`):
-    ``RunIdSource`` and its subclasses merge the non-``None`` values, every other
-    source returns its config untouched, so instantiation never fails with an
-    unknown keyword argument. An unresolvable ``_target_`` is left for the pipeline
-    build to report.
+    The logger sets the lineage IDs at runtime, thus they are not in the Hydra config.
+    Sources that do not accept lineage return the config unchanged.
     """
     from anemoi.training.checkpoint.sources.base import source_class_from_config
 
@@ -74,26 +55,20 @@ def _inject_run_lineage(
 
 
 def loader_restores_training_state(cfg: DictConfig) -> bool:
-    """Whether the configured loading strategy declares ``restores_training_state``.
+    """Return whether the configured loader declares ``restores_training_state``.
 
-    Resolves ``training.checkpoint.loading._target_`` to its class and reads the
-    declared
-    :attr:`~anemoi.training.checkpoint.loading.base.LoadingStrategy.restores_training_state`
-    rather than matching the class name: a subclass, or any third-party strategy
-    that declares the attribute, is treated exactly like ``WarmStartLoader``.
+    The check reads the class attribute, not the class name, so subclasses also match.
 
     Parameters
     ----------
     cfg : DictConfig
-        A training-run configuration.
+        The training config.
 
     Returns
     -------
     bool
-        ``True`` when a loading strategy is configured and declares the attribute.
-        An absent or empty ``_target_`` yields ``False``; so does one that cannot be
-        imported, which the pipeline build then reports as a ``CheckpointConfigError``
-        naming the target.
+        ``False`` if the ``_target_`` is absent, empty or cannot be imported.
+        The pipeline build reports an import failure.
     """
     loading = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}", default=None)
     if loading is None:
@@ -112,25 +87,20 @@ def loader_restores_training_state(cfg: DictConfig) -> bool:
 
 
 def resumes_via_lightning(cfg: DictConfig) -> bool:
-    """Whether ``Trainer.fit(ckpt_path=)`` owns the checkpoint load for this config.
+    """Return whether ``Trainer.fit(ckpt_path=)`` loads the checkpoint.
 
-    ``True`` when no loading strategy is configured (a bare
-    ``training.checkpoint.source`` resumes the run, the way the removed
-    ``training.run_id`` did) or when the configured strategy declares
-    ``restores_training_state`` (``WarmStartLoader``). Every decision about a
-    resume keys on this: the builder emits a resolve-only source and no loading
-    stage, and the trainer keeps ``ckpt_path`` so Lightning loads the weights,
-    optimizer, scheduler and loop progress together in one pass.
+    This is ``True`` if there is no loader, or if the loader declares
+    ``restores_training_state``. Then Lightning loads the full training state.
 
     Parameters
     ----------
     cfg : DictConfig
-        A training-run configuration.
+        The training config.
 
     Returns
     -------
     bool
-        ``True`` when Lightning owns the load.
+        ``True`` if Lightning loads the checkpoint.
     """
     loading = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}", default=None)
     if loading is None:
@@ -139,21 +109,14 @@ def resumes_via_lightning(cfg: DictConfig) -> bool:
 
 
 def reject_unsupported_warm_start(cfg: DictConfig) -> None:
-    """Reject a resume that has nothing to resume from.
+    """Reject a warm start that has no source.
 
-    A loading strategy that declares ``restores_training_state`` needs a
-    ``training.checkpoint.source``: Lightning's ``ckpt_path`` load is the whole
-    restore, and the source stage is what produces the file it reads. Any source
-    will do — a remote one is downloaded to a node-local file that the trainer hands
-    to Lightning and deletes afterwards. Called at the start of
-    :func:`build_checkpoint_pipeline` so the checkpoint module owns this composition
-    rule.
+    Lightning needs a file for ``ckpt_path``, and the source gives that file.
 
     Raises
     ------
     CheckpointConfigError
-        If ``training.checkpoint.loading`` declares ``restores_training_state`` but no
-        source is configured.
+        If the loader declares ``restores_training_state`` and there is no source.
     """
     if not loader_restores_training_state(cfg):
         return
@@ -174,7 +137,7 @@ def reject_unsupported_warm_start(cfg: DictConfig) -> None:
 
 
 def _resolve_only(source: Any) -> Any:
-    """Wrap a source config so only its ``resolve`` step runs (see ``ResolveOnlySource``)."""
+    """Wrap a source config so that only its ``resolve`` step runs."""
     return OmegaConf.create(
         {"_target_": "anemoi.training.checkpoint.sources.base.ResolveOnlySource", "source": source},
     )
@@ -187,66 +150,37 @@ def build_checkpoint_pipeline(
     fork_run_server2server: str | None = None,
     load_checkpoint: bool = True,
 ) -> CheckpointPipeline:
-    """Assemble a :class:`CheckpointPipeline` from a training configuration.
+    """Build a ``CheckpointPipeline`` from a training config.
 
     Parameters
     ----------
     cfg : DictConfig
-        A training-run configuration. The builder reads:
-
-        - ``cfg.training.checkpoint.source`` — a single ``_target_`` source stage
-          (acquisition layer), e.g. ``LocalSource`` / ``S3Source`` / ``HTTPSource``.
-        - ``cfg.training.checkpoint.loading`` — a single ``_target_`` loading
-          strategy, e.g. ``WeightsOnlyLoader`` / ``TransferLearningLoader`` /
-          ``WarmStartLoader`` / ``ColdStartLoader``.
-        - ``cfg.training.checkpoint.modifiers`` — an ordered list of
-          ``_target_`` modifier stages, applied in list order after loading.
-
-        Any of these blocks may be absent; an absent block contributes no stage.
-        When the run resumes through Lightning (no ``loading`` block, or a loader
-        that declares ``restores_training_state`` — see :func:`resumes_via_lightning`)
-        the source is wrapped so only its ``resolve`` step runs, no loading stage is
-        emitted, and modifiers still apply: ``Trainer.fit(ckpt_path=)`` performs the
-        one and only load.
+        The training config. The builder reads ``source``, ``loading`` and
+        ``modifiers`` under ``training.checkpoint``. All are optional.
+        If Lightning loads the checkpoint (see ``resumes_via_lightning``),
+        the source only resolves and there is no loading stage.
     parent_run_server2server : str, optional
-        Runtime server-to-server resume lineage id. When set and the source is a
-        ``RunIdSource``, it is merged into the source config before instantiation so
-        a cross-server resume resolves the same path the trainer would. Ignored
-        for other source types.
+        Server-to-server resume lineage ID. Only ``RunIdSource`` uses it.
     fork_run_server2server : str, optional
-        Runtime server-to-server fork lineage id, merged into a ``RunIdSource``
-        source config as above for the fork path.
+        Server-to-server fork lineage ID. Only ``RunIdSource`` uses it.
     load_checkpoint : bool, optional
-        Whether a checkpoint should be acquired and applied at all (default
-        ``True``). Pass ``False`` when the run must start from scratch despite a
-        configured source — the MLflow dry-run gate, where the parent run was
-        minted by ``anemoi-training mlflow prepare`` and has no checkpoint yet.
-        Only the source and loading stages are suppressed; modifier stages still
-        apply, so a freezing-only configuration is unaffected.
+        If ``False``, skip the source and loading stages. Modifiers still apply.
+        The MLflow dry run uses this.
 
     Returns
     -------
     CheckpointPipeline
-        A pipeline whose stages are ordered source → loader → modifiers. When
-        nothing is configured the pipeline has zero stages and is a no-op, so the
-        model is returned as instantiated.
+        Stages in the order source, loader, modifiers. Empty if nothing is configured.
     """
     if not isinstance(cfg, DictConfig):
         cfg = OmegaConf.create(cfg)
 
-    # Composition rule: a resume needs a source to hand Lightning.
     reject_unsupported_warm_start(cfg)
 
-    # Resume has one owner. Trainer.fit(ckpt_path=) reads the file and runs
-    # on_load_checkpoint on the dict it loads, so the pipeline only resolves the
-    # file (a download is kept on disk) and never loads it here: a pipeline load
-    # would read the file a second time and apply the corrections to a copy that
-    # Lightning then discards.
+    # On resume, Lightning loads the file. The pipeline only resolves it,
+    # because a second load here would be discarded.
     resume = resumes_via_lightning(cfg)
 
-    # A second, independent reason not to acquire anything: the caller says the run
-    # starts from scratch (the MLflow dry-run gate). Modifier stages run either way:
-    # they change the model, not the checkpoint.
     if not load_checkpoint:
         LOGGER.info("Checkpoint acquisition and loading suppressed by the caller; modifier stages still apply")
 
@@ -263,11 +197,8 @@ def build_checkpoint_pipeline(
 
     modifiers = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_MODIFIERS}", default=None)
     if modifiers:
-        # Preserve list order: modifiers execute in the order they are declared.
         stage_configs.extend(modifiers)
 
     LOGGER.debug("Building checkpoint pipeline from %d configured stage(s)", len(stage_configs))
 
-    # CheckpointPipeline instantiates each ``_target_`` config in order via Hydra
-    # and surfaces a CheckpointConfigError with context on failure.
     return CheckpointPipeline(stages=stage_configs)

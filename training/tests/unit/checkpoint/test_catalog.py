@@ -114,9 +114,7 @@ class TestComponentCatalog:
         assert "checkpoint" not in components
         # Only concrete classes should appear
         for name in components:
-            # Catalog names are derived from the class name (RunIdSource -> run_id).
-            # The Hydra config group is named separately (source=run) and is the
-            # user-facing surface; these names drive discovery and listing only.
+            # Names come from the class name (RunIdSource -> run_id), not the Hydra group.
             assert name in {"local", "http", "s3", "run_id"}, f"Unexpected component: {name}"
 
     @patch("anemoi.training.checkpoint.catalog.ComponentCatalog._discover_components")

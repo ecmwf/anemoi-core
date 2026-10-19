@@ -9,12 +9,8 @@
 
 """Regression tests for multi-dataset metadata preservation.
 
-``hyper_parameters["data_indices"]`` is a ``dict[str, IndexCollection]`` keyed
-by dataset name, and ``preserve_anemoi_metadata`` (shared by the loading
-strategies and ``BaseTrainingModule.on_load_checkpoint``) must build
-``model._ckpt_model_name_to_index`` as a dict keyed per dataset. The legacy
-single-IndexCollection shape is rejected with a ``TypeError`` pointing at the
-checkpoint migration path.
+``model._ckpt_model_name_to_index`` must be a dict keyed by dataset name.
+The legacy single-IndexCollection shape raises ``TypeError``.
 """
 
 from __future__ import annotations
@@ -60,12 +56,7 @@ async def test_multi_dataset_data_indices_builds_dataset_keyed_dict() -> None:
 
 @pytest.mark.asyncio
 async def test_single_dataset_legacy_shape_raises() -> None:
-    """Legacy single-IndexCollection shape is rejected.
-
-    The current loaders require the dataset-keyed dict, so an old single-dataset
-    checkpoint raises ``TypeError`` pointing at the migration path; it must be
-    upgraded before loading.
-    """
+    """Legacy single-IndexCollection shape raises ``TypeError``. Migrate it first."""
     name_to_index = {"temperature": 0, "wind_u": 1, "wind_v": 2}
     checkpoint_data = {
         "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},

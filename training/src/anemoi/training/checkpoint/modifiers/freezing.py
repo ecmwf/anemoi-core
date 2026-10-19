@@ -31,32 +31,24 @@ class FreezingModifierStage(ModelModifier):
 
     Submodules are addressed by their full path *within the root*: an exact
     child name or a dot-separated path (e.g., "processor", "encoder.global").
-    A bare name does not match nested submodules — the full dot-path
-    resolution introduced in #1159.
+    A bare name does not match nested submodules.
 
-    The root matters. ``context.model`` is the LightningModule, and the graph
-    model that owns ``encoder`` / ``processor`` / ``decoder`` is two attribute
-    hops below it (LightningModule -> AnemoiModelInterface -> the graph model).
-    Set ``submodule_root: model.model`` to address those, which is where the
-    legacy ``training.submodules_to_freeze`` path resolved names. The default
-    ``""`` resolves against ``context.model`` itself, for callers that hand the
-    stage a bare module.
+    ``context.model`` is the LightningModule. In a training run, set
+    ``submodule_root: model.model`` to address ``encoder``, ``processor`` and
+    ``decoder``.
 
     Parameters
     ----------
     submodules_to_freeze : list[str]
         Paths of the submodules to freeze, relative to ``submodule_root``.
     submodule_root : str, default ""
-        Path within ``context.model`` that ``submodules_to_freeze`` is resolved
-        against, itself in dot notation. ``""`` means ``context.model`` itself.
-        For a standard anemoi training run this is ``"model.model"``.
+        Dot path within ``context.model`` to resolve the submodules against.
+        ``""`` means ``context.model``. For a training run, use ``"model.model"``.
     strict : bool, default False
         If True, raise an error when a specified module is not found.
-        If False, log a warning and continue. Either way, a config where *no*
-        listed path resolves is an error — see :meth:`process`.
+        If False, log a warning and continue. If no path resolves, always raise.
     validate_gradients : bool, default True
-        If True, verify after freezing that the named submodules hold no
-        trainable parameters.
+        If True, make sure that the frozen submodules have no trainable parameters.
     """
 
     def __init__(
@@ -96,11 +88,8 @@ class FreezingModifierStage(ModelModifier):
         Raises
         ------
         CheckpointConfigError
-            If ``submodule_root`` does not resolve, or if not one of the listed
-            submodules resolves against it. A freezing config that freezes
-            nothing is never what the user meant, so it is an error regardless
-            of ``strict`` — ``strict`` governs tolerance of *one* missing name,
-            not of an entirely inert config.
+            If ``submodule_root`` does not resolve, or if no listed submodule
+            resolves. This does not depend on ``strict``.
         ValueError
             If ``strict`` and a listed submodule is not found.
         """
@@ -154,21 +143,17 @@ class FreezingModifierStage(ModelModifier):
         Parameters
         ----------
         model : torch.nn.Module or None
-            The context's model, i.e. the LightningModule in a training run.
+            The context model (the LightningModule in a training run).
 
         Returns
         -------
         torch.nn.Module
-            The module that ``submodules_to_freeze`` is resolved against.
-            ``get_submodule("")`` returns the module itself, so the default
-            root costs nothing.
+            The root module for ``submodules_to_freeze``.
 
         Raises
         ------
         CheckpointConfigError
-            If there is no model, or ``submodule_root`` does not resolve. A
-            root that silently fell back to the model would reintroduce the
-            defect this parameter exists to fix.
+            If there is no model, or ``submodule_root`` does not resolve.
         """
         from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
@@ -189,14 +174,12 @@ class FreezingModifierStage(ModelModifier):
             raise CheckpointConfigError(msg, config_path=_CONFIG_PATH) from exc
 
     def _raise_nothing_resolved(self) -> None:
-        """Refuse a freezing config where not one listed submodule resolved.
+        """Raise because no listed submodule resolved.
 
         Raises
         ------
         CheckpointConfigError
-            Always. Mirrors ``CheckpointPipeline._verify_weights_loaded``:
-            configured-but-did-nothing is a hard error, because the alternative
-            is a fine-tune that silently trains every parameter.
+            Always. Otherwise the fine-tune silently trains all parameters.
         """
         from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
@@ -216,8 +199,7 @@ class FreezingModifierStage(ModelModifier):
 
         ``target_name`` is resolved with :meth:`torch.nn.Module.get_submodule`,
         i.e. as a full path relative to ``module``. There is no name-match
-        search at arbitrary depth — a bare name only resolves a direct child,
-        the dot-path semantics introduced in #1159.
+        search at arbitrary depth — a bare name only resolves a direct child.
 
         Parameters
         ----------
@@ -254,9 +236,7 @@ class FreezingModifierStage(ModelModifier):
         Parameters
         ----------
         model : torch.nn.Module
-            The **resolved root** — the same module the freezing loop used. Passing
-            the unresolved ``context.model`` here would make every lookup miss and
-            the validation vacuous, which is the defect this stage was fixed for.
+            The resolved root, not ``context.model``.
         """
         for module_name in self.submodules_to_freeze:
             try:

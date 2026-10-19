@@ -7,14 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Parity coverage for run-lineage, MLflow, determinism and guard behaviour.
+"""Parity tests for run lineage, MLflow tags, rank guards and seeding.
 
-These tests drive the trainer run-identity wiring (``_update_paths``,
-``_check_dry_run``, ``run_id`` fall-through, ``_skip_lightning_restore``), the
-MLflow lineage tagging on resume/fork, the acquisition-layer rank-0 gate, the
-checkpoint builder error surface, and the seed-scaling rule. Each test exercises
-the real classes/functions on CPU with no network access; remote downloads are
-replaced with a synthetic writer, but the code under test always runs.
+The tests run on CPU with no network access. A fake writer replaces remote downloads.
 """
 
 from __future__ import annotations
@@ -47,7 +42,7 @@ _RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
 
 
 # ---------------------------------------------------------------------------
-# _update_paths: lineage-append to the output paths (train.py:758-781)
+# _update_paths: add the run ID to the output paths
 # ---------------------------------------------------------------------------
 
 
@@ -59,7 +54,7 @@ def _paths_namespace(
     checkpoints_root: str,
     plots: str,
 ) -> SimpleNamespace:
-    """Minimal ``self`` for ``AnemoiTrainer._update_paths`` (reads run_id + the run-identity accessors)."""
+    """Make a minimal ``self`` for ``AnemoiTrainer._update_paths``."""
     config = OmegaConf.create(
         {
             "system": {"output": {"checkpoints": {"root": checkpoints_root}, "plots": plots}},
@@ -102,7 +97,7 @@ def test_update_paths_uses_fork_run_id_when_run_id_absent() -> None:
 
     AnemoiTrainer._update_paths(ns)
 
-    # The fork branch appends only to checkpoints.root; plots is left untouched.
+    # A fork changes only checkpoints.root, not plots.
     assert ns.config.system.output.checkpoints.root == Path("/base/ckpts", "fork-999")
     assert ns.config.system.output.plots == "/base/plots"
 
@@ -123,7 +118,7 @@ def test_update_paths_server2server_takes_precedence_over_run_id() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _check_dry_run: rank-zero gate + parent-dry-run suppression (train.py:786-800)
+# _check_dry_run
 # ---------------------------------------------------------------------------
 
 
@@ -133,10 +128,10 @@ def _dry_run_namespace(
     parent_dry_run: bool,
     start_from_checkpoint: bool,
 ) -> SimpleNamespace:
-    """Minimal ``self`` for ``AnemoiTrainer._check_dry_run`` with an mlflow logger."""
+    """Make a minimal ``self`` for ``AnemoiTrainer._check_dry_run`` with an MLflow logger."""
     config = OmegaConf.create(
         {
-            # A path that does not exist on disk -> ``.is_dir()`` is False.
+            # This path does not exist.
             "system": {"output": {"checkpoints": {"root": "/nonexistent/checkpoint/dir"}}},
             "training": {},
         },
@@ -153,16 +148,9 @@ def _dry_run_namespace(
 
 
 def test_check_dry_run_reaches_the_same_answer_on_every_rank(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The dry-run decision must not be rank-dependent.
+    """All ranks get the same dry-run result.
 
-    It used to be ``@rank_zero_only``, which was harmless while
-    ``start_from_checkpoint`` only fed ``last_checkpoint``. Now it decides whether
-    the checkpoint pipeline acquires anything at all, so a rank-0-only answer would
-    have rank 0 start fresh while every other rank looked for a checkpoint that was
-    never written — rank 0 succeeds, the rest crash. There is no process group yet
-    at trainer construction to broadcast over, and both inputs (an MLflow tag, a
-    directory on the shared filesystem) are rank-independent, so every rank simply
-    computes it.
+    The result controls checkpoint loading, so a rank-0-only result makes other ranks fail.
     """
     monkeypatch.setattr(rank_zero_only, "rank", 1)
     ns = _dry_run_namespace(fork_run_id=None, parent_dry_run=True, start_from_checkpoint=True)
@@ -190,12 +178,12 @@ def test_check_dry_run_preserves_start_from_checkpoint_for_fork(monkeypatch: pyt
     AnemoiTrainer._check_dry_run(ns)
 
     assert ns.dry_run is True
-    # A fork keeps start_from_checkpoint even when the parent is dry.
+    # A fork keeps start_from_checkpoint if the parent is dry.
     assert ns.start_from_checkpoint is True
 
 
 # ---------------------------------------------------------------------------
-# _skip_lightning_restore: loader-class resolution (train.py:825-844)
+# _skip_lightning_restore
 # ---------------------------------------------------------------------------
 
 
@@ -215,15 +203,12 @@ def _skip_restore_namespace(loading: dict | None) -> SimpleNamespace:
 def test_skip_lightning_restore_matches_loading_strategy(loading: dict, expected: bool) -> None:
     ns = _skip_restore_namespace(loading)
 
-    # An unresolvable _target_ must be caught (ImportError/ValueError) rather than
-    # propagating. It does not count as a resume: treating it as one would let the
-    # builder skip the loader and silently resume past a typo, whereas building the
-    # loader stage raises a CheckpointConfigError naming the target before fit().
+    # An unknown _target_ is not a resume. The loader build then reports the error before fit().
     assert AnemoiTrainer._skip_lightning_restore(ns) is expected
 
 
 # ---------------------------------------------------------------------------
-# MLflow lineage tags on resume / fork (logger.py:_get_mlflow_run_params)
+# MLflow lineage tags on resume and fork
 # ---------------------------------------------------------------------------
 
 
@@ -234,7 +219,7 @@ def _create_parent_run(
     tags: dict[str, str] | None = None,
     params: dict[str, str] | None = None,
 ) -> str:
-    """Create a finished MLflow run in an offline file store and return its id."""
+    """Make a finished MLflow run in an offline file store and return its ID."""
     mlflow.set_tracking_uri(f"file://{save_dir}")
     with contextlib.suppress(mlflow.exceptions.MlflowException):
         mlflow.create_experiment(experiment_name)
@@ -261,7 +246,7 @@ def test_mlflow_resume_sets_resumed_run_tag(tmp_path: Path) -> None:
     parent = _create_parent_run(save_dir, "exp")
 
     logger = _offline_logger(save_dir, "exp", run_id=parent, fork_run_id=None)
-    child_id = logger.run_id  # forces the child run to be created
+    child_id = logger.run_id  # creates the child run
 
     client = mlflow.MlflowClient(f"file://{save_dir}")
     run = client.get_run(child_id)
@@ -300,7 +285,7 @@ def test_mlflow_in_place_resume_when_child_disabled(tmp_path: Path) -> None:
 
     logger = _offline_logger(save_dir, "exp", run_id=parent, fork_run_id=None, on_resume_create_child=False)
 
-    # The same run continues in place: no child, no parentRunId link, status RUNNING.
+    # The same run continues. There is no child run.
     assert logger.run_id == parent
     assert "mlflow.parentRunId" not in logger.tags
     client = mlflow.MlflowClient(f"file://{save_dir}")
@@ -336,7 +321,7 @@ def test_mlflow_fork_extracts_server2server_fork_lineage(tmp_path: Path) -> None
 
 
 # ---------------------------------------------------------------------------
-# Builder / pipeline error surface (builder.py + pipeline.py)
+# Builder and pipeline errors
 # ---------------------------------------------------------------------------
 
 
@@ -355,7 +340,7 @@ def test_builder_malformed_source_target_raises_config_error() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Acquisition-layer rank-0 gate (sources/base.py:is_rank_zero, used by run.py)
+# Rank-0 gate in the sources
 # ---------------------------------------------------------------------------
 
 
@@ -375,7 +360,7 @@ def test_rank_env_priority_rank_beats_local_rank(tmp_path: Path, monkeypatch: py
     monkeypatch.setenv("LOCAL_RANK", "1")
     context = _missing_run_context(tmp_path)
 
-    # RANK is read first and stops the search: rank 0 -> missing checkpoint raises.
+    # RANK has priority. On rank 0, a missing checkpoint raises.
     with pytest.raises(RuntimeError, match="run_missing"):
         asyncio.run(RunIdSource(run_id="run_missing").process(context))
 
@@ -422,20 +407,20 @@ def test_resolve_path_invariant_to_dataset_count() -> None:
 
     assert single_path == multi_path
     assert single_path == Path("/base", "run_A", "last.ckpt")
-    # No dataset name leaks into the resolved path.
+    # The path contains no dataset name.
     assert "ds1" not in single_path.parts
     assert "ds2" not in multi_path.parts
 
 
 # ---------------------------------------------------------------------------
-# run_id fall-through to a fresh uuid4 (run_identity_from_config + run_id)
+# run_id falls back to a new uuid4
 # ---------------------------------------------------------------------------
 
 
 def test_run_identity_noop_then_uuid_fallthrough() -> None:
     from anemoi.training.checkpoint.sources.run import run_identity_from_config
 
-    # No RunIdSource configured -> no run identity, and run_id falls through to uuid4.
+    # With no RunIdSource, run_id is a new uuid4.
     assert run_identity_from_config(OmegaConf.create({"training": {}})) == (None, None)
 
     ns = SimpleNamespace(_run_identity=(None, None), _resume_run_id=None, _fork_run_id=None, logger=None)
@@ -449,17 +434,16 @@ def test_run_id_is_uuid_for_keyless_run() -> None:
 
     run_id = AnemoiTrainer.run_id.func(ns)
 
-    # Parses cleanly as a canonical uuid4 string.
     assert uuid.UUID(run_id).version == 4
 
 
 # ---------------------------------------------------------------------------
-# __init__ writes the resolved run_id back onto config (train.py:177-181)
+# __init__ writes run_id into the config
 # ---------------------------------------------------------------------------
 
 
 def _fresh_trainer_config(checkpoints_path: Path) -> DictConfig:
-    """A minimal, validation-skipped trainer config for a fresh (no-source) run."""
+    """Return a minimal trainer config for a new run, with no validation."""
     config_dict = {
         "config_validation": False,
         "training": {},
@@ -493,19 +477,19 @@ def test_init_writes_resolved_run_id_back_into_config(tmp_path: Path) -> None:
     ):
         trainer = AnemoiTrainer(config=config)
 
-    # A fresh run mints a uuid and writes it back onto training.run_id.
+    # A new run writes its uuid into training.run_id.
     assert trainer.config.training.run_id == trainer.run_id
     assert uuid.UUID(trainer.config.training.run_id).version == 4
 
 
 # ---------------------------------------------------------------------------
-# Remote sources publish their kept download as the local checkpoint path (http.py)
+# Remote sources set the downloaded file as the checkpoint path
 # ---------------------------------------------------------------------------
 
 
 async def _fake_download(url: str, dest: Path, max_retries: int, timeout: int) -> None:
-    """Stand in for the network download by writing a real checkpoint to ``dest``."""
-    del url, max_retries, timeout  # signature must match download_with_retry; only dest is used
+    """Write a checkpoint to ``dest`` instead of a download."""
+    del url, max_retries, timeout  # same signature as download_with_retry
     torch.save({"state_dict": {"weight": torch.zeros(2, 2)}}, dest)
 
 
@@ -516,8 +500,7 @@ def test_http_source_publishes_kept_download_as_checkpoint_path() -> None:
         result = asyncio.run(HTTPSource(url="https://models.example.int/model.ckpt").process(context))
 
     try:
-        # The download is kept and recorded as the local path, so a trainer reading
-        # last_checkpoint from this context can hand it to Trainer.fit(ckpt_path=).
+        # The trainer can give this path to Trainer.fit(ckpt_path=).
         assert result.checkpoint_path is not None
         assert result.checkpoint_path.exists()
         assert result.temporary_files == [result.checkpoint_path]
@@ -527,7 +510,7 @@ def test_http_source_publishes_kept_download_as_checkpoint_path() -> None:
 
 
 # ---------------------------------------------------------------------------
-# An env-sourced base seed is returned unscaled (seeding.py get_base_seed)
+# A base seed from the environment is not scaled
 # ---------------------------------------------------------------------------
 
 
@@ -536,7 +519,5 @@ def test_env_seed_is_returned_unscaled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SLURM_JOB_ID", raising=False)
     monkeypatch.setenv("CUSTOM_BASE_SEED", "42")
 
-    # get_base_seed returns the configured seed as-is. The legacy "<1000 -> *1000"
-    # scaling was removed in #1228 (seed-overflow fix): small seeds are now expanded
-    # safely by np.random.SeedSequence inside derive_seed, so no pre-scaling is needed.
+    # derive_seed uses np.random.SeedSequence, so small seeds need no scaling.
     assert get_base_seed(base_seed_env="CUSTOM_BASE_SEED") == 42

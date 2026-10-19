@@ -7,20 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Parity coverage for the checkpoint acquisition (sources) subsystem.
+"""Parity tests for the checkpoint sources (local, run ID, HTTP and S3).
 
-These tests close verification gaps in the source layer that no other suite
-exercises: LocalSource path precedence / tilde-expansion / symlink resolution,
-the ``CheckpointNotFoundError`` suggestion branches, the torch.load error-type
-wrapping into ``CheckpointLoadError``, the ``weights_only=False`` guarantee,
-RunIdSource rank-detection fall-throughs (LOCAL_RANK / SLURM_PROCID /
-JSM_NAMESPACE_RANK / malformed / negative), the auxiliary-key Lightning branch
-in ``detect_format_from_data``, HTTPSource construction/validation and checksum
-handling, and the S3 URL-parsing / ``supports`` / URL-resolution pure logic.
-
-Everything runs on CPU with no network. Remote downloads are replaced by a
-synthetic writer that copies a real on-disk checkpoint into the destination the
-source chose, so the source code under test always runs end to end.
+The tests run on CPU with no network. A fake download copies a local
+checkpoint to the destination path.
 """
 
 from __future__ import annotations
@@ -59,7 +49,7 @@ _RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
 
 
 def _write_state_dict_ckpt(path: Path) -> Path:
-    """Write a minimal Lightning-shaped checkpoint to ``path``."""
+    """Write a minimal Lightning-style checkpoint to ``path``."""
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"state_dict": {"layer.weight": torch.zeros(2, 2)}}, path)
     return path
@@ -81,7 +71,7 @@ def _clear_rank_env(monkeypatch: pytest.MonkeyPatch, keep: Iterable[str] = ()) -
 
 
 async def test_local_source_explicit_path_overrides_context_checkpoint_path(tmp_path: Path) -> None:
-    """An explicit ``path=`` wins over an already-set ``context.checkpoint_path``."""
+    """An explicit ``path=`` has priority over ``context.checkpoint_path``."""
     configured = _write_state_dict_ckpt(tmp_path / "configured" / "model.ckpt")
     other = _write_state_dict_ckpt(tmp_path / "other" / "other.ckpt")
 
@@ -93,7 +83,7 @@ async def test_local_source_explicit_path_overrides_context_checkpoint_path(tmp_
 
 
 async def test_local_source_expands_tilde_in_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``~/...`` is expanded via expanduser before loading; the recorded path is absolute."""
+    """``~`` is expanded and the recorded path is absolute."""
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_state_dict_ckpt(tmp_path / "model.ckpt")
 
@@ -107,7 +97,7 @@ async def test_local_source_expands_tilde_in_path(tmp_path: Path, monkeypatch: p
 
 
 async def test_local_source_resolves_symlink_to_canonical_path(tmp_path: Path) -> None:
-    """A symlinked checkpoint is followed to its canonical target by resolve()."""
+    """A symlink resolves to its target path."""
     actual = _write_state_dict_ckpt(tmp_path / "actual.ckpt")
     link = tmp_path / "link.ckpt"
     link.symlink_to(actual)
@@ -119,7 +109,7 @@ async def test_local_source_resolves_symlink_to_canonical_path(tmp_path: Path) -
 
 
 async def test_local_source_missing_file_lists_similar_files(tmp_path: Path) -> None:
-    """A missing file whose parent holds other checkpoints suggests those files."""
+    """A missing file gives suggestions for other checkpoints in its directory."""
     directory = tmp_path / "ckpts"
     directory.mkdir()
     (directory / "epoch_1.ckpt").write_bytes(b"x")
@@ -133,7 +123,7 @@ async def test_local_source_missing_file_lists_similar_files(tmp_path: Path) -> 
 
 
 async def test_local_source_missing_parent_directory_reports_missing_directory(tmp_path: Path) -> None:
-    """A missing parent directory produces the 'Directory does not exist' suggestion."""
+    """A missing parent directory gives the 'Directory does not exist' hint."""
     context = CheckpointContext(checkpoint_path=tmp_path / "no_such_dir" / "model.ckpt")
     with pytest.raises(CheckpointNotFoundError) as excinfo:
         await LocalSource().process(context)
@@ -172,7 +162,7 @@ async def test_local_source_wraps_load_errors(
     factory: Callable[[Path], Path],
     expected_type: type[Exception],
 ) -> None:
-    """torch.load failures are wrapped in CheckpointLoadError, preserving the original error type."""
+    """A torch.load error becomes CheckpointLoadError and keeps the original error."""
     bad_path = factory(tmp_path)
     context = CheckpointContext(checkpoint_path=bad_path)
 
@@ -183,7 +173,7 @@ async def test_local_source_wraps_load_errors(
 
 
 async def test_local_source_loads_lightning_metadata_requiring_weights_only_false(tmp_path: Path) -> None:
-    """LocalSource loads Lightning metadata that ``weights_only=True`` would reject."""
+    """LocalSource loads Lightning metadata that ``weights_only=True`` rejects."""
     ckpt = {
         "pytorch-lightning_version": "2.2.0",
         "callbacks": {"cb": {"best": 0.1}},
@@ -193,8 +183,7 @@ async def test_local_source_loads_lightning_metadata_requiring_weights_only_fals
     path = tmp_path / "lightning.ckpt"
     torch.save(ckpt, path)
 
-    # The fixture is only meaningful if weights_only=True genuinely rejects it,
-    # otherwise the assertion below could not distinguish the two load modes.
+    # Make sure that weights_only=True rejects this checkpoint.
     with pytest.raises(pickle.UnpicklingError):
         torch.load(path, weights_only=True, map_location="cpu")
 
@@ -211,7 +200,7 @@ async def test_local_source_s3_scheme_path_treated_as_local_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An ``s3://`` string given to LocalSource is a literal local path -> NotFound (no dispatch)."""
+    """LocalSource treats an ``s3://`` string as a local path, which is not found."""
     monkeypatch.chdir(tmp_path)
     context = CheckpointContext(checkpoint_path="s3://bucket/model.ckpt")
     with pytest.raises(CheckpointNotFoundError):
@@ -245,7 +234,7 @@ def test_local_supports_scheme_urls_false() -> None:
 
 
 def test_checkpoint_not_found_error_is_deterministic(tmp_path: Path) -> None:
-    """Repeated construction on the same missing path yields the same type and message."""
+    """Two errors for the same missing path have the same type and message."""
     missing = tmp_path / "no_such_dir" / "model.ckpt"
     first = CheckpointNotFoundError(missing)
     second = CheckpointNotFoundError(missing)
@@ -266,7 +255,7 @@ async def test_run_source_defers_on_nonzero_rank_from_fallback_var(
     monkeypatch: pytest.MonkeyPatch,
     rank_var: str,
 ) -> None:
-    """When RANK is unset, a non-zero fallback rank variable defers instead of raising."""
+    """If RANK is not set, a non-zero fallback rank variable defers and does not raise."""
     _clear_rank_env(monkeypatch)
     monkeypatch.setenv(rank_var, "1")
 
@@ -281,7 +270,7 @@ async def test_run_source_rank_precedence_rank_over_local_rank(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """RANK is read before LOCAL_RANK: RANK=1 defers even though LOCAL_RANK=0."""
+    """RANK has priority over LOCAL_RANK."""
     _clear_rank_env(monkeypatch)
     monkeypatch.setenv("RANK", "1")
     monkeypatch.setenv("LOCAL_RANK", "0")
@@ -298,7 +287,7 @@ async def test_run_source_invalid_rank_treated_as_rank_zero(
     monkeypatch: pytest.MonkeyPatch,
     rank_value: str,
 ) -> None:
-    """A malformed or negative RANK is treated conservatively as rank 0 (raises on missing)."""
+    """A malformed or negative RANK counts as rank 0."""
     _clear_rank_env(monkeypatch)
     monkeypatch.setenv("RANK", rank_value)
 
@@ -311,7 +300,7 @@ async def test_run_source_sets_resolved_checkpoint_path_metadata(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A resolved run checkpoint records its full path string in metadata."""
+    """A resolved run checkpoint records its full path in metadata."""
     _clear_rank_env(monkeypatch)
     root = tmp_path / "job" / "checkpoints"
     resolved = _write_state_dict_ckpt(tmp_path / "job" / "run_A" / "last.ckpt")
@@ -329,7 +318,7 @@ async def test_run_source_sets_resolved_checkpoint_path_metadata(
 
 
 def test_detect_format_lightning_from_auxiliary_keys_without_version() -> None:
-    """Two Lightning auxiliary keys (no version key) are enough to classify as lightning."""
+    """Two Lightning keys with no version key give the lightning format."""
     data = {"callbacks": {}, "optimizer_states": [{}]}
     assert detect_format_from_data(data) == "lightning"
 
@@ -350,7 +339,7 @@ def test_detect_format_defaults_to_pytorch_for_unrecognized() -> None:
 
 
 def test_detect_format_is_deterministic_across_calls() -> None:
-    """Format detection is a pure function of the data: repeated calls agree."""
+    """Two calls on the same data give the same format."""
     data = {"callbacks": {}, "optimizer_states": [{}]}
     first = detect_format_from_data(data)
     second = detect_format_from_data(data)
@@ -361,7 +350,7 @@ async def test_local_source_path_expansion_is_deterministic(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Loading ``~/model.ckpt`` twice resolves to the same absolute path each time."""
+    """Two loads of ``~/model.ckpt`` give the same absolute path."""
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_state_dict_ckpt(tmp_path / "model.ckpt")
 
@@ -377,7 +366,7 @@ async def test_local_source_path_expansion_is_deterministic(
 
 
 def test_load_and_populate_mutates_context_in_place() -> None:
-    """``_load_and_populate`` attaches the raw dict and sets the detected format in place."""
+    """``_load_and_populate`` sets the raw dict and the format on the context."""
     raw_data = {"layer.weight": torch.zeros(2, 2)}
     context = CheckpointContext()
 
@@ -483,12 +472,12 @@ def test_http_supports_rejects_local_path() -> None:
 
 
 # ---------------------------------------------------------------------------
-# HTTPSource download / checksum handling (download replaced by a local copy)
+# HTTPSource download and checksum (fake download)
 # ---------------------------------------------------------------------------
 
 
 def _copy_download_stub(source_file: Path, recorded: list[Path]) -> Callable[..., Awaitable[Path]]:
-    """Build an async replacement for ``download_with_retry`` that copies a real file."""
+    """Make a fake ``download_with_retry`` that copies ``source_file``."""
 
     async def _fake_download(*, url: str, dest: Path, max_retries: int, timeout: int) -> Path:  # noqa: ARG001
         recorded.append(Path(dest))
@@ -508,7 +497,7 @@ def _garbage_download_stub(recorded: list[Path]) -> Callable[..., Awaitable[Path
 
 
 async def test_http_source_checksum_match_loads_and_sets_metadata(tmp_path: Path) -> None:
-    """A matching checksum loads the checkpoint and records http source metadata."""
+    """A correct checksum loads the checkpoint and records HTTP metadata."""
     good = _write_state_dict_ckpt(tmp_path / "good.ckpt")
     checksum = calculate_checksum(good)
     recorded: list[Path] = []
@@ -538,7 +527,7 @@ async def test_http_source_checksum_mismatch_raises_validation_error(tmp_path: P
 
 
 async def test_http_source_without_checksum_loads(tmp_path: Path) -> None:
-    """With no expected checksum the download still loads (integrity unverified)."""
+    """With no expected checksum, the download loads."""
     good = _write_state_dict_ckpt(tmp_path / "good.ckpt")
     recorded: list[Path] = []
 
@@ -550,10 +539,9 @@ async def test_http_source_without_checksum_loads(tmp_path: Path) -> None:
 
 
 async def test_http_source_keeps_download_on_load_error() -> None:
-    """A corrupt download raises CheckpointLoadError; the file is kept and its path published.
+    """A corrupt download raises CheckpointLoadError, but the file and its path are kept.
 
-    Downloads outlive the source stage (a resume hands them to ``Trainer.fit(ckpt_path=)``)
-    and are deleted by the trainer through ``context.temporary_files``.
+    The trainer deletes downloads through ``context.temporary_files``.
     """
     recorded: list[Path] = []
     context = CheckpointContext()
@@ -576,7 +564,7 @@ async def test_http_source_keeps_download_on_load_error() -> None:
 
 
 # ---------------------------------------------------------------------------
-# S3Source pure logic (URL parsing, resolution, supports) — no download/network
+# S3Source URL logic (no download)
 # ---------------------------------------------------------------------------
 
 
@@ -591,7 +579,7 @@ def test_s3_source_url_none_by_default() -> None:
 
 
 def test_s3_resolve_url_constructor_takes_precedence() -> None:
-    """A constructor URL wins over a URL present in context.config."""
+    """A constructor URL has priority over the URL in context.config."""
     source = S3Source(url="s3://source1/model.ckpt")
     context = CheckpointContext(config={"url": "s3://source2/model.ckpt"})
     assert source._resolve_url(context) == "s3://source1/model.ckpt"
@@ -663,13 +651,8 @@ def test_s3_supports_rejects_local_path() -> None:
 
 
 def test_s3_source_does_not_bind_anemoi_utils_at_module_level() -> None:
-    """S3Source is importable/instantiable without the optional S3 dependency loaded.
-
-    The download helper is imported lazily inside ``_download_from_s3``, so the
-    module must not expose ``download_file`` at import time.
-    """
+    """S3Source imports and constructs without the optional S3 dependency."""
     import anemoi.training.checkpoint.sources.s3 as s3_module
 
     assert not hasattr(s3_module, "download_file")
-    # Construction must not require the optional dependency.
     assert S3Source(url="s3://bucket/key.ckpt").url == "s3://bucket/key.ckpt"

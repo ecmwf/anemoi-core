@@ -38,9 +38,8 @@ class S3Source(CheckpointSource):
     """Checkpoint source for S3-compatible storage.
 
     Downloads a checkpoint file from an S3 bucket to a node-local temporary
-    location and loads it with PyTorch. The download is kept on disk and
-    registered on the context so ``Trainer.fit(ckpt_path=)`` can read it on a
-    resume; the trainer deletes it once training has finished. Download is
+    location and loads it with PyTorch. The file stays on disk until the
+    trainer deletes it after training. Download is
     delegated to ``anemoi.utils.remote.s3.download_file`` (obstore-backed),
     which handles endpoint URLs, credentials, and per-bucket configuration
     from ``~/.config/anemoi/settings.toml``.
@@ -62,18 +61,15 @@ class S3Source(CheckpointSource):
         self.url = url
 
     async def resolve(self, context: CheckpointContext) -> Path:
-        """Download the S3 object to a temporary file and publish its path.
+        """Download the S3 object to a temporary file and set its path on the context.
 
-        The file is kept (and registered on ``context.temporary_files``) so a
-        resume can hand it to ``Trainer.fit(ckpt_path=)``; a failed download is
-        removed before the error propagates.
+        If the download fails, the file is deleted.
 
         Parameters
         ----------
         context : CheckpointContext
             Pipeline context. If ``self.url`` is None, the URL is read
-            from ``context.config["url"]``. ``checkpoint_path`` is set to
-            the download.
+            from ``context.config["url"]``.
 
         Returns
         -------
@@ -112,9 +108,7 @@ class S3Source(CheckpointSource):
         ----------
         context : CheckpointContext
             Pipeline context. If ``self.url`` is None, the URL is read
-            from ``context.config["url"]``. ``checkpoint_path`` is set to
-            the downloaded file, which stays on disk until the trainer
-            deletes it.
+            from ``context.config["url"]``.
 
         Returns
         -------

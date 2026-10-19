@@ -246,7 +246,7 @@ def test_combined_loss_with_multiscale_mixed_mode_rejected() -> None:
 
 
 def test_checkpoint_pipeline_schema_valid() -> None:
-    """source/loading/modifiers validate and expose the _target_ alias + extra kwargs."""
+    """A full config validates and keeps _target_ and extra kwargs."""
     schema = CheckpointPipelineSchema(
         source={"_target_": "anemoi.training.checkpoint.sources.local.LocalSource", "path": "/ckpt.pt"},
         loading={"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader", "strict": False},
@@ -258,7 +258,7 @@ def test_checkpoint_pipeline_schema_valid() -> None:
 
 
 def test_checkpoint_pipeline_schema_all_none() -> None:
-    """An empty checkpoint block is valid (a fresh run with no pipeline)."""
+    """An empty checkpoint block is valid."""
     schema = CheckpointPipelineSchema()
     assert schema.source is None
     assert schema.loading is None

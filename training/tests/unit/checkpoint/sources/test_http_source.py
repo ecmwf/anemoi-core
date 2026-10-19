@@ -191,9 +191,7 @@ class TestHTTPSourceProcess:
     ) -> None:
         """The download stays on disk and its path is on the context.
 
-        A resume hands that path to ``Trainer.fit(ckpt_path=)`` after the pipeline
-        returns, so the file must outlive the source stage; the trainer deletes it
-        once training has finished, via ``context.temporary_files``.
+        A resume gives this path to ``Trainer.fit(ckpt_path=)``. The trainer deletes it later.
         """
         created_paths: list[Path] = []
 
@@ -221,7 +219,7 @@ class TestHTTPSourceProcess:
         mock_download: AsyncMock,
         source: HTTPSource,
     ) -> None:
-        """A download that fails to load is kept too, so it can be inspected."""
+        """A download that fails to load is also kept."""
         created_paths: list[Path] = []
 
         async def _track_and_corrupt(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
@@ -249,7 +247,7 @@ class TestHTTPSourceProcess:
         mock_download: AsyncMock,
         source: HTTPSource,
     ) -> None:
-        """Only a completed download is kept; a failed one is removed with its error."""
+        """A failed download is removed."""
         created_paths: list[Path] = []
 
         async def _track_and_fail(url: str, dest: Path, **kwargs: Any) -> Path:
@@ -276,7 +274,7 @@ class TestHTTPSourceProcess:
         mock_download: AsyncMock,
         simple_state_dict: dict,
     ) -> None:
-        """Checksum mismatch raises CheckpointValidationError and leaves no file behind."""
+        """Checksum mismatch raises CheckpointValidationError and removes the file."""
         created_paths: list[Path] = []
         save = _make_download_side_effect(simple_state_dict).side_effect
 
@@ -293,7 +291,6 @@ class TestHTTPSourceProcess:
         with pytest.raises(CheckpointValidationError, match="Checksum mismatch"):
             await source.process(context)
 
-        # A rejected download is removed with its error, and never registered for later cleanup.
         assert len(created_paths) == 1
         assert not created_paths[0].exists()
         assert context.temporary_files == []

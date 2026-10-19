@@ -43,9 +43,7 @@ class HTTPSource(CheckpointSource):
     Downloads a checkpoint file to a node-local temporary location using
     :func:`~anemoi.training.checkpoint.utils.download_with_retry`,
     which provides async streaming with exponential-backoff retry.
-    The download is kept on disk and registered on the context so
-    ``Trainer.fit(ckpt_path=)`` can read it on a resume; the trainer
-    deletes it once training has finished.
+    The file stays on disk until the trainer deletes it after training.
 
     The URL is provided at construction time (compatible with Hydra
     instantiation) rather than via ``context.checkpoint_path``,
@@ -101,16 +99,14 @@ class HTTPSource(CheckpointSource):
         self.expected_checksum = expected_checksum
 
     async def resolve(self, context: CheckpointContext) -> Path:
-        """Download the checkpoint to a temporary file and publish its path.
+        """Download the checkpoint to a temporary file and set its path on the context.
 
-        The file is kept (and registered on ``context.temporary_files``) so a
-        resume can hand it to ``Trainer.fit(ckpt_path=)``; a failed or
-        checksum-rejected download is removed before the error propagates.
+        If the download or checksum fails, the file is deleted.
 
         Parameters
         ----------
         context : CheckpointContext
-            Pipeline context; ``checkpoint_path`` is set to the download.
+            Pipeline context.
 
         Returns
         -------
@@ -131,7 +127,7 @@ class HTTPSource(CheckpointSource):
 
         LOGGER.info("Downloading checkpoint from %s", self.url)
 
-        # Create a named temp file that persists until the trainer deletes it
+        # The trainer deletes this file after training.
         with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as tmp_fd:
             tmp_path = Path(tmp_fd.name)
 
@@ -175,8 +171,7 @@ class HTTPSource(CheckpointSource):
         Parameters
         ----------
         context : CheckpointContext
-            Pipeline context. ``checkpoint_path`` is set to the downloaded
-            file, which stays on disk until the trainer deletes it.
+            Pipeline context.
 
         Returns
         -------

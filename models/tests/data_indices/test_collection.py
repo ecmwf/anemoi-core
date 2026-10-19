@@ -231,45 +231,45 @@ def test_data_indices_cross_space_positions_with_target(
     assert data_indices_with_target.model_output_in_data_output_contiguous_length == 1
 
 
-# ── compare_variables: fine-tuning into a model with FEWER variables (issue #838) ──
+# ── compare_variables with a variable subset (#838) ──
 
 _CKPT = {"a": 0, "b": 1, "c": 2, "d": 3, "e": 4}
 
 
 def test_compare_variables_subset_raises_without_allow_subset(data_indices) -> None:
-    """A strict variable subset raises by default — this is the #838 pre-fix failure."""
-    data = {"a": 0, "b": 1, "c": 2}  # dropped d, e
+    """A variable subset raises by default."""
+    data = {"a": 0, "b": 1, "c": 2}
     with pytest.raises(ValueError, match="variable order"):
         data_indices.compare_variables(_CKPT, data)
 
 
 def test_compare_variables_subset_passes_with_allow_subset(data_indices) -> None:
-    """A strict subset with the same relative order is accepted when allow_subset=True (#838 fix)."""
-    data = {"a": 0, "b": 1, "c": 2}  # dropped the tail
-    data_indices.compare_variables(_CKPT, data, allow_subset=True)  # must not raise
+    """A subset in the same order passes with allow_subset=True."""
+    data = {"a": 0, "b": 1, "c": 2}
+    data_indices.compare_variables(_CKPT, data, allow_subset=True)
 
 
 def test_compare_variables_subset_dropping_middle_reindexes_ok(data_indices) -> None:
-    """Dropping middle variables re-indexes the survivors; still accepted with allow_subset."""
-    data = {"a": 0, "c": 1, "e": 2}  # relative order a<c<e preserved despite reindexing
-    data_indices.compare_variables(_CKPT, data, allow_subset=True)  # must not raise
+    """A subset without middle variables passes with allow_subset."""
+    data = {"a": 0, "c": 1, "e": 2}
+    data_indices.compare_variables(_CKPT, data, allow_subset=True)
 
 
 def test_compare_variables_reordered_subset_still_raises(data_indices) -> None:
-    """A subset that reorders the shared variables is a genuine mismatch even with allow_subset."""
-    data = {"c": 0, "a": 1, "e": 2}  # relative order changed
+    """A reordered subset raises, also with allow_subset."""
+    data = {"c": 0, "a": 1, "e": 2}
     with pytest.raises(ValueError):
         data_indices.compare_variables(_CKPT, data, allow_subset=True)
 
 
 def test_compare_variables_added_variable_still_raises(data_indices) -> None:
-    """Introducing a variable absent from the checkpoint is not a subset; allow_subset does not help."""
-    data = {"a": 0, "b": 1, "new": 2}  # 'new' not in the checkpoint
+    """A variable that is not in the checkpoint raises, also with allow_subset."""
+    data = {"a": 0, "b": 1, "new": 2}
     with pytest.raises(ValueError, match="variable order"):
         data_indices.compare_variables(_CKPT, data, allow_subset=True)
 
 
 def test_compare_variables_exact_match_passes(data_indices) -> None:
-    """An exact match never raises, regardless of allow_subset."""
+    """An exact match passes with and without allow_subset."""
     data_indices.compare_variables(_CKPT, _CKPT, allow_subset=False)
     data_indices.compare_variables(_CKPT, _CKPT, allow_subset=True)

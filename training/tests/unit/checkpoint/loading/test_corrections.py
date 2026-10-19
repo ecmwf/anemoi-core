@@ -7,12 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Tests for ``apply_checkpoint_corrections``: one function, one order.
+"""Tests for ``apply_checkpoint_corrections`` and the order of its steps.
 
-The load-time corrections (format migrations, the trainable-edge-permutation
-migration, the processor-statistics refresh) used to be three calls repeated per
-loading strategy, in an order that differed from the Lightning hook's. They are
-now one function whose order is pinned here.
+Order: format migrations, edge-permutation migration, processor refresh.
 """
 
 from __future__ import annotations
@@ -34,7 +31,7 @@ if TYPE_CHECKING:
 
 
 class _Inner(nn.Module):
-    """The AnemoiModelInterface-equivalent: processors live here, keyed without ``model.``."""
+    """Inner model (like AnemoiModelInterface). Holds the processors."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -43,7 +40,7 @@ class _Inner(nn.Module):
 
 
 class _Outer(nn.Module):
-    """LightningModule-shaped wrapper whose ``.model`` is the inner interface."""
+    """LightningModule-like wrapper around ``_Inner``."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -51,7 +48,7 @@ class _Outer(nn.Module):
 
 
 class _OuterWithoutProcessors(nn.Module):
-    """A wrapper whose inner model has no processors to re-inject from."""
+    """Wrapper whose inner model has no processors."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -59,7 +56,7 @@ class _OuterWithoutProcessors(nn.Module):
 
 
 def _stale_checkpoint(model: nn.Module) -> dict[str, Any]:
-    """A checkpoint whose every entry is obviously stale (all 99.0)."""
+    """Return a checkpoint with all values set to 99.0."""
     return {"state_dict": {key: torch.full_like(value, 99.0) for key, value in model.state_dict().items()}}
 
 
@@ -70,13 +67,9 @@ def _config(*, states: bool) -> DictConfig:
 
 
 def test_edge_perm_migration_runs_before_the_processor_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The order is edge-perm, then refresh, and it is load-bearing.
+    """The processor refresh runs after the edge-permutation migration.
 
-    The trainable-edge-permutation migration takes the live model and may rebuild
-    the state dict. Stand in for that with a migration that returns a new dict
-    without the processor entries: if the refresh ran first, the buffers it injected
-    from the live model would be discarded by the rebuild; run after, it puts them
-    back.
+    The migration can rebuild the state dict. If the refresh ran first, the rebuild would remove its entries.
     """
     model = _Outer()
     checkpoint = _stale_checkpoint(model)
@@ -92,12 +85,12 @@ def test_edge_perm_migration_runs_before_the_processor_refresh(monkeypatch: pyte
     live = model.model.state_dict()
     assert torch.equal(state_dict["model.pre_processors.weight"], live["pre_processors.weight"])
     assert torch.equal(state_dict["model.pre_processors.bias"], live["pre_processors.bias"])
-    # Entries outside the refresh are the checkpoint's own.
+    # Other entries come from the checkpoint.
     assert torch.all(state_dict["model.body.weight"] == 99.0)
 
 
 def test_format_migrations_run_first_and_edge_perm_sees_their_result(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The ledger-driven migration may replace the dict; every later step works on the replacement."""
+    """Later steps use the dict that the format migrations return."""
     model = _Outer()
     original = _stale_checkpoint(model)
     replacement = {"state_dict": dict(original["state_dict"]), "_migrated": True}
@@ -115,7 +108,6 @@ def test_format_migrations_run_first_and_edge_perm_sees_their_result(monkeypatch
 
     assert seen_by_edge_perm == [replacement]
     assert corrected is replacement
-    # The refresh worked on the replacement too.
     assert torch.equal(
         corrected["state_dict"]["model.pre_processors.weight"],
         model.model.state_dict()["pre_processors.weight"],
@@ -127,7 +119,7 @@ def test_none_checkpoint_is_returned_untouched() -> None:
 
 
 def test_missing_config_disables_the_refresh() -> None:
-    """A context without a config (strategies driven in isolation) leaves the processors alone."""
+    """Without a config, the processors are not refreshed."""
     model = _Outer()
     checkpoint = _stale_checkpoint(model)
 
@@ -137,11 +129,9 @@ def test_missing_config_disables_the_refresh() -> None:
 
 
 def test_refresh_without_an_inner_model_keeps_the_processor_entries(caplog: pytest.LogCaptureFixture) -> None:
-    """Dropping without re-injecting would leave a strict load missing keys, so nothing is dropped.
+    """Without an inner ``.model``, the refresh keeps the checkpoint processor entries.
 
-    The refresh reads the inner ``.model``; a module that has none (a bare model handed to
-    a strategy directly) cannot supply replacements, and the checkpoint's own entries are
-    kept rather than silently removed.
+    Removing them would make a strict load fail with missing keys.
     """
     model = nn.Linear(2, 2)
     checkpoint = {"state_dict": {"model.pre_processors.weight": torch.full((2, 2), 99.0), "model.body": torch.ones(1)}}
@@ -154,11 +144,7 @@ def test_refresh_without_an_inner_model_keeps_the_processor_entries(caplog: pyte
 
 
 def test_refresh_that_drops_but_cannot_reinject_is_logged_as_a_warning(caplog: pytest.LogCaptureFixture) -> None:
-    """A model without the checkpoint's processors drops them, and says so out loud.
-
-    That case is legitimate (a checkpoint with tendency processors loaded into a
-    model without them), so it is not an error, but it must not hide at debug level.
-    """
+    """If the model has no matching processors, the refresh removes them and logs a WARNING."""
     model = _OuterWithoutProcessors()
     checkpoint = {
         "state_dict": {"model.pre_processors.weight": torch.full((2, 2), 99.0), "model.weight": torch.ones(2, 2)},

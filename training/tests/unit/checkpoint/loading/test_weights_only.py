@@ -60,7 +60,7 @@ async def test_weights_only_sets_metadata() -> None:
 
 
 class TwoLayerModel(nn.Module):
-    """A trunk shared with the checkpoint, plus a variable-dependent head."""
+    """Shared trunk and a head whose size depends on the variables."""
 
     def __init__(self, head_out: int) -> None:
         super().__init__()
@@ -74,12 +74,9 @@ def _checkpoint_for(model: nn.Module) -> dict:
 
 @pytest.mark.asyncio
 async def test_weights_only_skip_mismatched_loads_the_compatible_parameters() -> None:
-    """Fine-tuning onto fewer variables loads the trunk and re-initialises the head.
+    """``skip_mismatched`` loads the trunk and keeps the new head.
 
-    `strict=False` cannot express this: PyTorch records a size mismatch outside its
-    `if strict:` block, so the load raised before the variable-subset check was ever
-    reached. That is what made the advertised `allow_variable_subset` workflow
-    unusable on this strategy.
+    ``strict=False`` alone is not sufficient: PyTorch raises on size mismatch in all cases.
     """
     source = TwoLayerModel(head_out=8)
     target = TwoLayerModel(head_out=4)
@@ -88,7 +85,6 @@ async def test_weights_only_skip_mismatched_loads_the_compatible_parameters() ->
     context = CheckpointContext(model=target, checkpoint_data=_checkpoint_for(source))
     result = await WeightsOnlyLoader(strict=False, skip_mismatched=True).process(context)
 
-    # Trunk transferred; head left at its initialised value.
     assert torch.equal(target.trunk.weight, source.trunk.weight)
     assert torch.equal(target.head.weight, head_before)
     assert result.metadata["skipped_params"].keys() == {"head.weight", "head.bias"}
@@ -100,7 +96,7 @@ async def test_weights_only_skip_mismatched_loads_the_compatible_parameters() ->
 async def test_weights_only_skip_mismatched_warns_about_untrained_parameters(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The skip is loud: nothing else would reveal that part of the model is random."""
+    """Skipped parameters cause a WARNING."""
     context = CheckpointContext(
         model=TwoLayerModel(head_out=4),
         checkpoint_data=_checkpoint_for(TwoLayerModel(head_out=8)),
@@ -115,11 +111,7 @@ async def test_weights_only_skip_mismatched_warns_about_untrained_parameters(
 
 @pytest.mark.asyncio
 async def test_weights_only_skip_mismatched_does_not_drop_unexpected_keys() -> None:
-    """Only shapes are skipped; the key set stays ``strict``'s business.
-
-    Dropping keys the model does not have would make ``strict=True``
-    unfalsifiable, so a genuinely wrong checkpoint still fails.
-    """
+    """``skip_mismatched`` skips only shape mismatches. ``strict`` still rejects unexpected keys."""
     target = TwoLayerModel(head_out=4)
     checkpoint = _checkpoint_for(TwoLayerModel(head_out=8))
     checkpoint["state_dict"]["not_a_real_layer.weight"] = torch.randn(3, 3)
@@ -131,7 +123,7 @@ async def test_weights_only_skip_mismatched_does_not_drop_unexpected_keys() -> N
 
 @pytest.mark.asyncio
 async def test_weights_only_skip_mismatched_refuses_an_empty_load() -> None:
-    """Skipping *everything* is the wrong checkpoint, not a deliberate reduction."""
+    """If all parameters are skipped, the load fails."""
     context = CheckpointContext(
         model=nn.Linear(10, 4),
         checkpoint_data={"state_dict": {"weight": torch.randn(8, 10), "bias": torch.randn(8)}},
@@ -143,7 +135,7 @@ async def test_weights_only_skip_mismatched_refuses_an_empty_load() -> None:
 
 @pytest.mark.asyncio
 async def test_cold_start_inherits_skip_mismatched() -> None:
-    """ColdStartLoader takes WeightsOnlyLoader's constructor, so it gets this too."""
+    """ColdStartLoader also accepts ``skip_mismatched``."""
     source = TwoLayerModel(head_out=8)
     target = TwoLayerModel(head_out=4)
 

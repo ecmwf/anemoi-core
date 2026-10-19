@@ -36,43 +36,32 @@ class WeightsOnlyLoader(LoadingStrategy):
 
     This is the simplest loading strategy: extract the state dict from
     checkpoint data and load it into the model. The optimizer, scheduler and
-    loop progress in the checkpoint are not used (the trainer withholds
-    ``ckpt_path`` from Lightning after a pipeline load).
+    loop progress are not used.
 
     Behavior
     --------
     - Loads weights with ``strict=self.strict`` (default ``True``)
     - **Leaves training-progress metadata untouched** (``epoch``,
-      ``global_step``). A prior pipeline stage that set these values keeps
-      them. If you want explicit zero-reset semantics, use
-      :class:`ColdStartLoader`.
+      ``global_step``). To reset them to zero, use :class:`ColdStartLoader`.
 
     Composes naturally inside larger pipelines where another stage owns
     training-progress state. For top-level "fresh training from pretrained
     weights" use :class:`ColdStartLoader` instead.
 
-    ``strict`` governs the *key set*. It cannot express tolerance of a shape
-    change: PyTorch records a size mismatch in ``error_msgs`` outside its
-    ``if strict:`` block, so ``strict=False`` still raises on one. That is what
-    ``skip_mismatched`` is for, and the two are independent.
+    ``strict`` controls the key set only. ``strict=False`` still raises on a shape
+    mismatch; use ``skip_mismatched`` for that.
 
     Parameters
     ----------
     strict : bool, optional
         Whether to require an exact match between checkpoint keys and
-        model keys (default: True). Missing keys raise ``CheckpointLoadError``.
+        model keys (default: True).
     skip_mismatched : bool, optional
-        Whether to load a checkpoint whose variable-dependent layers have a
-        different shape from the model's, skipping those parameters and leaving
-        them at their initialised values (default: ``False`` — a shape mismatch
-        is an error). Use it to fine-tune onto a dataset with fewer variables,
-        together with ``training.allow_variable_subset``.
-
-        Only shape mismatches are skipped, never keys the model does not have —
-        that is ``strict``'s job, and silently dropping them would make
-        ``strict=True`` unfalsifiable. Skipped parameters are logged at WARNING
-        and recorded in ``context.metadata["skipped_params"]``, because with them
-        gone nothing else would notice that part of the model is still random.
+        Whether to skip parameters with a different shape and keep their
+        initial values (default: False). Use it with
+        ``training.allow_variable_subset`` to fine-tune on fewer variables.
+        Skipped parameters are logged and recorded in
+        ``context.metadata["skipped_params"]``.
     """
 
     def __init__(self, strict: bool = True, skip_mismatched: bool = False) -> None:
@@ -119,24 +108,19 @@ class WeightsOnlyLoader(LoadingStrategy):
 
     @staticmethod
     def _shape_mismatched_keys(model: Any, state_dict: dict[str, Any]) -> dict[str, str]:
-        """Keys present in both model and checkpoint whose tensor shapes differ.
-
-        Narrower than
-        :func:`~anemoi.training.checkpoint.loading.utils.filter_state_dict`, which
-        also drops keys the target lacks — that is ``strict``'s business.
+        """Return the keys in both model and checkpoint whose tensor shapes differ.
 
         Parameters
         ----------
         model : torch.nn.Module
-            The model being loaded into.
+            The target model.
         state_dict : dict
-            The checkpoint's state dict.
+            The checkpoint state dict.
 
         Returns
         -------
         dict[str, str]
-            Key to a human-readable reason, in the same format
-            ``filter_state_dict`` uses so the two report identically.
+            Key to reason, in the ``filter_state_dict`` format.
         """
         target = model.state_dict()
         return {
@@ -154,30 +138,26 @@ class WeightsOnlyLoader(LoadingStrategy):
         state_dict: dict[str, Any],
         skipped: dict[str, str],
     ) -> None:
-        """Load a state dict with the shape-mismatched parameters already removed.
+        """Load a state dict with the shape-mismatched parameters removed.
 
-        The removed keys read as *missing* to PyTorch, so the load itself has to be
-        non-strict. When ``strict`` was requested its guarantee is re-applied here
-        instead, over the keys that were not deliberately skipped — otherwise
-        ``skip_mismatched`` would quietly disable ``strict`` altogether.
+        The load is non-strict, so this method does the ``strict`` check itself,
+        excluding the skipped keys.
 
         Parameters
         ----------
         context : CheckpointContext
-            Pipeline context, used for the checkpoint path in error messages and
-            to record the skipped parameters.
+            Pipeline context.
         state_dict : dict
-            The checkpoint state dict, already filtered.
+            The filtered checkpoint state dict.
         skipped : dict[str, str]
-            Key to reason for every parameter removed.
+            Key to reason for each removed parameter.
 
         Raises
         ------
         CheckpointIncompatibleError
-            If nothing at all could be loaded, or if ``strict`` and there are
-            missing/unexpected keys beyond the skipped ones.
+            If nothing loads, or if ``strict`` and other keys do not match.
         CheckpointLoadError
-            If the load fails for any other reason.
+            If the load fails for a different reason.
         """
         from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
 
@@ -222,9 +202,8 @@ class TransferLearningLoader(LoadingStrategy):
     Filters the source state dict to only include keys compatible with the
     target model (matching key names and tensor shapes), then loads the
     filtered weights. Keys that are missing in the target or have shape
-    mismatches are skipped rather than raising an error; every skip is logged
-    at WARNING with its reason, because the counts alone hide that a resized
-    model may have transferred almost nothing.
+    mismatches are skipped rather than raising an error. Each skip is logged
+    as a warning.
 
     The filter is non-mutating: it builds a new dict and never modifies the
     original ``checkpoint_data["state_dict"]``.
@@ -294,20 +273,16 @@ class TransferLearningLoader(LoadingStrategy):
 
     @staticmethod
     def _warn_about_skipped(transferred: int, skipped: dict[str, str]) -> None:
-        """Name every checkpoint tensor that did not transfer, and why.
+        """Log each checkpoint tensor that did not transfer, and the reason.
 
-        A change to the model width reshapes nearly every tensor, so a run can
-        "load" a checkpoint and still train from random initialisation almost
-        everywhere while the counts read as a success. Shape mismatches leave the
-        matching model parameters at their initial values; keys the model does
-        not have are simply dropped.
+        A model width change can make almost all tensors skip.
 
         Parameters
         ----------
         transferred : int
-            Number of parameters that were loaded.
+            Number of loaded parameters.
         skipped : dict[str, str]
-            Skipped checkpoint keys mapped to the reason from ``filter_state_dict``.
+            Skipped key to reason.
         """
         shape_mismatched = sum("Shape mismatch" in reason for reason in skipped.values())
         headline = (
@@ -322,35 +297,22 @@ class TransferLearningLoader(LoadingStrategy):
 
 
 class WarmStartLoader(LoadingStrategy):
-    """Marker strategy: resume an interrupted run through Lightning's ``ckpt_path`` load.
+    """Marker strategy: resume a run through ``Trainer.fit(ckpt_path=)``.
 
-    Selecting it tells the trainer that ``Trainer.fit(ckpt_path=)`` performs the
-    one and only load of the checkpoint — weights, optimizer, scheduler and loop
-    progress together — with ``BaseTrainingModule.on_load_checkpoint`` applying
-    the corrections to the dict Lightning loads. The pipeline's part of a resume
-    is to make the checkpoint reachable as a local file (the source's ``resolve``
-    step) and to run the modifier stages; the builder emits no loading stage, so
-    this class's ``process`` never runs in a training run.
-
-    The model has to match the checkpoint exactly. Lightning's load is strict,
-    so a changed architecture (an extra decoder, a resized layer) fails naming
-    the missing or unexpected keys. ``WeightsOnlyLoader(skip_mismatched=True)``
-    and ``TransferLearningLoader`` are the strategies for a changed model.
-
-    The class exists so ``training/checkpoint/loading=warm_start`` composes like
-    every other strategy; :attr:`restores_training_state` is what the trainer and
-    builder read.
+    Lightning loads the full training state. The builder adds no loading stage,
+    so ``process`` does not run. The model must match the checkpoint exactly.
+    For a changed model, use ``WeightsOnlyLoader`` or ``TransferLearningLoader``.
     """
 
     restores_training_state = True
 
     async def process(self, context: CheckpointContext) -> NoReturn:
-        """Refuse to run: a resume is loaded by ``Trainer.fit(ckpt_path=)``, not here.
+        """Raise: ``Trainer.fit(ckpt_path=)`` loads a resume, not this stage.
 
         Parameters
         ----------
         context : CheckpointContext
-            Unused; the pipeline never routes a resume through this stage.
+            Not used.
 
         Returns
         -------
@@ -360,9 +322,7 @@ class WarmStartLoader(LoadingStrategy):
         Raises
         ------
         RuntimeError
-            Always. Reaching this means the pipeline was hand-built with a
-            ``WarmStartLoader`` stage; use the builder, or a loading strategy
-            that applies weights.
+            Always.
         """
         del context
         msg = "WarmStartLoader is a marker: resume loads happen in Trainer.fit(ckpt_path=)"

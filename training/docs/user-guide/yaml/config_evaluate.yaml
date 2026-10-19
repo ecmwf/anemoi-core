@@ -1,7 +1,6 @@
 # Minimal Hydra override file for `anemoi-training evaluate`.
 #
-# A checkpoint MUST be specified via training.checkpoint.source (Pattern A or B
-# below) — evaluating a randomly-initialised model is almost certainly an error.
+# You MUST set training.checkpoint.source (Pattern A or B below).
 #
 # Usage:
 #   anemoi-training evaluate --config-path /path/to/overrides --config-name config_evaluate
@@ -18,8 +17,7 @@ training:
       _target_: anemoi.training.checkpoint.sources.run.RunIdSource
       run_id: ???             # run_id of the completed training run
     loading:
-      # weights-only load: skips a redundant second load by Lightning and
-      # avoids restoring optimiser state — recommended for evaluation.
+      # Load only the weights. Recommended for evaluation.
       _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
 
 # Pattern B: point directly at a checkpoint file

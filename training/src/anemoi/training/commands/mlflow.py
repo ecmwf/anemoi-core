@@ -58,12 +58,7 @@ def prepare_mlflow_run_id(
         else client.create_experiment(config.diagnostics.log.mlflow.experiment_name)
     )
 
-    # An existing run to attach to is expressed as a resume RunIdSource under
-    # training.checkpoint.source (a fork mints a fresh run, so it falls through to
-    # creating one below). The source class decides what the block means
-    # (``run_identity_from_config`` resolves it through ``source_class_from_config``),
-    # so a subclass of RunIdSource attaches like its parent; matching the end of the
-    # ``_target_`` string here is how this command and the trainer drifted apart.
+    # A resume source gives an existing run. A fork makes a new run (see below).
     existing_run_id = run_identity_from_config(config)[0]
 
     if existing_run_id is not None:  # Existing run_id
@@ -73,10 +68,7 @@ def prepare_mlflow_run_id(
         except ValueError as e:
             msg = "Invalid run_id provided."
             raise ValueError(msg) from e
-        # Return the run being attached to, not None: the caller unpacks two values
-        # and writes them to the metadata file the launch script reads. Returning
-        # None raised ``TypeError: cannot unpack non-sequence NoneType object`` and
-        # left that file unwritten.
+        # The caller unpacks two values.
         return existing_run_id, experiment_id
 
     # Create a new run attached to the experiment

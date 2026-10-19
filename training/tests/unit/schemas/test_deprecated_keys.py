@@ -7,16 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Removed config keys raise an informative error pointing to the new surface.
-
-``training.run_id`` / ``training.fork_run_id`` / ``system.input.warm_start`` and the
-legacy weight-loading keys ``training.load_weights_only`` /
-``training.transfer_learning`` / ``training.submodules_to_freeze`` were removed in
-favour of the ``training.checkpoint.{source,loading,modifiers}`` surface. The
-``_check_deprecated_keys`` before-validator on :class:`SchemaCommonMixin` rejects them
-on key *presence* (so a leftover ``key: null`` is still flagged), on both the
-validated and the unvalidated config paths.
-"""
+"""Removed config keys raise an error that points to ``training.checkpoint``."""
 
 import pytest
 from pydantic import ValidationError
@@ -26,7 +17,7 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 
 
 def _nested(path_parts: tuple[str, ...], value: object) -> dict:
-    """Build a nested dict ``{a: {b: {c: value}}}`` from dotted path parts."""
+    """Build a nested dict from path parts."""
     config: dict = {}
     node = config
     for part in path_parts[:-1]:
@@ -52,7 +43,7 @@ def test_removed_key_raises(
     path_parts: tuple[str, ...],
     hint_fragment: str,
 ) -> None:
-    """A removed key with a value raises a hint naming the training.checkpoint replacement."""
+    """A removed key raises with a hint."""
     config = _nested(path_parts, "some-value")
     with pytest.raises(ValidationError, match=hint_fragment):
         schema_cls(**config)
@@ -71,7 +62,7 @@ def test_removed_key_raises(
     ],
 )
 def test_removed_key_present_as_null_still_raises(schema_cls: type, path_parts: tuple[str, ...]) -> None:
-    """The check fires on key presence, so a leftover ``key: null`` is still rejected."""
+    """A removed key set to ``null`` also raises."""
     config = _nested(path_parts, None)
     with pytest.raises(ValidationError, match="has been removed"):
         schema_cls(**config)
@@ -79,12 +70,9 @@ def test_removed_key_present_as_null_still_raises(schema_cls: type, path_parts: 
 
 @pytest.mark.parametrize("schema_cls", [BaseSchema, UnvalidatedBaseSchema])
 def test_submodules_to_freeze_hint_names_the_submodule_root(schema_cls: type) -> None:
-    """The freezing replacement names ``submodule_root``; without it the listed paths resolve nothing.
+    """The ``submodules_to_freeze`` hint names ``submodule_root``.
 
-    ``FreezingModifierStage`` resolves ``submodules_to_freeze`` under ``submodule_root``,
-    which defaults to the LightningModule itself. The removed key addressed the graph
-    model two attribute hops below it (``model.model``), so a hint that omitted the root
-    sent users to a configuration that freezes nothing.
+    Without the root, the paths do not resolve and nothing is frozen.
     """
     config = _nested(("training", "submodules_to_freeze"), ["encoder"])
     with pytest.raises(ValidationError, match=r"submodule_root: model\.model") as excinfo:

@@ -475,11 +475,6 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
                 self._check_dry_run(run)
                 mlflow_client.update_run(run_id=run_id, status="RUNNING")
                 tags["resumedRun"] = "True"
-            # A "fork run A into already-prepared run B" branch used to sit here, keyed
-            # on config_run_id and fork_run_id both being set. Run lineage now comes from
-            # a single ``training.checkpoint.source`` RunIdSource, which yields a resume
-            # id or a fork id but never both, so the branch became unreachable. Removed
-            # rather than left as dead code; see docs/user-guide/tracking.rst.
             # This block is used when a run is forked without no child runs
             else:
                 parent_run_id = fork_run_id
@@ -664,12 +659,9 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             have lists converted according to `expand_iterables`,
             by default None.
         clean_params : bool, optional
-            Whether to drop redundant and irrelevant fields via
-            ``clean_config_params`` before logging, by default True. Set False to
-            log the parameters verbatim.
+            If True, remove unnecessary fields with ``clean_config_params``, by default True.
         max_params_length : int | None, optional
-            Maximum number of params to be logged to MLflow. Exceeding it raises
-            ``ValueError`` rather than silently truncating.
+            Maximum number of params to log. More params raise ``ValueError``.
         """
         import mlflow
         from mlflow.entities import Param

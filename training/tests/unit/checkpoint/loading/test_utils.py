@@ -38,7 +38,7 @@ def test_filter_state_dict_removes_shape_mismatches() -> None:
 
 
 def test_filter_state_dict_does_not_mutate_input() -> None:
-    """``filter_state_dict`` returns new dicts and leaves its input unchanged."""
+    """``filter_state_dict`` does not change its input."""
     source = {"a": torch.randn(3), "b": torch.randn(5)}
     target = {"a": torch.randn(3), "b": torch.randn(10)}
     original_keys = set(source.keys())

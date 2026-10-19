@@ -57,11 +57,8 @@ def check_variables_metadata_compatibility(
         Per-dataset metadata from the current datamodule. Each entry is expected to have
         a ``"variables_metadata"`` key.
     allow_subset : bool, optional
-        When True, tolerate the current data being a subset of the checkpoint's variables
-        (fine-tuning into a model with FEWER variables, issue #838): variables present only
-        in the checkpoint are dropped before the check, since there is no counterpart in the
-        current data to compare against. Unit compatibility is still enforced for every
-        shared variable. Default False keeps the strict equal-variable-set check.
+        If True, ignore checkpoint-only variables (issue #838). The check still applies
+        to the shared variables. By default False.
     **options : object
         Additional keyword arguments forwarded to ``Variable.check_compatibility``
         (e.g. ``ignore_units``, ``ignore_processing_period``).
@@ -97,9 +94,7 @@ def check_variables_metadata_compatibility(
         ds_vars = {name: Variable.from_dict(name, data) for name, data in ds_var_meta.items()}
 
         if allow_subset:
-            # Fine-tuning into FEWER variables (issue #838): only the shared variables can be
-            # unit-checked. Variables present only in the checkpoint have no counterpart in the
-            # current data, so drop them here instead of failing the equal-set check.
+            # Check only the shared variables (issue #838).
             ckpt_only = [name for name in ckpt_vars if name not in ds_vars]
             if ckpt_only:
                 LOG.warning(

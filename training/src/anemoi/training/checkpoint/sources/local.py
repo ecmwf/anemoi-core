@@ -50,9 +50,7 @@ class LocalSource(CheckpointSource):
     >>> result.checkpoint_format
     'lightning'
 
-    An explicit ``path`` may be configured directly (the canonical way to load a
-    specific checkpoint file); when set it is used instead of
-    ``context.checkpoint_path``:
+    If ``path`` is set, it replaces ``context.checkpoint_path``:
 
     >>> source = LocalSource(path="/models/epoch_50.ckpt")
     """
@@ -61,25 +59,19 @@ class LocalSource(CheckpointSource):
         self.path = path
 
     async def resolve(self, context: CheckpointContext) -> Path:
-        """Resolve the configured or context path to an existing, canonical file.
+        """Resolve the checkpoint path to an absolute file and set it on the context.
 
-        Applies ``expanduser().resolve()`` and publishes the result on
-        ``context.checkpoint_path``, so what the trainer later hands to
-        ``Trainer.fit(ckpt_path=)`` is the file that was checked. A relative path
-        resolves against the process working directory, which is where the
-        training command was launched (the shipped config leaves
-        ``hydra.job.chdir`` unset); prefer an absolute path.
+        A relative path is relative to the launch directory. Use an absolute path.
 
         Parameters
         ----------
         context : CheckpointContext
-            Pipeline context; ``checkpoint_path`` is used when no explicit
-            ``path`` was configured.
+            Pipeline context. Its ``checkpoint_path`` is used if ``path`` is not set.
 
         Returns
         -------
         Path
-            The canonical checkpoint file.
+            The absolute checkpoint file path.
 
         Raises
         ------

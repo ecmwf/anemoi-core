@@ -7,23 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Run-lineage checkpoint source.
+"""Checkpoint source that finds a checkpoint from a run ID.
 
-``RunIdSource`` is the acquisition-layer source for *resume* and *fork* by run id.
-It resolves the checkpoint path from a run id —
-``<system.output.checkpoints.root>.parent/<id>/last.ckpt`` — and delegates the
-actual load to :class:`~anemoi.training.checkpoint.sources.local.LocalSource`,
-so load semantics are byte-identical to a local checkpoint.
-
-``fork=False`` resumes the run (same MLflow run); ``fork=True`` forks from it
-(a new MLflow run started from its weights). The trainer maps the source's
-``run_id``/``fork`` onto the run-identity that drives MLflow and the output
-paths, so this stage only has to find and load the checkpoint.
-
-Server-to-server lineage overrides (``parent_run_server2server`` /
-``fork_run_server2server``) are logger-derived at runtime, so the trainer injects
-them as constructor inputs — the acquisition layer must not import the
-trainer/MLflow logger.
+The path is ``<checkpoints.root>.parent/<id>/last.ckpt``. ``LocalSource`` loads it.
+``fork=False`` resumes the run. ``fork=True`` starts a new run from its weights.
 
 Example
 -------
@@ -59,16 +46,13 @@ class RunIdSource(CheckpointSource):
     Parameters
     ----------
     run_id : str, optional
-        The run id to resume from (``fork=False``) or fork from (``fork=True``).
-        When ``None`` the source is a no-op pass-through.
+        The run ID to resume or fork from.
     fork : bool, default False
-        ``False`` resumes ``run_id``; ``True`` forks a new run from ``run_id``.
+        If ``True``, fork a new run. If ``False``, resume the run.
     parent_run_server2server : str, optional
-        Server-to-server resume lineage id; when set it takes precedence over
-        ``run_id`` for the resume path (injected by the trainer).
+        Resume lineage ID. If set, it replaces ``run_id`` in the resume path.
     fork_run_server2server : str, optional
-        Server-to-server fork lineage id; when set it takes precedence over
-        ``run_id`` for the fork path (injected by the trainer).
+        Fork lineage ID. If set, it replaces ``run_id`` in the fork path.
     """
 
     def __init__(
@@ -85,15 +69,12 @@ class RunIdSource(CheckpointSource):
 
     @classmethod
     def run_identity(cls, source_cfg: Any) -> tuple[str | None, str | None]:
-        """``fork=False`` resumes ``run_id``; ``fork=True`` forks from it (``run_id`` stays ``None``).
-
-        A fork lets a fresh experiment-tracker id be minted; a resume reuses the
-        run's own.
+        """Return ``(run_id, fork_run_id)`` from the source config.
 
         Parameters
         ----------
         source_cfg : Any
-            The source configuration block.
+            The source config.
 
         Returns
         -------
@@ -116,21 +97,21 @@ class RunIdSource(CheckpointSource):
         parent_run_server2server: str | None,
         fork_run_server2server: str | None,
     ) -> Any:
-        """Merge the runtime lineage ids; a value already in the config is never clobbered.
+        """Merge the runtime lineage IDs into the source config.
 
         Parameters
         ----------
         source_cfg : Any
-            The source configuration block.
+            The source config.
         parent_run_server2server : str or None
-            Runtime server-to-server resume lineage id.
+            Resume lineage ID.
         fork_run_server2server : str or None
-            Runtime server-to-server fork lineage id.
+            Fork lineage ID.
 
         Returns
         -------
         Any
-            The configuration with the non-``None`` ids merged in.
+            The config with the non-``None`` IDs merged in.
         """
         from omegaconf import OmegaConf
 
@@ -154,11 +135,9 @@ class RunIdSource(CheckpointSource):
         parent_run_server2server: str | None = None,
         fork_run_server2server: str | None = None,
     ) -> Path:
-        """Build the run checkpoint path ``<checkpoints.root.parent>/<id>/last.ckpt``.
+        """Build the path ``<checkpoints.root.parent>/<id>/last.ckpt``.
 
-        The ``.parent`` undoes the run-id append that ``_update_paths`` performs on
-        ``checkpoints.root`` (the caller owns that mutation). Shared by
-        :meth:`process` and the tests so the formula lives in one place.
+        ``.parent`` removes the run ID that ``_update_paths`` adds to ``checkpoints.root``.
 
         Raises
         ------
@@ -181,24 +160,15 @@ class RunIdSource(CheckpointSource):
         return Path(Path(root).parent, lineage_id) / "last.ckpt"
 
     async def resolve(self, context: CheckpointContext) -> Path | None:
-        """Resolve the run checkpoint path and publish it on the context.
+        """Resolve the run checkpoint path and set it on the context.
 
-        Returns ``None`` (context untouched) on a rank that defers. On a missing or
-        unreadable checkpoint, raises ``RuntimeError`` on rank 0 and defers (warns,
-        returns ``None``) on other ranks. A deferring
-        rank records ``source_deferred`` on the context so a loading stage can say
-        "rank 0 is reporting the real error" instead of failing with a message about
-        a corrupted file. The path is canonicalised through
-        :meth:`LocalSource.resolve` so it is the same file an explicit local
-        checkpoint would resolve to.
+        If the file is missing or not readable, rank 0 raises ``RuntimeError``.
+        Other ranks set ``source_deferred`` on the context and return ``None``.
 
         Raises
         ------
         CheckpointConfigError
-            If ``run_id`` is unset. The shipped preset ships ``run_id: null``, so
-            selecting ``training/checkpoint/source=run`` and forgetting the id is
-            the most likely first mistake; passing through left the loader to
-            report a corrupted checkpoint for a file that was never opened.
+            If ``run_id`` is not set.
         """
         if self.run_id is None:
             from anemoi.training.checkpoint.exceptions import CheckpointConfigError
@@ -226,9 +196,6 @@ class RunIdSource(CheckpointSource):
             context.update_metadata(source_deferred=True, source_deferred_reason=f"checkpoint not found: {path}")
             return None
 
-        # An unreadable checkpoint (e.g. wrong permissions) is handled the same way as a
-        # missing one: only rank 0 raises, other ranks defer, so a distributed run fails
-        # cleanly on rank 0 instead of every rank raising out of the shared torch.load.
         if not os.access(path, os.R_OK):
             if is_rank_zero():
                 msg = f"Checkpoint for run '{self.run_id}' is not readable: {path}"
@@ -244,34 +211,25 @@ class RunIdSource(CheckpointSource):
         return await LocalSource().resolve(context)
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Resolve the run checkpoint path and load it via :class:`LocalSource`.
+        """Resolve the run checkpoint path and load it with ``LocalSource``.
 
-        Returns the context unchanged when the error was deferred to rank 0 (see
-        :meth:`resolve`); an unset ``run_id`` raises there.
+        If the rank defers the error to rank 0, return the context unchanged.
         """
         if await self.resolve(context) is None:
             return context
 
-        # Delegate the actual torch.load + format detection to LocalSource so the
-        # load path is identical to an explicit local checkpoint.
         return await LocalSource().process(context)
 
 
 def run_identity_from_config(config: DictConfig) -> tuple[str | None, str | None]:
-    """Resolve ``(run_id, fork_run_id)`` from a configured ``training.checkpoint.source``.
+    """Return ``(run_id, fork_run_id)`` from ``training.checkpoint.source``.
 
-    The source class decides: ``RunIdSource`` (and any subclass of it) expresses a
-    resume or a fork through :meth:`RunIdSource.run_identity`; every other source,
-    or no source, carries no run identity and yields ``(None, None)``. The class is
-    resolved from ``_target_``, not matched by name, so a subclass is treated like
-    its parent. This replaces the trainer re-deriving the identity: the trainer
-    reads it here and never mutates the config to communicate it to the logger or
-    the output paths.
+    Sources other than ``RunIdSource`` and its subclasses give ``(None, None)``.
 
     Parameters
     ----------
     config : DictConfig
-        The training config; ``training.checkpoint.source`` is inspected.
+        The training config.
 
     Returns
     -------

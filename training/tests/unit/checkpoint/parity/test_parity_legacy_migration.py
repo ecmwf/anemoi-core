@@ -7,24 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Old-vs-new equivalence for the checkpoint-format migration and the load it guards.
+"""Compare the legacy transfer-learning load with ``TransferLearningLoader``.
 
-``tests/unit/checkpoint/loading/test_format_migrations.py`` tests the new migration
-logic against its own specification. This file answers the other question: does it
-still do what the code it replaced did?
-
-:func:`_legacy_transfer_learning_loading` is the pre-pipeline
-``anemoi.training.utils.checkpoint.transfer_learning_loading`` frozen verbatim from
-``main`` (minus the ``torch.load``, so both paths get the identical dict). Each test
-runs it and the pipeline's ``TransferLearningLoader`` over the same checkpoint and
-the same model, then compares the observable results tensor for tensor.
-
-The one deliberate divergence is applicability: the legacy code ran ``chunking_fix``
-unconditionally on every load, the pipeline screens it against the checkpoint's own
-migration ledger first. The tests below therefore cover both sides of that screen —
-a ledgerless checkpoint, where the two must agree because the migration runs in
-both, and an up-to-date one, where the pipeline is expected to skip work the legacy
-path did for nothing.
+Both paths load the same checkpoint into the same model, and the results must match.
+One difference is intentional: the pipeline skips ``chunking_fix`` if the
+checkpoint ledger records it. The legacy code always ran it.
 """
 
 from __future__ import annotations
@@ -49,7 +36,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# The legacy implementation, frozen.
+# Legacy implementation (copy from main).
 # ---------------------------------------------------------------------------
 
 
@@ -57,7 +44,7 @@ def _legacy_filter_state_dict_size_mismatches(
     state_dict: dict[str, torch.Tensor],
     model_state_dict: dict[str, torch.Tensor],
 ) -> None:
-    """``utils.checkpoint._filter_state_dict_size_mismatches`` from main, verbatim."""
+    """Copy of ``utils.checkpoint._filter_state_dict_size_mismatches`` from main."""
     for key in list(state_dict):
         if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
             del state_dict[key]
@@ -70,10 +57,9 @@ def _legacy_transfer_learning_loading(
     chunking_fix_migration: Any,
     trainable_edge_perm_fix_migration: Any,
 ) -> nn.Module:
-    """``utils.checkpoint.transfer_learning_loading`` from main, with the load hoisted out.
+    """Copy of ``utils.checkpoint.transfer_learning_loading`` from main, without ``torch.load``.
 
-    The migrations are passed in rather than imported so a test can hand both paths
-    the same fake.
+    The migrations are arguments, so both paths can use the same fakes.
     """
     checkpoint = chunking_fix_migration(checkpoint)
 
@@ -108,18 +94,15 @@ def _legacy_transfer_learning_loading(
 
 
 # ---------------------------------------------------------------------------
-# Shared material: one model shape, one checkpoint, two code paths.
+# Shared helpers.
 # ---------------------------------------------------------------------------
 
 
 class _Model(nn.Module):
-    """A model with the legacy processor-refresh hook, as a no-op.
+    """Model with a no-op legacy processor-refresh hook.
 
-    The hook is the one legacy step with no counterpart to compare against: the
-    pipeline does that work in ``refresh_checkpoint_processors``, driven by
-    ``training.update_ds_stats_on_ckpt_load``, which the config below leaves off.
-    Neutralising it on both sides keeps the comparison on the migration, filter and
-    metadata algorithm.
+    The run config also disables the refresh, so the tests compare only migration,
+    filter and metadata.
     """
 
     def __init__(self, width: int = 4) -> None:
@@ -136,7 +119,7 @@ def _index_collection(name_to_index: dict[str, int]) -> SimpleNamespace:
 
 
 def _checkpoint(width: int = 4) -> dict[str, Any]:
-    """A checkpoint with no migration ledger — the case the migration exists for."""
+    """Return a checkpoint with no migration ledger."""
     torch.manual_seed(0)
     source = _Model(width)
     return {
@@ -150,18 +133,15 @@ def _checkpoint(width: int = 4) -> dict[str, Any]:
 
 
 def _run_config() -> Any:
-    """A run config with the processor refresh off, matching the no-op legacy hook."""
+    """Return a run config with the processor refresh disabled."""
     return OmegaConf.create({"training": {"update_ds_stats_on_ckpt_load": {"states": False, "tendencies": False}}})
 
 
 @pytest.fixture
 def fake_migrations(monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, MagicMock]:
-    """Install fake chunking_fix / trainable_edge_perm_fix migrations with observable effects.
+    """Install fake chunking_fix and trainable_edge_perm_fix migrations.
 
-    Each rewrites one tensor in the state dict, so "the migration ran" is visible in
-    the loaded weights rather than only in a call count. The same two callables are
-    handed to the legacy reference, so any difference in result is a difference in
-    the surrounding algorithm, not in the migration.
+    Each fake changes one tensor, so the effect shows in the loaded weights.
     """
 
     def _chunking(ckpt: dict[str, Any]) -> dict[str, Any]:
@@ -206,7 +186,7 @@ def _assert_same_model(legacy: nn.Module, pipeline: nn.Module) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Equivalence.
+# Equivalence tests.
 # ---------------------------------------------------------------------------
 
 
@@ -214,13 +194,7 @@ def _assert_same_model(legacy: nn.Module, pipeline: nn.Module) -> None:
 async def test_ledgerless_checkpoint_loads_identically_to_the_legacy_path(
     fake_migrations: tuple[MagicMock, MagicMock],
 ) -> None:
-    """A checkpoint with no ledger: both paths migrate it and reach the same weights.
-
-    This is the case the chunking migration was written for — a checkpoint old
-    enough to predate migration tracking. Both run both migrations, in the same
-    order, and the loaded tensors, the restored name-to-index map and the extracted
-    variables metadata all match.
-    """
+    """A checkpoint with no ledger gives the same result on both paths."""
     chunking, edge_perm = fake_migrations
     checkpoint = _checkpoint()
 
@@ -242,14 +216,9 @@ async def test_ledgerless_checkpoint_loads_identically_to_the_legacy_path(
 async def test_shape_mismatch_is_skipped_identically_to_the_legacy_path(
     fake_migrations: tuple[MagicMock, MagicMock],
 ) -> None:
-    """A resized layer is skipped by both paths, leaving the model's own init in place.
-
-    Legacy deleted the mismatched key from the state dict in place and loaded with
-    ``strict=False``; the pipeline's ``filter_state_dict`` builds a new dict without
-    it. Same outcome, including which parameters keep their initialised values.
-    """
+    """Both paths skip a resized layer and keep its initial values."""
     chunking, edge_perm = fake_migrations
-    # A checkpoint trained at width 4, loaded into a width-4 model with a resized head.
+    # The checkpoint head has a different shape from the model head.
     checkpoint = _checkpoint(width=4)
     checkpoint["state_dict"]["head.weight"] = torch.randn(3, 4)
     checkpoint["state_dict"]["head.bias"] = torch.randn(3)
@@ -278,13 +247,7 @@ async def test_pipeline_skips_a_migration_the_legacy_path_reapplied(
     monkeypatch: pytest.MonkeyPatch,
     fake_migrations: tuple[MagicMock, MagicMock],
 ) -> None:
-    """The one intended divergence: an up-to-date checkpoint is not re-migrated.
-
-    Legacy called ``chunking_fix`` on every load regardless. The pipeline reads the
-    ledger the checkpoint carries and skips a migration already recorded there, so
-    the two paths differ exactly where they are meant to — and the legacy path is
-    the one doing redundant work.
-    """
+    """The pipeline does not run ``chunking_fix`` if the ledger records it."""
     chunking, _ = fake_migrations
     spy = MagicMock(side_effect=chunking.side_effect)
     monkeypatch.setattr(

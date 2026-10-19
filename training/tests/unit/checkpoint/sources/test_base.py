@@ -25,7 +25,7 @@ def test_checkpoint_source_extends_pipeline_stage() -> None:
 
 
 class _ProcessOnlySource(CheckpointSource):
-    """A source written against the old contract: ``process`` only, no ``resolve``."""
+    """Source with ``process`` only, no ``resolve``."""
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
         return context
@@ -33,10 +33,7 @@ class _ProcessOnlySource(CheckpointSource):
 
 @pytest.mark.asyncio
 async def test_resolve_is_not_required_for_process_only_sources_but_names_them_on_resume() -> None:
-    """A ``process``-only source still works for pipeline loads; a resume needs ``resolve``.
-
-    The error names the class so the author knows what to implement.
-    """
+    """A ``process``-only source loads, but ``resolve`` raises with the class name."""
     source = _ProcessOnlySource()
     context = CheckpointContext()
 
@@ -46,7 +43,7 @@ async def test_resolve_is_not_required_for_process_only_sources_but_names_them_o
 
 
 def test_remove_temporary_file_tolerates_a_file_that_is_already_gone(tmp_path: Path) -> None:
-    """The trainer's cleanup and the atexit backstop may both run; the second is a no-op."""
+    """A second removal of the same file does not raise."""
     path = tmp_path / "download.ckpt"
     path.write_bytes(b"x")
 

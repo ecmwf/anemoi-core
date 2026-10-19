@@ -7,12 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Tests for the shared Lightning-parity functions in ``checkpoint.loading.base``.
+"""Tests for the shared checkpoint-load functions in ``checkpoint.loading.base``.
 
-These functions are the single home for the checkpoint-load parity steps, called
-both by the pipeline loading strategies (via their ``_*`` wrappers) and by the
-trainer's ``BaseTrainingModule.on_load_checkpoint``. They are tested here
-directly, independently of either caller.
+The loading strategies and ``BaseTrainingModule.on_load_checkpoint`` both use these functions.
 """
 
 from __future__ import annotations
@@ -32,7 +29,7 @@ from anemoi.training.checkpoint.loading.base import warn_on_hparams_divergence
 
 
 class _ProcessorModel(torch.nn.Module):
-    """Minimal model exposing a ``pre_processors`` buffer for the refresh tests."""
+    """Model with a ``pre_processors`` buffer."""
 
     def __init__(self, value: float) -> None:
         super().__init__()
@@ -138,8 +135,7 @@ def test_apply_format_migrations_none_passthrough() -> None:
 
 
 def test_apply_format_migrations_tolerates_incomplete_shape() -> None:
-    # A raw state-dict checkpoint lacks hyper_parameters.config; the migration is
-    # skipped (no raise) and the same object is returned.
+    # No hyper_parameters.config: the migration is skipped.
     checkpoint = {"state_dict": {}}
     assert apply_checkpoint_format_migrations(checkpoint) is checkpoint
 

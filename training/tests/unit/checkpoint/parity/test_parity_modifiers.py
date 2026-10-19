@@ -7,12 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Parity coverage for model modifiers and pipeline composition/validation.
-
-Every test drives the real checkpoint classes on CPU with synthetic models and
-in-memory (or tmp-path) checkpoints. No GPU, no network, no RNG-dependent
-assertions.
-"""
+"""Parity tests for model modifiers and pipeline composition. All tests are CPU-only."""
 
 from __future__ import annotations
 
@@ -48,7 +43,7 @@ if TYPE_CHECKING:
 
 
 class TwoChildModel(nn.Module):
-    """Two named children, each an ``nn.Linear`` (weight + bias)."""
+    """Model with two ``nn.Linear`` children."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -57,7 +52,7 @@ class TwoChildModel(nn.Module):
 
 
 class ThreeChildModel(nn.Module):
-    """Three freezable children plus one unlisted child that must stay trainable."""
+    """Model with three children to freeze and one ``extra`` child to keep trainable."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -77,12 +72,12 @@ class MismatchTargetModel(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# Real pipeline-stage subclasses (layer bases, deliberately off-convention names)
+# Stage subclasses (some names do not follow the naming convention)
 # ---------------------------------------------------------------------------
 
 
 class _InMemorySource(CheckpointSource):
-    """A real ``CheckpointSource`` that attaches in-memory checkpoint data."""
+    """Source that sets in-memory checkpoint data."""
 
     def __init__(self, checkpoint_data: dict | None = None) -> None:
         self._data = checkpoint_data if checkpoint_data is not None else {"state_dict": {}}
@@ -93,7 +88,7 @@ class _InMemorySource(CheckpointSource):
 
 
 class _WeightMarkingLoader(LoadingStrategy):
-    """A real ``LoadingStrategy`` that only marks the model weights as loaded."""
+    """Loader that only marks the weights as loaded."""
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
         if context.model is not None:
@@ -102,14 +97,14 @@ class _WeightMarkingLoader(LoadingStrategy):
 
 
 class _NoOpStage(PipelineStage):
-    """A bare stage that neither loads weights nor belongs to any layer."""
+    """Stage that does nothing."""
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
         return context
 
 
 class _CustomModifier(ModelModifier):
-    """An inline modifier that freezes the whole model and records itself."""
+    """Modifier that freezes the full model and adds a metadata record."""
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
         for param in context.model.parameters():
@@ -162,7 +157,7 @@ async def test_freezing_multiple_submodules_in_single_call() -> None:
     for name in names:
         submodule = result.model.get_submodule(name)
         assert all(not p.requires_grad for p in submodule.parameters())
-    # Unlisted submodule is untouched.
+    # The extra submodule stays trainable.
     assert all(p.requires_grad for p in result.model.extra.parameters())
 
     applied = result.metadata["modifiers_applied"]
@@ -223,7 +218,6 @@ async def test_empty_freeze_list_is_noop() -> None:
     result = await stage.process(CheckpointContext(model=model))
 
     assert all(p.requires_grad for p in result.model.parameters())
-    # Early return happens before any metadata is appended.
     assert "modifiers_applied" not in result.metadata
 
 
@@ -311,7 +305,7 @@ def test_pipeline_instantiates_real_stages_from_hydra_targets() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Stage-role classification by isinstance (name-independent)
+# Stage role comes from isinstance, not from the name
 # ---------------------------------------------------------------------------
 
 
@@ -394,7 +388,6 @@ async def test_transfer_learning_then_freezing_compose_in_pipeline(tmp_path: Pat
     assert "encoder.weight" in result.metadata["skipped_params"]
     assert "Shape mismatch" in result.metadata["skipped_params"]["encoder.weight"]
 
-    # Freezing record composed alongside the loader state.
     freezing_records = [entry for entry in result.metadata["modifiers_applied"] if entry["type"] == "freezing"]
     assert freezing_records
     assert freezing_records[0]["frozen_modules"][0]["name"] == "encoder"

@@ -449,15 +449,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         checkpoint["task_state"] = self.task.training_runtime_state_dict()
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
-        # The task's training runtime state (e.g. rollout step) is resume state the
-        # checkpoint pipeline does not apply, so restore it here.
+        # The checkpoint pipeline does not restore the task state (e.g. rollout step).
         self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
 
-        # A resume is loaded once, by Trainer.fit(ckpt_path=), which calls this hook
-        # on the dict it is about to load: this is the only place the corrections can
-        # run for it (the pipeline resolves the file and loads nothing). Lightning
-        # holds a reference to this dict, so a replacement (the ledger-driven
-        # migration returns a new object) is written back in place rather than rebound.
+        # On a resume, only Lightning loads the checkpoint, thus apply the corrections here.
+        # Lightning keeps a reference to this dict, thus update it in place.
         trainer = getattr(self, "_trainer", None)
         corrected = apply_checkpoint_corrections(
             checkpoint,

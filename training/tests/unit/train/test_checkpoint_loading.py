@@ -45,7 +45,7 @@ class DummyIndexWithCompare(DummyIndex):
         self.compare_allow_subset: list[bool] = []
 
     def compare_variables(self, ckpt_index: dict, data_index: dict, *, allow_subset: bool = False) -> None:
-        """Track that compare was called (and with which allow_subset)."""
+        """Record the call and its allow_subset value."""
         self.compare_called_with.append((ckpt_index, data_index))
         self.compare_allow_subset.append(allow_subset)
 
@@ -166,13 +166,9 @@ def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
 
 
 def test_on_load_checkpoint_applies_corrections_regardless_of_weights_initialized() -> None:
-    """The Lightning hook corrects the dict it is handed, whatever ``weights_initialized`` says.
+    """The Lightning hook corrects the dict it gets, whatever ``weights_initialized`` is.
 
-    A resume is loaded once, by ``Trainer.fit(ckpt_path=)``, which re-reads the file and
-    hands this hook the fresh dict it is about to load. Skipping the corrections on a flag
-    set by some earlier load applied them to a copy Lightning discarded, so a resume of a
-    tendency model silently reloaded the checkpoint's stale statistics. The flag must not
-    matter here: tendency processors come from the live model, metadata is restored.
+    ``Trainer.fit(ckpt_path=)`` loads this dict, so the corrections must apply to it.
     """
     old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
     new_model = DummyModel(["6h", "12h"], offset=1.0)
@@ -264,13 +260,9 @@ def test_validate_transfer_learning_non_dict_checkpoint_format_returns_early() -
 
 
 def test_validate_transfer_learning_skips_a_checkpoint_without_dataset_metadata() -> None:
-    """A checkpoint that carried no ``data_indices`` leaves nothing to compare, not an AttributeError.
+    """A checkpoint without ``data_indices`` skips the compare and does not raise.
 
-    ``preserve_anemoi_metadata`` sets ``_ckpt_model_name_to_index`` only when the
-    checkpoint carries ``hyper_parameters.data_indices``; an inference checkpoint or a
-    raw state_dict save (the documented S3 + weights-only recipe) does not. The
-    validator runs for every loader, so it has to read the attribute defensively, as
-    the units check already does.
+    Inference checkpoints and raw state_dict saves have no ``data_indices``.
     """
     era5_index = DummyIndexWithCompare()
     era5_index.name_to_index = {"t2m": 0}
@@ -278,7 +270,7 @@ def test_validate_transfer_learning_skips_a_checkpoint_without_dataset_metadata(
         data_indices={"era5": era5_index},
         config=OmegaConf.create({"training": {}}),
     )
-    model = torch.nn.Linear(2, 2)  # a real module: no attribute, and nn.Module raises AttributeError on access
+    model = torch.nn.Linear(2, 2)  # nn.Module raises AttributeError for a missing attribute
 
     AnemoiTrainer._validate_transfer_learning_datasets(trainer, model)
 
@@ -311,15 +303,11 @@ def test_validate_transfer_learning_remove_dataset() -> None:
 
 
 def test_validate_transfer_learning_forwards_allow_variable_subset_flag() -> None:
-    """training.allow_variable_subset flows through to compare_variables (issue #838).
-
-    Fine-tuning into a model with FEWER variables must be opt-in: the trainer reads the
-    config flag and forwards it so compare_variables tolerates a strict variable subset.
-    """
+    """The trainer passes training.allow_variable_subset to compare_variables (#838)."""
     ckpt_index = {"t2m": 0, "u10": 1, "v10": 2}
     model = SimpleNamespace(_ckpt_model_name_to_index={"era5": ckpt_index})
 
-    # Gate ON: the flag is forwarded as allow_subset=True.
+    # Flag set: allow_subset=True.
     era5_on = DummyIndexWithCompare()
     era5_on.name_to_index = {"t2m": 0, "u10": 1}
     trainer_on = SimpleNamespace(
@@ -329,7 +317,7 @@ def test_validate_transfer_learning_forwards_allow_variable_subset_flag() -> Non
     AnemoiTrainer._validate_transfer_learning_datasets(trainer_on, model)
     assert era5_on.compare_allow_subset == [True]
 
-    # Default (flag absent): strict, allow_subset=False.
+    # Flag not set: allow_subset=False.
     era5_off = DummyIndexWithCompare()
     era5_off.name_to_index = {"t2m": 0, "u10": 1}
     trainer_off = SimpleNamespace(
@@ -400,10 +388,7 @@ def test_on_train_start_logs_effective_rollout_step(caplog: pytest.LogCaptureFix
 async def test_weights_only_pipeline_load_starts_rollout_schedule_from_config() -> None:
     """Loading only weights starts the rollout schedule at rollout.start.
 
-    A weights-only load goes through the checkpoint pipeline at model build and never
-    calls ``on_load_checkpoint`` (the trainer withholds ``ckpt_path``), so the task's
-    runtime state in the checkpoint is never applied: the rollout schedule starts
-    where the config says, not where the checkpoint stopped.
+    A weights-only load does not call ``on_load_checkpoint``, so the task state is not restored.
     """
     from anemoi.training.checkpoint.base import CheckpointContext
     from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
@@ -684,7 +669,7 @@ def test_validate_transfer_learning_units_dataset_not_in_checkpoint() -> None:
     AnemoiTrainer._validate_transfer_learning_units(trainer, model)
 
 
-# --- Tests for the opt-in checkpoint pipeline path (training.checkpoint) ---
+# --- checkpoint pipeline (training.checkpoint) ---
 
 
 def test_checkpoint_pipeline_configured_detects_training_checkpoint() -> None:
@@ -696,13 +681,7 @@ def test_checkpoint_pipeline_configured_detects_training_checkpoint() -> None:
 
 
 def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> None:
-    """The opt-in pipeline path resolves the run checkpoint and fills the model in place.
-
-    Exercises the trainer-side wiring end to end: the RunIdSource resolves ``run_id``
-    into ``<root.parent>/<run_id>/last.ckpt`` and loads it, and the WeightsOnlyLoader
-    fills the existing model's parameter slots (fill-model semantics — same object,
-    no re-instantiation).
-    """
+    """The pipeline finds the run checkpoint and loads weights into the same model object."""
     torch.manual_seed(0)
     model = torch.nn.Linear(4, 2)
     new_state = {key: torch.randn_like(value) for key, value in model.state_dict().items()}
@@ -736,8 +715,7 @@ def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> Non
     trainer = SimpleNamespace(
         config=cfg,
         data_indices=data_indices,
-        # A configured source means the trainer is starting from a checkpoint; the
-        # MLflow dry-run gate is what clears this, and that is exercised separately.
+        # A configured source means a start from a checkpoint.
         start_from_checkpoint=True,
         parent_run_server2server=None,
         fork_run_server2server=None,
@@ -754,15 +732,9 @@ def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> Non
 
 
 def test_load_via_checkpoint_pipeline_keeps_current_data_indices_over_checkpoint(tmp_path: Path) -> None:
-    """``data_indices`` after a load is the CURRENT config's, never the checkpoint's.
+    """After a load, ``data_indices`` comes from the current config, not the checkpoint.
 
-    ``data_indices`` decides which physical variable each model channel maps to, so a
-    silent swap to the checkpoint's mapping would corrupt every downstream forecast
-    without any error. This guards the trainer-side assignment
-    (``loaded_model.data_indices = self.data_indices``): even when the checkpoint
-    carries a *different* ``data_indices``, the live run's indices must win, and the
-    checkpoint's are retained only as ``_ckpt_model_name_to_index`` for the
-    transfer-learning compatibility validators.
+    The checkpoint mapping is kept only as ``_ckpt_model_name_to_index`` for the validators.
     """
     torch.manual_seed(0)
     model = torch.nn.Linear(4, 2)
@@ -771,7 +743,7 @@ def test_load_via_checkpoint_pipeline_keeps_current_data_indices_over_checkpoint
     ckpt_dir = tmp_path / run_id
     ckpt_dir.mkdir(parents=True)
 
-    # The checkpoint carries a DIFFERENT variable -> index mapping than the live run.
+    # The checkpoint has a different variable-to-index mapping.
     checkpoint_index = DummyIndex()
     checkpoint_index.name_to_index = {"t2m": 0, "u10": 1}
     torch.save(
@@ -782,7 +754,6 @@ def test_load_via_checkpoint_pipeline_keeps_current_data_indices_over_checkpoint
         ckpt_dir / "last.ckpt",
     )
 
-    # The live run uses a different mapping; it must be the one that survives.
     current_index = DummyIndex()
     current_index.name_to_index = {"z500": 0, "msl": 1}
     current_data_indices = {"data": current_index}
@@ -808,8 +779,7 @@ def test_load_via_checkpoint_pipeline_keeps_current_data_indices_over_checkpoint
     trainer = SimpleNamespace(
         config=cfg,
         data_indices=current_data_indices,
-        # A configured source means the trainer is starting from a checkpoint; the
-        # MLflow dry-run gate is what clears this, and that is exercised separately.
+        # A configured source means a start from a checkpoint.
         start_from_checkpoint=True,
         parent_run_server2server=None,
         fork_run_server2server=None,
@@ -819,11 +789,8 @@ def test_load_via_checkpoint_pipeline_keeps_current_data_indices_over_checkpoint
 
     result = AnemoiTrainer._load_via_checkpoint_pipeline(trainer, model)
 
-    # The current config's indices win — not the checkpoint's.
     assert result.data_indices is current_data_indices
     assert result.data_indices["data"].name_to_index == {"z500": 0, "msl": 1}
-    # The checkpoint's mapping is quarantined for compatibility checks, never promoted
-    # to model.data_indices.
     assert result._ckpt_model_name_to_index == {"data": {"t2m": 0, "u10": 1}}
 
 
@@ -853,21 +820,17 @@ def test_validate_transfer_learning_units_ignore_units_option() -> None:
     AnemoiTrainer._validate_transfer_learning_units(trainer, model)
 
 
-# --- Keyless neutrality: the default-surface flip must not change keyless runs ---
+# --- runs without training.checkpoint ---
 
 
 def test_checkpoint_pipeline_configured_false_when_keyless() -> None:
-    """No ``training.checkpoint`` key (or an explicit null) is not pipeline-configured."""
+    """A missing or null ``training.checkpoint`` is not pipeline-configured."""
     assert checkpoint_pipeline_configured(OmegaConf.create({"training": {}})) is False
     assert checkpoint_pipeline_configured(OmegaConf.create({"training": {"checkpoint": None}})) is False
 
 
 def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The ``.model`` property returns the freshly instantiated module unchanged when keyless.
-
-    With no ``training.checkpoint`` block the declarative pipeline does not run and no
-    warning fires — a keyless run is a plain fresh run.
-    """
+    """Without ``training.checkpoint``, ``.model`` returns the new module and gives no warning."""
     import anemoi.training.train.train as train_module
 
     sentinel = torch.nn.Linear(2, 2)
@@ -887,9 +850,7 @@ def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pyte
         warnings.simplefilter("error")
         result = AnemoiTrainer.model.func(trainer)
 
-    # Same object the instantiation returned: the pipeline branch did not run (a
-    # SimpleNamespace has no real ``_load_via_checkpoint_pipeline``, so taking it
-    # would raise), and ``simplefilter("error")`` proves silence.
+    # Same object, so the pipeline did not run.
     assert result is sentinel
 
 
@@ -899,25 +860,25 @@ _LOADERS = "anemoi.training.checkpoint.loading.strategies"
 @pytest.mark.parametrize(
     ("checkpoint", "expected"),
     [
-        (None, False),  # keyless: Lightning resume keeps ckpt_path
+        (None, False),
         ({"loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader"}}, True),
         ({"loading": {"_target_": f"{_LOADERS}.TransferLearningLoader"}}, True),
         ({"loading": {"_target_": f"{_LOADERS}.ColdStartLoader"}}, True),
-        ({"loading": {"_target_": f"{_LOADERS}.WarmStartLoader"}}, False),  # full restore keeps ckpt_path
-        ({"modifiers": [{"_target_": "x"}]}, False),  # freeze-only, no loader: resume
+        ({"loading": {"_target_": f"{_LOADERS}.WarmStartLoader"}}, False),
+        ({"modifiers": [{"_target_": "x"}]}, False),  # no loader: resume
     ],
 )
 def test_skip_lightning_restore_matches_loading_strategy(
     checkpoint: dict | None,
     expected: bool,
 ) -> None:
-    """ckpt_path is suppressed for weights-style pipeline loads, kept for warm start/resume."""
+    """Weights-only loads drop ckpt_path; warm start and resume keep it."""
     training = {"checkpoint": checkpoint} if checkpoint is not None else {}
     trainer = SimpleNamespace(config=OmegaConf.create({"training": training}))
     assert AnemoiTrainer._skip_lightning_restore(trainer) is expected
 
 
-# --- Run-lineage source: training.checkpoint.source -> internal run identity ---
+# --- run identity from training.checkpoint.source ---
 
 _RUNSOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
 _LOCALSOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
@@ -926,13 +887,13 @@ _LOCALSOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
 @pytest.mark.parametrize(
     ("source", "expected_run_id", "expected_fork_run_id"),
     [
-        # resume -> run_id only (same MLflow run continues)
+        # resume
         ({"_target_": _RUNSOURCE, "run_id": "abc", "fork": False}, "abc", None),
-        # fork -> fork_run_id only, run_id None (fresh MLflow id via fork-solo branch)
+        # fork
         ({"_target_": _RUNSOURCE, "run_id": "base999", "fork": True}, None, "base999"),
-        # RunIdSource with no run id -> no-op
+        # no run_id
         ({"_target_": _RUNSOURCE, "run_id": None, "fork": False}, None, None),
-        # explicit path carries no run identity (fresh run loading an explicit ckpt)
+        # explicit path: no run identity
         ({"_target_": _LOCALSOURCE, "path": "/scratch/run/last.ckpt"}, None, None),
     ],
 )
@@ -941,7 +902,7 @@ def test_run_identity_from_config_maps_source(
     expected_run_id: str | None,
     expected_fork_run_id: str | None,
 ) -> None:
-    """The RunIdSource surface resolves to the (run_id, fork_run_id) run identity."""
+    """The source config gives the (run_id, fork_run_id) pair."""
     from anemoi.training.checkpoint.sources.run import run_identity_from_config
 
     config = OmegaConf.create({"training": {"checkpoint": {"source": source}}})
@@ -949,19 +910,16 @@ def test_run_identity_from_config_maps_source(
 
 
 def test_run_identity_from_config_noop_without_checkpoint_source() -> None:
-    """With no training.checkpoint.source, there is no run identity."""
+    """Without a source, there is no run identity."""
     from anemoi.training.checkpoint.sources.run import run_identity_from_config
 
     assert run_identity_from_config(OmegaConf.create({"training": {}})) == (None, None)
 
 
 class _PipelineTrainer(SimpleNamespace):
-    """A trainer stub whose ``model`` builds through the real pipeline path.
+    """Trainer stub whose ``model`` builds through the real pipeline.
 
-    ``last_checkpoint`` reads the path the source stage resolved, so it needs the model
-    built first; the stub mirrors ``AnemoiTrainer.model`` by running
-    ``_load_via_checkpoint_pipeline`` lazily, which also proves ``last_checkpoint``
-    triggers the build when it is read first (as ``AnemoiEvaluator`` does).
+    The build is lazy, so a first read of ``last_checkpoint`` must start it.
     """
 
     def __init__(self, config: DictConfig, base_model: torch.nn.Module) -> None:
@@ -996,7 +954,7 @@ def _spy_torch_load(monkeypatch: pytest.MonkeyPatch) -> list[object]:
 
 
 def test_last_checkpoint_is_the_path_the_run_source_resolved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A RunIdSource resume hands Lightning the ``last.ckpt`` the source stage found, unloaded."""
+    """A RunIdSource resume gives Lightning the ``last.ckpt`` path and loads nothing."""
     root = tmp_path / "ckpts" / "abc"
     ckpt = tmp_path / "ckpts" / "abc" / "last.ckpt"
     ckpt.parent.mkdir(parents=True)
@@ -1021,11 +979,7 @@ def test_last_checkpoint_expands_and_resolves_a_tilde_local_source(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``~/...`` reaches Lightning expanded and canonical, exactly as the source checked it.
-
-    ``Trainer.fit(ckpt_path=PosixPath('~/runs/last.ckpt'))`` cannot find the file; the path
-    the source resolved is the one that is handed over.
-    """
+    """Lightning gets the expanded, canonical path, not the ``~/...`` form."""
     monkeypatch.setenv("HOME", str(tmp_path))
     ckpt = tmp_path / "runs" / "last.ckpt"
     ckpt.parent.mkdir()
@@ -1045,18 +999,13 @@ def test_last_checkpoint_expands_and_resolves_a_tilde_local_source(
 
 
 def test_last_checkpoint_none_when_not_starting() -> None:
-    """No source configured (start_from_checkpoint False) short-circuits to None."""
+    """Without a source, ``last_checkpoint`` is None."""
     trainer = SimpleNamespace(start_from_checkpoint=False)
     assert AnemoiTrainer.last_checkpoint.func(trainer) is None
 
 
 def test_resume_from_s3_keeps_the_download_for_lightning(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A remote resume: the download survives the pipeline and is what Lightning reads.
-
-    ``S3Source.resolve`` downloads to a node-local file and keeps it; ``last_checkpoint``
-    is that file; nothing is loaded in the pipeline; the trainer deletes the file after
-    training through ``_remove_temporary_checkpoints``.
-    """
+    """A remote resume keeps the download for Lightning and loads nothing in the pipeline."""
     import sys
     from types import ModuleType
 
@@ -1097,7 +1046,7 @@ def test_resume_from_s3_keeps_the_download_for_lightning(monkeypatch: pytest.Mon
     assert not resolved.exists()
 
 
-# --- Warm-start guard: a resume needs a source; any source will do ---
+# --- warm start needs a source ---
 
 _REMOTE_SOURCES = [
     "anemoi.training.checkpoint.sources.s3.S3Source",
@@ -1106,7 +1055,7 @@ _REMOTE_SOURCES = [
 
 
 def _warm_start_cfg(source: dict | None) -> DictConfig:
-    """Build a ``training.checkpoint`` config with WarmStartLoader and an optional source."""
+    """Build a WarmStartLoader config with an optional source."""
     checkpoint: dict = {"loading": {"_target_": f"{_LOADERS}.WarmStartLoader"}}
     if source is not None:
         checkpoint["source"] = source
@@ -1115,19 +1064,19 @@ def _warm_start_cfg(source: dict | None) -> DictConfig:
 
 @pytest.mark.parametrize("source_target", [_LOCALSOURCE, _RUNSOURCE, *_REMOTE_SOURCES])
 def test_warm_start_accepts_any_source(source_target: str) -> None:
-    """Every source resolves to a local file for Lightning; a remote one is downloaded and kept."""
-    reject_unsupported_warm_start(_warm_start_cfg({"_target_": source_target}))  # must not raise
+    """Warm start accepts all sources."""
+    reject_unsupported_warm_start(_warm_start_cfg({"_target_": source_target}))
 
 
 def test_warm_start_rejects_missing_source() -> None:
-    """Warm start with no source has nothing to resume from and must raise."""
+    """Warm start without a source raises."""
     with pytest.raises(CheckpointConfigError, match=r"no training\.checkpoint\.source"):
         reject_unsupported_warm_start(_warm_start_cfg(None))
 
 
 @pytest.mark.parametrize("source_target", _REMOTE_SOURCES)
 def test_non_warm_start_allows_remote_source(source_target: str) -> None:
-    """Weights-only loading from a remote source is fine; the guard only gates warm start."""
+    """Weights-only loading from a remote source passes."""
     cfg = OmegaConf.create(
         {
             "training": {
@@ -1138,14 +1087,14 @@ def test_non_warm_start_allows_remote_source(source_target: str) -> None:
             },
         },
     )
-    reject_unsupported_warm_start(cfg)  # must not raise
+    reject_unsupported_warm_start(cfg)
 
 
-# --- Downloads a source kept for Trainer.fit(ckpt_path=) are deleted after training ---
+# --- kept downloads are deleted after training ---
 
 
 class _KeepingSource(CheckpointSource):
-    """A source that keeps a download at ``_KeepingSource.kept`` (set per test via monkeypatch)."""
+    """Source that keeps a download at ``_KeepingSource.kept``."""
 
     kept: Path
 
@@ -1160,7 +1109,7 @@ class _KeepingSource(CheckpointSource):
 
 
 def test_load_via_checkpoint_pipeline_records_temporary_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The trainer keeps the list of downloads the source stage left on disk."""
+    """The trainer records the downloads that the source keeps."""
     kept = tmp_path / "download.ckpt"
     torch.save({"state_dict": {}}, kept)
     monkeypatch.setattr(_KeepingSource, "kept", kept, raising=False)
@@ -1196,7 +1145,7 @@ def test_load_via_checkpoint_pipeline_records_temporary_files(tmp_path: Path, mo
 
 
 def test_remove_temporary_checkpoints_deletes_the_recorded_downloads(tmp_path: Path) -> None:
-    """After training the kept downloads are removed; a missing one is not an error."""
+    """After training, kept downloads are removed. A missing file does not raise."""
     present = tmp_path / "present.ckpt"
     present.write_bytes(b"x")
     gone = tmp_path / "gone.ckpt"
@@ -1209,14 +1158,14 @@ def test_remove_temporary_checkpoints_deletes_the_recorded_downloads(tmp_path: P
 
 
 def test_remove_temporary_checkpoints_without_a_pipeline_run_is_a_noop() -> None:
-    """A keyless run never recorded downloads; cleanup must still be safe to call."""
+    """Cleanup without recorded downloads does not raise."""
     trainer = SimpleNamespace()
     AnemoiTrainer._remove_temporary_checkpoints(trainer)
     assert trainer._temporary_checkpoint_files == []
 
 
 def test_keep_download_registers_the_atexit_backstop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A kept download is registered with atexit so a job that never reaches fit() still cleans up."""
+    """A kept download is registered with atexit."""
     import atexit
 
     from anemoi.training.checkpoint.sources.base import remove_temporary_file
@@ -1235,7 +1184,7 @@ def test_keep_download_registers_the_atexit_backstop(tmp_path: Path, monkeypatch
 
 
 def _training_config_for_train() -> DictConfig:
-    """The config keys ``AnemoiTrainer.train`` reads before and after ``trainer.fit``."""
+    """Config keys that ``AnemoiTrainer.train`` reads."""
     return OmegaConf.create(
         {
             "training": {
@@ -1267,7 +1216,7 @@ def test_train_removes_kept_downloads_after_fit(
     monkeypatch: pytest.MonkeyPatch,
     fit_raises: bool,
 ) -> None:
-    """``train()`` deletes the kept downloads once ``fit`` returns, and also when it raises."""
+    """``train()`` deletes kept downloads after ``fit``, also if ``fit`` raises."""
     import anemoi.training.train.train as train_module
 
     kept = tmp_path / "download.ckpt"
@@ -1323,7 +1272,7 @@ def test_fit_parameters_hands_the_resolved_path_to_lightning_only_on_resume(
     loading: str | None,
     expect_ckpt_path: bool,
 ) -> None:
-    """``Trainer.fit(ckpt_path=)`` receives ``last_checkpoint`` on a resume and ``None`` after a pipeline load."""
+    """``Trainer.fit`` gets ``last_checkpoint`` on a resume and ``None`` after a pipeline load."""
     resolved = tmp_path / "last.ckpt"
     checkpoint: dict = {"source": {"_target_": _LOCALSOURCE, "path": str(resolved)}}
     if loading is not None:
@@ -1343,7 +1292,7 @@ def test_fit_parameters_hands_the_resolved_path_to_lightning_only_on_resume(
 
 
 def test_on_load_checkpoint_writes_a_replaced_dict_back_in_place(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Lightning holds the dict it passed in; a replacement from the corrections must land in that object."""
+    """The corrections change the dict that Lightning passed in, in place."""
     import anemoi.training.train.methods.base as methods_base
 
     replacement = {
@@ -1360,7 +1309,7 @@ def test_on_load_checkpoint_writes_a_replaced_dict_back_in_place(monkeypatch: py
     assert torch.equal(checkpoint["state_dict"]["replaced"], torch.ones(1))
 
 
-# --- The resume hook reports an incomplete migration ledger (finding 3 on the Lightning path) ---
+# --- resume hook warns about missing migrations ---
 
 
 def _shipped_migration_names() -> list[str]:
@@ -1394,11 +1343,7 @@ def _resume_checkpoint(names: list[str]) -> dict:
 def test_on_load_checkpoint_warns_about_an_incomplete_ledger_and_names_the_resume_file(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """On a resume the hook is the only correction pass, so the ledger check lives there too.
-
-    The warning names the outstanding migrations and the file Lightning is resuming
-    from (``trainer.ckpt_path``), and the load proceeds: metadata is still restored.
-    """
+    """On a resume, the hook warns about missing migrations and the load continues."""
     module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
     module._trainer = SimpleNamespace(ckpt_path="/runs/abc/last.ckpt", datamodule=None)
     checkpoint = _resume_checkpoint(_shipped_migration_names()[:3])
@@ -1414,7 +1359,7 @@ def test_on_load_checkpoint_warns_about_an_incomplete_ledger_and_names_the_resum
 
 
 def test_on_load_checkpoint_is_quiet_for_an_up_to_date_ledger(caplog: pytest.LogCaptureFixture) -> None:
-    """The common case, a checkpoint written by the installed anemoi-models, produces no warning."""
+    """A checkpoint from the installed anemoi-models gives no warning."""
     module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
     checkpoint = _resume_checkpoint(_shipped_migration_names())
 
@@ -1426,17 +1371,9 @@ def test_on_load_checkpoint_is_quiet_for_an_up_to_date_ledger(caplog: pytest.Log
 
 @pytest.mark.asyncio
 async def test_load_via_checkpoint_pipeline_works_inside_a_running_event_loop(tmp_path: Path) -> None:
-    """Building the model from an already-async context must not raise.
+    """Building the model in a running event loop does not raise.
 
-    The pipeline runs inside a ``cached_property``, so ``asyncio.run`` there raised
-    ``RuntimeError: asyncio.run() cannot be called from a running event loop`` for
-    anyone constructing the trainer from a Jupyter kernel, an asyncio job launcher,
-    or an ``async def test_`` (which this repo's ``asyncio_mode = auto`` makes a
-    one-line trap). ``CheckpointPipeline.execute_sync`` exists precisely to detect a
-    running loop and offload to a thread; it had no caller.
-
-    Being an ``async def`` test IS the reproduction: pytest-asyncio runs it in a live
-    loop, so the old call raises here and the new one does not.
+    This test is ``async``, so it runs in a live loop (for example, Jupyter).
     """
     torch.manual_seed(0)
     model = torch.nn.Linear(4, 2)

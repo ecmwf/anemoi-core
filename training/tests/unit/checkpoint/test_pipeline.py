@@ -296,7 +296,7 @@ class TestCheckpointPipeline:
 
 
 class TestComposition:
-    """Stage-composition validation: ordering/conflict violations raise at construction."""
+    """Bad stage order or conflicts raise at construction."""
 
     @staticmethod
     def _source() -> object:
@@ -348,7 +348,7 @@ class TestComposition:
         assert any("Multiple checkpoint sources" in record.getMessage() for record in caplog.records)
 
 
-# --- a resolve-only source is not "random weights" ---------------------------------
+# --- resolve-only sources ---
 
 
 def _write_checkpoint(tmp_path: Path) -> Path:
@@ -361,11 +361,7 @@ def _write_checkpoint(tmp_path: Path) -> Path:
 
 @pytest.mark.asyncio
 async def test_verify_weights_loaded_accepts_a_resolve_only_source(tmp_path: Path) -> None:
-    """On a resume the source only resolves the file: the weights arrive at ``Trainer.fit(ckpt_path=)``.
-
-    The post-execution check must not mistake that for a loading failure, and the
-    health check must agree.
-    """
+    """A resolve-only source passes the weights check and the health check."""
     import torch
 
     from anemoi.training.checkpoint.sources.base import ResolveOnlySource
@@ -386,7 +382,7 @@ async def test_verify_weights_loaded_accepts_a_resolve_only_source(tmp_path: Pat
 
 @pytest.mark.asyncio
 async def test_verify_weights_loaded_still_rejects_a_bare_source_without_loader(tmp_path: Path) -> None:
-    """Positive control: a source that loaded data with no loader to apply it is still refused."""
+    """A source that loads data with no loader still raises."""
     import torch
 
     from anemoi.training.checkpoint.exceptions import CheckpointLoadError

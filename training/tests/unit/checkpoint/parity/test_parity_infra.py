@@ -7,22 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Parity coverage for the checkpoint infrastructure and contract layer.
+"""Parity tests for the shared checkpoint infrastructure.
 
-These tests close genuine assertion gaps in the shared checkpoint
-infrastructure: the :class:`CheckpointContext` contract
-(``validate_for_stage`` and ``__repr__``), the format-availability helper,
-the ``download_with_retry`` error-mapping paths, the ``CheckpointPipeline``
-orchestration branches (Hydra ``add_stage`` instantiation, running-loop
-``execute_sync``, ``MemoryError`` propagation, completion markers, and the
-validation-import fallback), the post-run ``validate_pipeline_health``
-invariants, the ``ComponentCatalog`` discovery cache and suggestion paths,
-and the checkpoint exception message builders.
-
-Each test drives the real code path on small CPU objects with deterministic
-inputs and asserts the concrete observable signal (raised exception type,
-exact message substrings, metadata values, call counts) rather than a weaker
-proxy.
+The tests cover ``CheckpointContext``, format availability, ``download_with_retry``,
+``CheckpointPipeline``, ``validate_pipeline_health``, ``ComponentCatalog`` and the
+exception messages.
 """
 
 from __future__ import annotations
@@ -58,7 +47,7 @@ if TYPE_CHECKING:
 
 
 class MockStage(PipelineStage):
-    """Minimal successful stage that records a per-name marker in metadata."""
+    """Stage that adds a marker for its name to the metadata."""
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -100,13 +89,12 @@ def test_validate_for_stage_reports_missing_required_fields() -> None:
     assert "model" in message
     assert "checkpoint_data" in message
 
-    # An empty (falsy) checkpoint_data counts as missing via has_checkpoint_data().
+    # An empty checkpoint_data counts as missing.
     empty_data = CheckpointContext(model=nn.Linear(2, 2), checkpoint_data={})
     with pytest.raises(CheckpointError) as exc_empty:
         empty_data.validate_for_stage("LoadingStage", ["model", "checkpoint_data"])
     empty_message = str(exc_empty.value)
     assert "checkpoint_data" in empty_message
-    # 'model' is populated, so it must not appear in the missing-field list.
     assert "'model'" not in empty_message
 
     # A fully populated context does not raise.
@@ -146,7 +134,7 @@ def test_context_repr_omits_unset_fields(tmp_path: Path) -> None:
 
 
 def test_is_format_available_false_for_unsupported_formats() -> None:
-    """is_format_available returns False for unsupported/unknown formats."""
+    """is_format_available returns False for unsupported formats."""
     assert is_format_available("safetensors") is False
     assert is_format_available("unknown") is False
 
@@ -161,7 +149,7 @@ def test_is_format_available_false_for_unsupported_formats() -> None:
 
 
 def _session_raising_on_enter(error: Exception) -> AsyncMock:
-    """Build a mocked ClientSession whose session.get context enter raises ``error``."""
+    """Make a mock ClientSession whose ``session.get`` raises ``error`` on enter."""
     get_context = AsyncMock()
     get_context.__aenter__ = AsyncMock(side_effect=error)
     get_context.__aexit__ = AsyncMock(return_value=None)
@@ -174,7 +162,7 @@ def _session_raising_on_enter(error: Exception) -> AsyncMock:
 
 
 def _session_raising_on_status(error: Exception) -> AsyncMock:
-    """Build a mocked ClientSession whose response.raise_for_status raises ``error``."""
+    """Make a mock ClientSession whose ``raise_for_status`` raises ``error``."""
     response = Mock()
     response.raise_for_status = Mock(side_effect=error)
     response.headers = {"content-length": "0"}
@@ -251,11 +239,11 @@ def test_add_stage_instantiates_config_and_rejects_invalid(tmp_path: Path) -> No
     assert len(pipeline.stages) == 1
     assert isinstance(pipeline.stages[0], LocalSource)
 
-    # A plain object has no process method -> rejected.
+    # No process method.
     with pytest.raises(CheckpointConfigError):
         CheckpointPipeline([]).add_stage(object())
 
-    # An unimportable _target_ fails Hydra instantiation -> rejected.
+    # Unknown _target_.
     with pytest.raises(CheckpointConfigError):
         CheckpointPipeline([]).add_stage({"_target_": "nonexistent.module.DoesNotExist"})
 
@@ -266,8 +254,7 @@ async def test_execute_sync_uses_thread_pool_inside_running_loop() -> None:
     stage2 = MockStage("b")
     pipeline = CheckpointPipeline([stage1, stage2])
 
-    # This test function runs inside a live event loop; execute_sync must
-    # detect it and offload to a thread pool rather than raising.
+    # The test runs in an event loop, so execute_sync must use a thread pool.
     result = pipeline.execute_sync(CheckpointContext(model=nn.Linear(2, 2)))
 
     assert stage1.process_called
@@ -277,7 +264,7 @@ async def test_execute_sync_uses_thread_pool_inside_running_loop() -> None:
 
 
 async def test_memory_error_reraised_even_with_continue_on_error() -> None:
-    """MemoryError propagates but CheckpointError is swallowed under continue_on_error."""
+    """With continue_on_error, MemoryError propagates but CheckpointError does not."""
     memory_pipeline = CheckpointPipeline([_MemoryErrorStage()], continue_on_error=True)
     with pytest.raises(MemoryError):
         await memory_pipeline.execute_async(CheckpointContext(model=nn.Linear(2, 2)))
@@ -298,12 +285,11 @@ async def test_completed_markers_recorded_for_successful_stages() -> None:
 
 
 async def test_pre_execution_validation_degrades_on_import_error() -> None:
-    """Pipeline degrades gracefully when the validation module import fails."""
+    """The pipeline skips validation if the validation module does not import."""
     pipeline = CheckpointPipeline([MockStage("only")])
     context = CheckpointContext(model=nn.Linear(2, 2))
 
-    # Setting the module entry to None forces the local
-    # `from .validation import CheckpointPipelineValidator` to raise ImportError.
+    # A None entry in sys.modules causes ImportError.
     with patch.dict(sys.modules, {"anemoi.training.checkpoint.validation": None}):
         result = await pipeline.execute(context)
 
@@ -328,7 +314,7 @@ def test_non_string_stage_value_is_flagged() -> None:
 
 
 def test_config_validation_error_status_is_propagated() -> None:
-    """A configuration-validation 'error' status propagates to a health failure."""
+    """A config validation 'error' status causes a health failure."""
     context = CheckpointContext(model=nn.Linear(2, 2))
     context.update_metadata(stage_0_Loading="completed", validation_config_status="error")
 
@@ -344,7 +330,7 @@ def test_config_validation_error_status_is_propagated() -> None:
 
 
 class TestComponentCatalogParity:
-    """Catalog tests that touch the class-level discovery cache."""
+    """Catalog tests that use the class-level discovery cache."""
 
     @pytest.fixture(autouse=True)
     def _reset_catalog_cache(self) -> None:
@@ -357,7 +343,7 @@ class TestComponentCatalogParity:
         ComponentCatalog._modifiers = None
 
     def test_discovery_result_is_cached(self) -> None:
-        """list_* discovery runs once and the result is cached."""
+        """Discovery runs once, then the result comes from the cache."""
         fixed = {
             "s3": "anemoi.training.checkpoint.sources.S3Source",
             "local": "anemoi.training.checkpoint.sources.LocalSource",
@@ -371,7 +357,7 @@ class TestComponentCatalogParity:
         assert first == second == ["local", "s3"]
 
     def test_get_source_target_unknown_lists_available_and_suggests(self) -> None:
-        """Unknown source name against a populated catalog lists names + suggestions."""
+        """An unknown source name gives the available names and suggestions."""
         fixed = {
             "local": "anemoi.training.checkpoint.sources.LocalSource",
             "http": "anemoi.training.checkpoint.sources.HTTPSource",
@@ -379,7 +365,6 @@ class TestComponentCatalogParity:
         with patch.object(ComponentCatalog, "_discover_components", return_value=dict(fixed)):
             ComponentCatalog._sources = None
 
-            # The available-names listing is emitted for any unknown name.
             with pytest.raises(CheckpointConfigError) as exc:
                 ComponentCatalog.get_source_target("locel")
             message = str(exc.value)
@@ -387,18 +372,18 @@ class TestComponentCatalogParity:
             assert "local" in message
             assert "http" in message
 
-            # The similar-name suggestion branch fires for a substring near-miss.
+            # A substring match gives a suggestion.
             with pytest.raises(CheckpointConfigError) as exc_suggest:
                 ComponentCatalog.get_source_target("loca")
             assert "Did you mean: local" in str(exc_suggest.value)
 
     def test_find_similar_names_matches_substring(self) -> None:
-        """_find_similar_names returns substring near-matches."""
+        """_find_similar_names returns substring matches."""
         result = ComponentCatalog._find_similar_names("weight", ["weights_only", "warm_start"])
         assert "weights_only" in result
         assert "warm_start" not in result
 
-        # Reached end-to-end via get_loader_target's error path on a populated catalog.
+        # Also through the get_loader_target error path.
         fixed = {
             "weights_only": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader",
             "warm_start": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader",
@@ -416,7 +401,7 @@ class TestComponentCatalogParity:
 
 
 def test_not_found_error_builds_suggestions(tmp_path: Path) -> None:
-    """CheckpointNotFoundError builds similar-files / missing-directory hints."""
+    """CheckpointNotFoundError gives similar-file and missing-directory hints."""
     (tmp_path / "sibling.ckpt").write_bytes(b"x")
     (tmp_path / "other.pt").write_bytes(b"y")
 

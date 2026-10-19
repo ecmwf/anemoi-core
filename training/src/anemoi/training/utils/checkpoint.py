@@ -48,9 +48,7 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
         pytorch model, metadata.
 
     """
-    # Imported lazily: a module-level import of methods.base pulls the training
-    # stack (methods -> diagnostics.callbacks -> utils.checkpoint), forming a
-    # circular import that makes this utility module unsafe to import standalone.
+    # Local import to prevent a circular import.
     from anemoi.training.train.methods.base import BaseTrainingModule
 
     module = BaseTrainingModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)

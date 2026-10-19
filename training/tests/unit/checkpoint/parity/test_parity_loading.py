@@ -7,19 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Parity coverage for the checkpoint loading-strategy layer.
-
-These tests close genuine assertion gaps in the loading strategies
-(``WeightsOnlyLoader``, ``TransferLearningLoader``, ``WarmStartLoader``,
-``ColdStartLoader``), ``filter_state_dict``
-and the shared ``apply_trainable_edge_perm_migration`` parity helper.
-
-They exercise the real strategy code paths on small CPU modules with
-deterministic synthetic checkpoints, asserting the concrete observable signal
-(loaded tensor values, discarded optimizer/scheduler, exact metadata keys and
-values, raised exception types) rather than a weaker proxy such as "weights
-changed" or "key is present".
-"""
+"""Parity tests for the loading strategies, ``filter_state_dict`` and the edge-perm helper."""
 
 from __future__ import annotations
 
@@ -44,7 +32,7 @@ from anemoi.training.checkpoint.loading.utils import filter_state_dict
 
 
 class _LinearModel(nn.Module):
-    """Single ``linear`` submodule; state-dict keys ``linear.weight`` / ``linear.bias``."""
+    """Model with one ``linear`` submodule."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -52,7 +40,7 @@ class _LinearModel(nn.Module):
 
 
 class _Layer1Model(nn.Module):
-    """Single ``layer1`` submodule; state-dict keys ``layer1.weight`` / ``layer1.bias``."""
+    """Model with one ``layer1`` submodule."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -60,7 +48,7 @@ class _Layer1Model(nn.Module):
 
 
 class _SharedModel(nn.Module):
-    """Transfer-learning target: only a ``shared`` layer (no head)."""
+    """Transfer-learning target with only a ``shared`` layer."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -68,12 +56,12 @@ class _SharedModel(nn.Module):
 
 
 def _fake_index_collection(name_to_index: dict[str, int]) -> object:
-    """Build a stand-in ``IndexCollection`` exposing ``.name_to_index``."""
+    """Make a fake ``IndexCollection`` with ``name_to_index``."""
     return type("IndexCollection", (), {"name_to_index": name_to_index})()
 
 
 def _exact_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
-    """Deterministic state dict matching ``model``'s keys/shapes (distinct constant per key)."""
+    """Return a state dict for ``model`` with a different constant for each key."""
     return {key: torch.full_like(value, float(idx + 1)) for idx, (key, value) in enumerate(model.state_dict().items())}
 
 
@@ -128,7 +116,7 @@ async def test_weights_only_non_strict_tolerates_extra_key() -> None:
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
     result = await WeightsOnlyLoader(strict=False).process(context)
 
-    # No exception; the model's own keys loaded, extra key ignored.
+    # The extra key is ignored.
     assert torch.equal(result.model.layer1.weight, weight)
     assert torch.equal(result.model.layer1.bias, bias)
 
@@ -370,7 +358,7 @@ def test_warm_start_has_no_strict_parameter() -> None:
 
 @pytest.mark.asyncio
 async def test_warm_start_is_a_marker_and_never_loads() -> None:
-    """Resume loads happen in ``Trainer.fit(ckpt_path=)``; the marker's ``process`` refuses to run."""
+    """``WarmStartLoader.process`` raises, because ``Trainer.fit(ckpt_path=)`` does resume loads."""
     model = _LinearModel()
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": _exact_state_dict(model)})
 
@@ -415,7 +403,7 @@ def test_edge_perm_migration_noop_when_checkpoint_none() -> None:
 
 def test_filter_state_dict_maps_keys_to_specific_reasons() -> None:
     source: dict[str, Any] = {
-        "shared.weight": torch.full((5, 10), 1.0),  # matches -> filtered
+        "shared.weight": torch.full((5, 10), 1.0),  # matches, kept
         "missing_key": torch.full((3,), 2.0),  # absent from target
         "mismatch_key": torch.full((7, 10), 3.0),  # present but wrong shape
     }

@@ -9,10 +9,8 @@
 
 """Tests for WarmStartLoader.
 
-Warm start is a marker: selecting it means ``Trainer.fit(ckpt_path=)`` performs
-the one and only load of the checkpoint (weights, optimizer, scheduler and loop
-progress together) and the pipeline only resolves the source to a local file. The
-builder never emits this stage, so ``process`` refuses to run.
+WarmStartLoader is a marker. ``Trainer.fit(ckpt_path=)`` does the full load.
+The pipeline only resolves the source to a local file, so ``process`` must not run.
 """
 
 import inspect
@@ -33,20 +31,20 @@ class SimpleModel(nn.Module):
 
 
 def test_warm_start_declares_restores_training_state() -> None:
-    """The attribute the builder and the trainer read to route the load through Lightning."""
+    """``restores_training_state`` is True only for WarmStartLoader."""
     assert WarmStartLoader.restores_training_state is True
     assert LoadingStrategy.restores_training_state is False
 
 
 def test_warm_start_keeps_its_constructor_signature() -> None:
-    """``loading=warm_start`` configs carry no parameters; the class must keep accepting none."""
+    """WarmStartLoader takes no parameters."""
     assert "strict" not in inspect.signature(WarmStartLoader.__init__).parameters
     assert isinstance(WarmStartLoader(), LoadingStrategy)
 
 
 @pytest.mark.asyncio
 async def test_warm_start_process_refuses_to_run() -> None:
-    """A hand-built pipeline that routes a checkpoint through the marker fails loudly, untouched."""
+    """``process`` raises and does not change the model."""
     model = SimpleModel()
     before = {key: value.clone() for key, value in model.state_dict().items()}
     checkpoint_data = {"state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)}}

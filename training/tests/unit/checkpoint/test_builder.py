@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Tests for ``build_checkpoint_pipeline`` (config wiring → pipeline)."""
+"""Tests for ``build_checkpoint_pipeline``."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def _load_template(group: str, name: str) -> DictConfig:
 
 
 def _freezing_modifier(submodules: list[str] | None = None) -> dict:
-    """Inline FreezingModifierStage config with explicit submodules, for order-sensitive tests."""
+    """Return a FreezingModifierStage config with the given submodules."""
     return {"_target_": _FREEZING_TARGET, "submodules_to_freeze": submodules or []}
 
 
@@ -55,10 +55,9 @@ def compose_test_config(
     loading: str | None = None,
     modifiers: list | None = None,
 ) -> DictConfig:
-    """Build a minimal training config that exercises the builder's namespaces.
+    """Build a minimal training config for the builder.
 
-    ``modifiers`` accepts either template names (currently only ``"freezing"``)
-    or pre-built modifier config dicts, allowing order-sensitive assertions.
+    ``modifiers`` items are template names (only ``"freezing"``) or config dicts.
     """
     checkpoint: dict = {}
     if source is not None:
@@ -100,8 +99,7 @@ def test_hydra_defaults_compose() -> None:
     assert templates, f"no checkpoint templates found under {_checkpoint_template_dir()}"
     for template in templates:
         cfg = OmegaConf.load(template)
-        # Instantiation (not merely loading) is what catches an unsupported kwarg,
-        # e.g. a `strict` key on a loader that does not accept one (-> TypeError).
+        # Instantiate to catch unsupported kwargs.
         instantiate(cfg)
 
 
@@ -118,28 +116,28 @@ def test_modifiers_list_order_preserved() -> None:
 
 
 def test_no_checkpoint_config_builds_empty_pipeline() -> None:
-    """Absent training.checkpoint => no pipeline; trainer behaves as today."""
+    """No training.checkpoint gives an empty pipeline."""
     cfg = OmegaConf.create({"training": {}})
     pipeline = build_checkpoint_pipeline(cfg)
     assert len(pipeline.stages) == 0
 
 
 def test_builder_injects_server2server_into_run_source() -> None:
-    """Runtime server-to-server lineage is merged onto a RunIdSource source config."""
+    """Runtime server-to-server lineage is added to a RunIdSource config."""
     cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": _RUN_SOURCE, "run_id": "abc"}}}})
     pipeline = build_checkpoint_pipeline(
         cfg,
         parent_run_server2server="remote-parent",
         fork_run_server2server="remote-fork",
     )
-    # A source-only config is a resume: the stage is the resolve-only wrapper around the source.
+    # A source-only config is a resume, so the stage is a resolve-only wrapper.
     source = pipeline.stages[0].source
     assert source.parent_run_server2server == "remote-parent"
     assert source.fork_run_server2server == "remote-fork"
 
 
 def test_builder_server2server_defaults_leave_run_source_untouched() -> None:
-    """Without runtime lineage, a config-provided RunIdSource is built verbatim."""
+    """Without runtime lineage, RunIdSource is built from the config only."""
     cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": _RUN_SOURCE, "run_id": "abc"}}}})
     pipeline = build_checkpoint_pipeline(cfg)
     source = pipeline.stages[0].source
@@ -148,13 +146,13 @@ def test_builder_server2server_defaults_leave_run_source_untouched() -> None:
 
 
 def test_builder_server2server_ignored_for_local_source() -> None:
-    """Runtime lineage kwargs are a no-op for non-RunIdSource sources (no instantiation error)."""
+    """Runtime lineage kwargs have no effect on other sources."""
     cfg = compose_test_config(source="local")
     pipeline = build_checkpoint_pipeline(cfg, parent_run_server2server="remote-parent")
     assert type(pipeline.stages[0].source).__name__.endswith("LocalSource")
 
 
-# --- a resume has one owner: Trainer.fit(ckpt_path=) ------------------------------
+# --- resume: Trainer.fit(ckpt_path=) loads the checkpoint ---
 
 
 class _EncoderNet(torch.nn.Module):
@@ -165,11 +163,7 @@ class _EncoderNet(torch.nn.Module):
 
 
 class ResumeLoader(WarmStartLoader):
-    """A loader that restores training state without being named ``WarmStartLoader``.
-
-    Stands in for a third-party strategy that declares ``restores_training_state``; its
-    ``_target_`` does not end in ``WarmStartLoader``, so a class-name match would miss it.
-    """
+    """Loader that restores training state, with a name other than ``WarmStartLoader``."""
 
 
 _RESUME_LOADER = f"{__name__}.ResumeLoader"
@@ -205,11 +199,7 @@ def test_warm_start_resolves_the_source_only_and_emits_no_loader(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """For a loader declaring ``restores_training_state`` the pipeline resolves and loads nothing.
-
-    ``Trainer.fit(ckpt_path=)`` reads the file and runs the corrections in
-    ``on_load_checkpoint``; a load here would apply them to a copy Lightning discards.
-    """
+    """With ``restores_training_state``, the pipeline only resolves the file and loads nothing."""
     cfg, ckpt = _resume_cfg(tmp_path, f"{_LOADERS}.WarmStartLoader")
     loads = _spy_torch_load(monkeypatch)
     model = _EncoderNet()
@@ -228,7 +218,7 @@ def test_warm_start_resolves_the_source_only_and_emits_no_loader(
 
 
 def test_warm_start_still_runs_modifiers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Modifiers change the model, not the checkpoint, so they still apply on a resume."""
+    """Modifiers still apply on a resume."""
     cfg, _ = _resume_cfg(
         tmp_path,
         f"{_LOADERS}.WarmStartLoader",
@@ -247,10 +237,7 @@ def test_warm_start_still_runs_modifiers(tmp_path: Path, monkeypatch: pytest.Mon
 
 
 def test_source_without_loading_is_a_resume(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A bare source resumes: the file is resolved for ``Trainer.fit(ckpt_path=)`` and nothing is loaded.
-
-    This is the configuration the user guide prescribes for restarting a run.
-    """
+    """A source without a loader is a resume: it resolves the file and loads nothing."""
     cfg, ckpt = _resume_cfg(tmp_path, None)
     loads = _spy_torch_load(monkeypatch)
 
@@ -263,13 +250,13 @@ def test_source_without_loading_is_a_resume(tmp_path: Path, monkeypatch: pytest.
 
 
 def test_restoring_loader_subclass_is_treated_like_warm_start(tmp_path: Path) -> None:
-    """The resume decision keys on the declared attribute, not the class name."""
+    """The resume decision uses the class attribute, not the class name."""
     cfg, _ = _resume_cfg(tmp_path, _RESUME_LOADER)
     assert [type(stage).__name__ for stage in build_checkpoint_pipeline(cfg).stages] == ["ResolveOnlySource"]
 
 
 def test_weights_only_loader_still_loads_in_the_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Only a resume is deferred to Lightning; every other loader applies weights here."""
+    """Non-resume loaders load weights in the pipeline."""
     cfg, _ = _resume_cfg(tmp_path, f"{_LOADERS}.WeightsOnlyLoader")
     loads = _spy_torch_load(monkeypatch)
     model = _EncoderNet()
@@ -283,7 +270,7 @@ def test_weights_only_loader_still_loads_in_the_pipeline(tmp_path: Path, monkeyp
 
 
 def test_warm_start_from_a_remote_source_builds() -> None:
-    """A remote source is downloaded to a local file for Lightning; it is no longer refused."""
+    """A resume from a remote source builds."""
     cfg = OmegaConf.create(
         {
             "training": {
@@ -300,7 +287,7 @@ def test_warm_start_from_a_remote_source_builds() -> None:
 
 
 def test_warm_start_without_a_source_is_rejected() -> None:
-    """There is nothing for Lightning to read, so the composition fails at build."""
+    """A resume without a source fails at build."""
     cfg = OmegaConf.create({"training": {"checkpoint": {"loading": {"_target_": f"{_LOADERS}.WarmStartLoader"}}}})
     with pytest.raises(CheckpointConfigError, match=r"no training\.checkpoint\.source"):
         build_checkpoint_pipeline(cfg)
@@ -318,7 +305,7 @@ def test_warm_start_without_a_source_is_rejected() -> None:
     ],
 )
 def test_resumes_via_lightning(loading: str | None, expected: bool) -> None:
-    """The one decision the builder and the trainer share."""
+    """Check which configs resume through Lightning."""
     checkpoint: dict = {"source": {"_target_": "anemoi.training.checkpoint.sources.local.LocalSource", "path": "x"}}
     if loading is not None:
         checkpoint["loading"] = {"_target_": loading}
@@ -326,7 +313,7 @@ def test_resumes_via_lightning(loading: str | None, expected: bool) -> None:
 
 
 class _NothingSource(CheckpointSource):
-    """A source whose resolve step finds nothing on every rank."""
+    """Source that resolves nothing on all ranks."""
 
     async def resolve(self, context: CheckpointContext) -> Path | None:
         del context
@@ -337,12 +324,7 @@ class _NothingSource(CheckpointSource):
 
 
 def test_resume_that_resolves_nothing_fails_on_rank_zero(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A resume whose source finds no checkpoint must not start from scratch in silence.
-
-    A source that resolves ``None`` on rank 0 (a deferral is a non-zero-rank event) is
-    a configuration error, not a fresh run: the marker would otherwise let the
-    pipeline's weights check through and Lightning would receive ``ckpt_path=None``.
-    """
+    """A resume that resolves no checkpoint on rank 0 raises a config error."""
     for var in ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
         monkeypatch.delenv(var, raising=False)
     cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": f"{__name__}._NothingSource"}}}})
@@ -353,7 +335,7 @@ def test_resume_that_resolves_nothing_fails_on_rank_zero(monkeypatch: pytest.Mon
 
 
 def test_resume_with_the_run_preset_and_no_run_id_names_the_key(tmp_path: Path) -> None:
-    """The shipped ``source=run`` preset carries ``run_id: null``; forgetting ``+run_id=`` is named as such."""
+    """The ``source=run`` preset without a run_id raises an error that names the key."""
     cfg = OmegaConf.create(
         {
             "training": {"checkpoint": {"source": {"_target_": _RUN_SOURCE, "run_id": None}}},
@@ -367,7 +349,7 @@ def test_resume_with_the_run_preset_and_no_run_id_names_the_key(tmp_path: Path) 
 
 
 def test_resume_that_resolves_nothing_defers_on_other_ranks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Non-zero ranks defer to rank 0's error, as the sources do, so the job fails once."""
+    """Non-zero ranks defer to the error on rank 0."""
     monkeypatch.setenv("RANK", "1")
     cfg = OmegaConf.create(
         {
@@ -385,26 +367,16 @@ def test_resume_that_resolves_nothing_defers_on_other_ranks(tmp_path: Path, monk
 
 @pytest.mark.parametrize(("template", "required_key"), [("local", "path"), ("run", "run_id")])
 def test_source_presets_declare_their_required_key(template: str, required_key: str) -> None:
-    """A source preset names the value the user has to supply.
-
-    ``local.yaml`` shipped with only ``_target_`` and a comment claiming the path came
-    from the pipeline context. Nothing supplies it (only ``RunIdSource`` ever sets
-    ``context.checkpoint_path``, and it builds its own bare ``LocalSource``), so
-    selecting the preset alone could only fail. Declaring the key null makes the
-    requirement discoverable in the file, like its sibling already did.
-    """
+    """Each source preset declares its required key as null."""
     template_cfg = _load_template("source", template)
     assert required_key in template_cfg
     assert template_cfg[required_key] is None
 
 
 def test_dry_run_suppresses_acquisition_but_keeps_modifiers() -> None:
-    """A dry run starts fresh: no source, no loader, modifiers still applied.
+    """A dry run has no source and no loader, but keeps the modifiers.
 
-    ``anemoi-training mlflow prepare`` mints a run id with no checkpoint directory.
-    The trainer clears ``start_from_checkpoint`` for it, and that has to reach the
-    pipeline: otherwise the source stage looks for a checkpoint that was never
-    written and the prepared run cannot be launched at all.
+    ``anemoi-training mlflow prepare`` makes a run ID with no checkpoint yet.
     """
     cfg = compose_test_config(source="run", loading="weights_only", modifiers=["freezing"])
 
@@ -414,14 +386,14 @@ def test_dry_run_suppresses_acquisition_but_keeps_modifiers() -> None:
 
 
 def test_dry_run_suppresses_a_resume_too() -> None:
-    """The prepared run is resumed by RunIdSource; with nothing written yet there is nothing to resolve."""
+    """A dry run also removes a resume source."""
     cfg = compose_test_config(source="run")
 
     assert build_checkpoint_pipeline(cfg, load_checkpoint=False).stages == []
 
 
 def test_load_checkpoint_defaults_to_acquiring() -> None:
-    """Positive control: the same config builds the full pipeline by default."""
+    """Control: by default the same config builds the full pipeline."""
     cfg = compose_test_config(source="run", loading="weights_only")
 
     names = [type(s).__name__ for s in build_checkpoint_pipeline(cfg).stages]
@@ -429,17 +401,11 @@ def test_load_checkpoint_defaults_to_acquiring() -> None:
     assert names == ["RunIdSource", "WeightsOnlyLoader"]
 
 
-# --- stage identity is decided by the source class, not by what its name ends in ---
+# --- source type comes from the class, not the name ---
 
 
 class SiteRunSource(RunIdSource):
-    """A site-specific subclass whose ``_target_`` does not end in ``RunIdSource``.
-
-    Stands in for a user's ``EcmwfRunSource(RunIdSource)``: a string match on the
-    target name would treat it as an ordinary source, drop the runtime lineage on the
-    floor and report no run identity, so the job would resume with a fresh MLflow id
-    and no error.
-    """
+    """Subclass with a ``_target_`` that does not end in ``RunIdSource``."""
 
 
 _SITE_RUN_SOURCE = f"{__name__}.SiteRunSource"
@@ -464,7 +430,7 @@ def test_run_identity_is_read_from_a_run_source_subclass() -> None:
 
 
 def test_unresolvable_source_target_carries_no_identity_and_is_left_for_the_build_to_report() -> None:
-    """The helpers answer neutrally; the pipeline build raises the CheckpointConfigError."""
+    """The helper returns no identity; the pipeline build raises CheckpointConfigError."""
     from anemoi.training.checkpoint.sources.run import run_identity_from_config
 
     cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": "no.such.Source", "run_id": "abc"}}}})

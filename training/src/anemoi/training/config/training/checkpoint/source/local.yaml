@@ -1,4 +1,3 @@
-# Checkpoint source — read a checkpoint from an explicit file on the local
-# filesystem. `~` and relative paths are expanded.
+# Read a checkpoint from a local file.
 _target_: anemoi.training.checkpoint.sources.local.LocalSource
-path: null   # REQUIRED: the checkpoint file to load (e.g. training/checkpoint/source=local training.checkpoint.source.path=/path/to/model.ckpt)
+path: null   # REQUIRED, e.g. training/checkpoint/source=local training.checkpoint.source.path=/path/to/model.ckpt

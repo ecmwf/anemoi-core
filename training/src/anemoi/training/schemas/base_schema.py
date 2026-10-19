@@ -195,9 +195,7 @@ def _find_deprecated_target(data: Any, deprecated: dict[str, str]) -> tuple[str,
     return None
 
 
-# Removed config KEYS (by dotted path). Unlike _DEPRECATED_TARGETS (which keys on
-# _target_ values), these fire on the PRESENCE of the key — even when set to null —
-# because the field is gone from the schema and a leftover entry is a migration signal.
+# Removed config keys. If a key is present, validation fails, also if its value is null.
 _DEPRECATED_KEYS: dict[str, str] = {
     "training.run_id": (
         "training.run_id has been removed. To resume a run, set training.checkpoint.source to "
@@ -237,7 +235,7 @@ _DEPRECATED_KEYS: dict[str, str] = {
 
 
 def _find_deprecated_key(data: Any, deprecated: dict[str, str]) -> tuple[str, str] | None:
-    """Find a removed config key by dotted path; fires on key PRESENCE (any value)."""
+    """Find the first removed config key that is present in ``data``."""
     for path, hint in deprecated.items():
         node = data
         for part in path.split("."):
@@ -272,7 +270,7 @@ class SchemaCommonMixin:
     @model_validator(mode="before")
     @classmethod
     def _check_deprecated_keys(cls, values: Any) -> Any:
-        """Raise before validation if a removed config key is present (any value)."""
+        """Raise an error if a removed config key is present."""
         result = _find_deprecated_key(values, _DEPRECATED_KEYS)
         if result:
             _, hint = result

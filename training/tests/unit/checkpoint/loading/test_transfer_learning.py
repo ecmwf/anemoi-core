@@ -58,7 +58,7 @@ async def test_transfer_learning_skips_mismatched_shapes() -> None:
 
 @pytest.mark.asyncio
 async def test_transfer_learning_filter_is_non_mutating() -> None:
-    """The loader leaves ``checkpoint_data`` untouched; ``filter_state_dict`` returns a new mapping."""
+    """The loader does not change ``checkpoint_data``."""
     target = TargetModel()
     source_state = {
         "shared.weight": torch.randn(5, 10),
@@ -114,7 +114,7 @@ def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 @pytest.mark.asyncio
 async def test_transfer_learning_warns_naming_each_skipped_param(caplog: pytest.LogCaptureFixture) -> None:
-    """The skip is loud: one WARNING names every dropped tensor with its reason."""
+    """One WARNING gives each skipped tensor and its reason."""
     target = TargetModel()
     source_state = {
         "shared.weight": torch.randn(5, 10),
@@ -141,7 +141,7 @@ async def test_transfer_learning_warns_naming_each_skipped_param(caplog: pytest.
 async def test_transfer_learning_warns_when_most_of_the_checkpoint_did_not_transfer(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A width change leaves almost nothing to transfer; the warning says so outright."""
+    """The warning says when most of the checkpoint did not transfer."""
     target = TargetModel()
     source_state = {
         "shared.weight": torch.randn(5, 10),

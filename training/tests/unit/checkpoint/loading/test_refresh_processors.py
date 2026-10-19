@@ -9,10 +9,8 @@
 
 """Regression tests for the processor-refresh step of ``apply_checkpoint_corrections``.
 
-Pipeline-based loading must honour
-``config.training.update_ds_stats_on_ckpt_load.{states,tendencies}`` exactly as
-``BaseTrainingModule.on_load_checkpoint`` does; both paths reach
-:func:`refresh_checkpoint_processors` through ``apply_checkpoint_corrections``.
+Pipeline loading must obey ``config.training.update_ds_stats_on_ckpt_load``
+the same as ``BaseTrainingModule.on_load_checkpoint``.
 """
 
 from __future__ import annotations
@@ -27,7 +25,7 @@ from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
 
 
 class _InnerModel(nn.Module):
-    """The AnemoiModelInterface-equivalent: processors live here, keyed without ``model.``."""
+    """Inner model (like AnemoiModelInterface). Holds the processors."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -39,13 +37,7 @@ class _InnerModel(nn.Module):
 
 
 class _ModelWithProcessors(nn.Module):
-    """LightningModule-shaped wrapper whose ``.model`` is the inner interface.
-
-    ``context.model`` in the real trainer is the LightningModule, so its
-    ``state_dict()`` keys carry the leading ``model.`` (e.g.
-    ``model.pre_processors.weight``) — what the checkpoint and ``load_state_dict``
-    use — while the refresh re-injects from the inner ``.model``.
-    """
+    """LightningModule-like wrapper. Its ``state_dict`` keys start with ``model.``."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -172,9 +164,7 @@ async def test_full_process_call_applies_the_refresh() -> None:
     """Smoke test: the helper actually runs as part of WeightsOnlyLoader.process()."""
     context = _build_context(states=True, tendencies=True)
 
-    # strict=False keeps the smoke test tolerant of any non-processor key differences;
-    # it exercises that the refresh runs inside process() and that the resulting load
-    # leaves the model with its own (non-stale) processor weights.
+    # strict=False ignores key differences that are not processor keys.
     await WeightsOnlyLoader(strict=False).process(context)
 
     # The model keeps its own (non-stale) processor weights.

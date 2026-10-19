@@ -9,9 +9,7 @@
 
 """Core abstractions for checkpoint pipeline.
 
-A :class:`CheckpointContext` carries state through a series of
-:class:`PipelineStage` implementations; each stage mutates the context and
-returns it for the next one.
+Each :class:`PipelineStage` changes a :class:`CheckpointContext` and returns it.
 
 Example
 -------
@@ -61,9 +59,8 @@ class CheckpointContext:
     Parameters
     ----------
     checkpoint_path : Path, optional
-        Local path to the checkpoint file. A source's ``resolve`` step publishes
-        it (a canonical local path, or a kept download); the trainer hands it to
-        ``Trainer.fit(ckpt_path=)`` on a resume.
+        Local path to the checkpoint file. On a resume, the trainer gives it to
+        ``Trainer.fit(ckpt_path=)``.
     checkpoint_data : dict, optional
         Loaded checkpoint data dictionary containing model weights,
         optimizer state, training metadata, etc.
@@ -81,8 +78,8 @@ class CheckpointContext:
         Lightning module (Task) if loading from Lightning checkpoint.
         This preserves the full Lightning context for training resumption
     temporary_files : list of Path
-        Downloads a source kept on disk so ``Trainer.fit(ckpt_path=)`` can read
-        them. The trainer deletes them once training has finished.
+        Downloaded files kept for ``Trainer.fit(ckpt_path=)``. The trainer deletes
+        them after training.
 
     Examples
     --------
@@ -112,11 +109,9 @@ class CheckpointContext:
     temporary_files: list[Path] = field(default_factory=list)
 
     def __post_init__(self):
-        """Coerce ``checkpoint_path`` to a ``Path`` after initialization.
+        """Convert ``checkpoint_path`` to a ``Path``.
 
-        Structural-coherence checks (format/pl_module) live in
-        :func:`anemoi.training.checkpoint.validation.validate_pipeline_health`,
-        the single post-run validation home — they are not duplicated here.
+        ``validate_pipeline_health`` does the coherence checks.
         """
         from pathlib import Path
 

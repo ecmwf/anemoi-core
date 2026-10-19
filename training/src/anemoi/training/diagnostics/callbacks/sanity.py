@@ -33,8 +33,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
 
     def _compare_variables(self, trainer: pl.Trainer, model_name_to_index: dict, data_name_to_index: dict) -> None:  # type: ignore[misc]
         """Compare variables between model and data indices."""
-        # Opt-in fine-tuning into FEWER variables (issue #838): tolerate the current data
-        # being a strict subset of the checkpoint's variables, matching the trainer-side check.
+        # Optional: allow a subset of the checkpoint variables (issue #838).
         allow_subset = bool(trainer.datamodule.config.training.get("allow_variable_subset", False))
         for dataset_name, data_indices in trainer.datamodule.data_indices.items():
             # Only compare if dataset exists in model (handles transfer learning scenarios)

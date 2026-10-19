@@ -4,8 +4,7 @@ defaults:
   - training_loss: ensemble
   - optimization: default
   - weight_averaging: null
-  # Opt-in checkpoint pipeline (training.checkpoint). Default null = fresh run.
-  # Set training.checkpoint.source to resume/fork a run or load weights from a file.
+  # Optional checkpoint pipeline. By default, the run starts from scratch.
   - optional checkpoint/source: null
   - optional checkpoint/loading: null
   - optional checkpoint/modifiers: null
@@ -23,12 +22,9 @@ check_variables_compatibility:
   ignore_units: False
   ignore_processing_period: False
 
-# Fine-tuning into a model with FEWER variables (issue #838): set True to accept a
-# checkpoint whose variable set is a superset of the current dataset's (shared variables
-# must keep the same relative order). This relaxes the variable-order and units checks
-# only. To also load such a checkpoint, the loading strategy must skip shape-mismatched
-# parameters: TransferLearningLoader, or WeightsOnlyLoader / ColdStartLoader with
-# skip_mismatched: true.
+# Set True to fine-tune on a subset of the checkpoint variables (issue #838).
+# The shared variables must keep the same order. This changes only the checks.
+# To load the weights, use a loader that skips mismatched shapes (skip_mismatched: true).
 allow_variable_subset: False
 
 # run in deterministic mode ; slows down
