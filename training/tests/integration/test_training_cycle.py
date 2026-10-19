@@ -401,6 +401,13 @@ def test_restart_training_ddp(
         cfg.system.hardware.accelerator = "cuda"
         cfg.system.hardware.num_gpus_per_node = 2
         cfg.system.output.root = str(shared_root)
+        # testing_modifications.yaml sets SingleDeviceStrategy. Without DDP, each rank trains alone
+        # and writes its own run_id directory.
+        cfg.training.strategy = {
+            "_target_": "anemoi.training.distributed.strategy.DDPGroupStrategy",
+            "num_gpus_per_model": 1,
+            "read_group_size": 1,
+        }
 
     AnemoiTrainer(cfg).train()
     output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
