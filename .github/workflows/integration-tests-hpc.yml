@@ -31,6 +31,20 @@ jobs:
   # The dispatch inputs end up in the HPC shell templates, so only allow the expected formats.
   validate-inputs:
     runs-on: ubuntu-latest
+    # On a pull_request the expensive tests only run when the author opted in
+    # via the 'run-expensive-tests' label; schedule/dispatch/merge_group always run.
+    if: >-
+      ${{
+        github.event_name != 'pull_request' ||
+        (
+          github.event.action == 'labeled' &&
+          github.event.label.name == 'run-expensive-tests'
+        ) ||
+        (
+          github.event.action != 'labeled' &&
+          contains(github.event.pull_request.labels.*.name, 'run-expensive-tests')
+        )
+      }}
     steps:
       - env:
           REFERENCE_ID: ${{ github.event.inputs.accuracy_reference_id }}
@@ -50,20 +64,6 @@ jobs:
     needs: validate-inputs
     runs-on: hpc
     timeout-minutes: 120
-    # On a pull_request the expensive tests only run when the author opted in
-    # via the 'run-expensive-tests' label; schedule/dispatch/merge_group always run.
-    if: >-
-      ${{
-        github.event_name != 'pull_request' ||
-        (
-          github.event.action == 'labeled' &&
-          github.event.label.name == 'run-expensive-tests'
-        ) ||
-        (
-          github.event.action != 'labeled' &&
-          contains(github.event.pull_request.labels.*.name, 'run-expensive-tests')
-        )
-      }}
     steps:
       - uses: ecmwf/reusable-workflows/ci-hpc-generic@v2
         with:
@@ -139,7 +139,7 @@ jobs:
     secrets: inherit
 
   test_accuracy:
-    needs: [validate-inputs, build-env]
+    needs: build-env
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_accuracy' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:

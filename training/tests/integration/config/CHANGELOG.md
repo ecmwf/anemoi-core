@@ -47,15 +47,14 @@ with `accuracy_reference_id` set to its run ID, before committing it.
 
 Changes to the benchmark tests (`test_benchmark.py`) and their configurations (`benchmark/`). Also documents performance changes from underlying model optimisations.
 
-## 2026-10-14 - Improved loss and data reader performance ([#1469](https://github.com/ecmwf/anemoi-core/pull/1469))
+### 2026-10-14 — Improved loss and data reader performance ([#1469](https://github.com/ecmwf/anemoi-core/pull/1469))
 
 - Commit: 3452dec6caa6629615b17b6ca862a4766c411958
 - Benchmark changed: No
 - Performance change: Throughput and memory improvement for temporal downscaler model
 - Reason: LossVariableMapper expensive indexing replaced with index\_select. Improved dataloading when using Trajectory datasets. Performance increased from 3.86it/s to 4.8it/s
 
-## 2026-07-22 - Merged multiscale loss optimisation ([#1212](https://github.com/ecmwf/anemoi-core/pull/1212))
-
+### 2026-07-22 — Merged multiscale loss optimisation ([#1212](https://github.com/ecmwf/anemoi-core/pull/1212))
 
 - Commit: bc89ef3c58f2646ff3385fc6881946693e6ab732
 - Benchmark changed: No
@@ -70,14 +69,14 @@ Changes to the benchmark tests (`test_benchmark.py`) and their configurations (`
 INFO     anemoi.training.diagnostics.benchmark_server:benchmark_server.py:325 PASS. Local value for avThroughputIterPerS has improved compared to the reference value (2.84iter/s local vs 1.47iter/s reference)
 ```
 
-## 2026-07-22 - Ignore warmup iterations ([#1254](https://github.com/ecmwf/anemoi-core/pull/1254))
+### 2026-07-22 — Ignore warmup iterations ([#1254](https://github.com/ecmwf/anemoi-core/pull/1254))
 
 - Commit: cfd5ca2342d1e909bf5785c39d0356b22fbf9c86
 - Benchmark changed: Yes
 - Performance change: Throughput improved for all models
 - Reason: There was a throughput increase for all models because the throughput calculation was changed in this PR to avoid counting the first 100 warmup iterations. this was done because the initial iterations can vary dramatically and be much slower as code is being compiled and blocks of GPU memory are being allocated. This change should make the throughput results more consistent. it will also allow us to see the benefits of compilation in the benchmark tests, since the overhead of compilation won't be included in the scores.
 
-## 2026-07-20 - Multiscale loss added to ensemble benchmark ([#1172](https://github.com/ecmwf/anemoi-core/pull/1172))
+### 2026-07-20 — Multiscale loss added to ensemble benchmark ([#1172](https://github.com/ecmwf/anemoi-core/pull/1172))
 
 - Commit: 84b5385dc4d6b5f38457415146ed582346f54e2f
 - Benchmark changed: Yes
@@ -97,7 +96,7 @@ peakMemoryMB: 16335.80MB (date: 2026-07-10, commit: 84b5385dc4d6b5f38457415146ed
 --------------------
 ```
 
-## 2026-06-12 - Triton GT stability fix merged ([#1172](https://github.com/ecmwf/anemoi-core/pull/1172))
+### 2026-06-12 — Triton GT stability fix merged ([#1172](https://github.com/ecmwf/anemoi-core/pull/1172))
 
 - Commit: bbca17482d6176f53c16adb1d268ff1874840397
 - Benchmark changed: No
@@ -125,7 +124,7 @@ peakMemoryMB: 16335.80MB (date: 2026-07-10, commit: 84b5385dc4d6b5f38457415146ed
 00:30:11 INFO FAIL. Local value for peakMemoryMB has degraded compared to the reference value (6539.96MB local vs 6409.62MB reference)
 ```
 
-## 2026-06-03 - Graph partition refactor merged ([#1102](https://github.com/ecmwf/anemoi-core/pull/1102))
+### 2026-06-03 — Graph partition refactor merged ([#1102](https://github.com/ecmwf/anemoi-core/pull/1102))
 
 - Commit: 2d86f740724e0abbe0e22bf9ee9c276827e5593a
 - Benchmark changed: No
@@ -153,29 +152,28 @@ peakMemoryMB: 16335.80MB (date: 2026-07-10, commit: 84b5385dc4d6b5f38457415146ed
 15:41:17 INFO PASS. Local value for peakMemoryMB has improved compared to the reference value (6409.62MB local vs 6825.10MB reference)
 ```
 
-## 2026-03-10 - Benchmark test case made smaller ([#898](https://github.com/ecmwf/anemoi-core/commit/c6d42cac6e5bbb6a146f9827dbb348771e65a429))
+### 2026-03-10 — Benchmark test case made smaller ([#898](https://github.com/ecmwf/anemoi-core/commit/c6d42cac6e5bbb6a146f9827dbb348771e65a429))
 
 - Commit: c6d42cac6e5bbb6a146f9827dbb348771e65a429
 - Benchmark changed: Yes
 - Performance change: Throughput and memory usage improved for all models
 - Reason: Benchmark test cases made smaller, from 16 to 2 layers.
 
-## 2026-01-21 - throughput drop, not understood
+### 2026-01-21 — throughput drop, not understood
 
 - Commit: f537d7f209092215a94b9e7c613acc781ca4966b
 - Benchmark changed: No
 - Performance change: Throughput drop across all models
 - Reason: 10% performance drop observed across all models. (e.g. LAM 1.03 it/s → 0.94). The reason for this is NOT understood. The regression occurred after multi-datasets was merged. but then subsequent testing before and after multi-datasets couldn't link the regression to this PR. The performance regression could have been caused by a change in a dependency, or some change at the system level. Dataloader benchmark tests were subsequently added to detect regressions coming from dataloading, as a safety net.
 
-## 2025-12-17 - Ensemble model performance regression ([#758](https://github.com/ecmwf/anemoi-core/issues/758))
+### 2025-12-17 — Ensemble model performance regression ([#758](https://github.com/ecmwf/anemoi-core/issues/758))
 
 - Commit: 88bf1e5b59e2bd88ccee7c46125a52dbefc3ff71
 - Benchmark changed: Yes
 - Performance change: Ensemble model throughput decreased and memory usage decreased
 - Reason: QK\_norm was added to the ensemble benchmark test (e.g. model.processor.qk\_norm: True). This test configuration is now closer to the typical ensemble model configuration.
 
-
-## 2025-11-21 - Triton GT and torch.compile() merged ([#631](https://github.com/ecmwf/anemoi-core/issues/631))
+### 2025-11-21 — Triton GT and torch.compile() merged ([#631](https://github.com/ecmwf/anemoi-core/issues/631))
 
 - Commit: b40b6c610af47d15e8bb087c7bee79e692f7f2d7
 - Benchmark changed: No
@@ -186,7 +184,7 @@ peakMemoryMB: 16335.80MB (date: 2026-07-10, commit: 84b5385dc4d6b5f38457415146ed
 
 Changes to the other integration tests (e.g. `test_training_cycle.py`) and their configurations.
 
-### 2026-10-12 — changelog started (PR: TODO)
+### 2026-10-12 — changelog started ([#1463](https://github.com/ecmwf/anemoi-core/pull/1463))
 
 - Not the initial change: the integration tests existed and changed before this date,
   but earlier changes are not recorded here. See the git history for those.

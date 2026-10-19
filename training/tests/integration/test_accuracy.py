@@ -145,13 +145,8 @@ def test_accuracy(tmp_path: Path, mlflow_server: str, pytestconfig: pytest.Confi
     final_loss = float(epoch_history[-1].value)
     track_accuracy_final_loss(test_case="global", value=final_loss)
 
-    # I would like to point out a race condition in the pruning.  If there are two feature
-    # branches which both change the reference id and they are repeatedly run,
-    # they might exceed the last n runs and start deleting each others
-    # references.
-    # This will show up as a loud explicit failure.
-    # Preventing this makes the code much more complicated, so I would leave it
-    # as is, perhaps increase n and only if it turns out to be a problem fix it.
+    # Runs are pruned by last use; compare_id was tagged as used above, so a candidate
+    # reference that is being compared against survives other branches' runs.
     if _is_repo_on_branch("main"):
         prune_mlflow_runs(
             client=client,
