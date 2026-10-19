@@ -417,27 +417,6 @@ def graph_transformer_attention(
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Opaque custom op wrapping the Triton GraphTransformer attention.
 
-    Parameters
-    ----------
-    q : Tensor
-        Query tensor for destination nodes.
-    k : Tensor
-        Key tensor for source nodes.
-    v : Tensor
-        Value tensor for source nodes.
-    e : Tensor
-        Edge feature tensor.
-    row : Tensor
-        Source indices grouped by destination.
-    colptr : Tensor
-        Compressed sparse column pointers.
-    rowptr : Tensor
-        Compressed sparse row pointers.
-    edge_ids : Tensor
-        Edge indices grouped by source.
-    edge_dst : Tensor
-        Destination indices grouped by source.
-
     Returns
     -------
     out : Tensor

@@ -22,6 +22,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.utils.time_indices import TimeIndices
+from anemoi.training.utils.variables_metadata import check_datasets_variables_compatibility
 
 
 class DataLoadingPolicy(ABC):
@@ -104,6 +105,10 @@ class DataLoadingPolicy(ABC):
         BatchSampler
             Batch sampler that hands out lists of sample indices for this sample group.
         """
+
+    def check_dataset_compatibility(self, dataset: Dataset, **options: object) -> None:
+        """Check compatibility requirements specific to this loading policy."""
+        del dataset, options
 
 
 class SynchronizedLoadingPolicy(DataLoadingPolicy):
@@ -229,6 +234,12 @@ class CrossDatasetLoadingPolicy(DataLoadingPolicy):
             seed=seed,
             batch_size=batch_size,
             drop_last=drop_last,
+        )
+
+    def check_dataset_compatibility(self, dataset: CrossDataset, **options: object) -> None:
+        check_datasets_variables_compatibility(
+            {name: data.typed_variables for name, data in dataset.data.items()},
+            **options,
         )
 
 

@@ -11,9 +11,7 @@ import logging
 
 import pytorch_lightning as pl
 
-from anemoi.training.data.loading import CrossDatasetLoadingPolicy
 from anemoi.training.losses.utils import check_loss_tree_variable_units
-from anemoi.training.utils.variables_metadata import check_datasets_variables_compatibility
 from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
 
 LOGGER = logging.getLogger(__name__)
@@ -71,11 +69,10 @@ class CheckVariableOrder(pl.callbacks.Callback):
         """
         compat_options = dict(trainer.datamodule.config.training.check_variables_compatibility)
 
-        if isinstance(trainer.datamodule.loading_policy, CrossDatasetLoadingPolicy):
-            check_datasets_variables_compatibility(
-                {name: data.typed_variables for name, data in trainer.datamodule.ds_train.data.items()},
-                **compat_options,
-            )
+        trainer.datamodule.loading_policy.check_dataset_compatibility(
+            trainer.datamodule.ds_train,
+            **compat_options,
+        )
 
         for dataset_name in pl_module.target_dataset_names:
             check_loss_tree_variable_units(

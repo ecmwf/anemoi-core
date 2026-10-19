@@ -19,7 +19,6 @@ from anemoi.training.data.loading import CrossDatasetLoadingPolicy
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.tasks.temporal_downscaler import TemporalDownscaler
-from anemoi.training.utils.variables_metadata import check_datasets_variables_compatibility
 from anemoi.transform.variables import Variable
 
 
@@ -96,21 +95,20 @@ class TestMultiDomain:
         data_readers["dataset_b"].data.typed_variables = {
             "10u": Variable.from_dict("10u", {"units": "K"}),
         }
+        policy = CrossDatasetLoadingPolicy()
+        dataset = policy.build_dataset(data_readers, {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]})
 
         with pytest.raises(ValueError, match="Variable compatibility check failed"):
-            check_datasets_variables_compatibility(
-                {name: reader.data.typed_variables for name, reader in data_readers.items()},
-            )
+            policy.check_dataset_compatibility(dataset)
 
     def test_check_datasets_units_accepts_compatibility_options(self, data_readers: dict) -> None:
         data_readers["dataset_b"].data.typed_variables = {
             "10u": Variable.from_dict("10u", {"units": "km/h"}),
         }
+        policy = CrossDatasetLoadingPolicy()
+        dataset = policy.build_dataset(data_readers, {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]})
 
-        check_datasets_variables_compatibility(
-            {name: reader.data.typed_variables for name, reader in data_readers.items()},
-            ignore_units=True,
-        )
+        policy.check_dataset_compatibility(dataset, ignore_units=True)
 
     def test_temporal_downscaler_offsets_are_loaded_from_one_domain(self, mocker: MockFixture) -> None:
         task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
