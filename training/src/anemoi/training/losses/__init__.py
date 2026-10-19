@@ -15,6 +15,7 @@ from .graph_edge_energy_score import GraphEdgeEnergyScoreLoss
 from .graph_energy_score import GraphEnergyScoreLoss
 from .graph_variogram_score import GraphVariogramScoreLoss
 from .huber import HuberLoss
+from .huber import ReversedHuberLoss
 from .kcrps import CRPS
 from .logcosh import LogCoshLoss
 from .loss import get_loss_function
@@ -41,6 +42,7 @@ __all__ = [
     "GraphEnergyScoreLoss",
     "GraphVariogramScoreLoss",
     "HuberLoss",
+    "ReversedHuberLoss",
     "LogCoshLoss",
     "LogFFT2Distance",
     "LogSpectralDistance",
