@@ -139,7 +139,8 @@ jobs:
     secrets: inherit
 
   test_accuracy:
-    needs: build-env
+    # validate-inputs listed directly: accuracy_reference_id goes into pytest_cmd.
+    needs: [validate-inputs, build-env]
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_accuracy' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
