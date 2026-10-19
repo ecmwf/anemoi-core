@@ -352,7 +352,7 @@ are two cases:
 #. Genuine algorithm improvement: the loss curve changed for a legitimate
    reason. Promote the new run as the reference by copying the run ID logged
    by the test (``Run ID from trainer: ...``) into the ``reference_id``
-   constant in `test_accuracy.py`. Update the changelog 
+   constant in `test_accuracy.py`. Update the changelog
    ``training/tests/integration/config/CHANGELOG.md`` with a short note
    explaining the rationale behind your change.
 
