@@ -45,6 +45,12 @@ datasets:
       nodes_attribute_name: area_weight
       norm: unit-sum
 
+    # Scaler for spectral loss functions (adapt number of spectral modes and possibly spectral dimensions)
+    # spectral_dim_mean:
+    #   _target_: anemoi.training.losses.scalers.SpectralDimensionScaler
+    #   n_spectral_modes: 193
+    #   spectral_dims: 193
+
    # Scalers in the time dimension
     time_steps:
       _target_: anemoi.training.losses.scalers.UniformTimeStepScaler

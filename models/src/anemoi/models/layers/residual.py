@@ -60,9 +60,15 @@ class BaseResidualConnection(nn.Module, ABC):
 class SkipConnection(BaseResidualConnection):
     """Skip connection module
 
-    This layer returns the most recent timestep from the input sequence.
+    This layer returns the input step selected by 'step'.
 
+    The default is to return the last input step.
     This module is used to bypass processing layers and directly pass the latest input forward.
+    Parameters
+    ----------
+    step : int, default -1
+        Index along the time dimension of the input to return.
+        -1 selects the most recent (last) input step.
     """
 
     def __init__(self, step: int = -1, **_) -> None:
@@ -76,7 +82,7 @@ class SkipConnection(BaseResidualConnection):
         model_comm_group=None,
         n_step_output: int | None = None,
     ) -> torch.Tensor:
-        """Return the last timestep of the input sequence."""
+        """Return one of the input steps."""
         x_skip = x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
         return self._expand_time(x_skip, n_step_output)
 
@@ -109,6 +115,8 @@ class TruncatedConnection(BaseResidualConnection):
         Name of the data nodes in ``graph``.
     autocast : bool, default False
         Whether to use automatic mixed precision for the projections.
+    sparse_projector_num_chunks : int, default 1
+        Number of chunks to use for sparse projection matmuls.
     row_normalize : bool, optional
         Normalize projection weights per target node so each row sums to 1.
     truncation_up_file_path : str, optional
@@ -152,6 +160,7 @@ class TruncatedConnection(BaseResidualConnection):
         truncation_down_edges_name: Optional[tuple[str, str, str]] = None,
         data_node_name: str = "data",
         autocast: bool = False,
+        sparse_projector_num_chunks: int = 1,
         row_normalize: bool = False,
         # Deprecated: pass inside truncation_config instead.
         truncation_up_file_path: Optional[str] = None,
@@ -217,7 +226,7 @@ class TruncatedConnection(BaseResidualConnection):
             row_normalize=row_normalize,
         )
 
-        self.projector = SparseProjector(autocast=autocast)
+        self.projector = SparseProjector(autocast=autocast, num_chunks=sparse_projector_num_chunks)
 
     @staticmethod
     def _normalise_truncation_config(

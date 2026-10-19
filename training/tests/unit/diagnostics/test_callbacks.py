@@ -10,18 +10,15 @@
 # ruff: noqa: ANN001, ANN201
 
 from unittest.mock import MagicMock
-from unittest.mock import patch
 
 import omegaconf
-import pytest
 import torch
 import yaml
 
 from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
-from anemoi.training.diagnostics.callbacks.evaluation import RolloutEval
-from anemoi.training.train.step_output import TrainingStepOutput
+from anemoi.training.diagnostics.callbacks.per_timestep_metrics import PerTimestepMetrics
 
 NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigrations
 
@@ -98,8 +95,8 @@ def test_add_callback():
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
 
 
-def test_rollout_eval_instantiated_via_hydra_interpolation():
-    """RolloutEval in diagnostics.callbacks is instantiated with values from the Hydra tree.
+def test_user_callback_instantiated_via_hydra_interpolation():
+    """A callback in diagnostics.callbacks is instantiated with values from the Hydra tree.
 
     This verifies that callbacks receive config values via Hydra interpolation.
     """
@@ -113,9 +110,8 @@ task:
     )
     config.diagnostics.callbacks.append(
         {
-            "_target_": "anemoi.training.diagnostics.callbacks.evaluation.RolloutEval",
-            "rollout": ["${task.validation_rollout}"],
-            "every_n_batches": 1,
+            "_target_": "anemoi.training.diagnostics.callbacks.per_timestep_metrics.PerTimestepMetrics",
+            "every_n_batches": "${task.validation_rollout}",
         },
     )
     # Pass config.diagnostics — it keeps its parent reference to the root config,
@@ -128,23 +124,23 @@ task:
         mlflow_enabled=False,
     )
     callbacks = get_callbacks(context)
-    rollout_evals = [cb for cb in callbacks if isinstance(cb, RolloutEval)]
-    assert len(rollout_evals) == 1
-    assert rollout_evals[0].rollout == [3]
+    user_callbacks = [cb for cb in callbacks if isinstance(cb, PerTimestepMetrics)]
+    assert len(user_callbacks) == 1
+    assert user_callbacks[0].every_n_batches == 3
 
 
 def test_add_plotting_callback(monkeypatch):
     # Add plotting callback
     import anemoi.training.diagnostics.callbacks.plot as plot
 
-    class PlotLoss:
+    class LossCurvePlot:
         def __init__(self, plotting_settings=None):
             pass
 
-    monkeypatch.setattr(plot, "PlotLoss", PlotLoss)
+    monkeypatch.setattr(plot, "LossCurvePlot", LossCurvePlot)
 
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.PlotLoss"}]
+    config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.LossCurvePlot"}]
     context = CallbacksContext(
         diagnostics=config.diagnostics,
         checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
@@ -156,42 +152,7 @@ def test_add_plotting_callback(monkeypatch):
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
 
 
-@pytest.mark.parametrize("n_ensemble", [1, 3])
-def test_rollout_eval_handles_dict_batch(n_ensemble):
-    """Test RolloutEval._eval with a dict batch (multi-dataset style)."""
-    callback = RolloutEval(rollout=[1, 2], every_n_batches=1)
-
-    # Mock pl_module
-    pl_module = MagicMock()
-    pl_module.device = torch.device("cpu")
-    pl_module.n_step_input = 1
-    pl_module.n_step_output = 1
-    # _step returns aggregated output over all rollout steps.
-    pl_module._step.return_value = TrainingStepOutput(
-        loss=torch.tensor(0.125),
-        metrics={"metric1": torch.tensor(0.25)},
-        predictions=[],
-    )
-
-    trainer = MagicMock()
-    trainer.precision = "16-mixed"  # no autocast
-
-    # Mock batch (bs, ms, ens, latlon, nvar)
-    batch = {"data": torch.randn(2, 4, n_ensemble, 10, 5)}
-
-    with patch.object(callback, "_log") as mock_log:
-
-        callback.on_validation_batch_end(trainer, pl_module, outputs=[], batch=batch, batch_idx=0)
-
-        #  Check for output
-        mock_log.assert_called_once()
-        args = mock_log.call_args[0]
-        assert args[1].item() == pytest.approx(0.125)  # (0.1 + 0.15) / 2
-        assert args[2]["metric1"].item() == pytest.approx(0.25)  # Last metric value
-        assert args[3] == 2  # batch size
-
-
-def test_plot_loss_gathers_nan_mask_weights_from_nested_losses(monkeypatch):
+def test_plot_loss_gathers_nan_mask_weights_from_nested_losses():
     from omegaconf import DictConfig
 
     import anemoi.training.diagnostics.callbacks.plot as plot_mod
@@ -215,38 +176,28 @@ def test_plot_loss_gathers_nan_mask_weights_from_nested_losses(monkeypatch):
         data_indices=data_indices,
     )
 
-    callback = plot_mod.PlotLoss.__new__(plot_mod.PlotLoss)
+    callback = plot_mod.LossCurvePlot.__new__(plot_mod.LossCurvePlot)
     callback.every_n_batches = 1
     callback.dataset_names = ["data"]
     callback.parameter_groups = {}
 
-    trainer = MagicMock()
     pl_module = MagicMock()
     pl_module.loss = {"data": combined_loss}
     pl_module.grid_dim = -2
     pl_module.grid_indices = {"data": MagicMock()}
+    pl_module.grid_shard_sizes = {"data": None}
     pl_module.allgather_batch.side_effect = lambda tensor, *_args: tensor + 1.0
 
-    super_called = []
+    # _prepare_batch is overridden in LossCurvePlot to snapshot and gather nan_mask_weights
+    # before delegating batch preparation to the plot adapter. Call it directly.
+    callback._prepare_batch(pl_module, batch={"data": torch.zeros((1, 1, 1, 3, 2))})
 
-    def _stub_super(self, *_args, **_kwargs) -> None:
-        del self
-        super_called.append(True)
-
-    monkeypatch.setattr(plot_mod.BasePerBatchPlotCallback, "on_validation_batch_end", _stub_super, raising=True)
-
-    callback.on_validation_batch_end(
-        trainer=trainer,
-        pl_module=pl_module,
-        output=TrainingStepOutput(loss=torch.tensor(0.0), metrics={}, predictions=[]),
-        batch={"data": torch.zeros((1, 1, 1, 3, 2))},
-        batch_idx=0,
-    )
-
-    assert super_called == [True]
     assert pl_module.allgather_batch.call_count == 2
     for child_loss in callback.loss["data"].losses:
-        torch.testing.assert_close(child_loss.loss.scaler.nan_mask_weights, torch.full((1, 3, 2), 2.0))
+        torch.testing.assert_close(
+            child_loss.loss.scaler.get_scaler_tensor("nan_mask_weights"),
+            torch.full((1, 3, 2), 2.0),
+        )
 
 
 # Progress bar callback tests

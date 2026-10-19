@@ -1,5 +1,11 @@
 prefetch_factor: 2
 pin_memory: True
+# keep dataloader workers alive between epochs instead of starting new ones every epoch
+persistent_workers: False
+fake_dataloading: False
+
+loading_policy:
+  _target_: anemoi.training.data.loading.SynchronizedLoadingPolicy
 
 # ============
 # read_group_size:

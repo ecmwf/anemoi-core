@@ -78,6 +78,3 @@ datasets:
         _target_: anemoi.models.preprocessing.imputer.InputImputer
         config:
           default: "mean"
-
-# Values set in the code
-num_features: null # number of features in the forecast state

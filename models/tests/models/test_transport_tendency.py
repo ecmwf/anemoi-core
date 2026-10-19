@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
+import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.preprocessing import Processors
@@ -318,6 +319,44 @@ def test_before_sampling_keeps_reference_time_dimension() -> None:
     assert grid_shard_sizes is None
     assert xs["data"].shape == (2, 3, 1, 3, 2)
     assert x_t0s["data"].shape == (2, 1, 1, 3, 2)
+
+
+def test_before_sampling_projects_input_and_reference_with_source_shards(monkeypatch) -> None:
+    model = _make_model()
+    comm_group = object()
+    source_grid_shard_sizes = [4, 4]
+    target_grid_shard_sizes = [2, 2]
+
+    class RegriddingSpatialProcessor(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.received_shard_sizes = []
+
+        def forward(self, x, model_comm_group=None, grid_shard_sizes=None):
+            assert model_comm_group is comm_group
+            self.received_shard_sizes.append(grid_shard_sizes)
+            return x[..., :2, :], target_grid_shard_sizes
+
+    projector = RegriddingSpatialProcessor()
+    monkeypatch.setattr(
+        transport_model_module,
+        "get_shard_sizes",
+        lambda *_args, **_kwargs: source_grid_shard_sizes,
+    )
+    monkeypatch.setattr(transport_model_module, "shard_tensor", lambda tensor, *_args, **_kwargs: tensor)
+
+    (xs, x_t0s), grid_shard_sizes = model._before_sampling(
+        {"data": torch.randn(1, 3, 8, 1)},
+        {"data": Processors([])},
+        n_step_input=2,
+        model_comm_group=comm_group,
+        spatial_pre_processors=torch.nn.ModuleDict({"data": projector}),
+    )
+
+    assert projector.received_shard_sizes == [source_grid_shard_sizes, source_grid_shard_sizes]
+    assert grid_shard_sizes == {"data": target_grid_shard_sizes}
+    assert xs["data"].shape[-2] == 2
+    assert x_t0s["data"].shape[-2] == 2
 
 
 def test_after_sampling_uses_single_step_reference_per_output_step() -> None:

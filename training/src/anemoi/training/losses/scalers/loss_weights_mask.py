@@ -50,6 +50,11 @@ class NaNMaskScaler(BaseUpdatingScaler):
             The model.
         dataset_name : str, optional
             The dataset name for multi-dataset scenarios.
+
+        Returns
+        -------
+        torch.Tensor | None
+            Combined loss mask, or ``None`` when no processor provides one.
         """
         loss_weights_mask = None
         processors = []
@@ -72,14 +77,14 @@ class NaNMaskScaler(BaseUpdatingScaler):
                 else:
                     processors.append(tendency_processors)
 
-        # iterate over all pre-processors and check if they have a loss_mask_training attribute
+        # Combine the masks produced by the preprocessors for the current batch.
         for pre_processors in processors:
             for pre_processor in pre_processors.processors.values():
-                if hasattr(pre_processor, "loss_mask_training"):
+                processor_mask = getattr(pre_processor, "loss_mask_training", None)
+                if processor_mask is not None:
                     if loss_weights_mask is None:
-                        loss_weights_mask = pre_processor.loss_mask_training
+                        loss_weights_mask = processor_mask
                     else:
-                        # multiply the masks together
-                        loss_weights_mask = loss_weights_mask * pre_processor.loss_mask_training
+                        loss_weights_mask = loss_weights_mask * processor_mask
 
         return loss_weights_mask

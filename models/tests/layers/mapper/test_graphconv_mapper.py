@@ -40,7 +40,7 @@ class ConcreteGNNBaseMapper(GNNBaseMapper):
 class MapperConfig:
     in_channels_src: int = 3
     in_channels_dst: int = 4
-    hidden_dim: int = 256
+    num_channels: int = 256
     out_channels_dst: int = 8
     num_chunks: int = 2
     mlp_extra_layers: int = 2
@@ -106,7 +106,7 @@ class TestGNNBaseMapper:
         assert isinstance(mapper, GNNBaseMapper)
         assert mapper.in_channels_src == mapper_init.in_channels_src
         assert mapper.in_channels_dst == mapper_init.in_channels_dst
-        assert mapper.hidden_dim == mapper_init.hidden_dim
+        assert mapper.hidden_dim == mapper_init.num_channels
         assert mapper.out_channels_dst == mapper_init.out_channels_dst
         assert mapper.layer_factory is not None
 
@@ -144,7 +144,7 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
         assert isinstance(mapper, GNNBaseMapper)
         assert mapper.in_channels_src == mapper_init.in_channels_src
         assert mapper.in_channels_dst == mapper_init.in_channels_dst
-        assert mapper.hidden_dim == mapper_init.hidden_dim
+        assert mapper.hidden_dim == mapper_init.num_channels
         # Forward mapper doesn't have out_channels_dst
         assert mapper.layer_factory is not None
 
@@ -152,11 +152,11 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
         x = pair_tensor
 
         x_src, x_dst = mapper.pre_process(x)
-        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.hidden_dim]), (
+        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.num_channels]), (
             f"x_src.shape ({x_src.shape}) != torch.Size"
-            f"([self.NUM_SRC_NODES, hidden_dim]) ({torch.Size([self.NUM_SRC_NODES, mapper_init.hidden_dim])})"
+            f"([self.NUM_SRC_NODES, hidden_dim]) ({torch.Size([self.NUM_SRC_NODES, mapper_init.num_channels])})"
         )
-        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim]), (
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.num_channels]), (
             f"x_dst.shape ({x_dst.shape}) != torch.Size"
             "([self.NUM_DST_NODES, hidden_dim]) ({torch.Size([self.NUM_DST_NODES, hidden_dim])})"
         )
@@ -171,11 +171,11 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
 
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
         x_src, x_dst = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
-        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.hidden_dim])
-        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
+        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.num_channels])
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.num_channels])
 
         # Dummy loss
-        target = torch.rand(self.NUM_DST_NODES, mapper_init.hidden_dim, device=x_dst.device)
+        target = torch.rand(self.NUM_DST_NODES, mapper_init.num_channels, device=x_dst.device)
         loss_fn = nn.MSELoss()
 
         loss = loss_fn(x_dst, target)
@@ -225,8 +225,8 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
         )
 
         assert called["edges_are_dst_sorted"] is False
-        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.hidden_dim])
-        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
+        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.num_channels])
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.num_channels])
 
 
 class TestGNNBackwardMapper(TestGNNBaseMapper):
@@ -254,7 +254,7 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
     def test_post_process(self, mapper, mapper_init):
         x_dst = torch.rand(
             self.NUM_DST_NODES,
-            mapper_init.hidden_dim,
+            mapper_init.num_channels,
             device=next(mapper.parameters()).device,
         )
 
@@ -272,8 +272,8 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
 
         device = next(mapper.parameters()).device
         x = (
-            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim, device=device),
-            torch.rand(self.NUM_DST_NODES, mapper_init.hidden_dim, device=device),
+            torch.rand(self.NUM_SRC_NODES, mapper_init.num_channels, device=device),
+            torch.rand(self.NUM_DST_NODES, mapper_init.num_channels, device=device),
         )
 
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
@@ -305,8 +305,8 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
         batch_size = 1
         shard_info = BipartiteGraphShardInfo(src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=None)
         x = (
-            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim, device=device),
-            torch.rand(self.NUM_DST_NODES, mapper_init.hidden_dim, device=device),
+            torch.rand(self.NUM_SRC_NODES, mapper_init.num_channels, device=device),
+            torch.rand(self.NUM_DST_NODES, mapper_init.num_channels, device=device),
         )
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size, shard_edges=False)
         called = {}

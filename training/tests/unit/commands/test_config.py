@@ -39,6 +39,23 @@ def test_dump_config_composes_from_config_path_directory(config_generator: Confi
         assert OmegaConf.load(output_path) == {"foo": "bar"}
 
 
+def test_dump_config_sort(config_generator: ConfigGenerator) -> None:
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        config_path = Path(tmpdirname) / "config"
+        config_path.mkdir(parents=True, exist_ok=True)
+
+        unsorted_cfg = OmegaConf.create({"zebra": 1, "alpha": 2})
+
+        with mock.patch("anemoi.training.commands.config.compose", return_value=unsorted_cfg):
+            unsorted_output = Path(tmpdirname) / "unsorted.yaml"
+            config_generator.dump_config(config_path, "test", unsorted_output, sort=False)
+            assert unsorted_output.read_text().splitlines() == ["zebra: 1", "alpha: 2"]
+
+            sorted_output = Path(tmpdirname) / "sorted.yaml"
+            config_generator.dump_config(config_path, "test", sorted_output, sort=True)
+            assert sorted_output.read_text().splitlines() == ["alpha: 2", "zebra: 1"]
+
+
 def test_validate_config_uses_package_path(config_generator: ConfigGenerator) -> None:
     """Test that validate_config works correctly with package configs.
 
@@ -103,3 +120,15 @@ def test_optimizer_config_group_can_be_overridden() -> None:
         cfg = compose(config_name="config", overrides=["training/optimization/optimizer=zero"])
 
     assert cfg.training.optimization.optimizer._target_ == "torch.distributed.optim.ZeroRedundancyOptimizer"
+
+
+@pytest.mark.parametrize("config_name", ["temporal_downscaler", "temporal_downscaler_ensemble"])
+def test_temporal_downscaler_tendency_scalers_use_output_timestep(config_name: str) -> None:
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config"):
+        cfg = compose(config_name=config_name, overrides=["task.output_timestep=2H"])
+
+    OmegaConf.resolve(cfg)
+
+    scalers = cfg.training.scalers.datasets.data
+    assert scalers.stdev_tendency.timestep == "2H"
+    assert scalers.var_tendency.timestep == "2H"

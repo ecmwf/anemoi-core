@@ -25,7 +25,7 @@ the training loop relies on:
  Our tasks
 ************
 
-The three built-in tasks are:
+The four built-in tasks are:
 
 ``Forecaster``
    Autoregressive rollout training. Inputs are ``multistep_input``
@@ -41,6 +41,23 @@ The three built-in tasks are:
         multistep_input: 2
         multistep_output: 1
         timestep: "6H"
+        rollout:
+          start: 1
+          epoch_increment: 1
+          maximum: 12
+
+``OffsetForecaster``
+   An experimental generalization of ``Forecaster`` where inputs and
+   outputs are specified directly as time offsets relative to the start
+   of the forecast, allowing irregular time intervals. The latest input
+   offset must be ``0H``.
+
+   .. code:: yaml
+
+      task:
+        _target_: anemoi.training.tasks.OffsetForecaster
+        input_offsets: ["-6H", "0H"]
+        output_offsets: ["1H", "2H", "3H", "4H", "5H", "6H"]
         rollout:
           start: 1
           epoch_increment: 1
@@ -68,7 +85,7 @@ The three built-in tasks are:
       task:
         _target_: anemoi.training.tasks.Autoencoder
 
-For the full API reference see :doc:`../modules/tasks`.
+For the full API reference, see :doc:`../modules/tasks`.
 
 ************************
  Writing a custom task
@@ -86,8 +103,8 @@ The temporal layout is:
 * **Output:** :math:`t = -\Delta t` (the step immediately before the input states).
 
 
- **Step 1** — Implement the task class
-===================================
+**Step 1** — Implement the task class
+=====================================
 
 Create a new file
 ``src/anemoi/training/tasks/backward_forecaster.py``:
@@ -139,8 +156,8 @@ Key points:
   time steps to load per sample.
 
 
- **Step 2** — Add a Hydra configuration file
-==========================================
+**Step 2** — Add a Hydra configuration file
+===========================================
 
 Create ``src/anemoi/training/config/task/backward_forecaster.yaml``:
 
@@ -154,8 +171,8 @@ on the command line or in a recipe YAML with ``task: backward_forecaster``
 (Hydra resolves the file name without the ``.yaml`` extension).
 
 
- **Step 3** — Add a Pydantic validation schema
-=================================================
+**Step 3** — Add a Pydantic validation schema
+=============================================
 
 Open ``src/anemoi/training/schemas/tasks.py`` and add:
 
@@ -188,8 +205,8 @@ For more details on how Pydantic schemas and Hydra instantiation work
 together in Anemoi Training, see :doc:`../contributing`.
 
 
- **Step 4** — Register the task in the package
-=================================================
+**Step 4** — Register the task in the package
+=============================================
 
 Open ``src/anemoi/training/tasks/__init__.py`` and add the new task:
 
@@ -210,8 +227,8 @@ Open ``src/anemoi/training/tasks/__init__.py`` and add the new task:
 This is only needed to import it directly from ``anemoi.training.tasks``.
 
 
- **Step 5** — Use the new task
-============================
+**Step 5** — Use the new task
+=============================
 
 Override the task in your training command:
 

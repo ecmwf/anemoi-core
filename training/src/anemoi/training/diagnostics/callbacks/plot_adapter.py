@@ -39,6 +39,15 @@ class BasePlotAdapter(ABC):
     def is_ensemble(self) -> bool:
         return False
 
+    @property
+    def default_plot_members(self) -> int | list[int] | None:
+        """Default ``members`` selection for plot callbacks that don't request a specific subset.
+
+        ``0`` (first member / deterministic view) for non-ensemble adapters;
+        overridden by :class:`EnsemblePlotAdapterWrapper` to select all members.
+        """
+        return 0
+
     def get_loss_plot_batch_start(self, **_kwargs) -> int:
         return 0
 
@@ -146,6 +155,11 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
     @property
     def is_ensemble(self) -> bool:
         return True
+
+    @property
+    def default_plot_members(self) -> int | list[int] | None:
+        """All members by default for ensemble runs (``None`` = no selection/all)."""
+        return None
 
     def get_loss_plot_batch_start(self, **kwargs) -> int:
         return self._inner.get_loss_plot_batch_start(**kwargs)

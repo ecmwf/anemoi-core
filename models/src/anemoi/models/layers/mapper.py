@@ -147,7 +147,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
@@ -171,7 +171,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
+        num_channels : int
             Hidden dimension
         out_channels_dst : int, optional
             Output channels of the destination node, by default None
@@ -207,7 +207,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            hidden_dim=num_channels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -221,9 +221,9 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         Linear = self.layer_factory.Linear
 
         self.proc = GraphTransformerMapperBlock(
-            in_channels=hidden_dim,
-            hidden_dim=compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio),
-            out_channels=hidden_dim,
+            in_channels=num_channels,
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
+            out_channels=num_channels,
             attn_channels=attn_channels,
             num_heads=num_heads,
             edge_dim=edge_dim,
@@ -512,7 +512,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
@@ -536,7 +536,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
+        num_channels : int
             Hidden dimension
         out_channels_dst : int, optional
             Must remain ``None`` for forward graph-transformer mappers.
@@ -572,7 +572,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             out_channels_dst=None,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -632,7 +632,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
@@ -658,7 +658,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
+        num_channels : int
             Hidden dimension
         out_channels_dst : int
             Output channels of the destination node
@@ -696,7 +696,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -714,6 +714,14 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         )
         self.return_latents = return_latents
 
+        if self.in_channels_src != self.hidden_dim:
+            LOGGER.info(
+                f"The processor latents are linearly projected from {self.in_channels_src} to {self.hidden_dim} channels."
+            )
+            self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
+        else:
+            self.emb_nodes_src = nn.Identity()
+
         self.node_data_extractor = nn.Sequential(
             nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
         )
@@ -726,6 +734,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
 
     def pre_process(self, x):
         x_src, x_dst = x
+        x_src = self.emb_nodes_src(x_src)
         x_dst = self.emb_nodes_dst(x_dst)
         return x_src, x_dst
 
@@ -741,7 +750,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         mlp_extra_layers: int,
@@ -760,7 +769,7 @@ class GNNBaseMapper(BaseMapper, ABC):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
+        num_channels : int
             Hidden dimension
         out_channels_dst : int, optional
             Output channels of the destination node
@@ -783,7 +792,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            hidden_dim=num_channels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -793,8 +802,8 @@ class GNNBaseMapper(BaseMapper, ABC):
 
         self.emb_edges = MLP(
             in_features=edge_dim,
-            hidden_dim=compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio),
-            out_features=hidden_dim,
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
+            out_features=num_channels,
             layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers + 1,
             mlp_implementation=mlp_implementation,
@@ -897,7 +906,7 @@ class GNNForwardMapper(GNNBaseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         mlp_extra_layers: int,
@@ -916,7 +925,7 @@ class GNNForwardMapper(GNNBaseMapper):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
+        num_channels : int
             Hidden dimension
         out_channels_dst : int
             Output channels of the destination node, by default None
@@ -939,7 +948,7 @@ class GNNForwardMapper(GNNBaseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -951,11 +960,11 @@ class GNNForwardMapper(GNNBaseMapper):
             **kwargs,
         )
 
-        mlp_hidden_dim = compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio)
+        mlp_hidden_dim = compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio)
 
         self.proc = GraphConvMapperBlock(
-            in_channels=hidden_dim,
-            out_channels=hidden_dim,
+            in_channels=num_channels,
+            out_channels=num_channels,
             layer_kernels=self.layer_factory,
             mlp_extra_layers=mlp_extra_layers,
             mlp_hidden_ratio=mlp_hidden_ratio,
@@ -969,7 +978,7 @@ class GNNForwardMapper(GNNBaseMapper):
         self.emb_nodes_src = MLP(
             in_features=in_channels_src,
             hidden_dim=mlp_hidden_dim,
-            out_features=hidden_dim,
+            out_features=num_channels,
             layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers + 1,
             mlp_implementation=mlp_implementation,
@@ -978,7 +987,7 @@ class GNNForwardMapper(GNNBaseMapper):
         self.emb_nodes_dst = MLP(
             in_features=in_channels_dst,
             hidden_dim=mlp_hidden_dim,
-            out_features=hidden_dim,
+            out_features=num_channels,
             layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers + 1,
             mlp_implementation=mlp_implementation,
@@ -1002,7 +1011,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         mlp_extra_layers: int,
@@ -1021,8 +1030,8 @@ class GNNBackwardMapper(GNNBaseMapper):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
-            Hidden dimension
+        num_channels : int
+            Number of channels in the hidden layers
         out_channels_dst : int
             Output channels of the destination node
         num_chunks: int
@@ -1044,7 +1053,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -1056,11 +1065,11 @@ class GNNBackwardMapper(GNNBaseMapper):
             **kwargs,
         )
 
-        mlp_hidden_dim = compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio)
+        mlp_hidden_dim = compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio)
 
         self.proc = GraphConvMapperBlock(
-            in_channels=hidden_dim,
-            out_channels=hidden_dim,
+            in_channels=num_channels,
+            out_channels=num_channels,
             layer_kernels=self.layer_factory,
             mlp_extra_layers=mlp_extra_layers,
             mlp_hidden_ratio=mlp_hidden_ratio,
@@ -1124,7 +1133,7 @@ class PointWiseMapper(BaseMapper, ABC):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         cpu_offload: bool = False,
         gradient_checkpointing: bool = True,
         layer_kernels: dict | None = None,
@@ -1132,7 +1141,7 @@ class PointWiseMapper(BaseMapper, ABC):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            hidden_dim=num_channels,
             cpu_offload=cpu_offload,
             gradient_checkpointing=gradient_checkpointing,
             layer_kernels=layer_kernels,
@@ -1191,7 +1200,7 @@ class PointWiseForwardMapper(PointWiseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         cpu_offload: bool = False,
         gradient_checkpointing: bool = True,
         layer_kernels: dict | None = None,
@@ -1200,7 +1209,7 @@ class PointWiseForwardMapper(PointWiseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             cpu_offload=cpu_offload,
             gradient_checkpointing=gradient_checkpointing,
             layer_kernels=layer_kernels,
@@ -1247,7 +1256,7 @@ class PointWiseBackwardMapper(PointWiseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: int,
         initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
@@ -1258,7 +1267,7 @@ class PointWiseBackwardMapper(PointWiseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             cpu_offload=cpu_offload,
             gradient_checkpointing=gradient_checkpointing,
             layer_kernels=layer_kernels,
@@ -1294,7 +1303,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
@@ -1304,7 +1313,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
-        attention_implementation: str = "flash_attention",
+        attention_implementation: str = "scaled_dot_product_attention",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
@@ -1320,8 +1329,8 @@ class TransformerBaseMapper(BaseMapper, ABC):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
-            Hidden dimension
+        num_channels : int
+            Number of channels in the hidden layers
         out_channels_dst : int, optional
             Output channels of the destination node, by default None
         mlp_hidden_ratio: float
@@ -1339,7 +1348,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
             Implementation of feed-forward blocks in mapper layers.
         attention_implementation: str
             A predefined string which selects which underlying attention
-            implementation, by default "flash_attention"
+            implementation, by default "scaled_dot_product_attention"
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default 0
         use_alibi_slopes : bool
@@ -1355,7 +1364,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            hidden_dim=num_channels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             layer_kernels=layer_kernels,
@@ -1364,8 +1373,8 @@ class TransformerBaseMapper(BaseMapper, ABC):
         )
 
         self.proc = TransformerMapperBlock(
-            num_channels=hidden_dim,
-            hidden_dim=compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio),
+            num_channels=num_channels,
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
             attn_channels=attn_channels,
             num_heads=num_heads,
             window_size=window_size,
@@ -1454,7 +1463,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
@@ -1463,7 +1472,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
         qk_norm: bool = False,
         dropout_p: float = 0.0,
         mlp_implementation: MLPImplementation = "mlp",
-        attention_implementation: str = "flash_attention",
+        attention_implementation: str = "scaled_dot_product_attention",
         softcap: float = None,
         use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
@@ -1480,7 +1489,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
+        num_channels : int
             Hidden dimension
         out_channels_dst : int, optional
             Output channels of the destination node, by default None
@@ -1499,7 +1508,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
             Implementation of feed-forward blocks in mapper layers.
         attention_implementation: str
             A predefined string which selects which underlying attention
-            implementation, by default "flash_attention"
+            implementation, by default "scaled_dot_product_attention"
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default 0
         use_alibi_slopes : bool
@@ -1515,7 +1524,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             layer_kernels=layer_kernels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
@@ -1577,7 +1586,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
@@ -1586,7 +1595,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         qk_norm: bool = False,
         dropout_p: float = 0.0,
         mlp_implementation: MLPImplementation = "mlp",
-        attention_implementation: str = "flash_attention",
+        attention_implementation: str = "scaled_dot_product_attention",
         softcap: float = None,
         use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
@@ -1603,8 +1612,8 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
-            Hidden dimension
+        num_channels : int
+            Number of channels in the hidden layers
         out_channels_dst : int, optional
             Output channels of the destination node, by default None
         mlp_hidden_ratio: float
@@ -1622,7 +1631,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             Implementation of feed-forward blocks in mapper layers.
         attention_implementation: str
             A predefined string which selects which underlying attention
-            implementation, by default "flash_attention"
+            implementation, by default "scaled_dot_product_attention"
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default 0
         use_alibi_slopes : bool
@@ -1638,7 +1647,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             layer_kernels=layer_kernels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,

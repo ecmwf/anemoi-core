@@ -13,6 +13,16 @@ collaboration on GitHub, writing documentation, testing, and code style.
 The following sections provide additional information for contributing
 to Anemoi Training.
 
+*******************
+ Weekly PR Bulletin
+*******************
+
+A weekly bulletin summarising PR activity across ``anemoi-training``,
+``anemoi-models``, and ``anemoi-graphs`` -- including any breaking or
+config-schema changes -- is automatically posted to `issue #1262
+<https://github.com/ecmwf/anemoi-core/issues/1262>`_. You can receive
+notifications for this issue by clicking the "Subscribe" button on GitHub.
+
 ##########################
  Configuration guidelines
 ##########################
@@ -319,3 +329,64 @@ To add a new use case, follow these steps:
    test-time modifications. Check if these have overwritten expected
    configurations or are out-of-date with configuration changes in the
    templates.
+
+
+
+****************
+Accuracy testing
+****************
+
+The accuracy test (`training/tests/integration/test_accuracy.py`) trains a
+small global model for a fixed number of steps and compares its training
+loss curve against a reference run stored in MLflow. It runs nightly as
+part of the integration test matrix. Its configuration lives in
+`training/tests/integration/config/accuracy_testing/test_global.yaml`.
+
+When the test fails the loss curve no longer matches the reference. There
+are two cases:
+
+#. Unintended regression: a code or config change altered the loss curve by
+   accident. Investigate and fix the change (see the config-consistency
+   checks above).
+
+#. Genuine algorithm improvement: the loss curve changed for a legitimate
+   reason. Promote the new run as the reference by copying the run ID logged
+   by the test (``Run ID from trainer: ...``) into the ``reference_id``
+   constant in `test_accuracy.py`.
+
+In addition to the MLflow-based comparison, the accuracy test pushes a scalar
+summary of each run (currently the final training loss, under the metric name
+``accuracyFinalLoss``) to the anemoi integration-test data server -- the same
+server used by the performance benchmarks in ``test_benchmark.py``. The push
+happens only when the test is run from the ``main`` branch and is guarded by
+``track_accuracy_final_loss`` (a ``track_accuracy_result`` helper) in
+``src/anemoi/training/diagnostics/benchmark_server.py``.
+
+Accuracy results are written under a separate ``accuracy`` tree on the
+server, so they do not mix with the performance benchmarks. The remote
+location is resolved by ``get_benchmark_store(kind)`` which reads
+``~/.config/anemoi/anemoi-benchmark.yaml``:
+
+.. code:: yaml
+
+   user: ...
+   hostname: ...
+   path: /home/data/public/anemoi-integration-tests/training   # base directory
+
+By default, results for a given kind land under ``<path>/<kind>/<test_case>/``
+-- so the current global accuracy test writes to
+``.../training/accuracy/global/`` while the performance benchmarks write to
+``.../training/benchmarks/<test_case>/``. If you need to override the location
+for a specific kind, add a ``paths`` mapping which takes precedence:
+
+.. code:: yaml
+
+   paths:
+     benchmarks: /home/data/public/anemoi-integration-tests/training/benchmarks
+     accuracy:   /home/data/public/anemoi-integration-tests/training/accuracy
+
+Additional accuracy test cases (for example a limited-area variant) should
+reuse the same helper and pass their own ``test_case`` string so their
+results land in a sibling directory (e.g. ``.../training/accuracy/lam/``).
+See the "Local Benchmarking" section of the benchmarking user guide for
+more details on the config file layout.

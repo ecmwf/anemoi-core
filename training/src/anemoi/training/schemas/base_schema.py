@@ -1,4 +1,4 @@
-# (C) Copyright 2024-2026 Anemoi contributors.
+# (C) Copyright 2026- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -22,6 +22,7 @@ from pydantic import model_validator
 from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
 from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
 from anemoi.models.schemas.models import ModelSchema
@@ -85,32 +86,75 @@ _DEPRECATED_TARGETS: dict[str, str] = {
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.PlotEnsSample' "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn' "
         "instead and update your config accordingly."
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.PlotHistogram' "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn' "
         "instead and update your config accordingly."
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.PlotLoss' "
+        "'anemoi.training.diagnostics.callbacks.plot.LossCurvePlot' "
         "instead and update your config accordingly."
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.PlotSpectrum' "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn' "
         "instead and update your config accordingly."
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.PlotSample": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.PlotSample' "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn' "
         "instead and update your config accordingly."
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot' "
+        "'anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotLoss": (
+        "This callback has been renamed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.LossCurvePlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot": (
+        "This callback has been renamed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotSample": (
+        "This callback has been removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotHistogram": (
+        "This callback has been removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotSpectrum": (
+        "This callback has been removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotEnsSample": (
+        "This callback has been removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot": (
+        "This callback has been renamed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
         "instead and update your config accordingly."
     ),
     "anemoi.models.layers.activations.GLU": (
@@ -235,20 +279,24 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     @model_validator(mode="after")
     def check_bounding_not_used_with_data_extractor_zero(self) -> Self:
         """Check that bounding is not used with zero data extractor."""
-        if (
-            isinstance(self.model.decoder, GraphTransformerDecoderSchema)
-            and self.model.decoder.initialise_data_extractor_zero
-            and self.model.bounding
-        ):
-            error = "bounding_conflict_with_data_extractor_zero"
-            msg = (
-                "Boundings cannot be used with zero initialized weights in decoder. "
-                "Set initalise_data_extractor_zero to False."
-            )
-            raise PydanticCustomError(
-                error,
-                msg,
-            )
+        bounding = self.model.bounding
+        # A plain list of boundings belongs to the default dataset, as in the model.
+        if isinstance(bounding, dict) and "datasets" in bounding:
+            boundings = bounding["datasets"]
+        else:
+            boundings = {DEFAULT_DATASET_NAME: bounding}
+        for decoder_name, decoder in self.model.decoders.items():
+            mapper = decoder.mapper
+            dataset_names = decoder.target_datasets
+            if isinstance(mapper, GraphTransformerDecoderSchema) and mapper.initialise_data_extractor_zero:
+                for dataset_name in dataset_names:
+                    if boundings.get(dataset_name):
+                        error = "bounding_conflict_with_data_extractor_zero"
+                        msg = (
+                            f"Boundings for dataset '{dataset_name}' cannot be used with zero initialized weights"
+                            f" in decoder `'{decoder_name}`'. Set initalise_data_extractor_zero to False."
+                        )
+                        raise PydanticCustomError(error, msg)
         return self
 
 

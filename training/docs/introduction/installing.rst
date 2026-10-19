@@ -50,6 +50,7 @@ functionality:
    After installation, verify that your PyTorch build has CUDA or ROCm support:
 
    .. code:: bash
+
       # Run on a GPU node
       python -c 'import torch; print(torch.cuda.is_available())'
 
@@ -67,8 +68,8 @@ functionality:
 
 .. literalinclude:: ../../pyproject.toml
    :language: toml
-   :start-at: [project.optional-dependencies.all]
-   :end-before: [project.urls.Changelog]
+   :start-at: optional-dependencies.all
+   :end-before: urls.Changelog
 
 **********************
  Development versions

@@ -316,7 +316,7 @@ def test_update_scaler_delegates_to_inner_loss() -> None:
     wrapper = TimeAggregateLossWrapper(["mean"], inner)
     new_grid = torch.ones(4) * 2.0
     wrapper.update_scaler("unit_grid", new_grid, override=True)
-    assert torch.allclose(inner.scaler.unit_grid, new_grid)
+    assert torch.allclose(inner.scaler.get_scaler_tensor("unit_grid"), new_grid)
 
 
 def test_has_scaler_for_dim_delegates() -> None:

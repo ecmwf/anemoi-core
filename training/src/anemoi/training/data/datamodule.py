@@ -10,18 +10,24 @@
 
 import logging
 from functools import cached_property
+from typing import Any
 
 import pytorch_lightning as pl
-from torch.utils.data import DataLoader
+from hydra.utils import instantiate
+from torchdata.stateful_dataloader import StatefulDataLoader
+from torchdata.stateful_dataloader.sampler import BatchSampler
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.data_reader import create_dataset
+from anemoi.training.data.loading import DataLoadingPolicy
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
-from anemoi.training.utils.worker_init import worker_init_func
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import derive_seed
+from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
@@ -73,17 +79,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         """Return tendency statistics from all training datasets."""
         lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
 
-        # If the task defines a fixed tendency_delta (e.g. TemporalDownscaler uses 1h
-        # per-step differences rather than cumulative offsets from t=0), use that
-        # delta for every lead time so all steps share the same tendency statistics.
-        tendency_delta = getattr(self.task, "tendency_delta", None)
-        tendency_delta_str = frequency_to_string(tendency_delta) if tendency_delta is not None else None
-
         stats_by_dataset: dict[str, dict | None] = {}
         for dataset_name, dataset in self.ds_train.data_readers.items():
-            stats_by_lead = {
-                lead_time: dataset.statistics_tendencies(tendency_delta_str or lead_time) for lead_time in lead_times
-            }
+            stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
             if all(stats is None for stats in stats_by_lead.values()):
                 stats_by_dataset[dataset_name] = None
                 continue
@@ -116,71 +114,110 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return indices
 
     @cached_property
+    def loading_policy(self) -> DataLoadingPolicy:
+        """Return the policy that builds the dataset and batch sampler for each stage."""
+        return instantiate(self.config.dataloader.loading_policy)
+
+    @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
-        return self._get_dataset(self.train_dataloader_config, shuffle=True, label="training")
+        return self._get_dataset(self.train_dataloader_config, label="training")
 
     @cached_property
     def ds_valid(self) -> MultiDataset:
         """Create multi-dataset for validation."""
-        return self._get_dataset(self.valid_dataloader_config, shuffle=False, label="validation")
+        return self._get_dataset(self.valid_dataloader_config, label="validation")
 
     @cached_property
     def ds_test(self) -> MultiDataset:
         """Create multi-dataset for testing."""
-        return self._get_dataset(self.test_dataloader_config, shuffle=False, label="test")
+        return self._get_dataset(self.test_dataloader_config, label="test")
 
     def _get_dataset(
         self,
         config: dict[str, dict],
-        shuffle: bool = True,
         label: str = "generic",
     ) -> MultiDataset:
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
         relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
+        dataset_options = {}
+        dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
+        if dataloader_config.get("fake_dataloading", False):
+            dataset_options["fake_dataloading"] = True
 
-        return MultiDataset(
-            data_readers=data_readers,
-            relative_date_indices=relative_date_indices,
-            shuffle=shuffle,
-            label=label,
-            epoch=self.epoch,
-            rollout=len(tuple(self.task.steps(label))),
+        return self.loading_policy.build_dataset(
+            data_readers,
+            relative_date_indices,
+            **dataset_options,
         )
 
     def set_epoch(self, epoch: int) -> None:
-        """Update the epoch for each dataset. This will take effect once the DataLoader workers are re-started."""
+        """Set the datamodule epoch and synchronize datasets settings."""
         self.epoch = epoch
+        self.sync_dataset_state()
 
+    def sync_dataset_state(self) -> None:
+        """Load the time steps that the task's current rollout needs in all constructed datasets."""
         for dataset_name, label in (("ds_train", "training"), ("ds_valid", "validation"), ("ds_test", "test")):
             if dataset_name not in self.__dict__:
                 continue
 
             dataset = self.__dict__[dataset_name]
-            # Store the current rollout length, and refresh the time steps that must
-            # be loaded for it. The task provides both values: steps() gives the rollout
-            # length, and get_offsets() gives the time steps via compute_relative_date_indices().
-            dataset.set_epoch(
-                epoch,
-                rollout=len(tuple(self.task.steps(label))),
-                relative_date_indices=compute_relative_date_indices(
-                    self.task,
-                    dataset.data_readers,
-                    mode=label,
-                ),
+            dataset.set_relative_date_indices(
+                compute_relative_date_indices(self.task, dataset.data_readers, mode=label),
             )
 
-    def _persistent_workers(self) -> bool:
-        """Return whether DataLoader workers can persist across epochs."""
-        rollout = getattr(self.task, "rollout", None)
-        if rollout is None:
-            return True
-        # Workers could also be persisted once rollout.step >= rollout.maximum,
-        # but that would make resumed runs behave differently from uninterrupted
-        # runs.
-        return rollout.epoch_increment == 0
+    def state_dict(self) -> dict[str, Any]:
+        """Save the epoch that selects the training shuffle of newly built dataloaders."""
+        return {"epoch": self.epoch}
 
-    def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Restore the epoch before Lightning builds the dataloaders."""
+        self.set_epoch(state_dict["epoch"])
+
+    @cached_property
+    def rollout_changes_between_epochs(self) -> bool:
+        """Whether the rollout, and with it the number of samples, changes between epochs.
+
+        The dataloaders must then be rebuilt every epoch, because a sampler reads
+        the number of samples when it is constructed.
+        """
+        rollout = getattr(self.task, "rollout", None)
+        return rollout is not None and rollout.epoch_increment > 0
+
+    def _sample_groups(self) -> dict[str, int]:
+        """Return the number of sample groups and the group of this rank.
+
+        All ranks of a group train on the same samples. Without a distributed
+        strategy, or without a trainer, there is a single group.
+        """
+        trainer = self.trainer
+        if trainer is None or trainer.distributed_sampler_kwargs is None:
+            return {"num_replicas": 1, "rank": 0}
+        return trainer.distributed_sampler_kwargs
+
+    def _get_batch_sampler(self, ds: MultiDataset, stage: str) -> BatchSampler:
+        """Create the batch sampler that splits the samples between sample groups.
+
+        Every group gets the same number of samples. The training shuffle depends
+        only on the base seed and the epoch. The batch sampler counts the samples it
+        has handed out; Lightning saves this count, which is the same on every rank,
+        so training can resume in the middle of an epoch.
+        """
+        batch_sampler = self.loading_policy.build_batch_sampler(
+            ds,
+            **self._sample_groups(),
+            shuffle=(stage == "training"),
+            seed=derive_seed(get_base_seed(), SeedContext.DATALOADER),
+            batch_size=self.config.dataloader.batch_size[stage],
+            drop_last=True,
+        )
+        # Lightning sets the epoch when an epoch starts, but a resumed run builds
+        # its first dataloader before that, so the restored epoch is set here.
+        batch_sampler.sampler.set_epoch(self.epoch)
+        return batch_sampler
+
+    def _get_dataloader(self, ds: MultiDataset, stage: str) -> StatefulDataLoader:
         """Create DataLoader for multi-dataset."""
         assert stage in {"training", "validation", "test"}
 
@@ -194,26 +231,25 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
             LOGGER.info("Using multiprocessing context '%s' for dataloader workers.", ctx)
 
-        return DataLoader(
+        return StatefulDataLoader(
             ds,
-            batch_size=self.config.dataloader.batch_size[stage],
+            batch_sampler=self._get_batch_sampler(ds, stage),
             num_workers=self.config.dataloader.num_workers[stage],
             pin_memory=self.config.dataloader.pin_memory,
-            worker_init_fn=worker_init_func,
             prefetch_factor=self.config.dataloader.prefetch_factor,
-            persistent_workers=self._persistent_workers(),
+            persistent_workers=self.config.dataloader.get("persistent_workers", False),
             **extra,
         )
 
-    def train_dataloader(self) -> DataLoader:
+    def train_dataloader(self) -> StatefulDataLoader:
         """Return training dataloader."""
         return self._get_dataloader(self.ds_train, "training")
 
-    def val_dataloader(self) -> DataLoader:
+    def val_dataloader(self) -> StatefulDataLoader:
         """Return validation dataloader."""
         return self._get_dataloader(self.ds_valid, "validation")
 
-    def test_dataloader(self) -> DataLoader:
+    def test_dataloader(self) -> StatefulDataLoader:
         """Return test dataloader."""
         return self._get_dataloader(self.ds_test, "test")
 

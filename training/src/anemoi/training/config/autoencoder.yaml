@@ -19,13 +19,13 @@ config_validation: True
 #   hardware:
 #     num_gpus_per_node: 1
 
-dataloader:
-  validation_rollout: 0
-
 model:
   model:
-    _target_: anemoi.models.models.AnemoiModelAutoEncoder
+    _target_: anemoi.models.models.AnemoiModelEncProcDec
     latent_skip: False
+  decoders:
+    "0":
+      target_node_features: [ "coordinates" ]
   processor:
     _target_: anemoi.models.layers.processor.NoOpProcessor
 

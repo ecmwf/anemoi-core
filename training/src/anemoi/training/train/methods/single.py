@@ -11,13 +11,17 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.methods.base import BaseTrainingModule
-from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
+
+if TYPE_CHECKING:
+    import torch
+
+    from anemoi.training.train.step_output import TrainingStepOutput
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,14 +35,12 @@ class SingleTraining(BaseTrainingModule):
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Training / validation step."""
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
+        step_losses, step_metrics, y_preds = [], [], []
 
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
-        for task_kwargs in task_steps:
+        for i, task_kwargs in enumerate(task_steps):
             y_pred = self(x)
 
             y = self.task.get_targets(batch, **task_kwargs)
@@ -54,20 +56,20 @@ class SingleTraining(BaseTrainingModule):
                 use_reentrant=False,
             )
 
-            # Advance input state for each dataset
-            x = self.task.advance_input(
-                x,
-                y_preds_next,
-                batch,
-                **task_kwargs,
-                data_indices=self.data_indices,
-                output_mask=self.output_mask,
-                grid_shard_slice=self.grid_shard_slice,
-            )
+            # Advance input state for each dataset if another step follows
+            if i < len(task_steps) - 1:
+                x = self.task.advance_input(
+                    x,
+                    y_preds_next,
+                    batch,
+                    **task_kwargs,
+                    data_indices=self.data_indices,
+                    output_mask=self.output_mask,
+                    grid_shard_slice=self.grid_shard_slice,
+                )
 
-            loss = loss + loss_next
-            metrics.update(metrics_next)
+            step_losses.append(loss_next)
+            step_metrics.append(metrics_next)
             y_preds.append(y_preds_next)
 
-        loss *= 1.0 / len(task_steps)
-        return TrainingStepOutput(loss=loss, metrics=metrics, predictions=y_preds)
+        return self._combine_loss_and_metrics(step_losses, step_metrics, y_preds)

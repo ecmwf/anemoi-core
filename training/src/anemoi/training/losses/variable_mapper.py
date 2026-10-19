@@ -254,8 +254,26 @@ class LossVariableMapper(BaseLossWrapper):
         if isinstance(original_indexer, int):
             return mapped_indices[0] if len(mapped_indices) == 1 else mapped_indices
         if isinstance(original_indexer, torch.Tensor):
-            return torch.as_tensor(mapped_indices, device=original_indexer.device, dtype=torch.long)
+            return original_indexer.new_tensor(mapped_indices, dtype=torch.long)
         return mapped_indices
+
+    @staticmethod
+    def _select_variables(x: torch.Tensor, indices: list[int]) -> torch.Tensor:
+        """Select ``indices`` along the last (variable) dimension of ``x``.
+
+        Equivalent to ``x[..., indices]``, but avoids advanced indexing: its sort-based backward
+        is slow on GPU and dominated the step time for losses on large grids. Selecting all
+        variables in order is a no-op, a contiguous block is a slice, and anything else uses
+        ``index_select``, whose backward is a single scatter-add.
+        """
+        num_selected = len(indices)
+        start = indices[0] if num_selected else 0
+        if indices == list(range(start, start + num_selected)):
+            if start == 0 and num_selected == x.shape[-1]:
+                return x
+            return x.narrow(-1, start, num_selected)
+        index = torch.as_tensor(indices, dtype=torch.long, device=x.device)
+        return x.index_select(-1, index)
 
     def _remap_scaler_indices_for_filtered_pred(
         self,
@@ -305,7 +323,7 @@ class LossVariableMapper(BaseLossWrapper):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: Squash_mode = "avg",
+        squash_mode: Squash_mode | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
         **kwargs,
@@ -338,8 +356,13 @@ class LossVariableMapper(BaseLossWrapper):
         pred_indices = self.predicted_indices_by_layout[pred_layout]
         target_indices = self.target_indices_by_layout[target_layout]
 
-        pred_filtered = pred[..., pred_indices]
-        target_filtered = target[..., target_indices]
+        pred_filtered = self._select_variables(pred, pred_indices)
+        target_filtered = self._select_variables(target, target_indices)
+
+        # torch.compile performance change
+        # Make contiguous to prevent a changing stride forcing specialisation
+        pred_filtered = pred_filtered.contiguous()
+        target_filtered = target_filtered.contiguous()
 
         loss_kwargs = dict(kwargs)
         loss_kwargs.update(
@@ -348,9 +371,12 @@ class LossVariableMapper(BaseLossWrapper):
                 "without_scalers": without_scalers,
                 "grid_shard_slice": grid_shard_slice,
                 "group": group,
-                "squash_mode": squash_mode,
             },
         )
+        # Preserve the wrapped loss's reduction default unless the caller
+        # explicitly selects a mode.
+        if squash_mode is not None:
+            loss_kwargs["squash_mode"] = squash_mode
 
         empty_metric_selection = False
         if isinstance(scaler_indices, tuple):
