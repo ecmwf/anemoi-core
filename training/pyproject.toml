@@ -74,7 +74,6 @@ optional-dependencies.docs = [
 ]
 optional-dependencies.plotting = [
   "cartopy>=0.25",
-  "datashader>=0.17",
   "distinctipy>=1",
   "matplotlib>=3.7.1",
   "pyshtools>=4.13",
