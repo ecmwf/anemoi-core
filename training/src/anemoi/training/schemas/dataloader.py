@@ -21,6 +21,7 @@ from pydantic import RootModel
 from pydantic import computed_field
 
 from anemoi.models.schemas.schema_utils import DatasetDict
+from anemoi.training.schemas.training import GenericSchema
 from anemoi.utils.dates import frequency_to_timedelta
 from anemoi.utils.schemas import BaseModel
 
@@ -122,6 +123,13 @@ class LoaderSet(BaseModel):
     "Value for test dataset"
 
 
+class DataLoadingPolicySchema(GenericSchema):
+    """Hydra instantiation config for the DataLoadingPolicy that builds the dataset and batch sampler for each stage."""
+
+    target_: str = Field(default="anemoi.training.data.loading.SynchronizedLoadingPolicy", alias="_target_")
+    """Hydra target class of the policy."""
+
+
 class DataLoaderSchema(PydanticBaseModel):
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
@@ -130,10 +138,12 @@ class DataLoaderSchema(PydanticBaseModel):
     "Number of batches loaded in advance by each worker."
     pin_memory: bool = Field(example=True)
     "If True, the data loader will copy Tensors into device/CUDA pinned memory before returning them."
-    persistent_workers: bool = Field(default=True)
-    "Keep dataloader workers alive between epochs. Automatically disabled when the rollout changes between epochs."
+    persistent_workers: bool = Field(default=False)
+    "Keep dataloader workers alive between epochs instead of starting new ones every epoch."
     fake_dataloading: bool = Field(default=False)
     "Load one real sample per worker and reuse it for subsequent accesses."
+    loading_policy: DataLoadingPolicySchema = Field(default_factory=DataLoadingPolicySchema)
+    "Hydra config for the DataLoadingPolicy that builds the dataset and batch sampler for each stage."
     num_workers: LoaderSet
     "Number of process per-GPU for batch distribution."
     batch_size: LoaderSet
