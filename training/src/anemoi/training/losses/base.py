@@ -335,7 +335,14 @@ class BaseLossWrapper(BaseLoss):
         self.loss = loss
         # Share the inner loss's scaler so that scaler additions/updates
         # applied to this wrapper are visible to the actual loss computation.
-        self.scaler = self.loss.scaler
+        # A CombinedLoss has no scaler of its own (each sub-loss keeps its own scalers), so a
+        # wrapper around one has none either; add_scaler/update_scaler still reach the sub-losses
+        # through the delegation below.
+        inner_scaler = getattr(self.loss, "scaler", None)
+        if inner_scaler is None:
+            del self.scaler
+        else:
+            self.scaler = inner_scaler
         self.supports_sharding = getattr(self.loss, "supports_sharding", True)
 
     # -- scaler delegation --------------------------------------------------

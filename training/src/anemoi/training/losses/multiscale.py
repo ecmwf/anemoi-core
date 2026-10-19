@@ -303,19 +303,54 @@ class MultiscaleLossWrapper(BaseLossWrapper):
 
     def _smooth_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply smoothing matrix to predictions and targets for loss computation."""
-        if self.smoothing_matrices[i] is not None:
-            projection_matrix = self.smoothing_matrices[i].get_edges(device=x.device)
-            x = self.projector(
-                x,
-                projection_matrix,
-                num_chunks=self.sparse_projector_num_chunks,
-            )
-            y = self.projector(
-                y,
-                projection_matrix,
-                num_chunks=self.sparse_projector_num_chunks,
-            )
+        if self.smoothing_matrices[i] is None:
+            return x, y
+        projection_matrix = self.smoothing_matrices[i].get_edges(device=x.device)
+        if self.sparse_projector_num_chunks == 1 and x.shape[-2:] == y.shape[-2:] and x.dtype == y.dtype:
+            return self._project_pair(x, y, projection_matrix)
+        x = self.projector(
+            x,
+            projection_matrix,
+            num_chunks=self.sparse_projector_num_chunks,
+        )
+        y = self.projector(
+            y,
+            projection_matrix,
+            num_chunks=self.sparse_projector_num_chunks,
+        )
         return x, y
+
+    def _project_pair(
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        projection_matrix: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Smooth predictions and targets with a single sparse matmul.
+
+        Equivalent to one ``SparseProjector`` call each: every column of the dense right-hand
+        side is projected independently, so putting ``x`` and ``y`` side by side only halves
+        the number of sparse matmuls (in the forward and the backward pass).
+
+        Expected shapes: ``x`` ``[..., nodes, channels]`` and ``y`` ``[..., nodes, channels]``,
+        with the same nodes and channels but any leading dimensions.
+        """
+        num_nodes, num_channels = x.shape[-2:]
+        # [..., N, C] -> [N, B, C] for both, joined along B in one copy -> [N, (Bx + By) * C]
+        x_rhs = x.reshape(-1, num_nodes, num_channels).permute(1, 0, 2)
+        y_rhs = y.reshape(-1, num_nodes, num_channels).permute(1, 0, 2)
+        batch_x = x_rhs.shape[1]
+        rhs = torch.cat([x_rhs, y_rhs], dim=1).reshape(num_nodes, -1)
+
+        with torch.amp.autocast(device_type=x.device.type, enabled=self.projector.autocast):
+            # [M, N] @ [N, (Bx + By) * C] -> [M, (Bx + By) * C]
+            out = torch.sparse.mm(projection_matrix, rhs)
+
+        num_out_nodes = out.shape[0]
+        out = out.reshape(num_out_nodes, -1, num_channels)  # [M, Bx + By, C]
+        x_out = out[:, :batch_x].permute(1, 0, 2).reshape(*x.shape[:-2], num_out_nodes, num_channels)
+        y_out = out[:, batch_x:].permute(1, 0, 2).reshape(*y.shape[:-2], num_out_nodes, num_channels)
+        return x_out, y_out
 
     def forward(
         self,
@@ -362,31 +397,36 @@ class MultiscaleLossWrapper(BaseLossWrapper):
                     provider.projection_matrix.shape if provider is not None else None,
                 )
 
-            # smooth the predictions and the truth for loss computation
-            y_pred_ens_tmp, y_tmp = self._smooth_for_loss(
-                y_pred_ens_for_smooth,
-                y_for_smooth,
-                i,
-            )
+            if provider is None:
+                # Full resolution: no smoothing, so use the inputs directly. In the sharded case
+                # this skips the all-to-all round trip, which would return them unchanged.
+                y_pred_ens_tmp, y_tmp = y_pred_ens, y
+            else:
+                # smooth the predictions and the truth for loss computation
+                y_pred_ens_tmp, y_tmp = self._smooth_for_loss(
+                    y_pred_ens_for_smooth,
+                    y_for_smooth,
+                    i,
+                )
 
-            if is_model_sharded:
-                # channel-sharded -> grid-sharded: reverse the all-to-all
-                y_pred_ens_tmp = all_to_all_transpose(
-                    y_pred_ens_tmp,
-                    -2,
-                    grid_shard_sizes,
-                    -1,
-                    channel_shard_sizes_pred,
-                    group,
-                )
-                y_tmp = all_to_all_transpose(
-                    y_tmp,
-                    -2,
-                    grid_shard_sizes,
-                    -1,
-                    channel_shard_sizes_y,
-                    group,
-                )
+                if is_model_sharded:
+                    # channel-sharded -> grid-sharded: reverse the all-to-all
+                    y_pred_ens_tmp = all_to_all_transpose(
+                        y_pred_ens_tmp,
+                        -2,
+                        grid_shard_sizes,
+                        -1,
+                        channel_shard_sizes_pred,
+                        group,
+                    )
+                    y_tmp = all_to_all_transpose(
+                        y_tmp,
+                        -2,
+                        grid_shard_sizes,
+                        -1,
+                        channel_shard_sizes_y,
+                        group,
+                    )
 
             current_y_pred_ens = y_pred_ens_tmp
             current_y = y_tmp

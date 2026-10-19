@@ -427,19 +427,30 @@ class TrajectoryDataset(BaseAnemoiReader):
         """Load forecast steps ``positions`` of initialisation ``sequence``."""
         if isinstance(positions, slice):
             positions = range(*positions.indices(self.sequence_length(sequence)))
-        positions = normalize_time_indices(np.asarray(positions).tolist())
+        positions = normalize_time_indices(np.atleast_1d(np.asarray(positions)).tolist())
 
-        # data[sequence] -> (variables, ensembles, steps, cells)
-        if isinstance(positions, slice):
-            # Read only the requested steps instead of the whole forecast; with per-step chunking
-            # this avoids reading and decompressing unused steps. Only slices take this path: a list
-            # index on the step axis is not applied correctly by anemoi-datasets.
-            x = self.data[sequence, :, :, positions, :]
+        # A grid slice (the reader-group shard) is pushed into the read, so each rank only reads and
+        # decompresses its own part of the grid. Any other grid index is applied after the read.
+        if isinstance(grid_shard_indices, slice):
+            grid_read, grid_after = grid_shard_indices, None
         else:
-            x = self.data[sequence]
-            x = x[:, :, positions, :]
-        if grid_shard_indices is not None:
-            x = x[..., grid_shard_indices]
+            grid_read, grid_after = slice(None), grid_shard_indices
+
+        # data[sequence, ...] -> (variables, ensembles, steps, cells)
+        # Only slices are used on the step axis: a list index on the step axis is not applied
+        # correctly by anemoi-datasets.
+        if isinstance(positions, slice):
+            # Read only the requested steps; with per-step chunking this avoids reading and
+            # decompressing unused steps.
+            x = self.data[sequence, :, :, positions, grid_read]
+        else:
+            # Non-contiguous steps: read the smallest slice that covers them, then select.
+            steps = np.asarray(positions, dtype=np.int64)
+            first, last = int(steps.min()), int(steps.max())
+            x = self.data[sequence, :, :, slice(first, last + 1), grid_read]
+            x = x[:, :, steps - first, :]
+        if grid_after is not None:
+            x = x[..., grid_after]
 
         x = rearrange(x, "variables ensemble steps gridpoints -> steps ensemble gridpoints variables")
         return torch.from_numpy(x)

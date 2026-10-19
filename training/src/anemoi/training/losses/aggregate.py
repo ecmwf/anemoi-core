@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from functools import cached_property
 from typing import TYPE_CHECKING
 
 import torch
@@ -23,6 +24,31 @@ if TYPE_CHECKING:
     from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _is_time_additive(loss: BaseLoss) -> bool:
+    """Whether ``loss`` can be computed for all time steps in a single call.
+
+    True when the loss of a multi-step input equals the sum of the per-step losses
+    (``BaseLoss.reduce`` sums over time) and is zero where prediction and target are
+    both zero. Unknown losses return False and keep the per-step loop.
+    """
+    # Imported here to avoid circular imports through the loss factory.
+    from anemoi.training.losses.combined import CombinedLoss
+    from anemoi.training.losses.huber import HuberLoss
+    from anemoi.training.losses.kcrps import CRPS
+    from anemoi.training.losses.mae import MAELoss
+    from anemoi.training.losses.mse import MSELoss
+    from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+    from anemoi.training.losses.variable_mapper import LossVariableMapper
+
+    # Exact type matches: subclasses may change the reduction (e.g. RMSELoss takes a
+    # square root after summing over time, so it is not additive).
+    if type(loss) in (MultiscaleLossWrapper, LossVariableMapper):
+        return _is_time_additive(loss.loss)
+    if type(loss) is CombinedLoss:
+        return all(_is_time_additive(sub_loss) for sub_loss in loss.losses)
+    return type(loss) in (MSELoss, MAELoss, HuberLoss, CRPS)
 
 
 class TimeAggregateLossWrapper(BaseLossWrapper):
@@ -95,11 +121,13 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
 
         # Extract time weights from the shared scaler (if present)
         time_weights = None
-        for dims, scaler in self.loss.scaler.tensors.values():
+        time_scaler_name = None
+        for name, (dims, scaler) in self.loss.scaler.tensors.items():
             if isinstance(dims, int):
                 dims = (dims,)
             if TensorDim.TIME.value in dims or TensorDim.TIME in dims:
                 time_weights = scaler
+                time_scaler_name = name
                 break
 
         shared_kwargs = dict(
@@ -114,7 +142,17 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
             shared_kwargs["squash_mode"] = squash_mode
 
         for agg_op in self.time_aggregation_types:
-            loss = loss + self._compute_agg_loss(agg_op, pred, target, time_weights, shared_kwargs)
+            if agg_op == "diff":
+                loss = loss + self._compute_diff_loss(
+                    pred,
+                    target,
+                    time_weights,
+                    shared_kwargs,
+                    time_scaler_name=time_scaler_name,
+                    without_scalers=without_scalers,
+                )
+            else:
+                loss = loss + self._compute_agg_loss(agg_op, pred, target, time_weights, shared_kwargs)
 
         # Average over the number of aggregation types, matching the old per-term
         # normalisation (old code: loss /= num_interp_steps + num_aggregate_ops).
@@ -142,16 +180,66 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         target_agg = fn(target, dim=1, keepdim=True)
         return self.loss(pred_agg, target_agg, **shared_kwargs)
 
+    @cached_property
+    def _inner_loss_is_time_additive(self) -> bool:
+        return _is_time_additive(self.loss)
+
+    def _use_single_diff_call(
+        self,
+        time_scaler_name: str | None,
+        without_scalers: list[str] | list[int] | None,
+        num_times: int,
+    ) -> bool:
+        """Whether the diff loss of all steps can be computed in one call to the inner loss."""
+        if not self._inner_loss_is_time_additive:
+            return False
+        if time_scaler_name is None:
+            return True
+
+        # The time weights must come from a single 1-D TIME scaler covering all output times,
+        # so that the inner loss applies exactly the weights the per-step loop would.
+        time_scalers = self.loss.scaler.subset_by_dim(TensorDim.TIME.value).tensors
+        if len(time_scalers) != 1 or time_scaler_name not in time_scalers:
+            return False
+        dims, scaler = time_scalers[time_scaler_name]
+        if isinstance(dims, int):
+            dims = (dims,)
+        if tuple(int(d) for d in dims) != (TensorDim.TIME.value,) or tuple(scaler.shape) != (num_times,):
+            return False
+
+        # The per-step loop applies the time weights even when the caller excludes the TIME
+        # scaler; the single call applies them through the scaler, so keep the loop then.
+        if without_scalers:
+            return time_scaler_name in self.loss.scaler.without(list(without_scalers))
+        return True
+
     def _compute_diff_loss(
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
         time_weights: torch.Tensor | None,
         shared_kwargs: dict,
+        *,
+        time_scaler_name: str | None = None,
+        without_scalers: list[str] | list[int] | None = None,
     ) -> torch.Tensor:
         """Compute per-step diff loss, optionally weighted by time scaler."""
         pred_agg = pred[:, 1:, ...] - pred[:, :-1, ...]  # (bs, time-1, ens, latlon, nvar)
         target_agg = target[:, 1:, ...] - target[:, :-1, ...]  # (bs, time-1, latlon, nvar)
+
+        if self._use_single_diff_call(time_scaler_name, without_scalers, pred.shape[1]):
+            if time_scaler_name is None:
+                # BaseLoss.reduce sums over time, so one call over all steps gives the sum of
+                # the per-step losses.
+                return self.loss(pred_agg, target_agg, **shared_kwargs)
+
+            # Append a zero step so the time-1 diffs line up with the TIME scaler (length time)
+            # and let the inner loss apply the weights: step s is weighted by time_weights[s],
+            # as in the loop, and the zero step adds zero loss.
+            pred_agg = torch.cat([pred_agg, torch.zeros_like(pred_agg[:, :1])], dim=1)
+            target_agg = torch.cat([target_agg, torch.zeros_like(target_agg[:, :1])], dim=1)
+            return self.loss(pred_agg, target_agg, **{**shared_kwargs, "without_scalers": without_scalers})
+
         loss = torch.tensor(0.0, dtype=pred.dtype, device=pred.device, requires_grad=False)
         for step in range(pred_agg.shape[1]):
             step_loss = self.loss(
