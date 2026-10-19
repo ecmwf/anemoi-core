@@ -297,7 +297,6 @@ class CrossDatasetBatchSampler(Sampler[list[int]]):
         for sampler in self._domain_samplers:
             sampler.set_epoch(epoch)
         self._epoch = epoch
-        self._batches_yielded = 0
 
     def state_dict(self) -> dict:
         return {
