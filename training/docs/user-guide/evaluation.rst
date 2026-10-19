@@ -79,7 +79,7 @@ resolved checkpoint is applied:
    ``system.input.warm_start`` / ``training.load_weights_only`` keys have been
    **removed** and are rejected at config validation. Use the
    ``training.checkpoint`` surface above (see
-   :ref:`checkpoint_pipeline_configuration`).
+   :ref:`checkpoint_pipeline`).
 
 ***********************************
  Checkpointing and weight averaging
