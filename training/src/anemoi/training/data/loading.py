@@ -278,6 +278,7 @@ class CrossDatasetBatchSampler(Sampler[list[int]]):
             for domain in dataset.datasets
         ]
         self._batches_yielded = 0
+        self._next_batches_yielded = 0
 
     def _domain_order(self) -> list[int]:
         """Domain of each batch of the epoch, shuffled reproducibly from the seed and the epoch."""
@@ -294,6 +295,10 @@ class CrossDatasetBatchSampler(Sampler[list[int]]):
             iter(BatchSampler(sampler, batch_size=self.batch_size, drop_last=False))
             for sampler in self._domain_samplers
         ]
+        # Resume position from load_state_dict applies to the first iteration only; an iteration
+        # abandoned part-way (like in sanity validation) must not leak its position into the next one.
+        self._batches_yielded = self._next_batches_yielded
+        self._next_batches_yielded = 0
         for domain_index in self._domain_order()[self._batches_yielded :]:
             local_batch = next(domain_batches[domain_index])
             self._batches_yielded += 1
@@ -322,7 +327,7 @@ class CrossDatasetBatchSampler(Sampler[list[int]]):
             strict=True,
         ):
             sampler.load_state_dict(sampler_state)
-        self._batches_yielded = state_dict["batches_yielded"]
+        self._batches_yielded = self._next_batches_yielded = state_dict["batches_yielded"]
 
     @property
     def sampler(self) -> "CrossDatasetBatchSampler":
