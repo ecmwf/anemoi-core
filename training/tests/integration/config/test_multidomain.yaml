@@ -20,14 +20,10 @@ data:
       processors:
         normalizer:
           config:
-            default: mean-std
-            std: [tp]
-            min-max:
             max:
             none: ${data.datasets.sg_1.forcing}
 
 dataloader:
-  persistent_workers: false
   num_workers:
     training: 1
     validation: 1
@@ -35,7 +31,6 @@ dataloader:
   batch_size:
     training: 1
     validation: 1
-    test: 1
   limit_batches:
     training: 4
     validation: 4
@@ -67,7 +62,6 @@ task:
   validation_rollout: 2
 
 diagnostics:
-  callbacks: []
   plot:
     callbacks: []
 
