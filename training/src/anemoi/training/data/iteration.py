@@ -162,7 +162,7 @@ class CrossDatasetIteration(BaseIteration):
 class MixedIteration(BaseIteration):
     """Mixing cross-dataset iteration logic and base iteration logic."""
 
-    def __init__(self, iteration_mapping: dict[str, list]):
+    def __init__(self, iteration_mapping: list):
         self.iteration_mapping = iteration_mapping
 
     def compute_anchors(
@@ -172,25 +172,46 @@ class MixedIteration(BaseIteration):
     ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
 
         # Create groups of datasets that will be sampled together
-        groups = list(itertools.product(*self.iteration_mapping.values()))
+        groups = list(itertools.product(*self.iteration_mapping))
         self.groups_dict = {"group_" + str(i): group for i, group in enumerate(groups)}
         self.group_labels = list(self.groups_dict.keys())
 
         anchors = {}
         for group, datasets_in_group in self.groups_dict.items():
+            data_readers_in_group = {}
             for dataset_label in datasets_in_group:
                 if dataset_label in dataset.data_readers:
-                    group_anchors = compute_valid_anchors(
-                        {dataset_label: dataset.data_readers[dataset_label]},
-                        relative_date_indices,
-                    )
+                    data_readers_in_group[dataset_label] = dataset.data_readers[dataset_label]
                 else:
-                    msg = f"Dataset label '{dataset_label}' not found in data readers."
+                    msg = f"Dataset label '{dataset_label}' not found in data readers for group '{group}'."
                     LOGGER.warning(msg)
-                    group_anchors = []
-            if len(group_anchors) > 0:
-                anchors[group] = group_anchors
+                    continue
 
+            if not data_readers_in_group:
+                msg = f"Group '{group}' has no valid data readers. Skipping this group."
+                LOGGER.warning(msg)
+                continue
+
+            LOGGER.debug("Data readers in group %s: %s", group, list(data_readers_in_group.keys()))
+            group_anchors = compute_valid_anchors(
+                data_readers_in_group,
+                relative_date_indices,
+            )
+            if group_anchors is not None and len(group_anchors) > 0:
+                anchors[group] = group_anchors
+                LOGGER.info("Group '%s' has %d valid anchors", group, len(group_anchors))
+            else:
+                LOGGER.warning("Group '%s' has no valid anchors", group)
+
+        if not anchors:
+            available_datasets = list(dataset.data_readers.keys())
+            msg = (
+                f"No valid anchors found after intersection across all dataset groups. "
+                f"Available datasets: {available_datasets}, Requested groups: {self.groups_dict}"
+            )
+            raise ValueError(msg)
+
+        LOGGER.info("Computed anchors for groups: %s", {k: len(v) for k, v in anchors.items()})
         return anchors, {group_name: np.arange(len(values), dtype=np.int64) for group_name, values in anchors.items()}
 
     def sample(
@@ -198,20 +219,40 @@ class MixedIteration(BaseIteration):
         dataset: "MultiDataset",
         index: tuple[str, int],
     ) -> dict[str, torch.Tensor]:
-        """Load one sample from the selected dataset."""
+        """Load one sample from all datasets in the selected group."""
         group_name, sample_index = index
 
         sequence, position = (int(value) for value in dataset.anchors[group_name][sample_index])
 
-        return {
-            dataset_name: dataset.data_readers[dataset_name].get_sample(
+        result = {}
+        for dataset_name in self.groups_dict[group_name]:
+            if dataset_name not in dataset.data_readers:
+                LOGGER.warning("Dataset '%s' not found in data_readers for group '%s'", dataset_name, group_name)
+                continue
+
+            sample = dataset.data_readers[dataset_name].get_sample(
                 sequence,
                 offset_time_indices(position, dataset.relative_date_indices[dataset_name]),
                 self._grid_indices(dataset, dataset_name),
             )
-            for dataset_name in self.groups_dict[group_name]
-            if dataset_name in dataset.dataset_names
-        }
+            result[dataset_name] = sample
+
+        if not result:
+            LOGGER.error(
+                "No samples were retrieved for group '%s'. Available data readers: %s, Expected datasets: %s",
+                group_name,
+                list(dataset.data_readers.keys()),
+                self.groups_dict[group_name],
+            )
+        LOGGER.info(
+            "Sampled from group '%s' with datasets: %s, sample index: %d, data shapes: %s",
+            group_name,
+            list(result.keys()),
+            sample_index,
+            {k: v.shape for k, v in result.items()},
+        )
+
+        return result
 
     def _sample_indices(self, dataset: "MultiDataset") -> list[tuple[str, int]]:
         dataset_indices = {
@@ -228,7 +269,7 @@ class MixedIteration(BaseIteration):
             order = dataset.rng.choice(len(samples), size=len(samples), replace=False)
             samples = [samples[int(index)] for index in order]
 
-        LOGGER.debug(
+        LOGGER.info(
             (
                 "Worker pid %d, label %s, worker id %d, global_rank %d, "
                 "model comm group %d, group_rank %d, seed comm group id %d, using indices[0:10]: %s"
@@ -242,4 +283,5 @@ class MixedIteration(BaseIteration):
             dataset.sample_comm_group_id,
             samples[:10],
         )
+        LOGGER.info("Generated %d sample indices for mixed iteration", len(samples))
         return samples

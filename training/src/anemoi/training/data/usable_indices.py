@@ -78,9 +78,9 @@ def compute_valid_anchors(
 
     if intersection is None or len(intersection) == 0:
         msg = "No valid anchors found after intersection across all datasets."
-        raise ValueError(msg)
-
-    LOGGER.info("MultiDataset has %d valid anchors after intersection.", len(intersection))
+        LOGGER.warning(msg)  # raise a warning instead of an error
+    else:
+        LOGGER.info("MultiDataset has %d valid anchors after intersection.", len(intersection))
 
     return intersection
 
