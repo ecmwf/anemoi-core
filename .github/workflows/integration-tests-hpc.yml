@@ -44,6 +44,7 @@ jobs:
           template: |
             env | grep SLURM # helps with debugging
             set -eux
+            whoami
             module load python3/3.12.9-01
             # Shared working dir on $PERM. The clone + virtualenv are built once
             # here and reused by each test, then removed by cleanup-env or sweep-stale-envs.
