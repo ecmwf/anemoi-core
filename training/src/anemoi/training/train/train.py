@@ -34,6 +34,7 @@ from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
+from anemoi.training.distributed.strategy import BaseDDPStrategy
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -44,8 +45,9 @@ from anemoi.training.utils.compile import prepare_compilation
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import choose_base_seed
 from anemoi.training.utils.seeding import derive_seed
-from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.seeding import set_base_seed
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
@@ -117,6 +119,8 @@ class AnemoiTrainer(ABC):
         # Update dry_run attribute, check if checkpoint exists
         self._check_dry_run()
 
+        set_base_seed(self.base_seed)
+
         # Check for dry run, i.e. run id without data
         self._log_information()
 
@@ -142,8 +146,16 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def base_seed(self) -> int:
-        """Base seed shared by all ranks."""
-        return get_base_seed()
+        """Base seed that the run starts with: ``training.seed``, or a freshly drawn one.
+
+        A freshly drawn seed differs between ranks; distributed training replaces it with
+        rank 0's seed when the ranks first connect. A run that continues from a checkpoint
+        with its full training state switches to the checkpoint's seed while the
+        checkpoint is restored, unless ``training.seed`` is set.
+        """
+        base_seed = choose_base_seed(self.config.training.seed, checkpoint_seed=None)
+        LOGGER.info("Base seed: %d", base_seed)
+        return base_seed
 
     @cached_property
     def initial_seed(self) -> int:
@@ -594,22 +606,24 @@ class AnemoiTrainer(ABC):
     def strategy(self) -> Any:
         """Returns the distributed training strategy.
 
-        Runs with at least one tabular observation dataset build a dynamic graph per batch  and route each sample
+        Runs with at least one tabular observation dataset build a dynamic graph per batch and route each sample
         through per-dataset encoders/decoders that may be unused when a dataset has no observations in a batch.
+        DDP must then look for parameters without gradients in every step, so these runs need
+        ``static_graph: false`` and ``find_unused_parameters: true`` in ``training.strategy``.
         """
-        if any(dr.data_type == "tabular" for dr in self.datamodule.ds_train.data_readers.values()):
-            # If not all datasets are static, we set find_unused_parameters=True and static_graph=False.
-            return instantiate(
-                self.config.training.strategy,
-                find_unused_parameters=True,
-                static_graph=False,
-            )
-
-        return instantiate(
-            self.config.training.strategy,
-            find_unused_parameters=False,
-            static_graph=not self.config.training.accum_grad_batches > 1,
-        )
+        strategy = instantiate(self.config.training.strategy)
+        has_tabular = any(dr.data_type == "tabular" for dr in self.datamodule.ds_train.data_readers.values())
+        if has_tabular and isinstance(strategy, BaseDDPStrategy):
+            # A setting missing from the config takes DDP's own default, which is false for both.
+            strategy_config = self.config.training.strategy
+            if strategy_config.get("static_graph", False) or not strategy_config.get("find_unused_parameters", False):
+                msg = (
+                    "Training with tabular datasets needs training.strategy.static_graph: false and "
+                    "training.strategy.find_unused_parameters: true, because parameters of a dataset's "
+                    "encoder and decoder get no gradient when the dataset has no observations in a batch."
+                )
+                raise ValueError(msg)
+        return strategy
 
     @cached_property
     def fit_parameters(self) -> Any:
@@ -658,8 +672,12 @@ class AnemoiTrainer(ABC):
             accumulate_grad_batches=self.config.training.accum_grad_batches,
             gradient_clip_val=self.config.training.gradient_clip.val,
             gradient_clip_algorithm=self.config.training.gradient_clip.algorithm,
-            # we have our own DDP-compliant sampler logic baked into the dataset
+            # the datamodule builds samplers that split the data between groups of
+            # ranks training on the same samples, not between single ranks
             use_distributed_sampler=False,
+            # a changing rollout changes the number of samples, which a sampler
+            # reads only when it is built
+            reload_dataloaders_every_n_epochs=int(self.datamodule.rollout_changes_between_epochs),
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
             enable_checkpointing=self.config.diagnostics.enable_checkpointing,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),

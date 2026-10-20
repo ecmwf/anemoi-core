@@ -23,12 +23,12 @@ from anemoi.training.distributed.groups import build_reader_layout
 from anemoi.training.distributed.groups import create_ensemble_process_groups
 from anemoi.training.distributed.groups import create_model_process_groups
 from anemoi.training.distributed.groups import create_reader_process_groups
-from anemoi.training.distributed.groups import get_my_ensemble_comm_group
 from anemoi.training.distributed.groups import get_my_model_comm_group
 from anemoi.training.distributed.groups import get_my_reader_group
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.seeding import set_base_seed
 
 LOGGER = logging.getLogger(__name__)
 
@@ -114,7 +114,6 @@ class BaseDDPStrategy(DDPStrategy):
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
         self.use_local_synchronization = use_local_synchronization
-        self.shard_sizes: dict | None = None
 
     @abstractmethod
     def _setup_communication_groups(self) -> int:
@@ -127,6 +126,12 @@ class BaseDDPStrategy(DDPStrategy):
         """
         raise NotImplementedError
 
+    def setup_environment(self) -> None:
+        super().setup_environment()
+        # Every rank picked its base seed on its own; a freshly drawn one differs
+        # between ranks, so all ranks take rank 0's seed, which goes into the checkpoint.
+        set_base_seed(self.broadcast(get_base_seed(), src=0))
+
     def setup(self, trainer: pl.Trainer) -> None:
         model_comm_group_id = self._setup_communication_groups()
 
@@ -134,30 +139,59 @@ class BaseDDPStrategy(DDPStrategy):
 
         seed_rnd(model_comm_group_id, self.global_rank)
 
+    @property
+    def sample_comm_group_size(self) -> int:
+        """Number of ranks that train on the same samples."""
+        return self.model_comm_group_size
+
+    @property
+    def distributed_sampler_kwargs(self) -> dict[str, int]:
+        """Split the samples between groups of ranks that train on the same samples.
+
+        Every rank in a group receives the same samples, so the sampler treats
+        each group as one replica.
+        """
+        sample_comm_group_id, _, sample_comm_num_groups = get_my_model_comm_group(
+            self.sample_comm_group_size,
+            self.global_rank,
+            self.world_size,
+        )
+        return {"num_replicas": sample_comm_num_groups, "rank": sample_comm_group_id}
+
+    def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
+        """Pass reader group information to the dataloader's dataset.
+
+        Parameters
+        ----------
+        dataloader : torch.utils.data.DataLoader
+            Dataloader to process.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            Processed dataloader.
+
+        """
+        dataloader = super().process_dataloader(dataloader)
+
+        _, model_comm_group_rank, _ = get_my_model_comm_group(
+            self.model_comm_group_size,
+            self.global_rank,
+            self.world_size,
+        )
+        _, reader_group_rank, _, _ = get_my_reader_group(
+            model_comm_group_rank,
+            self.read_group_size,
+            self.global_rank,
+        )
+        dataloader.dataset.set_reader_group_info(reader_group_rank, self.read_group_size)
+
+        return dataloader
+
     def configure_ddp(self) -> None:
         """Configure DDP with custom gradient hooks."""
         self.register_parameter_hooks()
         super().configure_ddp()
-
-    def _setup_shard_sizes(self, trainer: pl.Trainer) -> dict:
-        """Set up shard sizes for the dataloader.
-
-        Parameters
-        ----------
-        trainer : pl.Trainer
-            The PyTorch Lightning trainer.
-
-        Returns
-        -------
-        dict
-            A dictionary containing the shard sizes for each dataset.
-        """
-        # For training, the model is wrapped in DDP and the LightningModule is accessible via trainer.model.module
-        # For evaluation, the model is not wrapped in DDP and the LightningModule is accessible via trainer.model
-        model = getattr(trainer.model, "module", trainer.model)
-        shard_sizes = model.shard_sizes
-        assert shard_sizes is not None, "Shard shapes should be set after setup"
-        return shard_sizes
 
     def register_parameter_hooks(self) -> None:
         """Register parameter hooks for gradient reduction."""
@@ -231,45 +265,6 @@ class DDPGroupStrategy(BaseDDPStrategy):
 
         return model_layout.model_comm_group_id
 
-    def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
-        """Pass communication group information to the dataloader for distributed training.
-
-        Parameters
-        ----------
-        dataloader : torch.utils.data.DataLoader
-            Dataloader to process.
-
-        Returns
-        -------
-        torch.utils.data.DataLoader
-            Processed dataloader.
-
-        """
-        dataloader = super().process_dataloader(dataloader)
-
-        # pass model and reader group information to the dataloaders dataset
-        model_comm_group_id, model_comm_group_rank, model_comm_num_groups = get_my_model_comm_group(
-            self.model_comm_group_size,
-            self.global_rank,
-            self.world_size,
-        )
-        _, reader_group_rank, _, _ = get_my_reader_group(
-            model_comm_group_rank,
-            self.read_group_size,
-            self.global_rank,
-        )
-
-        dataloader.dataset.set_comm_group_info(
-            self.global_rank,
-            model_comm_group_id,
-            model_comm_group_rank,
-            model_comm_num_groups,
-            reader_group_rank,
-            self.read_group_size,
-        )
-
-        return dataloader
-
 
 class DDPEnsGroupStrategy(BaseDDPStrategy):
     """Distributed Data Parallel strategy with group communication for ensembles."""
@@ -303,6 +298,11 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
             **kwargs,
         )
         self.ens_comm_group_size = num_gpus_per_ensemble
+
+    @property
+    def sample_comm_group_size(self) -> int:
+        """Number of ranks that train on the same samples."""
+        return self.ens_comm_group_size
 
     def register_parameter_hooks(self) -> None:
         """Compensate DDP averaging across model and ensemble shards."""
@@ -419,53 +419,3 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
         )
 
         return model_layout.model_comm_group_id
-
-    def process_dataloader(self, dataloader: torch.utils.data.DataLoader) -> torch.utils.data.DataLoader:
-        """Pass communication group information to the dataloader for distributed training.
-
-        Parameters
-        ----------
-        dataloader : torch.utils.data.DataLoader
-            Dataloader to process.
-
-        Returns
-        -------
-        torch.utils.data.DataLoader
-            Processed dataloader.
-
-        """
-        dataloader = super().process_dataloader(dataloader)
-
-        # pass model and reader group information to the dataloaders dataset
-        model_comm_group_id, model_comm_group_rank, model_comm_num_groups = get_my_model_comm_group(
-            self.model_comm_group_size,
-            self.global_rank,
-            self.world_size,
-        )
-        _, reader_group_rank, _, _ = get_my_reader_group(
-            model_comm_group_rank,
-            self.read_group_size,
-            self.global_rank,
-        )
-        ens_comm_group_id, ens_comm_group_rank, ens_comm_num_groups = get_my_ensemble_comm_group(
-            self.ens_comm_group_size,
-            self.global_rank,
-            self.world_size,
-        )
-
-        dataloader.dataset.set_comm_group_info(
-            self.global_rank,
-            model_comm_group_id,
-            model_comm_group_rank,
-            model_comm_num_groups,
-            reader_group_rank,
-            self.read_group_size,
-        )
-
-        dataloader.dataset.set_ens_comm_group_info(
-            ens_comm_group_id,
-            ens_comm_group_rank,
-            ens_comm_num_groups,
-        )
-
-        return dataloader

@@ -124,15 +124,13 @@ def _make_mock_reader(mocker: MockFixture, grid: int) -> MockFixture:
 
 
 def _make_multidataset(mocker: MockFixture) -> MultiDataset:
-    ds = MultiDataset(
+    return MultiDataset(
         data_readers={
             "a": _make_mock_reader(mocker, grid=6),
             "b": _make_mock_reader(mocker, grid=4),
         },
         relative_date_indices={"a": [0, 1], "b": [0, 1]},
     )
-    ds.worker_id = 0  # normally set by worker_init_func
-    return ds
 
 
 def test_multidataset_get_sample_returns_source_samples(mocker: MockFixture) -> None:

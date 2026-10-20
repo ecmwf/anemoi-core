@@ -767,6 +767,12 @@ class BaseDDPStrategySchema(BaseModel):
     "Use synchronization local to the group when creating process groups."
     broadcast_buffers: bool = Field(default=False, example=False)
     "Broadcast model buffers at the start of each iteration. Defaults to False."
+    static_graph: bool = Field(default=True, example=True)
+    """Tell DDP that the same parameters are trained in every step. Must be false when
+    training.accum_grad_batches > 1."""
+    find_unused_parameters: bool = Field(default=False, example=False)
+    """Let DDP check every step for parameters that receive no gradient. Together with static_graph: false,
+    DDP sums the gradients in the same groups in every step, so a resumed run continues bitwise identically."""
 
 
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
@@ -784,6 +790,10 @@ VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str 
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
+    seed: NonNegativeInt | None = Field(default=None, example=None)
+    """Base seed of all random number generators. If null, a run continuing from a checkpoint takes the
+    checkpoint's seed and a new run draws one. A seed that differs from the checkpoint's changes the rest of the
+    interrupted epoch."""
     run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
     fork_run_id: str | None = Field(example=None)
@@ -836,6 +846,14 @@ class BaseTrainingSchema(BaseModel):
     "List of metrics"
     ensemble_size_per_device: PositiveInt = 1
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
+
+    @model_validator(mode="after")
+    def check_static_graph_without_accumulation(self) -> Self:
+        """DDP's static graph does not support accumulating gradients over several batches."""
+        if self.accum_grad_batches > 1 and getattr(self.strategy, "static_graph", False):
+            error_msg = "training.strategy.static_graph must be false when training.accum_grad_batches > 1."
+            raise ValueError(error_msg)
+        return self
 
 
 class SingleTrainingMethodSchema(BaseModel):

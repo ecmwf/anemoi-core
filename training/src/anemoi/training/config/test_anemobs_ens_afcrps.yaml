@@ -662,6 +662,8 @@ training:
     read_group_size: ${dataloader.read_group_size}
     use_local_synchronization: true
     broadcast_buffers: false
+    static_graph: false
+    find_unused_parameters: true
   loss_gradient_scaling: false
   max_epochs: 100
   max_steps: 75000

@@ -5,6 +5,10 @@ defaults:
   - optimization: default
   - weight_averaging: null
 
+# base seed of all random number generators. null takes the seed of the checkpoint the run
+# continues from, or draws a new one for a new run
+seed: null
+
 # resume or fork a training from a checkpoint last.ckpt or specified in hardware.files.warm_start
 run_id: null
 fork_run_id: null
@@ -52,6 +56,9 @@ strategy:
   read_group_size: ${dataloader.read_group_size}
   use_local_synchronization: True
   broadcast_buffers: False
+  # must be False when accum_grad_batches > 1
+  static_graph: True
+  find_unused_parameters: False
 
 # loss functions
 
