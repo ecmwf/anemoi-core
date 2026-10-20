@@ -92,55 +92,73 @@ it does not guarantee exact reproducibility across hardware, software
 versions, or distributed executions because floating-point numerics and
 parallel reductions can still differ slightly.
 
--  Set ``ANEMOI_BASE_SEED`` explicitly if you want a fixed base seed for
-   a run.
--  If ``ANEMOI_BASE_SEED`` is not set, Anemoi Training uses
-   ``SLURM_JOB_ID`` when running inside a SLURM job.
--  If neither value is available, Anemoi Training falls back to ``42``.
+-  Set ``training.seed`` if you want a fixed base seed for a run, for
+   example with ``anemoi-training train training.seed=42``.
+-  If ``training.seed`` is ``null`` (the default), a run that continues
+   from a checkpoint takes the base seed stored in the checkpoint, and a
+   new run draws a random base seed. In distributed training all ranks
+   use the seed drawn on rank 0.
 
 Anemoi Training derives unsigned 32-bit runtime seeds from the selected base seed
-for the trainer, model communication groups, and data-loading epochs. Both
-the base seed and the derived trainer seed are stored in the checkpoint
-metadata (as ``base_seed`` and ``seed``); the derived trainer seed is also
-logged during training. To reuse the same seed derivation after a restart, set
-``ANEMOI_BASE_SEED`` to the stored ``base_seed``.
+for the trainer, model communication groups, the data shuffle, and every training
+batch. Both the base seed and the derived trainer seed are stored in the checkpoint
+metadata (as ``base_seed`` and ``seed``); the derived trainer seed is also logged
+during training.
 
-``persistent_workers`` controls whether dataloader worker processes remain alive
-between epochs. It defaults to ``true`` to avoid starting new workers every epoch
-during standard training.
+Resuming a run
+==============
 
-The dataloader epoch is also stored in training checkpoints. When
-``dataloader.persistent_workers`` is ``false``, workers are restarted every
-epoch. Restarting from a checkpoint saved at the end of an epoch with the same
-base seed, data, dataloader configuration, and distributed configuration then
-produces the same shuffle as uninterrupted training.
+A run resumed from a checkpoint loads the same batches and draws the same random
+numbers as a run that was never interrupted. This holds for checkpoints saved at the
+end of an epoch and in the middle of one, provided the resumed job uses the same base
+seed, data, dataloader configuration, and distributed configuration. A checkpoint
+saved on exactly the last training batch of an epoch is the exception: PyTorch
+Lightning resumes it into an empty epoch.
 
-Anemoi automatically sets ``persistent_workers`` to ``false`` when the rollout
-changes between epochs (``rollout.epoch_increment > 0``), so that new workers
-receive the updated rollout.
+-  **Base seed.** With ``training.seed: null`` a resumed or forked run takes the
+   ``base_seed`` stored in the checkpoint. A seed set in ``training.seed`` is used
+   as given; if it differs from the checkpoint's, Anemoi Training logs a warning and
+   the run does not continue exactly: the rest of the interrupted epoch repeats some
+   samples and skips others, and every step draws different random numbers. This is
+   useful, for example, to try different randomness after a loss spike while keeping
+   the optimiser state. Loading only the weights (``training.load_weights_only``)
+   starts a new run that does not use the checkpoint's seed. Checkpoints from
+   versions that did not store a base seed resume with the run's own seed, and
+   Anemoi Training logs a warning that the run does not continue exactly.
+-  **Data order.** The training shuffle depends only on the base seed and the
+   epoch. The dataloader counts the samples it has handed out, and this count is
+   stored in the checkpoint, so a resumed run continues with the next batch. This
+   works with and without ``dataloader.persistent_workers``. The resumed run must
+   use the same ``dataloader.num_workers.training``: the stored dataloader position
+   depends on the number of workers, and a resumed run with a different number
+   stops with an error when it starts loading data.
+-  **Model randomness.** The random number generators are seeded at the start of
+   every training batch from the base seed, the model communication group, the
+   epoch, and the batch number. Random numbers used by stochastic parts of the model,
+   such as noise injection or diffusion noise, therefore do not depend on what was
+   drawn before the batch, and no generator state needs to be stored.
 
-The workers' random number generator state is not stored in checkpoints.
-Consequently, when ``persistent_workers`` is ``true``, a restarted job does not
-continue the same shuffle sequence as an uninterrupted run, even when it uses the
-same base seed.
+When the rollout changes between epochs (``rollout.epoch_increment > 0``), the
+number of samples changes with it, and the dataloaders are rebuilt every epoch.
 
-With ``persistent_workers`` set to ``true``, repeating a training run split
-across multiple jobs produces the same shuffle sequence if the jobs restart from
-checkpoints saved at the end of the same epochs and use the same base seed, data,
-dataloader configuration, and distributed configuration. However, this sequence
-differs from running the same number of epochs in one uninterrupted job.
+The same data and random numbers do not guarantee bitwise identical results. Two
+things can prevent this:
 
-Anemoi does not store a dataloader's position within an epoch. A checkpoint
-written during an epoch therefore cannot resume the exact data sequence at the
-next batch and may repeat or skip samples. Use checkpoints saved at the end of an
-epoch and set ``persistent_workers`` to ``false`` when the data sequence must match
-uninterrupted training.
+-  Some GPU kernels add up results, such as gradients, in an order that can change
+   between runs.
+-  With several GPUs, the gradients of all GPUs are summed in an order that can
+   change between runs, for example when a run is resumed. Setting
+   ``training.strategy.static_graph: false`` and
+   ``training.strategy.find_unused_parameters: true`` keeps this order fixed, so a
+   resumed run continues bitwise identically if the GPU kernels are reproducible.
+   These settings may make training slower.
 
-The same data shuffling does not necessarily make the complete training run
-exactly reproducible. The random number generators used by stochastic parts of
-the model are seeded at job startup, but their current state is not stored in
-checkpoints. In addition, some GPU kernels used by the model may also produce
-results that are not bitwise identical between runs.
+Metrics that PyTorch Lightning averages over an epoch, such as the epoch value of
+the training loss, can differ for the epoch in which a run was resumed: Lightning
+does not store their running means in the checkpoint, so these values only cover
+the steps after the resume. Validation metrics logged for every batch are logged at
+Lightning's count of validation batches in the current job, which starts again at
+zero after a resume, so their values appear shifted.
 
 Step 5: Execute Training
 ========================
@@ -163,8 +181,6 @@ Make sure you have a GPU available and simply call:
 .. code:: bash
 
    anemoi-training train
-
-.. _restart target:
 
 **************
  Data Routing
@@ -247,19 +263,17 @@ The dataloader config exposes configuration options of the underlying pytorch da
       validation: 2
       test: 2
 
-   persistent_workers: true
+   persistent_workers: false
    multiprocessing_context: None
 
 
-``persistent_workers`` defaults to ``true`` to avoid the worker startup cost
-between epochs. When the rollout changes between epochs, Anemoi automatically
-sets it to ``false`` so that new workers receive the updated rollout state. For a
-fixed rollout (``rollout.epoch_increment == 0``), set it to ``false`` explicitly
-if a run restarted from a checkpoint saved at the end of an epoch must reproduce
-the uninterrupted data shuffle. This requires the base seed and the data,
-dataloader, and distributed configurations to remain unchanged. With persistent
-workers, their random number generator state cannot be restored after restarting
-a job.
+``persistent_workers`` keeps the dataloader workers alive between epochs
+instead of starting new ones every epoch, which saves the worker startup time.
+It defaults to ``false``. The setting does not change the data or the random
+numbers of a run, and a resumed run continues the data order of the
+interrupted run either way, see `Resuming a run`_. When the rollout changes
+between epochs, the dataloaders are rebuilt every epoch and start new workers
+regardless of this setting.
 
 Determining the optimal number of workers depends on your system and training setup. More dataloader processes can increase your filesystem bandwidth, at the cost of higher CPU memory usage. Higher source resolutions and larger batch sizes increase the memory required per worker. When the available CPU memory is not sufficient for the requested number of workers, your training run will crash. One can use the `anemoi dataloader benchmark`_ to quickly test different setups and determine the optimal configuration for your training setup.
 
@@ -523,6 +537,8 @@ learning rate. The default (see
 ``config/training/optimization/lr_scheduler/cosine_scheduler.yaml``)
 uses a warmup period of 1000 steps.
 
+.. _restart target:
+
 **************************
  Restarting a training run
 **************************
@@ -554,18 +570,11 @@ The above can be adapted depending on the use case and taking advantage
 of hydra, you can also reuse ``config.training.run_id`` or
 ``config.training.fork_run_id`` to define the path to the checkpoint.
 
-Anemoi does not store the dataloader's position within an epoch. When restarting
-from a checkpoint written during an epoch, use ``training.max_steps`` to
-prescribe the total number of optimization steps instead of relying on
-``max_epochs`` as a measure of how much data was processed. The standard training
-configurations already use a finite ``max_steps`` with ``max_epochs: null``. This
-keeps the number of optimizer steps fixed.
-
-When the data sequence must match uninterrupted training, use a checkpoint saved
-at the end of an epoch and set ``dataloader.persistent_workers`` to ``false``.
-Anemoi sets it to ``false`` automatically when the rollout changes between
-epochs; for a fixed rollout, set it explicitly. Disabling persistent workers adds
-worker startup costs at the beginning of every epoch.
+A run that restarts from a checkpoint with its full training state, that is
+without ``training.load_weights_only``, continues where the checkpoint was saved,
+also in the middle of an epoch. It trains on the same batches and draws the same
+random numbers as a run that was never interrupted; `Resuming a run`_ lists the
+conditions.
 
 **************************************
  Training checkpoint hyperparameters
@@ -662,23 +671,20 @@ Every Forecaster checkpoint stores the task rollout state: the current
 applies when the rollout step is 1 or the rollout is fixed. The dataloader epoch
 is also stored.
 
-When using rollout training with ``rollout.epoch_increment > 0``, extra
-care is required when restarting an interrupted run.
+A run restarted from a checkpoint, saved at the end of an epoch or within one,
+continues with the rollout and data order of the uninterrupted run, provided
+that you:
 
-As described under `Restarting a training run`_, only checkpoints saved at the
-end of an epoch can reproduce the uninterrupted data sequence.
-
-The recommended restart recipe is:
-
-1. Restart from a checkpoint saved at the end of an epoch.
-2. Keep ``rollout.start``, ``epoch_increment``, and ``maximum``
+1. Keep ``rollout.start``, ``epoch_increment``, and ``maximum``
    **unchanged** in your configuration.
-3. Use non-persistent dataloader workers. Anemoi applies this automatically
-   when ``rollout.epoch_increment > 0``.
-4. Reuse the original ``ANEMOI_BASE_SEED``, dataloader configuration, and
-   distributed configuration.
-5. Ensure that ``training.run_id`` is set to the run ID of the interrupted
-   job.
+2. Leave ``training.seed`` at ``null`` or at the original seed, and reuse the
+   dataloader configuration and distributed configuration.
+3. Set ``training.run_id`` to the run ID of the interrupted job.
+
+The rollout and the dataloader epoch advance only after an epoch has trained on
+all of its batches. A checkpoint saved within an epoch, for example when training
+stops at ``training.max_steps`` or a time limit, therefore resumes with the
+rollout and data order of that epoch.
 
 By default, Anemoi saves each epoch checkpoint after validation. At that point,
 the rollout and dataloader epoch have not yet advanced. When training resumes,
@@ -689,10 +695,6 @@ Anemoi can also save a final checkpoint when training ends, after this hook has
 run. That checkpoint stores the advanced dataloader epoch and records which
 epoch last increased the rollout. Lightning may run the hook again on resume.
 The saved record prevents the rollout from increasing twice.
-
-With ``persistent_workers`` set to ``false``, the first resumed epoch uses the
-same rollout length and shuffled data order that the uninterrupted run would have
-used.
 
 .. note::
 
