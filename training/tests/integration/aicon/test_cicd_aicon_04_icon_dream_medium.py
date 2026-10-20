@@ -11,7 +11,6 @@
 #
 # This script is not part of a productive ML workflow, but is
 # used for CI/CD!
-import os
 from functools import reduce
 from operator import getitem
 
@@ -30,7 +29,6 @@ from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import skip_if_offline
 
-os.environ["ANEMOI_BASE_SEED"] = "42"
 mpl.use("agg")
 
 

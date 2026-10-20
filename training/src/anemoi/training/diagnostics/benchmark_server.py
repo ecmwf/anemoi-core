@@ -38,6 +38,8 @@ LOGGER = logging.getLogger(__name__)
 
 BENCHMARK_SERVER_ARTIFACT_LIMIT: Final = 10
 MLFLOW_LOG_RETENTION_LIMIT: Final = 60
+# Run tag holding the last time (ms since epoch) a run was read as a comparison reference.
+MLFLOW_LAST_USED_TAG: Final = "anemoi.last_used_as_reference"
 
 
 def parse_benchmark_config(path: Path) -> tuple[str, str, str]:
@@ -783,6 +785,16 @@ def track_accuracy_result(
 track_accuracy_final_loss = partial(track_accuracy_result, name="accuracyFinalLoss")
 
 
+def mark_mlflow_run_used(client: Any, run_id: str) -> None:
+    """Records that ``run_id`` was just read as a reference, so pruning keeps it as recently used."""
+    client.set_tag(run_id, MLFLOW_LAST_USED_TAG, str(int(datetime.now(tz=UTC).timestamp() * 1000)))
+
+
+def _last_used(run: Any) -> int:
+    """Most recent of the run's start time and the last time it was read as a reference."""
+    return max(run.info.start_time, int(run.data.tags.get(MLFLOW_LAST_USED_TAG, 0)))
+
+
 @rank_zero_only
 def prune_mlflow_runs(
     client: Any,
@@ -791,13 +803,15 @@ def prune_mlflow_runs(
     keep_latest: int = MLFLOW_LOG_RETENTION_LIMIT,
     protected_run_ids: list[str] | None = None,
 ) -> None:
-    """Deletes old mlflow runs for a benchmark/accuracy test, keeping only the most recent ones.
+    """Deletes old mlflow runs for a benchmark/accuracy test, keeping only the most recently used ones.
 
     Once such a test has passed, only its most recent mlflow runs are useful for future
     comparisons; older ones just accumulate on the tracking server. This keeps the
-    ``keep_latest`` most recent runs (by start time) matching ``run_name`` within
-    ``experiment_name`` and deletes the rest, always preserving any run listed in
-    ``protected_run_ids`` (e.g. a pinned reference run used for comparisons) regardless of age.
+    ``keep_latest`` most recently used runs matching ``run_name`` within ``experiment_name``
+    and deletes the rest. A run counts as used when it was written (its start time) or read
+    as a reference (see ``mark_mlflow_run_used``), whichever is later, so a candidate
+    reference that is being compared against survives other runs. Runs listed in
+    ``protected_run_ids`` (e.g. the pinned reference) are always kept, regardless of age.
 
     client: an mlflow tracking client (e.g. AnemoiMlflowClient) exposing the standard
             MlflowClient interface (get_experiment_by_name, search_runs, delete_run).
@@ -815,10 +829,9 @@ def prune_mlflow_runs(
     runs = client.search_runs(
         experiment_ids=[experiment.experiment_id],
         filter_string=f"tags.mlflow.runName = '{run_name}'",
-        order_by=["attribute.start_time DESC"],
     )
 
-    runs_to_maybe_delete = runs[keep_latest:]
+    runs_to_maybe_delete = sorted(runs, key=_last_used, reverse=True)[keep_latest:]
     for run in runs_to_maybe_delete:
         if run.info.run_id in protected_run_ids:
             LOGGER.debug("Keeping protected mlflow run %s", run.info.run_id)
