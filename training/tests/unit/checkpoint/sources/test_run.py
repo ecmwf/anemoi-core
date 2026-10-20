@@ -14,7 +14,6 @@ from pathlib import Path
 import pytest
 import torch
 from omegaconf import OmegaConf
-
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.checkpoint.base import CheckpointContext

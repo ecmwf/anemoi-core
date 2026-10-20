@@ -57,7 +57,7 @@ dependencies = [
   "zarr>=2.14.2",
 ]
 # Optional extras: pip install anemoi-training[azure,tests], etc.
-optional-dependencies.all = [  ]
+optional-dependencies.all = []
 optional-dependencies.azure = [ "azure-ai-ml", "azure-identity", "azureml-mlflow>=1.6", "strenum" ]
 optional-dependencies.dev = [
   "anemoi-training[all,docs,tests]",
@@ -89,9 +89,9 @@ optional-dependencies.s3 = [
   "anemoi-utils[s3]>=0.5.7",
 ]
 optional-dependencies.tests = [
-  "anemoi-graphs[tri]",                                     # required to load the gnn checkpoint as part of the tests
-  "anemoi-models[spectral]",                                # required to test the DCT2D spectral loss
-  "anemoi-training[azure,mlflow,plotting,s3,wandb]",        # AzureMlflowLogger / S3Source / plotting integration
+  "anemoi-graphs[tri]",                              # required to load the gnn checkpoint as part of the tests
+  "anemoi-models[spectral]",                         # required to test the DCT2D spectral loss
+  "anemoi-training[azure,mlflow,plotting,s3,wandb]", # AzureMlflowLogger / S3Source / plotting integration
   "hypothesis>=6.11",
   "pytest>=8",
   "pytest-mock>=3",

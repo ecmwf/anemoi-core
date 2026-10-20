@@ -18,16 +18,15 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-
-import anemoi.training
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
+import anemoi.training
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
 from anemoi.training.checkpoint.builder import resumes_via_lightning
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
 from anemoi.training.checkpoint.loading.strategies import WarmStartLoader
+from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.checkpoint.sources.run import RunIdSource
 

@@ -18,7 +18,6 @@ from pathlib import Path
 import pytest
 import torch
 
-
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.exceptions import CheckpointValidationError
 from anemoi.training.checkpoint.utils import calculate_checksum

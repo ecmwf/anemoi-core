@@ -18,8 +18,8 @@ import torch
 import torch.nn as nn
 
 from anemoi.training.checkpoint import CheckpointContext
-from anemoi.training.checkpoint.catalog import ComponentCatalog
 from anemoi.training.checkpoint import PipelineStage
+from anemoi.training.checkpoint.catalog import ComponentCatalog
 from anemoi.training.checkpoint.exceptions import CheckpointError
 
 if TYPE_CHECKING:
