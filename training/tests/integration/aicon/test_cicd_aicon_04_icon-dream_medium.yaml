@@ -220,10 +220,6 @@ training:
       data:
         # loss class to initialise
         _target_: anemoi.training.losses.MSELoss
-        # Scalars to include in loss calculation
-        # Available scalars include:
-        # - 'variable': See `variable_loss_scaling` for more information
-        # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
         scalers: ["pressure_level", "general_variable", "node_weights"]
         ignore_nans: False
   validation_metrics:
@@ -231,24 +227,10 @@ training:
       data:
         wmse:
           # loss class to initialise
-          _target_: anemoi.training.losses.MSELoss
-          # Scalars to include in loss calculation
-          # Cannot scale over the variable dimension due to possible remappings.
-          # Available scalars include:
-          # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
-          # Use the `scale_validation_metrics` section to variable scale.
+          _target_: anemoi.training.losses.MSELoss.
           scalers: ["node_weights"]
           # other kwargs
           ignore_nans: True
-  #�| List of validation metrics to keep in normalised space, and scalars to be applied
-  # Use '*' in reference all metrics, or a list of metric names.
-  # Unlike above, variable scaling is possible due to these metrics being
-  # calculated in the same way as the training loss, within the internal model space.
-  # scale_validation_metrics:
-  #   scalars_to_apply: [] #['variable']
-  #   metrics: []
-  #       # - 'all'
-  #     # - "*"
 
   variable_groups:
     datasets:
@@ -287,19 +269,8 @@ training:
           y_intercept: -1.85
           slope: 0.057
 
-        # mask NaNs with zeros in the loss function
         nan_mask_weights:
           _target_: anemoi.training.losses.scalers.NaNMaskScaler
-
-        # tendency scalers
-        # scale the prognostic losses by the stdev of the variable tendencies (e.g. the 6-hourly differences of the data)
-        # useful if including slow vs fast evolving variables in the training (e.g. Land/Ocean vs Atmosphere)
-        # if using this option 'variable_loss_scalings' should all be set close to 1.0 for prognostic variables
-        # stdev_tendency:
-        #   _target_: anemoi.training.losses.scalers.StdevTendencyScaler
-        #
-        # var_tendency:
-        #   _target_: anemoi.training.losses.scalers.VarTendencyScaler
 
         # Scalers from node attributes
         node_weights:
@@ -529,27 +500,6 @@ model:
     hidden2data: 0
     hidden2hidden: 0 # GNN and GraphTransformer Processor only
 
-  # Torch compile configuration
-  # A list of modules present in the model, which will be compiled
-  # You can optionally pass options to torch.compile with the 'options' key
-  #
-  # Below is an explanation of some common parameters to torch.compile
-  # For a full list of possible parameters, consult the documenation for torch compile
-  #       https://docs.pytorch.org/docs/stable/generated/torch.compile.html
-  #
-  # dynamic (bool): When True, it will try to avoid recompilation by generating
-  #       as general a kernel as possible. But the performance of the general
-  #       kernel might be worse. When False, it will generate a specific
-  #       kernel for each input shape (until the configurable recompile
-  #       limit has been hit), leading to possibly better performance but
-  #       more recompilations
-  # mode (str): Different compilation modes, allowing you to trade off
-  #       compilation time versus potential performance. See the
-  #       torch.compile documentation for list of possible modes
-  # fullgraph (bool): When True, torch.compile will error when it hits a
-  #       section of code it can't compile. When False, it will fallback to
-  #       non-compiled ("eager") execution for those lines.
-  # options (dict): a dict of further options which can be passed to torch.compile
   compile:
     #- module: anemoi.models.layers.conv.GraphTransformerConv
 
@@ -568,38 +518,12 @@ model:
         - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
           variables:
             - PS # just for CI/CD test
-
-    # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
-    # This guarantees that cp is physically consistent with tp by restricting cp
-    # to a fraction of tp [0 to 1]. Uncomment the lines below to apply.
-    # NOTE: If this bounding strategy is used, the normalization of cp must be
-    # changed to "std" normalization, and the "cp" statistics should be remapped
-    # to those of tp to ensure consistency.
-
-
-    # - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
-    #   variables:
-    #   - RAIN_CON
-    #   min_val: 0
-    #   max_val: 1
-    #   total_var: TOT_PREC
-
         - _target_: anemoi.models.layers.bounding.HardtanhBounding
           variables:
             - U_70 # just for CI/CD test.
           # values are percentages in [0, 100], min-max normalized to [0, 1].
           min_val: 0.0
           max_val: 1.0
-    # [OPTIONAL] NormalizedReluBounding
-    # This is an extension of the Relu bounding in case the thrshold to be used
-    # is not 0. For example, in case of the sea surface temperature we don't use
-    # [0, infinity), buth rather [-2C, infinity). We do not want the water
-    # temperature to be below the freezing temperature.
-
-    # - _target_: anemoi.models.layers.bounding.NormalizedReluBounding
-    #   variables: [sst]
-    #   min_val: [-2]
-    #   normalizer: ['mean-std']
 
 diagnostics:
   plot:
@@ -628,21 +552,9 @@ diagnostics:
     callbacks:
       # Add plot callbacks here
       - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
-        # group parameters by categories when visualizing contributions to the loss
-        # one-parameter groups are possible to highlight individual parameters
         dataset_names: ${diagnostics.plot.datasets_to_plot}
         parameter_groups: {}
         every_n_batches: 100 # Frequency of the plotting
-          # moisture: [tp, cp, tcw]
-          # sfc_wind: [10u, 10v]
-      # - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
-      #   sample_idx: ${diagnostics.plot.sample_idx}
-      #   per_sample : 6
-      #   parameters: ${diagnostics.plot.parameters}
-      #   #Defining the accumulation levels for precipitation related fields and the colormap
-      #   accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
-      #   cmap_accumulation: ["#ffffff", "#04e9e7", "#019ff4", "#0300f4", "#02fd02", "#01c501", "#008e00", "#fdf802", "#e5bc00", "#fd9500", "#fd0000", "#d40000", "#bc0000", "#f800fd"]
-      #   precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
       - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
         tag_infix: histo
         dataset_names: ${diagnostics.plot.datasets_to_plot}
@@ -705,7 +617,7 @@ diagnostics:
       offline: False
       authentication: False
       log_model: False
-      tracking_uri: https://mlflow.dwd.de
+      tracking_uri: null
       experiment_name: 'tgoecke/aicon_anemoi_training_0.17.0'
       project_name: 'AICON'
       system: True
