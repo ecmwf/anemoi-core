@@ -30,5 +30,10 @@ INIT_HYPERPARAMETERS = frozenset(
 # Hyperparameters required for restoring a training checkpoint (resume, load weights only, transfer learning):
 HYPERPARAMETERS_FOR_RESUME = frozenset({"config", "data_indices", "metadata"})
 
+# Hyperparameters that ``anemoi-training checkpoint inference`` can do without, mapped to the option
+# of the command with which they have to be supplied instead
+OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION = {"graph_data": "--graph"}
 # Hyperparameters required for ``anemoi-training checkpoint inference``
-HYPERPARAMETERS_FOR_INFERENCE_CONVERSION = INIT_HYPERPARAMETERS
+REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION = INIT_HYPERPARAMETERS - set(
+    OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION,
+)

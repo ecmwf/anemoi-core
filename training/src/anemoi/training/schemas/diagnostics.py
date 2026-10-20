@@ -24,9 +24,10 @@ from pydantic import root_validator
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.training.schemas.training import GenericSchema
-from anemoi.training.utils.hyperparameters import HYPERPARAMETERS_FOR_INFERENCE_CONVERSION
 from anemoi.training.utils.hyperparameters import HYPERPARAMETERS_FOR_RESUME
 from anemoi.training.utils.hyperparameters import INIT_HYPERPARAMETERS
+from anemoi.training.utils.hyperparameters import OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION
+from anemoi.training.utils.hyperparameters import REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION
 from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
@@ -362,7 +363,9 @@ class CheckpointSchema(BaseModel):
     every_n_train_steps: CheckpointingSchema | None = None
     "Checkpointing by training step frequency."
     exclude_hyperparameters: list[str] = Field(default_factory=list)
-    "Init arguments of the training module not to store as hyperparameters in the checkpoint."
+    "Init arguments of the training module not to store as hyperparameters in the checkpoint. \
+            Only 'graph_data' can be excluded; converting the checkpoint with \
+            `anemoi-training checkpoint inference` then requires the graph through --graph."
 
     @field_validator("exclude_hyperparameters")
     @classmethod
@@ -371,7 +374,7 @@ class CheckpointSchema(BaseModel):
         if unknown:
             msg = (
                 f"Unknown hyperparameters {unknown} in exclude_hyperparameters. "
-                f"Choose from {sorted(set(INIT_HYPERPARAMETERS) - set(HYPERPARAMETERS_FOR_RESUME))}."
+                f"Choose from {sorted(OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION)}."
             )
             raise ValueError(msg)
 
@@ -380,12 +383,23 @@ class CheckpointSchema(BaseModel):
             msg = f"Hyperparameters {needed_for_resume} are needed to resume training and cannot be excluded."
             raise ValueError(msg)
 
-        needed_for_conversion = sorted(set(names) & HYPERPARAMETERS_FOR_INFERENCE_CONVERSION)
+        needed_for_conversion = sorted(set(names) & REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION)
         if needed_for_conversion:
+            msg = (
+                f"Hyperparameters {needed_for_conversion} are needed by `anemoi-training checkpoint inference` "
+                "and cannot be excluded."
+            )
+            raise ValueError(msg)
+
+        optional_for_conversion = sorted(set(names) & set(OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION))
+        for name in optional_for_conversion:
             LOGGER.warning(
-                "Excluding %s from the checkpoint hyperparameters: `anemoi-training checkpoint inference` "
-                "will not be able to convert the resulting training checkpoints.",
-                needed_for_conversion,
+                "Excluding '%s' from the checkpoint hyperparameters: conversion of the training checkpoint through "
+                "`anemoi-training checkpoint inference` will require '%s' to be supplied separately. "
+                "This can be done through the %s flag.",
+                name,
+                name,
+                OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION[name],
             )
         return names
 

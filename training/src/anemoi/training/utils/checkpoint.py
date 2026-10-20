@@ -21,6 +21,10 @@ from pytorch_lightning import Callback
 from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
+from anemoi.graphs.utils import load_graph_from_file
+from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.migrations import Migrator
 from anemoi.models.preprocessing.imputer import BaseImputer
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
@@ -55,13 +59,20 @@ def _filter_state_dict_size_mismatches(
             del state_dict[key]
 
 
-def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Module, dict]:
+def load_and_prepare_model(
+    lightning_checkpoint_path: str,
+    graph_path: Path | str | None = None,
+) -> tuple[torch.nn.Module, dict]:
     """Load the lightning checkpoint and extract the pytorch model and its metadata.
 
     Parameters
     ----------
     lightning_checkpoint_path : str
         path to lightning checkpoint
+    graph_path : Path | str | None, optional
+        path to a graph file. If given, it is used instead of the ``graph_data`` stored in the
+        checkpoint (which is then not required). The graph is not checked against the checkpoint
+        beyond the presence of the required dataset nodes.
 
     Returns
     -------
@@ -71,7 +82,29 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
     """
     from anemoi.training.train.methods.base import BaseTrainingModule
 
-    module = BaseTrainingModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
+    # memory-mapped: only the hyperparameters are needed here, not the weights
+    hyper_parameters = torch.load(
+        lightning_checkpoint_path,
+        map_location="cpu",
+        mmap=True,
+        weights_only=False,
+    )["hyper_parameters"]
+
+    overrides = {}
+    if graph_path is not None:
+        dataset_names = list(hyper_parameters["data_indices"])
+        graph = load_graph_from_file(graph_path)
+        fused = uses_fused_dataset_graph(graph, dataset_names)
+        validate_loaded_graph(graph, dataset_names if fused else [DEFAULT_DATASET_NAME])
+        overrides["graph_data"] = graph
+    elif "graph_data" not in hyper_parameters:
+        msg = (
+            f"The checkpoint {lightning_checkpoint_path} does not contain the hyperparameter 'graph_data'. "
+            "Supply a graph with --graph."
+        )
+        raise ValueError(msg)
+
+    module = BaseTrainingModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False, **overrides)
     model = module.model
 
     metadata = dict(**model.metadata)
