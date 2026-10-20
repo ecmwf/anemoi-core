@@ -567,6 +567,47 @@ Anemoi sets it to ``false`` automatically when the rollout changes between
 epochs; for a fixed rollout, set it explicitly. Disabling persistent workers adds
 worker startup costs at the beginning of every epoch.
 
+**************************************
+ Training checkpoint hyperparameters
+**************************************
+
+A training checkpoint stores the arguments used to build the training
+module (the Lightning *hyperparameters*), so that it can be restored
+without re-creating them: the config, the data indices, the metadata,
+the dataset statistics, the supporting arrays and the graph. The graph
+is by far the largest of these and can make up a significant part of the
+checkpoint size.
+
+The graph can be left out of the training checkpoints with
+``config.diagnostics.checkpoint.exclude_hyperparameters``:
+
+.. code:: yaml
+
+   diagnostics:
+     checkpoint:
+       exclude_hyperparameters: [graph_data]
+
+The default is an empty list, which stores everything. ``graph_data`` is
+the only hyperparameter that is currently allowed to be excluded.
+
+Resuming training, loading the weights, and transfer learning do not
+need the graph in the checkpoint, as the graph is rebuilt or loaded from
+the training config (``config.system.input.graph``) when the run (re)starts.
+Excluding ``graph_data`` therefore does not affect them.
+
+The graph does matter for converting a training checkpoint into an
+inference checkpoint with ``anemoi-training checkpoint inference``, which
+rebuilds the model from the stored hyperparameters. A training checkpoint without
+the graph can still be converted to an inference checkpoint if the graph
+is supplied separately, via the ``--graph`` argument:
+
+.. code:: bash
+
+   anemoi-training checkpoint inference \
+       --input last.ckpt \
+       --output inference-last.ckpt \
+       --graph graph.pt
+
 *********
  Rollout
 *********
