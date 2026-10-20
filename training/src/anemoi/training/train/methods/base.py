@@ -41,6 +41,9 @@ from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import BaseMask
 from anemoi.training.utils.masks import create_output_masks
+from anemoi.training.utils.resolve_config import is_container
+from anemoi.training.utils.resolve_config import is_mapping
+from anemoi.training.utils.resolve_config import is_sequence
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import choose_base_seed
 from anemoi.training.utils.seeding import derive_seed
@@ -76,6 +79,28 @@ if TYPE_CHECKING:
     from anemoi.training.tasks.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
+
+
+# helpers for building the loss config
+def resolve_subgrid_node(node: object, output_mask: object, dataset_name: str) -> None:
+    """Recursively replace ``subgrid: output_mask`` placeholders with the mask tuple."""
+    if is_mapping(node):
+        for k, v in node.items():
+            if is_container(v) and not isinstance(v, str):
+                resolve_subgrid_node(v, output_mask, dataset_name)
+            elif (k, v) == ("subgrid", "output_mask"):
+                node[k] = output_mask.as_tuple()
+                LOGGER.info("Resolved subgrid for dataset '%s' to output_mask as tuple: %s", dataset_name, node[k])
+    elif is_sequence(node) and not isinstance(node, str):
+        for item in node:
+            resolve_subgrid_node(item, output_mask, dataset_name)
+
+
+def resolve_subgrid(config: Mapping, output_mask: Mapping) -> None:
+    """Resolve ``subgrid: output_mask`` placeholders for every dataset in ``config``."""
+    for dataset_name, dataset_config in config.items():
+        if dataset_config is not None:
+            resolve_subgrid_node(dataset_config, output_mask[dataset_name], dataset_name)
 
 
 class BaseTrainingModule(pl.LightningModule, ABC):
@@ -249,8 +274,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.metrics = torch.nn.ModuleDict()
 
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
-        loss_configs = get_multiple_datasets_config(config.training.training_loss)
-        self._resolve_subgrid(loss_configs)
+        loss_configs = self._build_loss_configs()
 
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
@@ -1552,14 +1576,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             self.logger.log_hyperparams(hyper_params)
 
-    def _resolve_subgrid(self, config: dict) -> None:
-        def per_dataset_resolve(per_dataset_config: dict, dataset_name: str) -> None:
-            for k, v in per_dataset_config.items():
-                if isinstance(v, dict):
-                    per_dataset_resolve(v, dataset_name)
-                elif (k, v) == ("subgrid", "output_mask"):
-                    per_dataset_config[k] = self.output_mask[dataset_name].as_tuple()
-
-        for dataset_name, dataset_config in config.items():
-            if dataset_config is not None:
-                per_dataset_resolve(dataset_config, dataset_name)
+    def _build_loss_configs(self) -> dict:
+        """Fetch the per-dataset training-loss configs and resolve pre-defined entries."""
+        loss_configs = get_multiple_datasets_config(self.config.training.training_loss)
+        resolve_subgrid(loss_configs, self.output_mask)
+        return loss_configs

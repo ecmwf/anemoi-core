@@ -117,6 +117,71 @@ def get_edge_trainable_modules(model: Any, dataset_name: str) -> dict[tuple[str,
     return trainable_modules
 
 
+def _wrap_edges_at_antimeridian(
+    src_coords: np.ndarray,
+    dst_coords: np.ndarray,
+    data: np.ndarray,
+    period: float = 2 * np.pi,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build edge segments that take the shortest path in longitude.
+
+    Each edge is redrawn so that its two endpoints are at most half a period
+    apart in longitude; edges that then cross the antimeridian are split into
+    two segments, one on each side of the map. Without this, an edge joining
+    e.g. longitudes -1 and 1 degrees is drawn as a line spanning the whole map.
+
+    Parameters
+    ----------
+    src_coords : np.ndarray of shape (num_edges, 2)
+        Source (longitude, latitude) pairs.
+    dst_coords : np.ndarray of shape (num_edges, 2)
+        Destination (longitude, latitude) pairs.
+    data : np.ndarray of shape (num_edges,)
+        Value associated with each edge.
+    period : float, optional
+        Longitude period of the coordinates, by default ``2 * np.pi`` (radians).
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Segments of shape (num_segments, 2, 2) and the matching values of
+        shape (num_segments,).
+    """
+    half = period / 2
+    src = np.asarray(src_coords, dtype=float).copy()
+    dst = np.asarray(dst_coords, dtype=float).copy()
+    data = np.asarray(data)
+
+    # normalise source longitudes to [-half, half) and take the shortest path to the destination
+    src[:, 0] = (src[:, 0] + half) % period - half
+    dst[:, 0] = src[:, 0] + ((dst[:, 0] - src[:, 0] + half) % period - half)
+
+    crossing = np.abs(dst[:, 0]) > half
+    if not crossing.any():
+        return np.stack([src, dst], axis=1), data
+
+    src_in, dst_in = src[~crossing], dst[~crossing]
+    src_out, dst_out = src[crossing], dst[crossing]
+
+    # longitude of the map edge the segment crosses, and the latitude at which it does
+    edge_lon = np.sign(dst_out[:, 0]) * half
+    t = (edge_lon - src_out[:, 0]) / (dst_out[:, 0] - src_out[:, 0])
+    edge_lat = src_out[:, 1] + t * (dst_out[:, 1] - src_out[:, 1])
+
+    first = np.stack([src_out, np.stack([edge_lon, edge_lat], axis=1)], axis=1)
+    second = np.stack(
+        [
+            np.stack([-edge_lon, edge_lat], axis=1),
+            np.stack([dst_out[:, 0] - np.sign(dst_out[:, 0]) * period, dst_out[:, 1]], axis=1),
+        ],
+        axis=1,
+    )
+
+    segments = np.concatenate([np.stack([src_in, dst_in], axis=1), first, second], axis=0)
+    values = np.concatenate([data[~crossing], data[crossing], data[crossing]], axis=0)
+    return segments, values
+
+
 def edge_plot(
     fig: Figure,
     ax: plt.Axes,
@@ -145,14 +210,14 @@ def edge_plot(
     title : str, optional
         Title for plot, by default None.
     """
-    edge_lines = np.stack([src_coords, dst_coords], axis=1)
+    edge_lines, data = _wrap_edges_at_antimeridian(src_coords, dst_coords, data)
     lc = LineCollection(edge_lines, cmap=cmap, linewidths=1)
     lc.set_array(data)
 
     psc = ax.add_collection(lc)
 
-    xmin, xmax = edge_lines[:, 0, 0].min(), edge_lines[:, 0, 0].max()
-    ymin, ymax = edge_lines[:, 1, 1].min(), edge_lines[:, 1, 1].max()
+    xmin, xmax = edge_lines[..., 0].min(), edge_lines[..., 0].max()
+    ymin, ymax = edge_lines[..., 1].min(), edge_lines[..., 1].max()
     ax.set_xlim((xmin - 0.1, xmax + 0.1))
     ax.set_ylim((ymin - 0.1, ymax + 0.1))
 
