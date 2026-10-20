@@ -11,8 +11,8 @@
 
 Two behaviours are pinned here:
 
-* **Per-dataset losses are averaged over the training rollout.** 
-  ``_combine_loss_and_metrics`` averages over the first ``task.num_steps`` steps, so 
+* **Per-dataset losses are averaged over the training rollout.**
+  ``_combine_loss_and_metrics`` averages over the first ``task.num_steps`` steps, so
   ``val_<dataset>_..._loss`` is comparable to ``train_*_loss`` even when validation unrolls further.
 
 * **The input state must not be advanced after the final step.** Its result is never read, and
