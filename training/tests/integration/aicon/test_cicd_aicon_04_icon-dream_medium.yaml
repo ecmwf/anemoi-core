@@ -13,15 +13,13 @@
 # 10/2026, DWD
 # ---------------------------------------------------------------
 
-# default section
-
 system:
   input:
-     graph: null
-     # reduced for CI/CD test.
-     dataset: dwd/2024-12-11_00/dataset_20220101_20230101_6H.zarr
-     forcing_dataset: dwd/2024-12-11_00/forcings_20220101_20230101_6H.zarr
-     warm_start: null
+    graph: null
+    # reduced for CI/CD test.
+    dataset: dwd/2024-12-11_00/dataset_20220101_20230101_6H.zarr
+    forcing_dataset: dwd/2024-12-11_00/forcings_20220101_20230101_6H.zarr
+    warm_start: null
   output:
     root: output_training/${data.resolution}
     checkpoints:
