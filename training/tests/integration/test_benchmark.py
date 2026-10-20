@@ -10,7 +10,6 @@
 import contextlib
 import gc
 import logging
-import os
 import time
 
 import psutil
@@ -24,8 +23,8 @@ from anemoi.training.diagnostics.benchmark_server import benchmark
 from anemoi.training.diagnostics.benchmark_server import get_benchmark_store
 from anemoi.training.diagnostics.benchmark_server import track_dataloader_benchmark_results
 from anemoi.training.train.profiler import AnemoiProfiler
-
-os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
+from anemoi.training.utils import seeding
+from anemoi.training.utils.seeding import choose_base_seed
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,94 +40,79 @@ def get_tree_rss_mib() -> float:
     return total / (1024 * 1024)
 
 
-def set_temp_base_seed() -> tuple[str | None, str]:
-    """Set a temporary time-based seed and return original/new values."""
-    original_seed = os.environ.get("ANEMOI_BASE_SEED")
-    random_seed = str(int(time.time()))
-    os.environ["ANEMOI_BASE_SEED"] = random_seed
-    return original_seed, random_seed
-
-
-def restore_base_seed(original_seed: str | None) -> None:
-    """Restore ANEMOI_BASE_SEED to its previous value."""
-    if original_seed is None:
-        os.environ.pop("ANEMOI_BASE_SEED", None)
-    else:
-        os.environ["ANEMOI_BASE_SEED"] = original_seed
-
-
 @pytest.mark.multigpu
 @pytest.mark.slow
 def test_benchmark_training_dataloader(
     benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Runs a benchmark for dataloader performance, testing MultiDataset batch sampling speed."""
     from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
     cfg, test_case = benchmark_config
 
-    original_seed, random_seed = set_temp_base_seed()
-    LOGGER.info("Benchmarking dataloader for configuration: %s (seed=%s)", test_case, random_seed)
+    # The datamodule is used without a trainer, so the base seed is picked here; with
+    # no seed in the config every benchmark run draws a new one. It is reset after the test.
+    base_seed = choose_base_seed(cfg.training.seed, checkpoint_seed=None)
+    monkeypatch.setattr(seeding, "_base_seed", base_seed)
+    LOGGER.info("Benchmarking dataloader for configuration: %s (seed=%s)", test_case, base_seed)
 
-    try:
-        # Initialize task
-        task = instantiate(cfg.task)
+    # Initialize task
+    task = instantiate(cfg.task)
 
-        # Initialize datamodule
-        datamodule = AnemoiDatasetsDataModule(config=cfg, task=task)
+    # Initialize datamodule
+    datamodule = AnemoiDatasetsDataModule(config=cfg, task=task)
 
-        # Get training dataloader
-        train_dataloader = datamodule.train_dataloader()
+    # Get training dataloader
+    train_dataloader = datamodule.train_dataloader()
 
-        rss_before = get_tree_rss_mib()
-        LOGGER.info("Process tree RSS before benchmark: %.2f MiB", rss_before)
+    rss_before = get_tree_rss_mib()
+    LOGGER.info("Process tree RSS before benchmark: %.2f MiB", rss_before)
 
-        # Benchmark batch sampling speed
-        num_batches_to_test = 100
-        LOGGER.info("Testing %d batches from MultiDataset", num_batches_to_test)
+    # Benchmark batch sampling speed
+    num_batches_to_test = 100
+    LOGGER.info("Testing %d batches from MultiDataset", num_batches_to_test)
 
-        start_time = time.perf_counter()
-        batch_count = 0
+    start_time = time.perf_counter()
+    batch_count = 0
 
-        for batch_idx, batch in enumerate(train_dataloader):
-            if batch_idx >= num_batches_to_test:
-                break
-            batch_count += 1
+    for batch_idx, batch in enumerate(train_dataloader):
+        if batch_idx >= num_batches_to_test:
+            break
+        batch_count += 1
 
-            # Log first batch structure
-            if batch_idx == 0:
-                LOGGER.info("First batch structure:")
-                for dataset_name, data in batch.items():
-                    size_mb = data.nelement() * data.element_size() / (1024 * 1024)
-                    LOGGER.info(
-                        "  Dataset '%s': shape %s, dtype %s, size %.2f MB",
-                        dataset_name,
-                        data.shape,
-                        data.dtype,
-                        size_mb,
-                    )
+        # Log first batch structure
+        if batch_idx == 0:
+            LOGGER.info("First batch structure:")
+            for dataset_name, data in batch.items():
+                size_mb = data.nelement() * data.element_size() / (1024 * 1024)
+                LOGGER.info(
+                    "  Dataset '%s': shape %s, dtype %s, size %.2f MB",
+                    dataset_name,
+                    data.shape,
+                    data.dtype,
+                    size_mb,
+                )
 
-        end_time = time.perf_counter()
-        elapsed_time = end_time - start_time
+    end_time = time.perf_counter()
+    elapsed_time = end_time - start_time
 
-        # Calculate performance metrics
-        batches_per_second = batch_count / elapsed_time
-        time_per_batch_ms = (elapsed_time / batch_count) * 1000
+    # Calculate performance metrics
+    batches_per_second = batch_count / elapsed_time
+    time_per_batch_ms = (elapsed_time / batch_count) * 1000
 
-        # Record total process tree RSS after the benchmark
-        rss_after = get_tree_rss_mib()
+    # Record total process tree RSS after the benchmark
+    rss_after = get_tree_rss_mib()
 
-        LOGGER.info("Dataloader Performance Results:")
-        LOGGER.info("  Total batches: %d", batch_count)
-        LOGGER.info("  Total time: %.2f seconds", elapsed_time)
-        LOGGER.info("  Throughput: %.2f it/s", batches_per_second)
-        LOGGER.info("  Time per batch: %.2f ms", time_per_batch_ms)
-        LOGGER.info("  Process tree RSS before: %.2f MiB", rss_before)
-        LOGGER.info("  Process tree RSS after:  %.2f MiB", rss_after)
-        LOGGER.info("  Process tree RSS delta:  %.2f MiB", rss_after - rss_before)
-        track_dataloader_benchmark_results(test_case, batches_per_second)
-    finally:
-        restore_base_seed(original_seed)
+    LOGGER.info("Dataloader Performance Results:")
+    LOGGER.info("  Total batches: %d", batch_count)
+    LOGGER.info("  Total time: %.2f seconds", elapsed_time)
+    LOGGER.info("  Throughput: %.2f it/s", batches_per_second)
+    LOGGER.info("  Time per batch: %.2f ms", time_per_batch_ms)
+    LOGGER.info("  Process tree RSS before: %.2f MiB", rss_before)
+    LOGGER.info("  Process tree RSS after:  %.2f MiB", rss_after)
+    LOGGER.info("  Process tree RSS delta:  %.2f MiB", rss_after - rss_before)
+    track_dataloader_benchmark_results(test_case, batches_per_second)
 
 
 @pytest.mark.multigpu

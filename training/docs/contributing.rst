@@ -350,9 +350,15 @@ are two cases:
    checks above).
 
 #. Genuine algorithm improvement: the loss curve changed for a legitimate
-   reason. Promote the new run as the reference by copying the run ID logged
-   by the test (``Run ID from trainer: ...``) into the ``reference_id``
-   constant in `test_accuracy.py`.
+   reason. Take the run ID logged by the test (``Run ID from trainer: ...``)
+   as the candidate reference. Check it first by dispatching the
+   ``nightly-integration-tests-hpc-gpu`` workflow with ``tests`` set to
+   ``test_accuracy`` and ``accuracy_reference_id`` set to the candidate run
+   ID (locally: ``pytest --accuracy-reference-id=<run ID> ...``). If it
+   passes, promote it by copying the run ID into the ``reference_id``
+   constant in `test_accuracy.py`. Update the changelog
+   ``training/tests/integration/config/CHANGELOG.md`` with a short note
+   explaining the rationale behind your change.
 
 In addition to the MLflow-based comparison, the accuracy test pushes a scalar
 summary of each run (currently the final training loss, under the metric name

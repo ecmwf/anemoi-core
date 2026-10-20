@@ -56,7 +56,7 @@ class MemorySnapshotRecorder(Callback):
         train_dataloader = trainer.train_dataloader
         if isinstance(train_dataloader, list):
             train_dataloader = train_dataloader[0]
-        batch_size = train_dataloader.batch_size
+        batch_size = train_dataloader.batch_sampler.batch_size
         assert self.num_steps % batch_size == 0, "Snapshot steps is not a multiple of batch size"
         assert self.warmup % batch_size == 0, "Snapshot warmup steps is not a multiple of batch size"
 
