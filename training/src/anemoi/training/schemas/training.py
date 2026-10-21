@@ -267,6 +267,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
+    reversed_huber = "anemoi.training.losses.ReversedHuberLoss"
     fcl = "anemoi.training.losses.FourierCorrelationLoss"
     lsd = "anemoi.training.losses.LogSpectralDistance"
     logfft2d = "anemoi.training.losses.LogFFT2Distance"
@@ -519,6 +520,11 @@ class HuberLossSchema(BaseLossSchema):
     "Threshold for Huber loss."
 
 
+class ReversedHuberLossSchema(HuberLossSchema):
+    sharpness: float = 2.0
+    "Sharpness parameter for the reversed Huber loss."
+
+
 class SpectralProjectionConfigSchema(BaseModel):
     """Configuration for sparse projection applied before the spectral transform.
 
@@ -621,6 +627,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.PowerSpectrumLoss": "spectral",
     "anemoi.training.losses.SpectralAMSELoss": "spectral",
     "anemoi.training.losses.HuberLoss": "huber",
+    "anemoi.training.losses.ReversedHuberLoss": "reversed_huber",
     "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
 }
 
@@ -647,6 +654,7 @@ class CombinedLossSchema(BaseLossSchema):
         Annotated[
             Annotated[BaseLossSchema, Tag("base")]
             | Annotated[HuberLossSchema, Tag("huber")]
+            | Annotated[ReversedHuberLossSchema, Tag("reversed_huber")]
             | Annotated[CRPSSchema, Tag("crps")]
             | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
             | Annotated[EnergyScoreLossSchema, Tag("energy_score")]
@@ -706,6 +714,7 @@ class CombinedLossSchema(BaseLossSchema):
 LossSchemas = Annotated[
     Annotated[BaseLossSchema, Tag("base")]
     | Annotated[HuberLossSchema, Tag("huber")]
+    | Annotated[ReversedHuberLossSchema, Tag("reversed_huber")]
     | Annotated[CombinedLossSchema, Tag("combined")]
     | Annotated[CRPSSchema, Tag("crps")]
     | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
