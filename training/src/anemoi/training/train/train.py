@@ -503,14 +503,16 @@ class AnemoiTrainer(ABC):
 
         Returns ``None`` when there is nothing to resume, including when a loading
         strategy already loaded the weights in the pipeline. A configured-but-missing
-        run checkpoint still surfaces from the source stage during model build
-        (``RuntimeError`` on rank 0 / ``CheckpointNotFoundError`` for an explicit
-        file); the rank-0 policy lives solely in the acquisition layer, not here.
+        run checkpoint still surfaces during model build, from the source's resolve
+        step that the checkpoint runner calls (``CheckpointNotFoundError`` for a
+        missing file, ``CheckpointLoadError`` for an unreadable one, raised on rank 0;
+        other ranks defer); the rank-0 policy lives solely in the acquisition layer,
+        not here.
         """
         if not self.start_from_checkpoint:
             return None
 
-        # Building the model runs the pipeline, whose source stage resolves the path.
+        # Building the model runs the checkpoint runner, which resolves the path.
         _ = self.model
         return getattr(self, "_resolved_checkpoint_path", None)
 

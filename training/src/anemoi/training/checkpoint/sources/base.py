@@ -257,7 +257,8 @@ class CheckpointSource(PipelineStage):
         """Acquire checkpoint data from source and populate context.
 
         Implementations should:
-        1. Call ``resolve`` to obtain the local checkpoint file
+        1. Obtain the checkpoint file: a local-file source calls ``resolve``; a
+           remote source downloads to a temporary file, which it deletes once loaded
         2. Call ``_load_from_path`` to load it onto the context
         3. Add source-specific metadata for tracking
 

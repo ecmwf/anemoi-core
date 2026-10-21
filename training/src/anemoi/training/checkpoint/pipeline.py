@@ -45,10 +45,13 @@ Example
 Execution
 ---------
 The pipeline runs once during model construction, before ``trainer.fit()``:
-``AnemoiTrainer.model`` calls :func:`build_checkpoint_pipeline` on
-``training.checkpoint.*`` and then :meth:`CheckpointPipeline.execute`, so
-checkpoint loading happens exactly once at startup and never inside the training
-loop. Outside the trainer the same pipeline can be driven directly::
+``AnemoiTrainer.model`` calls :func:`~anemoi.training.checkpoint.runner.run_checkpoint_pipeline`,
+which builds the pipeline from ``training.checkpoint.*`` with
+:func:`build_checkpoint_pipeline` and then runs :meth:`CheckpointPipeline.execute`,
+so checkpoint loading happens exactly once at startup and never inside the
+training loop. On a resume the built pipeline has no source stage; the runner
+resolves the file through ``build_resume_source``, so drive a resume config
+through ``run_checkpoint_pipeline``. Any other config can be driven directly::
 
     pipeline = build_checkpoint_pipeline(config)  # reads training.checkpoint.*
     context = CheckpointContext(model=model)
@@ -218,8 +221,8 @@ class CheckpointPipeline:
     def _check_stage_order(self) -> None:
         """Raise if the stages are not ordered source -> one loader -> modifiers.
 
-        Stage ordering (source before loader, modifier after loader) and a single
-        loading strategy are structural invariants: a violation is a hard
+        Stage ordering (source before loader and modifiers, modifier after loader)
+        and a single loading strategy are structural invariants: a violation is a hard
         ``CheckpointConfigError`` at construction. More than one source, or a
         missing layer, is allowed. Stages that belong to no known layer are not
         placed. The builder always emits stages in the canonical order, so only
@@ -228,8 +231,8 @@ class CheckpointPipeline:
         Raises
         ------
         CheckpointConfigError
-            If a source follows a loader, a modifier precedes a loader, or there
-            is more than one loading strategy.
+            If a source follows a loader or a modifier, a modifier precedes a
+            loader, or there is more than one loading strategy.
         """
         rank = {"source": 0, "loader": 1, "modifier": 2}
         ranks = [rank[role] for role in map(self._stage_role, self.stages) if role is not None]

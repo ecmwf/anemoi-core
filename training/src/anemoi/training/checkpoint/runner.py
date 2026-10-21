@@ -97,8 +97,15 @@ def run_checkpoint_pipeline(
 
     Raises
     ------
+    CheckpointConfigError
+        If the configuration asks a remote source to resume, the resume source
+        cannot be instantiated or is not a ``CheckpointSource``, or (on rank 0) the
+        resume source resolved no file.
+    CheckpointNotFoundError
+        On rank 0, if the resume source's checkpoint file does not exist.
     CheckpointLoadError
-        If a loading strategy ran in the pipeline but left ``weights_initialized``
+        On rank 0, if the resume source's checkpoint file is unreadable; or if a
+        loading strategy ran in the pipeline but left ``weights_initialized``
         unset (raised by the pipeline's weights-loaded check).
     """
     from anemoi.training.checkpoint.base import CheckpointContext
@@ -152,6 +159,10 @@ def _resolve_resume_checkpoint(source: CheckpointSource, context: CheckpointCont
         On rank 0, if the source resolved no file: a resume with nothing to hand
         Lightning would otherwise start from scratch without a word. Other ranks
         defer, as the sources do, so the job fails once, on rank 0.
+    CheckpointNotFoundError
+        Propagated from ``source.resolve`` (on rank 0) for a missing file.
+    CheckpointLoadError
+        Propagated from ``source.resolve`` (on rank 0) for an unreadable file.
     """
     path = source.resolve(context)
     if path is not None:

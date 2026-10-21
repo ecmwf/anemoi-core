@@ -324,12 +324,12 @@ class TransferLearningLoader(LoadingStrategy):
 class WarmStartLoader(LoadingStrategy):
     """Marker strategy: resume an interrupted run through Lightning's ``ckpt_path`` load.
 
-    Selecting it tells the trainer that ``Trainer.fit(ckpt_path=)`` performs the
+    Selecting it tells the runner that ``Trainer.fit(ckpt_path=)`` performs the
     one and only load of the checkpoint — weights, optimizer, scheduler and loop
     progress together — with ``BaseTrainingModule.on_load_checkpoint`` applying
-    the corrections to the dict Lightning loads. The pipeline's part of a resume
-    is to make the checkpoint reachable as a local file (the source's ``resolve``
-    step) and to run the modifier stages; the builder emits no loading stage, so
+    the corrections to the dict Lightning loads. The runner makes the checkpoint
+    reachable as a local file (the source's ``resolve`` step) and the pipeline
+    runs the modifier stages; the builder emits no source or loading stage, so
     this class's ``process`` never runs in a training run.
 
     The model has to match the checkpoint exactly. Lightning's load is strict,
@@ -338,8 +338,8 @@ class WarmStartLoader(LoadingStrategy):
     and ``TransferLearningLoader`` are the strategies for a changed model.
 
     The class exists so ``training/checkpoint/loading=warm_start`` composes like
-    every other strategy; :attr:`restores_training_state` is what the trainer and
-    builder read.
+    every other strategy; :attr:`restores_training_state` is what the builder and
+    the runner read.
     """
 
     restores_training_state = True

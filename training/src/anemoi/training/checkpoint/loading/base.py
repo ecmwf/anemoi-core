@@ -73,7 +73,7 @@ class LoadingStrategy(PipelineStage):
     #: perform the one and only load — weights, optimizer, scheduler and loop
     #: progress — and the builder emits no loading stage at all. ``False`` (the
     #: default) means the strategy applies the weights itself at model build and
-    #: the trainer suppresses ``ckpt_path`` so training state starts fresh.
+    #: the runner withholds ``ckpt_path`` so training state starts fresh.
     restores_training_state: bool = False
 
     @abstractmethod
@@ -193,11 +193,10 @@ class LoadingStrategy(PipelineStage):
         """Set ``model.weights_initialized = True``.
 
         This is how a source stage that ran without any strategy applying weights
-        is detected.
-        - ``CheckpointPipeline._verify_weights_loaded`` treats it as a
-        gate and raises rather than train on random weights.
-        It is only a gate: whether the run resumes through ``Trainer.fit(ckpt_path=)``
-        is decided from the config, never from this flag. The gate exempts a resume,
+        is detected: ``CheckpointPipeline._verify_weights_loaded`` treats it as a
+        gate and raises rather than train on random weights. It is only a gate:
+        whether the run resumes through ``Trainer.fit(ckpt_path=)`` is decided
+        from the config, never from this flag. The gate exempts a resume,
         where the weights arrive at ``Trainer.fit(ckpt_path=)``. A strategy that
         forgets to call this therefore trips the gate.
 
