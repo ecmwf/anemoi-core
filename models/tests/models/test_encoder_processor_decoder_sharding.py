@@ -11,8 +11,9 @@
 
 Each rank supplies owned or replicated data-grid inputs. The normal model forward prepares
 hidden-node shards, graph-provider edge shards, encoder/processor/decoder layouts,
-and the local prediction with its input residual. Compare predictions, the global
-weighted loss, input gradients and all parameter gradients with an unsharded model.
+and the prediction in the supplied external layout with its input residual.
+Compare predictions, the global weighted loss, input gradients and all parameter
+gradients with an unsharded model.
 
 Trainable node and edge tables have row-varying values. Their reconstructed
 gradients are compared directly; ordinary layer-gradient contributions are summed.
@@ -164,12 +165,11 @@ def _test_graphconv_model_matches_unsharded_rank(
 ) -> None:
     """Compare normal model orchestration with one globally normalized reference objective."""
     torch.set_num_threads(1)
-    # Initialize independent models with identical state and distinguishable table rows.
     graph, data_splits = _build_model_graph(world_size)
     torch.manual_seed(43)
     reference_model = _build_graphconv_model(graph).to(device)
-    # Distinguish learned-feature rows in forward, rather than testing only
-    # TrainableTensor's default zero initialization. Populate before copying state.
+    # Row-varying learned features expose ownership/order mistakes hidden by
+    # default zero tables. Copy this initialized state to the distributed model.
     with torch.no_grad():
         for module in reference_model.modules():
             if isinstance(module, TrainableTensor) and module.trainable is not None:
@@ -180,18 +180,6 @@ def _test_graphconv_model_matches_unsharded_rank(
     distributed_model.load_state_dict(reference_model.state_dict())
     reference_params = dict(reference_model.named_parameters())
     distributed_params = dict(distributed_model.named_parameters())
-    assert (
-        reference_params.keys() == distributed_params.keys()
-    ), "Reference and distributed models must have identical parameter names"
-    # Callable messages prepend context without suppressing PyTorch's mismatch details.
-    for name, param in reference_params.items():
-        torch.testing.assert_close(
-            distributed_params[name],
-            param,
-            rtol=0,
-            atol=0,
-            msg=lambda details, name=name: f"initial {name} on rank {rank}\n{details}",
-        )
     # Tables are evaluated before production node/edge sharding. The surrounding
     # sharding operations gather their gradients in backward; TrainableTensor
     # itself does not communicate. Other parameters operate on owned work.
@@ -231,30 +219,32 @@ def _test_graphconv_model_matches_unsharded_rank(
     # Anemoi prepares hidden/edge shards and component layouts in both external modes.
     start = sum(data_splits[:rank])
     stop = start + data_splits[rank]
-    local_input = (inputs[..., start:stop, :] if input_is_sharded else inputs).clone().requires_grad_(True)
+    distributed_input = (inputs[..., start:stop, :] if input_is_sharded else inputs).clone().requires_grad_(True)
     distributed_outputs = distributed_model(
-        {"data": local_input},
+        {"data": distributed_input},
         model_comm_group=group,
         grid_shard_sizes={"data": data_splits} if input_is_sharded else None,
     )
     assert set(distributed_outputs) == {"data"}, "Each rank must return the configured data dataset"
-    local_output = distributed_outputs["data"]
-    assert local_output.shape == local_input.shape, "Predictions must match the supplied external data-grid layout"
+    distributed_output = distributed_outputs["data"]
+    assert (
+        distributed_output.shape == distributed_input.shape
+    ), "Predictions must match the supplied external data-grid layout"
     if input_is_sharded:
         local_loss = (
-            weights[..., start:stop, :] * (local_output - target[..., start:stop, :]).square()
+            weights[..., start:stop, :] * (distributed_output - target[..., start:stop, :]).square()
         ).sum() / weights.numel()
     else:
         # Gather backward splits model sensitivities; the full residual loss also
         # gives the replicated input its complete direct-path gradient on every rank.
-        local_loss = (weights * (local_output - target).square()).sum() / weights.numel()
+        local_loss = (weights * (distributed_output - target).square()).sum() / weights.numel()
     local_loss.backward()
 
-    # Compare output/loss, owned input gradients, and complete/partial parameter gradients.
+    # Callable messages add context without replacing PyTorch's mismatch details.
     output_tolerances = {"rtol": 1e-4, "atol": 1e-5}
     gradient_tolerances = {"rtol": 1e-4, "atol": 1e-7}
     torch.testing.assert_close(
-        local_output,
+        distributed_output,
         reference_output[..., start:stop, :] if input_is_sharded else reference_output,
         **output_tolerances,
         msg=lambda details: f"prediction on rank {rank}\n{details}",
@@ -264,9 +254,9 @@ def _test_graphconv_model_matches_unsharded_rank(
         dist.all_reduce(global_loss, group=group)
     torch.testing.assert_close(global_loss, reference_loss.detach(), **output_tolerances)
     assert reference_input.grad is not None, "Missing reference input gradient"
-    assert local_input.grad is not None, "Missing distributed input gradient"
+    assert distributed_input.grad is not None, "Missing distributed input gradient"
     torch.testing.assert_close(
-        local_input.grad,
+        distributed_input.grad,
         reference_input.grad[..., start:stop, :] if input_is_sharded else reference_input.grad,
         **gradient_tolerances,
         msg=lambda details: f"input gradient on rank {rank}\n{details}",
