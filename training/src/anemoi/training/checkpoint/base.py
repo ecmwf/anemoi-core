@@ -61,7 +61,7 @@ class CheckpointContext:
     ----------
     checkpoint_path : Path, optional
         Local path to the checkpoint file. A source's ``resolve`` step publishes
-        it (a canonical local path, or a kept download); the trainer hands it to
+        it (a canonical local path); the trainer hands it to
         ``Trainer.fit(ckpt_path=)`` on a resume.
     checkpoint_data : dict, optional
         Loaded checkpoint data dictionary containing model weights,
@@ -79,9 +79,6 @@ class CheckpointContext:
     pl_module : pl.LightningModule, optional
         Lightning module (Task) if loading from Lightning checkpoint.
         This preserves the full Lightning context for training resumption
-    temporary_files : list of Path
-        Downloads a source kept on disk so ``Trainer.fit(ckpt_path=)`` can read
-        them. The trainer deletes them once training has finished.
 
     Examples
     --------
@@ -108,7 +105,6 @@ class CheckpointContext:
     config: DictConfig | None = None
     checkpoint_format: Literal["lightning", "pytorch", "state_dict"] | None = None
     pl_module: Any | None = None  # Type hint as Any to avoid circular imports
-    temporary_files: list[Path] = field(default_factory=list)
 
     def __post_init__(self):
         """Coerce ``checkpoint_path`` to a ``Path`` after initialization."""

@@ -41,29 +41,28 @@ def test_http_source_uses_download_with_retry() -> None:
         mock_dl.assert_called_once()
 
 
-def test_http_source_resolve_keeps_download_without_loading() -> None:
-    """``resolve`` downloads to a kept temporary file, publishes it, and loads nothing.
+def test_http_source_deletes_download_after_loading() -> None:
+    """``process`` loads the download onto the context, then deletes the file.
 
-    That is what a resume needs: a local file for ``Trainer.fit(ckpt_path=)``. The
-    file is registered on ``context.temporary_files`` for the trainer to delete.
+    Nothing is kept on disk for the rest of the run, and no path to a deleted
+    file is published on the context.
     """
     source = HTTPSource(url="https://example.com/model.ckpt")
     context = CheckpointContext()
+    downloaded: list[Path] = []
 
     def fake_download(url: str, dest: Path, **kwargs: object) -> None:
         del url, kwargs
+        downloaded.append(dest)
         torch.save({"state_dict": {}}, dest)
 
     with patch("anemoi.training.checkpoint.utils.download_with_retry", side_effect=fake_download):
-        path = source.resolve(context)
+        result = source.process(context)
 
-    try:
-        assert path.exists()
-        assert context.checkpoint_path == path
-        assert context.temporary_files == [path]
-        assert context.checkpoint_data is None
-    finally:
-        path.unlink(missing_ok=True)
+    assert result.checkpoint_data == {"state_dict": {}}
+    assert len(downloaded) == 1
+    assert not downloaded[0].exists()
+    assert result.checkpoint_path is None
 
 
 def test_http_source_wraps_errors_as_checkpoint_source_error() -> None:

@@ -345,17 +345,12 @@ class CheckpointPipeline:
         treats it as a gate here: a configured source with no applied weights is
         a hard error, not a warning.
 
-        A resume is the exception: a resolve-only source publishes the file for
-        ``Trainer.fit(ckpt_path=)`` and marks the context, so the weights arrive
-        at ``fit()`` and are not missing.
+        A resume is the exception: the pipeline has no source stage then (the
+        runner resolves the file for ``Trainer.fit(ckpt_path=)``), so the weights
+        arrive at ``fit()`` and are not missing.
         """
-        from anemoi.training.checkpoint.sources.base import CHECKPOINT_LOAD_OWNER
-
         has_source = any(self._stage_role(stage) == "source" for stage in self.stages)
         if not has_source:
-            return
-
-        if context.metadata.get(CHECKPOINT_LOAD_OWNER) == "trainer":
             return
 
         model = context.model

@@ -59,7 +59,6 @@ def test_local_source_resolve_publishes_canonical_path_without_loading(
     assert path == (tmp_path / "model.ckpt").resolve()
     assert context.checkpoint_path == path
     assert context.checkpoint_data is None
-    assert context.temporary_files == []
 
 
 def test_local_source_process_publishes_the_resolved_path(

@@ -35,6 +35,8 @@ from anemoi.training.checkpoint.pipeline import CheckpointPipeline
 if TYPE_CHECKING:
     from typing import Any
 
+    from anemoi.training.checkpoint.sources.base import CheckpointSource
+
 LOGGER = logging.getLogger(__name__)
 
 # Configuration namespace for the checkpoint pipeline, kept together so the field
@@ -118,8 +120,9 @@ def resumes_via_lightning(cfg: DictConfig) -> bool:
     ``training.checkpoint.source`` resumes the run, the way the removed
     ``training.run_id`` did) or when the configured strategy declares
     ``restores_training_state`` (``WarmStartLoader``). Every decision about a
-    resume keys on this: the builder emits a resolve-only source and no loading
-    stage, and the trainer keeps ``ckpt_path`` so Lightning loads the weights,
+    resume keys on this: the builder emits no source or loading stage (the runner
+    resolves the source through :func:`build_resume_source`), and the trainer keeps
+    ``ckpt_path`` so Lightning loads the weights,
     optimizer, scheduler and loop progress together in one pass.
 
     Parameters
@@ -143,41 +146,119 @@ def reject_unsupported_warm_start(cfg: DictConfig) -> None:
 
     A loading strategy that declares ``restores_training_state`` needs a
     ``training.checkpoint.source``: Lightning's ``ckpt_path`` load is the whole
-    restore, and the source stage is what produces the file it reads. Any source
-    will do — a remote one is downloaded to a node-local file that the trainer hands
-    to Lightning and deletes afterwards. Called at the start of
-    :func:`build_checkpoint_pipeline` so the checkpoint module owns this composition
-    rule.
+    restore, and the source is what produces the file it reads. That file has to
+    be local, so a resume (see :func:`resumes_via_lightning`) needs a source that
+    implements ``resolve`` (``LocalSource``, ``RunIdSource``); ``S3Source`` and
+    ``HTTPSource`` delete their download straight after loading and cannot resume.
+    Called at the start of :func:`build_checkpoint_pipeline` so the checkpoint
+    module owns this composition rule.
 
     Raises
     ------
     CheckpointConfigError
         If ``training.checkpoint.loading`` declares ``restores_training_state`` but no
-        source is configured.
+        source is configured, or if a resume uses a source that does not support it.
     """
-    if not loader_restores_training_state(cfg):
+    from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+    from anemoi.training.checkpoint.sources.base import source_class_from_config
+
+    source = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None)
+
+    if source is None:
+        if loader_restores_training_state(cfg):
+            msg = (
+                "Warm start resumes through Trainer.fit(ckpt_path=), which needs a checkpoint to "
+                "read, but no training.checkpoint.source is configured. Add a source "
+                "(RunIdSource or LocalSource), or switch training.checkpoint.loading to "
+                "WeightsOnlyLoader / TransferLearningLoader / ColdStartLoader to start fresh "
+                "training state from a checkpoint."
+            )
+            raise CheckpointConfigError(msg)
         return
 
-    if OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None) is not None:
+    if not resumes_via_lightning(cfg):
         return
+
+    source_cls = source_class_from_config(source)
+    if source_cls is not None and not source_cls.supports_resume():
+        msg = (
+            f"{source_cls.__name__} cannot resume a run: Trainer.fit(ckpt_path=) needs a local file. "
+            "Download the checkpoint and use LocalSource, or add a loading strategy "
+            "(WeightsOnlyLoader / TransferLearningLoader / ColdStartLoader) to load only the weights."
+        )
+        raise CheckpointConfigError(msg)
+
+
+def _source_config(
+    cfg: DictConfig,
+    parent_run_server2server: str | None,
+    fork_run_server2server: str | None,
+) -> Any:
+    """The ``training.checkpoint.source`` block with runtime lineage merged in, or ``None``."""
+    source = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None)
+    if source is None:
+        return None
+    return _inject_run_lineage(source, parent_run_server2server, fork_run_server2server)
+
+
+def build_resume_source(
+    cfg: DictConfig,
+    *,
+    parent_run_server2server: str | None = None,
+    fork_run_server2server: str | None = None,
+    load_checkpoint: bool = True,
+) -> CheckpointSource | None:
+    """Instantiate the source whose ``resolve`` step gives Lightning its ``ckpt_path``.
+
+    On a resume (see :func:`resumes_via_lightning`) the pipeline has no source
+    stage: ``Trainer.fit(ckpt_path=)`` performs the one load, so the runner only
+    calls this source's ``resolve`` to publish the local file. Call
+    :func:`build_checkpoint_pipeline` first: it rejects a source that cannot
+    resume.
+
+    Parameters
+    ----------
+    cfg : DictConfig
+        A training-run configuration.
+    parent_run_server2server : str, optional
+        Runtime server-to-server resume lineage id, as for
+        :func:`build_checkpoint_pipeline`.
+    fork_run_server2server : str, optional
+        Runtime server-to-server fork lineage id, as for
+        :func:`build_checkpoint_pipeline`.
+    load_checkpoint : bool, optional
+        If ``False`` (the MLflow dry-run gate), nothing is resolved.
+
+    Returns
+    -------
+    CheckpointSource or None
+        The instantiated source, or ``None`` when the run does not resume through
+        Lightning, has no source, or must not acquire a checkpoint.
+
+    Raises
+    ------
+    CheckpointConfigError
+        If the source configuration cannot be instantiated.
+    """
+    if not isinstance(cfg, DictConfig):
+        cfg = OmegaConf.create(cfg)
+    if not load_checkpoint or not resumes_via_lightning(cfg):
+        return None
+
+    source = _source_config(cfg, parent_run_server2server, fork_run_server2server)
+    if source is None:
+        return None
+
+    from hydra.utils import instantiate
 
     from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
-    msg = (
-        "Warm start resumes through Trainer.fit(ckpt_path=), which needs a checkpoint to "
-        "read, but no training.checkpoint.source is configured. Add a source "
-        "(RunIdSource, LocalSource, S3Source or HTTPSource), or switch "
-        "training.checkpoint.loading to WeightsOnlyLoader / TransferLearningLoader / "
-        "ColdStartLoader to start fresh training state from a checkpoint."
-    )
-    raise CheckpointConfigError(msg)
-
-
-def _resolve_only(source: Any) -> Any:
-    """Wrap a source config so only its ``resolve`` step runs (see ``ResolveOnlySource``)."""
-    return OmegaConf.create(
-        {"_target_": "anemoi.training.checkpoint.sources.base.ResolveOnlySource", "source": source},
-    )
+    try:
+        return instantiate(source)
+    except Exception as e:
+        target = OmegaConf.select(source, "_target_", default="<unknown>")
+        msg = f"Failed to instantiate the resume checkpoint source '{target}': {e}"
+        raise CheckpointConfigError(msg, config_path=f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}") from e
 
 
 def build_checkpoint_pipeline(
@@ -205,9 +286,9 @@ def build_checkpoint_pipeline(
         Any of these blocks may be absent; an absent block contributes no stage.
         When the run resumes through Lightning (no ``loading`` block, or a loader
         that declares ``restores_training_state`` — see :func:`resumes_via_lightning`)
-        the source is wrapped so only its ``resolve`` step runs, no loading stage is
-        emitted, and modifiers still apply: ``Trainer.fit(ckpt_path=)`` performs the
-        one and only load.
+        no source or loading stage is emitted (the runner resolves the source
+        through :func:`build_resume_source`), and modifiers still apply:
+        ``Trainer.fit(ckpt_path=)`` performs the one and only load.
     parent_run_server2server : str, optional
         Runtime server-to-server resume lineage id. When set and the source is a
         ``RunIdSource``, it is merged into the source config before instantiation so
@@ -230,18 +311,23 @@ def build_checkpoint_pipeline(
         A pipeline whose stages are ordered source → loader → modifiers. When
         nothing is configured the pipeline has zero stages and is a no-op, so the
         model is returned as instantiated.
+
+    Raises
+    ------
+    CheckpointConfigError
+        If the configuration describes a resume that Lightning cannot load (see
+        :func:`reject_unsupported_warm_start`).
     """
     if not isinstance(cfg, DictConfig):
         cfg = OmegaConf.create(cfg)
 
-    # Composition rule: a resume needs a source to hand Lightning.
+    # Composition rule: a resume needs a source that can hand Lightning a local file.
     reject_unsupported_warm_start(cfg)
 
     # Resume has one owner. Trainer.fit(ckpt_path=) reads the file and runs
-    # on_load_checkpoint on the dict it loads, so the pipeline only resolves the
-    # file (a download is kept on disk) and never loads it here: a pipeline load
-    # would read the file a second time and apply the corrections to a copy that
-    # Lightning then discards.
+    # on_load_checkpoint on the dict it loads, so the runner only resolves the
+    # file and the pipeline never loads it: a pipeline load would read the file a
+    # second time and apply the corrections to a copy that Lightning then discards.
     resume = resumes_via_lightning(cfg)
 
     # A second, independent reason not to acquire anything: the caller says the run
@@ -252,10 +338,9 @@ def build_checkpoint_pipeline(
 
     stage_configs: list[Any] = []
 
-    source = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None)
-    if source is not None and load_checkpoint:
-        source = _inject_run_lineage(source, parent_run_server2server, fork_run_server2server)
-        stage_configs.append(_resolve_only(source) if resume else source)
+    source = _source_config(cfg, parent_run_server2server, fork_run_server2server)
+    if source is not None and not resume and load_checkpoint:
+        stage_configs.append(source)
 
     loading = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}", default=None)
     if loading is not None and not resume and load_checkpoint:

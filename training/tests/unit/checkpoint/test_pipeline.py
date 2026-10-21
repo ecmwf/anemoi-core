@@ -361,27 +361,6 @@ def _write_checkpoint(tmp_path: Path) -> Path:
     return ckpt
 
 
-def test_verify_weights_loaded_accepts_a_resolve_only_source(tmp_path: Path) -> None:
-    """On a resume the source only resolves the file: the weights arrive at ``Trainer.fit(ckpt_path=)``.
-
-    The post-execution check must not mistake that for a loading failure.
-    """
-    import torch
-
-    from anemoi.training.checkpoint.sources.base import ResolveOnlySource
-    from anemoi.training.checkpoint.sources.local import LocalSource
-
-    ckpt = _write_checkpoint(tmp_path)
-    model = torch.nn.Linear(2, 2)
-    pipeline = CheckpointPipeline([ResolveOnlySource(LocalSource(path=ckpt))])
-
-    result = pipeline.execute(CheckpointContext(model=model))
-
-    assert result.checkpoint_path == ckpt.resolve()
-    assert result.checkpoint_data is None
-    assert not getattr(model, "weights_initialized", False)
-
-
 def test_verify_weights_loaded_still_rejects_a_bare_source_without_loader(tmp_path: Path) -> None:
     """Positive control: a source that loaded data with no loader to apply it is still refused."""
     import torch

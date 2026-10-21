@@ -124,13 +124,8 @@ def test_s3_source_raises_when_obstore_missing() -> None:
     assert "anemoi-utils[s3]" in str(excinfo.value)
 
 
-def test_s3_source_keeps_download_and_publishes_path_on_load_failure() -> None:
-    """The download is kept and its path is on the context, even when loading fails.
-
-    A resume hands the path to ``Trainer.fit(ckpt_path=)`` after the pipeline
-    returns; the trainer deletes the file once training has finished, via
-    ``context.temporary_files``.
-    """
+def test_s3_source_deletes_download_on_load_failure() -> None:
+    """The download is deleted even when loading it fails."""
     source = S3Source(url="s3://bucket/corrupt.ckpt")
     context = CheckpointContext()
     downloaded: list[Path] = []
@@ -144,33 +139,36 @@ def test_s3_source_keeps_download_and_publishes_path_on_load_failure() -> None:
         with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointLoadError):
             source.process(context)
 
-        assert downloaded[0].exists()
-        assert context.checkpoint_path == downloaded[0]
-        assert context.temporary_files == [downloaded[0]]
+        assert len(downloaded) == 1
+        assert not downloaded[0].exists()
+        assert context.checkpoint_path is None
     finally:
         for path in downloaded:
             path.unlink(missing_ok=True)
 
 
-def test_s3_source_resolve_downloads_without_loading() -> None:
-    """``resolve`` produces the local file for ``Trainer.fit(ckpt_path=)`` and loads nothing."""
+def test_s3_source_deletes_download_after_loading() -> None:
+    """A successful load populates the context, then deletes the download."""
     source = S3Source(url="s3://bucket/model.ckpt")
     context = CheckpointContext()
+    downloaded: list[Path] = []
 
     def fake_download(_url: str, target: str, *_args: object, **_kwargs: object) -> None:
+        downloaded.append(Path(target))
         torch.save({"state_dict": {}}, target)
 
     fake_module = _fake_anemoi_utils_s3(fake_download)
-    with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}):
-        path = source.resolve(context)
-
     try:
-        assert path.exists()
-        assert context.checkpoint_path == path
-        assert context.temporary_files == [path]
-        assert context.checkpoint_data is None
+        with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}):
+            result = source.process(context)
+
+        assert result.checkpoint_data == {"state_dict": {}}
+        assert len(downloaded) == 1
+        assert not downloaded[0].exists()
+        assert result.checkpoint_path is None
     finally:
-        path.unlink(missing_ok=True)
+        for path in downloaded:
+            path.unlink(missing_ok=True)
 
 
 @pytest.mark.network

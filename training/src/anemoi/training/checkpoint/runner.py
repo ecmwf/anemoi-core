@@ -11,18 +11,23 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from dataclasses import field
 from typing import TYPE_CHECKING
 
 from omegaconf import OmegaConf
+from pytorch_lightning.utilities import rank_zero_only
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
     from pathlib import Path
 
     import torch.nn as nn
     from omegaconf import DictConfig
+
+    from anemoi.training.checkpoint.base import CheckpointContext
+    from anemoi.training.checkpoint.sources.base import CheckpointSource
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -35,15 +40,12 @@ class PipelineResult:
         The model after all stages.
     checkpoint_path : Path, optional
         The checkpoint file that the source resolved. On a resume, Lightning loads this file.
-    temporary_files : list of Path
-        Downloads to delete after training.
     weights_loaded : bool
         ``True`` if a loading strategy loaded the weights. ``False`` on a resume.
     """
 
     model: nn.Module
     checkpoint_path: Path | None = None
-    temporary_files: list[Path] = field(default_factory=list)
     weights_loaded: bool = False
 
 
@@ -61,6 +63,9 @@ def run_checkpoint_pipeline(
     load_checkpoint: bool = True,
 ) -> PipelineResult:
     """Build the pipeline from ``config`` and run it on ``model``.
+
+    On a resume, the source is only resolved to a local file before the pipeline
+    runs; ``Trainer.fit(ckpt_path=)`` loads it.
 
     Parameters
     ----------
@@ -82,26 +87,62 @@ def run_checkpoint_pipeline(
     """
     from anemoi.training.checkpoint.base import CheckpointContext
     from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
+    from anemoi.training.checkpoint.builder import build_resume_source
 
-    pipeline = build_checkpoint_pipeline(
-        config,
-        parent_run_server2server=parent_run_server2server,
-        fork_run_server2server=fork_run_server2server,
-        load_checkpoint=load_checkpoint,
-    )
-    context = pipeline.execute(CheckpointContext(model=model, config=config))
+    build_kwargs = {
+        "parent_run_server2server": parent_run_server2server,
+        "fork_run_server2server": fork_run_server2server,
+        "load_checkpoint": load_checkpoint,
+    }
+    # Build first: it rejects a resume from a source that cannot give a local file.
+    pipeline = build_checkpoint_pipeline(config, **build_kwargs)
+    context = CheckpointContext(model=model, config=config)
+
+    resume_source = build_resume_source(config, **build_kwargs)
+    if resume_source is not None:
+        _resolve_resume_checkpoint(resume_source, context)
+
+    context = pipeline.execute(context)
 
     return PipelineResult(
         model=context.model,
         checkpoint_path=context.checkpoint_path,
-        temporary_files=list(context.temporary_files),
         weights_loaded=bool(getattr(context.model, "weights_initialized", False)),
     )
 
 
-def remove_temporary_checkpoints(paths: Iterable[Path]) -> None:
-    """Delete the checkpoint downloads that the source kept for ``Trainer.fit(ckpt_path=)``."""
-    from anemoi.training.checkpoint.sources.base import remove_temporary_file
+def _resolve_resume_checkpoint(source: CheckpointSource, context: CheckpointContext) -> None:
+    """Resolve the resume checkpoint file onto ``context``; load nothing.
 
-    for path in paths:
-        remove_temporary_file(path)
+    ``Trainer.fit(ckpt_path=)`` performs the load, so only the source's
+    ``resolve`` step runs: it publishes the file on ``context.checkpoint_path``.
+
+    Parameters
+    ----------
+    source : CheckpointSource
+        The configured source.
+    context : CheckpointContext
+        The pipeline context (mutated in place).
+
+    Raises
+    ------
+    CheckpointConfigError
+        On rank 0, if the source resolved no file: a resume with nothing to hand
+        Lightning would otherwise start from scratch without a word. Other ranks
+        defer, as the sources do, so the job fails once, on rank 0.
+    """
+    path = source.resolve(context)
+    if path is not None:
+        LOGGER.info("Resume checkpoint resolved to %s; Trainer.fit(ckpt_path=) performs the load", path)
+        return
+
+    if rank_zero_only.rank == 0:
+        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+        msg = (
+            f"Resume configured, but {type(source).__name__} resolved no checkpoint file to hand "
+            "Trainer.fit(ckpt_path=). Check the training.checkpoint.source configuration (a RunIdSource "
+            "needs run_id), or add a loading strategy if you meant to start fresh training state."
+        )
+        raise CheckpointConfigError(msg)
+    LOGGER.warning("%s resolved no checkpoint on this rank; deferring the error to rank 0", type(source).__name__)

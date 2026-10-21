@@ -39,8 +39,9 @@ from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
+from anemoi.training.checkpoint.builder import build_resume_source
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
-from anemoi.training.checkpoint.sources.base import ResolveOnlySource
+from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
 from anemoi.training.checkpoint.sources.local import LocalSource
 from anemoi.training.schemas.base_schema import _DEPRECATED_KEYS
 from anemoi.training.schemas.training import CheckpointPipelineSchema
@@ -297,13 +298,12 @@ def test_resume_is_one_lightning_load_and_matches_the_legacy_hook(
         },
     )
 
-    executed = build_checkpoint_pipeline(cfg).execute(CheckpointContext(model=module, config=cfg))
+    executed = run_checkpoint_pipeline(module, cfg)
 
     # No pipeline load: the file was only resolved, the model is untouched.
     assert loads == []
     assert executed.checkpoint_path == ckpt_path.resolve()
-    assert executed.checkpoint_data is None
-    assert not getattr(module, "weights_initialized", False)
+    assert executed.weights_loaded is False
     for key, value in before.items():
         assert torch.equal(module.state_dict()[key], value)
 
@@ -408,30 +408,30 @@ def test_deprecated_key_replacement_config_builds_and_validates(deprecated_key: 
     cfg = OmegaConf.create({"training": {"checkpoint": checkpoint_block}})
     pipeline = build_checkpoint_pipeline(cfg)
     stage_names = [type(stage).__name__ for stage in pipeline.stages]
+    resume_source = build_resume_source(cfg)
 
-    if "source" in checkpoint_block:
-        assert stage_names[0].endswith("Source")
     if "loading" in checkpoint_block:
+        if "source" in checkpoint_block:
+            assert stage_names[0].endswith("Source")
         assert any(name.endswith("Loader") for name in stage_names)
     else:
-        # Source without a loading block is a resume: the source runs resolve-only and
-        # Trainer.fit(ckpt_path=) performs the load, as the removed keys used to.
-        assert not any(name.endswith("Loader") for name in stage_names)
+        # Source without a loading block is a resume: the runner resolves the source
+        # outside the pipeline and Trainer.fit(ckpt_path=) performs the load, as the
+        # removed keys used to.
+        assert ("source" in checkpoint_block) == (resume_source is not None)
+        assert not any(name.endswith(("Source", "Loader")) for name in stage_names)
     if "modifiers" in checkpoint_block:
         assert any(name.endswith("Stage") for name in stage_names)
 
     # Non-tautological attribute checks: the advice configures the intended behaviour.
     if deprecated_key == "training.run_id":
-        source = pipeline.stages[0].source
-        assert source.run_id == "abc"
-        assert source.fork is False
+        assert resume_source.run_id == "abc"
+        assert resume_source.fork is False
     elif deprecated_key == "training.fork_run_id":
-        source = pipeline.stages[0].source
-        assert source.run_id == "abc"
-        assert source.fork is True
+        assert resume_source.run_id == "abc"
+        assert resume_source.fork is True
     elif deprecated_key == "system.input.warm_start":
-        assert isinstance(pipeline.stages[0], ResolveOnlySource)
-        assert isinstance(pipeline.stages[0].source, LocalSource)
+        assert isinstance(resume_source, LocalSource)
     elif deprecated_key == "training.transfer_learning":
         loader = pipeline.stages[1]
         assert type(loader).__name__ == "TransferLearningLoader"
@@ -466,10 +466,11 @@ def test_preset_composes_with_checkpoint_source_overlay(preset: str) -> None:
     CheckpointPipelineSchema(**checkpoint_block)
 
     pipeline = build_checkpoint_pipeline(cfg)
-    # Source only: a resume, so the RunIdSource runs resolve-only for Trainer.fit(ckpt_path=).
-    assert isinstance(pipeline.stages[0], ResolveOnlySource)
-    assert type(pipeline.stages[0].source).__name__ == "RunIdSource"
-    assert pipeline.stages[0].source.run_id == "abc123"
+    # Source only: a resume, so the runner resolves the RunIdSource for Trainer.fit(ckpt_path=).
+    assert pipeline.stages == []
+    resume_source = build_resume_source(cfg)
+    assert type(resume_source).__name__ == "RunIdSource"
+    assert resume_source.run_id == "abc123"
 
 
 # --- the resume hook, like the pipeline, never runs chunking_fix on autoencoder weights ---

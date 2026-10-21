@@ -34,8 +34,8 @@ from omegaconf import OmegaConf
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.checkpoint.base import CheckpointContext
-from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
 from anemoi.training.checkpoint.sources.http import HTTPSource
 from anemoi.training.checkpoint.sources.run import RunIdSource
 from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
@@ -340,14 +340,11 @@ def test_builder_malformed_source_target_raises_config_error() -> None:
     cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": "nonexistent.Source"}}}})
     model = nn.Linear(2, 2)
 
-    def _build_and_run() -> None:
-        pipeline = build_checkpoint_pipeline(cfg)
-        pipeline.execute(CheckpointContext(model=model, config=cfg))
-
+    # A source-only config is a resume: the runner instantiates the source outside the pipeline.
     with pytest.raises(CheckpointConfigError) as excinfo:
-        _build_and_run()
+        run_checkpoint_pipeline(model, cfg)
 
-    assert "stage" in str(excinfo.value).lower()
+    assert "nonexistent.Source" in str(excinfo.value)
 
 
 def test_resolve_path_invariant_to_dataset_count() -> None:
@@ -447,7 +444,7 @@ def test_init_keeps_resolved_run_id_off_the_config(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Remote sources publish their kept download as the local checkpoint path (http.py)
+# Remote sources delete their download after loading (http.py)
 # ---------------------------------------------------------------------------
 
 
@@ -457,21 +454,16 @@ def _fake_download(url: str, dest: Path, max_retries: int, timeout: int) -> None
     torch.save({"state_dict": {"weight": torch.zeros(2, 2)}}, dest)
 
 
-def test_http_source_publishes_kept_download_as_checkpoint_path() -> None:
+def test_http_source_publishes_no_path_to_its_deleted_download() -> None:
     context = CheckpointContext()
 
     with patch("anemoi.training.checkpoint.utils.download_with_retry", new=_fake_download):
         result = HTTPSource(url="https://models.example.int/model.ckpt").process(context)
 
-    try:
-        # The download is kept and recorded as the local path, so a trainer reading
-        # last_checkpoint from this context can hand it to Trainer.fit(ckpt_path=).
-        assert result.checkpoint_path is not None
-        assert result.checkpoint_path.exists()
-        assert result.temporary_files == [result.checkpoint_path]
-        assert result.checkpoint_data is not None
-    finally:
-        result.checkpoint_path.unlink(missing_ok=True)
+    # The download is deleted after loading, so no path is left on the context for
+    # last_checkpoint to hand Trainer.fit(ckpt_path=); a resume needs LocalSource.
+    assert result.checkpoint_path is None
+    assert result.checkpoint_data is not None
 
 
 # ---------------------------------------------------------------------------

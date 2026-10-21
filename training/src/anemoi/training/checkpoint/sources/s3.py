@@ -37,9 +37,9 @@ class S3Source(CheckpointSource):
     """Checkpoint source for S3-compatible storage.
 
     Downloads a checkpoint file from an S3 bucket to a node-local temporary
-    location and loads it with PyTorch. The download is kept on disk and
-    registered on the context so ``Trainer.fit(ckpt_path=)`` can read it on a
-    resume; the trainer deletes it once training has finished. Download is
+    location, loads it with PyTorch and deletes the file straight after. A
+    resume cannot use this source, because ``Trainer.fit(ckpt_path=)`` needs a
+    local file: download the checkpoint and use ``LocalSource``. Download is
     delegated to ``anemoi.utils.remote.s3.download_file`` (obstore-backed),
     which handles endpoint URLs, credentials, and per-bucket configuration
     from ``~/.config/anemoi/settings.toml``.
@@ -60,66 +60,23 @@ class S3Source(CheckpointSource):
     def __init__(self, url: str | None = None) -> None:
         self.url = url
 
-    def resolve(self, context: CheckpointContext) -> Path:
-        """Download the S3 object to a temporary file and publish its path.
-
-        The file is kept (and registered on ``context.temporary_files``) so a
-        resume can hand it to ``Trainer.fit(ckpt_path=)``; a failed download is
-        removed before the error propagates.
-
-        Parameters
-        ----------
-        context : CheckpointContext
-            Pipeline context. If ``self.url`` is None, the URL is read
-            from ``context.config["url"]``. ``checkpoint_path`` is set to
-            the download.
-
-        Returns
-        -------
-        Path
-            The downloaded checkpoint file.
-
-        Raises
-        ------
-        CheckpointNotFoundError
-            If the S3 object does not exist.
-        CheckpointSourceError
-            If download fails (credentials, network, missing optional dep).
-        """
-        url = self._resolve_url(context)
-        self._parse_s3_url(url)
-
-        LOGGER.info("Downloading checkpoint from %s", url)
-
-        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as tmp_fd:
-            tmp_path = Path(tmp_fd.name)
-
-        try:
-            self._download_from_s3(url, tmp_path)
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
-
-        self._keep_download(context, tmp_path)
-        context.checkpoint_path = tmp_path
-        return tmp_path
-
     def process(self, context: CheckpointContext) -> CheckpointContext:
         """Download and load a checkpoint from S3.
 
+        The download goes to a temporary file that is deleted straight after
+        loading, also when the download or the load fails.
+
         Parameters
         ----------
         context : CheckpointContext
             Pipeline context. If ``self.url`` is None, the URL is read
-            from ``context.config["url"]``. ``checkpoint_path`` is set to
-            the downloaded file, which stays on disk until the trainer
-            deletes it.
+            from ``context.config["url"]``.
 
         Returns
         -------
         CheckpointContext
-            Context with ``checkpoint_path``, ``checkpoint_data``,
-            ``checkpoint_format``, and source metadata populated.
+            Context with ``checkpoint_data``, ``checkpoint_format``,
+            and source metadata populated.
 
         Raises
         ------
@@ -133,8 +90,17 @@ class S3Source(CheckpointSource):
         url = self._resolve_url(context)
         bucket, key = self._parse_s3_url(url)
 
-        path = self.resolve(context)
-        self._load_from_path(context, path)
+        LOGGER.info("Downloading checkpoint from %s", url)
+
+        # Deleted in the ``finally`` below, once the checkpoint is loaded.
+        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as tmp_fd:
+            tmp_path = Path(tmp_fd.name)
+
+        try:
+            self._download_from_s3(url, tmp_path)
+            self._load_from_path(context, tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
         context.update_metadata(
             source_type="s3",

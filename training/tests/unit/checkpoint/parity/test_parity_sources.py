@@ -486,12 +486,8 @@ def test_http_source_without_checksum_loads(tmp_path: Path) -> None:
     assert result.checkpoint_data is not None
 
 
-def test_http_source_keeps_download_on_load_error() -> None:
-    """A corrupt download raises CheckpointLoadError; the file is kept and its path published.
-
-    Downloads outlive the source stage (a resume hands them to ``Trainer.fit(ckpt_path=)``)
-    and are deleted by the trainer through ``context.temporary_files``.
-    """
+def test_http_source_deletes_download_on_load_error() -> None:
+    """A corrupt download raises CheckpointLoadError, and the file is deleted with the error."""
     recorded: list[Path] = []
     context = CheckpointContext()
 
@@ -504,9 +500,8 @@ def test_http_source_keeps_download_on_load_error() -> None:
             source.process(context)
 
         assert recorded, "download stub was not invoked"
-        assert recorded[0].exists()
-        assert context.checkpoint_path == recorded[0]
-        assert context.temporary_files == [recorded[0]]
+        assert not recorded[0].exists()
+        assert context.checkpoint_path is None
     finally:
         for path in recorded:
             path.unlink(missing_ok=True)

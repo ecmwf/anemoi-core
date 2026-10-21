@@ -183,18 +183,13 @@ class TestHTTPSourceProcess:
             source.process(context)
 
     @patch(_DOWNLOAD_TARGET)
-    def test_download_is_kept_and_published_on_success(
+    def test_download_is_deleted_after_loading(
         self,
         mock_download: MagicMock,
         source: HTTPSource,
         simple_state_dict: dict,
     ) -> None:
-        """The download stays on disk and its path is on the context.
-
-        A resume hands that path to ``Trainer.fit(ckpt_path=)`` after the pipeline
-        returns, so the file must outlive the source stage; the trainer deletes it
-        once training has finished, via ``context.temporary_files``.
-        """
+        """The download is loaded onto the context and deleted straight after."""
         created_paths: list[Path] = []
 
         def _track_and_save(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
@@ -205,23 +200,20 @@ class TestHTTPSourceProcess:
         mock_download.side_effect = _track_and_save
 
         context = CheckpointContext()
-        try:
-            result = source.process(context)
+        result = source.process(context)
 
-            assert len(created_paths) == 1
-            assert created_paths[0].exists(), "The download must be kept for Trainer.fit(ckpt_path=)"
-            assert result.checkpoint_path == created_paths[0]
-            assert result.temporary_files == [created_paths[0]]
-        finally:
-            created_paths[0].unlink(missing_ok=True)
+        assert result.checkpoint_data is not None
+        assert len(created_paths) == 1
+        assert not created_paths[0].exists()
+        assert result.checkpoint_path is None
 
     @patch(_DOWNLOAD_TARGET)
-    def test_download_is_kept_and_published_on_load_failure(
+    def test_download_is_deleted_on_load_failure(
         self,
         mock_download: MagicMock,
         source: HTTPSource,
     ) -> None:
-        """A download that fails to load is kept too, so it can be inspected."""
+        """A download that fails to load is deleted before the error propagates."""
         created_paths: list[Path] = []
 
         def _track_and_corrupt(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
@@ -232,16 +224,12 @@ class TestHTTPSourceProcess:
         mock_download.side_effect = _track_and_corrupt
 
         context = CheckpointContext()
-        try:
-            with pytest.raises(CheckpointLoadError):
-                source.process(context)
+        with pytest.raises(CheckpointLoadError):
+            source.process(context)
 
-            assert len(created_paths) == 1
-            assert created_paths[0].exists()
-            assert context.checkpoint_path == created_paths[0]
-            assert context.temporary_files == [created_paths[0]]
-        finally:
-            created_paths[0].unlink(missing_ok=True)
+        assert len(created_paths) == 1
+        assert not created_paths[0].exists()
+        assert context.checkpoint_path is None
 
     @patch(_DOWNLOAD_TARGET)
     def test_failed_download_leaves_no_file_behind(
@@ -249,7 +237,7 @@ class TestHTTPSourceProcess:
         mock_download: MagicMock,
         source: HTTPSource,
     ) -> None:
-        """Only a completed download is kept; a failed one is removed with its error."""
+        """A failed download is removed with its error."""
         created_paths: list[Path] = []
 
         def _track_and_fail(url: str, dest: Path, **kwargs: Any) -> Path:
@@ -266,7 +254,7 @@ class TestHTTPSourceProcess:
 
         assert len(created_paths) == 1
         assert not created_paths[0].exists()
-        assert context.temporary_files == []
+        assert context.checkpoint_path is None
 
     @patch(_DOWNLOAD_TARGET)
     @patch("anemoi.training.checkpoint.utils.calculate_checksum")
@@ -293,10 +281,10 @@ class TestHTTPSourceProcess:
         with pytest.raises(CheckpointValidationError, match="Checksum mismatch"):
             source.process(context)
 
-        # A rejected download is removed with its error, and never registered for later cleanup.
+        # A rejected download is removed with its error.
         assert len(created_paths) == 1
         assert not created_paths[0].exists()
-        assert context.temporary_files == []
+        assert context.checkpoint_path is None
 
     @patch(_DOWNLOAD_TARGET)
     @patch("anemoi.training.checkpoint.utils.calculate_checksum")

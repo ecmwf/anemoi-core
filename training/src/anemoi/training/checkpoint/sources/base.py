@@ -32,11 +32,14 @@ Callers that want scheme-based routing should perform their own
 dispatch (e.g., by inspecting ``urlparse(uri).scheme``) before
 selecting a ``_target_``.
 
-Acquisition is two steps. :meth:`CheckpointSource.resolve` makes the checkpoint
-reachable as a local file and publishes its path on the context (a download is
-kept on disk); :meth:`CheckpointSource.process` is resolve followed by the
-``torch.load``. A resume runs resolve only, because ``Trainer.fit(ckpt_path=)``
-performs the load itself.
+:meth:`CheckpointSource.process` acquires the checkpoint and loads it. A source
+that reads a local file also implements :meth:`CheckpointSource.resolve`, which
+makes the checkpoint reachable as a local file and publishes its path on the
+context; its ``process`` is resolve followed by the ``torch.load``. A resume runs
+resolve only, because ``Trainer.fit(ckpt_path=)`` performs the load itself, so
+only a source that implements ``resolve`` can resume a run (see
+:meth:`CheckpointSource.supports_resume`). A remote source downloads to a
+temporary file, loads it and deletes it straight away.
 
 Example
 -------
@@ -53,7 +56,6 @@ Example
 
 from __future__ import annotations
 
-import atexit
 import logging
 import pickle
 from abc import abstractmethod
@@ -61,7 +63,6 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
-from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.training.checkpoint.base import PipelineStage
 
@@ -115,21 +116,6 @@ def source_class_from_config(source_cfg: Any) -> type[CheckpointSource] | None:
     return cls if isinstance(cls, type) and issubclass(cls, CheckpointSource) else None
 
 
-def remove_temporary_file(path: Path) -> None:
-    """Delete a download a source kept on disk.
-
-    Never raises: the path is per-process (a :func:`tempfile.NamedTemporaryFile`),
-    but this also runs from ``atexit``, so a file already gone is fine and an
-    ``OSError`` is only warned about.
-    """
-    try:
-        path.unlink(missing_ok=True)
-    except OSError as exc:
-        LOGGER.warning("Could not remove temporary checkpoint %s: %s", path, exc)
-    else:
-        LOGGER.info("Removed temporary checkpoint %s", path)
-
-
 class CheckpointSource(PipelineStage):
     """Abstract base class for all checkpoint sources.
 
@@ -138,8 +124,9 @@ class CheckpointSource(PipelineStage):
     a specific source type (local file, cloud storage, HTTP endpoint,
     etc.) and populating the context for downstream stages.
 
-    Subclasses implement ``resolve`` (make the checkpoint reachable as a
-    local file and publish its path) and ``process`` (resolve, then load).
+    Subclasses implement ``process`` (acquire, then load). A source that
+    can make the checkpoint reachable as a local file for a resume also
+    implements ``resolve`` (publish the local path, do not load).
     The ``_load_from_path`` and ``_load_and_populate`` convenience methods
     standardise the load and how raw checkpoint data is attached to the
     context with format detection.
@@ -154,15 +141,12 @@ class CheckpointSource(PipelineStage):
     ...     def __init__(self, url: str):
     ...         self.url = url
     ...
-    ...     def resolve(self, context: CheckpointContext) -> Path:
-    ...         path = self._download_to_temp(self.url)
-    ...         self._keep_download(context, path)
-    ...         context.checkpoint_path = path
-    ...         return path
-    ...
     ...     def process(self, context: CheckpointContext) -> CheckpointContext:
-    ...         path = self.resolve(context)
-    ...         self._load_from_path(context, path)
+    ...         path = self._download_to_temp(self.url)
+    ...         try:
+    ...             self._load_from_path(context, path)
+    ...         finally:
+    ...             path.unlink(missing_ok=True)
     ...         return context
     """
 
@@ -222,8 +206,8 @@ class CheckpointSource(PipelineStage):
         """Make the checkpoint reachable as a local file and publish its path, without loading it.
 
         Sets ``context.checkpoint_path`` to the resolved file and returns it. A
-        source that downloads keeps the file and registers it with
-        :meth:`_keep_download` so the trainer deletes it after training. Returns
+        source that downloads does not implement this: its download is deleted
+        straight after loading, so there is no file to hand Lightning. Returns
         ``None`` when there is nothing to resolve on this rank (an error deferred
         to rank 0), in which case ``process`` leaves the context untouched.
 
@@ -252,6 +236,21 @@ class CheckpointSource(PipelineStage):
             "hand Trainer.fit(ckpt_path=) a local checkpoint file"
         )
         raise NotImplementedError(msg)
+
+    @classmethod
+    def supports_resume(cls) -> bool:
+        """Whether a resume can use this source.
+
+        A resume hands ``Trainer.fit(ckpt_path=)`` a local file, which only a
+        source that overrides :meth:`resolve` provides (``LocalSource``,
+        ``RunIdSource``). The builder checks this at build time.
+
+        Returns
+        -------
+        bool
+            ``True`` if the class overrides :meth:`resolve`.
+        """
+        return cls.resolve is not CheckpointSource.resolve
 
     @abstractmethod
     def process(self, context: CheckpointContext) -> CheckpointContext:
@@ -312,27 +311,6 @@ class CheckpointSource(PipelineStage):
 
         self._load_and_populate(context, raw_data)
 
-    def _keep_download(self, context: CheckpointContext, path: Path) -> None:
-        """Register a download kept on disk for ``Trainer.fit(ckpt_path=)``.
-
-        The trainer deletes every path in ``context.temporary_files`` once
-        training has finished; ``atexit`` is the backstop for a job that never
-        reaches that point.
-
-        Parameters
-        ----------
-        context : CheckpointContext
-            Current pipeline context (mutated in place)
-        path : Path
-            The downloaded checkpoint file
-        """
-        context.temporary_files.append(path)
-        atexit.register(remove_temporary_file, path)
-        LOGGER.info(
-            "Checkpoint downloaded to %s; kept until training finishes so Trainer.fit(ckpt_path=) can read it",
-            path,
-        )
-
     def _load_and_populate(
         self,
         context: CheckpointContext,
@@ -362,66 +340,3 @@ class CheckpointSource(PipelineStage):
             "Detected checkpoint format '%s' from data keys",
             context.checkpoint_format,
         )
-
-
-#: ``context.metadata`` marker a :class:`ResolveOnlySource` sets: the checkpoint is
-#: loaded by ``Trainer.fit(ckpt_path=)``, not by a pipeline stage.
-CHECKPOINT_LOAD_OWNER = "checkpoint_load_owner"
-
-
-class ResolveOnlySource(CheckpointSource):
-    """Run only a source's :meth:`~CheckpointSource.resolve` step.
-
-    The builder wraps the configured source in this for a resume:
-    ``Trainer.fit(ckpt_path=)`` performs the load, so the pipeline only makes
-    the checkpoint reachable as a local file and publishes its path. The
-    context is marked (``metadata["checkpoint_load_owner"] = "trainer"``) so
-    the pipeline's "weights were loaded" check knows the weights arrive at
-    ``fit()`` rather than being missing.
-
-    Parameters
-    ----------
-    source : CheckpointSource
-        The configured source whose resolve step runs.
-    """
-
-    def __init__(self, source: CheckpointSource) -> None:
-        self.source = source
-
-    def resolve(self, context: CheckpointContext) -> Path | None:
-        """Delegate to the wrapped source's resolve step."""
-        return self.source.resolve(context)
-
-    def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Resolve the checkpoint file for ``Trainer.fit(ckpt_path=)``; load nothing.
-
-        Raises
-        ------
-        CheckpointConfigError
-            On rank 0, if the source resolved no file: a resume with nothing to
-            hand Lightning would otherwise start from scratch without a word.
-            Other ranks defer, as the sources do, so the job fails once, on rank 0.
-        """
-        path = self.resolve(context)
-        context.update_metadata(**{CHECKPOINT_LOAD_OWNER: "trainer"})
-        if path is not None:
-            LOGGER.info("Resume checkpoint resolved to %s; Trainer.fit(ckpt_path=) performs the load", path)
-            return context
-
-        if rank_zero_only.rank == 0:
-            from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-
-            msg = (
-                f"Resume configured, but {type(self.source).__name__} resolved no checkpoint file to hand "
-                "Trainer.fit(ckpt_path=). Check the training.checkpoint.source configuration (a RunIdSource "
-                "needs run_id), or add a loading strategy if you meant to start fresh training state."
-            )
-            raise CheckpointConfigError(msg)
-        LOGGER.warning(
-            "%s resolved no checkpoint on this rank; deferring the error to rank 0",
-            type(self.source).__name__,
-        )
-        return context
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.source!r})"
