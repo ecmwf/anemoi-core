@@ -26,6 +26,8 @@ from anemoi.models.layers.mapper import GNNForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 from tests.distributed._distributed_runner import _run_distributed_test
+from tests.distributed._graph_fixtures import build_mapper_graph
+from tests.distributed._graph_fixtures import mapper_loss_data
 
 
 class ConcreteGNNBaseMapper(GNNBaseMapper):
@@ -340,51 +342,6 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
         assert result.shape == torch.Size([self.NUM_DST_NODES, mapper_init.out_channels_dst])
 
 
-def _build_sharded_mapper_graph(
-    world_size: int, device: torch.device
-) -> tuple[torch.Tensor, torch.Tensor, list[int], list[int]]:
-    """Each destination uses an owned source and a source from the next rank.
-
-    Source indices cycle through each partition. The first destination has
-    a duplicate edge with distinct attributes; both vertex partitions are uneven.
-    """
-    src_splits = [3] + [2] * (world_size - 1)
-    dst_splits = [4] + [3] * (world_size - 1)
-    src_starts = [sum(src_splits[:rank]) for rank in range(world_size)]
-    dst_starts = [sum(dst_splits[:rank]) for rank in range(world_size)]
-    edges = []
-    for rank in range(world_size):
-        src_rank = (rank + 1) % world_size
-        for dst_offset in range(dst_splits[rank]):
-            dst = dst_starts[rank] + dst_offset
-            remote_src = src_starts[src_rank] + dst_offset % src_splits[src_rank]
-            local_src = src_starts[rank] + dst_offset % src_splits[rank]
-            edges.extend([(remote_src, dst), (local_src, dst)])
-            if dst == 0:
-                edges.append((remote_src, dst))
-    edge_index = torch.tensor(edges, dtype=torch.long, device=device).T.contiguous()
-    edge_attr = torch.arange(len(edges) * 3, dtype=torch.float32, device=device).reshape(-1, 3) / 17 - 0.4
-
-    assert sum(src_splits) != sum(dst_splits)
-    assert edge_index[1].tolist() == sorted(edge_index[1].tolist())
-    assert torch.equal(edge_index[:, 0], edge_index[:, 2])
-    assert not torch.equal(edge_attr[0], edge_attr[2])
-    for rank in range(world_size):
-        local_edges = (edge_index[1] >= dst_starts[rank]) & (edge_index[1] < dst_starts[rank] + dst_splits[rank])
-        sources = edge_index[0, local_edges]
-        assert ((sources < src_starts[rank]) | (sources >= src_starts[rank] + src_splits[rank])).any()
-        owned_sources = sources[(sources >= src_starts[rank]) & (sources < src_starts[rank] + src_splits[rank])]
-        assert owned_sources.unique().numel() > 1
-    return edge_attr, edge_index, src_splits, dst_splits
-
-
-def _mapper_loss_data(output: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Deterministic targets and nonuniform weights in global row order."""
-    target = torch.linspace(-0.3, 0.7, output.numel(), device=output.device).reshape_as(output)
-    weights = (torch.arange(output.numel(), device=output.device).reshape_as(output) % 7 + 1).float() / 7
-    return target, weights
-
-
 def _test_gnn_mapper_matches_unsharded_rank(
     *,
     rank: int,
@@ -398,7 +355,7 @@ def _test_gnn_mapper_matches_unsharded_rank(
 ) -> None:
     """Compare mapper outputs and the derivatives of one globally normalized loss."""
     torch.set_num_threads(1)
-    edge_attr, edge_index, src_splits, dst_splits = _build_sharded_mapper_graph(world_size, device)
+    edge_attr, edge_index, src_splits, dst_splits = build_mapper_graph(world_size, device)
     src_start, dst_start = sum(src_splits[:rank]), sum(dst_splits[:rank])
     src_stop, dst_stop = src_start + src_splits[rank], dst_start + dst_splits[rank]
     hidden_channels = 8
@@ -427,16 +384,6 @@ def _test_gnn_mapper_matches_unsharded_rank(
     subject.gradient_checkpointing = gradient_checkpointing
     reference_params = dict(reference.named_parameters())
     subject_params = dict(subject.named_parameters())
-    assert reference_params.keys() == subject_params.keys()
-    # A string msg replaces PyTorch's mismatch details. Callable messages below
-    # prepend comparison/rank context while preserving those numerical diagnostics.
-    for name, param in reference_params.items():
-        torch.testing.assert_close(
-            subject_params[name],
-            param,
-            msg=lambda details, name=name: f"initial {name} on rank {rank}\n{details}",
-        )
-
     # Reference execution uses all vertices and edges without communication.
     reference_src_input = x_src.clone().requires_grad_(True)
     reference_dst_input = x_dst.clone().requires_grad_(True)
@@ -450,12 +397,12 @@ def _test_gnn_mapper_matches_unsharded_rank(
         keep_x_dst_sharded=True,
     )
     reference_dst_output = reference_result[1] if is_forward_mapper else reference_result
-    dst_target, dst_weights = _mapper_loss_data(reference_dst_output)
+    dst_target, dst_weights = mapper_loss_data(reference_dst_output)
     dst_loss_terms = dst_weights * (reference_dst_output - dst_target).square() / dst_weights.numel()
     global_loss = dst_loss_terms.sum()
     if is_forward_mapper:
         reference_src_output = reference_result[0]
-        src_target, src_weights = _mapper_loss_data(reference_src_output)
+        src_target, src_weights = mapper_loss_data(reference_src_output)
         global_loss = (
             global_loss + (src_weights * (reference_src_output - src_target).square()).sum() / src_weights.numel()
         )
@@ -492,6 +439,7 @@ def _test_gnn_mapper_matches_unsharded_rank(
     )
     distributed_dst_output = distributed_result[1] if is_forward_mapper else distributed_result
     expected_dst_output = reference_dst_output[dst_start:dst_stop] if keep_x_dst_sharded else reference_dst_output
+    # Callable messages add rank/parameter context without replacing numerical diagnostics.
     torch.testing.assert_close(
         distributed_dst_output,
         expected_dst_output,
