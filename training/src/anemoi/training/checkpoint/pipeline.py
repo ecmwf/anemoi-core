@@ -148,8 +148,7 @@ class CheckpointPipeline:
         for i, stage in enumerate(self.stages):
             LOGGER.debug("  Stage %d: %s", i, stage)
 
-        # Smart warnings about pipeline configuration
-        self._validate_pipeline_composition()
+        self._check_stage_order()
 
     def _instantiate_stages(self, stages: list[Any]) -> list[PipelineStage]:
         """Instantiate stages from configs or pass through existing instances.
@@ -216,114 +215,30 @@ class CheckpointPipeline:
             return "modifier"
         return None
 
-    def _validate_pipeline_composition(self) -> None:
-        """Validate pipeline composition: raise on ordering/conflict violations, warn/suggest otherwise.
+    def _check_stage_order(self) -> None:
+        """Raise if the stages are not ordered source -> one loader -> modifiers.
 
         Stage ordering (source before loader, modifier after loader) and a single
         loading strategy are structural invariants: a violation is a hard
-        ``CheckpointConfigError`` at construction. Multiple sources and missing
-        stages are advisory (warn / info) — the builder always emits stages in the
-        canonical order, so only hand-built or misconfigured pipelines are bitten.
+        ``CheckpointConfigError`` at construction. More than one source, or a
+        missing layer, is allowed. Stages that belong to no known layer are not
+        placed. The builder always emits stages in the canonical order, so only
+        hand-built pipelines are bitten.
+
+        Raises
+        ------
+        CheckpointConfigError
+            If a source follows a loader, a modifier precedes a loader, or there
+            is more than one loading strategy.
         """
-        if not self.stages:
-            LOGGER.warning(
-                "Pipeline has no stages configured. "
-                "Consider adding stages for source acquisition, loading, or model modification.",
-            )
-            return
-
-        roles = [self._stage_role(stage) for stage in self.stages]
-        stage_names = [stage.__class__.__name__ for stage in self.stages]
-
-        violations: list[str] = []
-        self._check_source_loading_order(roles, violations)
-        self._check_modifier_placement(roles, violations)
-        self._check_duplicate_stages(roles, stage_names, violations)
-
-        if violations:
+        rank = {"source": 0, "loader": 1, "modifier": 2}
+        ranks = [rank[role] for role in map(self._stage_role, self.stages) if role is not None]
+        if ranks != sorted(ranks) or ranks.count(rank["loader"]) > 1:
             from .exceptions import CheckpointConfigError
 
-            message = "Invalid checkpoint pipeline composition:\n  - " + "\n  - ".join(violations)
-            raise CheckpointConfigError(message, config_path="training.checkpoint")
-
-        # Non-fatal guidance.
-        self._warn_multiple_sources(roles, stage_names)
-        self._suggest_missing_stages(roles)
-
-    def _check_source_loading_order(self, roles: list[str | None], violations: list[str]) -> None:
-        """A source stage must come before every loading stage."""
-        source_indices = [i for i, role in enumerate(roles) if role == "source"]
-        loader_indices = [i for i, role in enumerate(roles) if role == "loader"]
-
-        if source_indices and loader_indices and max(source_indices) > min(loader_indices):
-            violations.append(
-                f"a source stage at position {max(source_indices)} comes after a loader stage at position "
-                f"{min(loader_indices)}; loaders expect the checkpoint already acquired "
-                "(order stages source -> loader -> modifiers).",
-            )
-
-    def _check_modifier_placement(self, roles: list[str | None], violations: list[str]) -> None:
-        """Modifier stages must come after every loading stage."""
-        loader_indices = [i for i, role in enumerate(roles) if role == "loader"]
-        modifier_indices = [i for i, role in enumerate(roles) if role == "modifier"]
-
-        if loader_indices and modifier_indices and min(modifier_indices) < max(loader_indices):
-            violations.append(
-                f"a modifier stage at position {min(modifier_indices)} comes before a loader stage at position "
-                f"{max(loader_indices)}; model modifications must run after checkpoint loading.",
-            )
-
-    def _check_duplicate_stages(self, roles: list[str | None], stage_names: list[str], violations: list[str]) -> None:
-        """Multiple loading strategies conflict; flag as a violation."""
-        loaders = [stage_names[i] for i, role in enumerate(roles) if role == "loader"]
-        if len(loaders) > 1:
-            violations.append(
-                f"found {len(loaders)} loading strategies ({', '.join(loaders)}); "
-                "use a single loading strategy appropriate for your use case.",
-            )
-
-    def _warn_multiple_sources(self, roles: list[str | None], stage_names: list[str]) -> None:
-        """Multiple sources are redundant but not fatal (the pipeline runs them in sequence)."""
-        sources = [stage_names[i] for i, role in enumerate(roles) if role == "source"]
-        if len(sources) > 1:
-            LOGGER.warning(
-                "Found %d checkpoint sources (%s). Multiple checkpoint sources may be redundant. "
-                "The pipeline will process them in sequence.",
-                len(sources),
-                ", ".join(sources),
-            )
-
-    def _suggest_missing_stages(self, roles: list[str | None]) -> None:
-        """Suggest potentially missing stages based on common patterns."""
-        has_source = "source" in roles
-        has_loader = "loader" in roles
-        has_modifier = "modifier" in roles
-
-        suggestions = []
-
-        if has_loader and not has_source:
-            suggestions.append(
-                "You have a loading stage but no source stage. "
-                "Consider adding a source stage (LocalSource, S3Source, etc.) to specify where to load from.",
-            )
-
-        if has_source and not has_loader:
-            suggestions.append(
-                "You have a source stage but no loading strategy. In a training run this is a "
-                "resume: Trainer.fit(ckpt_path=) loads the checkpoint. Add a loading stage "
-                "(WeightsOnlyLoader, TransferLearningLoader, ColdStartLoader) to start fresh "
-                "training state from the checkpoint instead.",
-            )
-
-        if has_modifier and not (has_source or has_loader):
-            suggestions.append(
-                "You have model modifiers but no checkpoint loading. "
-                "Modifiers work best when applied after loading a checkpoint. "
-                "Consider adding source and loading stages.",
-            )
-
-        if suggestions:
-            LOGGER.info("Pipeline composition suggestions:\n  • %s", "\n  • ".join(suggestions))
+            names = [type(stage).__name__ for stage in self.stages]
+            msg = f"Invalid checkpoint pipeline {names}: use the order source -> one loader -> modifiers."
+            raise CheckpointConfigError(msg, config_path="training.checkpoint")
 
     def execute(self, initial_context: CheckpointContext) -> CheckpointContext:
         """Execute the pipeline stages in sequence.
@@ -359,9 +274,6 @@ class CheckpointPipeline:
         which stages were executed and their results.
         """
         context = initial_context
-
-        # Perform environment health check before pipeline execution
-        self._perform_pre_execution_validation(context)
 
         for i, stage in enumerate(self.stages):
             stage_name = stage.__class__.__name__
@@ -563,62 +475,3 @@ class CheckpointPipeline:
         """
         stage_names = [s.__class__.__name__ for s in self.stages]
         return f"CheckpointPipeline(stages={stage_names}, continue_on_error={self.continue_on_error})"
-
-    def _perform_pre_execution_validation(self, context: CheckpointContext) -> None:
-        """Perform pre-execution health checks and validations.
-
-        This method runs lightweight validations before pipeline execution
-        to catch common configuration and environment issues early.
-
-        Parameters
-        ----------
-        context : CheckpointContext
-            The context about to be processed
-        """
-        try:
-            from .validation import CheckpointPipelineValidator
-
-            # Perform environment validation
-            env_results = CheckpointPipelineValidator.validate_environment_setup()
-
-            # Log any issues found
-            for issue in env_results.get("issues", []):
-                LOGGER.error("Environment issue: %s", issue)
-
-            for warning in env_results.get("warnings", []):
-                LOGGER.warning("Environment warning: %s", warning)
-
-            for info in env_results.get("info", []):
-                LOGGER.debug("Environment info: %s", info)
-
-            # Validate configuration if provided
-            if context.config and hasattr(context.config, "training"):
-                config_results = CheckpointPipelineValidator.validate_configuration(context.config)
-
-                # Log configuration issues
-                for issue in config_results.get("issues", []):
-                    LOGGER.error("Configuration issue: %s", issue)
-
-                for warning in config_results.get("warnings", []):
-                    LOGGER.warning("Configuration warning: %s", warning)
-
-                # Add validation results to context metadata
-                context.update_metadata(
-                    validation_environment_status=env_results.get("status", "unknown"),
-                    validation_config_status=config_results.get("status", "unknown"),
-                    validation_performed=True,
-                )
-            else:
-                context.update_metadata(
-                    validation_environment_status=env_results.get("status", "unknown"),
-                    validation_performed=True,
-                )
-
-        except ImportError:
-            # Validation module not available - this is ok, validation is optional
-            LOGGER.debug("Validation module not available, skipping pre-execution validation")
-            context.update_metadata(validation_performed=False, validation_skipped="module_unavailable")
-        except (ValueError, TypeError, AttributeError) as e:
-            # Don't fail pipeline execution due to validation errors
-            LOGGER.warning("Pre-execution validation failed: %s", e)
-            context.update_metadata(validation_performed=False, validation_error=str(e))

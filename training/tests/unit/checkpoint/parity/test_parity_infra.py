@@ -14,9 +14,8 @@ infrastructure: the :class:`CheckpointContext` contract
 (``validate_for_stage`` and ``__repr__``), the format-availability helper,
 the ``download_with_retry`` error-mapping paths, the ``CheckpointPipeline``
 orchestration branches (Hydra ``add_stage`` instantiation,
-``MemoryError`` propagation, completion markers, and the
-validation-import fallback), the post-run ``validate_pipeline_health``
-invariants, the ``ComponentCatalog`` discovery cache and suggestion paths,
+``MemoryError`` propagation and completion markers), the
+``ComponentCatalog`` discovery cache and suggestion paths,
 and the checkpoint exception message builders.
 
 Each test drives the real code path on small CPU objects with deterministic
@@ -27,7 +26,6 @@ proxy.
 
 from __future__ import annotations
 
-import sys
 import urllib.error
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -44,12 +42,10 @@ from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
 from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 from anemoi.training.checkpoint.exceptions import CheckpointSourceError
 from anemoi.training.checkpoint.exceptions import CheckpointTimeoutError
-from anemoi.training.checkpoint.exceptions import CheckpointValidationError
 from anemoi.training.checkpoint.formats import is_format_available
 from anemoi.training.checkpoint.pipeline import CheckpointPipeline
 from anemoi.training.checkpoint.sources import LocalSource
 from anemoi.training.checkpoint.utils import download_with_retry
-from anemoi.training.checkpoint.validation import validate_pipeline_health
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -234,47 +230,6 @@ def test_completed_markers_recorded_for_successful_stages() -> None:
 
     assert result.metadata["stage_0_MockStage"] == "completed"
     assert result.metadata["stage_1_MockStage"] == "completed"
-
-
-def test_pre_execution_validation_degrades_on_import_error() -> None:
-    """Pipeline degrades gracefully when the validation module import fails."""
-    pipeline = CheckpointPipeline([MockStage("only")])
-    context = CheckpointContext(model=nn.Linear(2, 2))
-
-    # Setting the module entry to None forces the local
-    # `from .validation import CheckpointPipelineValidator` to raise ImportError.
-    with patch.dict(sys.modules, {"anemoi.training.checkpoint.validation": None}):
-        result = pipeline.execute(context)
-
-    assert result.metadata["validation_performed"] is False
-    assert result.metadata["validation_skipped"] == "module_unavailable"
-
-
-# ---------------------------------------------------------------------------
-# validate_pipeline_health invariants
-# ---------------------------------------------------------------------------
-
-
-def test_non_string_stage_value_is_flagged() -> None:
-    """A stage_N_ metadata entry with a non-string value is flagged."""
-    context = CheckpointContext(model=nn.Linear(2, 2))
-    context.metadata["stage_0_X"] = 123
-
-    with pytest.raises(CheckpointValidationError) as exc:
-        validate_pipeline_health(context)
-
-    assert any("Stage entry 'stage_0_X' has non-string value" in err for err in exc.value.validation_errors)
-
-
-def test_config_validation_error_status_is_propagated() -> None:
-    """A configuration-validation 'error' status propagates to a health failure."""
-    context = CheckpointContext(model=nn.Linear(2, 2))
-    context.update_metadata(stage_0_Loading="completed", validation_config_status="error")
-
-    with pytest.raises(CheckpointValidationError) as exc:
-        validate_pipeline_health(context)
-
-    assert any("configuration validation" in err for err in exc.value.validation_errors)
 
 
 # ---------------------------------------------------------------------------

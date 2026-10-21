@@ -111,12 +111,7 @@ class CheckpointContext:
     temporary_files: list[Path] = field(default_factory=list)
 
     def __post_init__(self):
-        """Coerce ``checkpoint_path`` to a ``Path`` after initialization.
-
-        Structural-coherence checks (format/pl_module) live in
-        :func:`anemoi.training.checkpoint.validation.validate_pipeline_health`,
-        the single post-run validation home — they are not duplicated here.
-        """
+        """Coerce ``checkpoint_path`` to a ``Path`` after initialization."""
         from pathlib import Path
 
         if self.checkpoint_path is not None and not isinstance(self.checkpoint_path, Path):

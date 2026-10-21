@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Parity coverage for model modifiers and pipeline composition/validation.
+"""Parity coverage for model modifiers and pipeline composition.
 
 Every test drives the real checkpoint classes on CPU with synthetic models and
 in-memory (or tmp-path) checkpoints. No GPU, no network, no RNG-dependent
@@ -16,7 +16,6 @@ assertions.
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -24,12 +23,10 @@ import pytest
 import torch
 import torch.nn as nn
 
-from anemoi.training.checkpoint import validate_pipeline_health
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.base import PipelineStage
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-from anemoi.training.checkpoint.exceptions import CheckpointValidationError
 from anemoi.training.checkpoint.loading.base import LoadingStrategy
 from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
@@ -223,35 +220,6 @@ def test_empty_freeze_list_is_noop() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Pipeline composition warnings/suggestions
-# ---------------------------------------------------------------------------
-
-
-def test_empty_pipeline_warns_and_has_zero_length(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.WARNING):
-        pipeline = CheckpointPipeline([])
-
-    assert len(pipeline) == 0
-    assert any("no stages" in record.getMessage().lower() for record in caplog.records)
-
-
-def test_loader_without_source_suggests_adding_a_source(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.INFO):
-        CheckpointPipeline([WeightsOnlyLoader()])
-
-    info_messages = [record.getMessage() for record in caplog.records if record.levelno == logging.INFO]
-    assert any("source" in message.lower() for message in info_messages)
-
-
-def test_source_without_loader_suggests_adding_a_loading_stage(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.INFO):
-        CheckpointPipeline([LocalSource(path="model.ckpt")])
-
-    info_messages = [record.getMessage() for record in caplog.records if record.levelno == logging.INFO]
-    assert any("loading" in message.lower() for message in info_messages)
-
-
-# ---------------------------------------------------------------------------
 # Pipeline weights-loaded gate
 # ---------------------------------------------------------------------------
 
@@ -322,20 +290,6 @@ def test_stage_role_classifies_modifier_by_isinstance() -> None:
 
 def test_stage_role_returns_none_for_unrecognized_stage() -> None:
     assert CheckpointPipeline._stage_role(_UnknownStage()) is None
-
-
-# ---------------------------------------------------------------------------
-# Post-execution health validation
-# ---------------------------------------------------------------------------
-
-
-def test_health_check_flags_config_validation_error() -> None:
-    ctx = CheckpointContext()
-    ctx.update_metadata(stage_0_X="completed", validation_config_status="error")
-
-    with pytest.raises(CheckpointValidationError) as excinfo:
-        validate_pipeline_health(ctx)
-    assert any("configuration" in error.lower() for error in excinfo.value.validation_errors)
 
 
 # ---------------------------------------------------------------------------

@@ -197,9 +197,8 @@ class LoadingStrategy(PipelineStage):
         is detected.
         - ``CheckpointPipeline._verify_weights_loaded`` treats it as a
         gate and raises rather than train on random weights.
-        - ``validation.validate_pipeline_health`` treats it as a health finding.
         The trainer reads it to decide whether the transfer-learning validators have
-        anything to compare against. All three exempt a resume, where the weights
+        anything to compare against. Both exempt a resume, where the weights
         arrive at ``Trainer.fit(ckpt_path=)``. A strategy that forgets to call this
         therefore trips the gate.
 

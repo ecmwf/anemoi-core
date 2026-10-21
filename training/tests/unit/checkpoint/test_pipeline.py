@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -287,8 +286,10 @@ class TestCheckpointPipeline:
         assert result.metadata["stage_config_stage2"] == "processed"
 
 
-class TestComposition:
-    """Stage-composition validation: ordering/conflict violations raise at construction."""
+class TestStageOrder:
+    """The stage-order check: source -> one loader -> modifiers, raised at construction."""
+
+    _ORDER_ERROR = "use the order source -> one loader -> modifiers"
 
     @staticmethod
     def _source() -> object:
@@ -308,36 +309,45 @@ class TestComposition:
 
         return FreezingModifierStage(submodules_to_freeze=[])
 
-    def test_loader_before_source_raises(self) -> None:
+    @pytest.mark.parametrize(
+        "layout",
+        [
+            pytest.param("source loader modifier modifier", id="canonical"),
+            pytest.param("source loader", id="source-loader"),
+            pytest.param("source", id="source-only"),
+            pytest.param("loader modifier", id="loader-modifier"),
+            pytest.param("modifier", id="modifier-only"),
+            pytest.param("source source loader", id="two-sources"),
+            pytest.param("", id="empty"),
+        ],
+    )
+    def test_valid_orders_construct(self, layout: str) -> None:
+        make = {"source": self._source, "loader": self._loader, "modifier": self._modifier}
+        stages = [make[kind]() for kind in layout.split()]
+        assert len(CheckpointPipeline(stages)) == len(stages)
+
+    def test_stage_of_no_known_layer_is_not_placed(self) -> None:
+        stages = [MockStage("custom"), self._source(), self._loader(), MockStage("other"), self._modifier()]
+        assert len(CheckpointPipeline(stages)) == 5
+
+    def test_source_after_loader_raises(self) -> None:
         from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
-        with pytest.raises(CheckpointConfigError, match="comes after a loader"):
+        with pytest.raises(CheckpointConfigError, match=self._ORDER_ERROR):
             CheckpointPipeline([self._loader(), self._source()])
-
-    def test_two_loaders_raise(self) -> None:
-        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-
-        with pytest.raises(CheckpointConfigError, match="loading strategies"):
-            CheckpointPipeline([self._source(), self._loader(), self._loader()])
 
     def test_modifier_before_loader_raises(self) -> None:
         from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
-        with pytest.raises(CheckpointConfigError, match="comes before a loader"):
+        with pytest.raises(CheckpointConfigError, match=self._ORDER_ERROR):
             CheckpointPipeline([self._source(), self._modifier(), self._loader()])
 
-    def test_canonical_order_constructs(self) -> None:
-        pipeline = CheckpointPipeline([self._source(), self._loader(), self._modifier()])
-        assert len(pipeline) == 3
+    def test_two_loaders_raise(self) -> None:
+        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
-    def test_empty_pipeline_constructs(self) -> None:
-        assert len(CheckpointPipeline([])) == 0
-
-    def test_multiple_sources_warn_not_raise(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING):
-            pipeline = CheckpointPipeline([self._source(), self._source(), self._loader()])
-        assert len(pipeline) == 3
-        assert any("Multiple checkpoint sources" in record.getMessage() for record in caplog.records)
+        with pytest.raises(CheckpointConfigError, match=self._ORDER_ERROR) as exc_info:
+            CheckpointPipeline([self._source(), self._loader(), self._loader()])
+        assert "WeightsOnlyLoader" in str(exc_info.value)
 
 
 # --- a resolve-only source is not "random weights" ---------------------------------
@@ -354,14 +364,12 @@ def _write_checkpoint(tmp_path: Path) -> Path:
 def test_verify_weights_loaded_accepts_a_resolve_only_source(tmp_path: Path) -> None:
     """On a resume the source only resolves the file: the weights arrive at ``Trainer.fit(ckpt_path=)``.
 
-    The post-execution check must not mistake that for a loading failure, and the
-    health check must agree.
+    The post-execution check must not mistake that for a loading failure.
     """
     import torch
 
     from anemoi.training.checkpoint.sources.base import ResolveOnlySource
     from anemoi.training.checkpoint.sources.local import LocalSource
-    from anemoi.training.checkpoint.validation import validate_pipeline_health
 
     ckpt = _write_checkpoint(tmp_path)
     model = torch.nn.Linear(2, 2)
@@ -372,7 +380,6 @@ def test_verify_weights_loaded_accepts_a_resolve_only_source(tmp_path: Path) -> 
     assert result.checkpoint_path == ckpt.resolve()
     assert result.checkpoint_data is None
     assert not getattr(model, "weights_initialized", False)
-    assert validate_pipeline_health(result) is True
 
 
 def test_verify_weights_loaded_still_rejects_a_bare_source_without_loader(tmp_path: Path) -> None:
