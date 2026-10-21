@@ -130,7 +130,7 @@ Resume has nothing to resume from
    loading strategy (WeightsOnlyLoader / TransferLearningLoader / ColdStartLoader)
    to load only the weights.
 
-   CheckpointNotFoundError: Checkpoint not found: <checkpoints.root parent>/<run_id>/last.ckpt
+   CheckpointNotFoundError: Checkpoint not found: <checkpoints.root>/<run_id>/last.ckpt
 
 **What it means:** a ``training.checkpoint.source`` with no ``loading`` block,
 or with ``WarmStartLoader``, is a resume. PyTorch Lightning reads the file the

@@ -534,7 +534,7 @@ in the training.
 
 This is done by setting ``training.checkpoint.source`` to a ``RunIdSource``
 with the *run_id* of the run to restart. ``RunIdSource`` resolves that id to
-``<system.output.checkpoints.root>/../<run_id>/last.ckpt`` on the filesystem —
+``<system.output.checkpoints.root>/<run_id>/last.ckpt`` on the filesystem —
 it reads the run's checkpoint directory directly and does not fetch anything
 from MLflow. ``fork`` defaults to ``false`` (resume), so it can be omitted; a
 resume keeps the new checkpoints in the same folder as the old ones:
