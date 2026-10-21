@@ -41,8 +41,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 
+from pytorch_lightning.utilities import rank_zero_only
+
 from anemoi.training.checkpoint.sources.base import CheckpointSource
-from anemoi.training.checkpoint.sources.base import is_rank_zero
 from anemoi.training.checkpoint.sources.local import LocalSource
 
 if TYPE_CHECKING:
@@ -219,7 +220,7 @@ class RunIdSource(CheckpointSource):
         )
 
         if not path.exists():
-            if is_rank_zero():
+            if rank_zero_only.rank == 0:
                 msg = f"Could not find checkpoint for run '{self.run_id}': {path}"
                 raise RuntimeError(msg)
             LOGGER.warning("RunIdSource: checkpoint not found at %s; deferring the error to rank 0.", path)
@@ -230,7 +231,7 @@ class RunIdSource(CheckpointSource):
         # missing one: only rank 0 raises, other ranks defer, so a distributed run fails
         # cleanly on rank 0 instead of every rank raising out of the shared torch.load.
         if not os.access(path, os.R_OK):
-            if is_rank_zero():
+            if rank_zero_only.rank == 0:
                 msg = f"Checkpoint for run '{self.run_id}' is not readable: {path}"
                 raise RuntimeError(msg)
             LOGGER.warning("RunIdSource: checkpoint not readable at %s; deferring the error to rank 0.", path)

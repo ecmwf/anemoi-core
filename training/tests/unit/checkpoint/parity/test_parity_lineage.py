@@ -11,7 +11,7 @@
 
 These tests drive the trainer run-identity wiring (``_update_paths``,
 ``_check_dry_run``, ``run_id`` fall-through, ``_skip_lightning_restore``), the
-MLflow lineage tagging on resume/fork, the acquisition-layer rank-0 gate, the
+MLflow lineage tagging on resume/fork, the
 checkpoint builder error surface, and the seed-scaling rule. Each test exercises
 the real classes/functions on CPU with no network access; remote downloads are
 replaced with a synthetic writer, but the code under test always runs.
@@ -41,9 +41,6 @@ from anemoi.training.checkpoint.sources.run import RunIdSource
 from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.seeding import get_base_seed
-
-_RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
-
 
 # ---------------------------------------------------------------------------
 # _update_paths: lineage-append to the output paths (train.py:758-781)
@@ -351,55 +348,6 @@ def test_builder_malformed_source_target_raises_config_error() -> None:
         _build_and_run()
 
     assert "stage" in str(excinfo.value).lower()
-
-
-# ---------------------------------------------------------------------------
-# Acquisition-layer rank-0 gate (sources/base.py:is_rank_zero, used by run.py)
-# ---------------------------------------------------------------------------
-
-
-def _missing_run_context(tmp_path: Path) -> CheckpointContext:
-    root = tmp_path / "job" / "checkpoints"
-    return CheckpointContext(config=OmegaConf.create({"system": {"output": {"checkpoints": {"root": str(root)}}}}))
-
-
-def _clear_rank_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in _RANK_ENV_VARS:
-        monkeypatch.delenv(var, raising=False)
-
-
-def test_rank_env_priority_rank_beats_local_rank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear_rank_env(monkeypatch)
-    monkeypatch.setenv("RANK", "0")
-    monkeypatch.setenv("LOCAL_RANK", "1")
-    context = _missing_run_context(tmp_path)
-
-    # RANK is read first and stops the search: rank 0 -> missing checkpoint raises.
-    with pytest.raises(RuntimeError, match="run_missing"):
-        RunIdSource(run_id="run_missing").process(context)
-
-
-def test_rank_env_priority_slurm_procid_defers_when_only_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear_rank_env(monkeypatch)
-    monkeypatch.setenv("SLURM_PROCID", "1")
-    context = _missing_run_context(tmp_path)
-
-    result = RunIdSource(run_id="run_missing").process(context)
-    assert result.checkpoint_path is None
-
-
-@pytest.mark.parametrize("rank_value", ["abc", "-1"])
-def test_malformed_or_negative_rank_treated_as_rank_zero(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    rank_value: str,
-) -> None:
-    _clear_rank_env(monkeypatch)
-    monkeypatch.setenv("RANK", rank_value)
-    context = _missing_run_context(tmp_path)
-
-    with pytest.raises(RuntimeError, match="run_missing"):
-        RunIdSource(run_id="run_missing").process(context)
 
 
 def test_resolve_path_invariant_to_dataset_count() -> None:

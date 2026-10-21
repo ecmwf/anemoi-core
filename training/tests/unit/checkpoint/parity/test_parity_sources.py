@@ -13,8 +13,7 @@ These tests close verification gaps in the source layer that no other suite
 exercises: LocalSource path precedence / tilde-expansion / symlink resolution,
 the ``CheckpointNotFoundError`` suggestion branches, the torch.load error-type
 wrapping into ``CheckpointLoadError``, the ``weights_only=False`` guarantee,
-RunIdSource rank-detection fall-throughs (LOCAL_RANK / SLURM_PROCID /
-JSM_NAMESPACE_RANK / malformed / negative), the auxiliary-key Lightning branch
+the RunIdSource resolved-path metadata, the auxiliary-key Lightning branch
 in ``detect_format_from_data``, HTTPSource construction/validation and checksum
 handling, and the S3 URL-parsing / ``supports`` / URL-resolution pure logic.
 
@@ -35,6 +34,7 @@ from unittest.mock import patch
 import pytest
 import torch
 from omegaconf import OmegaConf
+from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
@@ -51,9 +51,6 @@ from anemoi.training.checkpoint.utils import calculate_checksum
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from collections.abc import Iterable
-
-_RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
 
 
 def _write_state_dict_ckpt(path: Path) -> Path:
@@ -65,12 +62,6 @@ def _write_state_dict_ckpt(path: Path) -> Path:
 
 def _run_config(root: Path) -> OmegaConf:
     return OmegaConf.create({"system": {"output": {"checkpoints": {"root": str(root)}}}})
-
-
-def _clear_rank_env(monkeypatch: pytest.MonkeyPatch, keep: Iterable[str] = ()) -> None:
-    for var in _RANK_ENV_VARS:
-        if var not in keep:
-            monkeypatch.delenv(var, raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -254,55 +245,8 @@ def test_checkpoint_not_found_error_is_deterministic(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# RunIdSource rank detection fall-through
+# RunIdSource metadata
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("rank_var", ["LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"])
-def test_run_source_defers_on_nonzero_rank_from_fallback_var(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    rank_var: str,
-) -> None:
-    """When RANK is unset, a non-zero fallback rank variable defers instead of raising."""
-    _clear_rank_env(monkeypatch)
-    monkeypatch.setenv(rank_var, "1")
-
-    context = CheckpointContext(config=_run_config(tmp_path / "job" / "checkpoints"))
-    result = RunIdSource(run_id="run_missing").process(context)
-
-    assert result.checkpoint_path is None
-    assert result.checkpoint_data is None
-
-
-def test_run_source_rank_precedence_rank_over_local_rank(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """RANK is read before LOCAL_RANK: RANK=1 defers even though LOCAL_RANK=0."""
-    _clear_rank_env(monkeypatch)
-    monkeypatch.setenv("RANK", "1")
-    monkeypatch.setenv("LOCAL_RANK", "0")
-
-    context = CheckpointContext(config=_run_config(tmp_path / "job" / "checkpoints"))
-    result = RunIdSource(run_id="run_missing").process(context)
-
-    assert result.checkpoint_path is None
-
-
-@pytest.mark.parametrize("rank_value", ["abc", "-1"])
-def test_run_source_invalid_rank_treated_as_rank_zero(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    rank_value: str,
-) -> None:
-    """A malformed or negative RANK is treated conservatively as rank 0 (raises on missing)."""
-    _clear_rank_env(monkeypatch)
-    monkeypatch.setenv("RANK", rank_value)
-
-    context = CheckpointContext(config=_run_config(tmp_path / "job" / "checkpoints"))
-    with pytest.raises(RuntimeError, match="run_missing"):
-        RunIdSource(run_id="run_missing").process(context)
 
 
 def test_run_source_sets_resolved_checkpoint_path_metadata(
@@ -310,7 +254,7 @@ def test_run_source_sets_resolved_checkpoint_path_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A resolved run checkpoint records its full path string in metadata."""
-    _clear_rank_env(monkeypatch)
+    monkeypatch.setattr(rank_zero_only, "rank", 0)
     root = tmp_path / "job" / "checkpoints"
     resolved = _write_state_dict_ckpt(tmp_path / "job" / "run_A" / "last.ckpt")
 

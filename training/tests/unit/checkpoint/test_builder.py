@@ -18,6 +18,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from pytorch_lightning.utilities import rank_zero_only
 
 import anemoi.training
 from anemoi.training.checkpoint.base import CheckpointContext
@@ -342,8 +343,7 @@ def test_resume_that_resolves_nothing_fails_on_rank_zero(monkeypatch: pytest.Mon
     a configuration error, not a fresh run: the marker would otherwise let the
     pipeline's weights check through and Lightning would receive ``ckpt_path=None``.
     """
-    for var in ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
-        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(rank_zero_only, "rank", 0)
     cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": f"{__name__}._NothingSource"}}}})
     pipeline = build_checkpoint_pipeline(cfg)
 
@@ -367,7 +367,7 @@ def test_resume_with_the_run_preset_and_no_run_id_names_the_key(tmp_path: Path) 
 
 def test_resume_that_resolves_nothing_defers_on_other_ranks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Non-zero ranks defer to rank 0's error, as the sources do, so the job fails once."""
-    monkeypatch.setenv("RANK", "1")
+    monkeypatch.setattr(rank_zero_only, "rank", 1)
     cfg = OmegaConf.create(
         {
             "training": {"checkpoint": {"source": {"_target_": _RUN_SOURCE, "run_id": "missing"}}},

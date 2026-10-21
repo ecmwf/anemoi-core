@@ -61,6 +61,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
+from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.training.checkpoint.base import PipelineStage
 
@@ -70,26 +71,6 @@ if TYPE_CHECKING:
     from anemoi.training.checkpoint.base import CheckpointContext
 
 LOGGER = logging.getLogger(__name__)
-
-#: Launcher rank variables, in the exact priority order of
-#: ``lightning_fabric.utilities.rank_zero._get_rank()``, so rank-0 detection here
-#: agrees with Lightning's.
-RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
-
-
-def is_rank_zero() -> bool:
-    """Whether this process is rank 0, using Lightning's own rank detection.
-
-    No rank variable set (single process, unit test) counts as rank 0, as does a
-    malformed one, so a missing-checkpoint error is never silently swallowed.
-    """
-    from lightning_fabric.utilities.rank_zero import _get_rank
-
-    try:
-        rank = _get_rank()
-    except ValueError:  # a launcher variable that is not an integer
-        return True
-    return rank is None or rank <= 0
 
 
 def source_class_from_config(source_cfg: Any) -> type[CheckpointSource] | None:
@@ -427,7 +408,7 @@ class ResolveOnlySource(CheckpointSource):
             LOGGER.info("Resume checkpoint resolved to %s; Trainer.fit(ckpt_path=) performs the load", path)
             return context
 
-        if is_rank_zero():
+        if rank_zero_only.rank == 0:
             from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
             msg = (

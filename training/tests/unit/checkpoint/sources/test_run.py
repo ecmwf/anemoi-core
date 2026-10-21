@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 import torch
 from omegaconf import OmegaConf
+from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
@@ -110,9 +111,8 @@ def test_run_source_missing_checkpoint_raises_on_rank_zero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A missing run checkpoint raises RuntimeError on rank 0 (default, no rank env)."""
-    for var in ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
-        monkeypatch.delenv(var, raising=False)
+    """A missing run checkpoint raises RuntimeError on rank 0."""
+    monkeypatch.setattr(rank_zero_only, "rank", 0)
     context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
     with pytest.raises(RuntimeError, match="run_missing"):
         RunIdSource(run_id="run_missing").process(context)
@@ -123,7 +123,7 @@ def test_run_source_missing_checkpoint_defers_on_nonzero_rank(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Non-rank-0 defers (warns, pass-through) rather than raising."""
-    monkeypatch.setenv("RANK", "1")
+    monkeypatch.setattr(rank_zero_only, "rank", 1)
     context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
     result = RunIdSource(run_id="run_missing").process(context)
     assert result.checkpoint_path is None
@@ -138,8 +138,7 @@ def test_run_source_unreadable_checkpoint_raises_on_rank_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An existing-but-unreadable checkpoint raises on rank 0, like a missing one."""
-    for var in ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
-        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(rank_zero_only, "rank", 0)
     ckpt = _write_ckpt(tmp_path / "job" / "run_locked" / "last.ckpt")
     ckpt.chmod(0o000)
     try:
@@ -159,7 +158,7 @@ def test_run_source_unreadable_checkpoint_defers_on_nonzero_rank(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Non-rank-0 defers on an unreadable checkpoint rather than every rank raising."""
-    monkeypatch.setenv("RANK", "1")
+    monkeypatch.setattr(rank_zero_only, "rank", 1)
     ckpt = _write_ckpt(tmp_path / "job" / "run_locked" / "last.ckpt")
     ckpt.chmod(0o000)
     try:
@@ -187,8 +186,7 @@ def test_run_source_resolve_publishes_path_without_loading(
 
     This is the step a resume runs: ``Trainer.fit(ckpt_path=)`` performs the load.
     """
-    for var in ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
-        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(rank_zero_only, "rank", 0)
     root = tmp_path / "job" / "checkpoints"
     ckpt = _write_ckpt(tmp_path / "job" / "run_A" / "last.ckpt")
 
@@ -209,7 +207,7 @@ def test_run_source_resolve_publishes_path_without_loading(
 
 def test_run_source_resolve_defers_on_nonzero_rank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A missing checkpoint on a non-zero rank resolves to None; rank 0 owns the error."""
-    monkeypatch.setenv("RANK", "1")
+    monkeypatch.setattr(rank_zero_only, "rank", 1)
     context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
 
     assert RunIdSource(run_id="run_missing").resolve(context) is None
@@ -238,7 +236,7 @@ def test_deferring_rank_reports_rank_zero_not_a_corrupted_file(
 
     root = tmp_path / "job" / "checkpoints"
     context = CheckpointContext(config=_config(root), model=torch.nn.Linear(2, 2))
-    monkeypatch.setattr("anemoi.training.checkpoint.sources.run.is_rank_zero", lambda: False)
+    monkeypatch.setattr(rank_zero_only, "rank", 1)
 
     if unreadable:
         run_dir = root.parent / "run-x"
