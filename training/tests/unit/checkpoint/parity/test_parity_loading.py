@@ -205,6 +205,20 @@ def test_cold_start_records_pretrained_from_path_value() -> None:
     assert result.metadata["pretrained_from"] == "/path/to/pretrained.ckpt"
 
 
+def test_cold_start_records_the_source_url_when_no_local_path_is_published() -> None:
+    """A remote source deletes its download, so its URL is the recorded provenance."""
+    model = _LinearModel()
+    context = CheckpointContext(
+        model=model,
+        checkpoint_data={"state_dict": _exact_state_dict(model)},
+        metadata={"source_url": "https://example.com/pretrained.ckpt"},
+    )
+
+    result = ColdStartLoader().process(context)
+
+    assert result.metadata["pretrained_from"] == "https://example.com/pretrained.ckpt"
+
+
 def test_cold_start_records_pretrained_from_none_when_path_unset() -> None:
     model = _LinearModel()
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": _exact_state_dict(model)})

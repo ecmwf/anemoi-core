@@ -406,8 +406,11 @@ class ColdStartLoader(WeightsOnlyLoader):
         context.metadata["epoch"] = 0
         context.metadata["global_step"] = 0
         context.metadata["loading_strategy"] = "cold_start"
-        context.metadata["pretrained_from"] = str(context.checkpoint_path) if context.checkpoint_path else None
+        # A remote source deletes its download and publishes no checkpoint_path;
+        # its URL is the provenance worth recording then.
+        pretrained_from = context.checkpoint_path or context.metadata.get("source_url")
+        context.metadata["pretrained_from"] = str(pretrained_from) if pretrained_from else None
 
-        LOGGER.info("Cold start: training state reset, pretrained from %s", context.checkpoint_path)
+        LOGGER.info("Cold start: training state reset, pretrained from %s", pretrained_from)
 
         return context
