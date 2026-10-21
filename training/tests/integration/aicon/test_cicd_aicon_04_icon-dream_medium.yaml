@@ -188,7 +188,7 @@ training:
     val: 32.0
     algorithm: value
   max_epochs: null
-  max_steps: 20 # reduced for CI/CD test.
+  max_steps: 4 # reduced for CI/CD test.
   optimization:
     lr: 0.0001
     optimizer:
@@ -198,7 +198,7 @@ training:
       _target_: timm.scheduler.CosineLRScheduler
       lr_min: 3.0e-8
       t_initial: ${training.max_steps}
-      warmup_t: 1000
+      warmup_t: 1 # reduced for CI/CD test.
       t_in_epochs: false
     pl_lr_scheduler:
       interval: step
@@ -581,7 +581,7 @@ diagnostics:
       trace_rank0_only: False #set to true and it will profile rank 0 only. Reads SLURM_PROC_ID so won't work when not running via Slurm
     time:
       enabled: True
-      verbose: False #If true, output every action the profiler caputres, otherwise output a subset defined in PROFILER_ACTIONS at the top of aifs/diagnostics/profiler.py
+      verbose: False #If true, output every action the profiler captures, otherwise output a subset defined in PROFILER_ACTIONS at the top of aifs/diagnostics/profiler.py
     speed:
       enabled: True
     system:
@@ -607,7 +607,7 @@ diagnostics:
       num_models_saved: 3 # If set to k, saves the 'last' k model weights in the training.
 
     every_n_epochs:
-      save_frequency: 1
+      save_frequency: 3 # increased for CI/CD test.
       num_models_saved: 3 # If set to -1, all checkpoints are kept ensuring runs can be continued/forked at any point in the training process
 
     every_n_train_steps:
