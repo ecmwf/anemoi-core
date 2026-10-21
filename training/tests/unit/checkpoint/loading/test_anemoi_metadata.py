@@ -38,3 +38,23 @@ def test_preserves_ckpt_model_name_to_index() -> None:
     result = loader.process(context)
 
     assert result.model._ckpt_model_name_to_index == {"era5": name_to_index}
+
+
+def test_weights_only_sets_ckpt_variables_metadata() -> None:
+    """The loader also sets ``_ckpt_variables_metadata``. The checkpoint hyper_parameters stay unchanged."""
+    model = ModelWithMetadata()
+    variables_metadata = {"2t": {"units": "K"}}
+    hyper_parameters = {
+        "data_indices": {"era5": type("obj", (), {"name_to_index": {"2t": 0}})()},
+        "metadata": {"dataset": {"era5": {"variables_metadata": variables_metadata}}},
+    }
+    checkpoint_data = {
+        "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
+        "hyper_parameters": hyper_parameters,
+    }
+
+    context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
+    WeightsOnlyLoader().process(context)
+
+    assert model._ckpt_variables_metadata == {"era5": variables_metadata}
+    assert context.checkpoint_data["hyper_parameters"] is hyper_parameters

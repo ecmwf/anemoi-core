@@ -8,13 +8,16 @@
 # nor does it submit to any jurisdiction.
 
 
+import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.train.train import AnemoiTrainer
 
@@ -138,6 +141,8 @@ def test_fork_run_source(trainer_factory: AnemoiTrainer, tmp_checkpoint_factory:
 
     assert trainer.start_from_checkpoint is True
     assert trainer.run_id != parent_run_id
+    # MlFlowSync reads the fork lineage from the config.
+    assert trainer.config.training.fork_run_id == parent_run_id
 
 
 def test_local_source_is_start_from_checkpoint(
@@ -168,3 +173,83 @@ def test_no_source_is_fresh_run(
 
     assert trainer.start_from_checkpoint is False
     assert trainer.last_checkpoint is None
+    # A fresh run gets a new uuid4, and the profiler and MlFlowSync read it from the config.
+    assert uuid.UUID(trainer.run_id).version == 4
+    assert trainer.config.training.run_id == trainer.run_id
+
+
+# --- output paths and dry run, tested on a minimal ``self`` ---
+
+
+@pytest.mark.parametrize(
+    ("run_id", "fork_run_id", "server2server", "expected_checkpoints", "expected_plots"),
+    [
+        ("run-abc", None, None, Path("/base/ckpts", "run-abc"), Path("/base/plots", "run-abc")),
+        (None, "fork-999", None, Path("/base/ckpts", "fork-999"), "/base/plots"),
+        (
+            "local-run",
+            None,
+            "remote-parent",
+            Path("/base/ckpts", "remote-parent"),
+            Path("/base/plots", "remote-parent"),
+        ),
+    ],
+    ids=["resume", "fork-changes-only-checkpoints", "server2server-wins"],
+)
+def test_update_paths_adds_the_run_id(
+    run_id: str | None,
+    fork_run_id: str | None,
+    server2server: str | None,
+    expected_checkpoints: Path,
+    expected_plots: Path | str,
+) -> None:
+    """The run id goes into the checkpoint and plot paths, so a later resume finds the checkpoints."""
+    trainer = SimpleNamespace(
+        run_id=run_id,
+        parent_run_server2server=server2server,
+        _run_identity=(run_id, fork_run_id),
+        _resume_run_id=run_id,
+        _fork_run_id=fork_run_id,
+        config=OmegaConf.create(
+            {"system": {"output": {"checkpoints": {"root": "/base/ckpts"}, "plots": "/base/plots"}}, "training": {}},
+        ),
+    )
+
+    AnemoiTrainer._update_paths(trainer)
+
+    assert trainer.config.system.output.checkpoints.root == expected_checkpoints
+    assert trainer.config.system.output.plots == expected_plots
+
+
+@pytest.mark.parametrize(
+    ("rank", "fork_run_id", "expected_start_from_checkpoint"),
+    [(0, None, False), (1, None, False), (0, "fork-1", True)],
+    ids=["rank-0", "other-rank", "fork"],
+)
+def test_check_dry_run_for_a_dry_parent(
+    monkeypatch: pytest.MonkeyPatch,
+    rank: int,
+    fork_run_id: str | None,
+    expected_start_from_checkpoint: bool,
+) -> None:
+    """A dry MLflow parent stops the checkpoint load on all ranks. A fork still loads.
+
+    If only rank 0 stopped the load, the other ranks would fail to find a checkpoint.
+    """
+    monkeypatch.setattr(rank_zero_only, "rank", rank)
+    trainer = SimpleNamespace(
+        start_from_checkpoint=True,
+        logger=SimpleNamespace(logger_name="mlflow"),
+        mlflow_logger=SimpleNamespace(_parent_dry_run=True),
+        _run_identity=(None, fork_run_id),
+        _resume_run_id=None,
+        _fork_run_id=fork_run_id,
+        config=OmegaConf.create(
+            {"system": {"output": {"checkpoints": {"root": "/nonexistent/checkpoint/dir"}}}, "training": {}},
+        ),
+    )
+
+    AnemoiTrainer._check_dry_run(trainer)
+
+    assert trainer.dry_run is True
+    assert trainer.start_from_checkpoint is expected_start_from_checkpoint

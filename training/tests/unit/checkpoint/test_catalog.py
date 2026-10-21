@@ -20,6 +20,7 @@ from anemoi.training.checkpoint.catalog import ComponentCatalog
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from unittest.mock import MagicMock
 
 
@@ -161,3 +162,27 @@ class TestComponentCatalog:
 
         assert "Unknown model modifier: 'freeze'" in str(exc_info.value)
         assert "no modifiers are currently available" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("lookup", "name", "suggestion"),
+    [
+        (ComponentCatalog.get_source_target, "loca", "local"),
+        (ComponentCatalog.get_loader_target, "weight", "weights_only"),
+    ],
+)
+def test_unknown_name_lists_available_names_and_suggests_a_match(
+    lookup: Callable[[str], str],
+    name: str,
+    suggestion: str,
+) -> None:
+    """A typo in a component name gives the available names and a suggestion."""
+    ComponentCatalog._sources = None
+    ComponentCatalog._loaders = None
+
+    with pytest.raises(CheckpointConfigError) as exc_info:
+        lookup(name)
+
+    message = str(exc_info.value)
+    assert "Available" in message
+    assert f"Did you mean: {suggestion}" in message

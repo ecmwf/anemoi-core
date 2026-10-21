@@ -197,3 +197,96 @@ def test_mlflow_schema_covers_logger_init_params() -> None:
 
     missing = logger_params - schema_fields
     assert not missing, f"MlflowSchema is missing fields for logger params: {missing}"
+
+
+# --- run lineage on resume and fork, in an offline file store ---
+
+
+def _lineage_parent(save_dir: Path, **params: str) -> str:
+    """Create a finished parent run. A ``metadata.offline_run_id`` param marks a server2server run."""
+    import mlflow
+
+    mlflow.set_tracking_uri(f"file://{save_dir}")
+    mlflow.set_experiment("lineage")
+    with mlflow.start_run(tags={"server2server": "True"} if params else {}):
+        for key, value in params.items():
+            mlflow.log_param(key, value)
+        return mlflow.active_run().info.run_id
+
+
+def _lineage_logger(save_dir: Path, **kwargs: object) -> AnemoiMLflowLogger:
+    return AnemoiMLflowLogger(
+        experiment_name="lineage",
+        offline=True,
+        tracking_uri=None,
+        authentication=False,
+        save_dir=str(save_dir),
+        **kwargs,
+    )
+
+
+def _tags(save_dir: Path, run_id: str) -> dict[str, str]:
+    import mlflow
+
+    return mlflow.MlflowClient(f"file://{save_dir}").get_run(run_id).data.tags
+
+
+def test_resume_creates_a_child_run_linked_to_the_parent(tmp_path_factory: pytest.TempPathFactory) -> None:
+    save_dir = tmp_path_factory.mktemp("mlruns")
+    parent = _lineage_parent(save_dir)
+
+    child = _lineage_logger(save_dir, run_id=parent, fork_run_id=None).run_id
+
+    tags = _tags(save_dir, child)
+    assert child != parent
+    assert tags.get("resumedRun") == "True"
+    assert tags.get("mlflow.parentRunId") == parent
+
+
+def test_resume_continues_the_parent_run_when_child_runs_are_disabled(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    import mlflow
+
+    save_dir = tmp_path_factory.mktemp("mlruns")
+    parent = _lineage_parent(save_dir)
+
+    logger = _lineage_logger(save_dir, run_id=parent, fork_run_id=None, on_resume_create_child=False)
+
+    assert logger.run_id == parent
+    assert "mlflow.parentRunId" not in logger.tags
+    assert mlflow.MlflowClient(f"file://{save_dir}").get_run(parent).info.status == "RUNNING"
+
+
+def test_fork_records_the_parent_run(tmp_path_factory: pytest.TempPathFactory) -> None:
+    save_dir = tmp_path_factory.mktemp("mlruns")
+    parent = _lineage_parent(save_dir)
+
+    fork = _lineage_logger(save_dir, run_id=None, fork_run_id=parent).run_id
+
+    tags = _tags(save_dir, fork)
+    assert tags.get("forkedRun") == "True"
+    assert tags.get("forkedRunId") == parent
+
+
+@pytest.mark.parametrize(
+    ("resume", "attribute"),
+    [(True, "_parent_run_server2server"), (False, "_fork_run_server2server")],
+    ids=["resume", "fork"],
+)
+def test_server2server_parent_gives_the_offline_run_id(
+    tmp_path_factory: pytest.TempPathFactory,
+    resume: bool,
+    attribute: str,
+) -> None:
+    """For a run synced from an offline server, the logger finds the original offline run id."""
+    save_dir = tmp_path_factory.mktemp("mlruns")
+    parent = _lineage_parent(save_dir, **{"metadata.offline_run_id": "origin-run"})
+
+    logger = _lineage_logger(
+        save_dir,
+        run_id=parent if resume else None,
+        fork_run_id=None if resume else parent,
+    )
+
+    assert getattr(logger, attribute) == "origin-run"

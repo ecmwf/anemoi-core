@@ -8,14 +8,19 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from pathlib import Path
 
 import pytest
+import torch
 import torch.nn as nn
 
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.base import PipelineStage
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
 from anemoi.training.checkpoint.modifiers.freezing import FreezingModifierStage
+from anemoi.training.checkpoint.pipeline import CheckpointPipeline
+from anemoi.training.checkpoint.sources.local import LocalSource
 
 
 class SimpleModel(nn.Module):
@@ -207,15 +212,59 @@ def test_freezing_metadata_accumulates_across_modifiers() -> None:
     assert applied[1]["submodules"] == ["decoder"]
 
 
-def test_freezing_metadata_includes_param_counts() -> None:
-    model = SimpleModel()
-    adapter = FreezingModifierStage(submodules_to_freeze=["encoder"])
-    context = CheckpointContext(model=model)
-    result = adapter.process(context)
+def test_freezing_several_submodules_records_param_counts() -> None:
+    """One stage freezes each listed submodule and records its parameter count and the total."""
+    model = NestedModel()
+    expected = {"processor": len(list(model.processor.parameters())), "head": len(list(model.head.parameters()))}
 
-    meta = result.metadata.get("modifier", result.metadata.get("modifiers_applied", {}))
-    meta_str = str(meta).lower()
-    assert "frozen" in meta_str or "parameters" in meta_str
+    result = FreezingModifierStage(submodules_to_freeze=["processor", "head"]).process(CheckpointContext(model=model))
+
+    assert not any(p.requires_grad for p in model.parameters())
+    entry = result.metadata["modifiers_applied"][0]
+    assert entry["type"] == "freezing"
+    assert [record["name"] for record in entry["frozen_modules"]] == ["processor", "head"]
+    assert {record["name"]: record["frozen_params"] for record in entry["frozen_modules"]} == expected
+    assert entry["total_frozen_params"] == sum(expected.values())
+
+
+def test_freezing_empty_list_is_a_noop() -> None:
+    model = SimpleModel()
+
+    result = FreezingModifierStage(submodules_to_freeze=[]).process(CheckpointContext(model=model))
+
+    assert all(p.requires_grad for p in model.parameters())
+    assert "modifiers_applied" not in result.metadata
+
+
+def test_freezing_after_transfer_learning_in_a_pipeline(tmp_path: Path) -> None:
+    """Source, transfer learning and freezing run together. Each stage records its result."""
+    ckpt_path = tmp_path / "pretrained.ckpt"
+    torch.save(
+        {
+            "state_dict": {
+                "encoder.weight": torch.randn(7, 10),  # shape mismatch: the model has (5, 10)
+                "encoder.bias": torch.randn(7),
+                "decoder.weight": torch.randn(3, 5),
+                "decoder.bias": torch.randn(3),
+            },
+        },
+        ckpt_path,
+    )
+    pipeline = CheckpointPipeline(
+        [
+            LocalSource(path=str(ckpt_path)),
+            TransferLearningLoader(skip_mismatched=True),
+            FreezingModifierStage(submodules_to_freeze=["encoder"]),
+        ],
+    )
+
+    result = pipeline.execute(CheckpointContext(model=SimpleModel()))
+
+    assert not any(p.requires_grad for p in result.model.encoder.parameters())
+    assert all(p.requires_grad for p in result.model.decoder.parameters())
+    assert "decoder.weight" in result.metadata["transferred_params"]
+    assert result.metadata["skipped_params"]["encoder.weight"].startswith("Shape mismatch")
+    assert result.metadata["modifiers_applied"][0]["frozen_modules"][0]["name"] == "encoder"
 
 
 class WrappedModel(nn.Module):

@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import argparse
 import pickle
 from typing import TYPE_CHECKING
 
@@ -112,6 +113,38 @@ class TestLocalSourceProcess:
             source.process(context)
 
         assert missing.name in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        ("missing", "hint"),
+        [("missing.ckpt", "similar files"), ("no_such_dir/model.ckpt", "Directory does not exist")],
+        ids=["similar-files", "missing-directory"],
+    )
+    def test_file_not_found_gives_a_hint(self, source: LocalSource, tmp_path: Path, missing: str, hint: str) -> None:
+        """The error tells the user about other checkpoints in the directory, or about a missing directory."""
+        (tmp_path / "epoch_1.ckpt").write_bytes(b"x")
+
+        with pytest.raises(CheckpointNotFoundError, match=hint):
+            source.process(CheckpointContext(checkpoint_path=tmp_path / missing))
+
+    def test_load_lightning_checkpoint_with_non_tensor_metadata(self, source: LocalSource, tmp_path: Path) -> None:
+        """The source loads a checkpoint that ``torch.load(weights_only=True)`` rejects.
+
+        Lightning checkpoints contain Python objects in ``hyper_parameters``.
+        """
+        path = _save_checkpoint(
+            tmp_path / "lightning.ckpt",
+            {
+                "pytorch-lightning_version": "2.2.0",
+                "hyper_parameters": {"config": argparse.Namespace(lr=1e-4)},
+                "state_dict": {"layer.weight": torch.zeros(2, 2)},
+            },
+        )
+        with pytest.raises(pickle.UnpicklingError):
+            torch.load(path, weights_only=True, map_location="cpu")
+
+        result = source.process(CheckpointContext(checkpoint_path=path))
+
+        assert result.checkpoint_data["hyper_parameters"]["config"].lr == 1e-4
 
     def test_invalid_file_raises(self, source: LocalSource, tmp_path: Path) -> None:
         bad_file = tmp_path / "garbage.ckpt"

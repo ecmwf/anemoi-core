@@ -14,8 +14,10 @@ import logging
 import pytest
 import torch
 import torch.nn as nn
+from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.base import CheckpointContext
+from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
 from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
 
 
@@ -165,3 +167,43 @@ def test_transfer_learning_is_quiet_when_everything_transfers(caplog: pytest.Log
 
     assert _warnings(caplog) == []
     assert result.metadata["skipped_params"] == {}
+
+
+def test_transfer_learning_without_skip_mismatched_raises_on_a_shape_mismatch() -> None:
+    source_state = {"shared.weight": torch.randn(7, 10), "shared.bias": torch.randn(5)}
+    context = CheckpointContext(model=TargetModel(), checkpoint_data={"state_dict": source_state})
+
+    with pytest.raises(CheckpointIncompatibleError, match="Shape mismatch"):
+        TransferLearningLoader(skip_mismatched=False).process(context)
+
+
+def test_transfer_learning_without_skip_mismatched_skips_a_missing_key() -> None:
+    """``skip_mismatched=False`` rejects only shape mismatches. A key that is not in the model is skipped."""
+    target = TargetModel()
+    source_state = {
+        "shared.weight": torch.randn(5, 10),
+        "shared.bias": torch.randn(5),
+        "old_head.weight": torch.randn(3, 5),
+    }
+    context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
+
+    result = TransferLearningLoader(skip_mismatched=False).process(context)
+
+    assert torch.equal(target.shared.weight, source_state["shared.weight"])
+    assert result.metadata["skipped_params"]["old_head.weight"] == "Key not in target"
+
+
+def test_transfer_learning_does_not_warn_about_different_hparams(caplog: pytest.LogCaptureFixture) -> None:
+    """Transfer learning expects a different model config, so it does not warn about it."""
+    target = TargetModel()
+    checkpoint = {
+        "state_dict": {key: torch.randn_like(value) for key, value in target.state_dict().items()},
+        "hyper_parameters": {"config": {"model": {"num_channels": 64}}},
+    }
+    config = OmegaConf.create({"model": {"num_channels": 128}})
+    context = CheckpointContext(model=target, checkpoint_data=checkpoint, config=config)
+
+    with caplog.at_level(logging.WARNING):
+        TransferLearningLoader(skip_mismatched=True).process(context)
+
+    assert "hparams differ" not in caplog.text

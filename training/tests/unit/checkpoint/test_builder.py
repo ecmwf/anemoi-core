@@ -18,9 +18,9 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 import anemoi.training
-from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
 from anemoi.training.checkpoint.builder import resumes_via_lightning
@@ -446,3 +446,25 @@ def test_unresolvable_source_target_carries_no_identity_and_is_left_for_the_buil
     assert run_identity_from_config(cfg) == (None, None)
     with pytest.raises(CheckpointConfigError):
         build_checkpoint_pipeline(cfg, parent_run_server2server="remote-parent")
+
+
+@pytest.mark.parametrize("preset", ["config", "lam", "multi", "stretched", "ensemble_crps"])
+def test_preset_composes_with_a_run_source_overlay(preset: str) -> None:
+    """Each shipped preset accepts the documented resume overlay and gives a valid pipeline."""
+    from hydra import compose
+    from hydra import initialize_config_module
+
+    from anemoi.training.schemas.training import CheckpointPipelineSchema
+
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config"):
+        cfg = compose(
+            config_name=preset,
+            overrides=["training/checkpoint/source=run", "+training.checkpoint.source.run_id=abc123"],
+        )
+
+    CheckpointPipelineSchema(**OmegaConf.to_container(cfg.training.checkpoint, resolve=True))
+    pipeline = build_checkpoint_pipeline(cfg)
+
+    assert [type(stage).__name__ for stage in pipeline.stages] == ["ResolveOnlySource"]
+    assert isinstance(pipeline.stages[0].source, RunIdSource)
+    assert pipeline.stages[0].source.run_id == "abc123"

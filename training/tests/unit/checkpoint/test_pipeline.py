@@ -383,3 +383,77 @@ def test_verify_weights_loaded_still_rejects_a_bare_source_without_loader(tmp_pa
 
     with pytest.raises(CheckpointLoadError, match="Refusing to proceed with random weights"):
         pipeline.execute(CheckpointContext(model=torch.nn.Linear(2, 2)))
+
+
+# --- stage roles come from the class, not the name ---
+
+
+def _unconventionally_named_stages() -> tuple[PipelineStage, PipelineStage, PipelineStage]:
+    """Return a source, a loader and a modifier whose names do not end in Source, Loader or Modifier."""
+    from anemoi.training.checkpoint.loading.base import LoadingStrategy
+    from anemoi.training.checkpoint.modifiers.base import ModelModifier
+    from anemoi.training.checkpoint.sources.base import CheckpointSource
+
+    class Fetcher(CheckpointSource):
+        def process(self, context: CheckpointContext) -> CheckpointContext:
+            return context
+
+    class Restorer(LoadingStrategy):
+        def process(self, context: CheckpointContext) -> CheckpointContext:
+            return context
+
+    class LoRAAdapter(ModelModifier):
+        def process(self, context: CheckpointContext) -> CheckpointContext:
+            return context
+
+    return Fetcher(), Restorer(), LoRAAdapter()
+
+
+@pytest.mark.parametrize(
+    ("order", "valid"),
+    [((0, 1, 2), True), ((1, 0, 2), False), ((0, 2, 1), False)],
+    ids=["source-loader-modifier", "loader-before-source", "modifier-before-loader"],
+)
+def test_stage_order_check_uses_the_stage_class(order: tuple[int, ...], valid: bool) -> None:
+    """The order check finds the role of a stage from its base class, not from its name."""
+    from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+    stages = _unconventionally_named_stages()
+    ordered = [stages[i] for i in order]
+
+    if valid:
+        assert len(CheckpointPipeline(ordered)) == 3
+    else:
+        with pytest.raises(CheckpointConfigError):
+            CheckpointPipeline(ordered)
+
+
+# --- continue_on_error does not hide fatal failures ---
+
+
+class _MemoryErrorStage(PipelineStage):
+    def process(self, context: CheckpointContext) -> CheckpointContext:  # noqa: ARG002
+        msg = "out of memory"
+        raise MemoryError(msg)
+
+
+def test_continue_on_error_does_not_hide_a_memory_error() -> None:
+    import torch
+
+    pipeline = CheckpointPipeline([_MemoryErrorStage()], continue_on_error=True)
+
+    with pytest.raises(MemoryError):
+        pipeline.execute(CheckpointContext(model=torch.nn.Linear(2, 2)))
+
+
+def test_continue_on_error_does_not_hide_unloaded_weights(tmp_path: Path) -> None:
+    """A source without a loader raises, also with ``continue_on_error``. Else training starts from random weights."""
+    import torch
+
+    from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+    from anemoi.training.checkpoint.sources.local import LocalSource
+
+    pipeline = CheckpointPipeline([LocalSource(path=_write_checkpoint(tmp_path))], continue_on_error=True)
+
+    with pytest.raises(CheckpointLoadError, match="Refusing to proceed with random weights"):
+        pipeline.execute(CheckpointContext(model=torch.nn.Linear(2, 2)))
