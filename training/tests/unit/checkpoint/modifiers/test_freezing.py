@@ -220,17 +220,6 @@ def test_freezing_metadata_accumulates_across_modifiers() -> None:
     assert applied[1]["submodules"] == ["decoder"]
 
 
-def test_freezing_metadata_includes_param_counts() -> None:
-    model = SimpleModel()
-    adapter = FreezingModifierStage(submodules_to_freeze=["encoder"])
-    context = CheckpointContext(model=model)
-    result = adapter.process(context)
-
-    meta = result.metadata.get("modifier", result.metadata.get("modifiers_applied", {}))
-    meta_str = str(meta).lower()
-    assert "frozen" in meta_str or "parameters" in meta_str
-
-
 class WrappedModel(nn.Module):
     """Mirrors the real nesting: LightningModule -> interface -> graph model.
 
@@ -338,3 +327,47 @@ def test_freezing_preset_example_path_freezes_the_graph_model_child() -> None:
 
     assert result.model.model.model.encoder["data"].weight.requires_grad is False
     assert result.model.model.model.decoder["data"].weight.requires_grad is True
+
+
+class ThreeChildModel(nn.Module):
+    """Three freezable children plus one unlisted child that must stay trainable."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.encoder = nn.Linear(10, 5)
+        self.decoder = nn.Linear(5, 3)
+        self.head = nn.Linear(3, 2)
+        self.extra = nn.Linear(2, 2)
+
+
+def test_freezing_several_submodules_records_one_entry_with_per_module_counts() -> None:
+    """One stage freezing several submodules writes one record: per-module counts and their total."""
+    model = ThreeChildModel()
+    names = ["encoder", "decoder", "head"]
+    expected = {name: sum(p.requires_grad for p in model.get_submodule(name).parameters()) for name in names}
+
+    result = FreezingModifierStage(submodules_to_freeze=names).process(CheckpointContext(model=model))
+
+    for name in names:
+        assert all(not p.requires_grad for p in result.model.get_submodule(name).parameters())
+    assert all(p.requires_grad for p in result.model.extra.parameters())
+
+    applied = result.metadata["modifiers_applied"]
+    assert len(applied) == 1
+    entry = applied[0]
+    assert entry["type"] == "freezing"
+    assert entry["submodules"] == names
+    assert [record["name"] for record in entry["frozen_modules"]] == names
+    assert {record["name"]: record["frozen_params"] for record in entry["frozen_modules"]} == expected
+    assert all(count > 0 for count in expected.values())
+    assert entry["total_frozen_params"] == sum(expected.values())
+
+
+def test_empty_freeze_list_is_a_no_op() -> None:
+    """An empty list freezes nothing and records nothing."""
+    model = SimpleModel()
+
+    result = FreezingModifierStage(submodules_to_freeze=[]).process(CheckpointContext(model=model))
+
+    assert all(p.requires_grad for p in result.model.parameters())
+    assert "modifiers_applied" not in result.metadata

@@ -26,6 +26,16 @@ def test_get_base_seed_from_environment(monkeypatch: pytest.MonkeyPatch, env_var
     assert get_base_seed(base_seed_env=base_seed_env) == 1234
 
 
+def test_get_base_seed_returns_a_small_seed_unscaled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A seed below 1000 is returned as configured. ``derive_seed`` expands small seeds itself."""
+    monkeypatch.delenv("ANEMOI_BASE_SEED", raising=False)
+    monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+    # Not 42, which is also the default when no seed is configured.
+    monkeypatch.setenv("CUSTOM_BASE_SEED", "7")
+
+    assert get_base_seed(base_seed_env="CUSTOM_BASE_SEED") == 7
+
+
 def test_get_base_seed_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ANEMOI_BASE_SEED", raising=False)
     monkeypatch.delenv("SLURM_JOB_ID", raising=False)

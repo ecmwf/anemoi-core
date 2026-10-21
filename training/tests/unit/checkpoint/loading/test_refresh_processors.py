@@ -22,6 +22,7 @@ import torch.nn as nn
 from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.base import CheckpointContext
+from anemoi.training.checkpoint.loading.base import refresh_checkpoint_processors
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
 
 
@@ -178,3 +179,39 @@ def test_full_process_call_applies_the_refresh() -> None:
     # The model keeps its own (non-stale) processor weights.
     loaded = context.model.state_dict()["model.pre_processors.weight"]
     assert not torch.all(loaded == 99.0)
+
+
+def test_refresh_reinjects_model_output_idx_from_the_live_model() -> None:
+    """The refresh also replaces the ``model_output_idx`` buffers with the live model's values."""
+
+    class _InnerWithOutputIdx(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pre_processors = nn.Linear(2, 2)
+            self.register_buffer("model_output_idx", torch.tensor([1.0]))
+
+    class _Wrapper(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.model = _InnerWithOutputIdx()
+
+    model = _Wrapper()
+    stale = {key: torch.full_like(value, 9.0) for key, value in model.state_dict().items()}
+    context = CheckpointContext(
+        model=model,
+        checkpoint_data={"state_dict": stale},
+        config=_config(states=True, tendencies=False),
+    )
+
+    WeightsOnlyLoader()._apply_corrections(context)
+
+    assert torch.equal(context.checkpoint_data["state_dict"]["model.model_output_idx"], torch.tensor([1.0]))
+
+
+def test_refresh_without_a_state_dict_is_a_no_op() -> None:
+    """A checkpoint with no state dict is left as it is, even with both flags set."""
+    checkpoint: dict = {}
+
+    refresh_checkpoint_processors(checkpoint, _ModelWithProcessors(), update_states=True, update_tendencies=True)
+
+    assert checkpoint == {}

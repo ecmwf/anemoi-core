@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 import torch
+from hydra import compose
+from hydra import initialize_config_module
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -33,6 +35,7 @@ from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.checkpoint.sources.local import LocalSource
 from anemoi.training.checkpoint.sources.run import RunIdSource
+from anemoi.training.schemas.training import CheckpointPipelineSchema
 
 _FREEZING_TARGET = "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
 _RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
@@ -595,3 +598,24 @@ def test_unresolvable_source_target_carries_no_identity_and_is_left_for_the_buil
     build_checkpoint_pipeline(cfg, parent_run_server2server="remote-parent")
     with pytest.raises(CheckpointConfigError):
         build_resume_source(cfg, parent_run_server2server="remote-parent")
+
+
+@pytest.mark.parametrize("preset", ["config", "lam", "multi", "stretched", "ensemble_crps"])
+def test_preset_composes_with_a_run_source_overlay(preset: str) -> None:
+    """Each shipped preset accepts the documented resume overlay and gives a valid resume.
+
+    A source without a loader is a resume: the pipeline has no stages, and the runner
+    resolves the ``RunIdSource`` for ``Trainer.fit(ckpt_path=)``.
+    """
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config"):
+        cfg = compose(
+            config_name=preset,
+            overrides=["training/checkpoint/source=run", "+training.checkpoint.source.run_id=abc123"],
+        )
+
+    CheckpointPipelineSchema(**OmegaConf.to_container(cfg.training.checkpoint, resolve=True))
+
+    assert build_checkpoint_pipeline(cfg).stages == []
+    resume_source = build_resume_source(cfg)
+    assert isinstance(resume_source, RunIdSource)
+    assert resume_source.run_id == "abc123"

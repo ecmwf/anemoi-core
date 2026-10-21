@@ -22,8 +22,10 @@ from unittest.mock import patch
 
 import pytest
 import torch
+from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.base import CheckpointContext
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 from anemoi.training.checkpoint.exceptions import CheckpointSourceError
@@ -50,10 +52,93 @@ def test_s3_source_does_not_import_anemoi_utils_at_module_level() -> None:
 
     saved = sys.modules.pop("anemoi.utils.remote.s3", None)
     try:
-        importlib.reload(importlib.import_module("anemoi.training.checkpoint.sources.s3"))
+        s3_module = importlib.reload(importlib.import_module("anemoi.training.checkpoint.sources.s3"))
+        assert not hasattr(s3_module, "download_file")
+        # Construction must not need the optional dependency either.
+        assert s3_module.S3Source(url="s3://bucket/key.ckpt").url == "s3://bucket/key.ckpt"
     finally:
         if saved is not None:
             sys.modules["anemoi.utils.remote.s3"] = saved
+
+
+def _recording_download(downloaded: list[str]) -> ModuleType:
+    """Stub ``anemoi.utils.remote.s3`` that records each URL and writes an empty checkpoint."""
+
+    def fake_download(url: str, target: str, *_args: object, **_kwargs: object) -> None:
+        downloaded.append(url)
+        torch.save({"state_dict": {}}, target)
+
+    return _fake_anemoi_utils_s3(fake_download)
+
+
+@pytest.mark.parametrize(
+    ("url", "match"),
+    [
+        ("s3a://bucket/model.ckpt", "scheme"),
+        ("s3:///model.ckpt", "bucket"),
+        ("s3://bucket/", "key"),
+    ],
+    ids=["wrong-scheme", "no-bucket", "no-key"],
+)
+def test_s3_source_rejects_a_malformed_url_before_the_download(url: str, match: str) -> None:
+    """A malformed URL raises CheckpointConfigError. The download does not start."""
+    downloaded: list[str] = []
+
+    with (
+        patch.dict(sys.modules, {"anemoi.utils.remote.s3": _recording_download(downloaded)}),
+        pytest.raises(CheckpointConfigError, match=match),
+    ):
+        S3Source(url=url).process(CheckpointContext())
+
+    assert downloaded == []
+
+
+@pytest.mark.parametrize(
+    ("source_url", "config", "expected"),
+    [
+        ("s3://constructor/model.ckpt", {"url": "s3://config/model.ckpt"}, "s3://constructor/model.ckpt"),
+        (None, {"url": "s3://config/model.ckpt"}, "s3://config/model.ckpt"),
+        (None, OmegaConf.create({"url": "s3://config/model.ckpt"}), "s3://config/model.ckpt"),
+    ],
+    ids=["constructor-wins", "dict-config", "omegaconf-config"],
+)
+def test_s3_source_resolves_the_url(source_url: str | None, config: object, expected: str) -> None:
+    """The constructor URL has priority. If it is not set, the source reads ``url`` from the config."""
+    downloaded: list[str] = []
+
+    with patch.dict(sys.modules, {"anemoi.utils.remote.s3": _recording_download(downloaded)}):
+        result = S3Source(url=source_url).process(CheckpointContext(config=config))
+
+    assert downloaded == [expected]
+    assert result.metadata["source_url"] == expected
+    assert result.metadata["s3_bucket"] == expected.split("/")[2]
+    assert result.metadata["s3_key"] == "model.ckpt"
+
+
+def test_s3_source_without_a_url_raises_config_error() -> None:
+    downloaded: list[str] = []
+
+    with (
+        patch.dict(sys.modules, {"anemoi.utils.remote.s3": _recording_download(downloaded)}),
+        pytest.raises(CheckpointConfigError, match="URL"),
+    ):
+        S3Source().process(CheckpointContext())
+
+    assert downloaded == []
+
+
+@pytest.mark.parametrize(
+    ("location", "expected"),
+    [
+        ("s3://bucket/model.ckpt", True),
+        (Path("/models/model.ckpt"), False),
+        ("http://example.com/model.ckpt", False),
+        ("/models/model.ckpt", False),
+    ],
+    ids=["s3-url", "path-object", "http-url", "local-path"],
+)
+def test_s3_source_supports_only_s3_urls(location: str | Path, expected: bool) -> None:
+    assert S3Source.supports(location) is expected
 
 
 def test_s3_source_calls_anemoi_utils_download_file() -> None:

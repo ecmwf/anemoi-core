@@ -15,11 +15,21 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 import pytest
+import torch
+import torch.nn as nn
 
 from anemoi.training.checkpoint import CheckpointContext
 from anemoi.training.checkpoint import CheckpointError
 from anemoi.training.checkpoint import CheckpointPipeline
 from anemoi.training.checkpoint import PipelineStage
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+from anemoi.training.checkpoint.loading.base import LoadingStrategy
+from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
+from anemoi.training.checkpoint.modifiers.base import ModelModifier
+from anemoi.training.checkpoint.modifiers.freezing import FreezingModifierStage
+from anemoi.training.checkpoint.sources.base import CheckpointSource
+from anemoi.training.checkpoint.sources.local import LocalSource
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -373,3 +383,164 @@ def test_verify_weights_loaded_still_rejects_a_bare_source_without_loader(tmp_pa
 
     with pytest.raises(CheckpointLoadError, match="Refusing to proceed with random weights"):
         pipeline.execute(CheckpointContext(model=torch.nn.Linear(2, 2)))
+
+
+# --- stage construction and error propagation ---------------------------------------
+
+
+class _MemoryErrorStage(PipelineStage):
+    """Stage whose process raises MemoryError."""
+
+    def process(self, context: CheckpointContext) -> CheckpointContext:  # noqa: ARG002
+        msg = "out of memory"
+        raise MemoryError(msg)
+
+
+def test_unimportable_stage_target_fails_at_construction() -> None:
+    """A stage config whose ``_target_`` cannot be imported names the failing stage index."""
+    with pytest.raises(CheckpointConfigError, match="Failed to instantiate pipeline stage 0"):
+        CheckpointPipeline([{"_target_": "nonexistent.module.Class", "param": "value"}])
+
+
+def test_memory_error_propagates_even_with_continue_on_error() -> None:
+    """continue_on_error swallows checkpoint errors, never a MemoryError."""
+    pipeline = CheckpointPipeline([_MemoryErrorStage()], continue_on_error=True)
+
+    with pytest.raises(MemoryError):
+        pipeline.execute(CheckpointContext(model=nn.Linear(2, 2)))
+
+
+# --- stage roles and executed cross-layer pipelines ----------------------------------
+
+
+class _TwoChildModel(nn.Module):
+    """Two named children, each an ``nn.Linear``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.encoder = nn.Linear(10, 5)
+        self.decoder = nn.Linear(5, 3)
+
+
+class _MismatchTargetModel(nn.Module):
+    """Target whose ``encoder`` shape differs from the source checkpoint."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.encoder = nn.Linear(10, 5)
+        self.decoder = nn.Linear(8, 4)
+
+
+class _InMemorySource(CheckpointSource):
+    """A source that attaches in-memory checkpoint data."""
+
+    def process(self, context: CheckpointContext) -> CheckpointContext:
+        context.checkpoint_data = {"state_dict": {}}
+        return context
+
+
+class _WeightMarkingLoader(LoadingStrategy):
+    """A loader that only marks the model weights as loaded."""
+
+    def process(self, context: CheckpointContext) -> CheckpointContext:
+        if context.model is not None:
+            self._mark_weights_loaded(context.model)
+        return context
+
+
+class _NoOpStage(PipelineStage):
+    """A bare stage that neither loads weights nor belongs to any layer."""
+
+    def process(self, context: CheckpointContext) -> CheckpointContext:
+        return context
+
+
+class _CustomModifier(ModelModifier):
+    """An inline modifier that freezes the whole model and records itself."""
+
+    def process(self, context: CheckpointContext) -> CheckpointContext:
+        for param in context.model.parameters():
+            param.requires_grad = False
+        context.metadata.setdefault("modifiers_applied", []).append({"type": "custom_recording"})
+        return context
+
+
+class _CustomRestorer(CheckpointSource):
+    """A source whose class name does not contain 'Source'."""
+
+    def process(self, context: CheckpointContext) -> CheckpointContext:
+        return context
+
+
+class _Restorer(LoadingStrategy):
+    """A loader whose class name does not contain 'Loader'."""
+
+    def process(self, context: CheckpointContext) -> CheckpointContext:
+        return context
+
+
+class _LoRAAdapter(ModelModifier):
+    """A modifier whose class name does not contain 'Modifier' or 'Freez'."""
+
+    def process(self, context: CheckpointContext) -> CheckpointContext:
+        return context
+
+
+@pytest.mark.parametrize("continue_on_error", [False, True])
+def test_source_without_a_loader_is_refused_even_with_continue_on_error(continue_on_error: bool) -> None:
+    """Checkpoint data that no loader applied stops the pipeline whatever continue_on_error says."""
+    pipeline = CheckpointPipeline([_InMemorySource(), _NoOpStage()], continue_on_error=continue_on_error)
+
+    with pytest.raises(CheckpointLoadError):
+        pipeline.execute(CheckpointContext(model=_TwoChildModel()))
+
+
+@pytest.mark.parametrize(
+    ("stage", "role"),
+    [(_CustomRestorer(), "source"), (_Restorer(), "loader"), (_LoRAAdapter(), "modifier")],
+    ids=["source", "loader", "modifier"],
+)
+def test_stage_role_comes_from_the_base_class_not_the_name(stage: PipelineStage, role: str) -> None:
+    assert CheckpointPipeline._stage_role(stage) == role
+
+
+def test_custom_inline_modifier_runs_after_the_loader() -> None:
+    """A third-party ModelModifier subclass runs as a modifier stage in an executed pipeline."""
+    modifier = _CustomModifier()
+    pipeline = CheckpointPipeline([_InMemorySource(), _WeightMarkingLoader(), modifier])
+
+    result = pipeline.execute(CheckpointContext(model=_TwoChildModel()))
+
+    assert all(not p.requires_grad for p in result.model.parameters())
+    assert {"type": "custom_recording"} in result.metadata["modifiers_applied"]
+    assert CheckpointPipeline._stage_role(modifier) == "modifier"
+
+
+def test_transfer_learning_then_freezing_compose_in_one_pipeline(tmp_path: Path) -> None:
+    """A transfer-learning load followed by freezing keeps both layers' metadata and effects."""
+    source_state = {
+        "encoder.weight": torch.randn(7, 10),  # shape mismatch vs (5, 10)
+        "encoder.bias": torch.randn(7),  # shape mismatch vs (5,)
+        "decoder.weight": torch.randn(4, 8),  # matches target
+        "decoder.bias": torch.randn(4),  # matches target
+    }
+    ckpt_path = tmp_path / "pretrained.ckpt"
+    torch.save({"state_dict": source_state}, ckpt_path)
+
+    pipeline = CheckpointPipeline(
+        [
+            LocalSource(path=str(ckpt_path)),
+            TransferLearningLoader(skip_mismatched=True),
+            FreezingModifierStage(submodules_to_freeze=["encoder"]),
+        ],
+    )
+
+    result = pipeline.execute(CheckpointContext(model=_MismatchTargetModel()))
+
+    assert all(not p.requires_grad for p in result.model.encoder.parameters())
+    assert result.metadata["loading_strategy"] == "transfer_learning"
+    assert "decoder.weight" in result.metadata["transferred_params"]
+    assert "Shape mismatch" in result.metadata["skipped_params"]["encoder.weight"]
+    freezing_records = [entry for entry in result.metadata["modifiers_applied"] if entry["type"] == "freezing"]
+    assert freezing_records
+    assert freezing_records[0]["frozen_modules"][0]["name"] == "encoder"

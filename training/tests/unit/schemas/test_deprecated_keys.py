@@ -19,10 +19,38 @@ validated and the unvalidated config paths.
 """
 
 import pytest
+from omegaconf import OmegaConf
 from pydantic import ValidationError
 
+from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
+from anemoi.training.checkpoint.builder import build_resume_source
+from anemoi.training.schemas.base_schema import _DEPRECATED_KEYS
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.schemas.training import CheckpointPipelineSchema
+
+_RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
+_LOCAL_SOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
+_LOADERS = "anemoi.training.checkpoint.loading.strategies"
+_FREEZING = "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
+
+# The training.checkpoint block that the hint for each removed key tells the user to write.
+_REPLACEMENTS = {
+    "training.run_id": {"source": {"_target_": _RUN_SOURCE, "run_id": "abc", "fork": False}},
+    "training.fork_run_id": {"source": {"_target_": _RUN_SOURCE, "run_id": "abc", "fork": True}},
+    "system.input.warm_start": {"source": {"_target_": _LOCAL_SOURCE, "path": "/scratch/last.ckpt"}},
+    "training.load_weights_only": {
+        "source": {"_target_": _RUN_SOURCE, "run_id": "abc"},
+        "loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader"},
+    },
+    "training.transfer_learning": {
+        "source": {"_target_": _LOCAL_SOURCE, "path": "/scratch/last.ckpt"},
+        "loading": {"_target_": f"{_LOADERS}.TransferLearningLoader", "skip_mismatched": True},
+    },
+    "training.submodules_to_freeze": {
+        "modifiers": [{"_target_": _FREEZING, "submodules_to_freeze": ["model.model.encoder"]}],
+    },
+}
 
 
 def _nested(path_parts: tuple[str, ...], value: object) -> dict:
@@ -91,3 +119,46 @@ def test_submodules_to_freeze_hint_names_the_model_model_prefix(schema_cls: type
         schema_cls(**config)
     assert "FreezingModifierStage" in str(excinfo.value)
     assert "submodule_root" not in str(excinfo.value)
+
+
+def test_every_removed_key_has_a_replacement() -> None:
+    assert set(_REPLACEMENTS) == set(_DEPRECATED_KEYS)
+
+
+@pytest.mark.parametrize(
+    ("removed_key", "expected_stages", "expected_resume_source"),
+    [
+        ("training.run_id", [], "RunIdSource"),
+        ("training.fork_run_id", [], "RunIdSource"),
+        ("system.input.warm_start", [], "LocalSource"),
+        ("training.load_weights_only", ["RunIdSource", "WeightsOnlyLoader"], None),
+        ("training.transfer_learning", ["LocalSource", "TransferLearningLoader"], None),
+        ("training.submodules_to_freeze", ["FreezingModifierStage"], None),
+    ],
+)
+def test_replacement_config_validates_and_builds(
+    removed_key: str,
+    expected_stages: list[str],
+    expected_resume_source: str | None,
+) -> None:
+    """The config that the hint for each removed key gives is valid and builds what the key used to do.
+
+    A source without a loader is a resume: the pipeline has no stages, and the runner
+    resolves the source for ``Trainer.fit(ckpt_path=)``, as the removed keys did.
+    """
+    checkpoint_block = _REPLACEMENTS[removed_key]
+
+    CheckpointPipelineSchema(**checkpoint_block)
+    cfg = OmegaConf.create({"training": {"checkpoint": checkpoint_block}})
+    pipeline = build_checkpoint_pipeline(cfg)
+    resume_source = build_resume_source(cfg)
+
+    assert [type(stage).__name__ for stage in pipeline.stages] == expected_stages
+    assert (type(resume_source).__name__ if resume_source is not None else None) == expected_resume_source
+    if removed_key in ("training.run_id", "training.fork_run_id"):
+        assert resume_source.run_id == "abc"
+        assert resume_source.fork is (removed_key == "training.fork_run_id")
+    elif removed_key == "training.transfer_learning":
+        assert pipeline.stages[1].skip_mismatched is True
+    elif removed_key == "training.submodules_to_freeze":
+        assert pipeline.stages[0].submodules_to_freeze == ["model.model.encoder"]

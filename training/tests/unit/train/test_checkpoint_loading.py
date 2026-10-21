@@ -13,6 +13,7 @@ from functools import cached_property
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Never
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -25,6 +26,7 @@ from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import reject_unsupported_warm_start
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.runner import checkpoint_pipeline_configured
+from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
 from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
@@ -1220,3 +1222,170 @@ def test_on_load_checkpoint_honours_a_migration_that_returns_a_new_dict(monkeypa
 
     assert held_by_lightning["state_dict"].keys() == {"migrated"}
     assert torch.equal(held_by_lightning["state_dict"]["migrated"], torch.ones(1))
+
+
+# --- a resume is one Lightning load, corrected by the hook ---
+
+
+def _index_with(name_to_index: dict[str, int]) -> DummyIndex:
+    index = DummyIndex()
+    index.name_to_index = name_to_index
+    return index
+
+
+def _legacy_on_load_checkpoint(module: DummyTrainingModule, checkpoint: dict) -> None:
+    """The steps ``BaseTrainingModule.on_load_checkpoint`` ran before the checkpoint pipeline existed.
+
+    Edge-perm migration, then the processor refresh, then ``_ckpt_model_name_to_index``,
+    then ``_ckpt_variables_metadata``, without the task-state and datamodule steps that
+    need a trainer. The edge-perm migration is a no-op for a model without a
+    ``StaticGraphProvider``, so this pins the processor refresh and the metadata.
+    """
+    import importlib
+
+    from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
+
+    edge_perm = importlib.import_module("anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix").migrate
+    edge_perm(checkpoint, model=module)
+
+    update_cfg = module.config.training.update_ds_stats_on_ckpt_load
+    state_dict = checkpoint.get("state_dict")
+    if isinstance(state_dict, dict) and (update_cfg.states or update_cfg.tendencies):
+        processor_prefixes: tuple[str, ...] = ()
+        if update_cfg.states:
+            processor_prefixes += ("model.pre_processors.", "model.post_processors.")
+        if update_cfg.tendencies:
+            processor_prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
+        for key in list(state_dict.keys()):
+            if key.startswith(processor_prefixes):
+                del state_dict[key]
+        model_state_dict = module.model.state_dict()
+        processor_prefixes += tuple(f"model.{k}" for k in model_state_dict if "model_output_idx" in k)
+        for key, value in model_state_dict.items():
+            full_key = f"model.{key}"
+            if full_key.startswith(processor_prefixes):
+                state_dict[full_key] = value
+
+    module._ckpt_model_name_to_index = {
+        dataset_name: data_indices.name_to_index
+        for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
+    }
+    module._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(
+        checkpoint,
+        module._ckpt_model_name_to_index,
+    )
+
+
+def test_resume_is_one_lightning_load_and_matches_the_legacy_hook(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A resume performs no pipeline load; the hook corrects the dict Lightning loads.
+
+    With ``update_ds_stats_on_ckpt_load.tendencies=True`` the tendency processors must
+    come from the live model, not the checkpoint. The pipeline only resolves the file
+    (``torch.load`` is never called), the model keeps its own weights until ``fit()``,
+    and the hook applies ``apply_checkpoint_corrections`` to Lightning's dict. The
+    result must match the legacy hook steps bit for bit.
+    """
+    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
+    checkpoint = {
+        "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
+        "hyper_parameters": {"data_indices": {"data": _index_with({"t2m": 0})}},
+    }
+    ckpt_path = tmp_path / "run_A" / "last.ckpt"
+    ckpt_path.parent.mkdir()
+    torch.save(checkpoint, ckpt_path)
+
+    real_load = torch.load
+    loads: list[object] = []
+
+    def _spy_load(*args: object, **kwargs: object) -> object:
+        loads.append(args[0])
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", _spy_load)
+
+    module = _make_dummy_module(DummyModel(["6h", "12h"], offset=1.0), update_states=False, update_tendencies=True)
+    before = {key: value.clone() for key, value in module.state_dict().items()}
+    cfg = OmegaConf.create(
+        {
+            "training": {
+                "checkpoint": {
+                    "source": {
+                        "_target_": "anemoi.training.checkpoint.sources.local.LocalSource",
+                        "path": str(ckpt_path),
+                    },
+                    "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+                },
+                "update_ds_stats_on_ckpt_load": {"states": False, "tendencies": True},
+            },
+        },
+    )
+
+    executed = run_checkpoint_pipeline(module, cfg)
+
+    # No pipeline load: the file was only resolved, the model is untouched.
+    assert loads == []
+    assert executed.checkpoint_path == ckpt_path.resolve()
+    assert executed.weights_loaded is False
+    for key, value in before.items():
+        assert torch.equal(module.state_dict()[key], value)
+
+    # Lightning's ckpt_path load: read the file, run the hook on that dict, load it.
+    lightning_dict = real_load(executed.checkpoint_path, weights_only=False, map_location="cpu")
+    BaseTrainingModule.on_load_checkpoint(module, lightning_dict)
+    module.load_state_dict(lightning_dict["state_dict"], strict=True)
+
+    # The legacy steps, on an identical module and a fresh read of the same file.
+    reference = _make_dummy_module(DummyModel(["6h", "12h"], offset=1.0), update_states=False, update_tendencies=True)
+    legacy_dict = real_load(ckpt_path, weights_only=False, map_location="cpu")
+    _legacy_on_load_checkpoint(reference, legacy_dict)
+    reference.load_state_dict(legacy_dict["state_dict"], strict=True)
+
+    resumed = module.state_dict()
+    for key, value in reference.state_dict().items():
+        assert torch.equal(resumed[key], value), f"{key} differs from the legacy hook path"
+    # The tendency processors are the live model's, not the checkpoint's stale 10.x.
+    assert torch.equal(
+        resumed["model.pre_processors_tendencies.data._processors.6h.processors.dummy.value"],
+        torch.tensor([1.0]),
+    )
+    assert module._ckpt_model_name_to_index == {"data": {"t2m": 0}}
+    assert module._ckpt_variables_metadata == reference._ckpt_variables_metadata
+
+
+@pytest.fixture
+def spy_chunking_migration(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Observe ``chunking_fix`` where ``loading.base`` calls it."""
+    spy = MagicMock(side_effect=lambda ckpt: {**ckpt, "_migration_applied": True})
+    monkeypatch.setattr("anemoi.training.checkpoint.loading.base._chunking_fix", spy)
+    return spy
+
+
+def test_resume_hook_does_not_migrate_an_autoencoder_checkpoint(spy_chunking_migration: MagicMock) -> None:
+    """On a resume the hook is the only correction pass, so it must skip autoencoder weights too.
+
+    Same checkpoint shape as the pipeline-path test in ``test_format_migrations.py``: a
+    ``NoOpProcessor`` config. The hook never calls the migration and hands Lightning
+    the state dict exactly as saved.
+    """
+    module = _make_dummy_module(DummyModel(["6h"], offset=1.0), update_states=False, update_tendencies=False)
+    checkpoint = {
+        "state_dict": {f"model.{key}": value.clone() for key, value in module.model.state_dict().items()},
+        "pytorch-lightning_version": "2.6.5",
+        "hyper_parameters": {
+            # NoOpProcessor: declares neither num_layers nor num_chunks.
+            "config": SimpleNamespace(model=SimpleNamespace(processor=SimpleNamespace())),
+            "data_indices": {"data": _index_with({"t2m": 0})},
+        },
+    }
+    saved = {key: value.clone() for key, value in checkpoint["state_dict"].items()}
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    spy_chunking_migration.assert_not_called()
+    assert "_migration_applied" not in checkpoint
+    for key, value in saved.items():
+        assert torch.equal(checkpoint["state_dict"][key], value), f"{key} was rewritten"
+    assert module._ckpt_model_name_to_index == {"data": {"t2m": 0}}

@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import pickle
 from typing import TYPE_CHECKING
@@ -257,3 +258,54 @@ class TestLocalSourceSupports:
 
     def test_gcs_url_returns_false(self) -> None:
         assert LocalSource.supports("gs://bucket/model.ckpt") is False
+
+
+class TestLocalSourceLoadEdgeCases:
+    """LocalSource behaviour on inputs torch.load cannot read, and on what it must read."""
+
+    def test_directory_path_wraps_os_error_as_load_error(self, source: LocalSource, tmp_path: Path) -> None:
+        """A path that exists but is a directory surfaces torch.load's OSError as CheckpointLoadError."""
+        directory = tmp_path / "a_directory.ckpt"
+        directory.mkdir()
+
+        with pytest.raises(CheckpointLoadError) as exc_info:
+            source.process(CheckpointContext(checkpoint_path=directory))
+
+        assert isinstance(exc_info.value.original_error, OSError)
+
+    def test_loads_lightning_metadata_that_weights_only_true_rejects(
+        self,
+        source: LocalSource,
+        tmp_path: Path,
+    ) -> None:
+        """LocalSource loads Lightning metadata (pickled objects) that ``weights_only=True`` would reject."""
+        ckpt = {
+            "pytorch-lightning_version": "2.2.0",
+            "callbacks": {"cb": {"best": 0.1}},
+            "hyper_parameters": {"config": argparse.Namespace(lr=1e-4)},
+            "state_dict": {"layer.weight": torch.zeros(2, 2)},
+        }
+        path = _save_checkpoint(tmp_path / "lightning.ckpt", ckpt)
+
+        # The fixture only distinguishes the two load modes if weights_only=True really rejects it.
+        with pytest.raises(pickle.UnpicklingError):
+            torch.load(path, weights_only=True, map_location="cpu")
+
+        result = source.process(CheckpointContext(checkpoint_path=path))
+
+        assert result.checkpoint_data is not None
+        for key in ("callbacks", "hyper_parameters", "pytorch-lightning_version"):
+            assert key in result.checkpoint_data
+        assert result.checkpoint_format == "lightning"
+
+    def test_s3_scheme_string_is_a_missing_local_path(
+        self,
+        source: LocalSource,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """LocalSource does not dispatch on URL schemes: an ``s3://`` string is a literal, missing local path."""
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(CheckpointNotFoundError):
+            source.process(CheckpointContext(checkpoint_path="s3://bucket/model.ckpt"))

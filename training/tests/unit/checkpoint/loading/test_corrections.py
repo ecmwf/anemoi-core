@@ -25,8 +25,11 @@ import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
 
+from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.loading import base as loading_base
+from anemoi.training.checkpoint.loading import strategies
 from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
+from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
 
 if TYPE_CHECKING:
     import pytest
@@ -172,3 +175,78 @@ def test_refresh_that_drops_but_cannot_reinject_is_logged_as_a_warning(caplog: p
 
     assert "model.pre_processors.weight" not in corrected["state_dict"]
     assert any("none to re-inject" in record.getMessage() for record in caplog.records)
+
+
+# --- the order of the shared steps inside the concrete loaders ---
+
+
+class _MiniModel(nn.Module):
+    """Single-layer model whose state dict round-trips through a strict load."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.encoder = nn.Linear(4, 3)
+
+
+def _install_order_recorders(model: nn.Module, calls: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace the corrections, the metadata steps and the model load with order recorders.
+
+    Both the corrections and the metadata steps are module-level functions, patched
+    where each is looked up: the corrections in ``loading.base`` (``apply_checkpoint_corrections``
+    calls them by name), the metadata steps in ``loading.strategies``. The real
+    ``_extract_state_dict`` and ``_mark_weights_loaded`` stay live so the strategy still
+    performs an actual (recorded) ``load_state_dict`` call.
+    """
+    corrections = {
+        "_chunking_fix": "format",
+        "_trainable_edge_perm_fix": "edge_perm",
+        "refresh_checkpoint_processors": "refresh",
+    }
+    # Every checkpoint counts as a chunking_fix candidate, so the recorder is reached.
+    monkeypatch.setattr(loading_base, "_chunking_fix_applicable", lambda _checkpoint: True)
+    for function_name, label in corrections.items():
+
+        def _correction_recorder(checkpoint: object, *_args: object, _label: str = label, **_kwargs: object) -> object:
+            calls.append(_label)
+            return checkpoint
+
+        monkeypatch.setattr(loading_base, function_name, _correction_recorder)
+
+    metadata_steps = {
+        "warn_on_hparams_divergence": "warn",
+        "preserve_anemoi_metadata": "preserve",
+        "extract_checkpoint_variables_metadata": "extract",
+    }
+    for function_name, label in metadata_steps.items():
+
+        def _recorder(*_args: object, _label: str = label, **_kwargs: object) -> None:
+            calls.append(_label)
+
+        monkeypatch.setattr(strategies, function_name, _recorder)
+
+    original_load = model.load_state_dict
+
+    def _load_recorder(*args: object, **kwargs: object) -> object:
+        calls.append("load")
+        return original_load(*args, **kwargs)
+
+    model.load_state_dict = _load_recorder
+
+
+def test_weights_only_runs_the_corrections_then_the_metadata_steps_around_the_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """WeightsOnlyLoader runs the corrections in their one order, loads, then restores metadata.
+
+    The order inside the corrections is chunking_fix, edge-perm, refresh: the order
+    ``on_load_checkpoint`` has always used for ``ckpt_path`` loads, and the safe one,
+    since edge-perm takes the live model and may rebuild the dict.
+    """
+    model = _MiniModel()
+    context = CheckpointContext(model=model, checkpoint_data={"state_dict": model.state_dict()})
+    calls: list[str] = []
+    _install_order_recorders(model, calls, monkeypatch)
+
+    WeightsOnlyLoader().process(context)
+
+    assert calls == ["format", "edge_perm", "refresh", "load", "warn", "preserve", "extract"]

@@ -59,4 +59,36 @@ def test_cold_start_tracks_pretrained_source() -> None:
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data, checkpoint_path=ckpt_path)
     result = loader.process(context)
 
-    assert "pretrained_from" in result.metadata
+    assert result.metadata["pretrained_from"] == str(result.checkpoint_path)
+    assert result.metadata["pretrained_from"] == ckpt_path
+
+
+def _checkpoint_for(model: nn.Module) -> dict:
+    return {"state_dict": {key: torch.full_like(value, 1.0) for key, value in model.state_dict().items()}}
+
+
+def test_cold_start_inherits_the_strict_parameter() -> None:
+    assert ColdStartLoader(strict=False).strict is False
+    assert ColdStartLoader().strict is True
+
+
+def test_cold_start_records_the_source_url_when_no_local_path_is_published() -> None:
+    """A remote source deletes its download, so its URL is the recorded provenance."""
+    model = SimpleModel()
+    context = CheckpointContext(
+        model=model,
+        checkpoint_data=_checkpoint_for(model),
+        metadata={"source_url": "https://example.com/pretrained.ckpt"},
+    )
+
+    result = ColdStartLoader().process(context)
+
+    assert result.metadata["pretrained_from"] == "https://example.com/pretrained.ckpt"
+
+
+def test_cold_start_records_no_provenance_without_a_path_or_url() -> None:
+    model = SimpleModel()
+
+    result = ColdStartLoader().process(CheckpointContext(model=model, checkpoint_data=_checkpoint_for(model)))
+
+    assert result.metadata["pretrained_from"] is None

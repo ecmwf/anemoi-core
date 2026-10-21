@@ -162,6 +162,14 @@ def test_edge_perm_migration_noop_without_model() -> None:
     assert context.checkpoint_data is ckpt
 
 
+def test_real_edge_perm_migration_leaves_a_model_without_graph_providers_alone() -> None:
+    """The shipped edge-perm migration finds no graph provider on the model and returns the checkpoint as is."""
+    checkpoint = {"state_dict": {}}
+
+    assert loading_base.apply_checkpoint_corrections(checkpoint, _Model(), None) is checkpoint
+    assert checkpoint == {"state_dict": {}}
+
+
 def test_migration_returning_a_new_dict_is_what_the_model_loads(monkeypatch: pytest.MonkeyPatch) -> None:
     """A migration that builds a new checkpoint, rather than editing the old one, is honoured.
 

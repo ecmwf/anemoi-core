@@ -820,3 +820,35 @@ class TestUtilsIntegration:
 
         except (TimeoutError, OSError, CheckpointSourceError) as e:
             pytest.skip(f"Network request failed: {e}")
+
+
+# --- download_with_retry error mapping, offline ---------------------------------------
+
+
+def _http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError("https://example.com/a.ckpt", code, "error", {}, None)
+
+
+def test_download_timeout_on_the_last_attempt_raises_timeout_error(tmp_path: Path) -> None:
+    """A timeout on the final attempt maps to CheckpointTimeoutError."""
+    with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")), pytest.raises(CheckpointTimeoutError):
+        download_with_retry("https://example.com/model.ckpt", tmp_path / "model.ckpt", max_retries=1, timeout=5)
+
+
+def test_client_errors_are_not_retried_but_server_errors_are(tmp_path: Path) -> None:
+    """A 4xx response raises after one attempt; a 5xx response is retried up to max_retries."""
+    with (
+        patch("urllib.request.urlopen", side_effect=_http_error(404)) as urlopen_404,
+        patch("time.sleep"),
+        pytest.raises(CheckpointSourceError),
+    ):
+        download_with_retry("https://example.com/a.ckpt", tmp_path / "a.ckpt", max_retries=3, timeout=5)
+    assert urlopen_404.call_count == 1
+
+    with (
+        patch("urllib.request.urlopen", side_effect=_http_error(503)) as urlopen_503,
+        patch("time.sleep"),
+        pytest.raises(CheckpointSourceError),
+    ):
+        download_with_retry("https://example.com/b.ckpt", tmp_path / "b.ckpt", max_retries=2, timeout=5)
+    assert urlopen_503.call_count == 2
