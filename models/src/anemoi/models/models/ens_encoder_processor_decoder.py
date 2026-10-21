@@ -44,7 +44,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         n_step_input: int,
         n_step_output: int,
     ) -> None:
-        self.condition_on_residual = DotDict(model_config).model.condition_on_residual
+        self.condition_on_residual = DotDict(model_config).condition_on_residual
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
