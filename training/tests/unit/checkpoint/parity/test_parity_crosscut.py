@@ -378,7 +378,7 @@ def _replacement_checkpoint_config(deprecated_key: str) -> dict:
             "loading": {"_target_": _TRANSFER_LEARNING, "skip_mismatched": True},
         },
         "training.submodules_to_freeze": {
-            "modifiers": [{"_target_": _FREEZING, "submodules_to_freeze": ["encoder"]}],
+            "modifiers": [{"_target_": _FREEZING, "submodules_to_freeze": ["model.model.encoder"]}],
         },
     }[deprecated_key]
 
@@ -436,7 +436,7 @@ def test_deprecated_key_replacement_config_builds_and_validates(deprecated_key: 
         assert type(loader).__name__ == "TransferLearningLoader"
         assert loader.skip_mismatched is True
     elif deprecated_key == "training.submodules_to_freeze":
-        assert pipeline.stages[0].submodules_to_freeze == ["encoder"]
+        assert pipeline.stages[0].submodules_to_freeze == ["model.model.encoder"]
 
 
 # --- each preset composes with a checkpoint.source overlay ------------

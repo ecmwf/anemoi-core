@@ -17,7 +17,6 @@ assertions.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import patch
 
 import pytest
 import torch
@@ -165,27 +164,6 @@ def test_freezing_multiple_submodules_in_single_call() -> None:
     assert len(applied) == 1
     assert len(applied[0]["frozen_modules"]) == 3
     assert [record["name"] for record in applied[0]["frozen_modules"]] == names
-
-
-def test_validate_gradients_false_skips_validation_but_still_freezes() -> None:
-    model = TwoChildModel()
-
-    with patch.object(FreezingModifierStage, "_validate_gradient_flow") as spy:
-        stage = FreezingModifierStage(submodules_to_freeze=["encoder"], validate_gradients=False)
-        result = stage.process(CheckpointContext(model=model))
-
-    spy.assert_not_called()
-    assert all(not p.requires_grad for p in result.model.encoder.parameters())
-
-
-def test_validate_gradients_true_invokes_validation() -> None:
-    model = TwoChildModel()
-
-    with patch.object(FreezingModifierStage, "_validate_gradient_flow") as spy:
-        stage = FreezingModifierStage(submodules_to_freeze=["encoder"], validate_gradients=True)
-        stage.process(CheckpointContext(model=model))
-
-    spy.assert_called_once()
 
 
 def test_modifiers_applied_records_param_counts_and_total() -> None:

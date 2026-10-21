@@ -229,9 +229,9 @@ _DEPRECATED_KEYS: dict[str, str] = {
     "training.submodules_to_freeze": (
         "training.submodules_to_freeze has been removed. Set training.checkpoint.modifiers to a list of "
         "modifier stages, e.g. [{_target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage, "
-        "submodule_root: model.model, submodules_to_freeze: [<submodule>, ...]}]. The submodule_root is "
-        "required to reach the same modules the removed key addressed: it names the graph model that owns "
-        "encoder/processor/decoder, two attribute hops below the LightningModule."
+        "submodules_to_freeze: [model.model.<submodule>, ...]}]. Paths start at the LightningModule, so "
+        "prefix the old names with model.model. to reach the same modules the removed key addressed: the "
+        "graph model that owns encoder/processor/decoder, two attribute hops below the LightningModule."
     ),
 }
 

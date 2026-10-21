@@ -78,15 +78,16 @@ def test_removed_key_present_as_null_still_raises(schema_cls: type, path_parts: 
 
 
 @pytest.mark.parametrize("schema_cls", [BaseSchema, UnvalidatedBaseSchema])
-def test_submodules_to_freeze_hint_names_the_submodule_root(schema_cls: type) -> None:
-    """The freezing replacement names ``submodule_root``; without it the listed paths resolve nothing.
+def test_submodules_to_freeze_hint_names_the_model_model_prefix(schema_cls: type) -> None:
+    """The freezing replacement names the ``model.model.`` prefix; without it the listed paths resolve nothing.
 
-    ``FreezingModifierStage`` resolves ``submodules_to_freeze`` under ``submodule_root``,
-    which defaults to the LightningModule itself. The removed key addressed the graph
-    model two attribute hops below it (``model.model``), so a hint that omitted the root
-    sent users to a configuration that freezes nothing.
+    ``FreezingModifierStage`` resolves ``submodules_to_freeze`` from the LightningModule.
+    The removed key addressed the graph model two attribute hops below it
+    (``model.model``), so a hint that omitted the prefix sent users to a configuration
+    that freezes nothing.
     """
     config = _nested(("training", "submodules_to_freeze"), ["encoder"])
-    with pytest.raises(ValidationError, match=r"submodule_root: model\.model") as excinfo:
+    with pytest.raises(ValidationError, match=r"model\.model\.<submodule>") as excinfo:
         schema_cls(**config)
     assert "FreezingModifierStage" in str(excinfo.value)
+    assert "submodule_root" not in str(excinfo.value)
