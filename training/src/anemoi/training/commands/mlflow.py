@@ -185,6 +185,24 @@ class MlFlow(Command):
             "-v",
             action="store_true",
         )
+        sync.add_argument(
+            "--incremental",
+            action="store_true",
+            help=(
+                "Update the same server run on every call, sending only what is new. Safe to run while the "
+                "training is still running. The source must be an offline store. A run must be synced either "
+                "with or without --incremental, not both."
+            ),
+        )
+        sync.add_argument(
+            "--status",
+            choices=["FINISHED", "FAILED", "KILLED"],
+            default=None,
+            help=(
+                "With --incremental: the final status of the server run. By default the server run takes the "
+                "offline status once the offline run has ended, and stays RUNNING until then."
+            ),
+        )
 
         help_msg = "Create an MLflow run_id given a training configuration."
         prepare = subparsers.add_parser(
@@ -252,8 +270,21 @@ class MlFlow(Command):
             return
 
         if args.subcommand == "sync":
-            from anemoi.training.utils.mlflow_sync import MlFlowSync
+            from urllib.parse import urlparse
+
             from anemoi.utils.mlflow.utils import health_check
+
+            if args.incremental:
+                source = urlparse(args.source)
+                if source.scheme and source.netloc:
+                    msg = "--incremental needs an offline store as source, not a tracking server"
+                    raise ValueError(msg)
+                if args.export_deleted_runs:
+                    msg = "--export-deleted-runs cannot be used with --incremental"
+                    raise ValueError(msg)
+            elif args.status:
+                msg = "--status can only be used with --incremental"
+                raise ValueError(msg)
 
             extra_tags = {}
 
@@ -271,6 +302,22 @@ class MlFlow(Command):
             health_check(args.destination)
 
             log_level = "DEBUG" if args.verbose else "INFO"
+
+            if args.incremental:
+                from anemoi.training.utils.mlflow_incremental_sync import LOGGER as SYNC_LOGGER
+                from anemoi.training.utils.mlflow_incremental_sync import MlFlowIncrementalSync
+
+                SYNC_LOGGER.setLevel(log_level)
+                MlFlowIncrementalSync(
+                    args.source,
+                    args.destination,
+                    args.experiment_name,
+                    authentication=args.authentication,
+                    extra_tags=extra_tags,
+                ).sync(args.run_id, status=args.status)
+                return
+
+            from anemoi.training.utils.mlflow_sync import MlFlowSync
 
             MlFlowSync(
                 args.source,
