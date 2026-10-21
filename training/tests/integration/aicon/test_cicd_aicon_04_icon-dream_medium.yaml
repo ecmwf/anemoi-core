@@ -210,6 +210,8 @@ training:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
     num_gpus_per_model: ${system.hardware.num_gpus_per_model}
     read_group_size: ${dataloader.read_group_size}
+    static_graph: True
+    find_unused_parameters: False
 
   loss_gradient_scaling: false
   # loss function for the model
@@ -225,7 +227,7 @@ training:
       data:
         wmse:
           # loss class to initialise
-          _target_: anemoi.training.losses.MSELoss.
+          _target_: anemoi.training.losses.MSELoss
           scalers: ["node_weights"]
           # other kwargs
           ignore_nans: True
@@ -279,6 +281,10 @@ training:
 
 dataloader:
   pin_memory: True
+  persistent_workers: False
+  fake_dataloading: False
+  loading_policy:
+    _target_: anemoi.training.data.loading.SynchronizedLoadingPolicy
   prefetch_factor: 1 # reduced for CI/CD test.
   read_group_size: ${system.hardware.num_gpus_per_model}
   validation_rollout: 1
