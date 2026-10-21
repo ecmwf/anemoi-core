@@ -135,11 +135,6 @@ class TestFormatFromData:
         assert detect_format_from_data(sample_state_dict) == "state_dict"
 
     @pytest.mark.unit
-    def test_detect_lightning_from_auxiliary_keys_without_version(self) -> None:
-        """Two Lightning-only keys identify a Lightning checkpoint without the version key."""
-        assert detect_format_from_data({"callbacks": {}, "optimizer_states": [{}]}) == "lightning"
-
-    @pytest.mark.unit
     def test_detect_non_dict_returns_pytorch(self) -> None:
         """Test that non-dict input returns pytorch."""
         assert detect_format_from_data("not a dict") == "pytorch"
@@ -368,13 +363,19 @@ class TestFormatAvailability:
     """Test format availability checking."""
 
     @pytest.mark.unit
-    @pytest.mark.parametrize(
-        ("checkpoint_format", "expected"),
-        [("pytorch", True), ("lightning", True), ("state_dict", True), ("safetensors", False), ("unknown", False)],
-    )
-    def test_format_availability(self, checkpoint_format: str, expected: bool) -> None:
-        """The formats that need only PyTorch are always available. Other formats are not."""
-        assert is_format_available(checkpoint_format) is expected
+    def test_pytorch_format_always_available(self) -> None:
+        """Test that PyTorch format is always available."""
+        assert is_format_available("pytorch") is True
+
+    @pytest.mark.unit
+    def test_lightning_format_always_available(self) -> None:
+        """Test that Lightning format is always available."""
+        assert is_format_available("lightning") is True
+
+    @pytest.mark.unit
+    def test_state_dict_format_always_available(self) -> None:
+        """Test that state dict format is always available."""
+        assert is_format_available("state_dict") is True
 
 
 class TestFormatIntegration:

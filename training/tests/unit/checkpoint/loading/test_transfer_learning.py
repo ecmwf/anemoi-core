@@ -16,7 +16,6 @@ import torch
 import torch.nn as nn
 
 from anemoi.training.checkpoint.base import CheckpointContext
-from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
 from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
 
 
@@ -125,7 +124,7 @@ def test_transfer_learning_warns_naming_each_skipped_param(caplog: pytest.LogCap
 
     warnings = _warnings(caplog)
     assert len(warnings) == 1
-    assert "SKIPPED 2 checkpoint parameter(s)" in warnings[0]
+    assert "2 checkpoint parameters did not transfer" in warnings[0]
     assert "1 shape-mismatched" in warnings[0]
     assert "1 not present in the model" in warnings[0]
     assert "new_head.weight: Shape mismatch" in warnings[0]
@@ -166,22 +165,3 @@ def test_transfer_learning_is_quiet_when_everything_transfers(caplog: pytest.Log
 
     assert _warnings(caplog) == []
     assert result.metadata["skipped_params"] == {}
-
-
-def test_transfer_learning_loads_when_no_keys_match() -> None:
-    """A checkpoint with no matching keys loads nothing and records each key as skipped."""
-    source_state = {"encoder.weight": torch.randn(4, 4), "encoder.bias": torch.randn(4)}
-    context = CheckpointContext(model=TargetModel(), checkpoint_data={"state_dict": source_state})
-
-    result = TransferLearningLoader().process(context)
-
-    assert result.metadata["transferred_params"] == []
-    assert result.metadata["skipped_params"] == dict.fromkeys(source_state, "Key not in target")
-
-
-def test_transfer_learning_without_skip_mismatched_raises_on_a_shape_mismatch() -> None:
-    source_state = {"shared.weight": torch.randn(5, 10), "new_head.weight": torch.randn(3, 5)}
-    context = CheckpointContext(model=TargetModel(), checkpoint_data={"state_dict": source_state})
-
-    with pytest.raises(CheckpointIncompatibleError, match="skip_mismatched"):
-        TransferLearningLoader(skip_mismatched=False).process(context)

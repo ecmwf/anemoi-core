@@ -26,7 +26,6 @@ from anemoi.training.train.evaluate import AnemoiEvaluator
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
-from tests.helpers import resume_checkpoint_cfg
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
@@ -81,22 +80,6 @@ def get_single_checkpoint_dir(cfg: DictConfig) -> Path:
         len(run_dirs) == 1
     ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
     return run_dirs[0]
-
-
-def _resume_to_epoch_3(cfg: DictConfig, checkpoint_dir: Path, *callbacks: pl.Callback) -> AnemoiTrainer:
-    """Resume the run in ``checkpoint_dir`` with WarmStartLoader, train to epoch 3 and check the final step."""
-    with open_dict(cfg):
-        cfg.training.checkpoint = resume_checkpoint_cfg(checkpoint_dir.name)
-    cfg.training.max_epochs = 3
-    trainer = AnemoiTrainer(cfg)
-    trainer.callbacks.extend(callbacks)
-    trainer.train()
-
-    expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
-    assert (
-        trainer.model.trainer.global_step == expected_global_step
-    ), f"Expected global_step={expected_global_step} after the resume, got {trainer.model.trainer.global_step}"
-    return trainer
 
 
 @skip_if_offline
@@ -353,14 +336,32 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     parent = torch.load(checkpoint_dir / "last.ckpt", map_location="cpu", weights_only=False)
     parent_epoch, parent_global_step = parent["epoch"], parent["global_step"]
 
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+        }
+    cfg.training.max_epochs = 3
+    trainer = AnemoiTrainer(cfg)
     # A fresh run gives the same final step, thus also check the start point.
     start = _RecordTrainingStart()
-    _resume_to_epoch_3(cfg, checkpoint_dir, start)
+    trainer.callbacks.append(start)
+    trainer.train()
 
     assert start.epoch == parent_epoch, f"resumed run started at epoch {start.epoch}, checkpoint has {parent_epoch}"
     assert (
         start.global_step == parent_global_step
     ), f"resumed run started at step {start.global_step}, checkpoint has {parent_global_step}"
+
+    expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
 
 
@@ -395,7 +396,28 @@ def test_restart_training_ddp(
         }
 
     AnemoiTrainer(cfg).train()
-    _resume_to_epoch_3(cfg, get_single_checkpoint_dir(cfg))
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert len(run_dirs) == 1, f"Expected exactly one run_id directory, found {[d.name for d in run_dirs]}"
+    checkpoint_dir = run_dirs[0]
+
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+        }
+    cfg.training.max_epochs = 3
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"DDP resume: expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
 
 
 @skip_if_offline
@@ -417,7 +439,28 @@ def test_restart_training_architectures(
         cfg.diagnostics.callbacks = []
 
     AnemoiTrainer(cfg).train()
-    _resume_to_epoch_3(cfg, get_single_checkpoint_dir(cfg))
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert len(run_dirs) == 1, f"Expected exactly one run_id directory, found {[d.name for d in run_dirs]}"
+    checkpoint_dir = run_dirs[0]
+
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+        }
+    cfg.training.max_epochs = 3
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"{config_fixture} resume: expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
 
 
 @skip_if_offline
@@ -436,7 +479,8 @@ def test_inference_checkpoint_round_trips(
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
-    run_dir = get_single_checkpoint_dir(cfg)
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    run_dir = next(item for item in output_dir.iterdir() if item.is_dir())
     inference_ckpts = sorted(run_dir.glob("inference-*.ckpt"))
     assert inference_ckpts, f"No inference checkpoint was saved in {run_dir}"
     inference_ckpt = inference_ckpts[0]
@@ -472,7 +516,7 @@ def test_restart_from_existing_checkpoint(
 
 @skip_if_offline
 @pytest.mark.slow
-@pytest.mark.parametrize("loader", ["WeightsOnlyLoader", "TransferLearningLoader"])
+@pytest.mark.parametrize("loader", ["WeightsOnlyLoader", "ColdStartLoader", "TransferLearningLoader"])
 def test_loading_strategy_loads_real_checkpoint(
     global_config_with_checkpoint: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
@@ -600,7 +644,13 @@ def test_training_cycle_mlflow_dry_run(
         config=cfg,
     )
     with open_dict(cfg):
-        cfg.training.checkpoint = resume_checkpoint_cfg(run_id, loading=None)
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": run_id,
+                "fork": False,
+            },
+        }
 
     # Get training data
     get_test_archive(url)
@@ -717,8 +767,19 @@ def test_evaluator(
     training_cfg.dataloader.limit_batches.validation = 0
     AnemoiTrainer(training_cfg).train()
 
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    checkpoint_dir = run_dirs[0]
+
     with open_dict(cfg):
-        cfg.training.checkpoint = resume_checkpoint_cfg(get_single_checkpoint_dir(cfg).name, "WeightsOnlyLoader")
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": checkpoint_dir.name,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"},
+        }
     evaluator = AnemoiEvaluator(cfg)
     evaluator.evaluate()
 
@@ -775,7 +836,13 @@ def test_restart_training_with_rollout(
 
     # Resume without a loading block. Lightning also restores the task state.
     with open_dict(cfg):
-        cfg.training.checkpoint = resume_checkpoint_cfg(checkpoint_dir.name, loading=None)
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+        }
     cfg.training.max_epochs = 4
     resumed_trainer = AnemoiTrainer(cfg)
     resumed_trainer.train()

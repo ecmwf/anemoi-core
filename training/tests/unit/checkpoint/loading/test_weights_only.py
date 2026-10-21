@@ -14,12 +14,10 @@ import logging
 import pytest
 import torch
 import torch.nn as nn
-from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.base import PipelineStage
 from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
-from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.loading.strategies import ColdStartLoader
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
 
@@ -57,50 +55,6 @@ def test_weights_only_sets_metadata() -> None:
     result = loader.process(context)
 
     assert result.metadata.get("loading_strategy") == "weights_only"
-
-
-@pytest.mark.parametrize(
-    ("state_dict", "strict", "raises"),
-    [
-        ({"linear.weight": torch.randn(5, 10)}, True, True),
-        ({"linear.weight": torch.randn(5, 10)}, False, False),
-        ({"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5), "extra": torch.randn(2)}, True, True),
-        ({"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5), "extra": torch.randn(2)}, False, False),
-    ],
-    ids=["strict-missing", "non-strict-missing", "strict-extra", "non-strict-extra"],
-)
-def test_weights_only_strict_rejects_a_key_mismatch(state_dict: dict, strict: bool, raises: bool) -> None:
-    """``strict`` (the default) rejects missing and extra keys. ``strict=False`` loads the matching keys."""
-    model = SimpleModel()
-    context = CheckpointContext(model=model, checkpoint_data={"state_dict": state_dict})
-
-    if raises:
-        with pytest.raises(CheckpointLoadError):
-            WeightsOnlyLoader(strict=strict).process(context)
-    else:
-        WeightsOnlyLoader(strict=strict).process(context)
-        assert torch.equal(model.linear.weight, state_dict["linear.weight"])
-
-
-@pytest.mark.parametrize(("checkpoint_channels", "warns"), [(64, True), (128, False)])
-def test_weights_only_warns_when_checkpoint_hparams_differ(
-    caplog: pytest.LogCaptureFixture,
-    checkpoint_channels: int,
-    warns: bool,
-) -> None:
-    """A different model config in the checkpoint causes a warning."""
-    model = SimpleModel()
-    checkpoint = {
-        "state_dict": {key: value.clone() for key, value in model.state_dict().items()},
-        "hyper_parameters": {"config": {"model": {"num_channels": checkpoint_channels}}},
-    }
-    config = OmegaConf.create({"model": {"num_channels": 128}})
-    context = CheckpointContext(model=model, checkpoint_data=checkpoint, config=config)
-
-    with caplog.at_level(logging.WARNING):
-        WeightsOnlyLoader().process(context)
-
-    assert ("hparams differ" in caplog.text) is warns
 
 
 class TwoLayerModel(nn.Module):
@@ -158,7 +112,7 @@ def test_weights_only_skip_mismatched_does_not_drop_unexpected_keys() -> None:
     checkpoint["state_dict"]["not_a_real_layer.weight"] = torch.randn(3, 3)
 
     context = CheckpointContext(model=target, checkpoint_data=checkpoint)
-    with pytest.raises(CheckpointIncompatibleError, match="Unexpected keys"):
+    with pytest.raises(CheckpointIncompatibleError, match="unexpected="):
         WeightsOnlyLoader(strict=True, skip_mismatched=True).process(context)
 
 

@@ -14,7 +14,7 @@ from .strategies import ColdStartLoader
 from .strategies import TransferLearningLoader
 from .strategies import WarmStartLoader
 from .strategies import WeightsOnlyLoader
-from .utils import shape_mismatches
+from .utils import filter_state_dict
 
 __all__ = [
     "ColdStartLoader",
@@ -22,5 +22,5 @@ __all__ = [
     "TransferLearningLoader",
     "WarmStartLoader",
     "WeightsOnlyLoader",
-    "shape_mismatches",
+    "filter_state_dict",
 ]

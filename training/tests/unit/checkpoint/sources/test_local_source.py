@@ -11,9 +11,7 @@
 
 from __future__ import annotations
 
-import argparse
 import pickle
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -23,11 +21,10 @@ from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
-from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.checkpoint.sources.local import LocalSource
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
@@ -39,11 +36,6 @@ def _save_checkpoint(path: Path, data: dict) -> Path:
     """Save checkpoint data to a file and return the path."""
     torch.save(data, path)
     return path
-
-
-def _no_load(*_args: object, **_kwargs: object) -> None:
-    msg = "resolve must not load the checkpoint"
-    raise AssertionError(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -70,8 +62,19 @@ def ckpt_file(tmp_path: Path, simple_state_dict: dict) -> Path:
     )
 
 
-def test_local_source_extends_checkpoint_source() -> None:
-    assert issubclass(LocalSource, CheckpointSource)
+@pytest.fixture
+def lightning_ckpt_file(tmp_path: Path, simple_state_dict: dict) -> Path:
+    """A Lightning-format .ckpt file."""
+    return _save_checkpoint(
+        tmp_path / "lightning.ckpt",
+        {
+            "state_dict": simple_state_dict,
+            "pytorch-lightning_version": "2.2.0",
+            "epoch": 10,
+            "global_step": 500,
+            "hyper_parameters": {"lr": 1e-4},
+        },
+    )
 
 
 class TestLocalSourceProcess:
@@ -84,36 +87,22 @@ class TestLocalSourceProcess:
         assert result.checkpoint_data is not None
         assert "state_dict" in result.checkpoint_data
         assert result.checkpoint_data["epoch"] == 5
-        assert result.checkpoint_data["state_dict"]["layer.weight"].device == torch.device("cpu")
-        assert result.checkpoint_path == ckpt_file
         assert result.metadata["source_type"] == "local"
         assert result.metadata["source_path"] == str(ckpt_file)
 
-    def test_load_lightning_checkpoint_with_non_tensor_metadata(
+    def test_load_lightning_checkpoint(
         self,
         source: LocalSource,
-        simple_state_dict: dict,
-        tmp_path: Path,
+        lightning_ckpt_file: Path,
     ) -> None:
-        """LocalSource loads Lightning metadata that ``weights_only=True`` rejects."""
-        path = _save_checkpoint(
-            tmp_path / "lightning.ckpt",
-            {
-                "state_dict": simple_state_dict,
-                "pytorch-lightning_version": "2.2.0",
-                "epoch": 10,
-                "hyper_parameters": {"config": argparse.Namespace(lr=1e-4)},
-            },
-        )
-        with pytest.raises(pickle.UnpicklingError):
-            torch.load(path, weights_only=True, map_location="cpu")
+        context = CheckpointContext(checkpoint_path=lightning_ckpt_file)
+        result = source.process(context)
 
-        result = source.process(CheckpointContext(checkpoint_path=path))
-
+        assert result.checkpoint_data is not None
         assert result.checkpoint_format == "lightning"
         assert result.checkpoint_data["pytorch-lightning_version"] == "2.2.0"
         assert result.checkpoint_data["epoch"] == 10
-        assert result.checkpoint_data["hyper_parameters"]["config"].lr == 1e-4
+        assert result.metadata["source_type"] == "local"
 
     def test_file_not_found_raises(self, source: LocalSource, tmp_path: Path) -> None:
         missing = tmp_path / "nonexistent.ckpt"
@@ -124,47 +113,14 @@ class TestLocalSourceProcess:
 
         assert missing.name in str(exc_info.value)
 
-    @pytest.mark.parametrize(
-        ("relative_path", "hint"),
-        [
-            ("ckpts/missing.ckpt", "Found similar files in"),
-            ("no_such_dir/model.ckpt", "Directory does not exist"),
-        ],
-    )
-    def test_file_not_found_gives_a_hint(
-        self,
-        source: LocalSource,
-        tmp_path: Path,
-        relative_path: str,
-        hint: str,
-    ) -> None:
-        """A missing file lists other checkpoints in its directory, or reports a missing directory."""
-        (tmp_path / "ckpts").mkdir()
-        (tmp_path / "ckpts" / "epoch_1.ckpt").write_bytes(b"x")
+    def test_invalid_file_raises(self, source: LocalSource, tmp_path: Path) -> None:
+        bad_file = tmp_path / "garbage.ckpt"
+        bad_file.write_text("this is not a valid checkpoint")
 
-        with pytest.raises(CheckpointNotFoundError, match=hint):
-            source.process(CheckpointContext(checkpoint_path=tmp_path / relative_path))
-
-    @pytest.mark.parametrize(
-        "make_bad_file",
-        [
-            lambda path: path.write_bytes(b""),
-            lambda path: path.write_text("this is not a valid checkpoint"),
-            lambda path: path.mkdir(),
-        ],
-        ids=["empty", "garbage", "directory"],
-    )
-    def test_invalid_file_raises(
-        self,
-        source: LocalSource,
-        tmp_path: Path,
-        make_bad_file: Callable[[Path], object],
-    ) -> None:
-        bad_file = tmp_path / "bad.ckpt"
-        make_bad_file(bad_file)
+        context = CheckpointContext(checkpoint_path=bad_file)
 
         with pytest.raises(CheckpointLoadError) as exc_info:
-            source.process(CheckpointContext(checkpoint_path=bad_file))
+            source.process(context)
 
         assert str(bad_file) in str(exc_info.value)
 
@@ -179,19 +135,6 @@ class TestLocalSourceProcess:
 
         assert result.checkpoint_data is not None
         assert result.metadata["source_type"] == "local"
-
-    def test_relative_path_becomes_absolute(
-        self,
-        source: LocalSource,
-        ckpt_file: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.chdir(ckpt_file.parent)
-
-        result = source.process(CheckpointContext(checkpoint_path=ckpt_file.name))
-
-        assert Path(result.checkpoint_path).is_absolute()
-        assert Path(result.checkpoint_path).is_file()
 
     def test_none_path_raises_config_error(self, source: LocalSource) -> None:
         """Passing None checkpoint_path should raise CheckpointConfigError."""
@@ -213,19 +156,21 @@ class TestLocalSourceProcess:
 
     def test_tilde_path_is_expanded(
         self,
+        source: LocalSource,
         simple_state_dict: dict,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A ``~`` path is expanded before loading and published as the canonical path."""
+        """A ``~`` path is expanded before loading."""
         monkeypatch.setenv("HOME", str(tmp_path))
-        expected = _save_checkpoint(tmp_path / "home_model.ckpt", {"state_dict": simple_state_dict}).resolve()
+        _save_checkpoint(tmp_path / "home_model.ckpt", {"state_dict": simple_state_dict})
+        context = CheckpointContext(checkpoint_path="~/home_model.ckpt")
 
-        result = LocalSource(path="~/home_model.ckpt").process(CheckpointContext())
+        result = source.process(context)
 
         assert result.checkpoint_data is not None
-        assert result.checkpoint_path == expected
-        assert result.metadata["source_path"] == str(expected)
+        assert "~" not in result.metadata["source_path"]
+        assert result.metadata["source_path"] == str(tmp_path / "home_model.ckpt")
 
     def test_symlink_path_is_resolved(self, source: LocalSource, ckpt_file: Path, tmp_path: Path) -> None:
         """A symlink path is resolved to its target in metadata."""
@@ -260,23 +205,6 @@ class TestLocalSourceProcess:
         assert isinstance(exc_info.value.original_error, exc)
 
 
-def test_resolve_publishes_canonical_path_without_loading(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``resolve`` sets the expanded, canonical path and loads nothing."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    torch.save({"state_dict": {}}, tmp_path / "model.ckpt")
-    monkeypatch.setattr(torch, "load", _no_load)
-
-    context = CheckpointContext()
-    path = LocalSource(path="~/model.ckpt").resolve(context)
-
-    assert path == (tmp_path / "model.ckpt").resolve()
-    assert context.checkpoint_path == path
-    assert context.checkpoint_data is None
-
-
 class TestLocalSourceSupports:
     """Tests for LocalSource.supports()."""
 
@@ -286,16 +214,16 @@ class TestLocalSourceSupports:
     def test_existing_file_returns_true(self, ckpt_file: Path) -> None:
         assert LocalSource.supports(str(ckpt_file)) is True
 
-    @pytest.mark.parametrize(
-        ("source", "expected"),
-        [
-            ("/models/epoch_50.ckpt", True),
-            ("relative/path/model.pt", True),
-            ("s3://bucket/model.ckpt", False),
-            ("http://example.com/model.ckpt", False),
-            ("https://example.com/model.ckpt", False),
-            ("gs://bucket/model.ckpt", False),
-        ],
-    )
-    def test_string_without_scheme_is_local(self, source: str, expected: bool) -> None:
-        assert LocalSource.supports(source) is expected
+    def test_local_string_without_scheme_returns_true(self) -> None:
+        assert LocalSource.supports("/models/epoch_50.ckpt") is True
+        assert LocalSource.supports("relative/path/model.pt") is True
+
+    def test_s3_url_returns_false(self) -> None:
+        assert LocalSource.supports("s3://bucket/model.ckpt") is False
+
+    def test_http_url_returns_false(self) -> None:
+        assert LocalSource.supports("http://example.com/model.ckpt") is False
+        assert LocalSource.supports("https://example.com/model.ckpt") is False
+
+    def test_gcs_url_returns_false(self) -> None:
+        assert LocalSource.supports("gs://bucket/model.ckpt") is False

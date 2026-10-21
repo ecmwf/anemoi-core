@@ -282,7 +282,7 @@ class MlFlowSync:
         run_type: str = "offline",
     ) -> (dict, dict):
 
-        if "forkedRun" not in tags and params["metadata.run_id"] == src_run_id:
+        if (params["config.training.fork_run_id"] == "None") and (params["metadata.run_id"] == src_run_id):
             params = self.update_run_id(
                 params,
                 "run_id",

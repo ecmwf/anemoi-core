@@ -21,6 +21,7 @@ import pandas as pd
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pytorch_lightning.utilities import rank_zero_only
 from rich.console import Console
 
@@ -332,13 +333,13 @@ class AnemoiProfiler(AnemoiTrainer):
         """Update the paths in the configuration."""
         super()._update_paths()
 
-        _, fork_run_id = self._run_identity
         if self.run_id:  # when using mlflow only rank0 will have a run_id except when resuming runs
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
             self.config.system.output.profiler = Path(self.config.system.output.profiler, self.run_id)
-        elif fork_run_id:
-            self.config.system.output.profiler = Path(self.config.system.output.profiler, fork_run_id)
+        elif OmegaConf.select(self.config, "training.fork_run_id", default=None):
+            parent_run = OmegaConf.select(self.config, "training.fork_run_id", default=None)
+            self.config.system.output.profiler = Path(self.config.system.output.profiler, parent_run)
         LOGGER.info("Profiler path: %s", self.config.system.output.profiler)
 
     def _close_logger(self) -> None:

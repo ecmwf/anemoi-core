@@ -11,23 +11,16 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from hydra.utils import instantiate
-from pytorch_lightning.utilities.rank_zero import rank_zero_only
+from omegaconf import OmegaConf
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     import torch.nn as nn
     from omegaconf import DictConfig
-
-    from anemoi.training.checkpoint.base import CheckpointContext
-    from anemoi.training.checkpoint.sources.base import CheckpointSource
-
-LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -49,6 +42,11 @@ class PipelineResult:
     weights_loaded: bool = False
 
 
+def checkpoint_pipeline_configured(config: DictConfig) -> bool:
+    """Return ``True`` if ``training.checkpoint`` is set."""
+    return OmegaConf.select(config, "training.checkpoint", default=None) is not None
+
+
 def run_checkpoint_pipeline(
     model: nn.Module,
     config: DictConfig,
@@ -58,8 +56,6 @@ def run_checkpoint_pipeline(
     load_checkpoint: bool = True,
 ) -> PipelineResult:
     """Build the pipeline from ``config`` and run it on ``model``.
-
-    On a resume, only resolve the source. ``Trainer.fit(ckpt_path=)`` loads the checkpoint.
 
     Parameters
     ----------
@@ -81,8 +77,6 @@ def run_checkpoint_pipeline(
     """
     from anemoi.training.checkpoint.base import CheckpointContext
     from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
-    from anemoi.training.checkpoint.builder import resumes_via_lightning
-    from anemoi.training.checkpoint.builder import source_config
 
     pipeline = build_checkpoint_pipeline(
         config,
@@ -90,39 +84,10 @@ def run_checkpoint_pipeline(
         fork_run_server2server=fork_run_server2server,
         load_checkpoint=load_checkpoint,
     )
-    context = CheckpointContext(model=model, config=config)
-
-    source = source_config(config, parent_run_server2server, fork_run_server2server)
-    if load_checkpoint and source is not None and resumes_via_lightning(config):
-        _resolve_resume_checkpoint(instantiate(source), context)
-
-    context = pipeline.execute(context)
+    context = pipeline.execute(CheckpointContext(model=model, config=config))
 
     return PipelineResult(
         model=context.model,
         checkpoint_path=context.checkpoint_path,
         weights_loaded=bool(getattr(context.model, "weights_initialized", False)),
     )
-
-
-def _resolve_resume_checkpoint(source: CheckpointSource, context: CheckpointContext) -> None:
-    """Resolve the resume checkpoint file on ``context``. Do not load it: Lightning loads it.
-
-    Raises
-    ------
-    CheckpointConfigError
-        On rank 0, if the source resolves no file. Other ranks defer the error to rank 0.
-    """
-    path = source.resolve(context)
-    if path is not None:
-        LOGGER.info("Resume checkpoint resolved to %s; Trainer.fit(ckpt_path=) loads it", path)
-        return
-    if rank_zero_only.rank == 0:
-        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-
-        msg = (
-            f"Resume configured, but {type(source).__name__} resolved no checkpoint file for "
-            "Trainer.fit(ckpt_path=). Check training.checkpoint.source."
-        )
-        raise CheckpointConfigError(msg)
-    LOGGER.warning("%s resolved no checkpoint on this rank; deferring the error to rank 0", type(source).__name__)

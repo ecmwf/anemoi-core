@@ -13,19 +13,183 @@ from __future__ import annotations
 
 import hashlib
 import time
+import urllib.error
 from pathlib import Path
+from unittest.mock import MagicMock
+from unittest.mock import Mock
+from unittest.mock import patch
 
 import pytest
 import torch
 
+
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+from anemoi.training.checkpoint.exceptions import CheckpointSourceError
+from anemoi.training.checkpoint.exceptions import CheckpointTimeoutError
 from anemoi.training.checkpoint.exceptions import CheckpointValidationError
 from anemoi.training.checkpoint.utils import calculate_checksum
 from anemoi.training.checkpoint.utils import compare_state_dicts
+from anemoi.training.checkpoint.utils import download_with_retry
 from anemoi.training.checkpoint.utils import estimate_checkpoint_memory
 from anemoi.training.checkpoint.utils import format_size
 from anemoi.training.checkpoint.utils import get_checkpoint_metadata
 from anemoi.training.checkpoint.utils import validate_checkpoint
+
+TIMEOUT = 60
+
+
+class TestDownloadWithRetry:
+    """Test download functionality with retry logic."""
+
+    @pytest.mark.unit
+    @pytest.mark.network
+    def test_download_with_retry_success(self, temp_checkpoint_dir: Path, network_urls: dict[str, str]) -> None:
+        """Test successful download on first attempt."""
+        dest_path = temp_checkpoint_dir / "downloaded_file.bin"
+
+        try:
+            result_path = download_with_retry(network_urls["valid"], dest_path, max_retries=3, timeout=TIMEOUT)
+
+            assert result_path == dest_path
+            assert dest_path.exists()
+            assert dest_path.stat().st_size > 0
+
+        except (TimeoutError, OSError, CheckpointSourceError) as e:
+            pytest.skip(f"Network request failed: {e}")
+
+    @pytest.mark.unit
+    @pytest.mark.network
+    def test_download_with_retry_timeout(self, temp_checkpoint_dir: Path, network_urls: dict[str, str]) -> None:
+        """Test download timeout and retry behavior."""
+        dest_path = temp_checkpoint_dir / "timeout_file.bin"
+
+        try:
+            with pytest.raises((CheckpointTimeoutError, CheckpointSourceError)):
+                download_with_retry(
+                    network_urls["timeout"],
+                    dest_path,
+                    max_retries=2,
+                    timeout=2,  # Short timeout to trigger error quickly
+                )
+        except CheckpointSourceError as e:
+            pytest.skip(f"Network not available: {e}")
+
+    @pytest.mark.unit
+    @pytest.mark.network
+    def test_download_with_retry_not_found(self, temp_checkpoint_dir: Path, network_urls: dict[str, str]) -> None:
+        """Test download with 404 error."""
+        dest_path = temp_checkpoint_dir / "not_found_file.bin"
+
+        with pytest.raises(CheckpointSourceError) as exc_info:
+            download_with_retry(network_urls["not_found"], dest_path, max_retries=2, timeout=60)
+
+        # The message is "http" and source_path contains the URL
+        assert "http" in exc_info.value.message or "http" in exc_info.value.source_path
+
+    @pytest.mark.unit
+    @pytest.mark.network
+    def test_download_with_retry_server_error(
+        self,
+        temp_checkpoint_dir: Path,
+        network_urls: dict[str, str],
+    ) -> None:
+        """Test download with server error and retry behavior."""
+        dest_path = temp_checkpoint_dir / "server_error_file.bin"
+
+        with pytest.raises(CheckpointSourceError):
+            download_with_retry(network_urls["server_error"], dest_path, max_retries=2, timeout=TIMEOUT)
+
+    @pytest.mark.unit
+    def test_download_with_retry_creates_parent_dir(self, temp_checkpoint_dir: Path) -> None:
+        """Test that download creates parent directories."""
+        nested_path = temp_checkpoint_dir / "nested" / "deep" / "file.bin"
+
+        with patch("urllib.request.urlopen", return_value=_mock_response([b"test_data"])):
+            result_path = download_with_retry("https://example.com/file.bin", nested_path, max_retries=1)
+
+        assert result_path == nested_path
+        assert nested_path.exists()
+        assert nested_path.parent.exists()
+
+    @pytest.mark.unit
+    def test_download_with_retry_exponential_backoff(self, temp_checkpoint_dir: Path) -> None:
+        """Test exponential backoff behavior on retries."""
+        dest_path = temp_checkpoint_dir / "backoff_test.bin"
+
+        with (
+            patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Connection failed")),
+            patch("time.sleep") as mock_sleep,
+            pytest.raises(CheckpointSourceError),
+        ):
+            download_with_retry("https://example.com/fail.bin", dest_path, max_retries=3, timeout=TIMEOUT)
+
+        # 2^0 + 2^1: one wait between each pair of attempts.
+        assert [c.args[0] for c in mock_sleep.call_args_list] == [1, 2]
+
+    @pytest.mark.unit
+    def test_download_with_retry_progress_logging(self, temp_checkpoint_dir: Path) -> None:
+        """Test progress logging during download."""
+        dest_path = temp_checkpoint_dir / "progress_test.bin"
+
+        # Create large mock data to trigger progress logging
+        chunk_size = 8192
+        large_data = [b"x" * chunk_size for _ in range(150)]  # >100 chunks to trigger logging
+
+        with (
+            patch("urllib.request.urlopen", return_value=_mock_response(large_data)),
+            patch("anemoi.training.checkpoint.utils.LOGGER") as mock_logger,
+        ):
+            result_path = download_with_retry("https://example.com/large.bin", dest_path, chunk_size=chunk_size)
+
+        assert result_path == dest_path
+        # Should have logged progress (debug calls for progress updates)
+        assert mock_logger.debug.call_count > 0
+
+    @pytest.mark.unit
+    def test_download_with_retry_custom_chunk_size(self, temp_checkpoint_dir: Path) -> None:
+        """Test download with custom chunk size."""
+        dest_path = temp_checkpoint_dir / "chunk_test.bin"
+        custom_chunk_size = 4096
+        test_data = b"x" * (custom_chunk_size * 3)  # 3 chunks
+        chunks = [test_data[i : i + custom_chunk_size] for i in range(0, len(test_data), custom_chunk_size)]
+        response = _mock_response(chunks)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            result_path = download_with_retry("https://example.com/chunk.bin", dest_path, chunk_size=custom_chunk_size)
+
+        assert result_path == dest_path
+        assert dest_path.read_bytes() == test_data
+        # Verify chunk size was used in call
+        response.read.assert_called_with(custom_chunk_size)
+
+    @pytest.mark.unit
+    @pytest.mark.slow
+    def test_download_with_retry_large_file_simulation(self, temp_checkpoint_dir: Path) -> None:
+        """Test download simulation with large file (performance test)."""
+        dest_path = temp_checkpoint_dir / "large_simulation.bin"
+
+        # Simulate 10MB file
+        chunk_size = 8192
+        num_chunks = 1280  # 10MB / 8KB
+
+        with patch("urllib.request.urlopen", return_value=_mock_response([b"x" * chunk_size] * num_chunks)):
+            start_time = time.time()
+            result_path = download_with_retry("https://example.com/large.bin", dest_path, chunk_size=chunk_size)
+            download_time = time.time() - start_time
+
+        assert result_path == dest_path
+        assert dest_path.exists()
+        # Should complete in reasonable time (< 5 seconds for simulation)
+        assert download_time < 5.0
+
+
+def _mock_response(chunks: list[bytes]) -> MagicMock:
+    """Make a mock ``urlopen`` response that returns ``chunks`` and then ``b""``."""
+    response = MagicMock()
+    response.headers = {"content-length": str(sum(len(c) for c in chunks))}
+    response.read = Mock(side_effect=[*chunks, b""])
+    response.__enter__.return_value = response
+    return response
 
 
 class TestValidateCheckpoint:
@@ -634,3 +798,26 @@ class TestUtilsIntegration:
         # Memory estimate should be in reasonable relation to file size
         # (Typically smaller due to compression and metadata overhead)
         assert 0.1 * actual_file_size <= estimated_bytes <= actual_file_size
+
+    @pytest.mark.integration
+    @pytest.mark.network
+    def test_download_validate_cycle(self, temp_checkpoint_dir: Path, network_urls: dict[str, str]) -> None:
+        """Test downloading and then validating a checkpoint."""
+        dest_path = temp_checkpoint_dir / "downloaded_valid.bin"
+
+        try:
+            # Download file
+            download_with_retry(network_urls["valid"], dest_path, max_retries=2, timeout=TIMEOUT)
+
+            assert dest_path.exists()
+
+            # Calculate checksum of downloaded file
+            checksum = calculate_checksum(dest_path)
+            assert len(checksum) == 64  # SHA256
+
+            # Get metadata (file info)
+            file_stat = dest_path.stat()
+            assert file_stat.st_size > 0
+
+        except (TimeoutError, OSError, CheckpointSourceError) as e:
+            pytest.skip(f"Network request failed: {e}")

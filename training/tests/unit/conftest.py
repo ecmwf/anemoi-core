@@ -11,7 +11,6 @@
 from pathlib import Path
 
 import pytest
-import torch
 from _pytest.fixtures import SubRequest
 from hydra import compose
 from hydra import initialize
@@ -45,17 +44,3 @@ def datamodule() -> AnemoiDatasetsDataModule:
         # config is relative to a module
         cfg = compose(config_name="config")
     return AnemoiDatasetsDataModule(cfg)
-
-
-@pytest.fixture
-def torch_load_calls(monkeypatch: pytest.MonkeyPatch) -> list[object]:
-    """Record the first argument of each ``torch.load`` call. The real load still runs."""
-    calls: list[object] = []
-    real_load = torch.load
-
-    def _spy(*args: object, **kwargs: object) -> object:
-        calls.append(args[0])
-        return real_load(*args, **kwargs)
-
-    monkeypatch.setattr(torch, "load", _spy)
-    return calls

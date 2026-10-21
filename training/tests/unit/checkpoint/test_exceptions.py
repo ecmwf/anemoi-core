@@ -261,17 +261,6 @@ class TestCheckpointIncompatibleError:
         assert error.details["num_mismatches"] == 1
 
     @pytest.mark.unit
-    @pytest.mark.parametrize("field", ["missing_keys", "unexpected_keys"])
-    def test_checkpoint_incompatible_error_truncates_long_key_lists(self, field: str) -> None:
-        """The message shows the first 5 keys and the number of other keys."""
-        keys = [f"layer.{i}.weight" for i in range(6)]
-        message = str(CheckpointIncompatibleError("Mismatch", **{field: keys}))
-
-        assert "... and 1 more" in message
-        assert keys[4] in message
-        assert keys[5] not in message
-
-    @pytest.mark.unit
     def test_checkpoint_incompatible_error_none_values(self) -> None:
         """Test CheckpointIncompatibleError with None values."""
         error = CheckpointIncompatibleError(

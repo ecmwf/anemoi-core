@@ -85,6 +85,25 @@ class TestCheckpointContext:
         context.update_metadata(accuracy=0.95)  # Add new
         assert context.metadata == {"epoch": 10, "loss": 0.1, "accuracy": 0.95}
 
+    def test_get_metadata(self) -> None:
+        """Test getting metadata with defaults."""
+        context = CheckpointContext(metadata={"epoch": 5})
+
+        assert context.get_metadata("epoch") == 5
+        assert context.get_metadata("missing") is None
+        assert context.get_metadata("missing", "default") == "default"
+
+    def test_has_checkpoint_data(self) -> None:
+        """Test checking for checkpoint data."""
+        context = CheckpointContext()
+        assert not context.has_checkpoint_data()
+
+        context.checkpoint_data = {}
+        assert not context.has_checkpoint_data()  # Empty dict
+
+        context.checkpoint_data = {"state_dict": {}}
+        assert context.has_checkpoint_data()
+
     def test_context_repr(self, tmp_path: Path) -> None:
         """Test context string representation."""
         checkpoint_path = tmp_path / "checkpoint.pt"

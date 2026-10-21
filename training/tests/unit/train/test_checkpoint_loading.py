@@ -22,14 +22,21 @@ from omegaconf import OmegaConf
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.checkpoint.base import CheckpointContext
+from anemoi.training.checkpoint.builder import reject_unsupported_warm_start
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+from anemoi.training.checkpoint.runner import checkpoint_pipeline_configured
 from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
-from tests.helpers import FakeIndexCollection
 
 
-class DummyIndexWithCompare(FakeIndexCollection):
-    """FakeIndexCollection that tracks compare_variables calls."""
+class DummyIndex:
+    def __init__(self) -> None:
+        self.name_to_index: dict[str, int] = {}
+
+
+class DummyIndexWithCompare(DummyIndex):
+    """DummyIndex that tracks compare_variables calls."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -103,7 +110,7 @@ def test_on_load_checkpoint_rebuilds_tendency_processors_for_fewer_steps() -> No
 
     checkpoint = {
         "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
-        "hyper_parameters": {"data_indices": {"data": FakeIndexCollection()}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
 
     module = _make_dummy_module(new_model, update_states=False, update_tendencies=True)
@@ -131,7 +138,7 @@ def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
 
     checkpoint = {
         "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
-        "hyper_parameters": {"data_indices": {"data": FakeIndexCollection()}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
 
     module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
@@ -167,7 +174,7 @@ def test_on_load_checkpoint_applies_corrections_regardless_of_weights_initialize
 
     checkpoint = {
         "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
-        "hyper_parameters": {"data_indices": {"data": FakeIndexCollection()}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
 
     module = _make_dummy_module(new_model, update_states=False, update_tendencies=True)
@@ -182,7 +189,7 @@ def test_on_load_checkpoint_applies_corrections_regardless_of_weights_initialize
     for key, value in new_model.state_dict().items():
         if key.startswith(("pre_processors_tendencies.", "post_processors_tendencies.")):
             assert torch.equal(state_dict[f"model.{key}"], value)
-    assert module._ckpt_model_name_to_index == {"data": FakeIndexCollection().name_to_index}
+    assert module._ckpt_model_name_to_index == {"data": DummyIndex().name_to_index}
 
 
 def test_validate_transfer_learning_add_dataset() -> None:
@@ -355,7 +362,7 @@ def test_on_load_checkpoint_overrides_configured_rollout_start(caplog: pytest.Lo
 
     checkpoint = {
         "task_state": {"rollout": {"step": 4, "last_increased_epoch": 3}},
-        "hyper_parameters": {"data_indices": {"data": FakeIndexCollection()}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
         "state_dict": {},
     }
     caplog.set_level(logging.INFO)
@@ -387,7 +394,7 @@ def test_weights_only_pipeline_load_starts_rollout_schedule_from_config() -> Non
     module.model = torch.nn.Linear(2, 2)
     checkpoint = {
         "task_state": {"rollout": {"step": 4, "last_increased_epoch": 3}},
-        "hyper_parameters": {"data_indices": {"data": FakeIndexCollection()}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
         "state_dict": {f"model.{key}": value.clone() for key, value in module.model.state_dict().items()},
     }
 
@@ -432,7 +439,7 @@ def test_on_load_checkpoint_synchronizes_dataloader_time_window() -> None:
 
     checkpoint = {
         "task_state": {"rollout": {"step": 3, "last_increased_epoch": 1}},
-        "hyper_parameters": {"data_indices": {"data": FakeIndexCollection()}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
         "state_dict": {},
     }
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
@@ -456,7 +463,7 @@ def test_rollout_step_not_spuriously_incremented_on_resume() -> None:
 
     # --- restore into a fresh module via on_load_checkpoint ---
     resumed_module, resumed_task = _make_module_with_forecaster_task(rollout_cfg)
-    checkpoint["hyper_parameters"] = {"data_indices": {"data": FakeIndexCollection()}}
+    checkpoint["hyper_parameters"] = {"data_indices": {"data": DummyIndex()}}
     checkpoint["state_dict"] = {}
     BaseTrainingModule.on_load_checkpoint(resumed_module, checkpoint)
 
@@ -482,7 +489,7 @@ def test_rollout_schedule_continues_at_configured_interval_after_resume() -> Non
 
     checkpoint: dict = {}
     BaseTrainingModule.on_save_checkpoint(module, checkpoint)
-    checkpoint["hyper_parameters"] = {"data_indices": {"data": FakeIndexCollection()}}
+    checkpoint["hyper_parameters"] = {"data_indices": {"data": DummyIndex()}}
     checkpoint["state_dict"] = {}
 
     resumed_module, resumed_task = _make_module_with_forecaster_task(rollout_cfg)
@@ -501,7 +508,7 @@ def test_on_load_checkpoint_without_task_state_leaves_rollout_at_start() -> None
     module, task = _make_module_with_forecaster_task({"start": 2, "epoch_increment": 1, "maximum": 5})
 
     checkpoint = {
-        "hyper_parameters": {"data_indices": {"data": FakeIndexCollection()}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
         "state_dict": {},
     }
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
@@ -662,6 +669,14 @@ def test_validate_transfer_learning_units_dataset_not_in_checkpoint() -> None:
 # --- checkpoint pipeline (training.checkpoint) ---
 
 
+def test_checkpoint_pipeline_configured_detects_training_checkpoint() -> None:
+    """``checkpoint_pipeline_configured`` is True only when training.checkpoint is set."""
+    configured = OmegaConf.create({"training": {"checkpoint": {"loading": {"_target_": "x"}}}})
+    assert checkpoint_pipeline_configured(configured) is True
+
+    assert checkpoint_pipeline_configured(OmegaConf.create({"training": {}})) is False
+
+
 def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> None:
     """The pipeline finds the run checkpoint and loads weights into the same model object."""
     torch.manual_seed(0)
@@ -693,7 +708,7 @@ def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> Non
         },
     )
 
-    data_indices = {"data": FakeIndexCollection()}
+    data_indices = {"data": DummyIndex()}
     trainer = SimpleNamespace(
         config=cfg,
         data_indices=data_indices,
@@ -726,7 +741,7 @@ def test_load_via_checkpoint_pipeline_keeps_current_data_indices_over_checkpoint
     ckpt_dir.mkdir(parents=True)
 
     # The checkpoint has a different variable-to-index mapping.
-    checkpoint_index = FakeIndexCollection()
+    checkpoint_index = DummyIndex()
     checkpoint_index.name_to_index = {"t2m": 0, "u10": 1}
     torch.save(
         {
@@ -736,7 +751,7 @@ def test_load_via_checkpoint_pipeline_keeps_current_data_indices_over_checkpoint
         ckpt_dir / "last.ckpt",
     )
 
-    current_index = FakeIndexCollection()
+    current_index = DummyIndex()
     current_index.name_to_index = {"z500": 0, "msl": 1}
     current_data_indices = {"data": current_index}
 
@@ -805,8 +820,14 @@ def test_validate_transfer_learning_units_ignore_units_option() -> None:
 # --- runs without training.checkpoint ---
 
 
+def test_checkpoint_pipeline_configured_false_when_keyless() -> None:
+    """A missing or null ``training.checkpoint`` is not pipeline-configured."""
+    assert checkpoint_pipeline_configured(OmegaConf.create({"training": {}})) is False
+    assert checkpoint_pipeline_configured(OmegaConf.create({"training": {"checkpoint": None}})) is False
+
+
 def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without ``training.checkpoint``, the empty pipeline returns the new module and gives no warning."""
+    """Without ``training.checkpoint``, ``.model`` returns the new module and gives no warning."""
     import anemoi.training.train.train as train_module
 
     sentinel = torch.nn.Linear(2, 2)
@@ -816,25 +837,42 @@ def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pyte
     trainer = SimpleNamespace(
         config=cfg,
         task=object(),
-        data_indices={"data": FakeIndexCollection()},
+        data_indices={"data": DummyIndex()},
         graph_data=object(),
         metadata={},
         datamodule=SimpleNamespace(statistics={}, statistics_tendencies={}),
         supporting_arrays=object(),
-        start_from_checkpoint=False,
-        parent_run_server2server=None,
-        fork_run_server2server=None,
     )
-    trainer._load_via_checkpoint_pipeline = AnemoiTrainer._load_via_checkpoint_pipeline.__get__(trainer)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         result = AnemoiTrainer.model.func(trainer)
 
+    # Same object, so the pipeline did not run.
     assert result is sentinel
-    assert trainer._resolved_checkpoint_path is None
 
 
 _LOADERS = "anemoi.training.checkpoint.loading.strategies"
+
+
+@pytest.mark.parametrize(
+    ("checkpoint", "expected"),
+    [
+        (None, False),
+        ({"loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader"}}, True),
+        ({"loading": {"_target_": f"{_LOADERS}.TransferLearningLoader"}}, True),
+        ({"loading": {"_target_": f"{_LOADERS}.ColdStartLoader"}}, True),
+        ({"loading": {"_target_": f"{_LOADERS}.WarmStartLoader"}}, False),
+        ({"modifiers": [{"_target_": "x"}]}, False),  # no loader: resume
+    ],
+)
+def test_skip_lightning_restore_matches_loading_strategy(
+    checkpoint: dict | None,
+    expected: bool,
+) -> None:
+    """Weights-only loads drop ckpt_path; warm start and resume keep it."""
+    training = {"checkpoint": checkpoint} if checkpoint is not None else {}
+    trainer = SimpleNamespace(config=OmegaConf.create({"training": training}))
+    assert AnemoiTrainer._skip_lightning_restore(trainer) is expected
 
 
 # --- run identity from training.checkpoint.source ---
@@ -854,20 +892,25 @@ _LOCALSOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
         ({"_target_": _RUNSOURCE, "run_id": None, "fork": False}, None, None),
         # explicit path: no run identity
         ({"_target_": _LOCALSOURCE, "path": "/scratch/run/last.ckpt"}, None, None),
-        # no source
-        (None, None, None),
     ],
 )
 def test_run_identity_from_config_maps_source(
-    source: dict | None,
+    source: dict,
     expected_run_id: str | None,
     expected_fork_run_id: str | None,
 ) -> None:
     """The source config gives the (run_id, fork_run_id) pair."""
     from anemoi.training.checkpoint.sources.run import run_identity_from_config
 
-    training = {"checkpoint": {"source": source}} if source is not None else {}
-    assert run_identity_from_config(OmegaConf.create({"training": training})) == (expected_run_id, expected_fork_run_id)
+    config = OmegaConf.create({"training": {"checkpoint": {"source": source}}})
+    assert run_identity_from_config(config) == (expected_run_id, expected_fork_run_id)
+
+
+def test_run_identity_from_config_noop_without_checkpoint_source() -> None:
+    """Without a source, there is no run identity."""
+    from anemoi.training.checkpoint.sources.run import run_identity_from_config
+
+    assert run_identity_from_config(OmegaConf.create({"training": {}})) == (None, None)
 
 
 class _PipelineTrainer(SimpleNamespace):
@@ -880,7 +923,7 @@ class _PipelineTrainer(SimpleNamespace):
         super().__init__(
             config=config,
             start_from_checkpoint=True,
-            data_indices={"data": FakeIndexCollection()},
+            data_indices={"data": DummyIndex()},
             parent_run_server2server=None,
             fork_run_server2server=None,
             _validate_transfer_learning_datasets=lambda _model: None,
@@ -895,12 +938,25 @@ class _PipelineTrainer(SimpleNamespace):
         return AnemoiTrainer._load_via_checkpoint_pipeline(self, self._base_model)
 
 
-def test_last_checkpoint_is_the_path_the_run_source_resolved(tmp_path: Path, torch_load_calls: list[object]) -> None:
+def _spy_torch_load(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    calls: list[object] = []
+    real_load = torch.load
+
+    def _spy(*args: object, **kwargs: object) -> object:
+        calls.append(args[0])
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", _spy)
+    return calls
+
+
+def test_last_checkpoint_is_the_path_the_run_source_resolved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A RunIdSource resume gives Lightning the ``last.ckpt`` path and loads nothing."""
     root = tmp_path / "ckpts" / "abc"
     ckpt = tmp_path / "ckpts" / "abc" / "last.ckpt"
     ckpt.parent.mkdir(parents=True)
     torch.save({"state_dict": torch.nn.Linear(2, 2).state_dict()}, ckpt)
+    loads = _spy_torch_load(monkeypatch)
     trainer = _PipelineTrainer(
         OmegaConf.create(
             {
@@ -913,7 +969,7 @@ def test_last_checkpoint_is_the_path_the_run_source_resolved(tmp_path: Path, tor
 
     assert AnemoiTrainer.last_checkpoint.func(trainer) == ckpt.resolve()
     assert trainer.pipeline_runs == 1
-    assert torch_load_calls == []
+    assert loads == []
 
 
 def test_last_checkpoint_expands_and_resolves_a_tilde_local_source(
@@ -945,6 +1001,57 @@ def test_last_checkpoint_none_when_not_starting() -> None:
     assert AnemoiTrainer.last_checkpoint.func(trainer) is None
 
 
+# --- warm start needs a source ---
+
+_REMOTE_SOURCES = [
+    "anemoi.training.checkpoint.sources.s3.S3Source",
+    "anemoi.training.checkpoint.sources.http.HTTPSource",
+]
+
+
+def _warm_start_cfg(source: dict | None) -> DictConfig:
+    """Build a WarmStartLoader config with an optional source."""
+    checkpoint: dict = {"loading": {"_target_": f"{_LOADERS}.WarmStartLoader"}}
+    if source is not None:
+        checkpoint["source"] = source
+    return OmegaConf.create({"training": {"checkpoint": checkpoint}})
+
+
+@pytest.mark.parametrize("source_target", [_LOCALSOURCE, _RUNSOURCE])
+def test_warm_start_accepts_local_sources(source_target: str) -> None:
+    """Warm start accepts the sources that give a local file."""
+    reject_unsupported_warm_start(_warm_start_cfg({"_target_": source_target}))
+
+
+@pytest.mark.parametrize("source_target", _REMOTE_SOURCES)
+def test_warm_start_rejects_remote_sources(source_target: str) -> None:
+    """Warm start from a remote source raises, because Lightning needs a local file."""
+    with pytest.raises(CheckpointConfigError, match="cannot resume"):
+        reject_unsupported_warm_start(_warm_start_cfg({"_target_": source_target}))
+
+
+def test_warm_start_rejects_missing_source() -> None:
+    """Warm start without a source raises."""
+    with pytest.raises(CheckpointConfigError, match=r"no training\.checkpoint\.source"):
+        reject_unsupported_warm_start(_warm_start_cfg(None))
+
+
+@pytest.mark.parametrize("source_target", _REMOTE_SOURCES)
+def test_non_warm_start_allows_remote_source(source_target: str) -> None:
+    """Weights-only loading from a remote source passes."""
+    cfg = OmegaConf.create(
+        {
+            "training": {
+                "checkpoint": {
+                    "source": {"_target_": source_target},
+                    "loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader"},
+                },
+            },
+        },
+    )
+    reject_unsupported_warm_start(cfg)
+
+
 @pytest.mark.parametrize(
     ("loading", "expect_ckpt_path"),
     [
@@ -953,17 +1060,103 @@ def test_last_checkpoint_none_when_not_starting() -> None:
         (f"{_LOADERS}.WeightsOnlyLoader", False),
     ],
 )
-def test_last_checkpoint_is_none_after_a_pipeline_load(
+def test_fit_parameters_hands_the_resolved_path_to_lightning_only_on_resume(
     tmp_path: Path,
     loading: str | None,
     expect_ckpt_path: bool,
 ) -> None:
-    """Lightning gets the checkpoint on a resume, and ``None`` if the pipeline loaded the weights."""
-    ckpt = tmp_path / "last.ckpt"
-    torch.save({"state_dict": torch.nn.Linear(2, 2).state_dict()}, ckpt)
-    checkpoint: dict = {"source": {"_target_": _LOCALSOURCE, "path": str(ckpt)}}
+    """``Trainer.fit`` gets ``last_checkpoint`` on a resume and ``None`` after a pipeline load."""
+    resolved = tmp_path / "last.ckpt"
+    checkpoint: dict = {"source": {"_target_": _LOCALSOURCE, "path": str(resolved)}}
     if loading is not None:
         checkpoint["loading"] = {"_target_": loading}
-    trainer = _PipelineTrainer(OmegaConf.create({"training": {"checkpoint": checkpoint}}), torch.nn.Linear(2, 2))
+    trainer = SimpleNamespace(
+        config=OmegaConf.create({"training": {"checkpoint": checkpoint}}),
+        model=torch.nn.Linear(2, 2),
+        datamodule=object(),
+        last_checkpoint=resolved,
+    )
+    trainer._skip_lightning_restore = AnemoiTrainer._skip_lightning_restore.__get__(trainer)
 
-    assert AnemoiTrainer.last_checkpoint.func(trainer) == (ckpt.resolve() if expect_ckpt_path else None)
+    params = AnemoiTrainer.fit_parameters.func(trainer)
+
+    assert params["ckpt_path"] == (resolved if expect_ckpt_path else None)
+    assert params["model"] is trainer.model
+
+
+def test_on_load_checkpoint_writes_a_replaced_dict_back_in_place(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The corrections change the dict that Lightning passed in, in place."""
+    import anemoi.training.train.methods.base as methods_base
+
+    replacement = {
+        "state_dict": {"replaced": torch.ones(1)},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+    }
+    monkeypatch.setattr(methods_base, "apply_checkpoint_corrections", lambda *_args, **_kwargs: replacement)
+    module = _make_dummy_module(DummyModel(["6h"], offset=1.0), update_states=False, update_tendencies=False)
+    checkpoint = {"state_dict": {"stale": torch.zeros(1)}, "hyper_parameters": {"data_indices": {"data": DummyIndex()}}}
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert "stale" not in checkpoint["state_dict"]
+    assert torch.equal(checkpoint["state_dict"]["replaced"], torch.ones(1))
+
+
+# --- resume hook warns about missing migrations ---
+
+
+def _shipped_migration_names() -> list[str]:
+    from anemoi.models.migrations import Migrator
+
+    return [migration.name for migration in Migrator()._grouped_migrations[-1]]
+
+
+def _ledger(*names: str) -> list[dict]:
+    from anemoi.models.migrations.migrator import MigrationMetadata
+
+    return [
+        {
+            "name": name,
+            "metadata": MigrationMetadata(versions={"migration": "1.0.0", "anemoi-models": "0.11.0"}),
+            "signature": f"signature-of-{name}",
+        }
+        for name in names
+    ]
+
+
+def _resume_checkpoint(names: list[str]) -> dict:
+    return {
+        "state_dict": {},
+        "pytorch-lightning_version": "2.6.5",
+        "migrations": _ledger(*names),
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+    }
+
+
+def test_on_load_checkpoint_warns_about_an_incomplete_ledger_and_names_the_resume_file(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """On a resume, the hook warns about missing migrations and the load continues."""
+    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    module._trainer = SimpleNamespace(ckpt_path="/runs/abc/last.ckpt", datamodule=None)
+    checkpoint = _resume_checkpoint(_shipped_migration_names()[:3])
+
+    with caplog.at_level(logging.WARNING):
+        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert "behind the installed anemoi-models" in caplog.text
+    for name in _shipped_migration_names()[3:]:
+        assert name in caplog.text
+    assert "anemoi-models migration sync /runs/abc/last.ckpt" in caplog.text
+    assert module._ckpt_model_name_to_index == {"data": {}}
+
+
+def test_on_load_checkpoint_is_quiet_for_an_up_to_date_ledger(caplog: pytest.LogCaptureFixture) -> None:
+    """A checkpoint from the installed anemoi-models gives no warning."""
+    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    checkpoint = _resume_checkpoint(_shipped_migration_names())
+
+    with caplog.at_level(logging.WARNING):
+        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert "behind the installed anemoi-models" not in caplog.text

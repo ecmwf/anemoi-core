@@ -20,6 +20,7 @@ Example
 from __future__ import annotations
 
 import logging
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
@@ -85,7 +86,14 @@ class S3Source(CheckpointSource):
         bucket, key = self._parse_s3_url(url)
 
         LOGGER.info("Downloading checkpoint from %s", url)
-        self._load_from_download(context, lambda path: self._download_from_s3(url, path))
+        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as tmp_fd:
+            tmp_path = Path(tmp_fd.name)
+
+        try:
+            self._download_from_s3(url, tmp_path)
+            self._load_from_path(context, tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
         context.update_metadata(
             source_type="s3",

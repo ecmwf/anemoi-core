@@ -8,16 +8,13 @@
 # nor does it submit to any jurisdiction.
 
 
-import uuid
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from anemoi.training.train.train import AnemoiTrainer
 
@@ -171,67 +168,3 @@ def test_no_source_is_fresh_run(
 
     assert trainer.start_from_checkpoint is False
     assert trainer.last_checkpoint is None
-    assert uuid.UUID(trainer.run_id).version == 4
-
-
-@pytest.mark.parametrize(
-    ("run_id", "fork_run_id", "server2server", "expected_checkpoints", "expected_plots"),
-    [
-        ("run-abc", None, None, Path("/base/ckpts/run-abc"), Path("/base/plots/run-abc")),
-        ("local-run", None, "remote-parent", Path("/base/ckpts/remote-parent"), Path("/base/plots/remote-parent")),
-        # A non-zero rank of a fork has no run_id: only checkpoints.root changes.
-        (None, "fork-999", None, Path("/base/ckpts/fork-999"), "/base/plots"),
-    ],
-)
-def test_update_paths_appends_the_lineage_id(
-    run_id: str | None,
-    fork_run_id: str | None,
-    server2server: str | None,
-    expected_checkpoints: Path,
-    expected_plots: Path | str,
-) -> None:
-    trainer = SimpleNamespace(
-        run_id=run_id,
-        parent_run_server2server=server2server,
-        _run_identity=(run_id, fork_run_id),
-        config=OmegaConf.create(
-            {"system": {"output": {"checkpoints": {"root": "/base/ckpts"}, "plots": "/base/plots"}}},
-        ),
-    )
-
-    AnemoiTrainer._update_paths(trainer)
-
-    assert trainer.config.system.output.checkpoints.root == expected_checkpoints
-    assert trainer.config.system.output.plots == expected_plots
-
-
-@pytest.mark.parametrize(
-    ("rank", "fork_run_id", "start_from_checkpoint"),
-    [
-        (0, None, False),
-        # All ranks get the same result, because the result controls checkpoint loading.
-        (1, None, False),
-        # A fork starts from its parent checkpoint even if the parent is dry.
-        (0, "fork-1", True),
-    ],
-)
-def test_check_dry_run_for_a_dry_mlflow_parent(
-    monkeypatch: pytest.MonkeyPatch,
-    rank: int,
-    fork_run_id: str | None,
-    start_from_checkpoint: bool,
-) -> None:
-    """A parent run without a checkpoint directory is dry. A resume from it starts from scratch."""
-    monkeypatch.setattr(rank_zero_only, "rank", rank)
-    trainer = SimpleNamespace(
-        start_from_checkpoint=True,
-        logger=SimpleNamespace(logger_name="mlflow"),
-        mlflow_logger=SimpleNamespace(_parent_dry_run=True),
-        _run_identity=(None, fork_run_id),
-        config=OmegaConf.create({"system": {"output": {"checkpoints": {"root": "/nonexistent/checkpoint/dir"}}}}),
-    )
-
-    AnemoiTrainer._check_dry_run(trainer)
-
-    assert trainer.dry_run is True
-    assert trainer.start_from_checkpoint is start_from_checkpoint

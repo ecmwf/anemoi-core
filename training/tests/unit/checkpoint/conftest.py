@@ -16,14 +16,13 @@ from typing import TYPE_CHECKING
 import pytest
 import torch
 import torch.nn as nn
+from omegaconf import DictConfig
 
 from anemoi.training.checkpoint import CheckpointContext
 from anemoi.training.checkpoint import PipelineStage
-from anemoi.training.checkpoint.catalog import ComponentCatalog
 from anemoi.training.checkpoint.exceptions import CheckpointError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
 
@@ -97,23 +96,6 @@ class ComplexModel(nn.Module):
         for layer in self.processor:
             x = layer(x)
         return self.decoder(x)
-
-
-@pytest.fixture(autouse=True)
-def _reset_catalog_cache() -> Iterator[None]:
-    """Clear the class-level ``ComponentCatalog`` discovery cache before and after each test.
-
-    Some tests fill the cache with mocked discovery results.
-    """
-
-    def _reset() -> None:
-        ComponentCatalog._sources = None
-        ComponentCatalog._loaders = None
-        ComponentCatalog._modifiers = None
-
-    _reset()
-    yield
-    _reset()
 
 
 @pytest.fixture
@@ -232,6 +214,35 @@ def large_checkpoint_data() -> dict:
         "epoch": 50,
         "global_step": 10000,
         "loss_history": [0.5 - 0.001 * i for i in range(1000)],  # Large metadata
+    }
+
+
+@pytest.fixture
+def mock_config(tmp_path: Path) -> DictConfig:
+    """Create a mock configuration for testing."""
+    return DictConfig(
+        {
+            "checkpoint": {
+                "cache_dir": str(tmp_path / "checkpoints"),
+                "max_retries": 3,
+                "timeout": 300,
+            },
+            "pipeline": {
+                "continue_on_error": False,
+            },
+        },
+    )
+
+
+@pytest.fixture
+def network_urls() -> dict[str, str]:
+    """Provide test URLs for network operations."""
+    return {
+        "valid": "https://httpbin.org/bytes/1024",  # Returns 1KB of data
+        "timeout": "https://httpbin.org/delay/10",  # Delays 10 seconds
+        "not_found": "https://httpbin.org/status/404",  # Returns 404
+        "server_error": "https://httpbin.org/status/500",  # Returns 500
+        "large_file": "https://httpbin.org/bytes/10485760",  # 10MB file
     }
 
 

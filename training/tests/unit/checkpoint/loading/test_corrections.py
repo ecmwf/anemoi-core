@@ -9,7 +9,7 @@
 
 """Tests for ``apply_checkpoint_corrections`` and the order of its steps.
 
-Order: chunking migration, edge-permutation migration, processor refresh.
+Order: format migrations, edge-permutation migration, processor refresh.
 """
 
 from __future__ import annotations
@@ -69,21 +69,19 @@ def _config(*, states: bool) -> DictConfig:
 def test_edge_perm_migration_runs_before_the_processor_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     """The processor refresh runs after the edge-permutation migration.
 
-    The migration can change the state dict. If the refresh ran first, the migration could remove its entries.
+    The migration can rebuild the state dict. If the refresh ran first, the rebuild would remove its entries.
     """
     model = _Outer()
     checkpoint = _stale_checkpoint(model)
 
-    def dropping_migrate(ckpt: dict[str, Any], _model: nn.Module) -> dict[str, Any]:
-        for key in [k for k in ckpt["state_dict"] if "pre_processors" in k]:
-            del ckpt["state_dict"][key]
-        return ckpt
+    def rebuilding_migrate(ckpt: dict[str, Any], _model: nn.Module) -> dict[str, Any]:
+        return {"state_dict": {k: v for k, v in ckpt["state_dict"].items() if "pre_processors" not in k}}
 
-    monkeypatch.setattr(loading_base, "_trainable_edge_perm_fix", dropping_migrate)
+    monkeypatch.setattr(loading_base, "_load_trainable_edge_perm_migration", lambda: rebuilding_migrate)
 
-    apply_checkpoint_corrections(checkpoint, model, _config(states=True))
+    corrected = apply_checkpoint_corrections(checkpoint, model, _config(states=True))
 
-    state_dict = checkpoint["state_dict"]
+    state_dict = corrected["state_dict"]
     live = model.model.state_dict()
     assert torch.equal(state_dict["model.pre_processors.weight"], live["pre_processors.weight"])
     assert torch.equal(state_dict["model.pre_processors.bias"], live["pre_processors.bias"])
@@ -91,14 +89,43 @@ def test_edge_perm_migration_runs_before_the_processor_refresh(monkeypatch: pyte
     assert torch.all(state_dict["model.body.weight"] == 99.0)
 
 
+def test_format_migrations_run_first_and_edge_perm_sees_their_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Later steps use the dict that the format migrations return."""
+    model = _Outer()
+    original = _stale_checkpoint(model)
+    replacement = {"state_dict": dict(original["state_dict"]), "_migrated": True}
+    seen_by_edge_perm: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(loading_base, "apply_checkpoint_format_migrations", lambda _ckpt, _path: replacement)
+
+    def recording_migrate(ckpt: dict[str, Any], _model: nn.Module) -> dict[str, Any]:
+        seen_by_edge_perm.append(ckpt)
+        return ckpt
+
+    monkeypatch.setattr(loading_base, "_load_trainable_edge_perm_migration", lambda: recording_migrate)
+
+    corrected = apply_checkpoint_corrections(original, model, _config(states=True))
+
+    assert seen_by_edge_perm == [replacement]
+    assert corrected is replacement
+    assert torch.equal(
+        corrected["state_dict"]["model.pre_processors.weight"],
+        model.model.state_dict()["pre_processors.weight"],
+    )
+
+
+def test_none_checkpoint_is_returned_untouched() -> None:
+    assert apply_checkpoint_corrections(None, _Outer(), _config(states=True)) is None
+
+
 def test_missing_config_disables_the_refresh() -> None:
     """Without a config, the processors are not refreshed."""
     model = _Outer()
     checkpoint = _stale_checkpoint(model)
 
-    apply_checkpoint_corrections(checkpoint, model, None)
+    corrected = apply_checkpoint_corrections(checkpoint, model, None)
 
-    assert torch.all(checkpoint["state_dict"]["model.pre_processors.weight"] == 99.0)
+    assert torch.all(corrected["state_dict"]["model.pre_processors.weight"] == 99.0)
 
 
 def test_refresh_without_an_inner_model_keeps_the_processor_entries(caplog: pytest.LogCaptureFixture) -> None:
@@ -110,9 +137,9 @@ def test_refresh_without_an_inner_model_keeps_the_processor_entries(caplog: pyte
     checkpoint = {"state_dict": {"model.pre_processors.weight": torch.full((2, 2), 99.0), "model.body": torch.ones(1)}}
 
     with caplog.at_level(logging.WARNING):
-        apply_checkpoint_corrections(checkpoint, model, _config(states=True))
+        corrected = apply_checkpoint_corrections(checkpoint, model, _config(states=True))
 
-    assert torch.all(checkpoint["state_dict"]["model.pre_processors.weight"] == 99.0)
+    assert torch.all(corrected["state_dict"]["model.pre_processors.weight"] == 99.0)
     assert any("no model" in record.getMessage() for record in caplog.records)
 
 
@@ -124,7 +151,7 @@ def test_refresh_that_drops_but_cannot_reinject_is_logged_as_a_warning(caplog: p
     }
 
     with caplog.at_level(logging.WARNING):
-        apply_checkpoint_corrections(checkpoint, model, _config(states=True))
+        corrected = apply_checkpoint_corrections(checkpoint, model, _config(states=True))
 
-    assert "model.pre_processors.weight" not in checkpoint["state_dict"]
+    assert "model.pre_processors.weight" not in corrected["state_dict"]
     assert any("none to re-inject" in record.getMessage() for record in caplog.records)

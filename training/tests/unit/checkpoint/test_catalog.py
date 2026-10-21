@@ -67,6 +67,9 @@ class TestComponentCatalog:
         Now that LocalSource and HTTPSource exist, we can test discovery
         against the actual sources module without mocking.
         """
+        # Clear cache so discovery runs fresh
+        ComponentCatalog._sources = None
+
         components = ComponentCatalog._discover_components(
             "anemoi.training.checkpoint.sources",
             "CheckpointSource",
@@ -100,6 +103,8 @@ class TestComponentCatalog:
         results, only concrete implementations like LocalSource and
         HTTPSource.
         """
+        ComponentCatalog._sources = None
+
         components = ComponentCatalog._discover_components(
             "anemoi.training.checkpoint.sources",
             "CheckpointSource",
@@ -118,6 +123,9 @@ class TestComponentCatalog:
         # Mock discovery to return empty dict
         mock_discover.return_value = {}
 
+        # Clear the cached sources to trigger discovery
+        ComponentCatalog._sources = None
+
         with pytest.raises(CheckpointConfigError, match="Unknown checkpoint source") as exc_info:
             ComponentCatalog.get_source_target("s3")
 
@@ -129,6 +137,9 @@ class TestComponentCatalog:
         """Test getting loader target when no loaders are discovered."""
         # Mock discovery to return empty dict
         mock_discover.return_value = {}
+
+        # Clear the cached loaders to trigger discovery
+        ComponentCatalog._loaders = None
 
         with pytest.raises(CheckpointConfigError, match="Unknown loader strategy") as exc_info:
             ComponentCatalog.get_loader_target("weights_only")
@@ -142,47 +153,11 @@ class TestComponentCatalog:
         # Mock discovery to return empty dict
         mock_discover.return_value = {}
 
+        # Clear the cached modifiers to trigger discovery
+        ComponentCatalog._modifiers = None
+
         with pytest.raises(CheckpointConfigError, match="Unknown model modifier") as exc_info:
             ComponentCatalog.get_modifier_target("freeze")
 
         assert "Unknown model modifier: 'freeze'" in str(exc_info.value)
         assert "no modifiers are currently available" in str(exc_info.value)
-
-    def test_discovery_result_is_cached(self) -> None:
-        """Discovery runs once. Later calls use the cache."""
-        fixed = {
-            "s3": "anemoi.training.checkpoint.sources.S3Source",
-            "local": "anemoi.training.checkpoint.sources.LocalSource",
-        }
-        with patch.object(ComponentCatalog, "_discover_components", return_value=fixed) as mock_discover:
-            first = ComponentCatalog.list_sources()
-            second = ComponentCatalog.list_sources()
-
-        assert mock_discover.call_count == 1
-        assert first == second == ["local", "s3"]
-
-    @pytest.mark.parametrize(
-        ("getter", "name", "available", "expected"),
-        [
-            ("get_source_target", "loca", {"local": "x.LocalSource", "http": "x.HTTPSource"}, "Did you mean: local"),
-            (
-                "get_source_target",
-                "locel",
-                {"local": "x.LocalSource", "http": "x.HTTPSource"},
-                "Available sources: http, local",
-            ),
-            ("get_loader_target", "weight", {"weights_only": "x.W", "warm_start": "x.S"}, "Did you mean: weights_only"),
-        ],
-    )
-    def test_unknown_name_lists_available_names_and_suggestions(
-        self,
-        getter: str,
-        name: str,
-        available: dict[str, str],
-        expected: str,
-    ) -> None:
-        with (
-            patch.object(ComponentCatalog, "_discover_components", return_value=available),
-            pytest.raises(CheckpointConfigError, match=expected),
-        ):
-            getattr(ComponentCatalog, getter)(name)

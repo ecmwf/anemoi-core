@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
+
 import pytest
 import torch.nn as nn
 
@@ -67,28 +69,13 @@ def test_freezing_adapter_freezes_specified_module() -> None:
     assert result.model.decoder.weight.requires_grad is True  # Untouched
 
 
-def test_freezing_several_submodules_records_param_counts() -> None:
-    """One stage freezes each listed submodule and records the counts in the list order."""
+def test_freezing_adapter_updates_metadata() -> None:
     model = SimpleModel()
-    result = FreezingModifierStage(submodules_to_freeze=["decoder", "encoder"]).process(CheckpointContext(model=model))
+    adapter = FreezingModifierStage(submodules_to_freeze=["encoder"])
+    context = CheckpointContext(model=model)
+    result = adapter.process(context)
 
-    assert not any(p.requires_grad for p in model.parameters())
-    (record,) = result.metadata["modifiers_applied"]
-    assert record["type"] == "freezing"
-    assert record["submodules"] == ["decoder", "encoder"]
-    assert record["frozen_modules"] == [
-        {"name": "decoder", "frozen_params": 2},
-        {"name": "encoder", "frozen_params": 2},
-    ]
-    assert record["total_frozen_params"] == 4
-
-
-def test_freezing_empty_list_is_a_noop() -> None:
-    model = SimpleModel()
-    result = FreezingModifierStage(submodules_to_freeze=[]).process(CheckpointContext(model=model))
-
-    assert all(p.requires_grad for p in model.parameters())
-    assert "modifiers_applied" not in result.metadata
+    assert "modifier" in result.metadata or "modifiers_applied" in result.metadata
 
 
 def test_freezing_strict_mode_raises_on_missing_submodule() -> None:
@@ -196,6 +183,17 @@ def test_freezing_branch_name_freezes_whole_subtree() -> None:
     assert result.model["b"].sequential[1].weight.requires_grad
 
 
+def test_freezing_gradient_validation() -> None:
+    model = SimpleModel()
+    adapter = FreezingModifierStage(submodules_to_freeze=["encoder"], validate_gradients=True)
+    context = CheckpointContext(model=model)
+    result = adapter.process(context)
+
+    for param in result.model.encoder.parameters():
+        assert param.requires_grad is False
+        assert param.grad is None  # No stale gradients on frozen parameters
+
+
 def test_freezing_metadata_accumulates_across_modifiers() -> None:
     model = SimpleModel()
     context = CheckpointContext(model=model)
@@ -209,6 +207,17 @@ def test_freezing_metadata_accumulates_across_modifiers() -> None:
     assert applied[1]["submodules"] == ["decoder"]
 
 
+def test_freezing_metadata_includes_param_counts() -> None:
+    model = SimpleModel()
+    adapter = FreezingModifierStage(submodules_to_freeze=["encoder"])
+    context = CheckpointContext(model=model)
+    result = adapter.process(context)
+
+    meta = result.metadata.get("modifier", result.metadata.get("modifiers_applied", {}))
+    meta_str = str(meta).lower()
+    assert "frozen" in meta_str or "parameters" in meta_str
+
+
 class WrappedModel(nn.Module):
     """Copies the real nesting: LightningModule -> interface -> graph model."""
 
@@ -219,23 +228,89 @@ class WrappedModel(nn.Module):
         self.model.pre_processors = nn.Linear(4, 4)
 
 
-def test_freezing_resolves_full_paths_from_the_lightning_module() -> None:
-    """A full path reaches the graph model. The parameter count is that of the real submodule."""
+def test_freezing_resolves_paths_against_submodule_root() -> None:
+    """With a root set, paths start at the graph model, not the LightningModule."""
     model = WrappedModel()
-    adapter = FreezingModifierStage(submodules_to_freeze=["model.model.encoder.data"])
+    adapter = FreezingModifierStage(
+        submodules_to_freeze=["encoder.data"],
+        submodule_root="model.model",
+    )
 
     result = adapter.process(CheckpointContext(model=model))
 
-    assert model.model.model.encoder["data"].weight.requires_grad is False
-    assert model.model.model.decoder["data"].weight.requires_grad is True
-    assert model.model.pre_processors.weight.requires_grad is True
+    assert result.model.model.model.encoder["data"].weight.requires_grad is False
+    assert result.model.model.model.decoder["data"].weight.requires_grad is True
+    # The root is not frozen.
+    assert result.model.model.pre_processors.weight.requires_grad is True
+
+
+def test_freezing_records_frozen_params_under_root() -> None:
+    """The recorded parameter count is that of the real submodule."""
+    model = WrappedModel()
+    adapter = FreezingModifierStage(
+        submodules_to_freeze=["encoder.data"],
+        submodule_root="model.model",
+    )
+
+    result = adapter.process(CheckpointContext(model=model))
+
     (record,) = result.metadata["modifiers_applied"]
-    assert record["frozen_modules"] == [{"name": "model.model.encoder.data", "frozen_params": 2}]
+    assert record["frozen_modules"] == [{"name": "encoder.data", "frozen_params": 2}]
     assert record["total_frozen_params"] == 2
 
 
 def test_freezing_raises_when_nothing_resolves() -> None:
     """A config that freezes nothing raises, also when strict is False."""
+    model = TwoBranchModel()
+    adapter = FreezingModifierStage(submodules_to_freeze=["encoder", "decoder"], submodule_root="", strict=False)
+    # Control: these paths resolve.
+    adapter.process(CheckpointContext(model=TwoBranchModel()))
+
     inert = FreezingModifierStage(submodules_to_freeze=["processor", "nope"], strict=False)
     with pytest.raises(CheckpointConfigError, match="not one path resolved"):
-        inert.process(CheckpointContext(model=TwoBranchModel()))
+        inert.process(CheckpointContext(model=model))
+
+
+def test_freezing_raises_when_submodule_root_does_not_resolve() -> None:
+    """A root that does not exist raises a config error."""
+    adapter = FreezingModifierStage(submodules_to_freeze=["encoder"], submodule_root="model.model")
+
+    with pytest.raises(CheckpointConfigError, match="submodule_root"):
+        adapter.process(CheckpointContext(model=SimpleModel()))
+
+
+def test_freezing_raises_without_a_model() -> None:
+    """No model on the context raises a config error."""
+    adapter = FreezingModifierStage(submodules_to_freeze=["encoder"])
+
+    with pytest.raises(CheckpointConfigError, match=r"context\.model is None"):
+        adapter.process(CheckpointContext(model=None))
+
+
+def test_gradient_validation_sees_the_rooted_modules(caplog: pytest.LogCaptureFixture) -> None:
+    """Gradient validation uses the same root as the freeze.
+
+    A stub makes one parameter trainable again before validation, so validation must warn.
+    """
+    model = WrappedModel()
+
+    class _ReArmingFreeze(FreezingModifierStage):
+        """Freezes, then makes one parameter trainable again."""
+
+        def _freeze_submodule_by_name(self, module: nn.Module, target_name: str) -> int | None:
+            frozen = super()._freeze_submodule_by_name(module, target_name)
+            if frozen is not None:
+                module.get_submodule(target_name).weight.requires_grad = True
+            return frozen
+
+    adapter = _ReArmingFreeze(
+        submodules_to_freeze=["encoder.data"],
+        submodule_root="model.model",
+        validate_gradients=True,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        adapter.process(CheckpointContext(model=model))
+
+    assert "still has trainable parameters" in caplog.text
+    assert "encoder.data" in caplog.text

@@ -33,6 +33,7 @@ from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
+from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
 from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
@@ -451,19 +452,29 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # The checkpoint pipeline does not restore the task state (e.g. rollout step).
         self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
 
-        # On a resume, only Lightning loads the checkpoint, thus apply the corrections here, in place.
-        apply_checkpoint_corrections(checkpoint, self, self.config)
+        # On a resume, only Lightning loads the checkpoint, thus apply the corrections here.
+        # Lightning keeps a reference to this dict, thus update it in place.
+        trainer = getattr(self, "_trainer", None)
+        corrected = apply_checkpoint_corrections(
+            checkpoint,
+            self,
+            self.config,
+            checkpoint_path=getattr(trainer, "ckpt_path", None) if trainer is not None else None,
+        )
+        if corrected is not checkpoint:
+            checkpoint.clear()
+            checkpoint.update(corrected)
 
         # Anemoi constructs the task and datasets from the config before Lightning
         # restores their checkpoint state. Now that the checkpoint rollout is restored,
         # update any constructed datasets so workers load the required input and target
         # time steps. Checkpoint conversion loads the module without creating a Trainer
         # or datamodule, so only synchronize if a datamodule is attached.
-        trainer = getattr(self, "_trainer", None)
         if trainer is not None and trainer.datamodule is not None:
             trainer.datamodule.sync_dataset_state()
 
         preserve_anemoi_metadata(self, checkpoint)
+        extract_checkpoint_variables_metadata(self, checkpoint)
 
     def _update_scaler_for_dataset(
         self,

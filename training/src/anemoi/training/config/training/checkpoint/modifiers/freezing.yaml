@@ -8,9 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 # Modifiers, applied in order after loading. This one freezes submodules.
-# Paths are dot paths from the LightningModule. The graph model is at model.model.
-# Encoder and decoder keys are the names in model.model.encoder / model.model.decoder
-# (e.g. "0", or "global" / "regional").
+# Paths are relative to submodule_root. Encoder and decoder keys are the names in
+# model.encoders / model.decoders (e.g. "0", or "global" / "regional").
 - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
-  submodules_to_freeze: []      # e.g. ["model.model.encoder.0", "model.model.processor"]
+  submodule_root: model.model   # root the paths below resolve against
+  submodules_to_freeze: []      # e.g. ["encoder.0", processor, "processor.proc.0"]
   strict: false                 # raise if a named submodule is not found
+  validate_gradients: true      # make sure frozen submodules have no trainable params
