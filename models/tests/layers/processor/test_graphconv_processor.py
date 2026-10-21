@@ -165,9 +165,18 @@ _SHARDED_CHANNELS = 8
 _SHARDED_EDGE_DIM = 3
 
 
-def _build_sharded_processor_case(
-    world_size: int, device: torch.device
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[int], list[int]]:
+@dataclass
+class _ProcessorGraph:
+    """Node/edge inputs and ownership for the controlled processor graph."""
+
+    node_features: torch.Tensor
+    edge_attr: torch.Tensor
+    edge_index: torch.Tensor
+    node_splits: list[int]
+    edge_splits: list[int]
+
+
+def _build_sharded_processor_case(world_size: int, device: torch.device) -> _ProcessorGraph:
     """Destination-sorted ring: every rank consumes a peer's sources; the final node is isolated."""
     node_splits = [3] + [2] * (world_size - 1)
     starts = [sum(node_splits[:rank]) for rank in range(world_size)]
@@ -180,31 +189,36 @@ def _build_sharded_processor_case(
         if rank == 0:
             edges.append((remote_src, dst))  # duplicate edge, with a different attribute row
         edges.append((dst, dst))  # local edge
+        # Leave the final node isolated in both source and destination roles.
         if rank < world_size - 1:
             edges.append((dst, dst + 1))
     edge_splits = [
         sum(starts[rank] <= dst < starts[rank] + node_splits[rank] for _, dst in edges) for rank in range(world_size)
     ]
     edge_index = torch.tensor(edges, dtype=torch.long, device=device).T.contiguous()
-    x = torch.arange(num_nodes * _SHARDED_CHANNELS, dtype=torch.float32, device=device)
-    x = x.reshape(num_nodes, _SHARDED_CHANNELS) / 19 - 0.7
+    # Independently varying channels avoid rows that differ only by an offset
+    # before the block's LayerNorm operations.
+    generator = torch.Generator().manual_seed(13)
+    x = torch.randn(num_nodes, _SHARDED_CHANNELS, generator=generator).to(device)
     edge_attr = torch.arange(len(edges) * _SHARDED_EDGE_DIM, dtype=torch.float32, device=device)
     edge_attr = edge_attr.reshape(-1, _SHARDED_EDGE_DIM) / 13 - 0.5
-    target = torch.linspace(-0.5, 0.6, x.numel(), device=device).reshape_as(x)
-    weights = (torch.arange(x.numel(), device=device).reshape_as(x) % 7 + 1).float() / 7
-
-    assert max(node_splits) - min(node_splits) == 1
-    assert edge_index[1].tolist() == sorted(edge_index[1].tolist())
-    assert edge_index[:, 0].tolist() == edge_index[:, 1].tolist()
-    assert not torch.equal(edge_attr[0], edge_attr[1])
-    assert not (edge_index == num_nodes - 1).any()
+    assert max(node_splits) - min(node_splits) == 1, "Processor fixture must have uneven node shards"
+    assert (edge_index[1].diff() >= 0).all(), "Processor edges must be destination-sorted"
+    assert torch.equal(edge_index[:, 0], edge_index[:, 1]), "First destination must have parallel edges"
+    assert not torch.equal(edge_attr[0], edge_attr[1]), "Parallel edges must have distinct attributes"
+    assert not (edge_index == num_nodes - 1).any(), "Final node must be isolated"
     for rank, dst_start in enumerate(starts):
         edge_start = sum(edge_splits[:rank])
-        assert edge_index[:, edge_start].tolist() == [starts[(rank + 1) % world_size], dst_start]
+        assert edge_index[:, edge_start].tolist() == [
+            starts[(rank + 1) % world_size],
+            dst_start,
+        ], f"Missing remote edge entering rank {rank}"
         local_dst = edge_index[1, edge_start : edge_start + edge_splits[rank]]
-        assert ((local_dst >= starts[rank]) & (local_dst < starts[rank] + node_splits[rank])).all()
+        assert (
+            (local_dst >= starts[rank]) & (local_dst < starts[rank] + node_splits[rank])
+        ).all(), f"Edge split does not match destination ownership on rank {rank}"
 
-    return x, edge_attr, edge_index, target, weights, node_splits, edge_splits
+    return _ProcessorGraph(x, edge_attr, edge_index, node_splits, edge_splits)
 
 
 def _test_gnn_processor_matches_unsharded_rank(
@@ -212,9 +226,11 @@ def _test_gnn_processor_matches_unsharded_rank(
 ) -> None:
     """Compare owned outputs and gradients against the same global objective."""
     torch.set_num_threads(1)
-    x, edge_attr, edge_index, target, weights, node_splits, edge_splits = _build_sharded_processor_case(
-        world_size, device
-    )
+    graph = _build_sharded_processor_case(world_size, device)
+    x, edge_attr, edge_index = graph.node_features, graph.edge_attr, graph.edge_index
+    node_splits, edge_splits = graph.node_splits, graph.edge_splits
+    target = torch.linspace(-0.5, 0.6, x.numel(), device=device).reshape_as(x)
+    weights = (torch.arange(x.numel(), device=device).reshape_as(x) % 7 + 1).float() / 7
     start = sum(node_splits[:rank])
     stop = start + node_splits[rank]
 
@@ -229,21 +245,23 @@ def _test_gnn_processor_matches_unsharded_rank(
         layer_kernels=load_layer_kernels(instance=False),
     ).to(device)
     subject = deepcopy(reference)
-    assert len(reference.proc) == 2
     reference_params = dict(reference.named_parameters())
     subject_params = dict(subject.named_parameters())
-    assert reference_params.keys() == subject_params.keys()
-    # Callable messages add comparison/rank context without replacing PyTorch's numerical diagnostics.
-    for name, param in reference_params.items():
-        torch.testing.assert_close(
-            subject_params[name], param, msg=lambda details, name=name: f"initial {name} on rank {rank}\n{details}"
-        )
 
     x_full = x.clone().requires_grad_(True)
     edges_full = edge_attr.clone().requires_grad_(True)
     y_full = reference(x_full, 1, GraphShardInfo(nodes=[x.size(0)], edges=[edge_index.size(1)]), edges_full, edge_index)
-    global_loss = (weights * (y_full - target).square()).sum() / weights.numel()
+    loss_terms = weights * (y_full - target).square() / weights.numel()
+    global_loss = loss_terms.sum()
+    remote_loss = loss_terms[:start].sum() + loss_terms[stop:].sum()
+    remote_gradient = torch.autograd.grad(remote_loss, x_full, retain_graph=True)[0]
     global_loss.backward()
+    gradient_tolerances = {"rtol": 1e-4, "atol": 1e-7}
+    assert x_full.grad is not None, "Missing reference node-input gradient"
+    allowed_error = gradient_tolerances["atol"] + gradient_tolerances["rtol"] * x_full.grad[start:stop].abs()
+    assert (
+        remote_gradient[start:stop].abs() > 10 * allowed_error
+    ).any(), f"Remote node-gradient contributions are too small to test communication on rank {rank}"
 
     x_local = x[start:stop].clone().requires_grad_(True)
     edge_start = sum(edge_splits[:rank])
@@ -260,21 +278,37 @@ def _test_gnn_processor_matches_unsharded_rank(
     local_loss.backward()
 
     tolerances = {"rtol": 1e-4, "atol": 1e-5}
-    torch.testing.assert_close(y_local, y_full[start:stop], **tolerances)
+    # Callable messages retain numerical diagnostics while adding rank/parameter context.
+    torch.testing.assert_close(
+        y_local, y_full[start:stop], **tolerances, msg=lambda details: f"output on rank {rank}\n{details}"
+    )
     combined_loss = local_loss.detach().clone()
     dist.all_reduce(combined_loss, group=group)
-    torch.testing.assert_close(combined_loss, global_loss.detach(), **tolerances)
+    torch.testing.assert_close(
+        combined_loss, global_loss.detach(), **tolerances, msg=lambda details: f"global loss on rank {rank}\n{details}"
+    )
 
-    assert x_local.grad is not None and x_full.grad is not None
-    torch.testing.assert_close(x_local.grad, x_full.grad[start:stop], **tolerances)
-    assert edge_features.grad is not None and edges_full.grad is not None
+    assert x_local.grad is not None, f"Missing distributed node-input gradient on rank {rank}"
+    torch.testing.assert_close(
+        x_local.grad,
+        x_full.grad[start:stop],
+        **gradient_tolerances,
+        msg=lambda details: f"node-input gradient on rank {rank}\n{details}",
+    )
+    assert edge_features.grad is not None, f"Missing distributed edge-input gradient on rank {rank}"
+    assert edges_full.grad is not None, "Missing reference edge-input gradient"
     if pre_sharded:
         # Edge attributes were already sliced: each rank owns only its edge-gradient rows.
         expected_edge_grad = edges_full.grad[edge_start : edge_start + edge_splits[rank]]
     else:
         # Sharding gathers the full input-edge gradient in backward on each rank.
         expected_edge_grad = edges_full.grad
-    torch.testing.assert_close(edge_features.grad, expected_edge_grad, **tolerances)
+    torch.testing.assert_close(
+        edge_features.grad,
+        expected_edge_grad,
+        **gradient_tolerances,
+        msg=lambda details: f"edge-input gradient on rank {rank}\n{details}",
+    )
 
     # Every layer operates on local edges; its ordinary parameter gradients are partial.
     for name, param in subject_params.items():
@@ -296,7 +330,7 @@ def _test_gnn_processor_matches_unsharded_rank(
 def test_gnn_processor_matches_unsharded(
     distributed_backend: str, distributed_world_size: int, pre_sharded: bool
 ) -> None:
-    """Balanced node shards reproduce the global processor loss and gradients."""
+    """Uneven node shards reproduce the global processor loss and gradients."""
     _run_distributed_test(
         _test_gnn_processor_matches_unsharded_rank,
         backend=distributed_backend,
