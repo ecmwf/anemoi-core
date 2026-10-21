@@ -59,24 +59,6 @@ LOGGER = logging.getLogger(__name__)
 PL_VERSION = version.parse(pl.__version__)
 
 
-def _write_run_identity(config: DictConfig, run_id: str | None, fork_run_id: str | None) -> None:
-    """Serialize the resolved run identity onto the config for the MLflow-sync contract.
-
-    ``MlFlowSync`` indexes ``config.training.run_id`` / ``config.training.fork_run_id``
-    by literal key when rewriting offline->online runs, and those keys were removed
-    from the schema, so this writes them back for that one consumer. Everything
-    internal reads :attr:`AnemoiTrainer._run_identity` instead. Runs under a
-    temporary struct unlock, restoring the prior flag.
-    """
-    prior_struct = OmegaConf.is_struct(config)
-    OmegaConf.set_struct(config, False)
-    try:
-        config.training.run_id = run_id
-        config.training.fork_run_id = fork_run_id
-    finally:
-        OmegaConf.set_struct(config, prior_struct)
-
-
 class AnemoiTrainer(ABC):
     """Utility class for training the model."""
 
@@ -129,9 +111,7 @@ class AnemoiTrainer(ABC):
 
         self.parent_uuid = None
 
-        # For the MLflow params / MlFlowSync contract only (see _write_run_identity).
-        _write_run_identity(self.config, run_id=self.run_id, fork_run_id=self._fork_run_id)
-        LOGGER.info("Run id: %s", self.config.training.run_id)
+        LOGGER.info("Run id: %s", self.run_id)
 
         # Get the server2server lineage
         self._get_server2server_lineage()

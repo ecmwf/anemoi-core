@@ -401,7 +401,7 @@ def test_run_id_is_uuid_for_keyless_run() -> None:
 
 
 # ---------------------------------------------------------------------------
-# __init__ writes the resolved run_id back onto config (train.py:177-181)
+# __init__ keeps the resolved run identity off the config
 # ---------------------------------------------------------------------------
 
 
@@ -430,7 +430,7 @@ def _fresh_trainer_config(checkpoints_path: Path) -> DictConfig:
     return OmegaConf.create(config_dict)
 
 
-def test_init_writes_resolved_run_id_back_into_config(tmp_path: Path) -> None:
+def test_init_keeps_resolved_run_id_off_the_config(tmp_path: Path) -> None:
     config = _fresh_trainer_config(tmp_path / "ckpts")
 
     with (
@@ -440,9 +440,10 @@ def test_init_writes_resolved_run_id_back_into_config(tmp_path: Path) -> None:
     ):
         trainer = AnemoiTrainer(config=config)
 
-    # A fresh run mints a uuid and writes it back onto training.run_id.
-    assert trainer.config.training.run_id == trainer.run_id
-    assert uuid.UUID(trainer.config.training.run_id).version == 4
+    # A fresh run mints a uuid on the trainer; the schema rejects training.run_id, so it stays off the config.
+    assert uuid.UUID(trainer.run_id).version == 4
+    assert "run_id" not in trainer.config.training
+    assert "fork_run_id" not in trainer.config.training
 
 
 # ---------------------------------------------------------------------------
