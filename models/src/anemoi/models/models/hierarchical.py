@@ -348,9 +348,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     shard_sizes_hidden=shard_sizes_hidden[first_hidden],
                     model_comm_group=model_comm_group,
                 )
-                if source is None:  # no data points for this dataset in this batch
-                    continue
-
                 x_skip_dict[dataset_name] = source.x_skip
                 sources.append(source)
 

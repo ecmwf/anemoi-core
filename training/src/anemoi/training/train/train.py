@@ -606,10 +606,12 @@ class AnemoiTrainer(ABC):
     def strategy(self) -> Any:
         """Returns the distributed training strategy.
 
-        Runs with at least one tabular observation dataset build a dynamic graph per batch and route each sample
-        through per-dataset encoders/decoders that may be unused when a dataset has no observations in a batch.
-        DDP must then look for parameters without gradients in every step, so these runs need
-        ``static_graph: false`` and ``find_unused_parameters: true`` in ``training.strategy``.
+        Runs with at least one tabular observation dataset build a dynamic graph per batch, and the set of
+        parameters that get a gradient can change from batch to batch. An empty observation window does not
+        change it (its encoder still runs, without edges, and its decoder decodes to zero rows), but a dataset
+        that is missing from a batch skips its encoder and decoder altogether. DDP must then look for parameters
+        without gradients in every step, so these runs need ``static_graph: false`` and
+        ``find_unused_parameters: true`` in ``training.strategy``.
         """
         strategy = instantiate(self.config.training.strategy)
         has_tabular = any(dr.data_type == "tabular" for dr in self.datamodule.ds_train.data_readers.values())
@@ -619,8 +621,8 @@ class AnemoiTrainer(ABC):
             if strategy_config.get("static_graph", False) or not strategy_config.get("find_unused_parameters", False):
                 msg = (
                     "Training with tabular datasets needs training.strategy.static_graph: false and "
-                    "training.strategy.find_unused_parameters: true, because parameters of a dataset's "
-                    "encoder and decoder get no gradient when the dataset has no observations in a batch."
+                    "training.strategy.find_unused_parameters: true, because a dataset that is missing from a "
+                    "batch skips its encoder and decoder, whose parameters then get no gradient in that step."
                 )
                 raise ValueError(msg)
         return strategy

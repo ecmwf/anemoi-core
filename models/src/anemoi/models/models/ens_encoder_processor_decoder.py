@@ -200,9 +200,6 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                     shard_sizes_hidden=shard_sizes_hidden,
                     model_comm_group=model_comm_group,
                 )
-                if source is None:  # no data points for this dataset in this batch
-                    continue
-
                 source = self._condition_source(source, fcstep)
                 x_skip_dict[dataset_name] = source.x_skip
                 sources.append(source)

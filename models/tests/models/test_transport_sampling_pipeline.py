@@ -68,6 +68,12 @@ class _GraphProvider:
         return torch.zeros(1, 1), torch.zeros(2, 1, dtype=torch.long), None
 
 
+class _EmptyGraphProvider:
+    def get_edges(self, *, src_coords, **_kwargs):
+        assert src_coords.shape[0] == 0
+        return torch.zeros(0, 1), torch.zeros(2, 0, dtype=torch.long), None
+
+
 def _data_indices(input_names: tuple[str, ...], output_names: tuple[str, ...]) -> SimpleNamespace:
     input_positions = {name: idx for idx, name in enumerate(input_names)}
     all_names = tuple(dict.fromkeys((*input_names, *output_names)))
@@ -349,10 +355,15 @@ def test_transport_assemble_input_stacks_history_and_noisy_target_rows_of_sparse
     torch.testing.assert_close(timedeltas, torch.tensor([-1.0] * 2 + [1.0] * 3 + [-1.0] + [1.0] * 2))
 
 
-def test_transport_skips_a_sparse_dataset_without_points_in_the_batch() -> None:
-    """As in the deterministic model, a dataset with no history and no target points is not encoded."""
+def test_transport_encodes_a_sparse_dataset_without_points_in_the_batch() -> None:
+    """As in the deterministic model, a dataset with no history and no target points is still encoded.
+
+    It has no rows and no edges, so the encoder only updates the hidden nodes; skipping it would leave a
+    model whose only source is that dataset without a latent.
+    """
     model = _transport_model_stub()
     model.node_attributes = _EmptyNodeAttributes()
+    model.encoder_graph_provider = {"obs": _EmptyGraphProvider()}
     x = _obs_source([0], n_variables=2, value=1.0, coordinate_offset=-1.0)
     y_noised = _obs_source([0], n_variables=1, value=5.0, coordinate_offset=1.0)
 
@@ -367,7 +378,10 @@ def test_transport_skips_a_sparse_dataset_without_points_in_the_batch() -> None:
         shard_sizes_hidden=None,
     )
 
-    assert source is None
+    assert source is not None
+    assert source.x_data_latent.shape[0] == 0
+    assert source.edge_index.shape == (2, 0)
+    assert source.edge_attr.shape[0] == 0
 
 
 def test_transport_assemble_input_adds_timedelta_features_to_sparse_rows() -> None:

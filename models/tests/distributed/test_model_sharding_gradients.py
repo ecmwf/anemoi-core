@@ -21,6 +21,14 @@ combined the way training combines them: the strategy's hooks multiply every gra
 except those of parameters named ``trainable`` or ``no_gradscaling``, and DDP then averages over the
 ranks.
 
+A further deterministic model reads and predicts the observations only. Observation windows can be
+empty, so every model also runs with empty input windows, an empty target window, or both, and with
+windows smaller than the group, where some ranks hold no rows. ``test_whole_model_with_empty_observations``
+runs those cases without a process group, so that they are also covered without ``--distributed``.
+Two further whole-model tests check that the samples of a batch, and the members of an ensemble, are
+decoded independently when some of them have no observations: each one's outputs equal those of a run
+on it alone, and the batch gradient is the sum of the single-run gradients.
+
 A sharded batch reaches the observation graph in a different row order, so the per-batch graph must
 not depend on row order. Each model runs with pyg-lib's neighbour search and a cap above the number of
 observations, and with the scikit-learn search, which keeps the nearest neighbours, and a cap small
@@ -29,6 +37,7 @@ enough that observations are dropped.
 
 import os
 from copy import deepcopy
+from functools import partial
 
 import numpy as np
 import pytest
@@ -43,6 +52,7 @@ from anemoi.models.data.sources import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
+from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 
@@ -60,9 +70,30 @@ TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2)
 UNSCALED_PARAMETERS = ("trainable", "no_gradscaling")
 MODELS = {
     "deterministic": {"model_class": AnemoiModelEncProcDec, "obs_predicted": True},
+    "deterministic_obs_only": {"model_class": AnemoiModelEncProcDec, "obs_predicted": True, "with_grid": False},
     "edm_transport": {"model_class": AnemoiTransportModelEncProcDec, "obs_predicted": True},
     "edm_transport_obs_input_only": {"model_class": AnemoiTransportModelEncProcDec, "obs_predicted": False},
     "edm_tendency_obs_input_only": {"model_class": AnemoiTransportTendModelEncProcDec, "obs_predicted": False},
+}
+# Observation rows per input window and in the target window.
+OBS_ROWS = {
+    "observed": {"obs_rows_per_window": OBS_ROWS_PER_WINDOW, "obs_target_rows": OBS_TARGET_ROWS},
+    "input_empty": {"obs_rows_per_window": (0, 0), "obs_target_rows": OBS_TARGET_ROWS},
+    "target_empty": {"obs_rows_per_window": OBS_ROWS_PER_WINDOW, "obs_target_rows": 0},
+    "all_empty": {"obs_rows_per_window": (0, 0), "obs_target_rows": 0},
+    # Fewer rows than ranks: some ranks hold no rows of a window that is not empty.
+    "single_rows": {"obs_rows_per_window": (1, 0), "obs_target_rows": 1},
+}
+EMPTY_OBS_ROWS = [name for name in OBS_ROWS if name != "observed"]
+# Whole-model tests only: a sharded tabular source supports a single ensemble member.
+ENSEMBLE_MODEL = {"model_class": AnemoiEnsModelEncProcDec, "obs_predicted": True}
+# Observation rows (per input window, target) of the two samples of a mixed batch.
+MIXED_BATCHES = {
+    "both_observed": (OBS_ROWS["observed"], OBS_ROWS["observed"]),
+    "first_target_empty": (OBS_ROWS["target_empty"], OBS_ROWS["observed"]),
+    "second_target_empty": (OBS_ROWS["observed"], OBS_ROWS["target_empty"]),
+    "first_all_empty": (OBS_ROWS["all_empty"], OBS_ROWS["observed"]),
+    "both_targets_empty": (OBS_ROWS["target_empty"], OBS_ROWS["all_empty"]),
 }
 NEIGHBOUR_SEARCH = {
     # pyg-lib keeps the first neighbours in row order, so its cap is above the number of observations.
@@ -81,7 +112,9 @@ def _points_on_sphere(num_points: int, generator: torch.Generator) -> tuple[np.n
     return latitudes.numpy(), longitudes.numpy()
 
 
-def _graph_config(grid_latitudes: np.ndarray, grid_longitudes: np.ndarray, max_obs_neighbours: int) -> DictConfig:
+def _graph_config(
+    grid_latitudes: np.ndarray, grid_longitudes: np.ndarray, max_obs_neighbours: int, with_grid: bool = True
+) -> DictConfig:
     edge_attributes = {
         "edge_length": {"_target_": "anemoi.graphs.edges.attributes.EdgeLength", "norm": "unit-std"},
         "edge_dirs": {"_target_": "anemoi.graphs.edges.attributes.EdgeDirection", "norm": "unit-std"},
@@ -91,7 +124,7 @@ def _graph_config(grid_latitudes: np.ndarray, grid_longitudes: np.ndarray, max_o
         return {"source_name": source, "target_name": target, "edge_builders": [builder], "attributes": edge_attributes}
 
     knn = {"_target_": "anemoi.graphs.edges.KNNEdges", "num_nearest_neighbours": 3}
-    return OmegaConf.create(
+    config = OmegaConf.create(
         {
             "nodes": {
                 "grid": {
@@ -126,11 +159,16 @@ def _graph_config(grid_latitudes: np.ndarray, grid_longitudes: np.ndarray, max_o
             ],
         },
     )
+    if not with_grid:
+        del config.nodes["grid"]
+        config.edges = [edge for edge in config.edges if "grid" not in (edge.source_name, edge.target_name)]
+    return config
 
 
-def _model_config(model_class: type, obs_predicted: bool) -> DictConfig:
+def _model_config(model_class: type, obs_predicted: bool, with_grid: bool = True) -> DictConfig:
     transport = issubclass(model_class, AnemoiTransportModelEncProcDec)
     tendency = issubclass(model_class, AnemoiTransportTendModelEncProcDec)
+    ensemble = issubclass(model_class, AnemoiEnsModelEncProcDec)
     channels = 16
     layer_norm = (
         {
@@ -230,9 +268,35 @@ def _model_config(model_class: type, obs_predicted: bool) -> DictConfig:
         else:
             # The transport network predicts the corrupted target itself, without a skip connection.
             config["residual"] = {"datasets": {}}
+    if ensemble:
+        config["condition_on_residual"] = False
+        config["noise_injector"] = {
+            "_target_": "anemoi.models.layers.ensemble.NoiseConditioning",
+            # No noise, so that runs on different batches are comparable; the noise MLP still runs.
+            "noise_std": 0,
+            "noise_channels_dim": 4,
+            "noise_mlp_hidden_dim": 8,
+            "layer_kernels": {"Activation": {"_target_": "torch.nn.GELU"}},
+        }
+        # The processor is conditioned on the noise.
+        config["processor"]["layer_kernels"] = {
+            **block["layer_kernels"],
+            "LayerNorm": {
+                "_target_": "anemoi.models.layers.normalization.ConditionalLayerNorm",
+                "normalized_shape": channels,
+                "condition_shape": 4,
+                "zero_init": False,
+                "autocast": False,
+            },
+        }
     if not obs_predicted:
         del config["decoders"]["obs"]
         del config["bounding"]["datasets"]["obs"]
+    if not with_grid:
+        for section in (config["encoders"], config["decoders"], config["bounding"]["datasets"]):
+            del section["grid"]
+        del config["node_trainable_parameters"]["grid"]
+        config["residual"] = {"datasets": {}}
     return OmegaConf.create(config)
 
 
@@ -261,19 +325,25 @@ def _statistics() -> dict[str, dict[str, np.ndarray]]:
     return {"grid": stats(len(GRID_VARIABLES)), "obs": stats(len(OBS_VARIABLES))}
 
 
-def _build_model(model_class: type, obs_predicted: bool, max_obs_neighbours: int) -> torch.nn.Module:
+def _build_model(
+    model_class: type, obs_predicted: bool, max_obs_neighbours: int, with_grid: bool = True
+) -> torch.nn.Module:
     generator = torch.Generator().manual_seed(0)
     latitudes, longitudes = _points_on_sphere(NUM_GRID_POINTS, generator)
+    datasets = ["grid", "obs"] if with_grid else ["obs"]
     torch.manual_seed(1)
     model = model_class(
-        model_config=_model_config(model_class, obs_predicted),
-        model_graph_config=_graph_config(latitudes, longitudes, max_obs_neighbours),
-        data_indices=_data_indices(),
-        statistics=_statistics(),
-        data_types={"grid": "gridded", "obs": "tabular"},
-        n_step_input={"grid": 2, "obs": 2},
-        n_step_output={"grid": 1, "obs": 1},
+        model_config=_model_config(model_class, obs_predicted, with_grid),
+        model_graph_config=_graph_config(latitudes, longitudes, max_obs_neighbours, with_grid),
+        data_indices={name: index for name, index in _data_indices().items() if name in datasets},
+        statistics={name: stats for name, stats in _statistics().items() if name in datasets},
+        data_types={name: kind for name, kind in {"grid": "gridded", "obs": "tabular"}.items() if name in datasets},
+        n_step_input={name: 2 for name in datasets},
+        n_step_output={name: 1 for name in datasets},
     )
+    if isinstance(model, AnemoiEnsModelEncProcDec):
+        # The ensemble model draws its noise in the injector's default float32.
+        model.noise_injector.forward = partial(model.noise_injector.forward, noise_dtype=DTYPE)
     return model.to(DTYPE)
 
 
@@ -348,13 +418,19 @@ def _local_rows(source, rank: int, world_size: int) -> torch.Tensor:
     return torch.arange(sum(sizes[:rank]), sum(sizes[: rank + 1]))
 
 
-def _synthetic_batches(model: torch.nn.Module) -> dict[str, Batch]:
+def _synthetic_batches(
+    model: torch.nn.Module,
+    obs_rows_per_window: tuple[int, ...] = OBS_ROWS_PER_WINDOW,
+    obs_target_rows: int = OBS_TARGET_ROWS,
+) -> dict[str, Batch]:
     """Inputs, target forcings and the noisy target of one sample, on the whole grid.
 
     The target forcings and the noisy target cover the predicted datasets only.
     """
     generator = torch.Generator().manual_seed(2)
-    grid_coordinates = model._graph_data["grid"].x.float()  # radians, as the graph stores them
+    with_grid = "grid" in model._graph_data.node_types
+    # radians, as the graph stores them; a model without the grid gets a batch without it
+    grid_coordinates = model._graph_data["grid"].x.float() if with_grid else torch.zeros(NUM_GRID_POINTS, 2)
     indices = _data_indices()
 
     def randn(*shape):
@@ -368,8 +444,8 @@ def _synthetic_batches(model: torch.nn.Module) -> dict[str, Batch]:
     grid_outputs = _variable_names(indices["grid"], indices["grid"].data.output.full)
     obs_inputs = _variable_names(indices["obs"], indices["obs"].data.input.full)
     obs_outputs = _variable_names(indices["obs"], indices["obs"].data.output.full)
-    history_coordinates = [obs_coordinates(rows) for rows in OBS_ROWS_PER_WINDOW]
-    target_coordinates = [obs_coordinates(OBS_TARGET_ROWS)]
+    history_coordinates = [obs_coordinates(rows) for rows in obs_rows_per_window]
+    target_coordinates = [obs_coordinates(obs_target_rows)]
 
     batches = {
         "x": Batch(
@@ -377,7 +453,7 @@ def _synthetic_batches(model: torch.nn.Module) -> dict[str, Batch]:
                 "grid": _gridded(grid_inputs, randn(1, 2, 1, NUM_GRID_POINTS, len(grid_inputs)), grid_coordinates),
                 "obs": _tabular(
                     obs_inputs,
-                    [randn(rows, len(obs_inputs)) for rows in OBS_ROWS_PER_WINDOW],
+                    [randn(rows, len(obs_inputs)) for rows in obs_rows_per_window],
                     history_coordinates,
                 ),
             },
@@ -385,18 +461,20 @@ def _synthetic_batches(model: torch.nn.Module) -> dict[str, Batch]:
         "target_forcing": Batch(
             {
                 "grid": _gridded(["f"], randn(1, 1, 1, NUM_GRID_POINTS, 1), grid_coordinates),
-                "obs": _tabular(["fo"], [randn(OBS_TARGET_ROWS, 1)], target_coordinates),
+                "obs": _tabular(["fo"], [randn(obs_target_rows, 1)], target_coordinates),
             },
         ),
         "noisy_target": Batch(
             {
                 "grid": _gridded(grid_outputs, randn(1, 1, 1, NUM_GRID_POINTS, len(grid_outputs)), grid_coordinates),
-                "obs": _tabular(obs_outputs, [randn(OBS_TARGET_ROWS, len(obs_outputs))], target_coordinates),
+                "obs": _tabular(obs_outputs, [randn(obs_target_rows, len(obs_outputs))], target_coordinates),
             },
         ),
     }
     for key in ("target_forcing", "noisy_target"):
         batches[key] = Batch({name: batches[key][name] for name in model.target_datasets})
+    if not with_grid:
+        batches["x"] = Batch({"obs": batches["x"]["obs"]})
     return batches
 
 
@@ -442,7 +520,29 @@ def _loss(outputs: Batch, weights: dict[str, torch.Tensor], rows: dict[str, torc
     return total
 
 
-def _check_sharded_model(*, rank, world_size, device, group, model, keep_batch_sharded, neighbour_search):
+def _parameters_without_gradient(model: torch.nn.Module) -> set[str]:
+    return {name for name, parameter in model.named_parameters() if parameter.grad is None}
+
+
+def _run_whole_model(model: dict, obs_rows: dict, max_obs_neighbours: int) -> tuple[Batch, set[str]]:
+    """Forward and backward on the whole batch; returns the outputs and the parameters left without a gradient."""
+    transport = issubclass(model["model_class"], AnemoiTransportModelEncProcDec)
+    network = _build_model(
+        model["model_class"], model["obs_predicted"], max_obs_neighbours, model.get("with_grid", True)
+    )
+    outputs = _forward(network, _synthetic_batches(network, **obs_rows), transport, group=None)
+    generator = torch.Generator().manual_seed(3)
+    weights = {
+        name: torch.randn(_flat_output(source).shape, generator=generator, dtype=DTYPE)
+        for name, source in outputs.items()
+    }
+    _loss(outputs, weights, rows=None).backward()
+    return outputs, _parameters_without_gradient(network)
+
+
+def _check_sharded_model(
+    *, rank, world_size, device, group, model, keep_batch_sharded, neighbour_search, obs_rows=OBS_ROWS["observed"]
+):
     del device  # CPU only: the Triton kernels have no float64 path
     # Read by anemoi-graphs whenever it builds a graph: the graph stays on the CPU, also on a GPU node.
     os.environ["ANEMOI_GRAPHS_FORCE_CPU"] = "1"
@@ -451,9 +551,11 @@ def _check_sharded_model(*, rank, world_size, device, group, model, keep_batch_s
         os.environ["ANEMOI_GRAPHS_DISABLE_PYG_LIB"] = "1"
     max_obs_neighbours = neighbour_search["max_obs_neighbours"]
     transport = issubclass(model["model_class"], AnemoiTransportModelEncProcDec)
-    reference_model = _build_model(model["model_class"], model["obs_predicted"], max_obs_neighbours)
+    reference_model = _build_model(
+        model["model_class"], model["obs_predicted"], max_obs_neighbours, model.get("with_grid", True)
+    )
     sharded_model = deepcopy(reference_model)
-    batches = _synthetic_batches(reference_model)
+    batches = _synthetic_batches(reference_model, **obs_rows)
 
     # Reference: the whole batch on one rank, no communication.
     reference_out = _forward(reference_model, batches, transport, group=None)
@@ -512,3 +614,215 @@ def test_sharded_model_matches_whole_model(
         keep_batch_sharded=keep_batch_sharded,
         neighbour_search=NEIGHBOUR_SEARCH[neighbour_search],
     )
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize("obs_rows", EMPTY_OBS_ROWS)
+@pytest.mark.parametrize("keep_batch_sharded", [False, True], ids=["batch_gathered", "batch_sharded"])
+@pytest.mark.parametrize("model", list(MODELS))
+def test_sharded_model_with_empty_observations_matches_whole_model(
+    distributed_backend, distributed_world_size, model, keep_batch_sharded, obs_rows
+):
+    if distributed_backend != "gloo":
+        pytest.skip("Float64 comparison runs on CPU only.")
+    _run_distributed_test(
+        _check_sharded_model,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        model=MODELS[model],
+        keep_batch_sharded=keep_batch_sharded,
+        neighbour_search=NEIGHBOUR_SEARCH["pyg_all_neighbours"],
+        obs_rows=OBS_ROWS[obs_rows],
+    )
+
+
+@pytest.mark.parametrize("obs_rows", EMPTY_OBS_ROWS)
+@pytest.mark.parametrize("model", list(MODELS))
+def test_whole_model_with_empty_observations(model, obs_rows) -> None:
+    """Empty observation windows are encoded and decoded, not skipped.
+
+    A skipped encoder left a model whose only source is the observation dataset without a latent
+    ("At least one latent tensor is required"), and left the encoder's parameters out of the autograd
+    graph, which DDP only tolerates with ``find_unused_parameters``. With empty windows the outputs must
+    keep the target rows, stay finite, and no parameter may lose its gradient.
+    """
+    os.environ["ANEMOI_GRAPHS_FORCE_CPU"] = "1"
+    max_obs_neighbours = NEIGHBOUR_SEARCH["pyg_all_neighbours"]["max_obs_neighbours"]
+    _, observed_without_gradient = _run_whole_model(MODELS[model], OBS_ROWS["observed"], max_obs_neighbours)
+    outputs, without_gradient = _run_whole_model(MODELS[model], OBS_ROWS[obs_rows], max_obs_neighbours)
+
+    for name, source in outputs.items():
+        out = _flat_output(source)
+        assert torch.isfinite(out).all(), f"{name}: non-finite outputs"
+        if name == "obs":
+            assert out.shape[0] == OBS_ROWS[obs_rows]["obs_target_rows"]
+    assert without_gradient == observed_without_gradient, (
+        f"Parameters without a gradient only with {obs_rows} observations: "
+        f"{sorted(without_gradient - observed_without_gradient)}"
+    )
+
+
+def _shifted(batches: dict[str, Batch], shift: float) -> dict[str, Batch]:
+    """The batches with ``shift`` added to every value, so that joined samples or members differ."""
+    return {
+        key: Batch(
+            {
+                name: source.clone(data=[d + shift for d in source.data] if source.is_tabular else source.data + shift)
+                for name, source in batch.items()
+            },
+        )
+        for key, batch in batches.items()
+    }
+
+
+def _join(first: dict[str, Batch], second: dict[str, Batch], axis: str) -> dict[str, Batch]:
+    """Join two batches into one, as two samples (``axis="sample"``) or two ensemble members (``"member"``)."""
+    joined = {}
+    for key, batch in first.items():
+        sources = {}
+        for name, a in batch.items():
+            b = second[key][name]
+            if axis == "member":  # same nodes, values stacked along the ensemble axis
+                data = (
+                    [torch.cat([x, y], dim=0) for x, y in zip(a.data, b.data)]
+                    if a.is_tabular
+                    else torch.cat([a.data, b.data], dim=2)
+                )
+                sources[name] = a.clone(data=data)
+            elif a.is_tabular:
+                sources[name] = a.clone(
+                    data=a.data + b.data,
+                    coordinates=a.coordinates + b.coordinates,
+                    timedeltas=a.timedeltas + b.timedeltas,
+                    boundaries=a.boundaries + b.boundaries,
+                )
+            else:
+                sources[name] = a.clone(data=torch.cat([a.data, b.data], dim=0))
+        joined[key] = Batch(sources)
+    return joined
+
+
+def _samples(source) -> list[torch.Tensor]:
+    """One tensor per sample: ``(members, points, variables)`` or ``(time, members, points, variables)``."""
+    return list(source.data) if source.is_tabular else list(source.data.unbind(0))
+
+
+def _weighted_run(network, batches: dict[str, Batch], weights: dict[str, list[torch.Tensor]]):
+    """Outputs and parameter gradients of a weighted sum of the outputs, one weight tensor per sample."""
+    network.zero_grad(set_to_none=True)
+    outputs = _forward(network, batches, transport=False, group=None)
+    total = sum(
+        (sample * weight).sum()
+        for name, source in outputs.items()
+        for sample, weight in zip(_samples(source), weights[name])
+    )
+    total.backward()
+    return outputs, {name: parameter.grad for name, parameter in network.named_parameters()}
+
+
+def _random_weights(network, batches: dict[str, Batch], seed: int) -> dict[str, list[torch.Tensor]]:
+    """One random weight tensor per sample, shaped like the network's outputs for ``batches``."""
+    with torch.no_grad():
+        outputs = _forward(network, batches, transport=False, group=None)
+    generator = torch.Generator().manual_seed(seed)
+    return {
+        name: [torch.randn(sample.shape, generator=generator, dtype=DTYPE) for sample in _samples(source)]
+        for name, source in outputs.items()
+    }
+
+
+def _assert_gradients_add_up(joined: dict, parts: list[dict]) -> None:
+    """The joined run's gradients are the sum of the separate runs' gradients, and none is missing.
+
+    Compared against the largest gradient of the model: the attention key biases have analytically
+    zero gradients (attention ignores a shift shared by all keys of a query), so their round-off would
+    fail any per-parameter relative tolerance.
+    """
+    missing = sorted(name for name, gradient in joined.items() if gradient is None)
+    assert not missing, f"Parameters without a gradient: {missing}"
+    scale = max(float(gradient.abs().max()) for gradient in joined.values())
+    for name, gradient in joined.items():
+        expected = sum(part[name] for part in parts if part[name] is not None)
+        torch.testing.assert_close(
+            gradient, expected, rtol=0, atol=1e-12 * scale, msg=lambda message, name=name: f"{name}: {message}"
+        )
+
+
+@pytest.mark.parametrize("batch_rows", list(MIXED_BATCHES))
+@pytest.mark.parametrize("model", ["deterministic", "deterministic_obs_only", "ensemble"])
+def test_mixed_batch_matches_single_samples(model, batch_rows) -> None:
+    """Samples without observations do not change the outputs or gradients of their batch-mates.
+
+    Each sample of a two-sample batch, some with empty observation windows, must get the outputs it
+    gets alone, so that empty targets are decoded to empty outputs and no rows are paired with the
+    wrong sample; the batch gradient must be the sum of the single-sample gradients.
+    """
+    os.environ["ANEMOI_GRAPHS_FORCE_CPU"] = "1"
+    spec = ENSEMBLE_MODEL if model == "ensemble" else MODELS[model]
+    network = _build_model(
+        spec["model_class"],
+        spec["obs_predicted"],
+        NEIGHBOUR_SEARCH["pyg_all_neighbours"]["max_obs_neighbours"],
+        spec.get("with_grid", True),
+    )
+
+    def single_sample(obs_rows: dict, shift: float) -> dict[str, Batch]:
+        batches = _shifted(_synthetic_batches(network, **obs_rows), shift)
+        if model == "ensemble":  # two members that differ
+            batches = _join(batches, _shifted(batches, 0.25), axis="member")
+        return batches
+
+    first, second = (single_sample(rows, shift) for rows, shift in zip(MIXED_BATCHES[batch_rows], (0.0, 0.5)))
+    first_weights, second_weights = _random_weights(network, first, 3), _random_weights(network, second, 4)
+
+    first_out, first_grads = _weighted_run(network, first, first_weights)
+    second_out, second_grads = _weighted_run(network, second, second_weights)
+    joint_weights = {name: first_weights[name] + second_weights[name] for name in first_weights}
+    joint_out, joint_grads = _weighted_run(network, _join(first, second, axis="sample"), joint_weights)
+
+    for name, source in joint_out.items():
+        expected = _samples(first_out[name]) + _samples(second_out[name])
+        for index, (sample, alone) in enumerate(zip(_samples(source), expected, strict=True)):
+            torch.testing.assert_close(sample, alone, rtol=1e-10, atol=1e-12, msg=f"{name}, sample {index}")
+    _assert_gradients_add_up(joint_grads, [first_grads, second_grads])
+
+
+@pytest.mark.parametrize("obs_rows", list(OBS_ROWS))
+def test_ensemble_members_match_single_members(obs_rows) -> None:
+    """The members of an ensemble are encoded and decoded independently, also with empty observations.
+
+    Without noise, each member of a two-member run must get the outputs of a one-member run on its
+    own inputs; the per-(sample, member) row blocks of the dynamic graphs must line up with the
+    decoded rows. The two-member gradient must be the sum of the one-member gradients.
+    """
+    os.environ["ANEMOI_GRAPHS_FORCE_CPU"] = "1"
+    network = _build_model(
+        ENSEMBLE_MODEL["model_class"], True, NEIGHBOUR_SEARCH["pyg_all_neighbours"]["max_obs_neighbours"]
+    )
+    first = _synthetic_batches(network, **OBS_ROWS[obs_rows])
+    second = _shifted(first, 0.25)
+    first_weights, second_weights = _random_weights(network, first, 3), _random_weights(network, second, 4)
+
+    first_out, first_grads = _weighted_run(network, first, first_weights)
+    second_out, second_grads = _weighted_run(network, second, second_weights)
+    member_axis = {"obs": 0, "grid": 1}  # in a sample tensor
+    joint_weights = {
+        name: [torch.cat([a, b], dim=member_axis[name]) for a, b in zip(first_weights[name], second_weights[name])]
+        for name in first_weights
+    }
+    joint_out, joint_grads = _weighted_run(network, _join(first, second, axis="member"), joint_weights)
+
+    for name, source in joint_out.items():
+        (sample,) = _samples(source)
+        assert sample.shape[member_axis[name]] == 2
+        for member, alone in enumerate((first_out[name], second_out[name])):
+            torch.testing.assert_close(
+                sample.select(member_axis[name], member),
+                _samples(alone)[0].select(member_axis[name], 0),
+                rtol=1e-10,
+                atol=1e-12,
+                msg=f"{name}, member {member}",
+            )
+        if name == "obs":
+            assert sample.shape[1] == OBS_ROWS[obs_rows]["obs_target_rows"]
+    _assert_gradients_add_up(joint_grads, [first_grads, second_grads])

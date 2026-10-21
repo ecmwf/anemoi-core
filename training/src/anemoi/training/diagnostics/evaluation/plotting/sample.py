@@ -69,15 +69,22 @@ def _compute_main_norm(
     truth: np.ndarray | None,
     pred: np.ndarray,
 ) -> Normalize:
-    """Compute normalization for main (non-error) plots."""
+    """Compute normalization for main (non-error) plots.
+
+    Sparse observation fields can be empty (a window without observations) or all-NaN. Only finite
+    values set the colour range.
+    """
     if vname in precip_fields:
         return BoundaryNorm(clevels, len(clevels) + 1)
 
-    combined = np.concatenate([field for field in (input_, truth, pred) if field is not None])
+    combined = np.concatenate([np.ravel(field) for field in (input_, truth, pred) if field is not None])
+    combined = combined[np.isfinite(combined)]
+    if combined.size == 0:
+        return Normalize()
 
     return Normalize(
-        vmin=np.nanmin(combined),
-        vmax=np.nanmax(combined),
+        vmin=combined.min(),
+        vmax=combined.max(),
     )
 
 

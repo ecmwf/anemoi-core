@@ -558,11 +558,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         hidden_batch_sizes: tuple[int, ...],
         shard_sizes_hidden: ShardSizes,
         model_comm_group: ProcessGroup | None = None,
-    ) -> EncoderSource | None:
+    ) -> EncoderSource:
         """Assemble one source dataset and its encoder edges.
 
-        Returns ``None`` when the dataset contributes no nodes to this batch, in which case the
-        caller skips it entirely (no skip connection, no latent).
+        A dataset without nodes in this batch is still returned, with zero rows and zero edges, so
+        that the encoder still runs and contributes a latent (see ``_encoder_source_from_rows``).
         """
         assembled = self._assemble_input(
             x,
@@ -592,14 +592,22 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         hidden_batch_sizes: tuple[int, ...],
         shard_sizes_hidden: ShardSizes,
         model_comm_group: ProcessGroup | None = None,
-    ) -> EncoderSource | None:
+    ) -> EncoderSource:
         """Pair a dataset's assembled encoder rows with its encoder edges.
 
-        ``assembled`` is what ``_assemble_input`` returns. Returns ``None`` when the rows are empty.
+        ``assembled`` is what ``_assemble_input`` returns. Empty rows are not skipped: the encoder then
+        runs with no edges and still updates the hidden nodes. Skipping would leave a model with a single
+        source dataset without any latent, and would make a sample's latent depend on whether other
+        samples in its batch have observations.
         """
         data_coords, x_data_latent, x_skip, shard_sizes_data, data_batch_sizes, data_timedeltas = assembled
         if data_coords.shape[0] == 0:
-            return None
+            LOGGER.debug(
+                "No data points for dataset %s in the batch (data_coords.shape = %s), "
+                + "will encode without edges ...",
+                dataset_name,
+                list(data_coords.shape),
+            )
 
         graph_batch_kwargs = (
             {"src_batch_sizes": data_batch_sizes, "dst_batch_sizes": hidden_batch_sizes}
@@ -827,9 +835,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                     shard_sizes_hidden=shard_sizes_hidden,
                     model_comm_group=model_comm_group,
                 )
-                if source is None:  # no data points for this dataset in this batch
-                    continue
-
                 x_skip_dict[dataset_name] = source.x_skip
                 sources.append(source)
 
