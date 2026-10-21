@@ -68,7 +68,10 @@ def _sparse_request_edges(generator: torch.Generator, world_size: int) -> torch.
 GRAPHS = {"directed": _directed_edges, "sparse-requests": _sparse_request_edges}
 
 
-def _build_case(graph: str, world_size: int, device: torch.device):
+def _build_processor_case(
+    graph: str, world_size: int, device: torch.device
+) -> tuple[GraphTransformerProcessor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return a processor, node/edge inputs, edge indices and fixed linear-loss weights."""
     generator = torch.Generator().manual_seed(0)
     edge_index = GRAPHS[graph](generator, world_size)
     edge_index, perm = sort_edge_index_by_dst(edge_index, max_value=NUM_NODES)
@@ -110,15 +113,25 @@ def _test_processor_matches_single_process_rank(
     graph: str,
     pre_sharded: bool,
     debug: bool,
+    dtype: torch.dtype = torch.float32,
 ) -> None:
     processor_module.ANEMOI_DEBUG_SHARDING = debug
-    processor, x, edge_attr, edge_index, loss_weights = _build_case(graph, world_size, device)
+    processor, x, edge_attr, edge_index, loss_weights = _build_processor_case(graph, world_size, device)
+    processor = processor.to(dtype=dtype)
+    x, edge_attr, loss_weights = x.to(dtype=dtype), edge_attr.to(dtype=dtype), loss_weights.to(dtype=dtype)
 
     # Reference: the whole graph in one process.
+    processor.gradient_checkpointing = False
     x_full = x.clone().requires_grad_(True)
-    y_full = processor(x_full, 1, GraphShardInfo(), edge_attr, edge_index, model_comm_group=None)
+    reference_edge_input = edge_attr.clone().requires_grad_(True)
+    y_full = processor(x_full, 1, GraphShardInfo(), reference_edge_input, edge_index, model_comm_group=None)
     (y_full * loss_weights).sum().backward()
-    param_grads_full = {name: param.grad.clone() for name, param in processor.named_parameters()}
+    assert reference_edge_input.grad is not None, "Missing reference edge-input gradient"
+    reference_edge_gradient = reference_edge_input.grad.clone()
+    param_grads_full = {}
+    for name, param in processor.named_parameters():
+        assert param.grad is not None, f"Missing reference gradient of {name}"
+        param_grads_full[name] = param.grad.detach().clone()
     processor.zero_grad(set_to_none=True)
 
     sizes = get_balanced_partition_sizes(NUM_NODES, world_size)
@@ -127,18 +140,59 @@ def _test_processor_matches_single_process_rank(
     edge_shard_sizes = None
     if pre_sharded:
         edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(edge_attr, edge_index, NUM_NODES, NUM_NODES, group)
+    edge_input = edge_attr.clone().requires_grad_(True)
     shard_info = GraphShardInfo(nodes=sizes, edges=edge_shard_sizes)
 
-    y_local = processor(x_local, 1, shard_info, edge_attr, edge_index, model_comm_group=group)
+    # The existing processor default is checkpointed; compare its recomputation
+    # explicitly against the uncheckpointed reference above.
+    processor.gradient_checkpointing = True
+    y_local = processor(x_local, 1, shard_info, edge_input, edge_index, model_comm_group=group)
     (y_local * loss_weights[start:stop]).sum().backward()
 
     tolerances = {"rtol": 1e-4, "atol": 1e-5}
-    torch.testing.assert_close(y_local, y_full[start:stop], **tolerances)
-    torch.testing.assert_close(x_local.grad, x_full.grad[start:stop], **tolerances)
+    # Callable messages preserve PyTorch's numerical mismatch diagnostics.
+    torch.testing.assert_close(
+        y_local, y_full[start:stop], **tolerances, msg=lambda details: f"output on rank {rank}\n{details}"
+    )
+    assert x_local.grad is not None, f"Missing distributed node-input gradient on rank {rank}"
+    assert x_full.grad is not None, "Missing reference node-input gradient"
+    torch.testing.assert_close(
+        x_local.grad,
+        x_full.grad[start:stop],
+        **tolerances,
+        msg=lambda details: f"node-input gradient on rank {rank}\n{details}",
+    )
+    assert edge_input.grad is not None, f"Missing distributed edge-input gradient on rank {rank}"
+    if pre_sharded:
+        edge_start = sum(edge_shard_sizes[:rank])
+        expected_edge_gradient = reference_edge_gradient[edge_start : edge_start + edge_shard_sizes[rank]]
+    else:
+        # Production sharding gathers a complete edge-input gradient in backward.
+        expected_edge_gradient = reference_edge_gradient
+    # Double-precision model arithmetic permits a tighter comparison for small
+    # edge gradients; other comparisons retain their established tolerances.
+    edge_atol = 1e-7 if dtype == torch.float64 else tolerances["atol"]
+    allowed_edge_error = edge_atol + tolerances["rtol"] * expected_edge_gradient.abs()
+    assert (
+        expected_edge_gradient.abs() > 10 * allowed_edge_error
+    ).any(), f"Insufficient edge-gradient signal on rank {rank}"
+    torch.testing.assert_close(
+        edge_input.grad,
+        expected_edge_gradient,
+        rtol=1e-4,
+        atol=edge_atol,
+        msg=lambda details: f"edge-input gradient on rank {rank}\n{details}",
+    )
     for name, param in processor.named_parameters():
-        grad = param.grad.clone()
+        assert param.grad is not None, f"Missing distributed gradient of {name}"
+        grad = param.grad.detach().clone()
         dist.all_reduce(grad, group=group)
-        torch.testing.assert_close(grad, param_grads_full[name], **tolerances, msg=f"gradient of {name}")
+        torch.testing.assert_close(
+            grad,
+            param_grads_full[name],
+            **tolerances,
+            msg=lambda details, name=name: f"gradient of {name} on rank {rank}\n{details}",
+        )
 
     halo_info = processor._cached_halo_info
     sends = _pairwise_send_counts(halo_info.send_counts, device, group)
@@ -169,4 +223,26 @@ def test_processor_matches_single_process(
         graph=graph,
         pre_sharded=pre_sharded,
         debug=debug,
+    )
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize("pre_sharded", [False, True], ids=["full-edges", "pre-sharded-edges"])
+def test_processor_edge_gradients_float64(
+    distributed_backend: str, distributed_world_size: int, pre_sharded: bool
+) -> None:
+    """Use a tighter edge-gradient oracle without replacing float32 processor coverage.
+
+    Double-precision model arithmetic supports a smaller absolute tolerance
+    for edge gradients near zero. Production communication precision is not
+    overridden. Other comparisons keep their established tolerances.
+    """
+    _run_distributed_test(
+        _test_processor_matches_single_process_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        graph="directed",
+        pre_sharded=pre_sharded,
+        debug=False,
+        dtype=torch.float64,
     )
