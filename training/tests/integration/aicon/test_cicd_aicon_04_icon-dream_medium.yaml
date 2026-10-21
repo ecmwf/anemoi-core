@@ -69,13 +69,7 @@ data:
         - "cos_local_time"
         - "sin_local_time"
         - "insolation"
-        # - H_SNOW
-        # - ALB_RAD
-        # - SKT
-        # - SMI_0
-        # - SMI_1
-        # - T_SO_0.0
-        # - T_SO_0.005
+
       diagnostic:
         - PS # just for CI/CD test.
 
@@ -89,13 +83,6 @@ data:
               - PS # just for CI/CD test.
             std:
             max:
-              # - CLCT
-              # - CLCL
-              # - CLCM
-              # - CLCH
-              # - FR_LAND
-              # - FR_LAKE
-              # - FR_ICE
             none:
               - cos_latitude
               - cos_longitude
