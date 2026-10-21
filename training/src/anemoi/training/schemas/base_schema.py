@@ -22,6 +22,7 @@ from pydantic import model_validator
 from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
 from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
 from anemoi.models.schemas.models import ModelSchema
@@ -278,12 +279,18 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     @model_validator(mode="after")
     def check_bounding_not_used_with_data_extractor_zero(self) -> Self:
         """Check that bounding is not used with zero data extractor."""
+        bounding = self.model.bounding
+        # A plain list of boundings belongs to the default dataset, as in the model.
+        if isinstance(bounding, dict) and "datasets" in bounding:
+            boundings = bounding["datasets"]
+        else:
+            boundings = {DEFAULT_DATASET_NAME: bounding}
         for decoder_name, decoder in self.model.decoders.items():
             mapper = decoder.mapper
             dataset_names = decoder.target_datasets
             if isinstance(mapper, GraphTransformerDecoderSchema) and mapper.initialise_data_extractor_zero:
                 for dataset_name in dataset_names:
-                    if self.model.bounding[dataset_name]:
+                    if boundings.get(dataset_name):
                         error = "bounding_conflict_with_data_extractor_zero"
                         msg = (
                             f"Boundings for dataset '{dataset_name}' cannot be used with zero initialized weights"
