@@ -42,7 +42,6 @@ system:
     num_gpus_per_model: 1
 
 data:
-  remapped:
   format: zarr
   resolution: mrl${data.refinement}
   refinement: ${graph.nodes.data.node_builder.max_level}
@@ -77,7 +76,7 @@ data:
         normalizer:
           _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
           # _convert_: all # deprecated?
-          config:   # ${data.normalizer}
+          config:
             default: mean-std
             min-max:
               - PS # just for CI/CD test.
@@ -108,7 +107,7 @@ graph:
         _target_: anemoi.graphs.nodes.ICONCellGridNodes
         max_level: 3 # reduced for CI/CD test.
         grid_filename: dwd/2024-12-11_00/icon_grid_0026_R03B07_subsetAICON.nc
-      attributes: ${graph.attributes.nodes}  # options: l1, l2, unit-max, unit-sum, unit-std
+      attributes: ${graph.attributes.nodes}
     # Hidden nodes
     hidden:
       node_builder:
@@ -491,7 +490,7 @@ model:
     hidden2data: 0
     hidden2hidden: 0 # GNN and GraphTransformer Processor only
 
-  compile:
+  compile: # disabled for CI/CD test
     #- module: anemoi.models.layers.conv.GraphTransformerConv
 
   attributes:
@@ -526,14 +525,12 @@ diagnostics:
 
     # Parameters to plot
     parameters:
-     - PS
-     - P_49
-     - P_86
-     - T_86
-     - U_70
-     - V_70
-     # - RAIN_CON
-    # Sample index
+      - PS
+      - P_49
+      - P_86
+      - T_86
+      - U_70
+      - V_70
     sample_idx: 0
 
     # Precipitation and related fields
@@ -609,7 +606,7 @@ diagnostics:
       authentication: False
       log_model: False
       tracking_uri: null
-      experiment_name: 'tgoecke/aicon_anemoi_training_0.17.0'
+      experiment_name: 'cicd_test'
       project_name: 'AICON'
       system: True
       terminal: True
