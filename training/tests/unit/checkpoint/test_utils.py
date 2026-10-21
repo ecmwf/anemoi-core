@@ -22,7 +22,6 @@ from unittest.mock import patch
 import pytest
 import torch
 
-
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.exceptions import CheckpointSourceError
 from anemoi.training.checkpoint.exceptions import CheckpointTimeoutError
