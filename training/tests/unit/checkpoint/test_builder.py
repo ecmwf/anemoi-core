@@ -462,6 +462,16 @@ def test_resume_that_resolves_nothing_fails_on_rank_zero(monkeypatch: pytest.Mon
         run_checkpoint_pipeline(_EncoderNet(), cfg)
 
 
+def test_resume_with_an_unimportable_source_target_is_a_config_error() -> None:
+    """On a resume the runner builds the source itself; a bad ``_target_`` still names the target."""
+    cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": "no.such.module.Source"}}}})
+
+    with pytest.raises(CheckpointConfigError, match=r"no\.such\.module\.Source") as exc_info:
+        run_checkpoint_pipeline(_EncoderNet(), cfg)
+
+    assert exc_info.value.__cause__ is not None
+
+
 def test_resume_with_the_run_preset_and_no_run_id_names_the_key(tmp_path: Path) -> None:
     """The shipped ``source=run`` preset carries ``run_id: null``; forgetting ``+run_id=`` is named as such."""
     cfg = OmegaConf.create(

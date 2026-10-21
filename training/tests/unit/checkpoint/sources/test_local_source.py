@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import os
 import pickle
 from typing import TYPE_CHECKING
 
@@ -112,6 +113,34 @@ class TestLocalSourceProcess:
             source.process(context)
 
         assert missing.name in str(exc_info.value)
+
+    @pytest.mark.skipif(
+        hasattr(os, "geteuid") and os.geteuid() == 0,
+        reason="root bypasses file permission bits, so a chmod-000 file stays readable",
+    )
+    def test_unreadable_file_raises_before_loading(
+        self,
+        source: LocalSource,
+        ckpt_file: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An existing file this process cannot read is a typed error naming the path, raised by ``resolve``."""
+
+        def _no_load(*_args: object, **_kwargs: object) -> None:
+            msg = "an unreadable file must be reported before torch.load"
+            raise AssertionError(msg)
+
+        monkeypatch.setattr(torch, "load", _no_load)
+        context = CheckpointContext(checkpoint_path=ckpt_file)
+        ckpt_file.chmod(0o000)
+        try:
+            with pytest.raises(CheckpointLoadError, match="not readable") as exc_info:
+                source.resolve(context)
+        finally:
+            ckpt_file.chmod(0o644)
+
+        assert str(ckpt_file) in str(exc_info.value)
+        assert isinstance(exc_info.value.original_error, PermissionError)
 
     def test_invalid_file_raises(self, source: LocalSource, tmp_path: Path) -> None:
         bad_file = tmp_path / "garbage.ckpt"

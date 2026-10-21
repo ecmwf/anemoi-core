@@ -19,6 +19,8 @@ from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.checkpoint.sources.local import LocalSource
 from anemoi.training.checkpoint.sources.run import RunIdSource
@@ -111,10 +113,10 @@ def test_run_source_missing_checkpoint_raises_on_rank_zero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A missing run checkpoint raises RuntimeError on rank 0."""
+    """A missing run checkpoint raises CheckpointNotFoundError on rank 0."""
     monkeypatch.setattr(rank_zero_only, "rank", 0)
     context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
-    with pytest.raises(RuntimeError, match="run_missing"):
+    with pytest.raises(CheckpointNotFoundError, match="run_missing"):
         RunIdSource(run_id="run_missing").process(context)
 
 
@@ -127,6 +129,7 @@ def test_run_source_missing_checkpoint_defers_on_nonzero_rank(
     context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
     result = RunIdSource(run_id="run_missing").process(context)
     assert result.checkpoint_path is None
+    assert result.metadata["source_deferred_reason"].startswith("checkpoint not found")
 
 
 @pytest.mark.skipif(
@@ -143,7 +146,7 @@ def test_run_source_unreadable_checkpoint_raises_on_rank_zero(
     ckpt.chmod(0o000)
     try:
         context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
-        with pytest.raises(RuntimeError, match="not readable"):
+        with pytest.raises(CheckpointLoadError, match="not readable"):
             RunIdSource(run_id="run_locked").process(context)
     finally:
         ckpt.chmod(0o644)
@@ -165,6 +168,7 @@ def test_run_source_unreadable_checkpoint_defers_on_nonzero_rank(
         context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
         result = RunIdSource(run_id="run_locked").process(context)
         assert result.checkpoint_path is None
+        assert result.metadata["source_deferred_reason"].startswith("checkpoint not readable")
     finally:
         ckpt.chmod(0o644)
 

@@ -19,7 +19,9 @@ Example
 
 from __future__ import annotations
 
+import errno
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
@@ -87,21 +89,28 @@ class LocalSource(CheckpointSource):
             If neither ``path`` nor ``context.checkpoint_path`` is set
         CheckpointNotFoundError
             If the checkpoint file does not exist
+        CheckpointLoadError
+            If the checkpoint file exists but is not readable by this process
         """
         from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+        from anemoi.training.checkpoint.exceptions import CheckpointLoadError
         from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 
-        if self.path is not None:
-            context.checkpoint_path = self.path
+        raw_path = self.path if self.path is not None else context.checkpoint_path
 
-        if context.checkpoint_path is None:
+        if raw_path is None:
             msg = "LocalSource requires an explicit 'path' or checkpoint_path to be set on the context"
             raise CheckpointConfigError(msg)
 
-        path = Path(context.checkpoint_path).expanduser().resolve()
+        path = Path(raw_path).expanduser().resolve()
 
         if not path.exists():
             raise CheckpointNotFoundError(path)
+
+        # Checked here rather than left to torch.load so an unreadable file (e.g. wrong
+        # permissions) is reported as such, and RunIdSource can defer it to rank 0.
+        if not os.access(path, os.R_OK):
+            raise CheckpointLoadError(path, PermissionError(errno.EACCES, "Checkpoint file is not readable", str(path)))
 
         context.checkpoint_path = path
         return path
@@ -126,7 +135,7 @@ class LocalSource(CheckpointSource):
         CheckpointNotFoundError
             If the checkpoint file does not exist
         CheckpointLoadError
-            If the file cannot be loaded by PyTorch
+            If the file is not readable or cannot be loaded by PyTorch
         """
         path = self.resolve(context)
 

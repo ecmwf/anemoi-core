@@ -36,7 +36,6 @@ Example
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
@@ -185,8 +184,8 @@ class RunIdSource(CheckpointSource):
         """Resolve the run checkpoint path and publish it on the context.
 
         Returns ``None`` (context untouched) on a rank that defers. On a missing or
-        unreadable checkpoint, raises ``RuntimeError`` on rank 0 and defers (warns,
-        returns ``None``) on other ranks. A deferring
+        unreadable checkpoint, raises on rank 0 and defers (warns, returns ``None``)
+        on other ranks. A deferring
         rank records ``source_deferred`` on the context so a loading stage can say
         "rank 0 is reporting the real error" instead of failing with a message about
         a corrupted file. The path is canonicalised through
@@ -200,6 +199,10 @@ class RunIdSource(CheckpointSource):
             selecting ``training/checkpoint/source=run`` and forgetting the id is
             the most likely first mistake; passing through left the loader to
             report a corrupted checkpoint for a file that was never opened.
+        CheckpointNotFoundError
+            On rank 0, if the run checkpoint does not exist.
+        CheckpointLoadError
+            On rank 0, if the run checkpoint exists but is not readable.
         """
         if self.run_id is None:
             from anemoi.training.checkpoint.exceptions import CheckpointConfigError
@@ -219,30 +222,26 @@ class RunIdSource(CheckpointSource):
             self.fork_run_server2server,
         )
 
-        if not path.exists():
-            if rank_zero_only.rank == 0:
-                msg = f"Could not find checkpoint for run '{self.run_id}': {path}"
-                raise RuntimeError(msg)
-            LOGGER.warning("RunIdSource: checkpoint not found at %s; deferring the error to rank 0.", path)
-            context.update_metadata(source_deferred=True, source_deferred_reason=f"checkpoint not found: {path}")
-            return None
+        from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+        from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 
-        # An unreadable checkpoint (e.g. wrong permissions) is handled the same way as a
-        # missing one: only rank 0 raises, other ranks defer, so a distributed run fails
-        # cleanly on rank 0 instead of every rank raising out of the shared torch.load.
-        if not os.access(path, os.R_OK):
+        # LocalSource.resolve owns the missing and unreadable checks. Only rank 0
+        # raises; other ranks defer, so a distributed run fails cleanly on rank 0
+        # instead of every rank raising out of the shared torch.load.
+        try:
+            resolved = LocalSource(path=path).resolve(context)
+        except (CheckpointNotFoundError, CheckpointLoadError) as e:
             if rank_zero_only.rank == 0:
-                msg = f"Checkpoint for run '{self.run_id}' is not readable: {path}"
-                raise RuntimeError(msg)
-            LOGGER.warning("RunIdSource: checkpoint not readable at %s; deferring the error to rank 0.", path)
-            context.update_metadata(source_deferred=True, source_deferred_reason=f"checkpoint not readable: {path}")
+                raise
+            problem = "not found" if isinstance(e, CheckpointNotFoundError) else "not readable"
+            LOGGER.warning("RunIdSource: checkpoint %s at %s; deferring the error to rank 0.", problem, path)
+            context.update_metadata(source_deferred=True, source_deferred_reason=f"checkpoint {problem}: {path}")
             return None
 
         resolution = "fork" if self.fork else "resume"
-        LOGGER.info("RunIdSource: resolved checkpoint path (%s): %s", resolution, path)
-        context.checkpoint_path = path
+        LOGGER.info("RunIdSource: resolved checkpoint path (%s): %s", resolution, resolved)
         context.update_metadata(resolved_checkpoint_path=str(path), lineage_resolution=resolution)
-        return LocalSource().resolve(context)
+        return resolved
 
     def process(self, context: CheckpointContext) -> CheckpointContext:
         """Resolve the run checkpoint path and load it via :class:`LocalSource`.
