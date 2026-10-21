@@ -147,6 +147,31 @@ def test_s3_source_deletes_download_on_load_failure() -> None:
             path.unlink(missing_ok=True)
 
 
+def test_s3_source_deletes_partial_download_on_download_failure() -> None:
+    """A download that fails part-way leaves no file behind."""
+    source = S3Source(url="s3://bucket/model.ckpt")
+    context = CheckpointContext()
+    downloaded: list[Path] = []
+
+    def fake_download(_url: str, target: str, *_args: object, **_kwargs: object) -> None:
+        downloaded.append(Path(target))
+        Path(target).write_bytes(b"partial")
+        msg = "connection reset"
+        raise OSError(msg)
+
+    fake_module = _fake_anemoi_utils_s3(fake_download)
+    try:
+        with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointSourceError):
+            source.process(context)
+
+        assert len(downloaded) == 1
+        assert not downloaded[0].exists()
+        assert context.checkpoint_data is None
+    finally:
+        for path in downloaded:
+            path.unlink(missing_ok=True)
+
+
 def test_s3_source_deletes_download_after_loading() -> None:
     """A successful load populates the context, then deletes the download."""
     source = S3Source(url="s3://bucket/model.ckpt")

@@ -350,7 +350,7 @@ class TestStageOrder:
         assert "WeightsOnlyLoader" in str(exc_info.value)
 
 
-# --- a resolve-only source is not "random weights" ---------------------------------
+# --- a source with no loader is refused -------------------------------------------
 
 
 def _write_checkpoint(tmp_path: Path) -> Path:

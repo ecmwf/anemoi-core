@@ -124,7 +124,7 @@ def test_no_checkpoint_data_is_noop() -> None:
     assert context.checkpoint_data is None
 
 
-def test_apply_trainable_edge_perm_migration_runs_model_dependent_migration(
+def test_corrections_run_the_model_dependent_edge_perm_migration(
     fake_edge_perm_migration: MagicMock,
 ) -> None:
     """The helper runs the model-dependent edge-perm migration and reassigns the result."""
