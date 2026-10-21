@@ -7,7 +7,7 @@ memory:
   trace_rank0_only: False #set to true and it will profile rank 0 only. Reads SLURM_PROC_ID so won't work when not running via Slurm
 time:
   enabled: True
-  verbose: False #If true, output every action the profiler caputres, otherwise output a subset defined in PROFILER_ACTIONS at the top of aifs/diagnostics/profiler.py
+  verbose: False #If true, output every action the profiler captures, otherwise output a subset defined in PROFILER_ACTIONS at the top of aifs/diagnostics/profiler.py
 speed:
   enabled: True
 system:
