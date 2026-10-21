@@ -80,7 +80,7 @@ class FreezingModifierStage(ModelModifier):
             self.validate_gradients,
         )
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Freeze specified submodules on context.model.
 
         Parameters

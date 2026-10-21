@@ -35,7 +35,7 @@ class MockStage(PipelineStage):
         self.process_called = False
         self.context_received = None
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Process the context."""
         self.process_called = True
         self.context_received = context
@@ -59,20 +59,17 @@ class TestCheckpointPipeline:
 
         assert len(pipeline) == 2
         assert pipeline.stages == stages
-        assert pipeline.async_execution is True
         assert pipeline.continue_on_error is False
 
     def test_pipeline_initialization_with_options(self) -> None:
         """Test pipeline initialization with options."""
         stages = [MockStage("stage1")]
-        pipeline = CheckpointPipeline(stages, async_execution=False, continue_on_error=True)
+        pipeline = CheckpointPipeline(stages, continue_on_error=True)
 
-        assert pipeline.async_execution is False
         assert pipeline.continue_on_error is True
 
-    @pytest.mark.asyncio
-    async def test_pipeline_execution_async(self) -> None:
-        """Test async pipeline execution."""
+    def test_pipeline_execution(self) -> None:
+        """Test pipeline execution."""
         stage1 = MockStage("stage1")
         stage2 = MockStage("stage2")
         stage3 = MockStage("stage3")
@@ -80,7 +77,7 @@ class TestCheckpointPipeline:
         pipeline = CheckpointPipeline([stage1, stage2, stage3])
 
         context = CheckpointContext()
-        result = await pipeline.execute_async(context)
+        result = pipeline.execute(context)
 
         # Check all stages were called
         assert stage1.process_called
@@ -100,15 +97,14 @@ class TestCheckpointPipeline:
         pipeline = CheckpointPipeline([stage1, stage2])
 
         context = CheckpointContext()
-        result = pipeline.execute_sync(context)
+        result = pipeline.execute(context)
 
         assert stage1.process_called
         assert stage2.process_called
         assert "stage_stage1" in result.metadata
         assert "stage_stage2" in result.metadata
 
-    @pytest.mark.asyncio
-    async def test_pipeline_execution_with_error(self) -> None:
+    def test_pipeline_execution_with_error(self) -> None:
         """Test pipeline execution with error."""
         stage1 = MockStage("stage1")
         stage2 = MockStage("stage2", should_fail=True)
@@ -119,7 +115,7 @@ class TestCheckpointPipeline:
         context = CheckpointContext()
 
         with pytest.raises(CheckpointError) as exc_info:
-            await pipeline.execute_async(context)
+            pipeline.execute(context)
 
         assert "Stage stage2 failed" in str(exc_info.value)
 
@@ -128,8 +124,7 @@ class TestCheckpointPipeline:
         assert stage2.process_called
         assert not stage3.process_called
 
-    @pytest.mark.asyncio
-    async def test_pipeline_continue_on_error(self) -> None:
+    def test_pipeline_continue_on_error(self) -> None:
         """Test pipeline continues on error when configured."""
         stage1 = MockStage("stage1")
         stage2 = MockStage("stage2", should_fail=True)
@@ -138,7 +133,7 @@ class TestCheckpointPipeline:
         pipeline = CheckpointPipeline([stage1, stage2, stage3], continue_on_error=True)
 
         context = CheckpointContext()
-        result = await pipeline.execute_async(context)
+        result = pipeline.execute(context)
 
         # All stages should be called
         assert stage1.process_called
@@ -197,26 +192,24 @@ class TestCheckpointPipeline:
     def test_pipeline_repr(self) -> None:
         """Test pipeline string representation."""
         stages = [MockStage("stage1"), MockStage("stage2")]
-        pipeline = CheckpointPipeline(stages, async_execution=False)
+        pipeline = CheckpointPipeline(stages, continue_on_error=True)
 
         repr_str = repr(pipeline)
         assert "CheckpointPipeline" in repr_str
         assert "MockStage" in repr_str
-        assert "async=False" in repr_str
+        assert "continue_on_error=True" in repr_str
 
-    @pytest.mark.asyncio
-    async def test_empty_pipeline(self) -> None:
+    def test_empty_pipeline(self) -> None:
         """Test executing empty pipeline."""
         pipeline = CheckpointPipeline([])
         context = CheckpointContext()
 
-        result = await pipeline.execute_async(context)
+        result = pipeline.execute(context)
 
         # Should return context unchanged
         assert result == context
 
-    @pytest.mark.asyncio
-    async def test_context_passing(self) -> None:
+    def test_context_passing(self) -> None:
         """Test context is passed correctly between stages."""
 
         class ModifyingStage(PipelineStage):
@@ -224,7 +217,7 @@ class TestCheckpointPipeline:
                 self.key = key
                 self.value = value
 
-            async def process(self, context: CheckpointContext) -> CheckpointContext:
+            def process(self, context: CheckpointContext) -> CheckpointContext:
                 context.update_metadata(**{self.key: self.value})
                 return context
 
@@ -235,7 +228,7 @@ class TestCheckpointPipeline:
         pipeline = CheckpointPipeline([stage1, stage2, stage3])
 
         context = CheckpointContext()
-        result = await pipeline.execute_async(context)
+        result = pipeline.execute(context)
 
         assert result.metadata["key1"] == "value1"
         assert result.metadata["key2"] == "value2"
@@ -274,8 +267,7 @@ class TestCheckpointPipeline:
         assert isinstance(pipeline.stages[0], MockStage)
         assert pipeline.stages[0].name == "added_stage"
 
-    @pytest.mark.asyncio
-    async def test_hydra_configured_pipeline_execution(self) -> None:
+    def test_hydra_configured_pipeline_execution(self) -> None:
         """Test executing pipeline created from config.
 
         Note: We test with pre-instantiated stages passed to the constructor
@@ -289,7 +281,7 @@ class TestCheckpointPipeline:
         pipeline = CheckpointPipeline([stage1, stage2])
         context = CheckpointContext()
 
-        result = await pipeline.execute(context)
+        result = pipeline.execute(context)
 
         assert result.metadata["stage_config_stage1"] == "processed"
         assert result.metadata["stage_config_stage2"] == "processed"
@@ -359,8 +351,7 @@ def _write_checkpoint(tmp_path: Path) -> Path:
     return ckpt
 
 
-@pytest.mark.asyncio
-async def test_verify_weights_loaded_accepts_a_resolve_only_source(tmp_path: Path) -> None:
+def test_verify_weights_loaded_accepts_a_resolve_only_source(tmp_path: Path) -> None:
     """On a resume the source only resolves the file: the weights arrive at ``Trainer.fit(ckpt_path=)``.
 
     The post-execution check must not mistake that for a loading failure, and the
@@ -376,7 +367,7 @@ async def test_verify_weights_loaded_accepts_a_resolve_only_source(tmp_path: Pat
     model = torch.nn.Linear(2, 2)
     pipeline = CheckpointPipeline([ResolveOnlySource(LocalSource(path=ckpt))])
 
-    result = await pipeline.execute(CheckpointContext(model=model))
+    result = pipeline.execute(CheckpointContext(model=model))
 
     assert result.checkpoint_path == ckpt.resolve()
     assert result.checkpoint_data is None
@@ -384,8 +375,7 @@ async def test_verify_weights_loaded_accepts_a_resolve_only_source(tmp_path: Pat
     assert validate_pipeline_health(result) is True
 
 
-@pytest.mark.asyncio
-async def test_verify_weights_loaded_still_rejects_a_bare_source_without_loader(tmp_path: Path) -> None:
+def test_verify_weights_loaded_still_rejects_a_bare_source_without_loader(tmp_path: Path) -> None:
     """Positive control: a source that loaded data with no loader to apply it is still refused."""
     import torch
 
@@ -396,4 +386,4 @@ async def test_verify_weights_loaded_still_rejects_a_bare_source_without_loader(
     pipeline = CheckpointPipeline([LocalSource(path=ckpt)])
 
     with pytest.raises(CheckpointLoadError, match="Refusing to proceed with random weights"):
-        await pipeline.execute(CheckpointContext(model=torch.nn.Linear(2, 2)))
+        pipeline.execute(CheckpointContext(model=torch.nn.Linear(2, 2)))

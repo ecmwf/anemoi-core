@@ -401,23 +401,16 @@ File not found (local)
 Use an absolute path, and remember that ``LocalSource`` does **not** understand
 ``s3://`` or ``https://`` strings — use the matching source for those.
 
-Remote downloads need an extra package
-======================================
+S3 downloads need an extra package
+==================================
 
 **Message:**
 
 .. code:: text
 
-   ImportError: aiohttp is required for remote checkpoint downloads.
-   Install with: pip install anemoi-training[remote]
+   CheckpointSourceError: S3Source requires anemoi-utils[s3]: pip install 'anemoi-utils[s3]'
 
-**How to fix it:** install the remote extra for HTTP(S):
-
-.. code:: bash
-
-   pip install anemoi-training[remote]
-
-For S3, install the S3 extra instead:
+**How to fix it:** install the S3 extra. HTTP(S) downloads need no extra package.
 
 .. code:: bash
 
@@ -499,7 +492,7 @@ After a run, every stage records its status in the context metadata:
 
 .. code:: python
 
-   result = await pipeline.execute(context)
+   result = pipeline.execute(context)
    for key, value in result.metadata.items():
        if key.startswith("stage_"):
            print(key, "->", value)
@@ -513,7 +506,7 @@ Test one stage in isolation
 
    context = CheckpointContext(model=my_model)
    try:
-       result = await my_stage.process(context)
+       result = my_stage.process(context)
        print("Stage succeeded")
    except Exception as e:
        import traceback

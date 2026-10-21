@@ -55,31 +55,28 @@ def _index_collection(name_to_index: dict[str, int]) -> object:
     return type("IndexCollection", (), {"name_to_index": name_to_index})()
 
 
-@pytest.mark.asyncio
-async def test_weights_only_default_is_strict() -> None:
+def test_weights_only_default_is_strict() -> None:
     """A missing-key checkpoint fails by default (default strict=True)."""
     model = _Tiny()
     partial = {key: value for key, value in _full_state(model).items() if key.startswith("encoder.")}
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": partial})
 
     with pytest.raises(CheckpointLoadError):
-        await WeightsOnlyLoader().process(context)
+        WeightsOnlyLoader().process(context)
 
 
-@pytest.mark.asyncio
-async def test_weights_only_non_strict_accepts_partial() -> None:
+def test_weights_only_non_strict_accepts_partial() -> None:
     """strict=False keeps the lenient fill-model behaviour for partial checkpoints."""
     model = _Tiny()
     partial = {key: value for key, value in _full_state(model).items() if key.startswith("encoder.")}
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": partial})
 
-    result = await WeightsOnlyLoader(strict=False).process(context)
+    result = WeightsOnlyLoader(strict=False).process(context)
 
     assert result.model is model
 
 
-@pytest.mark.asyncio
-async def test_hparams_divergence_warns(caplog: pytest.LogCaptureFixture) -> None:
+def test_hparams_divergence_warns(caplog: pytest.LogCaptureFixture) -> None:
     """Diverging checkpoint model hparams (with coinciding shapes) produce a warning."""
     model = _Tiny()
     checkpoint = {
@@ -90,7 +87,7 @@ async def test_hparams_divergence_warns(caplog: pytest.LogCaptureFixture) -> Non
     context = CheckpointContext(model=model, checkpoint_data=checkpoint, config=config)
 
     with caplog.at_level(logging.WARNING):
-        await WeightsOnlyLoader().process(context)
+        WeightsOnlyLoader().process(context)
 
     assert any("hparam" in record.getMessage().lower() for record in caplog.records)
 
@@ -138,8 +135,7 @@ def test_single_dataset_metadata_raises() -> None:
         preserve_anemoi_metadata(model, checkpoint)
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_sets_variables_metadata() -> None:
+def test_transfer_learning_sets_variables_metadata() -> None:
     """A transfer-learning load populates ``_ckpt_variables_metadata`` from the checkpoint."""
     model = _Tiny()
     checkpoint = {
@@ -151,6 +147,6 @@ async def test_transfer_learning_sets_variables_metadata() -> None:
     }
     context = CheckpointContext(model=model, checkpoint_data=checkpoint)
 
-    result = await TransferLearningLoader().process(context)
+    result = TransferLearningLoader().process(context)
 
     assert getattr(result.model, "_ckpt_variables_metadata", None) is not None

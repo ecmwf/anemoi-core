@@ -22,7 +22,6 @@ builder — no mocking of the code under test.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -95,7 +94,7 @@ def test_weights_only_casts_fp32_state_dict_into_bfloat16_model() -> None:
     target = _SmallNet().to(torch.bfloat16)
     context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
 
-    asyncio.run(WeightsOnlyLoader(strict=True).process(context))
+    WeightsOnlyLoader(strict=True).process(context)
 
     loaded = target.state_dict()
     for key, source_value in source_state.items():
@@ -114,7 +113,7 @@ def test_weights_only_casts_bfloat16_state_dict_into_fp32_model() -> None:
     target = _SmallNet()  # fp32
     context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state})
 
-    asyncio.run(WeightsOnlyLoader(strict=True).process(context))
+    WeightsOnlyLoader(strict=True).process(context)
 
     loaded = target.state_dict()
     for key, source_value in source_state.items():
@@ -142,8 +141,8 @@ def test_same_checkpoint_loads_identically_into_two_models(tmp_path: Path) -> No
 
     for model in (model_a, model_b):
         context = CheckpointContext(checkpoint_path=ckpt_path, model=model)
-        asyncio.run(LocalSource().process(context))
-        asyncio.run(WeightsOnlyLoader(strict=True).process(context))
+        LocalSource().process(context)
+        WeightsOnlyLoader(strict=True).process(context)
 
     state_a = model_a.state_dict()
     state_b = model_b.state_dict()
@@ -298,7 +297,7 @@ def test_resume_is_one_lightning_load_and_matches_the_legacy_hook(
         },
     )
 
-    executed = asyncio.run(build_checkpoint_pipeline(cfg).execute(CheckpointContext(model=module, config=cfg)))
+    executed = build_checkpoint_pipeline(cfg).execute(CheckpointContext(model=module, config=cfg))
 
     # No pipeline load: the file was only resolved, the model is untouched.
     assert loads == []
@@ -350,7 +349,7 @@ def test_weights_only_preserves_name_index_variables_metadata_and_hyper_paramete
     }
 
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    asyncio.run(WeightsOnlyLoader(strict=True).process(context))
+    WeightsOnlyLoader(strict=True).process(context)
 
     assert model._ckpt_model_name_to_index == {"era5": name_to_index}
     assert model._ckpt_variables_metadata == {"era5": variables_metadata}

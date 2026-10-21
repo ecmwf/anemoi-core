@@ -34,7 +34,7 @@ a shared :class:`CheckpointContext`, changes it, and passes it on:
 -  **Loading strategies** apply the checkpoint to ``context.model``.
 -  **Modifiers** change ``context.model`` after loading.
 
-All three are :class:`PipelineStage` subclasses with a single ``async process``
+All three are :class:`PipelineStage` subclasses with a single ``process``
 method. The :class:`CheckpointPipeline` runs them in order. In a training run,
 the trainer assembles the pipeline from config via
 :func:`~anemoi.training.checkpoint.builder.build_checkpoint_pipeline`.
@@ -104,13 +104,9 @@ The base class for everything that goes in the assembly line:
        def __init__(self, param: str) -> None:
            self.param = param
 
-       async def process(self, context: CheckpointContext) -> CheckpointContext:
+       def process(self, context: CheckpointContext) -> CheckpointContext:
            context.update_metadata(custom_param=self.param)
            return context
-
-``process`` is ``async`` so stages can do I/O (downloads, large reads) without
-blocking. A stage that needs no ``await`` is still written ``async`` — just
-return the context.
 
 In practice you usually subclass one of the three **layer base classes**
 instead of ``PipelineStage`` directly, because that is how the pipeline knows
@@ -135,9 +131,7 @@ Runs the stages in order:
    )
 
    context = CheckpointContext(model=my_model)
-   result = await pipeline.execute(context)        # async
-   # or, from synchronous code:
-   result = pipeline.execute_sync(context)         # manages the event loop for you
+   result = pipeline.execute(context)
 
 Two things happen automatically when you construct a pipeline:
 
@@ -275,7 +269,7 @@ The checkpoint module exposes a small exception hierarchy:
    )
 
    try:
-       result = await pipeline.execute(context)
+       result = pipeline.execute(context)
    except CheckpointNotFoundError as e:
        print(f"Checkpoint not found: {e.path}")
    except CheckpointLoadError as e:
@@ -367,7 +361,7 @@ The configuration guide has a full worked example
 
 #. Subclass the base class for the station you want
    (``CheckpointSource`` / ``LoadingStrategy`` / ``ModelModifier``).
-#. Implement ``async def process(self, context) -> CheckpointContext``.
+#. Implement ``def process(self, context) -> CheckpointContext``.
 #. Mutate the context (load weights, change the model, set metadata) and return
    it. A source sets ``checkpoint_path``/``checkpoint_data``; a loader sets
    ``context.model.weights_initialized = True``; a modifier appends to

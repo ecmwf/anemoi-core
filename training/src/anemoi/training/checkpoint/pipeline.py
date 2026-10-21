@@ -13,7 +13,6 @@ This module provides the CheckpointPipeline class that orchestrates
 the execution of multiple pipeline stages in sequence. It handles:
 - Stage execution order
 - Error propagation and recovery
-- Async/sync execution modes
 - Metadata tracking through stages
 - Hydra-based configuration and instantiation
 
@@ -41,28 +40,26 @@ Example
 >>>
 >>> # Execute pipeline
 >>> context = CheckpointContext(model=my_model)
->>> result = await pipeline.execute(context)
+>>> result = pipeline.execute(context)
 
 Execution
 ---------
 The pipeline runs once during model construction, before ``trainer.fit()``:
 ``AnemoiTrainer.model`` calls :func:`build_checkpoint_pipeline` on
-``training.checkpoint.*`` and then :meth:`CheckpointPipeline.execute_sync`, so
+``training.checkpoint.*`` and then :meth:`CheckpointPipeline.execute`, so
 checkpoint loading happens exactly once at startup and never inside the training
 loop. Outside the trainer the same pipeline can be driven directly::
 
     pipeline = build_checkpoint_pipeline(config)  # reads training.checkpoint.*
     context = CheckpointContext(model=model)
 
-    result = await pipeline.execute(context)   # from an async context
-    result = pipeline.execute_sync(context)    # from a sync context (manages the loop)
+    result = pipeline.execute(context)
 
     model = result.model
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING
 from typing import Any
@@ -90,7 +87,6 @@ class CheckpointPipeline:
     The pipeline supports:
     - Sequential execution of stages
     - Error handling with optional continuation
-    - Async and sync execution modes
     - Dynamic stage management (add/remove)
     - Metadata tracking for debugging
 
@@ -100,9 +96,6 @@ class CheckpointPipeline:
         List of pipeline stages to execute in order. Each item can be:
         - An instantiated PipelineStage object
         - A dict/DictConfig with '_target_' for Hydra instantiation
-    async_execution : bool, optional
-        Whether to use async execution (default: True). Set to False
-        for synchronous execution in non-async contexts.
     continue_on_error : bool, optional
         Whether to continue pipeline on stage errors (default: False).
         If True, failed stages will be logged but won't stop the pipeline.
@@ -111,8 +104,6 @@ class CheckpointPipeline:
     ----------
     stages : list
         Current list of pipeline stages
-    async_execution : bool
-        Whether async execution is enabled
     continue_on_error : bool
         Whether to continue on stage errors
 
@@ -135,7 +126,6 @@ class CheckpointPipeline:
     def __init__(
         self,
         stages: list[Union[PipelineStage, DictConfig, dict]] | None = None,
-        async_execution: bool = True,
         continue_on_error: bool = False,
     ):
         """Initialize the checkpoint pipeline.
@@ -146,12 +136,9 @@ class CheckpointPipeline:
             List of pipeline stages to execute in order. Each item can be:
             - An instantiated PipelineStage object
             - A dict/DictConfig with '_target_' for Hydra instantiation
-        async_execution : bool, optional
-            Whether to use async execution (default: True)
         continue_on_error : bool, optional
             Whether to continue pipeline on stage errors (default: False)
         """
-        self.async_execution = async_execution
         self.continue_on_error = continue_on_error
 
         # Instantiate stages
@@ -338,8 +325,8 @@ class CheckpointPipeline:
         if suggestions:
             LOGGER.info("Pipeline composition suggestions:\n  • %s", "\n  • ".join(suggestions))
 
-    async def execute_async(self, initial_context: CheckpointContext) -> CheckpointContext:
-        """Execute pipeline stages asynchronously.
+    def execute(self, initial_context: CheckpointContext) -> CheckpointContext:
+        """Execute the pipeline stages in sequence.
 
         Executes each stage in sequence, passing the context from one
         stage to the next. Each stage's execution is tracked in metadata
@@ -381,7 +368,7 @@ class CheckpointPipeline:
             LOGGER.debug("Executing stage %d/%d: %s", i, len(self.stages), stage_name)
 
             try:
-                context = await stage.process(context)
+                context = stage.process(context)
                 LOGGER.debug("Stage %s completed successfully", stage_name)
 
                 # Update metadata with stage execution
@@ -474,77 +461,6 @@ class CheckpointPipeline:
             )
             LOGGER.error(msg)
             raise CheckpointLoadError(context.checkpoint_path or "<unresolved checkpoint>", RuntimeError(msg))
-
-    def execute_sync(self, initial_context: CheckpointContext) -> CheckpointContext:
-        """Execute pipeline stages synchronously.
-
-        This is a convenience method for synchronous execution,
-        wrapping the async execution in asyncio.run(). If an event
-        loop is already running (e.g. in Jupyter), uses a thread pool.
-
-        Parameters
-        ----------
-        initial_context : CheckpointContext
-            Initial context to process
-
-        Returns
-        -------
-        CheckpointContext
-            Final processed context
-        """
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            # Inside existing event loop (e.g. Jupyter) — run in a thread
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, self.execute_async(initial_context))
-                return future.result()
-        return asyncio.run(self.execute_async(initial_context))
-
-    async def execute(self, initial_context: CheckpointContext) -> CheckpointContext:
-        """Execute the pipeline.
-
-        Main entry point for pipeline execution. This method is always
-        asynchronous and delegates to :meth:`execute_async`; await it from
-        an async context, or wrap it with ``asyncio.run`` from a sync one.
-        Use :meth:`execute_sync` if you need a blocking call that manages
-        the event loop for you.
-
-        Parameters
-        ----------
-        initial_context : CheckpointContext
-            Initial context to process. Should contain:
-            - model: The PyTorch model to load checkpoint into
-            - config: Optional configuration for stages
-            - Any other initial state needed by stages
-
-        Returns
-        -------
-        CheckpointContext
-            Final processed context containing:
-            - checkpoint_path: Path to downloaded checkpoint (if applicable)
-            - checkpoint_data: Loaded checkpoint data
-            - model: Modified model with loaded weights
-            - metadata: Execution tracking and stage results
-
-        Examples
-        --------
-        >>> import asyncio
-        >>> context = CheckpointContext(model=my_model)
-        >>>
-        >>> # In async context:
-        >>> result = await pipeline.execute(context)
-        >>>
-        >>> # In sync context:
-        >>> result = asyncio.run(pipeline.execute(context))
-        """
-        # execute() is already async, so always use execute_async
-        return await self.execute_async(initial_context)
 
     def add_stage(self, stage: Union[PipelineStage, DictConfig, dict]) -> None:
         """Add a stage to the pipeline.
@@ -643,10 +559,10 @@ class CheckpointPipeline:
         --------
         >>> pipeline = CheckpointPipeline([Stage1(), Stage2()])
         >>> print(pipeline)
-        CheckpointPipeline(stages=['Stage1', 'Stage2'], async=True)
+        CheckpointPipeline(stages=['Stage1', 'Stage2'], continue_on_error=False)
         """
         stage_names = [s.__class__.__name__ for s in self.stages]
-        return f"CheckpointPipeline(stages={stage_names}, async={self.async_execution})"
+        return f"CheckpointPipeline(stages={stage_names}, continue_on_error={self.continue_on_error})"
 
     def _perform_pre_execution_validation(self, context: CheckpointContext) -> None:
         """Perform pre-execution health checks and validations.

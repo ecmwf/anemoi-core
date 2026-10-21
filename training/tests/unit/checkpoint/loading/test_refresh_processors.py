@@ -17,7 +17,6 @@ Pipeline-based loading must honour
 
 from __future__ import annotations
 
-import pytest
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
@@ -167,15 +166,14 @@ def test_missing_config_is_no_op() -> None:
         assert torch.equal(context.checkpoint_data["state_dict"][key], original)
 
 
-@pytest.mark.asyncio
-async def test_full_process_call_applies_the_refresh() -> None:
+def test_full_process_call_applies_the_refresh() -> None:
     """Smoke test: the helper actually runs as part of WeightsOnlyLoader.process()."""
     context = _build_context(states=True, tendencies=True)
 
     # strict=False keeps the smoke test tolerant of any non-processor key differences;
     # it exercises that the refresh runs inside process() and that the resulting load
     # leaves the model with its own (non-stale) processor weights.
-    await WeightsOnlyLoader(strict=False).process(context)
+    WeightsOnlyLoader(strict=False).process(context)
 
     # The model keeps its own (non-stale) processor weights.
     loaded = context.model.state_dict()["model.pre_processors.weight"]

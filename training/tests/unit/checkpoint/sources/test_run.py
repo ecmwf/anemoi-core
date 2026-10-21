@@ -65,14 +65,13 @@ def test_resolve_path_missing_root_raises() -> None:
         RunIdSource.resolve_path(OmegaConf.create({"system": {"output": {"checkpoints": {}}}}), "run_A", fork=False)
 
 
-@pytest.mark.asyncio
-async def test_run_source_resume_loads_checkpoint(tmp_path: Path) -> None:
+def test_run_source_resume_loads_checkpoint(tmp_path: Path) -> None:
     """Resume resolves the run path and loads it via LocalSource semantics."""
     root = tmp_path / "job" / "checkpoints"
     _write_ckpt(tmp_path / "job" / "run_A" / "last.ckpt")
 
     context = CheckpointContext(config=_config(root))
-    result = await RunIdSource(run_id="run_A").process(context)
+    result = RunIdSource(run_id="run_A").process(context)
 
     assert result.checkpoint_path == tmp_path / "job" / "run_A" / "last.ckpt"
     assert result.checkpoint_data is not None
@@ -80,20 +79,18 @@ async def test_run_source_resume_loads_checkpoint(tmp_path: Path) -> None:
     assert result.metadata["lineage_resolution"] == "resume"
 
 
-@pytest.mark.asyncio
-async def test_run_source_fork_loads_parent_checkpoint(tmp_path: Path) -> None:
+def test_run_source_fork_loads_parent_checkpoint(tmp_path: Path) -> None:
     root = tmp_path / "job" / "checkpoints"
     _write_ckpt(tmp_path / "job" / "base999" / "last.ckpt")
 
     context = CheckpointContext(config=_config(root))
-    result = await RunIdSource(run_id="base999", fork=True).process(context)
+    result = RunIdSource(run_id="base999", fork=True).process(context)
 
     assert result.checkpoint_path == tmp_path / "job" / "base999" / "last.ckpt"
     assert result.metadata["lineage_resolution"] == "fork"
 
 
-@pytest.mark.asyncio
-async def test_run_source_no_run_id_raises_naming_the_key(tmp_path: Path) -> None:
+def test_run_source_no_run_id_raises_naming_the_key(tmp_path: Path) -> None:
     """No run_id names the missing key instead of passing through.
 
     The shipped preset ships ``run_id: null``, so selecting
@@ -106,11 +103,10 @@ async def test_run_source_no_run_id_raises_naming_the_key(tmp_path: Path) -> Non
     context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
 
     with pytest.raises(CheckpointConfigError, match="requires a run_id"):
-        await RunIdSource().process(context)
+        RunIdSource().process(context)
 
 
-@pytest.mark.asyncio
-async def test_run_source_missing_checkpoint_raises_on_rank_zero(
+def test_run_source_missing_checkpoint_raises_on_rank_zero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -119,27 +115,25 @@ async def test_run_source_missing_checkpoint_raises_on_rank_zero(
         monkeypatch.delenv(var, raising=False)
     context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
     with pytest.raises(RuntimeError, match="run_missing"):
-        await RunIdSource(run_id="run_missing").process(context)
+        RunIdSource(run_id="run_missing").process(context)
 
 
-@pytest.mark.asyncio
-async def test_run_source_missing_checkpoint_defers_on_nonzero_rank(
+def test_run_source_missing_checkpoint_defers_on_nonzero_rank(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Non-rank-0 defers (warns, pass-through) rather than raising."""
     monkeypatch.setenv("RANK", "1")
     context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
-    result = await RunIdSource(run_id="run_missing").process(context)
+    result = RunIdSource(run_id="run_missing").process(context)
     assert result.checkpoint_path is None
 
 
-@pytest.mark.asyncio
 @pytest.mark.skipif(
     hasattr(os, "geteuid") and os.geteuid() == 0,
     reason="root bypasses file permission bits, so a chmod-000 file stays readable",
 )
-async def test_run_source_unreadable_checkpoint_raises_on_rank_zero(
+def test_run_source_unreadable_checkpoint_raises_on_rank_zero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -151,17 +145,16 @@ async def test_run_source_unreadable_checkpoint_raises_on_rank_zero(
     try:
         context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
         with pytest.raises(RuntimeError, match="not readable"):
-            await RunIdSource(run_id="run_locked").process(context)
+            RunIdSource(run_id="run_locked").process(context)
     finally:
         ckpt.chmod(0o644)
 
 
-@pytest.mark.asyncio
 @pytest.mark.skipif(
     hasattr(os, "geteuid") and os.geteuid() == 0,
     reason="root bypasses file permission bits, so a chmod-000 file stays readable",
 )
-async def test_run_source_unreadable_checkpoint_defers_on_nonzero_rank(
+def test_run_source_unreadable_checkpoint_defers_on_nonzero_rank(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -171,24 +164,22 @@ async def test_run_source_unreadable_checkpoint_defers_on_nonzero_rank(
     ckpt.chmod(0o000)
     try:
         context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
-        result = await RunIdSource(run_id="run_locked").process(context)
+        result = RunIdSource(run_id="run_locked").process(context)
         assert result.checkpoint_path is None
     finally:
         ckpt.chmod(0o644)
 
 
-@pytest.mark.asyncio
-async def test_local_source_explicit_path_loads(tmp_path: Path) -> None:
+def test_local_source_explicit_path_loads(tmp_path: Path) -> None:
     """LocalSource(path=...) loads the explicit file without a context path set."""
     ckpt = _write_ckpt(tmp_path / "explicit" / "model.ckpt")
     context = CheckpointContext()
-    result = await LocalSource(path=ckpt).process(context)
+    result = LocalSource(path=ckpt).process(context)
     assert result.checkpoint_path == ckpt
     assert "state_dict" in result.checkpoint_data
 
 
-@pytest.mark.asyncio
-async def test_run_source_resolve_publishes_path_without_loading(
+def test_run_source_resolve_publishes_path_without_loading(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -208,7 +199,7 @@ async def test_run_source_resolve_publishes_path_without_loading(
     monkeypatch.setattr(torch, "load", _no_load)
 
     context = CheckpointContext(config=_config(root))
-    path = await RunIdSource(run_id="run_A").resolve(context)
+    path = RunIdSource(run_id="run_A").resolve(context)
 
     assert path == ckpt.resolve()
     assert context.checkpoint_path == path
@@ -216,18 +207,17 @@ async def test_run_source_resolve_publishes_path_without_loading(
     assert context.metadata["lineage_resolution"] == "resume"
 
 
-@pytest.mark.asyncio
-async def test_run_source_resolve_defers_on_nonzero_rank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_source_resolve_defers_on_nonzero_rank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A missing checkpoint on a non-zero rank resolves to None; rank 0 owns the error."""
     monkeypatch.setenv("RANK", "1")
     context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
 
-    assert await RunIdSource(run_id="run_missing").resolve(context) is None
+    assert RunIdSource(run_id="run_missing").resolve(context) is None
     assert context.checkpoint_path is None
 
 
 @pytest.mark.parametrize("unreadable", [False, True], ids=["missing", "unreadable"])
-async def test_deferring_rank_reports_rank_zero_not_a_corrupted_file(
+def test_deferring_rank_reports_rank_zero_not_a_corrupted_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     unreadable: bool,
@@ -258,11 +248,11 @@ async def test_deferring_rank_reports_rank_zero_not_a_corrupted_file(
         ckpt.chmod(0o000)
 
     try:
-        result = await RunIdSource(run_id="run-x").process(context)
+        result = RunIdSource(run_id="run-x").process(context)
         assert result.metadata["source_deferred"] is True
 
         with pytest.raises(CheckpointLoadError, match="rank 0"):
-            await WeightsOnlyLoader().process(result)
+            WeightsOnlyLoader().process(result)
     finally:
         if unreadable:
             ckpt.chmod(0o600)

@@ -29,7 +29,7 @@ Example
 -------
 >>> source = RunIdSource(run_id="abc123")        # resume
 >>> context = CheckpointContext(config=cfg)
->>> result = await source.process(context)
+>>> result = source.process(context)
 >>> result.checkpoint_path  # <checkpoints.root.parent>/abc123/last.ckpt
 """
 
@@ -180,7 +180,7 @@ class RunIdSource(CheckpointSource):
         lineage_id = (fork_run_server2server or run_id) if fork else (parent_run_server2server or run_id)
         return Path(Path(root).parent, lineage_id) / "last.ckpt"
 
-    async def resolve(self, context: CheckpointContext) -> Path | None:
+    def resolve(self, context: CheckpointContext) -> Path | None:
         """Resolve the run checkpoint path and publish it on the context.
 
         Returns ``None`` (context untouched) on a rank that defers. On a missing or
@@ -241,20 +241,20 @@ class RunIdSource(CheckpointSource):
         LOGGER.info("RunIdSource: resolved checkpoint path (%s): %s", resolution, path)
         context.checkpoint_path = path
         context.update_metadata(resolved_checkpoint_path=str(path), lineage_resolution=resolution)
-        return await LocalSource().resolve(context)
+        return LocalSource().resolve(context)
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Resolve the run checkpoint path and load it via :class:`LocalSource`.
 
         Returns the context unchanged when the error was deferred to rank 0 (see
         :meth:`resolve`); an unset ``run_id`` raises there.
         """
-        if await self.resolve(context) is None:
+        if self.resolve(context) is None:
             return context
 
         # Delegate the actual torch.load + format detection to LocalSource so the
         # load path is identical to an explicit local checkpoint.
-        return await LocalSource().process(context)
+        return LocalSource().process(context)
 
 
 def run_identity_from_config(config: DictConfig) -> tuple[str | None, str | None]:

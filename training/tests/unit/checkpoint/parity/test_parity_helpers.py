@@ -23,8 +23,8 @@ import logging
 import sys
 import types
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
-import pytest
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
@@ -39,6 +39,9 @@ from anemoi.training.checkpoint.loading.base import refresh_checkpoint_processor
 from anemoi.training.checkpoint.loading.base import warn_on_hparams_divergence
 from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class _MiniModel(nn.Module):
@@ -254,8 +257,7 @@ def _install_order_recorders(
     model.load_state_dict = _load_recorder
 
 
-@pytest.mark.asyncio
-async def test_weights_only_invokes_shared_parity_functions_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_weights_only_invokes_shared_parity_functions_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     """WeightsOnlyLoader runs the corrections (in their one order) and the metadata steps around the load.
 
     The order inside the corrections is format migrations, edge-perm, refresh: the
@@ -268,13 +270,12 @@ async def test_weights_only_invokes_shared_parity_functions_in_order(monkeypatch
     calls: list[str] = []
     _install_order_recorders(model, calls, monkeypatch)
 
-    await loader.process(context)
+    loader.process(context)
 
     assert calls == ["format", "edge_perm", "refresh", "load", "warn", "preserve", "extract"]
 
 
-@pytest.mark.asyncio
-async def test_transfer_learning_invokes_shared_parity_functions_without_hparams_warn(
+def test_transfer_learning_invokes_shared_parity_functions_without_hparams_warn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """TransferLearningLoader runs the same corrections but omits the hparams warning.
@@ -288,7 +289,7 @@ async def test_transfer_learning_invokes_shared_parity_functions_without_hparams
     calls: list[str] = []
     _install_order_recorders(model, calls, monkeypatch)
 
-    await loader.process(context)
+    loader.process(context)
 
     assert calls == ["format", "edge_perm", "refresh", "load", "preserve", "extract"]
     assert "warn" not in calls

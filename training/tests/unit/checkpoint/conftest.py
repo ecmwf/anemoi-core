@@ -35,7 +35,7 @@ class MockStage(PipelineStage):
         self.process_called = False
         self.context_received = None
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Process the context."""
         self.process_called = True
         self.context_received = context
@@ -228,7 +228,6 @@ def mock_config(tmp_path: Path) -> DictConfig:
                 "timeout": 300,
             },
             "pipeline": {
-                "async_execution": True,
                 "continue_on_error": False,
             },
         },

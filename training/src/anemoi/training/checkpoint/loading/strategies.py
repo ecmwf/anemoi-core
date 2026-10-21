@@ -79,7 +79,7 @@ class WeightsOnlyLoader(LoadingStrategy):
         self.strict = strict
         self.skip_mismatched = skip_mismatched
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Load weights into the model.
 
         Parameters
@@ -239,7 +239,7 @@ class TransferLearningLoader(LoadingStrategy):
     def __init__(self, skip_mismatched: bool = True) -> None:
         self.skip_mismatched = skip_mismatched
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Filter and load compatible weights from checkpoint.
 
         Parameters
@@ -344,7 +344,7 @@ class WarmStartLoader(LoadingStrategy):
 
     restores_training_state = True
 
-    async def process(self, context: CheckpointContext) -> NoReturn:
+    def process(self, context: CheckpointContext) -> NoReturn:
         """Refuse to run: a resume is loaded by ``Trainer.fit(ckpt_path=)``, not here.
 
         Parameters
@@ -388,7 +388,7 @@ class ColdStartLoader(WeightsOnlyLoader):
     overwrite it.
     """
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Load weights and reset training state to zero.
 
         Parameters
@@ -401,7 +401,7 @@ class ColdStartLoader(WeightsOnlyLoader):
         CheckpointContext
             Context with weights loaded and training state reset.
         """
-        context = await super().process(context)
+        context = super().process(context)
 
         context.metadata["epoch"] = 0
         context.metadata["global_step"] = 0

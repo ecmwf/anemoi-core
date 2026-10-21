@@ -13,13 +13,12 @@ Example
 -------
 >>> source = S3Source(url="s3://my-bucket/checkpoints/model.ckpt")
 >>> context = CheckpointContext()
->>> result = await source.process(context)
+>>> result = source.process(context)
 >>> assert result.checkpoint_data is not None
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import tempfile
 from pathlib import Path
@@ -55,13 +54,13 @@ class S3Source(CheckpointSource):
     --------
     >>> source = S3Source(url="s3://models/anemoi/pretrained.ckpt")
     >>> context = CheckpointContext()
-    >>> result = await source.process(context)
+    >>> result = source.process(context)
     """
 
     def __init__(self, url: str | None = None) -> None:
         self.url = url
 
-    async def resolve(self, context: CheckpointContext) -> Path:
+    def resolve(self, context: CheckpointContext) -> Path:
         """Download the S3 object to a temporary file and publish its path.
 
         The file is kept (and registered on ``context.temporary_files``) so a
@@ -96,7 +95,7 @@ class S3Source(CheckpointSource):
             tmp_path = Path(tmp_fd.name)
 
         try:
-            await self._download_from_s3(url, tmp_path)
+            self._download_from_s3(url, tmp_path)
         except Exception:
             tmp_path.unlink(missing_ok=True)
             raise
@@ -105,7 +104,7 @@ class S3Source(CheckpointSource):
         context.checkpoint_path = tmp_path
         return tmp_path
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Download and load a checkpoint from S3.
 
         Parameters
@@ -134,8 +133,8 @@ class S3Source(CheckpointSource):
         url = self._resolve_url(context)
         bucket, key = self._parse_s3_url(url)
 
-        path = await self.resolve(context)
-        await self._load_from_path(context, path)
+        path = self.resolve(context)
+        self._load_from_path(context, path)
 
         context.update_metadata(
             source_type="s3",
@@ -163,7 +162,7 @@ class S3Source(CheckpointSource):
         return url
 
     @staticmethod
-    async def _download_from_s3(url: str, tmp_path: Path) -> None:
+    def _download_from_s3(url: str, tmp_path: Path) -> None:
         """Download an S3 object to ``tmp_path`` via anemoi-utils.
 
         Maps obstore/anemoi-utils errors to checkpoint exception types.
@@ -178,8 +177,7 @@ class S3Source(CheckpointSource):
             raise CheckpointSourceError(msg, url) from e
 
         try:
-            await asyncio.to_thread(
-                download_file,
+            download_file(
                 url,
                 str(tmp_path),
                 True,  # overwrite — tmp file already exists

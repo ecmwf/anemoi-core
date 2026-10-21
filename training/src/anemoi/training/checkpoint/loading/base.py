@@ -24,7 +24,7 @@ corrections are one function with one fixed order,
 Example
 -------
 >>> class WeightsOnlyLoader(LoadingStrategy):
-...     async def process(self, context: CheckpointContext) -> CheckpointContext:
+...     def process(self, context: CheckpointContext) -> CheckpointContext:
 ...         state_dict = self._extract_state_dict(context)
 ...         context.model.load_state_dict(state_dict, strict=False)
 ...         self._mark_weights_loaded(context.model)
@@ -59,7 +59,7 @@ class LoadingStrategy(PipelineStage):
     Examples
     --------
     >>> class TransferLearningLoader(LoadingStrategy):
-    ...     async def process(self, context: CheckpointContext) -> CheckpointContext:
+    ...     def process(self, context: CheckpointContext) -> CheckpointContext:
     ...         state_dict = self._extract_state_dict(context)
     ...         # ... filter and apply compatible weights ...
     ...         preserve_anemoi_metadata(context.model, context.checkpoint_data)
@@ -76,7 +76,7 @@ class LoadingStrategy(PipelineStage):
     restores_training_state: bool = False
 
     @abstractmethod
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Apply checkpoint data to the model using this strategy.
 
         Implementations should:

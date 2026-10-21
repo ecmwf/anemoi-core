@@ -27,12 +27,11 @@ def test_checkpoint_source_extends_pipeline_stage() -> None:
 class _ProcessOnlySource(CheckpointSource):
     """A source written against the old contract: ``process`` only, no ``resolve``."""
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         return context
 
 
-@pytest.mark.asyncio
-async def test_resolve_is_not_required_for_process_only_sources_but_names_them_on_resume() -> None:
+def test_resolve_is_not_required_for_process_only_sources_but_names_them_on_resume() -> None:
     """A ``process``-only source still works for pipeline loads; a resume needs ``resolve``.
 
     The error names the class so the author knows what to implement.
@@ -40,9 +39,9 @@ async def test_resolve_is_not_required_for_process_only_sources_but_names_them_o
     source = _ProcessOnlySource()
     context = CheckpointContext()
 
-    assert await source.process(context) is context
+    assert source.process(context) is context
     with pytest.raises(NotImplementedError, match=r"_ProcessOnlySource.*resolve"):
-        await source.resolve(context)
+        source.resolve(context)
 
 
 def test_remove_temporary_file_tolerates_a_file_that_is_already_gone(tmp_path: Path) -> None:
@@ -62,8 +61,6 @@ def test_checkpoint_source_is_abstract() -> None:
 
 
 def test_checkpoint_source_requires_process() -> None:
-    """Subclasses must implement async process(context) -> context."""
-    import inspect
-
+    """Subclasses must implement process(context) -> context."""
     method = CheckpointSource.process
-    assert inspect.iscoroutinefunction(method) or hasattr(method, "__isabstractmethod__")
+    assert hasattr(method, "__isabstractmethod__")

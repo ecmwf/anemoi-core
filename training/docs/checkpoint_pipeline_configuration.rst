@@ -736,8 +736,8 @@ lot of would-be confusion:
 The minimum contract
 ====================
 
-Pick the base class for the station you are filling, write one ``async
-process`` method, change the context, and return it:
+Pick the base class for the station you are filling, write one
+``process`` method, change the context, and return it:
 
 .. list-table::
    :header-rows: 1
@@ -780,7 +780,7 @@ It lives in *your* project, e.g. ``my_project/modifiers.py``:
            self.submodules = submodules
            self.factor = factor
 
-       async def process(self, context: CheckpointContext) -> CheckpointContext:
+       def process(self, context: CheckpointContext) -> CheckpointContext:
            for name in self.submodules:
                module = context.model.get_submodule(name)
                for param in module.parameters():
