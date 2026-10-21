@@ -81,9 +81,9 @@ def source_class_from_config(source_cfg: Any) -> type[CheckpointSource] | None:
     subclass (``class EcmwfRunSource(RunIdSource)``) is recognised through
     inheritance rather than by what its name ends in. Returns ``None`` for a
     missing, empty or unimportable target, or one that is not a
-    :class:`CheckpointSource`; the pipeline build reports those with a
-    ``CheckpointConfigError`` naming the target, so callers only need a neutral
-    answer here.
+    :class:`CheckpointSource`; the pipeline build (or, on a resume,
+    ``build_resume_source``) reports those with a ``CheckpointConfigError``
+    naming the target, so callers only need a neutral answer here.
 
     Parameters
     ----------

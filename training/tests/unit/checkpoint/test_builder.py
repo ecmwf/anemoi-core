@@ -472,6 +472,14 @@ def test_resume_with_an_unimportable_source_target_is_a_config_error() -> None:
     assert exc_info.value.__cause__ is not None
 
 
+def test_resume_with_a_target_that_is_not_a_source_is_a_config_error() -> None:
+    """A ``_target_`` that imports but is not a ``CheckpointSource`` is named, not an ``AttributeError``."""
+    cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": "torch.nn.Identity"}}}})
+
+    with pytest.raises(CheckpointConfigError, match=r"torch\.nn\.Identity.*not a CheckpointSource"):
+        run_checkpoint_pipeline(_EncoderNet(), cfg)
+
+
 def test_resume_with_the_run_preset_and_no_run_id_names_the_key(tmp_path: Path) -> None:
     """The shipped ``source=run`` preset carries ``run_id: null``; forgetting ``+run_id=`` is named as such."""
     cfg = OmegaConf.create(

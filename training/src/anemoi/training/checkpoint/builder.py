@@ -65,7 +65,7 @@ def _inject_run_lineage(
     ``RunIdSource`` and its subclasses merge the non-``None`` values, every other
     source returns its config untouched, so instantiation never fails with an
     unknown keyword argument. An unresolvable ``_target_`` is left for the pipeline
-    build to report.
+    build, or on a resume :func:`build_resume_source`, to report.
     """
     from anemoi.training.checkpoint.sources.base import source_class_from_config
 
@@ -238,7 +238,8 @@ def build_resume_source(
     Raises
     ------
     CheckpointConfigError
-        If the source configuration cannot be instantiated.
+        If the source configuration cannot be instantiated, or its ``_target_``
+        is not a :class:`CheckpointSource`.
     """
     if not isinstance(cfg, DictConfig):
         cfg = OmegaConf.create(cfg)
@@ -252,13 +253,19 @@ def build_resume_source(
     from hydra.utils import instantiate
 
     from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+    from anemoi.training.checkpoint.sources.base import CheckpointSource
 
+    target = OmegaConf.select(source, "_target_", default="<unknown>")
+    config_path = f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}"
     try:
-        return instantiate(source)
+        instance = instantiate(source)
     except Exception as e:
-        target = OmegaConf.select(source, "_target_", default="<unknown>")
         msg = f"Failed to instantiate the resume checkpoint source '{target}': {e}"
-        raise CheckpointConfigError(msg, config_path=f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}") from e
+        raise CheckpointConfigError(msg, config_path=config_path) from e
+    if not isinstance(instance, CheckpointSource):
+        msg = f"The resume checkpoint source '{target}' is not a CheckpointSource (got {type(instance).__name__})"
+        raise CheckpointConfigError(msg, config_path=config_path)
+    return instance
 
 
 def build_checkpoint_pipeline(
