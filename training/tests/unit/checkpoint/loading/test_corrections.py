@@ -9,7 +9,7 @@
 
 """Tests for ``apply_checkpoint_corrections``: one function, one order.
 
-The load-time corrections (format migrations, the trainable-edge-permutation
+The load-time corrections (``chunking_fix``, the trainable-edge-permutation
 migration, the processor-statistics refresh) used to be three calls repeated per
 loading strategy, in an order that differed from the Lightning hook's. They are
 now one function whose order is pinned here.
@@ -84,7 +84,7 @@ def test_edge_perm_migration_runs_before_the_processor_refresh(monkeypatch: pyte
     def rebuilding_migrate(ckpt: dict[str, Any], _model: nn.Module) -> dict[str, Any]:
         return {"state_dict": {k: v for k, v in ckpt["state_dict"].items() if "pre_processors" not in k}}
 
-    monkeypatch.setattr(loading_base, "_load_trainable_edge_perm_migration", lambda: rebuilding_migrate)
+    monkeypatch.setattr(loading_base, "_trainable_edge_perm_fix", rebuilding_migrate)
 
     corrected = apply_checkpoint_corrections(checkpoint, model, _config(states=True))
 
@@ -96,20 +96,23 @@ def test_edge_perm_migration_runs_before_the_processor_refresh(monkeypatch: pyte
     assert torch.all(state_dict["model.body.weight"] == 99.0)
 
 
-def test_format_migrations_run_first_and_edge_perm_sees_their_result(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The ledger-driven migration may replace the dict; every later step works on the replacement."""
+def test_chunking_fix_runs_first_and_edge_perm_sees_its_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``chunking_fix`` may return a new dict; every later step works on that one."""
     model = _Outer()
     original = _stale_checkpoint(model)
+    original["hyper_parameters"] = {
+        "config": OmegaConf.create({"model": {"processor": {"num_layers": 2, "num_chunks": 1}}}),
+    }
     replacement = {"state_dict": dict(original["state_dict"]), "_migrated": True}
     seen_by_edge_perm: list[dict[str, Any]] = []
 
-    monkeypatch.setattr(loading_base, "apply_checkpoint_format_migrations", lambda _ckpt, _path: replacement)
+    monkeypatch.setattr(loading_base, "_chunking_fix", lambda _ckpt: replacement)
 
     def recording_migrate(ckpt: dict[str, Any], _model: nn.Module) -> dict[str, Any]:
         seen_by_edge_perm.append(ckpt)
         return ckpt
 
-    monkeypatch.setattr(loading_base, "_load_trainable_edge_perm_migration", lambda: recording_migrate)
+    monkeypatch.setattr(loading_base, "_trainable_edge_perm_fix", recording_migrate)
 
     corrected = apply_checkpoint_corrections(original, model, _config(states=True))
 

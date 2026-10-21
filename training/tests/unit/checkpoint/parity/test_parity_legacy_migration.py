@@ -19,18 +19,14 @@ still do what the code it replaced did?
 runs it and the pipeline's ``TransferLearningLoader`` over the same checkpoint and
 the same model, then compares the observable results tensor for tensor.
 
-The one deliberate divergence is applicability: the legacy code ran ``chunking_fix``
-unconditionally on every load, the pipeline screens it against the checkpoint's own
-migration ledger first. The tests below therefore cover both sides of that screen —
-a ledgerless checkpoint, where the two must agree because the migration runs in
-both, and an up-to-date one, where the pipeline is expected to skip work the legacy
-path did for nothing.
+Both paths run ``chunking_fix`` on a checkpoint whose processor declares the
+chunking geometry, and both use whatever each migration returns. The fakes below
+return new dicts rather than editing in place, so a path that dropped a return
+value would load the unmigrated weights and fail the comparison.
 """
 
 from __future__ import annotations
 
-import sys
-import types
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from typing import Any
@@ -42,6 +38,7 @@ import torch.nn as nn
 from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.base import CheckpointContext
+from anemoi.training.checkpoint.loading import base as loading_base
 from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 
@@ -136,7 +133,7 @@ def _index_collection(name_to_index: dict[str, int]) -> SimpleNamespace:
 
 
 def _checkpoint(width: int = 4) -> dict[str, Any]:
-    """A checkpoint with no migration ledger — the case the migration exists for."""
+    """A checkpoint whose processor declares the geometry ``chunking_fix`` rewrites."""
     torch.manual_seed(0)
     source = _Model(width)
     return {
@@ -178,14 +175,8 @@ def fake_migrations(monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, MagicMo
     chunking = MagicMock(side_effect=_chunking)
     edge_perm = MagicMock(side_effect=_edge_perm)
 
-    scripts = "anemoi.models.migrations.scripts"
-    parent = sys.modules.get(scripts) or types.ModuleType(scripts)
-    for name, migrate in (("chunking_fix", chunking), ("trainable_edge_perm_fix", edge_perm)):
-        module = types.ModuleType(f"{scripts}.{name}")
-        module.migrate = migrate
-        setattr(parent, name, module)
-        monkeypatch.setitem(sys.modules, f"{scripts}.{name}", module)
-    monkeypatch.setitem(sys.modules, scripts, parent)
+    monkeypatch.setattr(loading_base, "_chunking_fix", chunking)
+    monkeypatch.setattr(loading_base, "_trainable_edge_perm_fix", edge_perm)
 
     return chunking, edge_perm
 
@@ -210,15 +201,13 @@ def _assert_same_model(legacy: nn.Module, pipeline: nn.Module) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_ledgerless_checkpoint_loads_identically_to_the_legacy_path(
+def test_migrated_checkpoint_loads_identically_to_the_legacy_path(
     fake_migrations: tuple[MagicMock, MagicMock],
 ) -> None:
-    """A checkpoint with no ledger: both paths migrate it and reach the same weights.
+    """Both paths migrate the checkpoint and reach the same weights.
 
-    This is the case the chunking migration was written for — a checkpoint old
-    enough to predate migration tracking. Both run both migrations, in the same
-    order, and the loaded tensors, the restored name-to-index map and the extracted
-    variables metadata all match.
+    Both run both migrations, and the loaded tensors, the restored name-to-index
+    map and the extracted variables metadata all match.
     """
     chunking, edge_perm = fake_migrations
     checkpoint = _checkpoint()
@@ -269,39 +258,3 @@ def test_shape_mismatch_is_skipped_identically_to_the_legacy_path(
     # The head did not transfer in either path.
     assert legacy.head.weight.shape == (2, 4)
     _assert_same_model(legacy, pipeline)
-
-
-def test_pipeline_skips_a_migration_the_legacy_path_reapplied(
-    monkeypatch: pytest.MonkeyPatch,
-    fake_migrations: tuple[MagicMock, MagicMock],
-) -> None:
-    """The one intended divergence: an up-to-date checkpoint is not re-migrated.
-
-    Legacy called ``chunking_fix`` on every load regardless. The pipeline reads the
-    ledger the checkpoint carries and skips a migration already recorded there, so
-    the two paths differ exactly where they are meant to — and the legacy path is
-    the one doing redundant work.
-    """
-    chunking, _ = fake_migrations
-    spy = MagicMock(side_effect=chunking.side_effect)
-    monkeypatch.setattr(
-        "anemoi.training.checkpoint.loading.base._load_chunking_fix_migration",
-        lambda: spy,
-    )
-
-    from anemoi.models.migrations import Migrator
-    from anemoi.models.migrations.migrator import MigrationMetadata
-
-    checkpoint = _checkpoint()
-    checkpoint["migrations"] = [
-        {
-            "name": migration.name,
-            "metadata": MigrationMetadata(versions={"migration": "1.0.0", "anemoi-models": "0.11.0"}),
-            "signature": f"signature-of-{migration.name}",
-        }
-        for migration in Migrator()._grouped_migrations[-1]
-    ]
-
-    _new_path(_Model(), checkpoint)
-
-    spy.assert_not_called()

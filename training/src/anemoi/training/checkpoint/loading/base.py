@@ -33,6 +33,7 @@ Example
 
 from __future__ import annotations
 
+import importlib
 import logging
 from abc import abstractmethod
 from typing import TYPE_CHECKING
@@ -176,10 +177,9 @@ class LoadingStrategy(PipelineStage):
     def _apply_corrections(self, context: CheckpointContext) -> None:
         """Run :func:`apply_checkpoint_corrections` on ``context.checkpoint_data``.
 
-        Reassigns the (possibly replaced) checkpoint onto the context.
-        ``context.checkpoint_path`` is forwarded so a checkpoint with an incomplete
-        migration ledger is reported with the file to migrate. A context without
-        checkpoint data is left untouched.
+        Reassigns the (possibly replaced) checkpoint onto the context, so the state
+        dict extracted afterwards is the corrected one. A context without checkpoint
+        data is left untouched.
         """
         if context.checkpoint_data is None:
             return
@@ -187,7 +187,6 @@ class LoadingStrategy(PipelineStage):
             context.checkpoint_data,
             context.model,
             context.config,
-            checkpoint_path=context.checkpoint_path,
         )
 
     def _mark_weights_loaded(self, model: nn.Module) -> None:
@@ -211,157 +210,14 @@ class LoadingStrategy(PipelineStage):
         LOGGER.debug("Marked model weights as initialized")
 
 
-# Candidate import paths for the chunking_fix migration. Try the friendly
-# dotted name first; fall back to the timestamp-prefixed module that
-# anemoi-models currently ships
-# (``1762857428_chunking_fix``). Both resolve to a ``migrate(ckpt)``
-# function. Returns ``None`` if neither path is importable, which we treat
-# as "no chunking migration needed in this anemoi-models version".
-_CHUNKING_FIX_PATHS = (
-    "anemoi.models.migrations.scripts.chunking_fix",
-    "anemoi.models.migrations.scripts.1762857428_chunking_fix",
-)
-
-
-def _load_chunking_fix_migration() -> Any | None:
-    """Resolve the ``chunking_fix.migrate`` callable from anemoi-models, or ``None``."""
-    import importlib
-
-    for path in _CHUNKING_FIX_PATHS:
-        try:
-            module = importlib.import_module(path)
-        except ImportError:
-            continue
-        migrate = getattr(module, "migrate", None)
-        if migrate is not None:
-            return migrate
-    LOGGER.debug("chunking_fix migration not available in anemoi-models; skipping")
-    return None
-
-
-def _migrator() -> Any | None:
-    """Return an anemoi-models ``Migrator``, or ``None`` when unavailable.
-
-    Constructing a ``Migrator`` imports every migration script anemoi-models
-    ships, so instantiation is inside the guard too: an anemoi-models without the
-    migration framework, or with an unimportable scripts package, degrades to
-    ``None`` instead of failing the checkpoint load.
-    """
-    try:
-        from anemoi.models.migrations import Migrator
-
-        return Migrator()
-    except ImportError as exc:
-        LOGGER.debug("anemoi-models migration ledger unavailable (%s); falling back to the in-memory path", exc)
-        return None
-
-
-def _has_migration_ledger(checkpoint: dict[str, Any]) -> bool:
-    """Whether the checkpoint carries a non-empty migration ledger.
-
-    Distinguishes "this checkpoint tracks migrations and is behind" from "this
-    checkpoint predates migration tracking". Only the first can be reported as
-    out of date; the second is what every pre-ledger checkpoint looks like and
-    it loads exactly as before.
-    """
-    try:
-        return bool(checkpoint.get("migrations"))
-    except AttributeError:  # pragma: no cover - checkpoint is always a mapping here
-        return False
-
-
-def _outstanding_migrations(migrator: Any, checkpoint: dict[str, Any]) -> list[str] | None:
-    """Names of the migrations this checkpoint is missing, in application order.
-
-    ``Migrator._resolve_migrations`` diffs the ledger against the newest
-    compatibility group, reading only: no file is touched, nothing is mutated.
-
-    Asked of the *whole* ledger, never of one migration by name:
-    ``register_migrations`` stamps every migration the writing version knew, not
-    the ones it applied, so keying on a single name would report "up to date" for
-    every checkpoint written since that migration shipped and skip all the newer
-    ones in silence.
-
-    Parameters
-    ----------
-    migrator : Any
-        An anemoi-models ``Migrator``.
-    checkpoint : dict
-        The in-memory checkpoint whose ledger is read.
-
-    Returns
-    -------
-    list[str] or None
-        The outstanding migration names, empty when the checkpoint is current, or
-        ``None`` when the ledger cannot be read at all, which the caller treats as
-        "cannot tell" and falls through rather than refusing the load.
-    """
-    try:
-        from anemoi.models.migrations import IncompatibleCheckpointException
-    except ImportError:  # pragma: no cover - _migrator() already proved the import works
-        IncompatibleCheckpointException = ()  # noqa: N806
-
-    try:
-        _setups, ops, _extra = migrator._resolve_migrations(checkpoint, migrator._grouped_migrations[-1])
-    except (IncompatibleCheckpointException, AttributeError, KeyError, TypeError, IndexError) as exc:
-        # IncompatibleCheckpointException derives from BaseException, so it has to be
-        # named explicitly: ``except Exception`` would not catch it.
-        LOGGER.debug("Could not resolve the checkpoint migration ledger (%s); treating it as unknown", exc)
-        return None
-    return [op.migration.name for op in ops]
-
-
-def _warn_unmigrated_checkpoint(outstanding: list[str], checkpoint_path: Any) -> None:
-    """Warn that a checkpoint is behind the installed anemoi-models. Never blocks.
-
-    Warning rather than migrating in-process, and warning rather than refusing:
-
-    - Migrating in-process means ``Migrator.sync``, a file-oriented CLI API. It
-      re-reads the checkpoint twice and deep-copies it (four full copies of a
-      multi-gigabyte checkpoint in host RAM per rank, two extra reads of a file
-      whose bytes are already held) and it runs the migrations' ``migrate_setup``
-      hooks, which mutate ``sys.modules`` of the live training process with
-      nothing to undo them.
-    - Refusing blocks work that has always succeeded. Most of what a ledger can
-      be missing does not affect the load: ``initial`` returns the checkpoint
-      unchanged, ``deprecate_eda`` and ``hardware_schema_update`` have no-op
-      ``migrate`` (their setup hooks matter only while unpickling, which has
-      already happened once we hold a dict), ``glu_mlp_implementation`` renames
-      keys no non-GraphTransformer model has, ``rename_swa_to_weight_averaging``
-      touches only the checkpoint's archived config, and
-      ``trainable_edge_perm_fix`` is applied by
-      :func:`apply_trainable_edge_perm_migration` moments later. Refusing would
-      also break read-only workflows (``anemoi-training evaluate`` would need
-      write access to the checkpoint) and remote sources, since the remedy is a
-      local file operation.
-
-    So: say precisely what is missing, and let the load proceed. A migration that
-    genuinely matters still fails downstream (``preserve_anemoi_metadata`` raises
-    ``TypeError`` naming ``anemoi-models migration sync`` for a pre-multi-dataset
-    checkpoint), now with this warning already in the log to explain it.
-
-    Parameters
-    ----------
-    outstanding : list[str]
-        Names of the migrations the checkpoint is missing.
-    checkpoint_path : Any
-        The checkpoint's file, when one exists, to name in the remedy.
-    """
-    remedy = (
-        f"`anemoi-models migration sync {checkpoint_path}` (note: this rewrites the checkpoint in "
-        "place and writes a full-size backup beside it)"
-        if checkpoint_path is not None
-        else "downloading it, running `anemoi-models migration sync` on the copy, and pointing "
-        "training.checkpoint.source at the result"
-    )
-    LOGGER.warning(
-        "Checkpoint is behind the installed anemoi-models by %d migration(s): %s. Loading it anyway; "
-        "most migrations do not affect the load. If this run fails with a checkpoint-format error, "
-        "migrate it first: %s.",
-        len(outstanding),
-        ", ".join(outstanding),
-        remedy,
-    )
+# The two anemoi-models migrations a load applies in memory, imported the way
+# ``train/methods/base.py`` and ``utils/checkpoint.py`` on ``main`` import them.
+# Both ``migrate`` functions return the checkpoint they produce, which callers
+# must use: today they work in place, but nothing in their contract says so.
+_chunking_fix = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
+_trainable_edge_perm_fix = importlib.import_module(
+    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix",
+).migrate
 
 
 def _chunking_fix_applicable(checkpoint: dict[str, Any]) -> bool:
@@ -369,9 +225,10 @@ def _chunking_fix_applicable(checkpoint: dict[str, Any]) -> bool:
 
     The migration indexes ``config.model.processor.num_layers`` / ``num_chunks``
     and divides by the latter, so a processor declaring neither (``NoOpProcessor``,
-    ``PointWiseMLPProcessor``) is not a candidate. Screening up front keeps "not
-    applicable" distinct from "the migration is broken", which a broad ``except``
-    would absorb.
+    ``PointWiseMLPProcessor``) is not a candidate. It also rewrites
+    ``checkpoint["state_dict"]``, so a checkpoint without one is not either.
+    Screening up front keeps "not applicable" distinct from "the migration is
+    broken", which a broad ``except`` would absorb.
     """
     try:
         processor = checkpoint["hyper_parameters"]["config"].model.processor
@@ -379,34 +236,7 @@ def _chunking_fix_applicable(checkpoint: dict[str, Any]) -> bool:
         return False
     num_layers = getattr(processor, "num_layers", None)
     num_chunks = getattr(processor, "num_chunks", None)
-    return isinstance(num_layers, int) and isinstance(num_chunks, int) and num_chunks > 0
-
-
-# The trainable-edge permutation migration is runtime and model-dependent
-# (``migrate(ckpt, model)``); it ships alongside chunking_fix in anemoi-models.
-# Resolve the friendly name first, then the timestamp-prefixed module
-# (``1779202136_trainable_edge_perm_fix``). Returns ``None`` when neither is
-# importable (older anemoi-models), treated as "no migration needed".
-_TRAINABLE_EDGE_PERM_PATHS = (
-    "anemoi.models.migrations.scripts.trainable_edge_perm_fix",
-    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix",
-)
-
-
-def _load_trainable_edge_perm_migration() -> Any | None:
-    """Resolve the ``trainable_edge_perm_fix.migrate`` callable from anemoi-models, or ``None``."""
-    import importlib
-
-    for path in _TRAINABLE_EDGE_PERM_PATHS:
-        try:
-            module = importlib.import_module(path)
-        except ImportError:
-            continue
-        migrate = getattr(module, "migrate", None)
-        if migrate is not None:
-            return migrate
-    LOGGER.debug("trainable_edge_perm migration not available in anemoi-models; skipping")
-    return None
+    return "state_dict" in checkpoint and isinstance(num_layers, int) and isinstance(num_chunks, int) and num_chunks > 0
 
 
 def _drop_keys_with_prefix(state_dict: dict[str, Any], prefixes: tuple[str, ...]) -> int:
@@ -451,18 +281,20 @@ def apply_checkpoint_corrections(
     checkpoint: dict[str, Any] | None,
     model: nn.Module | None,
     config: Any,
-    *,
-    checkpoint_path: Any = None,
 ) -> dict[str, Any] | None:
     """Bring a checkpoint into line with the installed anemoi-models and the live model.
 
     The one place the load-time corrections live, in one fixed order:
 
-    1. :func:`apply_checkpoint_format_migrations` — the ledger-driven path may
-       replace the dict wholesale, so it runs first;
-    2. :func:`apply_trainable_edge_perm_migration` — takes the live model;
+    1. ``chunking_fix`` — only when the processor declares the geometry it reads
+       (see :func:`_chunking_fix_applicable`);
+    2. ``trainable_edge_perm_fix`` — takes the live model;
     3. :func:`refresh_checkpoint_processors` — driven by
        ``config.training.update_ds_stats_on_ckpt_load``.
+
+    Each migration's return value is the checkpoint the next step works on.
+    Both migrations change only old-format entries, so running them on a
+    checkpoint that already has them applied leaves it as it is.
 
     The edge-permutation migration runs before the refresh because it takes the
     live model and may rebuild the state dict: run afterwards it would discard the
@@ -484,21 +316,25 @@ def apply_checkpoint_corrections(
     config : Any
         The run config; ``training.update_ds_stats_on_ckpt_load.{states,tendencies}``
         is read defensively (a missing layer disables the refresh).
-    checkpoint_path : Path or str, optional
-        The checkpoint's file, when one exists; named in the warning a checkpoint
-        with an incomplete migration ledger gets.
 
     Returns
     -------
     dict or None
-        The corrected checkpoint. The same object when every step worked in place; a
-        new object only when the ledger-driven migration replaced it.
+        The corrected checkpoint: whatever the last migration returned, with the
+        processor refresh applied to it. Callers must use this object, not the one
+        they passed in.
     """
     if checkpoint is None:
         return checkpoint
 
-    checkpoint = apply_checkpoint_format_migrations(checkpoint, checkpoint_path)
-    checkpoint = apply_trainable_edge_perm_migration(checkpoint, model)
+    if _chunking_fix_applicable(checkpoint):
+        checkpoint = _chunking_fix(checkpoint)
+    else:
+        LOGGER.debug(
+            "chunking_fix not applied: the checkpoint declares no usable processor num_layers/num_chunks "
+            "(e.g. a NoOpProcessor autoencoder, or a raw state_dict save)",
+        )
+    checkpoint = _trainable_edge_perm_fix(checkpoint, model)
 
     update_cfg = getattr(getattr(config, "training", None), "update_ds_stats_on_ckpt_load", None)
     refresh_checkpoint_processors(
@@ -508,114 +344,6 @@ def apply_checkpoint_corrections(
         update_tendencies=bool(getattr(update_cfg, "tendencies", False)),
     )
     return checkpoint
-
-
-def apply_checkpoint_format_migrations(
-    checkpoint: dict[str, Any],
-    checkpoint_path: Any = None,
-) -> dict[str, Any]:
-    """Bring a checkpoint up to date with the anemoi-models migration ledger.
-
-    Applicability is decided from the ledger every anemoi checkpoint carries, not
-    by running a migration and seeing whether it throws. A checkpoint that is
-    missing no migration is returned untouched and no file is read, which is the
-    common case for anything a current anemoi wrote.
-
-    "Missing nothing" is asked of the whole ledger, never of one migration by
-    name: the ledger records what the writing version *knew*, not what it
-    *applied*, so any checkpoint written after a migration shipped records that
-    migration whether or not it was ever needed.
-
-    When the ledger is incomplete the outstanding migrations are named in a
-    WARNING and the load proceeds (see :func:`_warn_unmigrated_checkpoint` for why
-    neither migrating in-process nor refusing is the right trade), then the
-    in-memory ``chunking_fix`` fallback runs, screened for applicability first.
-    A checkpoint with no ledger at all predates migration tracking and gets the
-    same in-memory fallback it always did.
-
-    Parameters
-    ----------
-    checkpoint : dict
-        The loaded checkpoint. Returned unchanged when ``None``.
-    checkpoint_path : Path or str, optional
-        The checkpoint's file, when one exists. Only used to name the file in the
-        remedy suggested when the ledger is incomplete.
-
-    Returns
-    -------
-    dict
-        The (possibly migrated) checkpoint.
-    """
-    if checkpoint is None:
-        return checkpoint
-
-    migrator = _migrator()
-    # Two guards narrow this to a checkpoint that *has* a ledger which is incomplete:
-    #   - "pytorch-lightning_version" is the key ``Migrator._load_ckpt`` itself gates
-    #     on. An inference checkpoint or a raw state_dict save is not a migratable
-    #     training checkpoint and has no ledger to be behind on.
-    #   - a checkpoint with no ledger at all predates migration tracking rather than
-    #     lagging it, and loads exactly as before.
-    if migrator is not None and "pytorch-lightning_version" in checkpoint and _has_migration_ledger(checkpoint):
-        outstanding = _outstanding_migrations(migrator, checkpoint)
-        if outstanding == []:
-            LOGGER.debug("Checkpoint migration ledger is up to date; no format migration applied")
-            return checkpoint
-        if outstanding:
-            _warn_unmigrated_checkpoint(outstanding, checkpoint_path)
-
-    # No ledger to consult, an unreadable one, or a checkpoint that is behind.
-    return _apply_chunking_fix_in_memory(checkpoint)
-
-
-def _apply_chunking_fix_in_memory(checkpoint: dict[str, Any]) -> dict[str, Any]:
-    """Apply ``chunking_fix`` in memory, screened for applicability first.
-
-    The one migration this module applies itself, because it is the one whose
-    absence silently corrupts a non-strict load (renamed processor keys just go
-    missing). Every other outstanding migration is reported by
-    :func:`_warn_unmigrated_checkpoint`; migrating them belongs to the
-    ``anemoi-models migration sync`` CLI, offline, once, not to every rank of
-    every run.
-    """
-    migrate = _load_chunking_fix_migration()
-    if migrate is None:
-        return checkpoint
-    if not _chunking_fix_applicable(checkpoint):
-        LOGGER.info(
-            "chunking_fix not applied: the checkpoint declares no usable processor num_layers/num_chunks "
-            "(e.g. a NoOpProcessor autoencoder, or a raw state_dict save)",
-        )
-        return checkpoint
-
-    LOGGER.info("Applying chunking_fix in memory; no checkpoint file available for a full ledger migration")
-    try:
-        return migrate(checkpoint)
-    except (KeyError, AttributeError) as exc:
-        # The geometry screen above catches the shapes we know are not candidates;
-        # this stays as a narrow net for checkpoints missing some other key the
-        # migration reads. Anything else is a real fault and propagates.
-        LOGGER.info("chunking_fix skipped: checkpoint shape incomplete (%s)", exc)
-        return checkpoint
-
-
-def apply_trainable_edge_perm_migration(checkpoint: dict[str, Any], model: nn.Module) -> dict[str, Any]:
-    """Apply the runtime, model-dependent trainable-edge-permutation migration.
-
-    Returns the (possibly rewritten) checkpoint. A no-op when the migration is
-    unavailable or ``checkpoint``/``model`` is missing, and tolerant of
-    incomplete checkpoint shapes (skipped rather than raising).
-    """
-    if checkpoint is None or model is None:
-        return checkpoint
-    migrate = _load_trainable_edge_perm_migration()
-    if migrate is None:
-        return checkpoint
-    try:
-        return migrate(checkpoint, model)
-    except (KeyError, AttributeError) as exc:
-        LOGGER.debug("trainable_edge_perm migration skipped: checkpoint shape incomplete (%s)", exc)
-        return checkpoint
 
 
 def refresh_checkpoint_processors(

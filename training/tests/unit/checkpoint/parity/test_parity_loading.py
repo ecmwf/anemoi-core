@@ -11,8 +11,7 @@
 
 These tests close genuine assertion gaps in the loading strategies
 (``WeightsOnlyLoader``, ``TransferLearningLoader``, ``WarmStartLoader``,
-``ColdStartLoader``), ``filter_state_dict``
-and the shared ``apply_trainable_edge_perm_migration`` parity helper.
+``ColdStartLoader``) and ``filter_state_dict``.
 
 They exercise the real strategy code paths on small CPU modules with
 deterministic synthetic checkpoints, asserting the concrete observable signal
@@ -25,7 +24,6 @@ from __future__ import annotations
 
 import inspect
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 import torch
@@ -34,7 +32,6 @@ import torch.nn as nn
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-from anemoi.training.checkpoint.loading import base as loading_base
 from anemoi.training.checkpoint.loading.base import LoadingStrategy
 from anemoi.training.checkpoint.loading.strategies import ColdStartLoader
 from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
@@ -372,21 +369,6 @@ def test_restores_training_state_defaults_false_for_non_warm_start() -> None:
     assert WeightsOnlyLoader.restores_training_state is False
     assert TransferLearningLoader.restores_training_state is False
     assert ColdStartLoader.restores_training_state is False
-
-
-# ---------------------------------------------------------------------------
-# apply_trainable_edge_perm_migration parity helper
-# ---------------------------------------------------------------------------
-
-
-def test_edge_perm_migration_noop_when_checkpoint_none() -> None:
-    model = _LinearModel()
-
-    with patch.object(loading_base, "_load_trainable_edge_perm_migration") as resolve:
-        result = loading_base.apply_trainable_edge_perm_migration(None, model)
-
-    assert result is None
-    resolve.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

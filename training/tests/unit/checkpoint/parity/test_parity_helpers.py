@@ -20,8 +20,6 @@ two concrete loaders.
 from __future__ import annotations
 
 import logging
-import sys
-import types
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -32,8 +30,7 @@ from omegaconf import OmegaConf
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.loading import base as loading_base
 from anemoi.training.checkpoint.loading import strategies
-from anemoi.training.checkpoint.loading.base import apply_checkpoint_format_migrations
-from anemoi.training.checkpoint.loading.base import apply_trainable_edge_perm_migration
+from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
 from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
 from anemoi.training.checkpoint.loading.base import refresh_checkpoint_processors
 from anemoi.training.checkpoint.loading.base import warn_on_hparams_divergence
@@ -52,67 +49,30 @@ class _MiniModel(nn.Module):
         self.encoder = nn.Linear(4, 3)
 
 
-def _install_fake_migration_module(module_name: str, migrate: object) -> types.ModuleType:
-    """Build a stand-in module exposing ``migrate`` for injection into ``sys.modules``."""
-    module = types.ModuleType(module_name)
-    module.migrate = migrate
-    return module
-
-
 def _hparams_warning_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     """Return only the captured records that report an hparams divergence."""
     return [record for record in caplog.records if "hparams differ" in record.getMessage()]
 
 
-# --- apply_checkpoint_format_migrations --------------------------
+# --- migrations inside apply_checkpoint_corrections ---
 
 
-def test_format_migration_swallows_attribute_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An ``AttributeError`` from the migration is treated as an incomplete-shape no-op."""
+def test_corrections_none_checkpoint_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ``None`` checkpoint short-circuits before either migration runs."""
+    calls: list[str] = []
+    monkeypatch.setattr(loading_base, "_chunking_fix", lambda ckpt: calls.append("chunking") or ckpt)
+    monkeypatch.setattr(loading_base, "_trainable_edge_perm_fix", lambda ckpt, _m: calls.append("edge") or ckpt)
 
-    def _migrate(_checkpoint: dict) -> dict:
-        msg = "config"
-        raise AttributeError(msg)
-
-    module_name = loading_base._CHUNKING_FIX_PATHS[0]
-    monkeypatch.setitem(sys.modules, module_name, _install_fake_migration_module(module_name, _migrate))
-
-    checkpoint = {"state_dict": {}}
-    assert apply_checkpoint_format_migrations(checkpoint) is checkpoint
+    assert apply_checkpoint_corrections(None, _MiniModel(), None) is None
+    assert calls == []
 
 
-# --- apply_trainable_edge_perm_migration -------
-
-
-def test_edge_perm_migration_none_checkpoint_returns_none() -> None:
-    """A ``None`` checkpoint short-circuits before any migration is resolved."""
-    model = _MiniModel()
-    assert apply_trainable_edge_perm_migration(None, model) is None
-
-
-def test_edge_perm_migration_noop_when_module_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When neither edge-perm import path resolves, the checkpoint is returned untouched."""
-    for module_name in loading_base._TRAINABLE_EDGE_PERM_PATHS:
-        monkeypatch.setitem(sys.modules, module_name, None)
-
+def test_real_edge_perm_migration_leaves_a_model_without_graph_providers_alone() -> None:
+    """The shipped edge-perm migration finds no graph provider and returns the checkpoint as is."""
     model = _MiniModel()
     checkpoint = {"state_dict": {}}
-    assert apply_trainable_edge_perm_migration(checkpoint, model) is checkpoint
-
-
-def test_edge_perm_migration_swallows_key_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A ``KeyError`` from the edge-perm migration is tolerated as an incomplete-shape no-op."""
-
-    def _migrate(_checkpoint: dict, _model: nn.Module) -> dict:
-        msg = "hyper_parameters"
-        raise KeyError(msg)
-
-    module_name = loading_base._TRAINABLE_EDGE_PERM_PATHS[0]
-    monkeypatch.setitem(sys.modules, module_name, _install_fake_migration_module(module_name, _migrate))
-
-    model = _MiniModel()
-    checkpoint = {"state_dict": {}}
-    assert apply_trainable_edge_perm_migration(checkpoint, model) is checkpoint
+    assert apply_checkpoint_corrections(checkpoint, model, None) is checkpoint
+    assert checkpoint == {"state_dict": {}}
 
 
 # --- refresh_checkpoint_processors ----------------------
@@ -224,10 +184,12 @@ def _install_order_recorders(
     performs an actual (recorded) ``load_state_dict`` call.
     """
     corrections = {
-        "apply_checkpoint_format_migrations": "format",
-        "apply_trainable_edge_perm_migration": "edge_perm",
+        "_chunking_fix": "format",
+        "_trainable_edge_perm_fix": "edge_perm",
         "refresh_checkpoint_processors": "refresh",
     }
+    # Every checkpoint counts as a chunking_fix candidate, so the recorder is reached.
+    monkeypatch.setattr(loading_base, "_chunking_fix_applicable", lambda _checkpoint: True)
     for function_name, label in corrections.items():
 
         def _correction_recorder(checkpoint: object, *_args: object, _label: str = label, **_kwargs: object) -> object:
@@ -260,7 +222,7 @@ def _install_order_recorders(
 def test_weights_only_invokes_shared_parity_functions_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     """WeightsOnlyLoader runs the corrections (in their one order) and the metadata steps around the load.
 
-    The order inside the corrections is format migrations, edge-perm, refresh: the
+    The order inside the corrections is chunking_fix, edge-perm, refresh: the
     order ``on_load_checkpoint`` has always used for ``ckpt_path`` loads, and the safe
     one, since edge-perm takes the live model and may rebuild the dict.
     """

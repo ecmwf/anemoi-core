@@ -23,8 +23,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from anemoi.training.checkpoint.loading.base import apply_checkpoint_format_migrations
-from anemoi.training.checkpoint.loading.base import apply_trainable_edge_perm_migration
+from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
 from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
 from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
 from anemoi.training.checkpoint.loading.base import refresh_checkpoint_processors
@@ -130,20 +129,15 @@ def test_warn_noop_when_config_none() -> None:
     warn_on_hparams_divergence({"hyper_parameters": {"config": {"model": {}}}}, None)  # must not raise
 
 
-# --- migration wrappers: tolerance / no-op ---------------------------------
+# --- migrations: tolerance / no-op ---------------------------------------
 
 
-def test_apply_format_migrations_none_passthrough() -> None:
-    assert apply_checkpoint_format_migrations(None) is None
+def test_corrections_none_passthrough() -> None:
+    assert apply_checkpoint_corrections(None, None, None) is None
 
 
-def test_apply_format_migrations_tolerates_incomplete_shape() -> None:
-    # A raw state-dict checkpoint lacks hyper_parameters.config; the migration is
-    # skipped (no raise) and the same object is returned.
+def test_corrections_tolerate_incomplete_shape() -> None:
+    # A raw state-dict checkpoint lacks hyper_parameters.config; chunking_fix is
+    # screened out (no raise) and the same object is returned.
     checkpoint = {"state_dict": {}}
-    assert apply_checkpoint_format_migrations(checkpoint) is checkpoint
-
-
-def test_apply_edge_perm_migration_none_model_passthrough() -> None:
-    checkpoint = {"state_dict": {}}
-    assert apply_trainable_edge_perm_migration(checkpoint, None) is checkpoint
+    assert apply_checkpoint_corrections(checkpoint, None, None) is checkpoint

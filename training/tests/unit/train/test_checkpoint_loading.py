@@ -1199,65 +1199,24 @@ def test_on_load_checkpoint_writes_a_replaced_dict_back_in_place(monkeypatch: py
     assert torch.equal(checkpoint["state_dict"]["replaced"], torch.ones(1))
 
 
-# --- The resume hook reports an incomplete migration ledger (finding 3 on the Lightning path) ---
+def test_on_load_checkpoint_honours_a_migration_that_returns_a_new_dict(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A migration that builds a new checkpoint is honoured through the real hook.
 
-
-def _shipped_migration_names() -> list[str]:
-    from anemoi.models.migrations import Migrator
-
-    return [migration.name for migration in Migrator()._grouped_migrations[-1]]
-
-
-def _ledger(*names: str) -> list[dict]:
-    from anemoi.models.migrations.migrator import MigrationMetadata
-
-    return [
-        {
-            "name": name,
-            "metadata": MigrationMetadata(versions={"migration": "1.0.0", "anemoi-models": "0.11.0"}),
-            "signature": f"signature-of-{name}",
-        }
-        for name in names
-    ]
-
-
-def _resume_checkpoint(names: list[str]) -> dict:
-    return {
-        "state_dict": {},
-        "pytorch-lightning_version": "2.6.5",
-        "migrations": _ledger(*names),
-        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
-    }
-
-
-def test_on_load_checkpoint_warns_about_an_incomplete_ledger_and_names_the_resume_file(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """On a resume the hook is the only correction pass, so the ledger check lives there too.
-
-    The warning names the outstanding migrations and the file Lightning is resuming
-    from (``trainer.ckpt_path``), and the load proceeds: metadata is still restored.
+    The hook runs the real corrections; only the edge-permutation migration is
+    faked, returning a new object. Lightning loads the dict it passed to the hook,
+    so the migrated content must end up in that same object.
     """
-    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
-    module._trainer = SimpleNamespace(ckpt_path="/runs/abc/last.ckpt", datamodule=None)
-    checkpoint = _resume_checkpoint(_shipped_migration_names()[:3])
+    import anemoi.training.checkpoint.loading.base as loading_base
 
-    with caplog.at_level(logging.WARNING):
-        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+    def rebuilding_migrate(ckpt: dict, _model: torch.nn.Module) -> dict:
+        return {**ckpt, "state_dict": {"migrated": torch.ones(1)}}
 
-    assert "behind the installed anemoi-models" in caplog.text
-    for name in _shipped_migration_names()[3:]:
-        assert name in caplog.text
-    assert "anemoi-models migration sync /runs/abc/last.ckpt" in caplog.text
-    assert module._ckpt_model_name_to_index == {"data": {}}
+    monkeypatch.setattr(loading_base, "_trainable_edge_perm_fix", rebuilding_migrate)
+    module = _make_dummy_module(DummyModel(["6h"], offset=1.0), update_states=False, update_tendencies=False)
+    checkpoint = {"state_dict": {"stale": torch.zeros(1)}, "hyper_parameters": {"data_indices": {"data": DummyIndex()}}}
+    held_by_lightning = checkpoint
 
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
-def test_on_load_checkpoint_is_quiet_for_an_up_to_date_ledger(caplog: pytest.LogCaptureFixture) -> None:
-    """The common case, a checkpoint written by the installed anemoi-models, produces no warning."""
-    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
-    checkpoint = _resume_checkpoint(_shipped_migration_names())
-
-    with caplog.at_level(logging.WARNING):
-        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
-
-    assert "behind the installed anemoi-models" not in caplog.text
+    assert held_by_lightning["state_dict"].keys() == {"migrated"}
+    assert torch.equal(held_by_lightning["state_dict"]["migrated"], torch.ones(1))

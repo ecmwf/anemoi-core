@@ -456,15 +456,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # A resume is loaded once, by Trainer.fit(ckpt_path=), which calls this hook
         # on the dict it is about to load: this is the only place the corrections can
         # run for it (the pipeline resolves the file and loads nothing). Lightning
-        # holds a reference to this dict, so a replacement (the ledger-driven
-        # migration returns a new object) is written back in place rather than rebound.
+        # holds a reference to this dict, so a replacement (a migration may return a
+        # new object) is written back in place rather than rebound.
         trainer = getattr(self, "_trainer", None)
-        corrected = apply_checkpoint_corrections(
-            checkpoint,
-            self,
-            self.config,
-            checkpoint_path=getattr(trainer, "ckpt_path", None) if trainer is not None else None,
-        )
+        corrected = apply_checkpoint_corrections(checkpoint, self, self.config)
         if corrected is not checkpoint:
             checkpoint.clear()
             checkpoint.update(corrected)
