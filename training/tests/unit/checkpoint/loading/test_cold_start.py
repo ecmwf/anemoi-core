@@ -31,6 +31,8 @@ def test_cold_start_loads_weights() -> None:
     result = loader.process(context)
 
     assert result.model is not None
+    assert torch.equal(result.model.linear.weight, checkpoint_data["state_dict"]["linear.weight"])
+    assert torch.equal(result.model.linear.bias, checkpoint_data["state_dict"]["linear.bias"])
 
 
 def test_cold_start_resets_training_state() -> None:

@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 import torch
 import torch.nn as nn
+from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint import CheckpointContext
 from anemoi.training.checkpoint import CheckpointError
@@ -260,21 +261,34 @@ class TestCheckpointPipeline:
         assert isinstance(pipeline.stages[1], MockStage)
         assert pipeline.stages[1].name == "from_list"
 
-    def test_add_stage_from_config(self) -> None:
-        """Test adding stage to pipeline.
-
-        Note: We test with pre-instantiated stages since test modules
-        are not installed as packages in CI. Hydra instantiation with
-        _target_ paths is tested with installed package classes.
-        """
+    @pytest.mark.parametrize("as_dictconfig", [False, True], ids=["dict", "DictConfig"])
+    def test_add_stage_from_config(self, tmp_path: Path, as_dictconfig: bool) -> None:
+        """A stage config with a ``_target_`` is instantiated into that stage."""
+        checkpoint_path = tmp_path / "model.ckpt"
+        config = {"_target_": "anemoi.training.checkpoint.sources.local.LocalSource", "path": str(checkpoint_path)}
         pipeline = CheckpointPipeline([])
 
-        stage = MockStage("added_stage")
-        pipeline.add_stage(stage)
+        pipeline.add_stage(OmegaConf.create(config) if as_dictconfig else config)
 
         assert len(pipeline) == 1
-        assert isinstance(pipeline.stages[0], MockStage)
-        assert pipeline.stages[0].name == "added_stage"
+        assert isinstance(pipeline.stages[0], LocalSource)
+        assert pipeline.stages[0].path == str(checkpoint_path)
+
+    def test_add_stage_rejects_an_object_without_process(self) -> None:
+        pipeline = CheckpointPipeline([])
+
+        with pytest.raises(CheckpointConfigError, match="Invalid stage type"):
+            pipeline.add_stage(object())
+
+        assert len(pipeline) == 0
+
+    def test_add_stage_rejects_a_config_whose_target_cannot_be_imported(self) -> None:
+        pipeline = CheckpointPipeline([])
+
+        with pytest.raises(CheckpointConfigError, match="cannot instantiate"):
+            pipeline.add_stage({"_target_": "nonexistent.module.DoesNotExist"})
+
+        assert len(pipeline) == 0
 
     def test_hydra_configured_pipeline_execution(self) -> None:
         """Test executing pipeline created from config.

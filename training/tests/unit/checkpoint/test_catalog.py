@@ -197,5 +197,9 @@ def test_unknown_name_lists_available_names_and_suggests_a_match(
         lookup(name)
 
     message = str(exc_info.value)
-    assert "Available" in message
+    # The listing is the first line; the suggestion and examples follow on later lines.
+    first_line = message.splitlines()[0]
+    assert "Available" in first_line
+    listing = first_line.split("Available", 1)[1]
+    assert suggestion in listing
     assert f"Did you mean: {suggestion}" in message

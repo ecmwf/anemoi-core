@@ -17,6 +17,7 @@ import torch.nn as nn
 from omegaconf import DictConfig
 
 from anemoi.training.checkpoint import CheckpointContext
+from anemoi.training.checkpoint import CheckpointError
 from anemoi.training.checkpoint import PipelineStage
 
 
@@ -134,6 +135,30 @@ class TestCheckpointContext:
 
         context.metadata["new_key"] = "new_value"
         assert context.metadata["new_key"] == "new_value"
+
+    def test_validate_for_stage_names_the_missing_fields(self) -> None:
+        """A stage's required fields that are unset, or empty checkpoint data, are named in the error."""
+        with pytest.raises(CheckpointError) as exc_info:
+            CheckpointContext().validate_for_stage("LoadingStage", ["model", "checkpoint_data"])
+        message = str(exc_info.value)
+        assert "LoadingStage" in message
+        assert "'model'" in message
+        assert "'checkpoint_data'" in message
+
+        # Empty checkpoint data counts as missing; a set model is not reported.
+        with pytest.raises(CheckpointError) as exc_info:
+            CheckpointContext(model=SimpleModel(), checkpoint_data={}).validate_for_stage(
+                "LoadingStage",
+                ["model", "checkpoint_data"],
+            )
+        message = str(exc_info.value)
+        assert "'checkpoint_data'" in message
+        assert "'model'" not in message
+
+    def test_validate_for_stage_accepts_a_populated_context(self) -> None:
+        context = CheckpointContext(model=SimpleModel(), checkpoint_data={"state_dict": {}})
+
+        context.validate_for_stage("LoadingStage", ["model", "checkpoint_data"])
 
 
 class TestPipelineStage:

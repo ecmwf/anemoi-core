@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
@@ -75,8 +77,9 @@ class TestHTTPSourceInit:
         assert source.url == "http://example.com/model.ckpt"
 
     def test_invalid_scheme_raises(self) -> None:
-        with pytest.raises(CheckpointConfigError, match="HTTP or HTTPS"):
+        with pytest.raises(CheckpointConfigError, match="HTTP or HTTPS") as exc_info:
             HTTPSource(url="ftp://example.com/model.ckpt")
+        assert "'ftp'" in str(exc_info.value)
 
     def test_no_scheme_raises(self) -> None:
         with pytest.raises(CheckpointConfigError, match="HTTP or HTTPS"):
@@ -303,6 +306,25 @@ class TestHTTPSourceProcess:
         result = source.process(context)
 
         assert result.checkpoint_data is not None
+
+    def test_download_matching_its_sha256_loads(self, tmp_path: Path, simple_state_dict: dict) -> None:
+        """A downloaded file whose sha256 matches ``expected_checksum`` is verified and loaded."""
+        served = tmp_path / "served.ckpt"
+        torch.save({"state_dict": simple_state_dict}, served)
+        expected = hashlib.sha256(served.read_bytes()).hexdigest()
+
+        def _copy_served_file(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
+            shutil.copyfile(served, dest)
+            return dest
+
+        source = HTTPSource(url=_TEST_URL, expected_checksum=expected)
+        with patch(_DOWNLOAD_TARGET, side_effect=_copy_served_file) as mock_download:
+            result = source.process(CheckpointContext())
+
+        mock_download.assert_called_once()
+        assert torch.equal(result.checkpoint_data["state_dict"]["layer.weight"], simple_state_dict["layer.weight"])
+        assert result.metadata["source_type"] == "http"
+        assert result.metadata["source_url"] == _TEST_URL
 
 
 class TestHTTPSourceSupports:

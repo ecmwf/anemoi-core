@@ -89,6 +89,15 @@ def test_weights_only_strict_rejects_a_key_mismatch(state_dict: dict, strict: bo
         assert torch.equal(model.linear.weight, state_dict["linear.weight"])
 
 
+def test_weights_only_rejects_a_missing_key_by_default() -> None:
+    """A loader built without ``strict`` is strict: a checkpoint missing a key is rejected."""
+    model = SimpleModel()
+    context = CheckpointContext(model=model, checkpoint_data={"state_dict": {"linear.weight": torch.randn(5, 10)}})
+
+    with pytest.raises(CheckpointLoadError):
+        WeightsOnlyLoader().process(context)
+
+
 @pytest.mark.parametrize(
     ("checkpoint_dtype", "model_dtype"),
     [(torch.float32, torch.bfloat16), (torch.bfloat16, torch.float32)],
