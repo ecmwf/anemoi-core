@@ -173,7 +173,7 @@ task:
 
 
 training:
-
+  seed: 42
   run_id: null
   fork_run_id: null
   load_weights_only: False
