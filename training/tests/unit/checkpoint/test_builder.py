@@ -26,6 +26,8 @@ from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
 from anemoi.training.checkpoint.builder import build_resume_source
 from anemoi.training.checkpoint.builder import resumes_via_lightning
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+from anemoi.training.checkpoint.loading.base import LoadingStrategy
 from anemoi.training.checkpoint.loading.strategies import WarmStartLoader
 from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
 from anemoi.training.checkpoint.sources.base import CheckpointSource
@@ -360,6 +362,9 @@ def test_warm_start_without_a_source_is_rejected() -> None:
         (f"{_LOADERS}.WeightsOnlyLoader", False),
         (f"{_LOADERS}.ColdStartLoader", False),
         (f"{_LOADERS}.TransferLearningLoader", False),
+        # Not a resume: the loader stage is built and fails naming the target,
+        # rather than the run silently resuming past a typo.
+        ("nonexistent.LoaderClass", False),
     ],
 )
 def test_resumes_via_lightning(loading: str | None, expected: bool) -> None:
@@ -368,6 +373,68 @@ def test_resumes_via_lightning(loading: str | None, expected: bool) -> None:
     if loading is not None:
         checkpoint["loading"] = {"_target_": loading}
     assert resumes_via_lightning(OmegaConf.create({"training": {"checkpoint": checkpoint}})) is expected
+
+
+@pytest.mark.parametrize(
+    ("loading", "resume"),
+    [
+        (None, True),
+        (f"{_LOADERS}.WarmStartLoader", True),
+        (f"{_LOADERS}.WeightsOnlyLoader", False),
+        (f"{_LOADERS}.ColdStartLoader", False),
+        (f"{_LOADERS}.TransferLearningLoader", False),
+    ],
+)
+def test_runner_routes_the_load_from_the_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    loading: str | None,
+    resume: bool,
+) -> None:
+    """A resume hands Lightning the resolved file and loads nothing; any other loader loads here and withholds it."""
+    cfg, ckpt = _resume_cfg(tmp_path, loading)
+    expected = torch.load(ckpt)["state_dict"]
+    loads = _spy_torch_load(monkeypatch)
+    model = _EncoderNet()
+    before = {key: value.clone() for key, value in model.state_dict().items()}
+
+    result = run_checkpoint_pipeline(model, cfg)
+
+    assert result.checkpoint_path == ckpt.resolve()
+    if resume:
+        assert result.ckpt_path == ckpt.resolve()
+        assert result.weights_loaded is False
+        assert loads == []
+        for key, value in before.items():
+            assert torch.equal(model.state_dict()[key], value)
+    else:
+        assert result.ckpt_path is None
+        assert result.weights_loaded is True
+        assert len(loads) == 1
+        assert model.weights_initialized is True
+        for key, value in expected.items():
+            assert torch.equal(model.state_dict()[key], value)
+
+
+class _ForgetfulLoader(LoadingStrategy):
+    """Loads the weights but never calls ``_mark_weights_loaded``."""
+
+    def process(self, context: CheckpointContext) -> CheckpointContext:
+        context.model.load_state_dict(self._extract_state_dict(context))
+        return context
+
+
+def test_loader_that_forgets_the_flag_raises_instead_of_resuming(tmp_path: Path) -> None:
+    """The flag is a gate, not a route: a non-resume loader that leaves it unset is refused.
+
+    Were the route keyed on ``weights_initialized``, this run would silently become a
+    full Lightning resume (epoch, step, optimizer) from the same file.
+    """
+    cfg, _ = _resume_cfg(tmp_path, f"{__name__}._ForgetfulLoader")
+    assert resumes_via_lightning(cfg) is False
+
+    with pytest.raises(CheckpointLoadError, match="Refusing to proceed with random weights"):
+        run_checkpoint_pipeline(_EncoderNet(), cfg)
 
 
 class _NothingSource(CheckpointSource):

@@ -406,9 +406,10 @@ class AnemoiTrainer(ABC):
         ``modifiers`` stages. On a resume (see
         :func:`~anemoi.training.checkpoint.builder.resumes_via_lightning`) the
         source only resolves the checkpoint to a local file and no loading stage
-        runs: ``Trainer.fit(ckpt_path=)`` performs the one load. The resolved file
-        escapes the pipeline as :attr:`_resolved_checkpoint_path`, which is what
-        :attr:`last_checkpoint` hands to Lightning.
+        runs: ``Trainer.fit(ckpt_path=)`` performs the one load. On a resume the
+        resolved file escapes the pipeline as :attr:`_resolved_checkpoint_path`,
+        which is what :attr:`last_checkpoint` hands to Lightning; after a pipeline
+        load it is ``None``.
 
         Parameters
         ----------
@@ -434,8 +435,9 @@ class AnemoiTrainer(ABC):
             load_checkpoint=self.start_from_checkpoint,
         )
 
-        # What :attr:`last_checkpoint` hands to Trainer.fit(ckpt_path=) on a resume.
-        self._resolved_checkpoint_path = result.checkpoint_path
+        # What :attr:`last_checkpoint` hands to Trainer.fit(ckpt_path=): the resolved
+        # file on a resume, None after a pipeline load (the runner decides from the config).
+        self._resolved_checkpoint_path = result.ckpt_path
 
         # A resume loads nothing here, so there is no checkpoint metadata on the
         # model to compare against yet.
@@ -499,7 +501,8 @@ class AnemoiTrainer(ABC):
         so the file Lightning reads is the one the source checked; touching
         :attr:`model` here makes that hold whatever the caller's order.
 
-        Returns ``None`` when there is nothing to resume. A configured-but-missing
+        Returns ``None`` when there is nothing to resume, including when a loading
+        strategy already loaded the weights in the pipeline. A configured-but-missing
         run checkpoint still surfaces from the source stage during model build
         (``RuntimeError`` on rank 0 / ``CheckpointNotFoundError`` for an explicit
         file); the rank-0 policy lives solely in the acquisition layer, not here.
@@ -739,25 +742,6 @@ class AnemoiTrainer(ABC):
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
-    def _skip_lightning_restore(self) -> bool:
-        """Whether ``ckpt_path`` is withheld from Lightning because the pipeline already loaded the weights.
-
-        A checkpoint has exactly one loader. Either the run **resumes**, and
-        ``Trainer.fit(ckpt_path=)`` loads weights, optimizer, scheduler and loop
-        progress in one pass (returns ``False``: ``ckpt_path`` is passed); or a
-        loading strategy applied the weights at model build and training state starts
-        fresh (returns ``True``: ``ckpt_path`` is withheld, so Lightning does not load
-        the file a second time). Which one is decided by
-        :func:`~anemoi.training.checkpoint.builder.resumes_via_lightning`, the same
-        function the builder uses to decide whether to emit a loading stage: a
-        resume is no ``training.checkpoint.loading`` block, or a loader declaring
-        ``restores_training_state`` (``WarmStartLoader``); ``WeightsOnlyLoader`` /
-        ``ColdStartLoader`` / ``TransferLearningLoader`` are the other case.
-        """
-        from anemoi.training.checkpoint.builder import resumes_via_lightning
-
-        return not resumes_via_lightning(self.config)
-
     @cached_property
     def fit_parameters(self) -> Any:
         """Options to be passed to trainer.fit().
@@ -775,9 +759,10 @@ class AnemoiTrainer(ABC):
         params["model"] = self.model
         params["datamodule"] = self.datamodule
         # One loader per checkpoint: on a resume Lightning loads everything from
-        # ckpt_path; after a pipeline load ckpt_path is withheld. See
-        # :meth:`_skip_lightning_restore`.
-        params["ckpt_path"] = None if self._skip_lightning_restore() else self.last_checkpoint
+        # ckpt_path; after a pipeline load ckpt_path is withheld. The runner makes
+        # that call from the config, so :attr:`last_checkpoint` is already ``None``
+        # after a pipeline load.
+        params["ckpt_path"] = self.last_checkpoint
 
         if version.parse("2.6.0") <= PL_VERSION:
             params["weights_only"] = False

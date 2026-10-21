@@ -40,12 +40,17 @@ class PipelineResult:
         The model after all stages.
     checkpoint_path : Path, optional
         The checkpoint file that the source resolved. On a resume, Lightning loads this file.
+    ckpt_path : Path, optional
+        What ``Trainer.fit(ckpt_path=)`` receives: ``checkpoint_path`` on a resume,
+        ``None`` when a loading strategy loaded the weights in the pipeline. Decided
+        from the config by :func:`~anemoi.training.checkpoint.builder.resumes_via_lightning`.
     weights_loaded : bool
         ``True`` if a loading strategy loaded the weights. ``False`` on a resume.
     """
 
     model: nn.Module
     checkpoint_path: Path | None = None
+    ckpt_path: Path | None = None
     weights_loaded: bool = False
 
 
@@ -65,7 +70,12 @@ def run_checkpoint_pipeline(
     """Build the pipeline from ``config`` and run it on ``model``.
 
     On a resume, the source is only resolved to a local file before the pipeline
-    runs; ``Trainer.fit(ckpt_path=)`` loads it.
+    runs; ``Trainer.fit(ckpt_path=)`` loads it. Whether the run resumes is read
+    from the config alone (:func:`~anemoi.training.checkpoint.builder.resumes_via_lightning`):
+    no loading block, or a loader declaring ``restores_training_state``
+    (``WarmStartLoader``). Every other strategy loads in the pipeline and
+    ``ckpt_path`` is withheld. ``weights_initialized`` never routes the load; the
+    pipeline's weights-loaded check only refuses a load that left it unset.
 
     Parameters
     ----------
@@ -84,10 +94,17 @@ def run_checkpoint_pipeline(
     -------
     PipelineResult
         The model and the checkpoint data that the trainer needs.
+
+    Raises
+    ------
+    CheckpointLoadError
+        If a loading strategy ran in the pipeline but left ``weights_initialized``
+        unset (raised by the pipeline's weights-loaded check).
     """
     from anemoi.training.checkpoint.base import CheckpointContext
     from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
     from anemoi.training.checkpoint.builder import build_resume_source
+    from anemoi.training.checkpoint.builder import resumes_via_lightning
 
     build_kwargs = {
         "parent_run_server2server": parent_run_server2server,
@@ -104,10 +121,15 @@ def run_checkpoint_pipeline(
 
     context = pipeline.execute(context)
 
+    # One owner per load, decided from the config: Lightning on a resume, the
+    # pipeline's loading stage otherwise. A pipeline load keeps ckpt_path from
+    # Lightning, which would otherwise load the same file a second time.
+    resume = resumes_via_lightning(config)
     return PipelineResult(
         model=context.model,
         checkpoint_path=context.checkpoint_path,
-        weights_loaded=bool(getattr(context.model, "weights_initialized", False)),
+        ckpt_path=context.checkpoint_path if resume else None,
+        weights_loaded=load_checkpoint and not resume,
     )
 
 

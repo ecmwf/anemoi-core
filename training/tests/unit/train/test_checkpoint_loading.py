@@ -894,27 +894,6 @@ def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pyte
 _LOADERS = "anemoi.training.checkpoint.loading.strategies"
 
 
-@pytest.mark.parametrize(
-    ("checkpoint", "expected"),
-    [
-        (None, False),  # keyless: Lightning resume keeps ckpt_path
-        ({"loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader"}}, True),
-        ({"loading": {"_target_": f"{_LOADERS}.TransferLearningLoader"}}, True),
-        ({"loading": {"_target_": f"{_LOADERS}.ColdStartLoader"}}, True),
-        ({"loading": {"_target_": f"{_LOADERS}.WarmStartLoader"}}, False),  # full restore keeps ckpt_path
-        ({"modifiers": [{"_target_": "x"}]}, False),  # freeze-only, no loader: resume
-    ],
-)
-def test_skip_lightning_restore_matches_loading_strategy(
-    checkpoint: dict | None,
-    expected: bool,
-) -> None:
-    """ckpt_path is suppressed for weights-style pipeline loads, kept for warm start/resume."""
-    training = {"checkpoint": checkpoint} if checkpoint is not None else {}
-    trainer = SimpleNamespace(config=OmegaConf.create({"training": training}))
-    assert AnemoiTrainer._skip_lightning_restore(trainer) is expected
-
-
 # --- Run-lineage source: training.checkpoint.source -> internal run identity ---
 
 _RUNSOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
@@ -1178,23 +1157,28 @@ def test_fit_parameters_hands_the_resolved_path_to_lightning_only_on_resume(
     loading: str | None,
     expect_ckpt_path: bool,
 ) -> None:
-    """``Trainer.fit(ckpt_path=)`` receives ``last_checkpoint`` on a resume and ``None`` after a pipeline load."""
+    """``Trainer.fit(ckpt_path=)`` receives the resolved file on a resume and ``None`` after a pipeline load."""
+    model = torch.nn.Linear(2, 2)
     resolved = tmp_path / "last.ckpt"
+    torch.save({"state_dict": torch.nn.Linear(2, 2).state_dict()}, resolved)
     checkpoint: dict = {"source": {"_target_": _LOCALSOURCE, "path": str(resolved)}}
     if loading is not None:
         checkpoint["loading"] = {"_target_": loading}
     trainer = SimpleNamespace(
         config=OmegaConf.create({"training": {"checkpoint": checkpoint}}),
-        model=torch.nn.Linear(2, 2),
+        start_from_checkpoint=True,
+        data_indices=None,
         datamodule=object(),
-        last_checkpoint=resolved,
+        _validate_transfer_learning_datasets=lambda _model: None,
+        _validate_transfer_learning_units=lambda _model: None,
     )
-    trainer._skip_lightning_restore = AnemoiTrainer._skip_lightning_restore.__get__(trainer)
+    trainer.model = AnemoiTrainer._load_via_checkpoint_pipeline(trainer, model)
+    trainer.last_checkpoint = AnemoiTrainer.last_checkpoint.func(trainer)
 
     params = AnemoiTrainer.fit_parameters.func(trainer)
 
-    assert params["ckpt_path"] == (resolved if expect_ckpt_path else None)
-    assert params["model"] is trainer.model
+    assert params["ckpt_path"] == (resolved.resolve() if expect_ckpt_path else None)
+    assert params["model"] is model
 
 
 def test_on_load_checkpoint_writes_a_replaced_dict_back_in_place(monkeypatch: pytest.MonkeyPatch) -> None:

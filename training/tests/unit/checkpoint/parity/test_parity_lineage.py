@@ -10,7 +10,7 @@
 """Parity coverage for run-lineage, MLflow, determinism and guard behaviour.
 
 These tests drive the trainer run-identity wiring (``_update_paths``,
-``_check_dry_run``, ``run_id`` fall-through, ``_skip_lightning_restore``), the
+``_check_dry_run``, ``run_id`` fall-through), the
 MLflow lineage tagging on resume/fork, the
 checkpoint builder error surface, and the seed-scaling rule. Each test exercises
 the real classes/functions on CPU with no network access; remote downloads are
@@ -188,34 +188,6 @@ def test_check_dry_run_preserves_start_from_checkpoint_for_fork(monkeypatch: pyt
     assert ns.dry_run is True
     # A fork keeps start_from_checkpoint even when the parent is dry.
     assert ns.start_from_checkpoint is True
-
-
-# ---------------------------------------------------------------------------
-# _skip_lightning_restore: loader-class resolution (train.py:825-844)
-# ---------------------------------------------------------------------------
-
-
-def _skip_restore_namespace(loading: dict | None) -> SimpleNamespace:
-    checkpoint = {"loading": loading} if loading is not None else {}
-    return SimpleNamespace(config=OmegaConf.create({"training": {"checkpoint": checkpoint}}))
-
-
-@pytest.mark.parametrize(
-    ("loading", "expected"),
-    [
-        ({"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"}, True),
-        ({"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"}, False),
-        ({"_target_": "nonexistent.LoaderClass"}, True),
-    ],
-)
-def test_skip_lightning_restore_matches_loading_strategy(loading: dict, expected: bool) -> None:
-    ns = _skip_restore_namespace(loading)
-
-    # An unresolvable _target_ must be caught (ImportError/ValueError) rather than
-    # propagating. It does not count as a resume: treating it as one would let the
-    # builder skip the loader and silently resume past a typo, whereas building the
-    # loader stage raises a CheckpointConfigError naming the target before fit().
-    assert AnemoiTrainer._skip_lightning_restore(ns) is expected
 
 
 # ---------------------------------------------------------------------------
