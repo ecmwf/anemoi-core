@@ -122,6 +122,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="MLFlow server for tests requiring MLFlow (only if --mlflow is set)",
     )
+    parser.addoption(
+        "--accuracy-reference-id",
+        dest="accuracy_reference_id",
+        default="",
+        help="MLflow run ID to compare the accuracy test against (empty: use the hard-coded reference)",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
