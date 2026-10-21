@@ -824,27 +824,26 @@ decoder.
           _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
         modifiers:
           - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
-            submodule_root: model.model
             submodules_to_freeze:
-               - encoder.global
-               - processor
-               - decoder.global
+               - model.model.encoder.global
+               - model.model.processor
+               - model.model.decoder.global
             strict: false
-            validate_gradients: true
 
 .. important::
 
-   ``submodule_root`` is required to reach these modules. Paths are resolved
-   with ``torch.nn.Module.get_submodule`` relative to that root, and
-   ``model.model`` is the graph model that owns ``encoder`` / ``processor`` /
-   ``decoder`` — two attribute hops below the LightningModule the pipeline
-   passes around. Without it nothing resolves.
+   The ``model.model.`` prefix is required to reach these modules. Paths are
+   resolved with ``torch.nn.Module.get_submodule`` from the LightningModule the
+   pipeline passes around, and ``model.model`` is the graph model that owns
+   ``encoder`` / ``processor`` / ``decoder``, two attribute hops below it.
+   Without the prefix nothing resolves.
 
    ``encoder`` and ``decoder`` are ``ModuleDict`` s keyed by the **names you
    give them** under ``model.encoders`` and ``model.decoders`` in the model
-   config, so ``encoder.global`` above assumes an encoder named ``global``.
-   The shipped ``graphtransformer.yaml`` names its single encoder and decoder
-   ``"0"``, giving ``encoder.0`` and ``decoder.0``; the multi-dataset presets
+   config, so ``model.model.encoder.global`` above assumes an encoder named
+   ``global``. The shipped ``graphtransformer.yaml`` names its single encoder
+   and decoder ``"0"``, giving ``model.model.encoder.0`` and
+   ``model.model.decoder.0``; the multi-dataset presets
    use ``global`` and ``regional``. Use the keys of your own model config.
 
 .. note::

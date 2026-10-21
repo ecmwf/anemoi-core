@@ -91,8 +91,9 @@ Invalid pipeline order
 
 .. code:: text
 
-   CheckpointConfigError: Invalid checkpoint pipeline composition:
-     - a modifier stage at position 0 comes before a loader stage at position 1; ...
+   CheckpointConfigError: Invalid checkpoint pipeline ['FreezingModifierStage',
+   'WeightsOnlyLoader']: use the order source -> one loader -> modifiers. (at
+   training.checkpoint)
 
 **What it means:** the stages are in an impossible order. The pipeline enforces
 **source → loading → modifiers** and refuses three combinations:
@@ -124,19 +125,29 @@ Resume has nothing to resume from
    CheckpointConfigError: RunIdSource requires a run_id:
    training.checkpoint.source.run_id is unset. ...
 
+   CheckpointConfigError: S3Source cannot resume a run: Trainer.fit(ckpt_path=)
+   needs a local file. Download the checkpoint and use LocalSource, or add a
+   loading strategy (WeightsOnlyLoader / TransferLearningLoader / ColdStartLoader)
+   to load only the weights.
+
+   CheckpointNotFoundError: Checkpoint not found: <checkpoints.root parent>/<run_id>/last.ckpt
+
 **What it means:** a ``training.checkpoint.source`` with no ``loading`` block,
 or with ``WarmStartLoader``, is a resume. PyTorch Lightning reads the file the
 source resolves and restores weights, optimizer, scheduler and loop progress in
-one pass at ``fit()``; the pipeline loads nothing itself, its job is to make the
-checkpoint reachable as a local file. Each message names the step that had
-nothing to hand over: no source at all, a source that resolved no file (rank 0
-raises, the other ranks defer to it), or the ``RunIdSource`` preset used with
-its ``run_id`` left at ``null``.
+one pass at ``fit()``; the pipeline loads nothing itself. The checkpoint runner
+resolves the source to a local file before the pipeline runs. Each message
+names the step that had nothing to hand over: no source at all, a source that
+resolved no file (rank 0 raises, the other ranks defer to it), the
+``RunIdSource`` preset used with its ``run_id`` left at ``null``, a remote
+source, or a run checkpoint that does not exist.
 
-Any source works for a resume. ``LocalSource`` and ``RunIdSource`` resolve an
-existing path; ``S3Source`` and ``HTTPSource`` download the checkpoint to a
-node-local temporary file that is handed to Lightning and deleted when training
-finishes.
+Only ``LocalSource`` and ``RunIdSource`` can resume: they resolve an existing
+path. ``S3Source`` and ``HTTPSource`` delete their download straight after
+loading, so a resume from them is rejected when the pipeline is built (the
+message names ``HTTPSource`` for an HTTP source). A ``RunIdSource`` whose
+``<run_id>/last.ckpt`` is missing raises ``CheckpointNotFoundError`` on rank 0;
+an unreadable one raises ``CheckpointLoadError``.
 
 **How to fix it:** either
 
@@ -144,7 +155,9 @@ finishes.
    +training.checkpoint.source.run_id=<id>`` for a run, or
    ``training/checkpoint/source=local +training.checkpoint.source.path=<file>``
    for a file, or
--  pass the run id the ``run`` preset ships as ``null``, or
+-  pass the run id the ``run`` preset ships as ``null``, or check that the run
+   id and ``system.output.checkpoints.root`` point at an existing run, or
+-  for a remote checkpoint, download it and use ``LocalSource``, or
 -  if you meant to start fresh training state from those weights, add a loading
    strategy (``WeightsOnlyLoader`` / ``TransferLearningLoader`` /
    ``ColdStartLoader``).
@@ -158,9 +171,19 @@ Could not build a stage from config
 
    CheckpointConfigError: Failed to instantiate pipeline stage ... from configuration
 
+On a resume, the source is built on its own, so the messages are:
+
+.. code:: text
+
+   CheckpointConfigError: Failed to instantiate the resume checkpoint source '<target>': ...
+
+   CheckpointConfigError: The resume checkpoint source '<target>' is not a
+   CheckpointSource (got <type>) (at training.checkpoint.source)
+
 **What it means:** Hydra could not create one of your stages from its
-``_target_``. Usually the ``_target_`` path is wrong, a required parameter is
-missing, or the target module fails to import.
+``_target_``, or (on a resume) the ``_target_`` is not a ``CheckpointSource``.
+Usually the ``_target_`` path is wrong, a required parameter is missing, or the
+target module fails to import.
 
 **How to fix it:**
 
@@ -303,9 +326,11 @@ Warm start architecture mismatch
 
 .. code:: text
 
-   CheckpointIncompatibleError: WarmStart requires exact model match: ...
+   RuntimeError: Error(s) in loading state_dict for ...:
+       Missing key(s) in state_dict: ... Unexpected key(s) in state_dict: ...
 
-**What it means:** ``WarmStartLoader`` requires the resumed model to match the
+**What it means:** on a resume (``WarmStartLoader``, or no ``loading`` block)
+Lightning loads the state dict strictly, so the resumed model has to match the
 checkpoint exactly (resuming assumes the same architecture).
 
 **How to fix it:** resume only models that match the checkpoint. If the
@@ -336,42 +361,28 @@ recognises (non-standard structure or unusual key names).
    print("Top-level keys:", list(checkpoint.keys())[:10])
    print("Detected format:", detect_checkpoint_format("checkpoint.ckpt"))
 
-Checkpoint is behind the installed anemoi-models (warning)
-==========================================================
+Checkpoint from before multi-dataset support
+============================================
 
-**Message** (example):
+**Message:**
 
 .. code:: text
 
-   WARNING Checkpoint is behind the installed anemoi-models by 2 migration(s):
-   1778688800_glu_mlp_implementation, 1779202136_trainable_edge_perm_fix. Loading it
-   anyway; most migrations do not affect the load. If this run fails with a
-   checkpoint-format error, migrate it first: `anemoi-models migration sync
-   /runs/abc/last.ckpt` (note: this rewrites the checkpoint in place and writes a
-   full-size backup beside it).
+   TypeError: Checkpoint hyper_parameters.data_indices is a single-dataset
+   IndexCollection from a pre-multi-dataset anemoi-core, incompatible with the
+   current loaders. Run `anemoi-models migration sync <checkpoint>` to upgrade it
+   to the multi-dataset format, or re-export it with current anemoi-core.
 
-**What it means:** every checkpoint anemoi writes carries a ledger of the
-migrations the writing version knew about. This one is missing some that the
-installed ``anemoi-models`` ships, so an older version wrote it. The load is
-not refused: the loading strategy (or, on a resume, ``on_load_checkpoint``)
-checks the ledger, names what is missing, and carries on. Most migrations do
-not change how a checkpoint loads. The one that does for old checkpoints,
-``chunking_fix``, is applied in memory when the checkpoint's processor declares
-the geometry it rewrites and skipped otherwise, so autoencoder weights, which
-have no processor, are left untouched. A checkpoint with no ledger at all
-predates migration tracking and gets that same in-memory fallback.
+**What it means:** the checkpoint was written by an anemoi version from before
+multi-dataset support. The load applies the ``chunking_fix`` and
+``trainable_edge_perm_fix`` migrations in memory, but it does not convert this
+older ``data_indices`` format.
 
-**What to do next:**
+**How to fix it:**
 
-#. Nothing, if the run proceeds. The warning is there to explain a later
-   failure, not to demand action.
-
-#. If the run fails with a checkpoint-format error (a ``TypeError`` from
-   ``preserve_anemoi_metadata`` naming ``anemoi-models migration sync`` is the
-   usual one, for a checkpoint from before multi-dataset support), migrate the
-   file on disk with the command the warning prints, then run again. The command
-   rewrites the checkpoint in place and leaves a full-size backup beside it, so
-   check the disk space first.
+#. Migrate the file on disk with ``anemoi-models migration sync <checkpoint>``,
+   then run again. The command rewrites the checkpoint in place and leaves a
+   full-size backup beside it, so check the disk space first.
 
 #. For a remote source (``S3Source`` / ``HTTPSource``) there is no file to
    rewrite in place: download the checkpoint, migrate the copy, and load it

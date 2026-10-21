@@ -36,7 +36,9 @@ a shared :class:`CheckpointContext`, changes it, and passes it on:
 
 All three are :class:`PipelineStage` subclasses with a single ``process``
 method. The :class:`CheckpointPipeline` runs them in order. In a training run,
-the trainer assembles the pipeline from config via
+the trainer calls
+:func:`~anemoi.training.checkpoint.runner.run_checkpoint_pipeline`, which
+assembles the pipeline from config via
 :func:`~anemoi.training.checkpoint.builder.build_checkpoint_pipeline`.
 
 **************
@@ -74,7 +76,8 @@ Fields:
 
    -  -  ``checkpoint_path``
       -  Local path to the checkpoint file, if there is one. A source sets this;
-         the trainer reads it afterwards to hand to Lightning on a resume.
+         on a resume the runner reads it afterwards and returns it as the
+         ``ckpt_path`` for Lightning.
 
    -  -  ``checkpoint_data``
       -  The loaded checkpoint dictionary.
@@ -146,7 +149,7 @@ Two things happen automatically when you construct a pipeline:
    -  a modifier before a loader,
    -  more than one loading strategy.
 
-   Multiple sources, or a station with no companion, only log a warning/hint.
+   Multiple sources, or a missing station, are allowed.
    Classification is by ``isinstance`` against the three layer base classes, so
    a correctly-subclassed custom stage is placed and validated like a built-in.
 
@@ -154,13 +157,14 @@ After execution, a safety check (``_verify_weights_loaded``) **raises**
 :class:`CheckpointLoadError` if a source ran but the model never reported
 ``weights_initialized`` — this prevents silently training a randomly-initialised
 model when ``continue_on_error=True`` swallowed a loading failure. A resume is
-exempt: its resolve-only source marks the context, because the weights arrive
-at ``Trainer.fit(ckpt_path=)`` rather than from a pipeline stage.
+exempt: its pipeline has no source stage, because the weights arrive at
+``Trainer.fit(ckpt_path=)`` rather than from a pipeline stage.
 
 From configuration
 ==================
 
-The trainer does not build pipelines by hand; it calls the builder:
+The trainer does not build pipelines by hand; it calls the builder (through
+``run_checkpoint_pipeline``):
 
 .. code:: python
 
@@ -169,7 +173,8 @@ The trainer does not build pipelines by hand; it calls the builder:
    pipeline = build_checkpoint_pipeline(cfg)   # reads cfg.training.checkpoint.*
 
 The builder reads ``training.checkpoint.{source,loading,modifiers}`` and emits
-stages in the fixed order source → loading → modifiers. Absent blocks
+stages in the fixed order source → loading → modifiers. On a resume it emits
+only the modifier stages (see :ref:`cp_dev_warmstart`). Absent blocks
 contribute nothing; an empty config yields a no-op pipeline. The builder also
 accepts ``parent_run_server2server`` / ``fork_run_server2server`` keyword
 arguments, which it merges **only** onto a ``RunIdSource`` config — this is how
@@ -187,14 +192,17 @@ code: a checkpoint has exactly one loader.
 
 **Resume.** When the configured loader declares ``restores_training_state``
 (``WarmStartLoader``), or when no ``training.checkpoint.loading`` block is
-configured at all, PyTorch Lightning is the loader. The builder
-(:func:`~anemoi.training.checkpoint.builder.resumes_via_lightning`) wraps the
-source in a ``ResolveOnlySource`` — the source's ``resolve`` step makes the
-checkpoint reachable as a local file and publishes ``context.checkpoint_path``;
-nothing is ``torch.load``-ed — emits no loading stage, and keeps the modifier
-stages. The trainer reads the resolved path back from the executed context
-(``AnemoiTrainer.last_checkpoint``) and hands it to
-``trainer.fit(ckpt_path=...)``. Lightning then reads the file once, calls
+configured at all, PyTorch Lightning is the loader
+(:func:`~anemoi.training.checkpoint.builder.resumes_via_lightning` decides this
+from the config). The builder emits no source or loading stage and keeps the
+modifier stages. The runner builds the source with
+:func:`~anemoi.training.checkpoint.builder.build_resume_source` and calls only
+its ``resolve`` step, which makes the checkpoint reachable as a local file and
+publishes ``context.checkpoint_path``. Nothing is ``torch.load``-ed. The runner
+returns a :class:`~anemoi.training.checkpoint.runner.PipelineResult` whose
+``ckpt_path`` is that file; the trainer (``AnemoiTrainer.last_checkpoint``)
+hands it to ``trainer.fit(ckpt_path=...)``. Lightning then reads the file once,
+calls
 ``BaseTrainingModule.on_load_checkpoint`` on the dict it is about to load —
 which is where
 :func:`~anemoi.training.checkpoint.loading.base.apply_checkpoint_corrections`
@@ -203,16 +211,16 @@ progress together.
 
 **Pipeline load.** Every other strategy (``WeightsOnlyLoader``,
 ``ColdStartLoader``, ``TransferLearningLoader``) applies the weights at
-model-build time and runs the same corrections itself; the trainer withholds
-``ckpt_path`` (``_skip_lightning_restore``) so Lightning does not load the file
-a second time, and training state starts fresh.
+model-build time and runs the same corrections itself; the runner returns
+``ckpt_path=None`` in the ``PipelineResult``, so Lightning does not load the
+file a second time, and training state starts fresh.
 
-Any source works for a resume. ``LocalSource`` and ``RunIdSource`` resolve to an
-existing file (``~`` expanded, canonicalised); ``HTTPSource`` and ``S3Source``
-download to a node-local temporary file, keep it, and register it on
-``context.temporary_files``, which the trainer deletes once ``fit()`` returns
-(``atexit`` is the backstop). A resume with no source at all is rejected at
-build time by
+Only a source that implements ``resolve`` can resume. ``LocalSource`` and
+``RunIdSource`` resolve to an existing file (``~`` expanded, canonicalised).
+``HTTPSource`` and ``S3Source`` download, load, then delete the file, so a
+resume from them is rejected at build time with an error that names
+``LocalSource``. A resume with no source at all is also rejected at build time.
+Both checks are in
 :func:`~anemoi.training.checkpoint.builder.reject_unsupported_warm_start`.
 
 Shared parity helpers
@@ -225,16 +233,16 @@ module-level functions in ``anemoi.training.checkpoint.loading.base`` and are
 the single home for that logic:
 
 -  ``apply_checkpoint_corrections`` — the one entry point for the three steps
-   that change the checkpoint, in one fixed order: format migrations, then the
-   trainable-edge-permutation migration, then the processor refresh. The
-   pipeline strategies call it (``LoadingStrategy._apply_corrections``) and so
-   does ``on_load_checkpoint`` on a resume. It composes:
+   that change the checkpoint, in one fixed order: the chunking-fix migration,
+   then the trainable-edge-permutation migration, then the processor refresh.
+   The pipeline strategies call it (``LoadingStrategy._apply_corrections``) and
+   so does ``on_load_checkpoint`` on a resume. It runs:
 
-   -  ``apply_checkpoint_format_migrations`` — apply anemoi-models format
-      migrations (e.g. chunking fix) if available; no-op otherwise.
-   -  ``apply_trainable_edge_perm_migration`` — apply the model-dependent
-      trainable-edge-permutation migration if available.
-   -  ``refresh_checkpoint_processors`` — rebuild stale pre/post-processor
+   -  the anemoi-models ``chunking_fix`` migration, applied directly when the
+      checkpoint's processor declares ``num_layers`` / ``num_chunks``.
+   -  the anemoi-models ``trainable_edge_perm_fix`` migration, applied directly
+      with the live model.
+   -  ``refresh_checkpoint_processors``: rebuild stale pre/post-processor
       weights from the current model when
       ``training.update_ds_stats_on_ckpt_load.{states,tendencies}`` is set.
 -  ``preserve_anemoi_metadata`` — restore ``model._ckpt_model_name_to_index``

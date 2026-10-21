@@ -166,8 +166,7 @@ training (add a modifier after any loading strategy):
          strict: false
        modifiers:
          - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
-           submodule_root: model.model
-           submodules_to_freeze: ["encoder.0"]   # the encoder key from your model config
+           submodules_to_freeze: ["model.model.encoder.0"]   # the encoder key from your model config
 
 Load weights from S3 or a URL
 =============================
@@ -191,11 +190,11 @@ https://…`` to download over HTTP(S).
    **Warm start (resume) is Lightning's load.** ``WarmStartLoader`` — or a
    ``source`` with no ``loading`` block at all — tells the trainer that the
    checkpoint is loaded once, by PyTorch Lightning's ``ckpt_path`` mechanism at
-   ``trainer.fit()``, which reads the checkpoint as a file on disk. Any source
-   works: ``LocalSource`` and ``RunIdSource`` already point at a file, and
-   ``S3Source``/``HTTPSource`` download to a node-local temporary file that the
-   trainer hands to Lightning and deletes after training (see
-   :ref:`cp_warmstart_ownership`).
+   ``trainer.fit()``, which reads the checkpoint as a file on disk. Use
+   ``LocalSource`` or ``RunIdSource``: they point at a file. ``S3Source`` and
+   ``HTTPSource`` delete their download straight after loading, so a resume
+   from them is rejected when the pipeline is built, with an error that names
+   ``LocalSource`` (see :ref:`cp_warmstart_ownership`).
 
 Start a fresh run (no checkpoint)
 =================================
@@ -402,7 +401,11 @@ Amazon S3 (and S3-compatible storage)
        source:
          _target_: anemoi.training.checkpoint.sources.s3.S3Source
          url: s3://my-bucket/path/to/model.ckpt
+       loading:
+         _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+         strict: false
 
+A remote source cannot resume a run, so it always needs a ``loading`` block.
 Credentials and endpoint settings are read from your anemoi-utils settings
 (``~/.config/anemoi/settings.toml``), not from the training config. This needs
 the S3 extra installed (``anemoi-training[s3]`` / ``anemoi-utils[s3]``).
@@ -418,6 +421,11 @@ HTTP / HTTPS
          _target_: anemoi.training.checkpoint.sources.http.HTTPSource
          url: https://host.example/path/to/checkpoint.ckpt
          expected_checksum: null   # optional sha256; if set, the download is verified
+       loading:
+         _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+         strict: false
+
+As with S3, a ``loading`` block is required: ``HTTPSource`` cannot resume a run.
 
 .. list-table:: ``HTTPSource`` parameters
    :header-rows: 1
@@ -581,8 +589,8 @@ A checkpoint has exactly one loader.
    **PyTorch Lightning**: ``trainer.fit(ckpt_path=...)`` reads the file once and
    restores weights, optimizer, scheduler and the training clock (epoch/step)
    together. The pipeline's part is to make the checkpoint reachable as a local
-   file (the source's *resolve* step; a remote source downloads to a node-local
-   temporary file that is deleted after training) and to run any modifiers. The
+   file (the source's *resolve* step, so only ``LocalSource`` and
+   ``RunIdSource`` can resume) and to run any modifiers. The
    compatibility steps — format migrations, the trainable-edge-permutation
    migration, the processor-statistics refresh — run inside the Lightning load
    hook, on the dict Lightning is about to load.
@@ -592,9 +600,9 @@ A checkpoint has exactly one loader.
    is withheld from Lightning so the file is not loaded a second time.
 
 Internally each loader declares which case it is via a
-``restores_training_state`` flag that the trainer and the pipeline builder both
-read. A resume with no source at all is rejected when the pipeline is built:
-there is nothing for Lightning to read.
+``restores_training_state`` flag that the pipeline builder and the checkpoint
+runner both read. A resume with no source at all is rejected when the pipeline
+is built: there is nothing for Lightning to read.
 
 *********************************************
  Station 3 — Modifiers (adjust the model after loading)
@@ -616,10 +624,8 @@ fixed during training (it sets ``requires_grad=False``):
      checkpoint:
        modifiers:
          - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
-           submodule_root: model.model
-           submodules_to_freeze: ["encoder.0", "processor.proc.0"]
+           submodules_to_freeze: ["model.model.encoder.0", "model.model.processor.proc.0"]
            strict: false
-           validate_gradients: true
 
 .. list-table:: ``FreezingModifierStage`` parameters
    :header-rows: 1
@@ -629,23 +635,18 @@ fixed during training (it sets ``requires_grad=False``):
       -  Default
       -  Meaning
 
-   -  -  ``submodule_root``
-      -  ``""``
-      -  The module the paths below are resolved against, itself in dot
-         notation. For a training run set it to ``model.model``: the pipeline
-         hands the stage the LightningModule, and the graph model that owns
-         ``encoder`` / ``processor`` / ``decoder`` is two hops below it. The
-         default ``""`` means the model itself, for callers that pass a bare
-         module.
-
    -  -  ``submodules_to_freeze``
-      -  ``[]``
-      -  Names of the parts to freeze, in **dot notation**, relative to
-         ``submodule_root``. Names are exact — there are no wildcards.
+      -  *(required)*
+      -  Full paths of the parts to freeze, in **dot notation**, from the
+         LightningModule. The pipeline hands the stage the LightningModule, and
+         the graph model that owns ``encoder`` / ``processor`` / ``decoder`` is
+         two hops below it, so a training run prefixes each path with
+         ``model.model.``. Names are exact: there are no wildcards.
          ``encoder`` and ``decoder`` are keyed by the names given under
          ``model.encoders`` / ``model.decoders`` in the model config
-         (``encoder.0`` with the shipped ``graphtransformer.yaml``), and the
-         processor's layers live under ``proc`` (``processor.proc.0``).
+         (``model.model.encoder.0`` with the shipped ``graphtransformer.yaml``),
+         and the processor's layers live under ``proc``
+         (``model.model.processor.proc.0``).
 
    -  -  ``strict``
       -  ``false``
@@ -654,16 +655,12 @@ fixed during training (it sets ``requires_grad=False``):
          where **no** name resolves is refused: freezing nothing is never
          intentional, and it used to pass silently.
 
-   -  -  ``validate_gradients``
-      -  ``true``
-      -  After freezing, double-check that the frozen parts really are frozen
-         (by inspecting their ``requires_grad`` flags) and warn if not.
-
 .. tip::
 
-   To find the right names, print the submodules of the root you configured
-   (``print(dict(model.model.model.named_modules()).keys())`` for
-   ``submodule_root: model.model``) and copy the dotted paths.
+   To find the right names, print the submodules of the graph model
+   (``print(dict(model.model.model.named_modules()).keys())``, where the first
+   ``model`` is the LightningModule) and prefix each dotted path with
+   ``model.model.``.
 
 Freezing is the only modifier shipped today. Adding more (adapters, LoRA,
 quantisation) is exactly the extensibility story in the next section.
@@ -700,8 +697,8 @@ which makes the intent explicit:
 
 Behind the scenes, choosing ``RunIdSource`` also sets the run identity the
 experiment tracker and output paths expect (resume keeps the run id; fork mints
-a new one), so the behaviour matches the old ``run_id`` / ``fork_run_id`` flow
-exactly — you just express it in one consistent place now.
+a new one), as the old ``run_id`` / ``fork_run_id`` settings did. You express
+it in one place now.
 
 .. _cp_extensibility:
 
@@ -834,8 +831,8 @@ and the ordering checks below protect it just like a built-in.
 
 You do not have to assemble the stations in the right order — when you use the
 config, Anemoi always builds them **source → loading → modifiers**. On top of
-that, the pipeline guards against mistakes. Some problems are **errors** (they
-stop the run with a clear message), and some are just **warnings**.
+that, the pipeline guards against mistakes. These are **errors**: they stop the
+run with a clear message.
 
 **Errors** (raise ``CheckpointConfigError`` when the pipeline is built):
 
@@ -850,12 +847,7 @@ always produces a valid order.
 configured but the model's weights were never actually loaded, the run refuses
 to continue rather than silently training a random model.
 
-**Warnings / hints** (logged, never fatal): more than one source, or a station
-that looks like it is missing a companion (e.g. a loader with no source).
-
-There are also lightweight pre-run checks (Python/PyTorch versions, that your
-``training.checkpoint`` block has a ``_target_``) and a post-run health check.
-These record their findings but do not stop a run on their own.
+The order check does not reject more than one source, or a missing station.
 
 .. tip::
 

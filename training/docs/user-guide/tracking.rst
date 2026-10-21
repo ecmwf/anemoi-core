@@ -54,10 +54,15 @@ system.
 
 When resuming a run (see :ref:`training <restart target>`), mlflow will
 show the resumed run(s) as child runs. The child runs will have a
-different 'mlflow run id' BUT in the logged params the training.run_id
-and metadata.run_id will point to the parent run. For example in the
-screenshot below our parent run_id is '35f50496f0494d79a2800857ad9a4f46'
-which is the training.run_id in all child run. To be able to still
+different 'mlflow run id' BUT in the logged params the metadata.run_id
+will point to the parent run. For example in the screenshot below our
+parent run_id is '35f50496f0494d79a2800857ad9a4f46' which is the
+metadata.run_id in all child run. Runs synced from offline to online
+(``anemoi-training mlflow sync``) also carry the params
+``config.training.run_id``, ``config.training.<run_type>_run_id`` and, for
+a fork, ``config.training.fork_run_id``: the sync writes them
+(``MlFlowSync.update_run_id``), although the training config no longer has
+these keys. To be able to still
 identify that the run has been resumed those will include the tag
 'resumedRun: True' and will display a parent run pointing to the parent
 run.
