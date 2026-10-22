@@ -1,0 +1,13 @@
+defaults:
+- multidomain
+- override model: graphtransformer_multidomain_ens
+- override training: multidomain_ensemble
+- _self_
+
+system:
+  hardware:
+    num_gpus_per_ensemble: 1
+
+diagnostics:
+  plot:
+    callbacks: []
