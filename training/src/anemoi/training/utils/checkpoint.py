@@ -132,7 +132,7 @@ def save_inference_checkpoint(
     metadata : dict
         Anemoi Metadata to inject into checkpoint
     save_path : Path | str
-        Directory to save anemoi checkpoint
+        File path of the anemoi inference checkpoint to write
     supporting_arrays : dict | None, optional
         Supporting arrays to inject into checkpoint
 
@@ -141,8 +141,7 @@ def save_inference_checkpoint(
     Path
         Path to saved checkpoint
     """
-    save_path = Path(save_path)
-    inference_filepath = save_path.parent / f"inference-{save_path.name}"
+    inference_filepath = Path(save_path)
 
     clear_imputer_runtime_state(model)
     torch.save(model, inference_filepath)
