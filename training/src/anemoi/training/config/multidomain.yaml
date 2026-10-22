@@ -10,7 +10,7 @@ defaults:
 - _self_
 
 # Two-domain (multidomain) setup: the single-domain `stretched` configs describe the
-# first domain `data`; everything below adds the second domain `datb`
+# first domain `data`; everything below adds the second domain `data_2`
 # (and overrides the settings that differ for multidomain training).
 
 config_validation: True
@@ -22,11 +22,11 @@ system:
 
 diagnostics:
   plot:
-    datasets_to_plot: [data, datb]
+    datasets_to_plot: [data, data_2]
 
 data:
   datasets:
-    datb: ${data.datasets.data}
+    data_2: ${data.datasets.data}
 
 dataloader:
   loading_policy:
@@ -43,7 +43,7 @@ dataloader:
             - dataset: ${system.input.forcing_dataset}
             adjust: all
             min_distance_km: 0
-      datb:
+      data_2:
         dataset_config:
           dataset:
             cutout:
@@ -61,9 +61,9 @@ dataloader:
       data:
         dataset_config:
           dataset: ${dataloader.training.datasets.data.dataset_config.dataset}
-      datb:
+      data_2:
         dataset_config:
-          dataset: ${dataloader.training.datasets.datb.dataset_config.dataset}
+          dataset: ${dataloader.training.datasets.data_2.dataset_config.dataset}
           frequency: ${data.frequency}
         start: ${dataloader.validation.datasets.data.start}
         end: ${dataloader.validation.datasets.data.end}
@@ -72,9 +72,9 @@ dataloader:
       data:
         dataset_config:
           dataset: ${dataloader.training.datasets.data.dataset_config.dataset}
-      datb:
+      data_2:
         dataset_config:
-          dataset: ${dataloader.training.datasets.datb.dataset_config.dataset}
+          dataset: ${dataloader.training.datasets.data_2.dataset_config.dataset}
           frequency: ${data.frequency}
         start: ${dataloader.test.datasets.data.start}
         end: ${dataloader.test.datasets.data.end}
@@ -83,31 +83,31 @@ model:
   model:
     hidden_nodes_name:
       data: hidden
-      datb: hidden_b
+      data_2: hidden_2
   encoders:
     "0":
-      source_datasets: [data, datb]
+      source_datasets: [data, data_2]
   decoders:
     "0":
-      target_datasets: [data, datb]
+      target_datasets: [data, data_2]
   residual:
     datasets:
-      datb: ${model.residual.datasets.data}
+      data_2: ${model.residual.datasets.data}
   output_mask:
     datasets:
-      datb: ${model.output_mask.datasets.data}
+      data_2: ${model.output_mask.datasets.data}
   node_trainable_parameters:
     data: 0
     hidden: 0
-    datb: 0
-    hidden_b: 0
+    data_2: 0
+    hidden_2: 0
   edge_trainable_parameters:
     data2hidden: 0
     hidden2hidden: 0
     hidden2data: 0
   bounding:
     datasets:
-      datb: ${model.bounding.datasets.data}
+      data_2: ${model.bounding.datasets.data}
 
 training:
   scalers:
@@ -115,16 +115,16 @@ training:
       data:
         node_weights:
           weight_frac_of_total: 0.25
-      datb: ${training.scalers.datasets.data}
+      data_2: ${training.scalers.datasets.data}
   training_loss:
     datasets:
-      datb: ${training.training_loss.datasets.data}
+      data_2: ${training.training_loss.datasets.data}
   validation_metrics:
     datasets:
-      datb: ${training.validation_metrics.datasets.data}
+      data_2: ${training.validation_metrics.datasets.data}
   variable_groups:
     datasets:
-      datb: ${training.variable_groups.datasets.data}
+      data_2: ${training.variable_groups.datasets.data}
   metrics:
     datasets:
-      datb: ${training.metrics.datasets.data}
+      data_2: ${training.metrics.datasets.data}

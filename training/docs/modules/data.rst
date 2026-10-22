@@ -105,28 +105,28 @@ encoder and decoder group to both domains::
      model:
        hidden_nodes_name:
          data: hidden
-         datb: hidden_b
+         data_2: hidden_2
      encoders:
        shared:
-         source_datasets: [data, datb]
+         source_datasets: [data, data_2]
          dataset_fusing_strategy: not_supported
          mapper:
            _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
            # ... mapper configuration
      decoders:
        shared:
-         target_datasets: [data, datb]
+         target_datasets: [data, data_2]
          target_node_features: [encoded_data]
          mapper:
            _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
            # ... mapper configuration
 
 The ``shared`` key is user-defined; datasets listed in the same group use the
-same mapper weights. ``hidden`` and ``hidden_b`` must be nodes in the
+same mapper weights. ``hidden`` and ``hidden_2`` must be nodes in the
 graph configuration, with ``data -> hidden -> data`` and
-``datb -> hidden_b -> datb`` edges. The complete example is the top-level
+``data_2 -> hidden_2 -> data_2`` edges. The complete example is the top-level
 ``multidomain`` configuration, which builds on the single-domain stretched-grid
-configurations (first domain ``data``) and adds the second domain ``datb``; its
+configurations (first domain ``data``) and adds the second domain ``data_2``; its
 graph is defined in the ``graph=multidomain`` group.
 
 With the current distributed strategy, domain-specific trainable node and edge

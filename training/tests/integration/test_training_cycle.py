@@ -225,22 +225,22 @@ def test_training_cycle_multidomain(
     trainer.train()
 
     model = trainer.model.model.model
-    assert model.dataset2encoder == {"data": "0", "datb": "0"}
-    assert model.dataset2decoder == {"data": "0", "datb": "0"}
+    assert model.dataset2encoder == {"data": "0", "data_2": "0"}
+    assert model.dataset2decoder == {"data": "0", "data_2": "0"}
     assert len(model.encoder) == 1
     assert len(model.decoder) == 1
     assert model.dataset2hidden == {
         "data": "hidden",
-        "datb": "hidden_b",
+        "data_2": "hidden_2",
     }
     assert set(trainer.graph_data.node_types) == {
         "data",
-        "datb",
+        "data_2",
         "hidden",
-        "hidden_b",
+        "hidden_2",
     }
-    assert trainer.graph_data["data"].num_nodes != trainer.graph_data["datb"].num_nodes
-    assert trainer.graph_data["hidden"].num_nodes != trainer.graph_data["hidden_b"].num_nodes
+    assert trainer.graph_data["data"].num_nodes != trainer.graph_data["data_2"].num_nodes
+    assert trainer.graph_data["hidden"].num_nodes != trainer.graph_data["hidden_2"].num_nodes
     assert trainer.model.trainer.global_step == 4
 
     assert_keys_exist(trainer.metadata, partial_metadata_schema)
@@ -252,7 +252,7 @@ def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, lis
     assert cfg.dataloader.loading_policy._target_ == "anemoi.training.data.loading.CrossDatasetLoadingPolicy"
     assert cfg.model.model.hidden_nodes_name == {
         "data": "hidden",
-        "datb": "hidden_b",
+        "data_2": "hidden_2",
     }
 
 

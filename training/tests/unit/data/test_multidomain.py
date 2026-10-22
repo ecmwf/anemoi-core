@@ -113,7 +113,7 @@ class TestMultiDomain:
     def test_temporal_downscaler_offsets_are_loaded_from_one_domain(self, mocker: MockFixture) -> None:
         task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
         readers = {}
-        for name, frequency in (("data", datetime.timedelta(hours=1)), ("datb", datetime.timedelta(hours=2))):
+        for name, frequency in (("data", datetime.timedelta(hours=1)), ("data_2", datetime.timedelta(hours=2))):
             reader = mocker.MagicMock()
             reader.frequency = frequency
             reader.num_sequences = 1
@@ -123,13 +123,13 @@ class TestMultiDomain:
             readers[name] = reader
 
         relative_date_indices = compute_relative_date_indices(task, readers)
-        assert relative_date_indices == {"data": [0, 2, 4, 6], "datb": [0, 1, 2, 3]}
+        assert relative_date_indices == {"data": [0, 2, 4, 6], "data_2": [0, 1, 2, 3]}
 
         dataset = CrossDatasetLoadingPolicy().build_dataset(readers, relative_date_indices)
         sample = dataset[0]
 
         readers["data"].get_sample.assert_called_once_with(0, slice(0, 8, 2), slice(None))
-        readers["datb"].get_sample.assert_not_called()
+        readers["data_2"].get_sample.assert_not_called()
 
         batch = {"data": sample["data"].unsqueeze(0)}
         data_indices = {"data": mocker.MagicMock()}

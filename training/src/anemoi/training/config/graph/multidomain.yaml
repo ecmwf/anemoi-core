@@ -1,4 +1,4 @@
-# Stretched grid graph with two domains `data` and `datb`.
+# Stretched grid graph with two domains `data` and `data_2`.
 # Nodes and attributes are inherited from stretched_grid; each domain has its own
 # data nodes, hidden mesh and graph edges.
 defaults:
@@ -6,17 +6,17 @@ defaults:
   - _self_
 
 nodes:
-  datb:
+  data_2:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.training.datasets.datb.dataset_config}
+      dataset: ${dataloader.training.datasets.data_2.dataset_config}
     attributes: ${graph.attributes.nodes}
-  hidden_b:
+  hidden_2:
     node_builder:
       _target_: anemoi.graphs.nodes.StretchedTriNodes
       lam_resolution: 8
       global_resolution: 5
-      reference_node_name: datb
+      reference_node_name: data_2
       mask_attr_name: cutout_mask
       margin_radius_km: 11
 
@@ -46,15 +46,15 @@ edges:
     source_mask_attr_name: null
     target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
-- source_name: datb
-  target_name: hidden_b
+- source_name: data_2
+  target_name: hidden_2
   edge_builders: ${graph.edges.0.edge_builders}
   attributes: ${graph.attributes.edges}
-- source_name: hidden_b
-  target_name: hidden_b
+- source_name: hidden_2
+  target_name: hidden_2
   edge_builders: ${graph.edges.1.edge_builders}
   attributes: ${graph.attributes.edges}
-- source_name: hidden_b
-  target_name: datb
+- source_name: hidden_2
+  target_name: data_2
   edge_builders: ${graph.edges.2.edge_builders}
   attributes: ${graph.attributes.edges}
