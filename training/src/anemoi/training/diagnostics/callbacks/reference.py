@@ -191,8 +191,10 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
     reference ``sp``, for both prediction and reference.
 
     The model forward runs synchronously; only figure rendering goes through the (possibly
-    asynchronous) plot executor. The forward runs on rank 0 alone, so the callback is skipped
-    when the model is sharded (``num_gpus_per_model > 1``).
+    asynchronous) plot executor. Every rank runs the forward, because an ensemble model
+    gathers its members across the ranks of an ensemble group inside the step; only rank 0
+    scores, logs and plots. The callback is skipped when the model is sharded
+    (``num_gpus_per_model > 1``).
 
     Example
     -------
@@ -348,8 +350,11 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
             raise ValueError(msg)
         return int(hits[0])
 
-    def compute(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> dict:
+    def compute(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> dict | None:
         """Run the model on the fixed dates and collect prediction/reference pairs.
+
+        Every rank must call this: the forward can hold collectives (the ensemble member
+        gather), so a rank that skipped it would leave the others waiting forever.
 
         Parameters
         ----------
@@ -360,7 +365,8 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
 
         Returns
         -------
-        dict
+        dict | None
+            None on ranks other than 0, which only take part in the forward. On rank 0,
             ``{"lat", "lon", "cases": [{"date", "step", "valid_time", "fields": {var: (pred, ref)}}]}``,
             plus ``"zonal": {step: summary}`` when ``zonal`` is set (see :meth:`_zonal_summary`) and
             ``"mean_maps"`` when ``mean_maps`` is set (see :meth:`_mean_maps`).
@@ -404,6 +410,8 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
             # context explicitly (flash-attention rejects fp32 inputs under bf16/16-mixed).
             with torch.no_grad(), trainer.precision_plugin.forward_context():
                 output = pl_module._step(batch, validation_mode=True)
+            if rank_zero_only.rank != 0:
+                continue
 
             for step_kwargs, label, prediction in zip(task_steps, labels, output.predictions, strict=True):
                 if label not in selected:
@@ -426,6 +434,9 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
                 if levels is not None:
                     case["zonal"] = self._case_moments(levels, pred, out_index, ref)
                 cases.append(case)
+
+        if rank_zero_only.rank != 0:
+            return None
 
         # All numerics stay here, on the training thread, done once: the plot executor thread only
         # draws. SHTOOLS/FFTW planning and the shared BLAS pools are not safe to run concurrently on
@@ -593,16 +604,19 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
             out["tw_residual_rmse"] = section_rmse(lat, residual[None])
         return {key: float(value) for key, value in out.items()}
 
-    @rank_zero_only
     def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule, **kwargs) -> None:
+        # Not rank_zero_only: every rank must enter the forward in compute (see its docstring).
         del kwargs
         if trainer.sanity_checking or trainer.current_epoch % self.every_n_epochs != 0:
             return
         if getattr(pl_module, "model_comm_group_size", 1) > 1:
-            LOGGER.warning("ReferenceComparisonPlot: skipped, the model is sharded across GPUs.")
+            if rank_zero_only.rank == 0:
+                LOGGER.warning("ReferenceComparisonPlot: skipped, the model is sharded across GPUs.")
             return
 
         result = self.compute(trainer, pl_module)
+        if result is None:
+            return
         if trainer.logger is not None:
             trainer.logger.log_metrics(self.scores(result), step=trainer.global_step)
         self.plot(trainer, pl_module, self.dataset_names, epoch=trainer.current_epoch, result=result)
