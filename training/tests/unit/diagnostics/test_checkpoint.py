@@ -37,10 +37,8 @@ class DummyModel(torch.nn.Module):
         self.config = config
         self.metadata = metadata
         self.supporting_arrays = {}
-        # Mirror AnemoiModelInterface's graph_data/model._graph_data shape so
-        # AnemoiCheckpoint._save_checkpoint's graph_data null-out has something to act on.
-        self.graph_data = {"dummy": "graph"}
-        self.model = SimpleNamespace(_graph_data={"dummy": "graph"})
+        self.graph_data = {"hidden": torch.tensor(1.0)}
+        self.model = SimpleNamespace(_graph_data=self.graph_data)
         self.fc1 = nn.Linear(32, 5)
         self.fc2 = nn.Linear(5, 1)
         self.relu = nn.ReLU()
@@ -48,7 +46,7 @@ class DummyModel(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.fc1(x)
         x = self.relu(x)
-        return self.fc2(x)
+        return self.fc2(x) + self.model._graph_data["hidden"]
 
 
 class DummyModule(BoringModel):
@@ -212,6 +210,10 @@ def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule
 
     for ckpt_path in Path(tmp_path).iterdir():
         if str(ckpt_path.name).startswith("inference"):
+            inference_model = torch.load(ckpt_path, weights_only=False)
+            torch.testing.assert_close(inference_model.graph_data["hidden"], torch.tensor(1.0))
+            assert inference_model(torch.zeros(1, 32)).shape == (1, 1)
+
             pl_ckpt_name = (ckpt_path.name).replace("inference-", "")
 
             if Path(tmp_path + "/" + pl_ckpt_name).exists():
