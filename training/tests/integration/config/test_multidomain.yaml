@@ -6,7 +6,7 @@ system:
 # The integration dataset does not contain all variables configured by the multidomain data defaults.
 data:
   datasets:
-    sg_1:
+    data:
       forcing:
       - cos_latitude
       - cos_longitude
@@ -21,7 +21,7 @@ data:
         normalizer:
           config:
             max:
-            none: ${data.datasets.sg_1.forcing}
+            none: ${data.datasets.data.forcing}
 
 dataloader:
   num_workers:
@@ -37,23 +37,23 @@ dataloader:
     test: 4
   training:
     datasets:
-      sg_1:
+      data:
         start: 2017-01-01T00:00:00
         end: 2017-01-02T00:00:00
   validation:
     datasets:
-      sg_1:
+      data:
         start: 2017-01-02T00:00:00
         end: 2017-01-03T00:00:00
   test:
     datasets:
-      sg_1:
+      data:
         start: 2017-01-02T00:00:00
         end: 2017-01-03T00:00:00
 
 graph:
   nodes:
-    sg_1_hidden:
+    hidden:
       node_builder:
         lam_resolution: 5
         global_resolution: 3
