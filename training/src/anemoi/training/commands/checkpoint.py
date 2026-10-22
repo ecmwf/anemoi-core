@@ -31,6 +31,12 @@ class Checkpoint(Command):
         )
         inference.add_argument("--input", "-i", required=True, metavar="training.ckpt")
         inference.add_argument("--output", "-o", required=True, metavar="inference.ckpt")
+        inference.add_argument(
+            "--graph",
+            metavar="graph.pt",
+            help="Graph file to use instead of the graph stored in the training checkpoint. "
+            "Required if the checkpoint does not contain the graph.",
+        )
 
     @staticmethod
     def run(args: argparse.Namespace) -> None:
@@ -40,7 +46,7 @@ class Checkpoint(Command):
             from anemoi.training.utils.checkpoint import load_and_prepare_model
             from anemoi.training.utils.checkpoint import save_inference_checkpoint
 
-            module, metadata = load_and_prepare_model(args.input)
+            module, metadata = load_and_prepare_model(args.input, graph_path=args.graph)
             path = save_inference_checkpoint(module, metadata, args.output)
 
             LOG.info("Inference checkpoint saved to %s", path)

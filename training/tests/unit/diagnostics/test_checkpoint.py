@@ -11,6 +11,7 @@
 import datetime
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -39,6 +40,10 @@ class DummyModel(torch.nn.Module):
         self.config = config
         self.metadata = metadata
         self.supporting_arrays = {}
+        # Mirror AnemoiModelInterface's graph_data/model._graph_data shape so
+        # AnemoiCheckpoint._save_checkpoint's graph_data null-out has something to act on.
+        self.graph_data = {"dummy": "graph"}
+        self.model = SimpleNamespace(_graph_data={"dummy": "graph"})
         self.fc1 = nn.Linear(32, 5)
         self.fc2 = nn.Linear(5, 1)
         self.relu = nn.ReLU()

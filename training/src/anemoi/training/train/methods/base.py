@@ -248,7 +248,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.data_indices = data_indices
 
-        self.save_hyperparameters()
+        self.save_hyperparameters(
+            ignore=list(config.diagnostics.checkpoint.exclude_hyperparameters),
+        )
 
         self.statistics_tendencies = statistics_tendencies
 
