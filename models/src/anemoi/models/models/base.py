@@ -335,6 +335,13 @@ class BaseGraphModel(nn.Module):
 
         return dim_sizes[0]
 
+    def _get_active_hidden_name(self, dataset_names: list[str]) -> str:
+        """Return the single hidden mesh used by the datasets in the batch."""
+        active_hidden_names = list(dict.fromkeys(self.dataset2hidden[dataset_name] for dataset_name in dataset_names))
+        if len(active_hidden_names) != 1:
+            raise ValueError(f"All datasets in a batch must use the same hidden mesh, got {active_hidden_names}.")
+        return active_hidden_names[0]
+
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the networks for the model."""

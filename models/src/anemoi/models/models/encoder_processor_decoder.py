@@ -367,10 +367,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
         # Process each dataset through its corresponding encoder
-        active_hidden_names = list(dict.fromkeys(self.dataset2hidden[dataset_name] for dataset_name in dataset_names))
-        if len(active_hidden_names) != 1:
-            raise ValueError(f"All datasets in a batch must use the same hidden mesh, got {active_hidden_names}.")
-        hidden_name = active_hidden_names[0]
+        hidden_name = self._get_active_hidden_name(dataset_names)
         dataset_latents = {}
         x_skip_dict = {}
         x_data_latent_dict = {}
