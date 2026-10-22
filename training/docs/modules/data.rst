@@ -98,6 +98,36 @@ mapped hidden node set must have corresponding domain-to-hidden,
 hidden-to-hidden, and hidden-to-domain edges in the graph. Hidden node and edge
 feature dimensions must match because the model weights remain shared.
 
+The model routing names the hidden mesh for each domain and assigns the same
+encoder and decoder group to both domains::
+
+   model:
+     model:
+       hidden_nodes_name:
+         sg_1: sg_1_hidden
+         sg_2: sg_2_hidden
+     encoders:
+       shared:
+         source_datasets: [sg_1, sg_2]
+         dataset_fusing_strategy: not_supported
+         mapper:
+           _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+           # ... mapper configuration
+     decoders:
+       shared:
+         target_datasets: [sg_1, sg_2]
+         target_node_features: [encoded_data]
+         mapper:
+           _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+           # ... mapper configuration
+
+The ``shared`` key is user-defined; datasets listed in the same group use the
+same mapper weights. ``sg_1_hidden`` and ``sg_2_hidden`` must be nodes in the
+graph configuration, with ``sg_1 -> sg_1_hidden -> sg_1`` and
+``sg_2 -> sg_2_hidden -> sg_2`` edges. The complete example is the top-level
+``multidomain`` configuration, including ``model=graphtransformer_multidomain``
+and the corresponding multidomain data, dataloader, graph, and training groups.
+
 With the current distributed strategy, domain-specific trainable node and edge
 features must be disabled because the active domain, and therefore the active
 graph-specific parameters, changes between batches.
