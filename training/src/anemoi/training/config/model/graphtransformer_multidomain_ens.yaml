@@ -1,5 +1,5 @@
 defaults:
-- graphtransformer_multidomain
+- graphtransformer
 - _self_
 
 condition_on_residual: False

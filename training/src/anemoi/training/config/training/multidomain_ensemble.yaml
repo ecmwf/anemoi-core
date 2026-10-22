@@ -1,5 +1,5 @@
 defaults:
-  - multidomain
+  - stretched
   - _self_
 
 method:
@@ -13,7 +13,7 @@ strategy:
 
 training_loss:
   datasets:
-    sg_1:
+    data:
       _target_: anemoi.training.losses.CRPS
       scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
       ignore_nans: False
@@ -22,7 +22,7 @@ training_loss:
 
 validation_metrics:
   datasets:
-    sg_1:
+    data:
       crps:
         _target_: anemoi.training.losses.CRPS
         scalers: ['node_weights', 'time_steps']
