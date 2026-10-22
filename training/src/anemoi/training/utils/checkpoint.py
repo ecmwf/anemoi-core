@@ -59,10 +59,7 @@ def load_and_prepare_model(
         pytorch model, metadata.
 
     """
-    # Imported lazily: a module-level import of methods.base pulls the training
-    # stack (methods -> diagnostics.callbacks -> utils.checkpoint), forming a
-    # circular import that makes this utility module unsafe to import standalone.
-    from anemoi.training.train.methods.base import BaseTrainingModule
+    from hydra.utils import get_class
 
     # memory-mapped: only the hyperparameters are needed here, not the weights
     hyper_parameters = torch.load(
@@ -86,7 +83,9 @@ def load_and_prepare_model(
         )
         raise ValueError(msg)
 
-    module = BaseTrainingModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False, **overrides)
+    training_method_cls = get_class(hyper_parameters["config"].training.method._target_)
+
+    module = training_method_cls.load_from_checkpoint(lightning_checkpoint_path, weights_only=False, **overrides)
     model = module.model
 
     metadata = dict(**model.metadata)
@@ -96,7 +95,12 @@ def load_and_prepare_model(
     return model, metadata
 
 
-def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path: Path | str) -> Path:
+def save_inference_checkpoint(
+    model: torch.nn.Module,
+    metadata: dict,
+    save_path: Path | str,
+    supporting_arrays: dict | None = None,
+) -> Path:
     """Save a pytorch checkpoint for inference with the model metadata.
 
     Parameters
@@ -106,19 +110,20 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
     metadata : dict
         Anemoi Metadata to inject into checkpoint.
     save_path : Path | str
-        Directory to save anemoi checkpoint.
+        File path of the anemoi inference checkpoint to write.
+    supporting_arrays : dict | None, optional
+        Supporting arrays to inject into checkpoint.
 
     Returns
     -------
     Path
         Path to saved checkpoint.
     """
-    save_path = Path(save_path)
-    inference_filepath = save_path.parent / f"inference-{save_path.name}"
+    inference_filepath = Path(save_path)
 
     clear_imputer_runtime_state(model)
     torch.save(model, inference_filepath)
-    save_metadata(inference_filepath, metadata)
+    save_metadata(inference_filepath, metadata, supporting_arrays=supporting_arrays)
     return inference_filepath
 
 
