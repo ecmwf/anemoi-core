@@ -117,7 +117,12 @@ def load_and_prepare_model(
     return model, metadata
 
 
-def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path: Path | str) -> Path:
+def save_inference_checkpoint(
+    model: torch.nn.Module,
+    metadata: dict,
+    save_path: Path | str,
+    supporting_arrays: dict | None = None,
+) -> Path:
     """Save a pytorch checkpoint for inference with the model metadata.
 
     Parameters
@@ -128,6 +133,8 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
         Anemoi Metadata to inject into checkpoint
     save_path : Path | str
         Directory to save anemoi checkpoint
+    supporting_arrays : dict | None, optional
+        Supporting arrays to inject into checkpoint
 
     Returns
     -------
@@ -139,7 +146,7 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
 
     clear_imputer_runtime_state(model)
     torch.save(model, inference_filepath)
-    save_metadata(inference_filepath, metadata)
+    save_metadata(inference_filepath, metadata, supporting_arrays=supporting_arrays)
     return inference_filepath
 
 
