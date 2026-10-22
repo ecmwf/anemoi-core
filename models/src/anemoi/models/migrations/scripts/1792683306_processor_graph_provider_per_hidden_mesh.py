@@ -44,7 +44,7 @@ def migrate(ckpt: CkptType) -> CkptType:
     CkptType
         The migrated checkpoint dict.
     """
-    hidden_nodes_name = ckpt["hyper_parameters"]["config"].model.hidden_nodes_name
+    hidden_nodes_name = ckpt["hyper_parameters"]["config"].model.model.hidden_nodes_name
     if not isinstance(hidden_nodes_name, str):
         return ckpt
 
