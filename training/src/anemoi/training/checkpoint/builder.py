@@ -362,4 +362,43 @@ def build_checkpoint_pipeline(
 
     # CheckpointPipeline instantiates each ``_target_`` config in order via Hydra
     # and surfaces a CheckpointConfigError with context on failure.
-    return CheckpointPipeline(stages=stage_configs)
+    pipeline = CheckpointPipeline(stages=stage_configs)
+    _reject_lora_dropout_with_model_sharding(pipeline, cfg)
+    return pipeline
+
+
+def _reject_lora_dropout_with_model_sharding(pipeline: CheckpointPipeline, cfg: DictConfig) -> None:
+    """Refuse LoRA dropout when the model is sharded across GPUs.
+
+    Processors refuse dropout under model sharding, but they only check their own
+    ``dropout_p``: dropout inside a LoRA adapter would pass that check unseen. The
+    stage cannot see the hardware config, so the builder checks it here, before
+    training starts.
+
+    Parameters
+    ----------
+    pipeline : CheckpointPipeline
+        The built pipeline.
+    cfg : DictConfig
+        The training-run configuration.
+
+    Raises
+    ------
+    CheckpointConfigError
+        If a ``PeftModifierStage`` has ``lora_dropout > 0`` and
+        ``system.hardware.num_gpus_per_model > 1``.
+    """
+    num_gpus_per_model = OmegaConf.select(cfg, "system.hardware.num_gpus_per_model", default=1) or 1
+    if num_gpus_per_model <= 1:
+        return
+
+    from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+    from anemoi.training.checkpoint.modifiers.peft import PeftModifierStage
+
+    for stage in pipeline.stages:
+        if isinstance(stage, PeftModifierStage) and stage.lora_config.lora_dropout > 0:
+            msg = (
+                f"lora_dropout={stage.lora_config.lora_dropout} is not supported when the model is sharded "
+                f"(system.hardware.num_gpus_per_model={num_gpus_per_model}). Set lora_dropout to 0."
+            )
+            raise CheckpointConfigError(msg, config_path=f"{_TRAINING}.{_CHECKPOINT}.{_MODIFIERS}")
