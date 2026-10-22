@@ -260,7 +260,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # `task` holds runtime objects that cannot be deepcopied by Lightning's
         # `save_hyperparameters` and are not meaningful to persist in the
         # checkpoint hyperparameters anyway.
-        self.save_hyperparameters(ignore=["task"])
+        exclude_hyperparameters = list(config.diagnostics.checkpoint.exclude_hyperparameters)
+        if "task" not in exclude_hyperparameters:
+            exclude_hyperparameters.append("task")
+        self.save_hyperparameters(
+            ignore=exclude_hyperparameters,
+        )
 
         self.statistics_tendencies = statistics_tendencies
 

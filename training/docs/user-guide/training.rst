@@ -576,6 +576,38 @@ also in the middle of an epoch. It trains on the same batches and draws the same
 random numbers as a run that was never interrupted; `Resuming a run`_ lists the
 conditions.
 
+**************************************
+ Training checkpoint hyperparameters
+**************************************
+
+A training checkpoint stores the arguments used to build the training
+module (the Lightning *hyperparameters*), so that it can be restored
+without re-creating them: the config, the data indices, the metadata,
+the dataset types and statistics, and the supporting arrays. The graph is
+rebuilt or loaded from the stored training config and is not a training-module
+hyperparameter.
+
+``config.diagnostics.checkpoint.exclude_hyperparameters`` defaults to an
+empty list. All current hyperparameters are required to resume training or
+convert the training checkpoint, so none can currently be excluded.
+
+.. code:: yaml
+
+   diagnostics:
+     checkpoint:
+       exclude_hyperparameters: []
+
+When converting a training checkpoint into an inference checkpoint,
+``anemoi-training checkpoint inference`` uses the graph path from the stored
+config. The path can be replaced with the ``--graph`` argument:
+
+.. code:: bash
+
+   anemoi-training checkpoint inference \
+       --input last.ckpt \
+       --output inference-last.ckpt \
+       --graph graph.pt
+
 *********
  Rollout
 *********

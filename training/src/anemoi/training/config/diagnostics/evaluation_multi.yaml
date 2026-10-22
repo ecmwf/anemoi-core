@@ -27,6 +27,9 @@ checkpoint:
     save_frequency: null # Does not scale with rollout
     num_models_saved: 0
 
+  # Hyperparameters not to store in the training checkpoint. All current hyperparameters are required.
+  exclude_hyperparameters: []
+
 enable_progress_bar: True
 check_val_every_n_epoch: 1
 print_memory_summary: False
