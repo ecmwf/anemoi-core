@@ -48,8 +48,10 @@ ONLINE_PARENT_RUN_ID = "online-parent"
 
 
 @pytest.fixture
-def mlflow_sync_module() -> Iterator[ModuleType]:
+def mlflow_sync_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[ModuleType]:
     """Import ``mlflow_sync`` with the optional ``mlflow-export-import`` package stubbed out."""
+    # the module needs TMPDIR or SCRATCH at import time
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
     stubs = {name: MagicMock() for name in _EXPORT_IMPORT_MODULES}
     with patch.dict(sys.modules, stubs):
         sys.modules.pop("anemoi.training.utils.mlflow_sync", None)
