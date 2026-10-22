@@ -326,6 +326,7 @@ _CFG_DIFFUSION = DictConfig(
 def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
     """_compute_loss passes grid_shard_slice and model_comm_group to the loss function."""
     module = MagicMock(spec=BaseTrainingModule)
+    module.loss_gradient_scaler = None
     loss = CaptureLoss()
     group = object()
     shard_sizes = [1, 1]
@@ -361,6 +362,7 @@ def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
 def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
     """_compute_loss adds grid_dim and grid_shard_sizes when loss.needs_shard_layout_info."""
     module = MagicMock(spec=BaseTrainingModule)
+    module.loss_gradient_scaler = None
     loss = ShardingAwareCaptureLoss()
     group = object()
     shard_sizes = [1, 1]
@@ -403,6 +405,7 @@ def test_base_compute_loss_passes_none_shard_sizes_when_gathered() -> None:
     through here makes a MultiscaleLossWrapper re-shard an already-full tensor (see scaler size mismatch).
     """
     module = MagicMock(spec=BaseTrainingModule)
+    module.loss_gradient_scaler = None
     loss = ShardingAwareCaptureLoss()
     group = object()
     shard_sizes = [1, 1]
@@ -437,6 +440,7 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
 ) -> None:
     """_compute_loss correctly routes shard layout to a CombinedLoss wrapping MultiscaleLossWrapper."""
     module = MagicMock(spec=BaseTrainingModule)
+    module.loss_gradient_scaler = None
     group = FakeGroup(size=2)
     grid_shard_sizes = [1, 1]
     channel_shard_sizes_pred = [1, 1]

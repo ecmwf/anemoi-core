@@ -1257,10 +1257,42 @@ individual loss config.
 There is also generic functions that are useful for losses in
 ``anemoi/training/losses/utils.py``.
 
-``grad_scaler`` is used to automatically scale the loss gradients in the
-loss function using the formula in https://arxiv.org/pdf/2306.06079.pdf,
-section 4.3.2. This can be switched on in the config by setting the
-option ``config.training.loss_gradient_scaling=True``.
+``LossScaler`` (in ``anemoi/training/losses/scaler_tensor.py``) rescales
+the loss gradients using the formula in
+https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2. It is the identity
+in the forward pass. In the backward pass it takes, for every (batch,
+time) row, the L2 norm of the gradient of each output variable over the
+ensemble and grid dimensions, and rescales the gradients so that all
+active variables get the same norm. Variables with a zero gradient (for
+example outputs the loss does not see, or fully masked observations) are
+left at zero and do not take part in the normalisation. When the grid is
+sharded across the model group, the norms are all-reduced over the group.
+
+It is off by default and is configured under
+``training.loss_gradient_scaling``:
+
+.. code:: yaml
+
+   training:
+     loss_gradient_scaling:
+       enabled: True
+       # 1 equalises the gradient norms, 0 leaves the gradients unchanged
+       power: 1.0
+       # optional cap on the weight of the weakest variable relative to
+       # the strongest one
+       max_gain: null
+
+The legacy form ``loss_gradient_scaling: True`` is equivalent to
+``enabled: True`` with the default ``power`` and ``max_gain``. The
+scaler has no state, so it can be switched on or off when resuming from
+a checkpoint.
+
+.. warning::
+
+   With ``power: 1`` the per-variable gradient norms are equalised, so
+   per-variable loss weights (variable and pressure-level scalers) no
+   longer affect the parameter update. Dataset, rollout and node
+   weights are unaffected. The reported loss value does not change.
 
 ``ScaleTensor`` is a class that can record and apply arbitrary scaling
 factors to tensors. It supports relative indexing, combining multiple

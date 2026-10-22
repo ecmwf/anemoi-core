@@ -15,7 +15,11 @@ from collections.abc import Sequence
 from typing import Self
 
 import torch
+from torch import distributed as dist
 from torch import nn
+from torch.autograd import Function
+from torch.autograd.function import once_differentiable
+from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.training.utils.compile import subset_tensor
 from anemoi.training.utils.enums import TensorDim
@@ -23,40 +27,159 @@ from anemoi.training.utils.enums import TensorDim
 LOGGER = logging.getLogger(__name__)
 
 
-def grad_scaler(
-    module: nn.Module,
-    grad_in: tuple[torch.Tensor, ...],
-    grad_out: tuple[torch.Tensor, ...],
-) -> tuple[torch.Tensor, ...] | None:
-    """Scales the loss gradients.
+LOSS_SCALE_REL_EPS = 1e-8
+"""Channels whose gradient norm is below this fraction of the largest channel norm are treated as inactive."""
 
-    Uses the formula in https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 
-    Use <module>.register_full_backward_hook(grad_scaler, prepend=False) to register this hook.
+class LossScaleFunction(Function):
+    """Identity in the forward pass; equalises the per-variable loss gradients in the backward pass.
 
-    Parameters
-    ----------
-    module : nn.Module
-        Loss object (not used)
-    grad_in : tuple[torch.Tensor, ...]
-        Loss gradients
-    grad_out : tuple[torch.Tensor, ...]
-        Output gradients (not used)
+    Implements the loss-gradient rescaling of https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2, for tensors
+    laid out as (batch, time, ensemble, grid, variable). For every (batch, time) row the L2 norm of the
+    gradient of each variable is taken over the ensemble and grid dimensions, and the gradient of each
+    variable is rescaled so that all active variables end up with the same norm.
 
-    Returns
-    -------
-    tuple[torch.Tensor, ...]
-        Re-scaled input gradients
-
+    Variables whose gradient is (numerically) zero, e.g. outputs not seen by the loss or fully masked
+    observations, are left at zero and do not take part in the normalisation. The rescaling is
+    positively homogeneous of degree one, so it does not depend on the absolute scale of the loss.
     """
-    del module, grad_out
-    # first grad_input is that of the predicted state and the second is that of the "ground truth" (== zero)
-    channels = grad_in[0].shape[-1]  # number of channels
-    channel_weights = torch.reciprocal(torch.sum(torch.abs(grad_in[0]), dim=1, keepdim=True))  # channel-wise weights
-    new_grad_in = (
-        (channels * channel_weights) / torch.sum(channel_weights, dim=-1, keepdim=True) * grad_in[0]
-    )  # rescaled gradient
-    return new_grad_in, grad_in[1]
+
+    @staticmethod
+    def forward(
+        ctx: torch.autograd.function.FunctionCtx,
+        x: torch.Tensor,
+        power: float,
+        max_gain: float | None,
+        group: ProcessGroup | None,
+    ) -> torch.Tensor:
+        """Return the input unchanged and store the backward options.
+
+        Parameters
+        ----------
+        ctx : torch.autograd.function.FunctionCtx
+            Autograd context.
+        x : torch.Tensor
+            Prediction tensor, shape (batch, time, ensemble, grid, variable).
+        power : float
+            Exponent of the inverse gradient norm; 1 equalises the norms, 0 is the identity.
+        max_gain : float | None
+            Upper bound on the weight of the weakest variable relative to the strongest one.
+        group : ProcessGroup | None
+            Model-parallel group to all-reduce over when the grid dimension is sharded.
+
+        Returns
+        -------
+        torch.Tensor
+            The input tensor (autograd returns it as a view with this function's backward attached).
+        """
+        if x.ndim != len(TensorDim):
+            msg = f"LossScaleFunction expects a {len(TensorDim)}D tensor (batch, time, ens, grid, var), got {x.ndim}D."
+            raise ValueError(msg)
+        ctx.power = power
+        ctx.max_gain = max_gain
+        ctx.group = group
+        return x
+
+    @staticmethod
+    @once_differentiable
+    def backward(
+        ctx: torch.autograd.function.FunctionCtx,
+        grad: torch.Tensor,
+    ) -> tuple[torch.Tensor, None, None, None]:
+        """Rescale the incoming gradient per variable.
+
+        Parameters
+        ----------
+        ctx : torch.autograd.function.FunctionCtx
+            Autograd context.
+        grad : torch.Tensor
+            Gradient of the loss with respect to the prediction.
+
+        Returns
+        -------
+        tuple[torch.Tensor, None, None, None]
+            Rescaled gradient, and None for the non-tensor arguments.
+        """
+        g = grad.float()
+        tiny = torch.finfo(g.dtype).tiny
+        var_dim = TensorDim.VARIABLE.value
+
+        sq_norm = g.square().sum(dim=(TensorDim.ENSEMBLE_DIM.value, TensorDim.GRID.value), keepdim=True)
+        if ctx.group is not None and dist.get_world_size(group=ctx.group) > 1:
+            dist.all_reduce(sq_norm, group=ctx.group)
+        norm = sq_norm.sqrt()
+
+        rel_norm = norm / norm.amax(dim=var_dim, keepdim=True).clamp_min(tiny)
+        active = rel_norm > LOSS_SCALE_REL_EPS
+        weight = torch.where(active, rel_norm.clamp_min(LOSS_SCALE_REL_EPS).pow(-ctx.power), 0.0)
+        if ctx.max_gain is not None:
+            weight = weight.clamp_max(ctx.max_gain)
+
+        n_active = active.sum(dim=var_dim, keepdim=True)
+        weight = n_active * weight / weight.sum(dim=var_dim, keepdim=True).clamp_min(tiny)
+
+        return (weight * g).to(grad.dtype), None, None, None
+
+
+class LossScaler(nn.Module):
+    """Module wrapper around `LossScaleFunction`.
+
+    The module holds no parameters or buffers, so enabling or disabling it does not change the state dict.
+    """
+
+    def __init__(self, power: float = 1.0, max_gain: float | None = None) -> None:
+        """Initialise LossScaler.
+
+        Parameters
+        ----------
+        power : float, optional
+            Exponent of the inverse gradient norm; 1 equalises the norms, 0 is the identity. By default 1.0.
+        max_gain : float | None, optional
+            Upper bound on the weight of the weakest variable relative to the strongest one, by default None.
+        """
+        super().__init__()
+        self.power = power
+        self.max_gain = max_gain
+
+    def forward(self, x: torch.Tensor, group: ProcessGroup | None = None) -> torch.Tensor:
+        """Apply the gradient rescaling to the prediction tensor.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Prediction tensor, shape (batch, time, ensemble, grid, variable).
+        group : ProcessGroup | None, optional
+            Model-parallel group, passed only when the grid dimension of x is sharded. By default None.
+
+        Returns
+        -------
+        torch.Tensor
+            The input, with rescaled gradients in the backward pass.
+        """
+        return LossScaleFunction.apply(x, self.power, self.max_gain, group)
+
+    @classmethod
+    def from_config(cls, config: object) -> "LossScaler | None":
+        """Build a LossScaler from `training.loss_gradient_scaling`, or None if disabled.
+
+        Parameters
+        ----------
+        config : object
+            A bool (legacy form), or an object with `enabled`, and optionally `power` and `max_gain`.
+
+        Returns
+        -------
+        LossScaler | None
+            The scaler, or None if gradient scaling is disabled.
+        """
+        if config is None or isinstance(config, bool):
+            return cls() if config else None
+        if not getattr(config, "enabled", False):
+            return None
+        return cls(power=getattr(config, "power", 1.0), max_gain=getattr(config, "max_gain", None))
+
+    def extra_repr(self) -> str:
+        return f"power={self.power}, max_gain={self.max_gain}"
 
 
 TENSOR_SPEC = tuple[int | tuple[int, ...], torch.Tensor]
