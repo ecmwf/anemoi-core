@@ -82,32 +82,20 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self._build_latent_aggregator(model_config.latent_aggregator)
 
         # Processor hidden -> hidden
-        hidden_names = list(dict.fromkeys(self.dataset2hidden.values()))
-        if self._multiple_hidden_meshes:
-            self.processor_graph_provider = torch.nn.ModuleDict()
-            for hidden_name in hidden_names:
-                self.processor_graph_provider[hidden_name] = create_graph_provider(
-                    graph=self._graph_data[(hidden_name, "to", hidden_name)],
-                    edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
-                    src_size=self.node_attributes.num_nodes[hidden_name],
-                    dst_size=self.node_attributes.num_nodes[hidden_name],
-                    trainable_size=model_config.processor.get("trainable_size", 0),
-                )
-            processor_edge_dims = [provider.edge_dim for provider in self.processor_graph_provider.values()]
-            assert all(
-                dim == processor_edge_dims[0] for dim in processor_edge_dims
-            ), f"All hidden meshes must have the same processor edge dimension, got {processor_edge_dims}."
-            processor_edge_dim = processor_edge_dims[0]
-        else:
-            hidden_name = hidden_names[0]
-            self.processor_graph_provider = create_graph_provider(
+        self.processor_graph_provider = torch.nn.ModuleDict()
+        for hidden_name in self.hidden_names:
+            self.processor_graph_provider[hidden_name] = create_graph_provider(
                 graph=self._graph_data[(hidden_name, "to", hidden_name)],
                 edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[hidden_name],
                 dst_size=self.node_attributes.num_nodes[hidden_name],
                 trainable_size=model_config.processor.get("trainable_size", 0),
             )
-            processor_edge_dim = self.processor_graph_provider.edge_dim
+        processor_edge_dims = [provider.edge_dim for provider in self.processor_graph_provider.values()]
+        assert all(
+            dim == processor_edge_dims[0] for dim in processor_edge_dims
+        ), f"All hidden meshes must have the same processor edge dimension, got {processor_edge_dims}."
+        processor_edge_dim = processor_edge_dims[0]
 
         self.processor = instantiate(
             model_config.processor,
@@ -439,16 +427,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
 
         # Processor
-        processor_graph_provider = (
-            self.processor_graph_provider[hidden_name]
-            if self._multiple_hidden_meshes
-            else self.processor_graph_provider
-        )
         (
             processor_edge_attr,
             processor_edge_index,
             proc_edge_shard_sizes,
-        ) = processor_graph_provider.get_edges(
+        ) = self.processor_graph_provider[hidden_name].get_edges(
             batch_size=batch_size,
             model_comm_group=model_comm_group,
         )
