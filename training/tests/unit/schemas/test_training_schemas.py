@@ -11,8 +11,8 @@ import pytest
 from pydantic import ValidationError
 
 from anemoi.training.schemas.training import BaseDDPStrategySchema
-from anemoi.training.schemas.training import CheckpointPipelineSchema
 from anemoi.training.schemas.training import BaseTrainingSchema
+from anemoi.training.schemas.training import CheckpointPipelineSchema
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
