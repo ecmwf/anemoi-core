@@ -311,6 +311,9 @@ class SemiLagrangianLayer(nn.Module):
             position = torch.stack([lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()], dim=-1)
             self.register_buffer("arrival_position", position.float(), persistent=False)
 
+        # Lazy init. Hook for diagnostics.
+        self.diag_hook = None
+
     def departure_points(self, displacement: Tensor, layout: LatLonLayout) -> Tensor:
         """Positions, in grid_sample's [-1, 1] coordinates of the padded globe, to read each value from.
 
@@ -364,12 +367,26 @@ class SemiLagrangianLayer(nn.Module):
     def sample(self, values: Tensor, displacement: Tensor, layout: LatLonLayout) -> Tensor:
         """Read every value from its departure point.
 
-        values has shape (batch * local nodes, heads, channels per head) and displacement has shape
-        (batch * local nodes, heads, displacement_dim). Returns a tensor shaped like values.
+        Arguments
+        ---------
+        values : torch.Tensor
+            The values to be sampled, with shape (batch * local nodes, heads, channels per head).
+        displacement : torch.Tensor
+            The displacement vectors, with shape (batch * local nodes, heads, displacement_dim).
+        layout : LatLonLayout
+            The layout object describing the latitude-longitude grid.
+        
+        Returns
+        -------
+        torch.Tensor
+            The sampled values, with the same shape as the input `values`.
         """
         with torch.autocast(device_type=values.device.type, enabled=False):
             grid = layout.to_globe(self.departure_points(_at_least_float32(displacement), layout))
             grid = einops.rearrange(grid, "b g k h w -> (b g) h w k")
+
+            if self.diag_hook is not None:
+                self.diag_hook(self, grid[:, :, :, 0], grid[:, :, :, 1])
 
             globe = layout.to_globe(values)
             local_heads = globe.shape[1]
