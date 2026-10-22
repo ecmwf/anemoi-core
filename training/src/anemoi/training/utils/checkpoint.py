@@ -104,7 +104,6 @@ def load_and_prepare_model(
         )
         raise ValueError(msg)
 
-    # BaseTrainingModule is abstract: resolve the concrete training method stored in the checkpoint config.
     training_method_cls = get_class(hyper_parameters["config"].training.method._target_)
 
     module = training_method_cls.load_from_checkpoint(lightning_checkpoint_path, weights_only=False, **overrides)
