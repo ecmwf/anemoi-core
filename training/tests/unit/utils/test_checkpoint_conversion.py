@@ -41,6 +41,8 @@ def load_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
 
 
 def _set_hyper_parameters(monkeypatch: pytest.MonkeyPatch, hyper_parameters: dict) -> None:
+    method = SimpleNamespace(_target_="anemoi.training.train.methods.base.BaseTrainingModule")
+    hyper_parameters = {"config": SimpleNamespace(training=SimpleNamespace(method=method)), **hyper_parameters}
     monkeypatch.setattr(torch, "load", lambda *_a, **_k: {"hyper_parameters": hyper_parameters})
 
 
