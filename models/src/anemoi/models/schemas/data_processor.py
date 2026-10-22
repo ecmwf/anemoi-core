@@ -234,6 +234,7 @@ class RemapperSchema(BaseModel):
 
 class PreprocessorTarget(str, Enum):
     normalizer = "anemoi.models.preprocessing.normalizer.InputNormalizer"
+    joint_variable_normalizer = "anemoi.models.preprocessing.joint_variable_normalizer.JointVariableNormalizer"
     imputer = "anemoi.models.preprocessing.imputer.InputImputer"
     const_imputer = "anemoi.models.preprocessing.imputer.ConstantImputer"
     remapper = "anemoi.models.preprocessing.remapper.Remapper"
@@ -245,6 +246,7 @@ class PreprocessorTarget(str, Enum):
 
 target_to_schema = {
     PreprocessorTarget.normalizer: NormalizerSchema,
+    PreprocessorTarget.joint_variable_normalizer: NormalizerSchema,
     PreprocessorTarget.imputer: ImputerSchema,
     PreprocessorTarget.const_imputer: ConstantImputerSchema,
     PreprocessorTarget.remapper: RemapperSchema,
