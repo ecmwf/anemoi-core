@@ -80,7 +80,7 @@ def load_and_prepare_model(
         pytorch model, metadata
 
     """
-    from anemoi.training.train.methods.base import BaseTrainingModule
+    from hydra.utils import get_class
 
     # memory-mapped: only the hyperparameters are needed here, not the weights
     hyper_parameters = torch.load(
@@ -104,7 +104,10 @@ def load_and_prepare_model(
         )
         raise ValueError(msg)
 
-    module = BaseTrainingModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False, **overrides)
+    # BaseTrainingModule is abstract: resolve the concrete training method stored in the checkpoint config.
+    training_method_cls = get_class(hyper_parameters["config"].training.method._target_)
+
+    module = training_method_cls.load_from_checkpoint(lightning_checkpoint_path, weights_only=False, **overrides)
     model = module.model
 
     metadata = dict(**model.metadata)
