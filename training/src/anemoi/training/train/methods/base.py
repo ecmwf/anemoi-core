@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -23,30 +22,30 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler.scheduler import Scheduler as TimmScheduler
-from torch_geometric.data import HeteroData
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
+from anemoi.models.data import Batch
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
+from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
+from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
-from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
-from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
-from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
-from anemoi.training.losses.scalers.base_scaler import BaseScaler
-from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
-from anemoi.training.utils.masks import build_output_masks
+from anemoi.training.utils.index_space import IndexSpace
+from anemoi.training.utils.masks import BaseMask
+from anemoi.training.utils.masks import create_output_masks
+from anemoi.training.utils.resolve_config import is_container
+from anemoi.training.utils.resolve_config import is_mapping
+from anemoi.training.utils.resolve_config import is_sequence
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import choose_base_seed
 from anemoi.training.utils.seeding import derive_seed
@@ -54,24 +53,50 @@ from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.seeding import seed_random_generators
 from anemoi.training.utils.seeding import set_base_seed
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
-
-_chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
-_trainable_edge_perm_fix_migration = importlib.import_module(
-    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix",
-).migrate
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from collections.abc import Mapping
+
     from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
+    from torch_geometric.data import HeteroData
 
+    from anemoi.models.data.sources.base import Source
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.distributed.shapes import DatasetShardSizes
+    from anemoi.models.distributed.shapes import ShardSizes
+    from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
+    from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
+    from anemoi.training.losses.scalers.base_scaler import BaseScaler
+    from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.tasks.base import BaseTask
-    from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
+
+
+# helpers for building the loss config
+def resolve_subgrid_node(node: object, output_mask: object, dataset_name: str) -> None:
+    """Recursively replace ``subgrid: output_mask`` placeholders with the mask tuple."""
+    if is_mapping(node):
+        for k, v in node.items():
+            if is_container(v) and not isinstance(v, str):
+                resolve_subgrid_node(v, output_mask, dataset_name)
+            elif (k, v) == ("subgrid", "output_mask"):
+                node[k] = output_mask.as_tuple()
+                LOGGER.info("Resolved subgrid for dataset '%s' to output_mask as tuple: %s", dataset_name, node[k])
+    elif is_sequence(node) and not isinstance(node, str):
+        for item in node:
+            resolve_subgrid_node(item, output_mask, dataset_name)
+
+
+def resolve_subgrid(config: Mapping, output_mask: Mapping) -> None:
+    """Resolve ``subgrid: output_mask`` placeholders for every dataset in ``config``."""
+    for dataset_name, dataset_config in config.items():
+        if dataset_config is not None:
+            resolve_subgrid_node(dataset_config, output_mask[dataset_name], dataset_name)
 
 
 class BaseTrainingModule(pl.LightningModule, ABC):
@@ -101,14 +126,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Configuration object defining all parameters.
     task : BaseTask
         Training task that defines the prediction workflow.
-    graph_data : HeteroData
-        Graph-structured input data containing node and edge features, keyed by dataset name.
     statistics : dict
         Dictionary of training statistics (mean, std, etc.) used for normalization.
     statistics_tendencies : dict
         Statistics related to tendencies (if used).
     data_indices : dict[str, IndexCollection]
         Maps feature names to index ranges used for training and loss functions.
+    data_types : dict[str, str]
+        Kind of data of each dataset (``"gridded"``, ``"tabular"``), passed to the model interface.
     metadata : dict
         Dictionary with metadata such as dataset provenance and variable descriptions.
     supporting_arrays : dict
@@ -128,10 +153,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Mapping of variable groups for which to calculate validation metrics.
     output_mask : nn.Module
         Masking module that filters outputs during inference.
-    n_step_input : int
-        Number of input timesteps provided to the model.
-    n_step_output : int
-        Number of output timesteps predicted by the model.
+    n_step_input : dict[str, int]
+        Number of input timesteps provided to the model for each dataset and location.
+    n_step_output : dict[str, int]
+        Number of output timesteps predicted by the model for each dataset and location.
     keep_batch_sharded : bool
         Whether to keep input batches split across GPUs instead of gathering them.
 
@@ -152,7 +177,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     - `BaseLoss`
     - `IndexCollection`
     - `CosineLRScheduler`
-    - `create_scalers`, `grad_scaler`
+    - `create_scalers`
 
     """
 
@@ -161,10 +186,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         *,
         config: BaseSchema,
         task: BaseTask,
-        graph_data: dict[str, HeteroData],
-        statistics: dict,
-        statistics_tendencies: dict,
+        statistics: dict[str, dict],
+        statistics_tendencies: dict[str, dict],
         data_indices: dict[str, IndexCollection],
+        data_types: dict[str, str],
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -176,14 +201,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Job configuration
         task : BaseTask
             Training task.
-        graph_data : HeteroData
-            Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
         statistics_tendencies : dict
             Statistics of data tendencies.
         data_indices : dict[str, IndexCollection]
-            Indices of the training data,
+            Indices of the training data.
+        data_types : dict[str, str]
+            Kind of data of each dataset (``"gridded"``, ``"tabular"``).
         metadata : dict
             Provenance information
         supporting_arrays : dict
@@ -192,54 +217,54 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """
         super().__init__()
         self.task = task
+        self.config = config
 
-        assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
 
-        graph_data = graph_data.to(self.device)
         self.dataset_names = list(data_indices.keys())
 
-        # Create output_mask dictionary for each dataset
-        self.output_mask = build_output_masks(get_multiple_datasets_config(config.model.output_mask), graph_data)
-
-        # Handle supporting_arrays merge with all output masks
-        combined_supporting_arrays = supporting_arrays.copy()
-        for dataset_name, mask in self.output_mask.items():
-            combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
-
-        self.n_step_input = self.task.num_input_timesteps
-        self.n_step_output = self.task.num_output_timesteps
-        self.n_step_input_by_dataset = self.task.num_input_timesteps_by_dataset or {
-            dataset_name: len(self.task._requested_input_relative_times(dataset_name))
-            for dataset_name in self.dataset_names
-        }
-        self.n_step_output_by_dataset = self.task.num_output_timesteps_by_dataset or {
-            dataset_name: len(self.task._requested_output_relative_times(dataset_name))
-            for dataset_name in self.dataset_names
-        }
-        model_n_step_input: int | dict[str, int] = self.n_step_input
-        model_n_step_output: int | dict[str, int] = self.n_step_output
-        if any(value != self.task.num_input_timesteps for value in self.n_step_input_by_dataset.values()):
-            model_n_step_input = self.n_step_input_by_dataset
-        if any(value != self.task.num_output_timesteps for value in self.n_step_output_by_dataset.values()):
-            model_n_step_output = self.n_step_output_by_dataset
+        # Define number of input/output timesteps per node for each dataset
+        self.n_step_input = self.task.num_input_timesteps_by_dataset or dict.fromkeys(
+            self.dataset_names,
+            self.task.num_input_timesteps,
+        )
+        self.n_step_output = self.task.num_output_timesteps_by_dataset or dict.fromkeys(
+            self.dataset_names,
+            self.task.num_output_timesteps,
+        )
 
         self.model = AnemoiModelInterface(
+            config=config,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
+            data_types=data_types,
             metadata=metadata,
-            n_step_input=model_n_step_input,
-            n_step_output=model_n_step_output,
-            supporting_arrays=combined_supporting_arrays,
-            graph_data=graph_data,
-            config=config,
+            n_step_input=self.n_step_input,
+            n_step_output=self.n_step_output,
+            supporting_arrays=supporting_arrays.copy(),
         )
-        self.config = config
+
+        # Output masks read node attributes (e.g. the LAM `cutout_mask`) from the graph,
+        # which the model builds, so they are created once the model exists.
+        self.output_mask: dict[str, BaseMask] = create_output_masks(
+            get_multiple_datasets_config(config.model.output_mask),
+            graph_data=self.model.graph_data,
+            dataset_names=self.dataset_names,
+        )
+
+        # Handle supporting_arrays merge with all output masks
+        for dataset_name, mask in self.output_mask.items():
+            self.model.supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
         self.data_indices = data_indices
 
-        self.save_hyperparameters()
+        # `task` holds runtime objects that cannot be deepcopied by Lightning's
+        # `save_hyperparameters` and are not meaningful to persist in the
+        # checkpoint hyperparameters anyway.
+        self.save_hyperparameters(
+            ignore=["task", *config.diagnostics.checkpoint.exclude_hyperparameters],
+        )
 
         self.statistics_tendencies = statistics_tendencies
 
@@ -253,13 +278,22 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.metrics = torch.nn.ModuleDict()
 
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
-        loss_configs = get_multiple_datasets_config(config.training.training_loss)
-        self._validate_loss_datasets(loss_configs)
-        self._resolve_subgrid(loss_configs)
+        loss_configs = self._build_loss_configs()
+        zero_target_losses = [
+            name
+            for name, loss_config in loss_configs.items()
+            if loss_config is not None and self.n_step_output[name] == 0
+        ]
+        if zero_target_losses:
+            msg = f"Datasets {zero_target_losses} have a training loss configured but no model targets."
+            raise ValueError(msg)
 
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
+        # Losses that declare needs_graph_data (spectral projections, on-the-fly multiscale
+        # smoothers, graph scores) read the model graph.
+        graph_data = self.model.graph_data
         for dataset_name in self.dataset_names:
             if dataset_name not in loss_configs or loss_configs[dataset_name] is None:
                 LOGGER.warning("Dataset %s is skipped for loss & metric computation.", dataset_name)
@@ -267,8 +301,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
             self.target_dataset_names.append(dataset_name)
 
-            fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
-            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
+            # The model graph has one node group per dataset (see BaseGraphModel).
+            data_node_name = dataset_name
 
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
@@ -329,20 +363,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_indices[dataset_name],
             )
 
+        # Loss gradient scaling (arXiv:2306.06079, section 4.3.2) has been removed for now, to be revisited.
+        # The config key stays so existing configs validate; asking for it fails loudly.
         if config.training.loss_gradient_scaling:
-            # Multi-dataset: register hook for each loss
-            for loss_fn in self.loss.values():
-                loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
+            msg = "training.loss_gradient_scaling is temporarily unavailable; set it to false."
+            raise NotImplementedError(msg)
 
         self.is_first_step = True
 
-        LOGGER.info(
-            "GraphModule with n_step_input=%s n_step_output=%s per_dataset_input=%s per_dataset_output=%s",
-            self.n_step_input,
-            self.n_step_output,
-            self.n_step_input_by_dataset,
-            self.n_step_output_by_dataset,
-        )
+        LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
         self.effective_lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
@@ -352,26 +381,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.model_comm_group = None
         self.reader_groups = None
 
-        reader_group_size = self.config.dataloader.read_group_size
+        self.reader_group_size = self.config.dataloader.read_group_size
 
-        self._validate_spatial_processor_target_grid(graph_data)
-
-        self.shard_sizes = {}
-        for dataset_name in self.dataset_names:
-            if dataset_name in self.model.spatial_pre_processors:
-                # Readers deliver the un-projected grid, so shard over the projector's source grid.
-                grid_size = self.model.spatial_pre_processors[dataset_name].input_grid_size
-            else:
-                grid_size = graph_data[dataset_name].num_nodes  # TODO(Mario): Replace by dataset.grid_size
-            self.shard_sizes[dataset_name] = get_balanced_partition_sizes(grid_size, reader_group_size)
+        self._validate_spatial_processor_target_grid(self.model.graph_data)
 
         self.grid_dim = -2
 
         # check sharding support
         self.keep_batch_sharded = self.config.model.keep_batch_sharded
-        read_group_supports_sharding = reader_group_size == self.config.system.hardware.num_gpus_per_model
+        read_group_supports_sharding = self.reader_group_size == self.config.system.hardware.num_gpus_per_model
         assert read_group_supports_sharding or not self.keep_batch_sharded, (
-            f"Reader group size {reader_group_size} does not match the number of GPUs per model "
+            f"Reader group size {self.reader_group_size} does not match the number of GPUs per model "
             f"{self.config.system.hardware.num_gpus_per_model}, but `model.keep_batch_sharded=True` was set. ",
             "Please set `model.keep_batch_sharded=False` or set `dataloader.read_group_size` ="
             "`hardware.num_gpus_per_model`.",
@@ -379,8 +399,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # set flag if loss and metrics support sharding
         self._check_sharding_support()
-
-        LOGGER.debug("n_step_input_by_dataset: %s", self.n_step_input_by_dataset)
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_id = 0
@@ -392,28 +410,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.reader_group_rank = 0
         self.reader_group_size = 1
 
-        self.grid_shard_sizes = dict.fromkeys(self.dataset_names, None)
-        self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
-
-    def _validate_loss_datasets(self, loss_configs: dict) -> None:
-        """Validate that configured losses correspond to datasets with model targets."""
-        loss_datasets = [
-            dataset_name
-            for dataset_name in self.dataset_names
-            if dataset_name in loss_configs and loss_configs[dataset_name] is not None
-        ]
-        zero_target_datasets = [
-            dataset_name for dataset_name in loss_datasets if self.n_step_output_by_dataset[dataset_name] == 0
-        ]
-        if zero_target_datasets:
-            msg = (
-                f"Datasets {zero_target_datasets} have no targets at the configured model frequency but have a "
-                "training loss. Remove their loss configuration or choose compatible output offsets."
-            )
-            raise ValueError(msg)
-        if not loss_datasets:
-            msg = "At least one dataset with model targets must have a training loss configured."
-            raise ValueError(msg)
+        # Static (time-invariant) coordinate tensors, kept on the model device across
+        # steps so transfer_batch_to_device copies them once per run instead of per
+        # batch. Derived state - deliberately not a buffer, nothing to checkpoint.
+        self._static_coord_cache: dict[str, torch.Tensor] = {}
 
     @property
     def plot_adapter(self) -> Any:
@@ -484,84 +484,57 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             },
         )
 
-    def forward(self, x: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
+    def forward(self, x: Batch | dict[str, torch.Tensor], **kwargs) -> Batch:
         """Forward method.
 
         This method calls the model's forward method with the appropriate
         communication group and sharding information.
+
+        Accepts either a :class:`Batch` (preferred) or a legacy
+        ``dict[str, Tensor]`` of per-dataset input tensors. The dict path
+        is a transitional shim until ``_step`` is migrated to construct a
+        :class:`Batch` end-to-end.
         """
         return self.model(
             x,
             model_comm_group=self.model_comm_group,
-            grid_shard_sizes=self.grid_shard_sizes,
             **kwargs,
         )
-
-    def _update_checkpoint_state_dict_for_load(self, checkpoint: dict[str, Any]) -> None:
-        update_cfg = self.config.training.update_ds_stats_on_ckpt_load
-        update_states = update_cfg.states
-        update_tendencies = update_cfg.tendencies
-        state_dict = checkpoint.get("state_dict")
-        if not isinstance(state_dict, dict) or not (update_states or update_tendencies):
-            return
-
-        processor_prefixes: tuple[str, ...] = ()
-        if update_states:
-            processor_prefixes += ("model.pre_processors.", "model.post_processors.")
-        if update_tendencies:
-            processor_prefixes += (
-                "model.pre_processors_tendencies.",
-                "model.post_processors_tendencies.",
-            )
-
-        if not processor_prefixes:
-            return
-        for key in list(state_dict.keys()):
-            if key.startswith(processor_prefixes):
-                del state_dict[key]
-
-        model_state_dict = self.model.state_dict()
-        processor_prefixes += tuple(f"model.{k}" for k in model_state_dict if "model_output_idx" in k)
-        for key, value in model_state_dict.items():
-            full_key = f"model.{key}"
-            if full_key.startswith(processor_prefixes):
-                state_dict[full_key] = value
 
     def on_save_checkpoint(self, checkpoint: dict) -> None:
         checkpoint["task_state"] = self.task.training_runtime_state_dict()
 
-    def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
-        # Apply migrations to handle state_dict key changes from older checkpoints.
-        # These are idempotent: already-migrated checkpoints are unaffected.
-        _trainable_edge_perm_fix_migration(checkpoint, model=self)
-        self._update_checkpoint_state_dict_for_load(checkpoint)
+    def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        # The task's training runtime state (e.g. rollout step) is resume state the
+        # checkpoint pipeline does not apply, so restore it here.
+        self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
 
-        self._ckpt_model_name_to_index = {
-            dataset_name: data_indices.name_to_index
-            for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
-        }
+        # A resume is loaded once, by Trainer.fit(ckpt_path=), which calls this hook
+        # on the dict it is about to load: this is the only place the corrections can
+        # run for it (the pipeline resolves the file and loads nothing). Lightning
+        # holds a reference to this dict, so a replacement (a migration may return a
+        # new object) is written back in place rather than rebound.
+        trainer = getattr(self, "_trainer", None)
+        corrected = apply_checkpoint_corrections(checkpoint, self, self.config)
+        if corrected is not checkpoint:
+            checkpoint.clear()
+            checkpoint.update(corrected)
 
-        if not self.config.training.load_weights_only:
-            # Checkpoint conversion loads the module without creating a Trainer; only a
-            # training run that continues from the checkpoint takes over its seed.
-            trainer = getattr(self, "_trainer", None)
-            if trainer is not None:
-                self._restore_base_seed(checkpoint)
-            self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
+        # Checkpoint conversion loads the module without creating a Trainer; only a
+        # training run that continues from the checkpoint takes over its seed.
+        if trainer is not None:
+            self._restore_base_seed(checkpoint)
 
-            # Anemoi constructs the task and datasets from the config before Lightning
-            # restores their checkpoint state. Now that the checkpoint rollout is restored,
-            # update any constructed datasets so workers load the required input and target
-            # time steps. Checkpoint conversion creates no datamodule either, so only
-            # synchronize if a datamodule is attached.
-            if trainer is not None and trainer.datamodule is not None:
-                trainer.datamodule.sync_dataset_state()
+        # Anemoi constructs the task and datasets from the config before Lightning
+        # restores their checkpoint state. Now that the checkpoint rollout is restored,
+        # update any constructed datasets so workers load the required input and target
+        # time steps. Checkpoint conversion creates no datamodule either, so only
+        # synchronize if a datamodule is attached.
+        if trainer is not None and trainer.datamodule is not None:
+            trainer.datamodule.sync_dataset_state()
 
-        # Extract variables_metadata for unit compatibility check
-        self._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(
-            checkpoint,
-            self._ckpt_model_name_to_index,
-        )
+        preserve_anemoi_metadata(self, checkpoint)
+        extract_checkpoint_variables_metadata(self, checkpoint)
 
     def _restore_base_seed(self, checkpoint: dict) -> None:
         """Continue with the checkpoint's base seed, unless ``training.seed`` sets one.
@@ -657,7 +630,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def update_scalers(self, callback: AvailableCallbacks) -> None:
         """Update scalers, calling the defined function on them, updating if not None."""
-        # Multi-dataset case: {'dataset_a': {'nan_mask_weights': scaler, ...}, 'dataset_b': {...}}
         for dataset_name, dataset_scalers in self.updating_scalars.items():
             for name, scaler_builder in dataset_scalers.items():
                 self._update_scaler_for_dataset(
@@ -695,55 +667,213 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.reader_group_rank = reader_group_rank
         self.reader_group_size = reader_group_size
 
+    def _grid_shard_sizes(self, source: Source | Batch) -> ShardSizes | DatasetShardSizes:
+        """Grid shard sizes of the source, or per dataset when given a Batch.
+
+        Returns None when the source is replicated (not sharded) or tabular.
+        """
+        if isinstance(source, Batch):
+            return {name: self._grid_shard_sizes(dataset_source) for name, dataset_source in source.items()}
+        return source.grid_shard_sizes
+
+    def _grid_shard_slice(self, source: Source) -> slice | None:
+        """Local grid shard slice for ``source``, derived from its shard sizes.
+
+        Returns None when the source is replicated (not sharded).
+        """
+        # Tabular sources report no grid shard sizes: they have no per-grid scalers/masks to slice.
+        shard_sizes = source.grid_shard_sizes
+        if not shard_sizes:
+            return None
+        assert isinstance(shard_sizes, list) and all(
+            isinstance(s, int) for s in shard_sizes
+        ), "shard_sizes must be a list of integers"
+        start, end = get_partition_range(shard_sizes, self.model_comm_group_rank)
+        return slice(start, end)
+
     def _prepare_tensors_for_loss(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: Source,
+        y: Source,
         dataset_name: str,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor, slice | None]:
+    ) -> tuple[Source, Source, slice | None]:
         """Prepare tensors for loss computation, handling sharding if necessary.
 
         Parameters
         ----------
-        y_pred : torch.Tensor
-            Predicted values
-        y : torch.Tensor
-            Target values
+        y_pred : Source
+            Predicted values.
+        y : Source
+            Target values.
         dataset_name : str
             Dataset being processed.
         validation_mode : bool
-            Whether in validation mode
+            Whether in validation mode.
 
         Returns
         -------
-        tuple[torch.Tensor, torch.Tensor, slice | None]
-            Prepared y_pred, y, and grid_shard_slice
+        tuple[Source, Source, slice | None]
+            Prepared y_pred, y, and grid_shard_slice.
         """
-        # Handle multi-dataset case for grid shard slice and sizes
-        grid_shard_slice = self.grid_shard_slice[dataset_name]
-        grid_shard_sizes = self.grid_shard_sizes[dataset_name]
+        # Sharding metadata now lives on the source views (None when replicated).
+        # A single gather decision is applied to both views, so they must agree.
+        y_shard_sizes = getattr(y, "shard_sizes", None)
+        y_pred_shard_sizes = getattr(y_pred, "shard_sizes", None)
+        if y_shard_sizes != y_pred_shard_sizes:
+            msg = (
+                f"Prediction and target sharding disagree for dataset {dataset_name!r}: "
+                f"prediction shard_sizes={y_pred_shard_sizes}, target shard_sizes={y_shard_sizes}. "
+                "Both views must be sharded identically (or both replicated) before the loss."
+            )
+            raise ValueError(msg)
 
-        is_sharded = grid_shard_slice is not None
+        # grid_shard_slice is gridded-only (it slices per-grid scalers/masks), so the gather
+        # decision must come from the shard metadata itself - otherwise a sharded tabular
+        # view would be left un-gathered and the loss computed on a partial grid.
+        grid_shard_slice = self._grid_shard_slice(y)
+        is_sharded = y_shard_sizes is not None
 
         sharding_supported = (self.loss_supports_sharding) and (  # loss calculated in training and validation mode
             self.metrics_support_sharding or not validation_mode
         )
 
         if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
-            y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, grid_shard_sizes, self.model_comm_group)
-            y_full = gather_tensor(torch.clone(y), self.grid_dim, grid_shard_sizes, self.model_comm_group)
+            y_pred_full = y_pred.allgather(self.model_comm_group)
+            y_full = y.allgather(self.model_comm_group)
             final_grid_shard_slice = None
         else:
             y_pred_full, y_full = y_pred, y
             final_grid_shard_slice = grid_shard_slice
 
+        if final_grid_shard_slice == slice(None):
+            final_grid_shard_slice = None
+
         return y_pred_full, y_full, final_grid_shard_slice
+
+    @staticmethod
+    def _evaluate_loss(
+        loss: Callable,
+        pred: Source,
+        target: Source,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Check training precision before promoting inputs and evaluating the loss."""
+        full_precision = (torch.float32, torch.float64)
+        assert (
+            pred.dtype in full_precision
+        ), f"Prediction for {pred.name!r} must be float32 or float64, got {pred.dtype}."
+        assert (
+            target.dtype in full_precision
+        ), f"Target for {target.name!r} must be float32 or float64, got {target.dtype}."
+        dtype = torch.promote_types(torch.promote_types(pred.dtype, target.dtype), torch.float32)
+        pred = pred.map_data(lambda data: data.to(dtype))
+        target = target.map_data(lambda data: data.to(dtype))
+        with torch.autocast(device_type=pred.device.type, enabled=False):
+            return loss(pred, target, **kwargs)
+
+    @staticmethod
+    def _nan_flags_per_variable(source: Source, variables: Mapping[str, Any]) -> tuple[list[int], torch.Tensor] | None:
+        """Return the positions in ``source`` of the ``variables`` it holds, and whether each contains a NaN.
+
+        The flags stay on the device, so callers can check several sources with a single sync.
+        Returns ``None`` if ``source`` holds none of ``variables``.
+        """
+        indices = [i for i, name in enumerate(source.variables) if name in variables]
+        if not indices:
+            return None
+        samples = source.data if source.is_tabular else [source.data]
+        nan_per_variable = torch.zeros(len(indices), dtype=torch.bool, device=samples[0].device)
+        for sample in samples:
+            variables_axis = source.layout.axis("variables", ndim=sample.ndim)
+            values = sample.index_select(variables_axis, torch.as_tensor(indices, device=sample.device))
+            nan_per_variable |= torch.isnan(values.movedim(variables_axis, -1)).reshape(-1, len(indices)).any(dim=0)
+        return indices, nan_per_variable
+
+    @staticmethod
+    def _variables_with_nans(source: Source, indices: list[int], nan_per_variable: torch.Tensor) -> list[str]:
+        """Return the names of the flagged variables."""
+        return [source.variables[i] for i, has_nan in zip(indices, nan_per_variable.tolist(), strict=True) if has_nan]
+
+    def _check_nan_inputs(self, batch: Batch) -> None:
+        """Fail loudly when model inputs still contain NaNs after preprocessing.
+
+        The model has no NaN handling: one NaN input spreads through the graph and makes the whole
+        prediction NaN. Losses with ``ignore_nans=True`` then mask every point and report a loss of 0
+        with no gradient, so training silently stops learning. Missing input values must be filled
+        by an imputer in the dataset's processors. Only the model's input variables are checked.
+
+        Parameters
+        ----------
+        batch : Batch
+            Preprocessed model inputs.
+        """
+        flags = {
+            name: self._nan_flags_per_variable(source, self.data_indices[name].model.input.name_to_index)
+            for name, source in batch.items()
+            if name in self.data_indices
+        }
+        flags = {name: flag for name, flag in flags.items() if flag is not None}
+        if not flags or not bool(torch.cat([nan_per_variable for _, nan_per_variable in flags.values()]).any()):
+            return
+
+        nan_inputs = {
+            name: nan_variables
+            for name, flag in flags.items()
+            if (nan_variables := self._variables_with_nans(batch[name], *flag))
+        }
+        msg = (
+            f"Model inputs contain NaNs after preprocessing: {nan_inputs}. The model cannot handle NaN inputs: "
+            "the whole prediction becomes NaN, and losses with ignore_nans=True then report 0. Add an imputer "
+            "(e.g. anemoi.models.preprocessing.imputer.InputImputer) for these variables to the dataset's processors."
+        )
+        raise ValueError(msg)
+
+    def _check_nan_targets(self, y: Source, dataset_name: str, losses: dict[str, torch.nn.Module]) -> None:
+        """Fail loudly when targets contain NaNs that a loss or metric cannot handle.
+
+        Targets are not imputed, so missing values reach the losses as NaNs. A loss or metric
+        with ``ignore_nans=False`` would then return NaN. The check only runs when such a loss is
+        configured for ``dataset_name``, and only looks at the model's output variables.
+
+        Parameters
+        ----------
+        y : Source
+            Target values.
+        dataset_name : str
+            Dataset name.
+        losses : dict[str, torch.nn.Module]
+            Losses or metrics to check, keyed by the name used in the error message.
+        """
+        # Only the leaf losses compute anything: a container such as CombinedLoss keeps its own
+        # (unused) ignore_nans=False even when all of its children ignore NaNs.
+        intolerant = [
+            name
+            for name, loss in losses.items()
+            if any(
+                getattr(leaf, "ignore_nans", True) is False
+                for leaf in (loss.iter_leaf_losses() if isinstance(loss, BaseLoss) else loss.modules())
+            )
+        ]
+        if not intolerant:
+            return
+
+        flags = self._nan_flags_per_variable(y, self.data_indices[dataset_name].model.output.name_to_index)
+        if flags is None or not bool(flags[1].any()):
+            return
+
+        nan_variables = self._variables_with_nans(y, *flags)
+        msg = (
+            f"Dataset '{dataset_name}': the targets of {nan_variables} contain NaNs, but {intolerant} "
+            "use ignore_nans=False, so they would be NaN. Targets are not imputed; set ignore_nans: True "
+            "for these losses and metrics."
+        )
+        raise ValueError(msg)
 
     def _compute_loss(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: Source,
+        y: Source,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
@@ -754,27 +884,28 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        y_pred : torch.Tensor
-            Predicted values
-        y : torch.Tensor
-            Target values
+        y_pred : Source
+            Predicted values.
+        y : Source
+            Target values.
         grid_shard_slice : slice | None
-            Grid shard slice for distributed training
+            Grid shard slice for distributed training.
         dataset_name : str
-            Dataset name for multi-dataset scenarios
+            Dataset name for multi-dataset scenarios.
         pred_layout : IndexSpace | str | None
             Variable layout of the predictions.
         target_layout : IndexSpace | str | None
             Variable layout of the targets.
         **_kwargs
-            Additional arguments
+            Additional arguments.
 
         Returns
         -------
         torch.Tensor
-            Computed loss
+            Computed loss.
         """
         loss = self.loss[dataset_name]
+        self._check_nan_targets(y, dataset_name, {"training_loss": loss})
         loss_kwargs = {
             "grid_shard_slice": grid_shard_slice,
             "group": self.model_comm_group,
@@ -783,21 +914,22 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             loss_kwargs["pred_layout"] = pred_layout
         if target_layout is not None:
             loss_kwargs["target_layout"] = target_layout
+
         if getattr(loss, "needs_shard_layout_info", False):
             # grid_shard_sizes must stay consistent with grid_shard_slice: if the tensors were
             # gathered to the full grid (grid_shard_slice is None), the loss must be told it is
             # not sharded, otherwise it would re-shard an already-full tensor. See _prepare_tensors_for_loss.
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
-                grid_shard_sizes=self.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None,
+                grid_shard_sizes=self._grid_shard_sizes(y),
             )
 
-        return loss(y_pred, y, **loss_kwargs)
+        return self._evaluate_loss(loss, y_pred, y, **loss_kwargs)
 
     def _compute_metrics(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: Source,
+        y: Source,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
@@ -809,12 +941,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        y_pred : torch.Tensor
-            Predicted values
-        y : torch.Tensor
-            Target values
+        y_pred : Source
+            Predicted values.
+        y : Source
+            Target values.
         grid_shard_slice : slice | None
-            Grid shard slice for distributed training
+            Grid shard slice for distributed training.
         dataset_name : str | None
             Dataset name for multi-dataset scenarios.
         pred_layout : IndexSpace | str | None
@@ -829,7 +961,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Returns
         -------
         dict[str, torch.Tensor]
-            Computed metrics
+            Computed metrics.
         """
         return self.calculate_val_metrics(
             y_pred,
@@ -843,31 +975,31 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def compute_dataset_loss_metrics(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: Source,
+        y: Source,
         validation_mode: bool = False,
         dataset_name: str | None = None,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], Source]:
         """Compute loss and metrics for the given predictions and targets.
 
         Parameters
         ----------
-        y_pred : torch.Tensor
-            Predicted values
-        y : torch.Tensor
-            Target values
+        y_pred : Source
+            Predicted values.
+        y : Source
+            Target values.
         validation_mode : bool, optional
-            Whether to compute validation metrics
+            Whether to compute validation metrics.
         dataset_name : str | None, optional
             Dataset being processed.
         **kwargs
-            Additional arguments to pass to loss computation
+            Additional arguments to pass to loss computation.
 
         Returns
         -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]
-            Loss, metrics dictionary (if validation_mode), and full predictions
+        tuple[torch.Tensor | None, dict[str, torch.Tensor], Source]
+            Loss, metrics dictionary (if validation_mode), and full predictions.
         """
         # Prepare tensors for loss/metrics computation
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
@@ -900,31 +1032,31 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def compute_loss_metrics(
         self,
-        y_pred: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        y_pred: Batch,
+        y: Batch,
         validation_mode: bool = False,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], Batch]:
         """Compute loss and metrics for the given predictions and targets.
 
         Parameters
         ----------
-        y_pred : dict[str, torch.Tensor]
-            Predicted values
-        y : dict[str, torch.Tensor]
-            Target values
+        y_pred : Batch
+            Predicted values.
+        y : Batch
+            Target values.
         validation_mode : bool, optional
-            Whether to compute validation metrics
+            Whether to compute validation metrics.
         **kwargs
-            Additional arguments to pass to loss computation
+            Additional arguments to pass to loss computation.
 
         Returns
         -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]
-            Loss, metrics dictionary (if validation_mode), and full predictions
+        tuple[torch.Tensor | None, dict[str, torch.Tensor], Batch]
+            Loss, metrics dictionary (if validation_mode), and full predictions.
         """
-        assert isinstance(y_pred, dict), "y_pred must be a dict keyed by dataset name"
-        assert isinstance(y, dict), "y must be a dict keyed by dataset name"
+        assert isinstance(y_pred, Batch), "y_pred must be a dict keyed by dataset name"
+        assert isinstance(y, Batch), "y must be a dict keyed by dataset name"
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.target_dataset_names:
@@ -953,7 +1085,55 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             for metric_name, metric_value in dataset_metrics.items():
                 metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
 
-        return total_loss, metrics_next, y_preds
+        return total_loss, metrics_next, Batch(y_preds)
+
+    def _map_dataset_processors(self, batch: Batch, processors: Any, **kwargs) -> Batch:
+        """Apply per-dataset processors without mutating the selected batch."""
+        processed_batch = batch
+        for dataset_name, processor in processors.items():
+            if dataset_name in batch:
+                processed_batch = processed_batch.replace(
+                    dataset_name,
+                    processor(batch[dataset_name], in_place=False, **kwargs),
+                )
+        return processed_batch
+
+    def preprocess_inputs(self, batch: Batch) -> Batch:
+        """Transform selected model inputs into model-input space, and check that no NaNs are left."""
+        processed = self._map_dataset_processors(batch, self.model.pre_processors)
+        self._check_nan_inputs(processed)
+        return processed
+
+    def preprocess_targets(self, batch: Batch) -> Batch:
+        """Normalize selected targets while preserving missing values."""
+        return self._map_dataset_processors(batch, self.model.pre_processors, skip_imputation=True)
+
+    def postprocess_targets(
+        self,
+        batch: Batch,
+        layouts: dict[str, IndexSpace | str | None] | IndexSpace | str | None = None,
+    ) -> Batch:
+        """Transform normalized targets to physical space without mutating them."""
+        processed = batch
+        for dataset_name in self.model.post_processors:
+            if dataset_name not in batch:
+                continue
+            layout = layouts.get(dataset_name) if isinstance(layouts, dict) else layouts
+            processed = processed.replace(
+                dataset_name,
+                self._postprocess_dataset_view(batch[dataset_name], dataset_name, layout),
+            )
+        return processed
+
+    def _postprocess_dataset_view(
+        self,
+        view: Source,
+        dataset_name: str,
+        layout: IndexSpace | str | None = None,
+    ) -> Source:
+        """Postprocess one view using the same metadata alignment as batch targets."""
+        aligned = self._align_view_to_layout(view, layout, dataset_name)
+        return self.model.post_processors[dataset_name](aligned, in_place=False)
 
     def _dataset_loss_metric_name(self, dataset_name: str) -> str:
         """Metric key under which the validation loss of ``dataset_name`` is logged."""
@@ -961,133 +1141,49 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
         return f"{dataset_name}_{loss_name}_loss"
 
-    def on_after_batch_transfer(self, batch: dict[str, torch.Tensor], _: int) -> dict[str, torch.Tensor]:
+    def on_after_batch_transfer(self, batch: Batch, _: int) -> Batch:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
 
         Also normalize the batch in-place if needed.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
-            Batch to transfer
+        batch : Batch
+            Batch to transfer.
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Batch after transfer
+        Batch
+            Batch after transfer.
         """
-        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
+        assert isinstance(batch, Batch), "batch must be a Batch instance"
         # Gathering/sharding of batch
-        batch = self._setup_batch_sharding(batch)
+        if not self.keep_batch_sharded:
+            batch = self.allgather_batch(batch)
 
         # Spatial preprocessing (e.g. CrossGridProjector for downscaling).
         # Owned by the model; applied before normalization so projectors see raw values.
-        for ds_name, projector in self.model.spatial_pre_processors.items():
-            if ds_name in batch:
-                batch[ds_name], output_grid_shard_sizes = projector(
-                    batch[ds_name],
-                    model_comm_group=self.model_comm_group,
-                    grid_shard_sizes=self.grid_shard_sizes[ds_name],
-                )
-                self.grid_shard_sizes[ds_name] = output_grid_shard_sizes
-                if output_grid_shard_sizes is None:
-                    self.grid_shard_slice[ds_name] = None
-                else:
-                    start, end = get_partition_range(
-                        partition_sizes=output_grid_shard_sizes,
-                        partition_id=self.model_comm_group_rank,
-                    )
-                    self.grid_shard_slice[ds_name] = slice(start, end)
+        batch = self.model.apply_spatial_pre_processors(batch, model_comm_group=self.model_comm_group)
 
-        # Batch normalization
-        batch = self._normalize_batch(batch)
+        # Debug-log the batch contents (per-dataset shape + layout) so that
+        # layout/shape mismatches can be diagnosed from a real run.
+        LOGGER.debug("on_after_batch_transfer batch:\n%r", batch)
 
-        # Prepare scalers, e.g. init delayed scalers and update scalers
-        self._prepare_loss_scalers()
-
-        return batch
-
-    def _setup_batch_sharding(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Setup batch sharding before every step.
-
-        If the batch is sharded, it will be setup with the grid shard sizes and slice.
-        Otherwise, the batch will be allgathered.
-
-        Parameters
-        ----------
-        batch : dict[str, torch.Tensor]
-            Batch to setup
-
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Batch after setup
-        """
-        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
-        self.grid_shard_sizes = {}
-        self.grid_shard_slice = {}
-
-        for dataset_name in self.dataset_names:
-            if self.keep_batch_sharded and self.model_comm_group_size > 1:
-                self.grid_shard_sizes[dataset_name] = self.shard_sizes[dataset_name]
-                start, end = get_partition_range(
-                    partition_sizes=self.grid_shard_sizes[dataset_name],
-                    partition_id=self.reader_group_rank,
-                )
-                self.grid_shard_slice[dataset_name] = slice(start, end)
-            else:
-                self.grid_shard_sizes[dataset_name] = None
-                self.grid_shard_slice[dataset_name] = None
-                batch[dataset_name] = self.allgather_batch(batch[dataset_name], self.shard_sizes[dataset_name])
         return batch
 
     def transfer_batch_to_device(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: Batch,
         device: torch.device,
         _dataloader_idx: int = 0,
-    ) -> dict[str, torch.Tensor]:
-        """Transfer batch to device, handling dictionary batches."""
-        transferred_batch = {}
-        for dataset_name, dataset_batch in batch.items():
-            transferred_batch[dataset_name] = (
-                dataset_batch.to(device, non_blocking=True)
-                if isinstance(dataset_batch, torch.Tensor)
-                else dataset_batch
-            )
-        return transferred_batch
-
-    def _normalize_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Normalize batch for training and validation before every step.
-
-        Parameters
-        ----------
-        batch : dict[str, torch.Tensor]
-            Batch to prepare
-
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Normalized batch
-        """
-        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
-        for dataset_name in batch:
-            batch[dataset_name] = self.model.pre_processors[dataset_name](batch[dataset_name])  # normalized in-place
-        return batch
-
-    def _prepare_loss_scalers(self) -> None:
-        """Prepare scalers for training and validation before every step."""
-        # Delayed scalers need to be initialized after the pre-processors once
-        if self.is_first_step:
-            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
-            self.is_first_step = False
-        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
-        return
+    ) -> Batch:
+        """Transfer the :class:`Batch` to ``device``, reusing cached static coordinates."""
+        return batch.to(device, non_blocking=True, static_coord_cache=self._static_coord_cache)
 
     @abstractmethod
     def _step(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: Batch,
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         pass
@@ -1116,7 +1212,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     metrics[name] = metrics.get(name, 0.0) + value / num_loss_steps
         return TrainingStepOutput(loss=loss, metrics=metrics, predictions=predictions)
 
-    def allgather_batch(self, batch: torch.Tensor, grid_shard_sizes: list[int] | None) -> torch.Tensor:
+    def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
         """Allgather the shards of a grid-sharded tensor across the reader group.
 
         The shard sizes must be supplied by the caller because a tensor may live on the
@@ -1131,37 +1227,47 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         ----------
         batch : torch.Tensor
             Grid-shard of the current reader rank.
-        grid_shard_sizes : list[int] | None
-            Shard size per rank, or ``None`` when the tensor is already replicated.
 
         Returns
         -------
         torch.Tensor
             Allgathered (full) tensor.
         """
-        if grid_shard_sizes is None or self.reader_group_size == 1:
-            return batch  # already have the full grid
+        # Without reader groups (single-device training) there is a single reader, so nothing is
+        # sharded; Source.allgather treats a None group as single-rank and validates any shard sizes.
+        group = None if self.reader_groups is None else self.reader_groups[self.reader_group_id]
+        return batch.allgather(group)
 
-        expected_size = grid_shard_sizes[self.reader_group_rank]
-        if batch.shape[self.grid_dim] != expected_size:
-            msg = (
-                f"Expected grid shard of size {expected_size} on reader rank {self.reader_group_rank}, "
-                f"got {batch.shape[self.grid_dim]}. The supplied shard sizes describe a different grid "
-                f"than the tensor."
-            )
-            raise ValueError(msg)
+    def _align_view_to_layout(
+        self,
+        view: Source,
+        layout: IndexSpace | str | None,
+        dataset_name: str,
+    ) -> Source:
+        """Select the data and metadata for the requested variable index space.
 
-        return gather_tensor(
-            batch,
-            self.grid_dim,
-            grid_shard_sizes,
-            self.reader_groups[self.reader_group_id],
-        )
+        Views already in that space are returned unchanged.
+        """
+        layout = IndexSpace.DATA_FULL if layout is None else IndexSpace(layout)
+        data_indices = self.data_indices[dataset_name]
+        if layout == IndexSpace.MODEL_OUTPUT:
+            names = list(data_indices.model.output.ordered_names)
+        elif layout == IndexSpace.DATA_OUTPUT:
+            names = list(data_indices.data.output.ordered_names)
+        else:
+            names = list(data_indices.data_full_ordered_names)
+
+        # The view's metadata already matches the layout's variable set.
+        if list(view.variables) == names:
+            return view
+
+        positions = [view.name_to_index[name] for name in names]
+        return view.select(variables=positions)
 
     def calculate_val_metrics(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: Source,
+        y: Source,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         step: int | None = None,
@@ -1174,16 +1280,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        y_pred : torch.Tensor
-            Predicted ensemble
-        y : torch.Tensor
+        y_pred: Source
+            Predicted ensemble.
+        y: Source
             Ground truth (target).
         grid_shard_slice : slice | None, optional
             Grid shard slice for distributed validation.
         dataset_name : str | None, optional
             Dataset being processed.
         step : int | None, optional
-            Step number
+            Step number.
         pred_layout : IndexSpace | str | None, optional
             Variable layout of the predictions.
         target_layout : IndexSpace | str | None, optional
@@ -1196,17 +1302,26 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Returns
         -------
         val_metrics : dict[str, torch.Tensor]
-            validation metrics and predictions
+            validation metrics and predictions.
         """
         metrics = {}
 
         # Handle multi-dataset case for post-processors
-        post_processor = self.model.post_processors[dataset_name]
         metrics_dict = self.metrics[dataset_name]
+        self._check_nan_targets(
+            y,
+            dataset_name,
+            {f"validation_metrics.{name}": metric for name, metric in metrics_dict.items()},
+        )
         val_metric_ranges = self.val_metric_ranges[dataset_name]
 
-        y_postprocessed = post_processor(y, in_place=False)
-        y_pred_postprocessed = post_processor(y_pred, in_place=False)
+        # y (target) and y_pred (model output) can live in different index
+        # spaces and therefore hold different numbers of variables along the
+        # variable axis.
+        # The metadata of the prediction view must be realigned to
+        # the variables actually present in its tensor *before* the normalisation
+        y_postprocessed = self._postprocess_dataset_view(y, dataset_name, target_layout)
+        y_pred_postprocessed = self._postprocess_dataset_view(y_pred, dataset_name, pred_layout)
 
         suffix = "" if step is None else f"/{step + 1}"
         for metric_name, metric in metrics_dict.items():
@@ -1222,8 +1337,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 metric_step_name = f"{metric_name}_metric/{dataset_name}/{mkey}{suffix}"
                 if metric.has_scaler_for_dim(TensorDim.VARIABLE):
                     exception_msg = (
-                        "Validation metrics cannot be scaled over the variable dimension"
-                        " in the post processed space."
+                        "Validation metrics cannot be scaled over the variable dimension in the post processed space."
                     )
                     raise ValueError(exception_msg)
 
@@ -1247,7 +1361,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     # told it is not sharded, otherwise it would re-shard an already-full tensor.
                     metric_kwargs.update(
                         grid_dim=self.grid_dim,
-                        grid_shard_sizes=self.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None,
+                        grid_shard_sizes=self._grid_shard_sizes(y),
                     )
 
                 metric_value = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
@@ -1258,7 +1372,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         return metrics
 
-    def on_train_batch_start(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
+    def on_train_batch_start(self, batch: Batch, batch_idx: int) -> None:
         """Seed the random number generators for this training batch.
 
         The seed depends only on the base seed, the model communication group, the
@@ -1279,11 +1393,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         seed_random_generators(seed)
         LOGGER.debug("Epoch %d, batch %d: random number generators seeded with %d", self.current_epoch, batch_idx, seed)
 
-    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
         del batch_idx
-        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
-        # Get batch size (handle dict of tensors)
-        batch_size = next(iter(batch.values())).shape[0]
+        assert isinstance(batch, Batch), "batch must be a Batch instance"
 
         step_output = self._step(batch)
         train_loss = step_output.loss
@@ -1295,20 +1407,20 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             on_step=True,
             prog_bar=True,
             logger=self.logger_enabled,
-            batch_size=batch_size,
+            batch_size=batch.batch_size,
             sync_dist=True,
         )
 
-        self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled)
+        self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled, batch_size=batch.batch_size)
 
         return train_loss
 
-    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> TrainingStepOutput:
+    def validation_step(self, batch: Batch, batch_idx: int) -> TrainingStepOutput:
         """Calculate the loss over a validation batch using the training loss function.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
+        batch : Batch
             Validation batch.
         batch_idx : int
             Batch index.
@@ -1319,10 +1431,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Output of the validation step.
         """
         del batch_idx
-        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
-
-        # Get batch size (handle dict of tensors)
-        batch_size = next(iter(batch.values())).shape[0]
+        assert isinstance(batch, Batch), "batch must be a Batch instance"
 
         with torch.no_grad():
             step_output = self._step(batch, validation_mode=True)
@@ -1336,7 +1445,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             on_step=True,
             prog_bar=True,
             logger=self.logger_enabled,
-            batch_size=batch_size,
+            batch_size=batch.batch_size,
             sync_dist=True,
         )
 
@@ -1348,7 +1457,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 on_step=False,
                 prog_bar=False,
                 logger=self.logger_enabled,
-                batch_size=batch_size,
+                batch_size=batch.batch_size,
                 sync_dist=True,
             )
 
@@ -1426,7 +1535,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def _validate_spatial_processor_target_grid(self, graph_data: HeteroData) -> None:
         """Check each spatial projector's target grid against its dataset's graph nodes."""
         for dataset_name, projector in self.model.spatial_pre_processors.items():
+            if dataset_name not in graph_data.node_types:
+                # Datasets on a dynamic graph (e.g. observations) have no static node set.
+                continue
             dataset_grid_size = graph_data[dataset_name].num_nodes
+
             if projector.output_grid_size != dataset_grid_size:
                 msg = (
                     f"Spatial processor for dataset {dataset_name!r} produces a target grid of "
@@ -1458,7 +1571,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 )
                 raise ValueError(msg)
 
-            if reader.grid_size != projector.input_grid_size:
+            if reader.data_type == "gridded" and reader.grid_size != projector.input_grid_size:
                 msg = (
                     f"Spatial processor for dataset {dataset_name!r} expects a source grid of "
                     f"{projector.input_grid_size} points, but the dataset provides {reader.grid_size}. "
@@ -1476,14 +1589,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             self.logger.log_hyperparams(hyper_params)
 
-    def _resolve_subgrid(self, config: dict) -> None:
-        def per_dataset_resolve(per_dataset_config: dict, dataset_name: str) -> None:
-            for k, v in per_dataset_config.items():
-                if isinstance(v, dict):
-                    per_dataset_resolve(v, dataset_name)
-                elif (k, v) == ("subgrid", "output_mask"):
-                    per_dataset_config[k] = self.output_mask[dataset_name].as_tuple()
-
-        for dataset_name, dataset_config in config.items():
-            if dataset_config is not None:
-                per_dataset_resolve(dataset_config, dataset_name)
+    def _build_loss_configs(self) -> dict:
+        """Fetch the per-dataset training-loss configs and resolve pre-defined entries."""
+        loss_configs = get_multiple_datasets_config(self.config.training.training_loss)
+        resolve_subgrid(loss_configs, self.output_mask)
+        return loss_configs

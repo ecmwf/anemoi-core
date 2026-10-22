@@ -141,12 +141,6 @@ class VariableMaskingScalerSchema(BaseModel):
     "Flag to invert the variable mask."
 
 
-class NaNMaskScalerSchema(BaseModel):
-    target_: Literal["anemoi.training.losses.scalers.NaNMaskScaler"] = Field(..., alias="_target_")
-    use_processors_tendencies: bool = Field(default=False)
-    "Flag to include processors for tendencies when building the loss mask."
-
-
 class TendencyScalerTargets(StrEnum):
     stdev = "anemoi.training.losses.scalers.StdevTendencyScaler"
     var = "anemoi.training.losses.scalers.VarTendencyScaler"
@@ -249,7 +243,6 @@ ScalerSchema = (
     | VariableLevelScalerSchema
     | VariableMaskingScalerSchema
     | TendencyScalerSchema
-    | NaNMaskScalerSchema
     | GraphNodeAttributeScalerSchema
     | TimeStepScalerSchema
     | UniformTimeStepScalerSchema
@@ -433,6 +426,21 @@ class MultiscaleConfigOnTheFlySchema(BaseModel):
         return self
 
 
+def _check_wrapper_ignore_nans(wrapper: str, ignore_nans: bool, inner: BaseModel) -> None:
+    """Reject ``ignore_nans`` on a loss wrapper whose inner loss does not ignore NaNs.
+
+    Mirrors ``BaseLossWrapper``: the wrapper's effective ``ignore_nans`` is its own value or-ed with
+    the inner loss's, and a wrapper that ignores NaNs around an inner loss that does not is an error.
+    The flag is not passed down, so set it on the inner loss.
+    """
+    if ignore_nans and not inner.ignore_nans:
+        msg = (
+            f"{wrapper} sets 'ignore_nans: true' but its inner loss does not. "
+            "Set 'ignore_nans: true' on the inner loss too (the wrapper does not pass it down)."
+        )
+        raise ValueError(msg)
+
+
 class TimeAggregateLossWrapperSchema(BaseModel):
     """Schema for TimeAggregateLossWrapper used inside CombinedLoss."""
 
@@ -443,6 +451,8 @@ class TimeAggregateLossWrapperSchema(BaseModel):
     "Inner loss function applied to each time-aggregated output."
     scalers: list[str] | None = None
     "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
+    ignore_nans: bool = False
+    "Allow nans in the loss. Or-ed with ``loss_fn.ignore_nans``; ``true`` requires it on ``loss_fn`` too."
 
     @field_validator("loss_fn", mode="before")
     @classmethod
@@ -462,6 +472,11 @@ class TimeAggregateLossWrapperSchema(BaseModel):
                     v["scalers"] = []
         return v
 
+    @model_validator(mode="after")
+    def check_ignore_nans_matches_inner(self) -> Self:
+        _check_wrapper_ignore_nans("TimeAggregateLossWrapper", self.ignore_nans, self.loss_fn)
+        return self
+
 
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
@@ -478,6 +493,8 @@ class MultiScaleLossSchema(BaseModel):
     weights: list[float]
     multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
     sparse_projector_num_chunks: PositiveInt = 1
+    ignore_nans: bool = False
+    "Allow nans in the loss. Or-ed with ``per_scale_loss.ignore_nans``; ``true`` requires it there too."
     # Deprecated: pass inside multiscale_config instead.
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
@@ -499,6 +516,11 @@ class MultiScaleLossSchema(BaseModel):
                 with open_dict(v):
                     v["scalers"] = []
         return v
+
+    @model_validator(mode="after")
+    def check_ignore_nans_matches_inner(self) -> Self:
+        _check_wrapper_ignore_nans("MultiscaleLossWrapper", self.ignore_nans, self.per_scale_loss)
+        return self
 
     @model_validator(mode="after")
     def check_no_deprecated_mixed_with_on_the_fly(self) -> Self:
@@ -582,7 +604,7 @@ class SpectralLossSchema(BaseLossSchema):
 
     transform: Literal["fft2d", "dct2d", "regular_sht", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
-    subgrid: tuple[int, int | None] | str | None = None
+    subgrid: tuple[int, int | None] | Literal["output_mask"] | None = None
     """Optional slice or string to select a subgrid before the transform."""
     projection_config: SpectralProjectionConfigSchema | None = None
     """Optional sparse projection applied to the data before the spectral transform."""
@@ -774,6 +796,22 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
     "Rebuild tendency pre/post-processing statistics from the current dataset."
 
 
+class CheckpointPipelineSchema(BaseModel):
+    """Declarative checkpoint pipeline consumed by ``build_checkpoint_pipeline``.
+
+    Each block is a Hydra ``_target_`` config: at most one acquisition ``source`` and
+    one ``loading`` strategy, plus an ordered list of ``modifiers`` applied after
+    loading. A ``None`` field configures no checkpoint pipeline (a fresh run).
+    """
+
+    source: GenericSchema | None = Field(default=None)
+    "Acquisition source stage (LocalSource / RunIdSource / S3Source / HTTPSource)."
+    loading: GenericSchema | None = Field(default=None)
+    "Loading strategy stage (WeightsOnlyLoader / TransferLearningLoader / WarmStartLoader / ColdStartLoader)."
+    modifiers: list[GenericSchema] | None = Field(default=None)
+    "Ordered model-modifier stages applied after loading (e.g. FreezingModifierStage)."
+
+
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
@@ -781,22 +819,22 @@ class BaseTrainingSchema(BaseModel):
     """Base seed of all random number generators. If null, a run continuing from a checkpoint takes the
     checkpoint's seed and a new run draws one. A seed that differs from the checkpoint's changes the rest of the
     interrupted epoch."""
-    run_id: str | None = Field(example=None)
-    "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
-    fork_run_id: str | None = Field(example=None)
-    "Run ID to fork from, either last.ckpt or specified in system.input.warm_start."
-    load_weights_only: bool = Field(example=False)
-    "Load only the weights from the checkpoint, not the optimiser state."
-    transfer_learning: bool = Field(example=False)
-    "Flag to activate transfer learning mode when loading a checkpoint."
     check_variables_compatibility: CheckVariablesCompatibilitySchema = Field(
         default_factory=CheckVariablesCompatibilitySchema,
     )
     "Options forwarded to ``Variable.check_compatibility`` when checking checkpoint vs. current dataset (fine-tuning)."
+    allow_variable_subset: bool = Field(default=False)
+    "Allow fine-tuning into a model with FEWER variables (issue #838). When True, a checkpoint"
+    " whose variable set is a superset of the current dataset's is accepted instead of raising,"
+    " provided the shared variables keep the same relative order; the variable-dependent layers"
+    " are re-initialised for the reduced set. Default False keeps the strict variable-order check."
     update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
     "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
-    submodules_to_freeze: list[str] = Field(example=["processor"])
-    "List of submodules to freeze during transfer learning."
+    checkpoint: CheckpointPipelineSchema | None = Field(default=None)
+    "Checkpoint pipeline configuration consumed by build_checkpoint_pipeline: an"
+    " acquisition source under `source`, a loading strategy under `loading`, and/or an"
+    " ordered list of model `modifiers`, each a Hydra `_target_` block. None configures"
+    " no checkpoint pipeline (a fresh run)."
     deterministic: bool = Field(default=False)
     "This flag sets torch.backends.cudnn.deterministic. It may reduce nondeterminism, but does not guarantee exact"
     " reproducibility."
@@ -818,7 +856,7 @@ class BaseTrainingSchema(BaseModel):
     weight_averaging: WeightAveragingSchema | None = Field(default=None)
     "Config for weight averaging (SWA or EMA). Set to null to disable."
     loss_gradient_scaling: bool = False
-    "Dynamic rescaling of the loss gradient. Not yet tested."
+    "Dynamic rescaling of the loss gradient. Temporarily unavailable: must be false."
     scalers: DatasetDict[dict[str, ScalerSchema]]
     "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: DatasetDict[dict[str, LossSchemas] | None]

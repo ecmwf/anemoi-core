@@ -10,6 +10,7 @@
 
 import datetime
 import logging
+from collections.abc import Callable
 from functools import cached_property
 from typing import Any
 
@@ -18,11 +19,12 @@ from hydra.utils import instantiate
 from torchdata.stateful_dataloader import StatefulDataLoader
 from torchdata.stateful_dataloader.sampler import BatchSampler
 
+from anemoi.models.data import Batch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.loading import DataLoadingPolicy
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.readers import create_reader
 from anemoi.training.data.relative_time_indices import resolve_task_relative_indices_by_dataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
@@ -79,7 +81,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def statistics_tendencies(self) -> dict[str, dict | None] | None:
         """Return tendency statistics from all training datasets."""
         stats_by_dataset: dict[str, dict | None] = {}
-        for dataset_name, dataset in self.ds_train.data_readers.items():
+        for dataset_name, reader in self.ds_train.data_readers.items():
             targets_by_step = self.task.dataset_target_relative_times_by_dataset_by_step.get(dataset_name)
             if targets_by_step is not None and self.task.model_timestep is not None:
                 lead_times = [
@@ -88,7 +90,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 ]
             else:
                 lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
-            stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
+            stats_by_lead = {lead_time: reader.statistics_tendencies(lead_time) for lead_time in lead_times}
             if all(stats is None for stats in stats_by_lead.values()):
                 stats_by_dataset[dataset_name] = None
                 continue
@@ -97,6 +99,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         if not any(stats is not None for stats in stats_by_dataset.values()):
             return None
+
         return stats_by_dataset
 
     @cached_property
@@ -145,22 +148,25 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         config: dict[str, dict],
         label: str = "generic",
     ) -> MultiDataset:
-        data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
+        data_readers = {name: create_reader(data_reader) for name, data_reader in config.items()}
+        relative_date_indices = self.loading_policy.relative_date_indices(self.task, data_readers, mode=label)
         dataset_options = {}
         dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
         if dataloader_config.get("fake_dataloading", False):
             dataset_options["fake_dataloading"] = True
 
-        relative_date_indices = self.loading_policy.relative_date_indices(
-            self.task,
-            data_readers,
-            mode=label,
-        )
-        return self.loading_policy.build_dataset(
+        dataset = self.loading_policy.build_dataset(
             data_readers,
             relative_date_indices,
             **dataset_options,
         )
+        LOGGER.info(
+            "%s dataset has %d valid samples after applying relative date indices %s.",
+            label.capitalize(),
+            len(dataset),
+            relative_date_indices,
+        )
+        return dataset
 
     def set_epoch(self, epoch: int) -> None:
         """Set the datamodule epoch and synchronize datasets settings."""
@@ -169,28 +175,20 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     def sync_dataset_state(self) -> None:
         """Load the time steps that the task's current rollout needs in all constructed datasets."""
-        refresh_task_timing = False
         for dataset_name, label in (("ds_train", "training"), ("ds_valid", "validation"), ("ds_test", "test")):
             if dataset_name not in self.__dict__:
                 continue
 
             dataset = self.__dict__[dataset_name]
-            relative_date_indices = self.loading_policy.relative_date_indices(
-                self.task,
-                dataset.data_readers,
-                mode=label,
-            )
             dataset.set_relative_date_indices(
-                relative_date_indices=relative_date_indices,
+                self.loading_policy.relative_date_indices(self.task, dataset.data_readers, mode=label),
             )
-            refresh_task_timing |= not dataset.relative_date_indices_are_native
 
-        if refresh_task_timing:
-            timesteps = self._timing_metadata()
+        if "ds_train" in self.__dict__ and not self.ds_train.relative_date_indices_are_native:
             metadata = {
                 "metadata_inference": {
                     "dataset_names": self.dataset_names,
-                    **{dataset_name: {"timesteps": timesteps} for dataset_name in self.dataset_names},
+                    **{name: {"timesteps": self._timing_metadata()} for name in self.dataset_names},
                 },
             }
             self.task.fill_metadata(metadata)
@@ -246,11 +244,26 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         batch_sampler.sampler.set_epoch(self.epoch)
         return batch_sampler
 
+    def _make_collate_fn(self, ds: MultiDataset) -> Callable[[list[dict]], Batch]:
+        del ds  # each BaseSample carries everything collation needs
+        return Batch.collate
+
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> StatefulDataLoader:
         """Create DataLoader for multi-dataset."""
         assert stage in {"training", "validation", "test"}
 
         extra = {}
+        batch_sampler = self._get_batch_sampler(ds, stage)
+        num_workers = self.config.dataloader.num_workers[stage]
+
+        LOGGER.info(
+            "Creating %s dataloader from %d valid samples: %d batches of %d samples for this rank (num_workers=%d).",
+            stage,
+            len(ds),
+            len(batch_sampler),
+            batch_sampler.batch_size,
+            num_workers,
+        )
 
         if self.config.dataloader.get("multiprocessing_context", None) is not None:
             import multiprocessing
@@ -262,11 +275,12 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         return StatefulDataLoader(
             ds,
-            batch_sampler=self._get_batch_sampler(ds, stage),
-            num_workers=self.config.dataloader.num_workers[stage],
+            batch_sampler=batch_sampler,
+            num_workers=num_workers,
             pin_memory=self.config.dataloader.pin_memory,
             prefetch_factor=self.config.dataloader.prefetch_factor,
             persistent_workers=self.config.dataloader.get("persistent_workers", False),
+            collate_fn=self._make_collate_fn(ds),
             **extra,
         )
 
@@ -295,8 +309,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         for dataset_name in self.dataset_names:
             metadata["metadata_inference"][dataset_name] = {}
-            if len(timesteps) > 0:
+            if timesteps:
                 metadata["metadata_inference"][dataset_name]["timesteps"] = timesteps
+            reader = self.ds_train.data_readers[dataset_name]
+            metadata["metadata_inference"][dataset_name]["data_type"] = reader.data_type
+
+            if reader.data_type == "gridded":
+                metadata["metadata_inference"][dataset_name]["grid_size"] = reader.grid_size
 
             name_to_index = {
                 "input": data_indices[dataset_name].model.input.name_to_index,
@@ -315,49 +334,41 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             metadata["metadata_inference"][dataset_name]["variable_types"] = variable_types
 
     def _timing_metadata(self) -> dict[str, object]:
-        """Return the current dataset-specific time windows for task configuration and inference metadata."""
+        """Return dataset-specific model-grid time windows."""
         decoders = getattr(getattr(self.config, "model", None), "decoders", None)
-        target_dataset_names = (
-            {dataset_name for decoder in decoders.values() for dataset_name in decoder.target_datasets}
+        target_names = (
+            {name for decoder in decoders.values() for name in decoder.target_datasets}
             if decoders is not None
             else None
         )
 
-        def _dataset_timing_metadata(dataset: MultiDataset, label: str) -> dict[str, object]:
+        def timing(dataset: MultiDataset, label: str) -> dict[str, object]:
             if dataset.relative_date_indices_are_native:
                 return {}
-            assert dataset.frequency_seconds is not None
-
-            (
-                input_relative_indices_by_dataset,
-                target_relative_indices_by_dataset,
-                target_relative_indices_by_dataset_by_step,
-            ) = resolve_task_relative_indices_by_dataset(
+            timestep = datetime.timedelta(seconds=dataset.frequency_seconds)
+            inputs, targets, targets_by_step = resolve_task_relative_indices_by_dataset(
                 self.task,
                 dataset.model_relative_date_indices_by_dataset,
-                datetime.timedelta(seconds=dataset.frequency_seconds),
+                timestep,
                 mode=label,
             )
-            if target_dataset_names is not None:
-                for dataset_name in set(self.dataset_names) - target_dataset_names:
-                    target_relative_indices_by_dataset[dataset_name] = []
-                    target_relative_indices_by_dataset_by_step[dataset_name] = [[] for _step in self.task.steps(label)]
+            if target_names is not None:
+                for name in set(self.dataset_names) - target_names:
+                    targets[name] = []
+                    targets_by_step[name] = [[] for _step in self.task.steps(label)]
 
             return {
-                "model_timestep": frequency_to_string(datetime.timedelta(seconds=dataset.frequency_seconds)),
-                f"relative_date_indices_{label}": [int(v) for v in dataset.model_relative_date_indices.tolist()],
-                f"relative_date_input_indices_{label}_by_dataset": input_relative_indices_by_dataset,
+                "model_timestep": frequency_to_string(timestep),
+                f"relative_date_indices_{label}": dataset.model_relative_date_indices.tolist(),
+                f"relative_date_input_indices_{label}_by_dataset": inputs,
                 f"relative_date_indices_{label}_by_dataset": {
-                    name: [int(v) for v in dataset.model_relative_date_indices_by_dataset[name].tolist()]
-                    for name in self.dataset_names
+                    name: dataset.model_relative_date_indices_by_dataset[name].tolist() for name in self.dataset_names
                 },
-                f"relative_date_target_indices_{label}_by_dataset": target_relative_indices_by_dataset,
-                f"relative_date_target_indices_{label}_by_dataset_by_step": (
-                    target_relative_indices_by_dataset_by_step
-                ),
+                f"relative_date_target_indices_{label}_by_dataset": targets,
+                f"relative_date_target_indices_{label}_by_dataset_by_step": targets_by_step,
             }
 
-        timesteps = _dataset_timing_metadata(self.ds_train, "training")
-        if len(self.valid_dataloader_config) > 0:
-            timesteps.update(_dataset_timing_metadata(self.ds_valid, "validation"))
-        return timesteps
+        result = timing(self.ds_train, "training")
+        if self.valid_dataloader_config:
+            result.update(timing(self.ds_valid, "validation"))
+        return result

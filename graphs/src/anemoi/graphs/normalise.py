@@ -39,6 +39,13 @@ class NormaliserMixin:
             if std == 0:
                 LOGGER.warning(f"Std. dev. of the {self.__class__.__name__} values is 0. Normalisation is skipped.")
                 return (1,)
+            if torch.isnan(std):
+                # the sample std. dev. of a single value is NaN (e.g. a dynamic edge set with one edge)
+                LOGGER.warning(
+                    f"Std. dev. of the {self.__class__.__name__} values is NaN "
+                    f"({values.numel()} value(s)). Normalisation is skipped."
+                )
+                return (1,)
 
             statistics = (std,)
 

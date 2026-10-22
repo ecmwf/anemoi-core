@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from anemoi.training.schemas.training import BaseDDPStrategySchema
 from anemoi.training.schemas.training import BaseTrainingSchema
+from anemoi.training.schemas.training import CheckpointPipelineSchema
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
@@ -232,11 +233,11 @@ def test_combined_loss_with_scalers_valid() -> None:
             "losses": [
                 {
                     "_target_": "anemoi.training.losses.MSELoss",
-                    "scalers": ["nan_mask_weights"],
+                    "scalers": ["node_weights"],
                 },
                 {
                     "_target_": "anemoi.training.losses.MAELoss",
-                    "scalers": ["nan_mask_weights"],
+                    "scalers": ["node_weights"],
                 },
             ],
             "loss_weights": [1.0, 1.0],
@@ -272,3 +273,63 @@ def test_combined_loss_with_multiscale_mixed_mode_rejected() -> None:
                 ],
             },
         )
+
+
+# (schema, base config, key of the inner loss) for the loss wrappers that accept ``ignore_nans``.
+_LOSS_WRAPPERS = [
+    pytest.param(TimeAggregateLossWrapperSchema, _TIME_AGG_CFG, "loss_fn", id="time_aggregate"),
+    pytest.param(MultiScaleLossSchema, _MULTISCALE_BASE, "per_scale_loss", id="multiscale"),
+]
+
+
+@pytest.mark.parametrize(("schema", "base", "inner"), _LOSS_WRAPPERS)
+def test_loss_wrapper_accepts_ignore_nans(schema: type, base: dict, inner: str) -> None:
+    """The wrapper classes take ``ignore_nans``, so their schemas must too (the packaged ensemble losses set it)."""
+    cfg = {**base, "ignore_nans": True, inner: {**base[inner], "ignore_nans": True}}
+    assert schema(**cfg).ignore_nans is True
+
+
+@pytest.mark.parametrize(("schema", "base", "inner"), _LOSS_WRAPPERS)
+def test_loss_wrapper_ignore_nans_defaults_to_the_inner_loss(schema: type, base: dict, inner: str) -> None:
+    """Leaving the wrapper's flag unset is valid whatever the inner loss says."""
+    cfg = {**base, inner: {**base[inner], "ignore_nans": True}}
+    assert schema(**cfg).ignore_nans is False
+
+
+@pytest.mark.parametrize(("schema", "base", "inner"), _LOSS_WRAPPERS)
+def test_loss_wrapper_ignore_nans_requires_it_on_the_inner_loss(schema: type, base: dict, inner: str) -> None:
+    """A wrapper ignoring NaNs around an inner loss that does not fails validation, as ``BaseLossWrapper`` would."""
+    with pytest.raises(ValidationError, match="inner loss does not"):
+        schema(**{**base, "ignore_nans": True, inner: {**base[inner], "ignore_nans": False}})
+
+
+def test_checkpoint_pipeline_schema_valid() -> None:
+    """source/loading/modifiers validate and expose the _target_ alias + extra kwargs."""
+    schema = CheckpointPipelineSchema(
+        source={"_target_": "anemoi.training.checkpoint.sources.local.LocalSource", "path": "/ckpt.pt"},
+        loading={"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader", "strict": False},
+        modifiers=[{"_target_": "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"}],
+    )
+    assert schema.source.target_.endswith("LocalSource")
+    assert schema.loading.strict is False
+    assert schema.modifiers[0].target_.endswith("FreezingModifierStage")
+
+
+def test_checkpoint_pipeline_schema_all_none() -> None:
+    """An empty checkpoint block is valid (a fresh run with no pipeline)."""
+    schema = CheckpointPipelineSchema()
+    assert schema.source is None
+    assert schema.loading is None
+    assert schema.modifiers is None
+
+
+def test_checkpoint_pipeline_schema_source_requires_target() -> None:
+    """A source block without _target_ is rejected."""
+    with pytest.raises(ValidationError):
+        CheckpointPipelineSchema(source={"path": "/ckpt.pt"})
+
+
+def test_checkpoint_pipeline_schema_loading_requires_target() -> None:
+    """A loading block without _target_ is rejected."""
+    with pytest.raises(ValidationError):
+        CheckpointPipelineSchema(loading={"strict": True})

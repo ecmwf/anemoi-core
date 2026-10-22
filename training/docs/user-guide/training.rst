@@ -121,8 +121,9 @@ Lightning resumes it into an empty epoch.
    the run does not continue exactly: the rest of the interrupted epoch repeats some
    samples and skips others, and every step draws different random numbers. This is
    useful, for example, to try different randomness after a loss spike while keeping
-   the optimiser state. Loading only the weights (``training.load_weights_only``)
-   starts a new run that does not use the checkpoint's seed. Checkpoints from
+   the optimiser state. A run that loads only the weights (a
+   ``training.checkpoint.loading`` strategy such as ``WeightsOnlyLoader``) is a new
+   run and does not use the checkpoint's seed. Checkpoints from
    versions that did not store a base seed resume with the run's own seed, and
    Anemoi Training logs a warning that the run does not continue exactly.
 -  **Data order.** The training shuffle depends only on the base seed and the
@@ -496,7 +497,7 @@ The loss is also scaled by assigning a weight to each node on the output
 grid. These weights are calculated during graph-creation and stored as
 an attribute in the graph object. Node weighting is applied via the
 ``node_weights`` scaler defined under
-``config.training.scalers.<dataset_name>.node_weights``; set
+``config.training.scalers.datasets.<dataset_name>.node_weights``; set
 ``nodes_attribute_name`` to the graph attribute to use as weights, and
 reference the scaler from a loss by including ``node_weights`` in its
 ``scalers:`` list. By default anemoi-training uses area weighting
@@ -548,33 +549,90 @@ i.e. because the training has exceeded the time limit on an HPC system
 or because the user wants to fine-tune the model from a specific point
 in the training.
 
-This can be done by setting ``config.training.run_id`` in the config
-file to be the *run_id* of the run that is being restarted. In this case
-the new checkpoints will go in the same folder as the old checkpoints.
-If the user does not want this then they can instead set
-``config.training.fork_run_id`` in the config file to the *run_id* of
-the run that is being restarted. In this case the old run will be
-unaffected and the new checkpoints will go in to a new folder with a new
-run_id. The user might want to do this if they want to start multiple
-new runs from 1 old run.
+This is done by setting ``training.checkpoint.source`` to a ``RunIdSource``
+with the *run_id* of the run to restart. ``RunIdSource`` resolves that id to
+``<system.output.checkpoints.root>/<run_id>/last.ckpt`` on the filesystem —
+it reads the run's checkpoint directory directly and does not fetch anything
+from MLflow. ``fork`` defaults to ``false`` (resume), so it can be omitted; a
+resume keeps the new checkpoints in the same folder as the old ones:
 
-The above will restart the model training from where the old run
-finished training. It's also possible to restart the model training from
-a specific checkpoint. This can either be a checkpoint from the same run
-or a checkpoint from a different run that you have run in the past or
-that you using for transfer learning. To do this, set
-``config.system.input.warm_start`` to be the path to the checkpoint they
-want to restart from.
+.. code:: yaml
 
-The above can be adapted depending on the use case and taking advantage
-of hydra, you can also reuse ``config.training.run_id`` or
-``config.training.fork_run_id`` to define the path to the checkpoint.
+   training:
+     checkpoint:
+       source:
+         _target_: anemoi.training.checkpoint.sources.run.RunIdSource
+         run_id: <run_id>
+         # fork: false   # optional; false is the default (resume), set true to fork
+
+With no ``loading`` block the run *resumes*: PyTorch Lightning loads the
+checkpoint — weights, optimizer and training progress — at ``trainer.fit()``.
+Add ``training/checkpoint/loading=weights_only`` (or another strategy) to start
+fresh training state from those weights instead.
+
+With ``fork: true`` the old run is unaffected and the new checkpoints go to a
+new folder with a fresh run_id — useful for starting multiple new runs from a
+single old run. The same can be selected on the command line with the Hydra
+group ``training/checkpoint/source=run +training.checkpoint.source.run_id=<run_id>``.
+
+To restart from a specific checkpoint *file* instead of a run's ``last.ckpt`` —
+e.g. a checkpoint from a different run, or one used for transfer learning — use
+a ``LocalSource`` with an explicit ``path``:
+
+.. code:: yaml
+
+   training:
+     checkpoint:
+       source:
+         _target_: anemoi.training.checkpoint.sources.local.LocalSource
+         path: /path/to/checkpoint.ckpt
 
 A run that restarts from a checkpoint with its full training state, that is
-without ``training.load_weights_only``, continues where the checkpoint was saved,
-also in the middle of an epoch. It trains on the same batches and draws the same
-random numbers as a run that was never interrupted; `Resuming a run`_ lists the
-conditions.
+without ``training.checkpoint.loading`` or with ``WarmStartLoader``, continues
+where the checkpoint was saved, also in the middle of an epoch. It trains on the
+same batches and draws the same random numbers as a run that was never
+interrupted; `Resuming a run`_ lists the conditions.
+
+**************************************
+ Training checkpoint hyperparameters
+**************************************
+
+A training checkpoint stores the arguments used to build the training
+module (the Lightning *hyperparameters*), so that it can be restored
+without re-creating them: the config, the data indices, the metadata,
+the dataset statistics, the supporting arrays and the graph. The graph
+is by far the largest of these and can make up a significant part of the
+checkpoint size.
+
+The graph can be left out of the training checkpoints with
+``config.diagnostics.checkpoint.exclude_hyperparameters``:
+
+.. code:: yaml
+
+   diagnostics:
+     checkpoint:
+       exclude_hyperparameters: [graph_data]
+
+The default is an empty list, which stores everything. ``graph_data`` is
+the only hyperparameter that is currently allowed to be excluded.
+
+Resuming training, loading the weights, and transfer learning do not
+need the graph in the checkpoint, as the graph is rebuilt or loaded from
+the training config (``config.system.input.graph``) when the run (re)starts.
+Excluding ``graph_data`` therefore does not affect them.
+
+The graph does matter for converting a training checkpoint into an
+inference checkpoint with ``anemoi-training checkpoint inference``, which
+rebuilds the model from the stored hyperparameters. A training checkpoint without
+the graph can still be converted to an inference checkpoint if the graph
+is supplied separately, via the ``--graph`` argument:
+
+.. code:: bash
+
+   anemoi-training checkpoint inference \
+       --input last.ckpt \
+       --output inference-last.ckpt \
+       --graph graph.pt
 
 *********
  Rollout
@@ -612,9 +670,9 @@ up until ``rollout.maximum``.
       maximum: 12
 
 This two stage approach requires the model training to be restarted
-after stage one, see :ref:`restart target` below. The user should make
-sure to set ``config.training.run_id`` equal to the run-id of the first
-stage of training.
+after stage one, see :ref:`restart target` below. The user should
+configure ``training.checkpoint.source`` as a ``RunIdSource`` with the
+``run_id`` of the first stage of training (and ``fork: false`` to resume it).
 
 Note, for many purposes, it may make sense for the rollout stage (stage
 two) to be performed at the minimum learning rate throughout and for the
@@ -638,7 +696,8 @@ that you:
    **unchanged** in your configuration.
 2. Leave ``training.seed`` at ``null`` or at the original seed, and reuse the
    dataloader configuration and distributed configuration.
-3. Set ``training.run_id`` to the run ID of the interrupted job.
+3. Configure ``training.checkpoint.source`` as a ``RunIdSource`` with the
+   ``run_id`` of the interrupted job (and ``fork: false`` to resume it).
 
 The rollout and the dataloader epoch advance only after an epoch has trained on
 all of its batches. A checkpoint saved within an epoch, for example when training
@@ -662,9 +721,11 @@ The saved record prevents the rollout from increasing twice.
    ``rollout.step`` overrides ``rollout.start`` from the current configuration.
    Resetting the rollout step while restoring optimiser and scheduler state is
    not currently supported. To start from ``rollout.start`` in the current
-   configuration, set ``training.load_weights_only: true``; this restores the
-   model weights but initializes new optimiser and scheduler state from the
-   current configuration.
+   configuration, load the checkpoint with the ``WeightsOnlyLoader`` instead
+   (``training/checkpoint/loading=weights_only``); this restores the model
+   weights but initialises new optimiser and scheduler state from the current
+   configuration. The legacy ``training.load_weights_only`` key is rejected
+   at config validation.
 
 *******************
  Transfer Learning
@@ -675,22 +736,44 @@ trained checkpoint. This is particularly useful when the new task is
 related to the old one, enabling faster convergence and often improving
 model performance.
 
-To enable transfer learning, set the config.training.transfer_learning
-flag to True in the configuration file.
+To configure transfer learning through the config, use the
+``training.checkpoint`` pipeline. Select the ``transfer_learning`` loading
+strategy via its Hydra group:
+
+.. code:: bash
+
+   anemoi-training train training/checkpoint/loading=transfer_learning
+
+or configure it inline under ``training.checkpoint.loading``:
 
 .. code:: yaml
 
    training:
-      # start the training from a checkpoint of a previous run
-      fork_run_id: ...
-      load_weights_only: True
-      transfer_learning: True
+      checkpoint:
+        # the checkpoint to transfer-learn from (a run, or a LocalSource path)
+        source:
+          _target_: anemoi.training.checkpoint.sources.run.RunIdSource
+          run_id: <run_id>
+          fork: true
+        loading:
+          _target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader
+          skip_mismatched: true
 
-When this flag is active and a checkpoint path is specified in
-``config.system.input.warm_start`` or ``self.last_checkpoint``, the system loads
-the pre-trained weights using the `transfer_learning_loading()` function.
-This approach ensures only compatible weights are loaded and mismatched
-layers are handled appropriately.
+The ``TransferLearningLoader`` filters key and shape mismatches so that only
+compatible weights are loaded and mismatched layers are handled
+appropriately. Set ``skip_mismatched: false`` to raise
+``CheckpointIncompatibleError`` instead of skipping mismatched weights.
+
+.. note::
+
+   The legacy keys ``training.transfer_learning`` and
+   ``training.load_weights_only`` have been **removed**. They are rejected at
+   config validation with an error naming the replacement: set
+   ``training.checkpoint.source`` to the run or file to load and
+   ``training.checkpoint.loading`` to a ``WeightsOnlyLoader`` (or a
+   ``TransferLearningLoader`` with ``skip_mismatched: true``), as shown above.
+   The removed run-lineage keys ``training.run_id`` / ``training.fork_run_id``
+   are likewise expressed as a ``RunIdSource`` under ``training.checkpoint.source``.
 
 For example, transfer learning might be used to adapt a weather
 forecasting model trained on one geographic region to another region
@@ -756,11 +839,16 @@ model are excluded from training. This is useful when certain parts of
 the model have been sufficiently trained or should remain unchanged for
 the current task.
 
-To specify which submodules to freeze, use the
-``config.training.submodules_to_freeze`` field in the configuration. List
-the names of submodules to be frozen. During model initialization, these
-submodules will have their parameters frozen, ensuring they are not
-updated during training.
+To freeze submodules through the config, use the ``training.checkpoint``
+pipeline, which applies freezing as a modifier stage after the model weights
+have been loaded. Select the ``freezing`` modifier group via Hydra:
+
+.. code:: bash
+
+   anemoi-training train training/checkpoint/modifiers=freezing
+
+or configure it inline as a list under ``training.checkpoint.modifiers``,
+listing the dot-paths of the submodules to freeze.
 
 For example, if you have a pre-trained model on a 'global' dataset and
 want to train a new decoder with the previous model's parameters frozen,
@@ -771,14 +859,44 @@ decoder.
 .. code:: yaml
 
    training:
-      # start the training from a checkpoint of a previous run
-      fork_run_id: ...
-      load_weights_only: True
+      checkpoint:
+        # the checkpoint to start from (a run, or a LocalSource path)
+        source:
+          _target_: anemoi.training.checkpoint.sources.run.RunIdSource
+          run_id: <run_id>
+          fork: true
+        loading:
+          _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+        modifiers:
+          - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
+            submodules_to_freeze:
+               - model.model.encoder.global
+               - model.model.processor
+               - model.model.decoder.global
+            strict: false
 
-      submodules_to_freeze:
-         - encoder.global
-         - processor
-         - decoder.global
+.. important::
+
+   The ``model.model.`` prefix is required to reach these modules. Paths are
+   resolved with ``torch.nn.Module.get_submodule`` from the LightningModule the
+   pipeline passes around, and ``model.model`` is the graph model that owns
+   ``encoder`` / ``processor`` / ``decoder``, two attribute hops below it.
+   Without the prefix nothing resolves.
+
+   ``encoder`` and ``decoder`` are ``ModuleDict`` s keyed by the **names you
+   give them** under ``model.encoders`` and ``model.decoders`` in the model
+   config, so ``model.model.encoder.global`` above assumes an encoder named
+   ``global``. The shipped ``graphtransformer.yaml`` names its single encoder
+   and decoder ``"0"``, giving ``model.model.encoder.0`` and
+   ``model.model.decoder.0``; the multi-dataset presets
+   use ``global`` and ``regional``. Use the keys of your own model config.
+
+.. note::
+
+   The legacy key ``training.submodules_to_freeze`` has been **removed**. It is
+   rejected at config validation with an error naming the replacement: set
+   ``training.checkpoint.modifiers`` to a list with a ``FreezingModifierStage``,
+   as shown above.
 
 Freezing can be particularly beneficial in scenarios such as fine-tuning
 when only specific components (e.g., the encoder, the decoder) need to
@@ -815,8 +933,8 @@ directly will crash or silently mis-pair tensors when used with:
 
 -  **Imputers** (e.g. ``ConstantImputer``), which register scratch
    buffers whose shapes change on the first forward pass.
--  **Updating loss scalers** (e.g. ``NaNMaskScaler``), which re-register
-   scaler buffers every batch via ``ScaleTensor.update_scaler`` —
+-  **Custom updating loss scalers**, which can re-register scaler buffers
+   via ``ScaleTensor.update_scaler`` —
    shuffling the buffer order in the live model relative to the averaged
    model's snapshot.
 

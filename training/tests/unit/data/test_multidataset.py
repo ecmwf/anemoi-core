@@ -8,60 +8,78 @@
 # nor does it submit to any jurisdiction.
 
 
-import datetime
 import re
+from datetime import timedelta
 
 import numpy as np
 import pytest
 import torch
 from pytest_mock import MockFixture
 
-from anemoi.training.data.data_reader import RelativeTimeReader
+from anemoi.models.data import BaseSample
+from anemoi.models.data import Batch
+from anemoi.models.data.sample import create_batched_struct
 from anemoi.training.data.multidataset import MixedFrequencyDataset
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.usable_indices import ReaderAnchors
+from anemoi.training.data.usable_indices import get_usable_indices
 
 
 class TestMultiDataset:
     """Test MultiDataset instantiation and properties."""
 
+    @staticmethod
+    def _mock_reader(mocker: MockFixture, num_dates: int, missing: set[int]) -> MockFixture:
+        """Mock a single-sequence reader whose ``valid_anchors`` runs the real logic over ``reader.missing``.
+
+        ``reader.missing`` is read at call time, so tests can change it after the mock is built.
+        """
+        reader = mocker.MagicMock()
+        reader.missing = missing
+        reader.dates = list(range(num_dates))
+        reader.frequency = "3h"
+        reader.sampling = None
+        # Gridded samples carry no point times, so measuring them from the reference changes nothing.
+        reader.measure_from_reference.side_effect = lambda sample, *_args: sample
+
+        def valid_anchors(relative_indices: list[int]) -> ReaderAnchors:
+            positions = get_usable_indices(reader.missing, len(reader.dates), relative_indices)
+            return ReaderAnchors(positions.astype("datetime64[s]"), np.zeros_like(positions), positions)
+
+        reader.valid_anchors.side_effect = valid_anchors
+        return reader
+
     @pytest.fixture
     def multi_dataset(self, mocker: MockFixture) -> MultiDataset:
         """Fixture to provide a MultiDataset instance with mocked datasets."""
-        # Mock create_dataset to return mock datasets
-        mock_dataset_a = mocker.MagicMock()
-        mock_dataset_a.missing = set()
-        mock_dataset_a.dates = list(range(30))  # 15 reference dates
-        mock_dataset_a.frequency = "3h"
-        mock_dataset_a.num_sequences = 1
-        # relative_date_indices=[0,2,6], window=7, valid positions [0..23] at sequence 0
-        anchors_a = np.column_stack([np.zeros(24, dtype=np.int64), np.arange(24, dtype=np.int64)])
-        mock_dataset_a.compute_anchors.return_value = anchors_a
-
-        mock_dataset_b = mocker.MagicMock()
-        mock_dataset_b.missing = {7, 8, 9, 10}
-        mock_dataset_b.dates = list(range(30))  # 15 reference dates
-        mock_dataset_b.frequency = "3h"
-        mock_dataset_b.num_sequences = 1
-        # missing {7..10}: exclude positions {1..10}, valid positions [0, 11..23] at sequence 0
-        pos_b = np.array([0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], dtype=np.int64)
-        anchors_b = np.column_stack([np.zeros(14, dtype=np.int64), pos_b])
-        mock_dataset_b.compute_anchors.return_value = anchors_b
-
-        data_readers = {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
+        data_readers = {
+            "dataset_a": self._mock_reader(mocker, num_dates=30, missing=set()),
+            "dataset_b": self._mock_reader(mocker, num_dates=30, missing={7, 8, 9, 10}),
+        }
         relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}  # e.g. f([t, t-6h]) = t+12h
 
         return MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
 
     def test_len_counts_valid_anchors(self, multi_dataset: MultiDataset) -> None:
-        """Test that the dataset has one index per valid (sequence, position) anchor."""
+        """The dataset has one index per (sequence, position) anchor every reader can sample."""
         # relative_date_indices are: [0, 2, 6]
-        # dataset_a has no missing → valid positions [0..23] at sequence 0
-        # dataset_b has missing {7,8,9,10} → valid positions [0, 11..23] at sequence 0
-        # intersection: [0, 11..23] → 14 anchors
+        # dataset_a has no missing dates → valid positions [0..23]
+        # dataset_b has missing {7, 8, 9, 10} → positions 1..10 read a missing date → valid [0, 11..23]
+        # intersection: [0, 11..23], all in sequence 0
         expected_positions = np.array([0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23])
-
         assert len(multi_dataset) == len(expected_positions)
-        assert np.array_equal(multi_dataset.anchors[:, 1], expected_positions)
+        for rows in multi_dataset.anchors.rows.values():
+            np.testing.assert_array_equal(rows[:, 0], 0)
+            np.testing.assert_array_equal(rows[:, 1], expected_positions)
+
+    def test_get_sample_offsets_each_reader(self, multi_dataset: MultiDataset) -> None:
+        """get_sample(i) asks every reader for anchor i's sequence and position + its relative date indices."""
+        sample = multi_dataset.get_sample(1)  # anchor 1 is (sequence 0, position 11)
+
+        for name, reader in multi_dataset.data_readers.items():
+            reader.get_sample.assert_called_once_with(0, [11, 13, 17])
+            reader.measure_from_reference.assert_called_once_with(reader.get_sample.return_value, 11, [11, 13, 17])
+            assert sample[name] is reader.get_sample.return_value
 
     def test_set_relative_date_indices_updates_contiguous_indices(self, multi_dataset: MultiDataset) -> None:
         """Test that the loaded time steps can be updated to contiguous relative date indices."""
@@ -100,134 +118,94 @@ class TestMultiDataset:
         assert all(sample is samples[0] for sample in samples)
 
     def test_valid_date_indices_empty_dataset(self, multi_dataset: MultiDataset) -> None:
-        """Test that MultiDataset raises ValueError when a dataset has no valid anchors."""
+        """Test that MultiDataset raises ValueError when a dataset has no valid anchor."""
         data_readers = multi_dataset.data_readers
         relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}
 
-        # Make dataset_b return no valid anchors
-        data_readers["dataset_b"].compute_anchors.return_value = np.empty((0, 2), dtype=np.int64)
-
-        # Constructing MultiDataset should raise ValueError
+        # Every date of dataset_b is missing, so no index can be sampled from it
         empty_dataset = data_readers["dataset_b"]
+        empty_dataset.missing = set(range(30))
+
         err_msg = f"No valid anchors found for data reader 'dataset_b': {empty_dataset}"
         with pytest.raises(ValueError, match=re.escape(err_msg)):
             MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
 
     def test_valid_date_indices_empty_intersection(self, multi_dataset: MultiDataset) -> None:
-        """Test that MultiDataset raises ValueError when intersection of valid anchors is empty."""
+        """Test that MultiDataset raises ValueError when the readers' valid anchors do not overlap."""
         data_readers = multi_dataset.data_readers
-        relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}
+        relative_date_indices = {"dataset_a": [0], "dataset_b": [0]}
 
-        # dataset_a has anchors at positions [0, 1, 2]; dataset_b at [5, 6, 7] — no overlap
-        data_readers["dataset_a"].compute_anchors.return_value = np.array([[0, 0], [0, 1], [0, 2]], dtype=np.int64)
-        data_readers["dataset_b"].compute_anchors.return_value = np.array([[0, 5], [0, 6], [0, 7]], dtype=np.int64)
+        # dataset_a can only sample dates 0..9, dataset_b only dates 10..29
+        data_readers["dataset_a"].missing = set(range(10, 30))
+        data_readers["dataset_b"].missing = set(range(10))
 
         with pytest.raises(ValueError, match="No valid anchors found after intersection across all datasets"):
             MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
 
-    def test_mixed_frequency_rejects_trajectory_datasets(self, mocker: MockFixture) -> None:
-        reader = mocker.MagicMock()
-        reader.num_sequences = 2
 
-        with pytest.raises(ValueError, match="Trajectory datasets are unsupported"):
-            MixedFrequencyDataset(
-                data_readers={"trajectory": reader},
-                relative_date_indices=[0, 1],
-                frequency="1h",
-            )
+def _mixed_reader(mocker: MockFixture, frequency_minutes: int, dates: np.ndarray) -> MockFixture:
+    reader = mocker.MagicMock()
+    reader.frequency = timedelta(minutes=frequency_minutes)
+    reader.sampling = {"stride": 1}
+    reader.data_type = "gridded"
 
+    def valid_anchors(relative_indices: list[int]) -> ReaderAnchors:
+        positions = get_usable_indices(set(), len(dates), relative_indices)
+        return ReaderAnchors(dates[positions], np.zeros_like(positions), positions)
 
-class RecordingReader:
-    def __init__(self, *, missing: set[int] | None = None) -> None:
-        self.data = "coarse"
-        self.frequency = datetime.timedelta(hours=6)
-        self.dates = np.arange(
-            np.datetime64("2020-01-01T00:00"),
-            np.datetime64("2020-01-02T00:00"),
-            np.timedelta64(6, "h"),
+    def get_sample(_sequence: int, positions: list[int] | np.ndarray) -> BaseSample:
+        values = torch.as_tensor(np.atleast_1d(positions), dtype=torch.float32).reshape(-1, 1, 1, 1)
+        return create_batched_struct(
+            data_type="gridded",
+            data=values,
+            variables=["value"],
+            layout=("time", "ensemble", "grid", "variables"),
+            latitudes=[0.0],
+            longitudes=[0.0],
         )
-        self.missing = missing or set()
-        self.raw_requested_indices = None
-        self.requested_indices = None
 
-    def get_sample(
-        self,
-        _sequence: int,
-        time_indices: slice | int | list[int],
-        _grid_shard_indices: np.ndarray | slice | None = None,
-    ) -> torch.Tensor:
-        self.raw_requested_indices = time_indices
-        if isinstance(time_indices, slice):
-            indices = list(range(time_indices.start, time_indices.stop, time_indices.step))
-        elif isinstance(time_indices, int):
-            indices = [time_indices]
-        else:
-            indices = list(time_indices)
-        self.requested_indices = indices
-        return torch.as_tensor(indices, dtype=torch.float32).reshape(len(indices), 1, 1, 1)
+    reader.valid_anchors.side_effect = valid_anchors
+    reader.get_sample.side_effect = get_sample
+    reader.measure_from_reference.side_effect = lambda sample, *_args: sample
+    return reader
 
 
-def test_relative_time_reader_uses_previous_native_time_without_dropping_time_axis() -> None:
-    reader = RecordingReader()
-    wrapped = RelativeTimeReader(
-        reader,
-        native_relative_indices=np.array([0]),
-        model_relative_indices=np.array([0]),
-        frequency_seconds=3600,
-        anchor_dates_ns=np.array([np.datetime64("2020-01-01T04:00", "ns").astype(np.int64)]),
-    )
-
-    sample = wrapped.get_sample(sequence=0, position=0)
-
-    assert not isinstance(reader.raw_requested_indices, int)
-    assert reader.requested_indices == [0]
-    assert sample.shape == (1, 1, 1, 1)
-
-
-def test_relative_time_reader_skips_missing_exact_native_time() -> None:
-    reader = RecordingReader(missing={1})
-    wrapped = RelativeTimeReader(
-        reader,
-        native_relative_indices=np.array([0]),
-        model_relative_indices=np.array([0]),
-        frequency_seconds=3600,
-        anchor_dates_ns=np.array([np.datetime64("2020-01-01T06:00", "ns").astype(np.int64)]),
-    )
-
-    sample = wrapped.get_sample(sequence=0, position=0)
-
-    assert reader.requested_indices == [0]
-    assert sample.shape == (1, 1, 1, 1)
-
-
-def test_mixed_frequency_dataset_filters_anchors_before_coarse_data_start(mocker: MockFixture) -> None:
-    fast = mocker.MagicMock()
-    fast.num_sequences = 1
-    fast.frequency = datetime.timedelta(minutes=5)
-    fast.dates = np.arange(
-        np.datetime64("2020-01-01T00:00"),
-        np.datetime64("2020-01-01T02:00"),
-        np.timedelta64(5, "m"),
-    )
-    fast.missing = set()
-    fast.compute_anchors.return_value = np.column_stack(
-        [np.zeros(23, dtype=np.int64), np.arange(23, dtype=np.int64)],
-    )
-
-    coarse = mocker.MagicMock()
-    coarse.num_sequences = 1
-    coarse.frequency = datetime.timedelta(hours=1)
-    coarse.dates = np.arange(
-        np.datetime64("2020-01-01T01:00"),
-        np.datetime64("2020-01-01T03:00"),
-        np.timedelta64(1, "h"),
-    )
-    coarse.missing = set()
+def test_mixed_frequency_dataset_returns_collatable_samples_with_causal_coarse_times(
+    mocker: MockFixture,
+) -> None:
+    start = np.datetime64("2020-01-01T00:00")
+    fine_dates = start + np.arange(145) * np.timedelta64(5, "m")
+    coarse_dates = start + np.arange(3) * np.timedelta64(6, "h")
+    fine = _mixed_reader(mocker, 5, fine_dates)
+    coarse = _mixed_reader(mocker, 360, coarse_dates)
 
     dataset = MixedFrequencyDataset(
-        data_readers={"fast": fast, "coarse": coarse},
-        relative_date_indices=[0, 1],
-        frequency="5m",
+        {"fine": fine, "coarse": coarse},
+        relative_date_indices=[0, 72],
+        frequency=timedelta(minutes=5),
     )
 
-    assert dataset.anchors[0].tolist() == [0, 12]
+    sample = dataset[1]
+    assert coarse.get_sample.call_args.args[0] == 0
+    assert fine.get_sample.call_args.args[0] == 0
+    np.testing.assert_array_equal(coarse.get_sample.call_args.args[1], [0, 1])
+    np.testing.assert_array_equal(fine.get_sample.call_args.args[1], [1, 73])
+    batch = Batch.collate([dataset[0], sample])
+    assert batch["fine"].time_size == 2
+    assert batch["coarse"].time_size == 2
+
+
+def test_mixed_frequency_dataset_filters_anchors_without_a_prior_coarse_timestamp(mocker: MockFixture) -> None:
+    start = np.datetime64("2020-01-01T00:00")
+    fine_dates = start + np.arange(217) * np.timedelta64(5, "m")
+    coarse_dates = start + np.arange(1, 4) * np.timedelta64(6, "h")
+    dataset = MixedFrequencyDataset(
+        {
+            "fine": _mixed_reader(mocker, 5, fine_dates),
+            "coarse": _mixed_reader(mocker, 360, coarse_dates),
+        },
+        relative_date_indices=[0, 72],
+        frequency=timedelta(minutes=5),
+    )
+
+    assert dataset.anchors.times.min() == np.datetime64("2020-01-01T06:00")

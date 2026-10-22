@@ -14,9 +14,9 @@ from torch.utils.data import Dataset
 from torchdata.stateful_dataloader.sampler import BatchSampler
 from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
 
-from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.multidataset import MixedFrequencyDataset
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.readers import DataReader
 from anemoi.training.data.relative_time_indices import compute_model_relative_date_indices
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.tasks.base import BaseTask
@@ -35,7 +35,7 @@ class DataLoadingPolicy(ABC):
     def relative_date_indices(
         self,
         task: BaseTask,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         *,
         mode: str,
     ) -> dict[str, list[int]]:
@@ -45,7 +45,7 @@ class DataLoadingPolicy(ABC):
     @abstractmethod
     def build_dataset(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         relative_date_indices: dict[str, TimeIndices],
         *,
         fake_dataloading: bool = False,
@@ -54,7 +54,7 @@ class DataLoadingPolicy(ABC):
 
         Parameters
         ----------
-        data_readers : dict[str, BaseAnemoiReader]
+        data_readers : dict[str, DataReader]
             Dictionary mapping dataset names to their data readers.
         relative_date_indices : dict[str, TimeIndices]
             Precomputed relative date indices for each data reader.
@@ -125,7 +125,7 @@ class SynchronizedLoadingPolicy(DataLoadingPolicy):
 
     def build_dataset(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         relative_date_indices: dict[str, TimeIndices],
         *,
         fake_dataloading: bool = False,
@@ -164,13 +164,14 @@ class SynchronizedLoadingPolicy(DataLoadingPolicy):
 class MixedFrequencyLoadingPolicy(SynchronizedLoadingPolicy):
     """Synchronize readers with different native frequencies on a shared model grid."""
 
-    def __init__(self, frequency: str) -> None:
+    def __init__(self, frequency: str, tolerance: str | None = None) -> None:
         self.frequency = frequency_to_timedelta(frequency)
+        self.tolerance = None if tolerance is None else frequency_to_timedelta(tolerance)
 
     def relative_date_indices(
         self,
         task: BaseTask,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         *,
         mode: str,
     ) -> list[int]:
@@ -179,7 +180,7 @@ class MixedFrequencyLoadingPolicy(SynchronizedLoadingPolicy):
 
     def build_dataset(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         relative_date_indices: list[int],
         *,
         fake_dataloading: bool = False,
@@ -188,5 +189,6 @@ class MixedFrequencyLoadingPolicy(SynchronizedLoadingPolicy):
             data_readers=data_readers,
             relative_date_indices=relative_date_indices,
             frequency=self.frequency,
+            tolerance=self.tolerance,
             fake_dataloading=fake_dataloading,
         )

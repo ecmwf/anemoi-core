@@ -12,11 +12,15 @@ import logging
 from abc import ABC
 from collections.abc import Iterable
 from collections.abc import Mapping
-
-import torch
+from typing import TYPE_CHECKING
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.utils.time_indices import normalize_time_indices
+from anemoi.utils.dates import frequency_to_timedelta
+
+if TYPE_CHECKING:
+    from anemoi.models.data import BaseTemplate
+    from anemoi.models.data import Batch
 
 LOGGER = logging.getLogger(__name__)
 
@@ -123,7 +127,7 @@ class BaseTask(ABC):
         """
         return self._offsets_to_batch_indices(self.get_output_offsets(**kwargs))
 
-    def _requested_input_relative_times(self, dataset_name: str) -> list[int]:
+    def _requested_input_relative_times(self, dataset_name: str, **_kwargs) -> list[int]:
         requested = self.dataset_input_relative_times_by_dataset.get(dataset_name)
         if requested is not None:
             return requested
@@ -134,210 +138,154 @@ class BaseTask(ABC):
         if requested_by_step is not None:
             step = int(kwargs.get("rollout_step", kwargs.get("step", 0)))
             if not 0 <= step < len(requested_by_step):
-                msg = f"Dataset '{dataset_name}' has no mixed-frequency target indices for rollout step {step}."
+                msg = f"Dataset '{dataset_name}' has no mixed-frequency targets for rollout step {step}."
                 raise ValueError(msg)
             return requested_by_step[step]
-
         requested = self.dataset_target_relative_times_by_dataset.get(dataset_name)
         if requested is not None:
             return requested
         return self.get_batch_output_indices(**kwargs)
 
-    def _resolve_relative_time_metadata(
-        self,
-        metadata_inference: Mapping,
-        dataset_names: list[str],
-        keys: tuple[str, ...],
-    ) -> dict[str, list[int]]:
-        """Choose the richest per-dataset time window exposed by the datamodule metadata."""
-        relative_by_dataset: dict[str, list[int]] = {}
-
-        for dataset_name in dataset_names:
-            dataset_meta = metadata_inference.get(dataset_name, {})
-            timesteps_meta = dataset_meta.get("timesteps", {}) if isinstance(dataset_meta, Mapping) else {}
-
-            chosen: list[int] | None = None
-            for key in keys:
-                raw_relative = timesteps_meta.get(key, None)
-                if not isinstance(raw_relative, Mapping):
-                    continue
-                raw_values = raw_relative.get(dataset_name, None)
-                if raw_values is None:
-                    continue
-                candidate = [int(value) for value in raw_values]
-                if chosen is None or max(candidate, default=-1) > max(chosen, default=-1):
-                    chosen = candidate
-
-            if chosen is not None:
-                relative_by_dataset[dataset_name] = chosen
-
-        return relative_by_dataset
-
-    def _resolve_relative_time_metadata_by_step(
-        self,
-        metadata_inference: Mapping,
-        dataset_names: list[str],
-        keys: tuple[str, ...],
-    ) -> dict[str, list[list[int]]]:
-        """Choose per-rollout target indices exposed by the datamodule metadata."""
-        relative_by_dataset: dict[str, list[list[int]]] = {}
-
-        for dataset_name in dataset_names:
-            dataset_meta = metadata_inference.get(dataset_name, {})
-            timesteps_meta = dataset_meta.get("timesteps", {}) if isinstance(dataset_meta, Mapping) else {}
-
-            chosen: list[list[int]] | None = None
-            for key in keys:
-                raw_relative = timesteps_meta.get(key, None)
-                if not isinstance(raw_relative, Mapping):
-                    continue
-                raw_values = raw_relative.get(dataset_name, None)
-                if raw_values is None:
-                    continue
-                candidate = [[int(value) for value in step_values] for step_values in raw_values]
-                candidate_max = max((value for values in candidate for value in values), default=-1)
-                chosen_max = max((value for values in (chosen or []) for value in values), default=-1)
-                if chosen is None or candidate_max > chosen_max:
-                    chosen = candidate
-
-            if chosen is not None:
-                relative_by_dataset[dataset_name] = chosen
-
-        return relative_by_dataset
-
-    def _sample_batch_position(self, *, dataset_name: str, relative_time: int) -> int:
-        time_map = self.dataset_time_maps.get(dataset_name, {})
-        exact_idx = time_map.get(int(relative_time), None)
-        if exact_idx is not None:
-            return int(exact_idx)
-
-        available_times = sorted(int(value) for value in time_map)
-        if not available_times:
-            msg = f"Dataset '{dataset_name}' has no available relative times for dataset-specific time sampling."
-            raise ValueError(msg)
-
-        candidate_times = [value for value in available_times if value <= int(relative_time)]
-        if not candidate_times:
+    def _sample_batch_position(self, dataset_name: str, relative_time: int) -> int:
+        time_map = self.dataset_time_maps[dataset_name]
+        if relative_time in time_map:
+            return time_map[relative_time]
+        previous = [value for value in time_map if value <= relative_time]
+        if not previous:
             msg = (
-                f"Dataset '{dataset_name}' has no forcing/boundary time at or before relative time "
-                f"{relative_time}. Available times: {available_times}"
+                f"Dataset '{dataset_name}' has no timestamp at or before relative time {relative_time}. "
+                f"Available times: {sorted(time_map)}"
             )
             raise ValueError(msg)
-        sampled_time = candidate_times[-1]
-
-        LOGGER.debug(
-            "Dataset time sampling dataset=%s requested_time=%s sampled_time=%s",
-            dataset_name,
-            relative_time,
-            sampled_time,
-        )
-
-        return int(time_map[sampled_time])
-
-    def _assert_time_indices_in_batch(
-        self,
-        time_indices: list[int],
-        batch: dict[str, torch.Tensor],
-        **_kwargs,
-    ) -> None:
-        """Raise if the batch does not contain all requested time steps."""
-        if not time_indices:
-            return
-
-        required = max(time_indices) + 1
-        for dataset_name, dataset_batch in batch.items():
-            available = dataset_batch.shape[1]
-            if available < required:
-                msg = (
-                    f"Batch for dataset '{dataset_name}' contains {available} time steps, but requires "
-                    f"index {required - 1} (indices {time_indices}). The dataloader's "
-                    "time window does not match the task rollout."
-                )
-                raise ValueError(msg)
+        return time_map[max(previous)]
 
     def get_inputs(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: "Batch",
         data_indices: dict[str, IndexCollection],
         **_kwargs,
-    ) -> dict[str, torch.Tensor]:
-        """Extract model inputs from a batch.
+    ) -> "Batch":
+        """Extract model inputs from a Batch, preserving coords and metadata.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
-            Full batch keyed by dataset name.
+        batch : Batch
+            Full batch object (data, coords, metadata) keyed by dataset name.
         data_indices : dict[str, IndexCollection]
             Data indices per dataset.
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Input tensors per dataset with shape
-            ``(bs, num_inputs, grid, nvar)``.
+        Batch
+            New Batch with input tensors per dataset (shape ``(bs, num_inputs, grid, nvar)``),
+            sharing coords and metadata by reference.
         """
-        if len(self.dataset_time_maps) == 0:
-            x = {}
-            for dataset_name, dataset_batch in batch.items():
-                time_indices = self.get_batch_input_indices()
-                time_indices = normalize_time_indices(time_indices)
-                dataset_batch = dataset_batch[:, time_indices]
-                x[dataset_name] = dataset_batch[..., data_indices[dataset_name].data.input.full]
-                LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
-            return x
+        var_indices = {dataset_name: data_indices[dataset_name].data.input.full for dataset_name in batch.dataset_names}
+        new_batch = self.get_input_times(batch, **_kwargs).select(variables=var_indices)
+        for dataset_name, selected_source in new_batch.items():
+            LOGGER.debug("Selected inputs: x[%s] = %s", dataset_name, selected_source)
+        return new_batch
 
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            requested_relative_times = self._requested_input_relative_times(dataset_name)
-            input_positions = [
-                self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time)
-                for relative_time in requested_relative_times
-            ]
-            input_index = torch.tensor(input_positions, device=dataset_batch.device, dtype=torch.long)
-            x_time = dataset_batch.index_select(1, input_index)
-            x[dataset_name] = x_time[..., data_indices[dataset_name].data.input.full]
-            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
-        return x
+    def get_input_times(self, batch: "Batch", **kwargs) -> "Batch":
+        """Select the time windows used as model inputs, retaining all variables."""
+        if self.dataset_time_maps:
+            time_indices = {
+                name: normalize_time_indices(
+                    [
+                        self._sample_batch_position(name, value)
+                        for value in self._requested_input_relative_times(name, **kwargs)
+                    ],
+                )
+                for name in batch.dataset_names
+            }
+        else:
+            time_indices = normalize_time_indices(self.get_batch_input_indices())
+        return batch.select(time=time_indices)
 
-    def get_targets(self, batch: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
-        """Extract model targets from a batch.
+    def get_targets(
+        self,
+        batch: "Batch",
+        data_indices: dict[str, IndexCollection],
+        **kwargs,
+    ) -> tuple["Batch", dict[str, "BaseTemplate"], "Batch"]:
+        """Extract model targets from a Batch, preserving coords and metadata.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
-            Full batch keyed by dataset name.
+        batch : Batch
+            Full batch object (data, coords, metadata) keyed by dataset name.
+        data_indices : dict[str, IndexCollection]
+            Data indices per dataset.
         **kwargs
-            Forwarded to ``get_batch_output_indices`` (e.g.
-            ``rollout_step``).
+            Forwarded to ``get_batch_output_indices`` (e.g. ``rollout_step``).
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Target tensors per dataset with shape
-            ``(bs, num_outputs, ensemble, grid, full_nvar)`` in DATA_FULL
-            variable space (all variables including forcings).
+        tuple[Batch, dict[str, BaseTemplate], Batch]: (target, target_template, target_forcing)
+            target holds the target tensors per dataset, shape (bs, num_outputs, ensemble, grid, full_nvar)).
+            target_template describes what the model predicts at the target nodes: the model's output
+            variables, in the model's output order, with their statistics, and no data.
+            target_forcing contains the output-time forcing variables used to
+            condition the decoder, preserving coordinates, timedeltas,
+            metadata and layouts.
         """
-        if len(self.dataset_time_maps) == 0:
-            time_indices = self.get_batch_output_indices(**kwargs)
-            self._assert_time_indices_in_batch(time_indices, batch, **kwargs)
-            time_indices = normalize_time_indices(time_indices)
-            y = {}
-            for dataset_name, dataset_batch in batch.items():
-                y[dataset_name] = dataset_batch[:, time_indices]
-                LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-            return y
+        if self.dataset_time_maps:
+            time_indices = {
+                name: [
+                    self._sample_batch_position(name, value)
+                    for value in self._requested_output_relative_times(name, **kwargs)
+                ]
+                for name in batch.dataset_names
+            }
+        else:
+            time_indices = dict.fromkeys(batch.dataset_names, self.get_batch_output_indices(**kwargs))
+        for dataset_name, view in batch.items():
+            dataset_indices = time_indices[dataset_name]
+            if dataset_indices and max(dataset_indices) >= view.time_size:
+                msg = (
+                    f"Batch for dataset '{dataset_name}' contains {view.time_size} time steps, "
+                    f"but requires index {max(dataset_indices)} (indices {dataset_indices}). "
+                    "The dataloader's time window does not match the task rollout."
+                )
+                raise ValueError(msg)
 
-        y = {}
-        for dataset_name, dataset_batch in batch.items():
-            requested_relative_times = self._requested_output_relative_times(dataset_name, **kwargs)
-            target_positions = [
-                self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time)
-                for relative_time in requested_relative_times
-            ]
-            target_index = torch.tensor(target_positions, device=dataset_batch.device, dtype=torch.long)
-            y[dataset_name] = dataset_batch.index_select(1, target_index)
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-        return y
+        time_indices = {name: normalize_time_indices(indices) for name, indices in time_indices.items()}
+
+        target_tensors = self.measure_targets_from_step(batch.select(time=time_indices), **kwargs)
+        for dataset_name, selected_source in target_tensors.items():
+            LOGGER.debug("Selected targets: x[%s] = %s", dataset_name, selected_source)
+
+        var_indices = {
+            dataset_name: data_indices[dataset_name].data.input.forcing for dataset_name in batch.dataset_names
+        }
+        target_forcing = target_tensors.select(variables=var_indices)
+
+        return target_tensors, self.get_target_template(target_tensors, data_indices), target_forcing
+
+    def measure_targets_from_step(self, targets: "Batch", **_kwargs) -> "Batch":
+        """Return ``targets`` with their point times measured from the step's own reference time.
+
+        Batches measure point times from the sample's reference time. Tasks whose steps move
+        that reference (e.g. rollout) shift the targets' times here.
+        """
+        return targets
+
+    @staticmethod
+    def get_target_template(
+        targets: "Batch",
+        data_indices: dict[str, IndexCollection],
+    ) -> dict[str, "BaseTemplate"]:
+        """Return what the model predicts at the nodes of ``targets``, one template per dataset.
+
+        The targets carry every variable of a dataset; each template keeps the model's output
+        variables, in the model's output order, together with their statistics.
+        """
+        templates = {}
+        for dataset_name, source in targets.items():
+            output_names = data_indices[dataset_name].model.output.ordered_names
+            positions = [source.name_to_index[name] for name in output_names]
+            templates[dataset_name] = source.template().select_variables(positions)
+        return templates
 
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""
@@ -365,9 +313,6 @@ class BaseTask(ABC):
         """Fill the metadata dictionary with task-specific information."""
         md_dict["metadata_inference"]["task"] = self.name
 
-        metadata_inference = md_dict.get("metadata_inference", {})
-        dataset_names = metadata_inference.get("dataset_names", []) if isinstance(metadata_inference, Mapping) else []
-
         input_relative_date_indices = self.get_batch_input_indices()
         output_relative_date_indices = self.get_batch_output_indices()
         timestep = self._get_timestep_for_metadata()
@@ -379,30 +324,65 @@ class BaseTask(ABC):
             "timestep": timestep,  # backwards compatibility with inference
         }
 
+        dataset_names = md_dict["metadata_inference"]["dataset_names"]
         for dataset_name in dataset_names:
-            existing_timesteps = metadata_inference[dataset_name].get("timesteps", {})
-            dataset_timesteps = timesteps | existing_timesteps
-            input_by_dataset = existing_timesteps.get("relative_date_input_indices_training_by_dataset", {})
-            relative_by_dataset = existing_timesteps.get("relative_date_indices_training_by_dataset", {})
-            targets_by_dataset_by_step = existing_timesteps.get(
-                "relative_date_target_indices_training_by_dataset_by_step",
-                {},
-            )
-            if dataset_name in input_by_dataset:
-                dataset_timesteps["input_relative_date_indices"] = input_by_dataset[dataset_name]
-            if dataset_name in relative_by_dataset:
-                dataset_timesteps["relative_date_indices_training"] = relative_by_dataset[dataset_name]
-            if targets_by_dataset_by_step.get(dataset_name):
-                dataset_timesteps["output_relative_date_indices"] = targets_by_dataset_by_step[dataset_name][0]
-            if "model_timestep" in existing_timesteps:
-                dataset_timesteps["timestep"] = existing_timesteps["model_timestep"]
-            metadata_inference[dataset_name]["timesteps"] = dataset_timesteps
+            existing = md_dict["metadata_inference"][dataset_name].get("timesteps", {})
+            dataset_timesteps = timesteps | existing
+            inputs = existing.get("relative_date_input_indices_training_by_dataset", {})
+            relative = existing.get("relative_date_indices_training_by_dataset", {})
+            targets = existing.get("relative_date_target_indices_training_by_dataset_by_step", {})
+            if dataset_name in inputs:
+                dataset_timesteps["input_relative_date_indices"] = inputs[dataset_name]
+            if dataset_name in relative:
+                dataset_timesteps["relative_date_indices_training"] = relative[dataset_name]
+            if targets.get(dataset_name):
+                dataset_timesteps["output_relative_date_indices"] = targets[dataset_name][0]
+            if "model_timestep" in existing:
+                dataset_timesteps["timestep"] = existing["model_timestep"]
+            md_dict["metadata_inference"][dataset_name]["timesteps"] = dataset_timesteps
+
+    @staticmethod
+    def _relative_times(metadata: Mapping, dataset_names: list[str], keys: tuple[str, ...]) -> dict[str, list[int]]:
+        result = {}
+        for name in dataset_names:
+            timesteps = metadata.get(name, {}).get("timesteps", {})
+            chosen = None
+            for key in keys:
+                values = timesteps.get(key)
+                if isinstance(values, Mapping) and name in values:
+                    candidate = [int(value) for value in values[name]]
+                    if chosen is None or max(candidate, default=-1) > max(chosen, default=-1):
+                        chosen = candidate
+            if chosen is not None:
+                result[name] = chosen
+        return result
+
+    @staticmethod
+    def _relative_times_by_step(
+        metadata: Mapping,
+        dataset_names: list[str],
+        keys: tuple[str, ...],
+    ) -> dict[str, list[list[int]]]:
+        result = {}
+        for name in dataset_names:
+            timesteps = metadata.get(name, {}).get("timesteps", {})
+            chosen = None
+            for key in keys:
+                values = timesteps.get(key)
+                if isinstance(values, Mapping) and name in values:
+                    candidate = [[int(value) for value in step] for step in values[name]]
+                    candidate_max = max((value for step in candidate for value in step), default=-1)
+                    chosen_max = max((value for step in (chosen or []) for value in step), default=-1)
+                    if chosen is None or candidate_max > chosen_max:
+                        chosen = candidate
+            if chosen is not None:
+                result[name] = chosen
+        return result
 
     def configure_from_metadata(self, md_dict: dict) -> None:
-        """Initialize task runtime state from metadata."""
-        metadata_inference = md_dict.get("metadata_inference", {})
-        dataset_names = metadata_inference.get("dataset_names", []) if isinstance(metadata_inference, Mapping) else []
-
+        """Configure dataset-specific time selection from datamodule metadata."""
+        metadata = md_dict.get("metadata_inference", {})
+        dataset_names = metadata.get("dataset_names", []) if isinstance(metadata, Mapping) else []
         self.dataset_input_relative_times_by_dataset = {}
         self.dataset_target_relative_times_by_dataset = {}
         self.dataset_target_relative_times_by_dataset_by_step = {}
@@ -410,36 +390,25 @@ class BaseTask(ABC):
         self.num_input_timesteps_by_dataset = {}
         self.num_output_timesteps_by_dataset = {}
         self.model_timestep = None
-
-        if len(dataset_names) == 0:
+        if not dataset_names:
             return
 
-        timesteps_meta = metadata_inference.get(dataset_names[0], {}).get("timesteps", {})
-        if "model_timestep" not in timesteps_meta:
+        first_timesteps = metadata.get(dataset_names[0], {}).get("timesteps", {})
+        if "model_timestep" not in first_timesteps:
             return
-
-        from anemoi.utils.dates import frequency_to_timedelta
-
-        self.model_timestep = frequency_to_timedelta(timesteps_meta["model_timestep"])
-
-        self.dataset_input_relative_times_by_dataset = self._resolve_relative_time_metadata(
-            metadata_inference,
+        self.model_timestep = frequency_to_timedelta(first_timesteps["model_timestep"])
+        self.dataset_input_relative_times_by_dataset = self._relative_times(
+            metadata,
             dataset_names,
-            (
-                "relative_date_input_indices_validation_by_dataset",
-                "relative_date_input_indices_training_by_dataset",
-            ),
+            ("relative_date_input_indices_validation_by_dataset", "relative_date_input_indices_training_by_dataset"),
         )
-        self.dataset_target_relative_times_by_dataset = self._resolve_relative_time_metadata(
-            metadata_inference,
+        self.dataset_target_relative_times_by_dataset = self._relative_times(
+            metadata,
             dataset_names,
-            (
-                "relative_date_target_indices_validation_by_dataset",
-                "relative_date_target_indices_training_by_dataset",
-            ),
+            ("relative_date_target_indices_validation_by_dataset", "relative_date_target_indices_training_by_dataset"),
         )
-        self.dataset_target_relative_times_by_dataset_by_step = self._resolve_relative_time_metadata_by_step(
-            metadata_inference,
+        self.dataset_target_relative_times_by_dataset_by_step = self._relative_times_by_step(
+            metadata,
             dataset_names,
             (
                 "relative_date_target_indices_validation_by_dataset_by_step",
@@ -447,71 +416,50 @@ class BaseTask(ABC):
             ),
         )
         self.num_input_timesteps_by_dataset = {
-            dataset_name: len(self._requested_input_relative_times(dataset_name)) for dataset_name in dataset_names
+            name: len(self._requested_input_relative_times(name)) for name in dataset_names
         }
-        self.num_output_timesteps_by_dataset = {}
-        for dataset_name in dataset_names:
-            targets_by_step = self.dataset_target_relative_times_by_dataset_by_step.get(dataset_name)
-            if targets_by_step is None:
-                self.num_output_timesteps_by_dataset[dataset_name] = len(
-                    self._requested_output_relative_times(dataset_name),
-                )
-                continue
-            output_counts = {len(targets) for targets in targets_by_step}
-            if len(output_counts) != 1:
-                msg = (
-                    f"Dataset '{dataset_name}' has a different number of native targets per rollout step: "
-                    f"{targets_by_step}. Mixed-frequency outputs must have a fixed shape."
-                )
+        for name in dataset_names:
+            by_step = self.dataset_target_relative_times_by_dataset_by_step.get(name)
+            counts = (
+                {len(values) for values in by_step}
+                if by_step is not None
+                else {len(self._requested_output_relative_times(name))}
+            )
+            if len(counts) != 1:
+                msg = f"Dataset '{name}' has a different number of native targets per rollout step."
                 raise ValueError(msg)
-            self.num_output_timesteps_by_dataset[dataset_name] = output_counts.pop()
-        relative_by_dataset = self._resolve_relative_time_metadata(
-            metadata_inference,
+            self.num_output_timesteps_by_dataset[name] = counts.pop()
+
+        relative = self._relative_times(
+            metadata,
             dataset_names,
-            (
-                "relative_date_indices_validation_by_dataset",
-                "relative_date_indices_training_by_dataset",
-            ),
+            ("relative_date_indices_validation_by_dataset", "relative_date_indices_training_by_dataset"),
         )
-        dataset_time_maps = {}
-        for dataset_name in dataset_names:
-            relative_times = relative_by_dataset.get(dataset_name)
-            if relative_times is None:
-                relative_times = sorted(
-                    {
-                        *self._requested_input_relative_times(dataset_name),
-                        *self._requested_output_relative_times(
-                            dataset_name,
-                            step=max(self.num_steps - 1, 0),
-                        ),
-                    },
-                )
-
-            dataset_time_maps[dataset_name] = {
-                int(relative_time): batch_idx for batch_idx, relative_time in enumerate(relative_times)
-            }
-
-        self.dataset_time_maps = dataset_time_maps
+        self.dataset_time_maps = {
+            name: {value: position for position, value in enumerate(relative[name])} for name in dataset_names
+        }
 
 
 class BaseSingleStepTask(BaseTask):
     """Base class for single-step tasks."""
 
-    def advance_input(self, *args, **_kwargs) -> dict[str, torch.Tensor]:
+    def advance_input(self, batch: "Batch", *_args, **_kwargs) -> "Batch":
         """Advance the input state for each dataset based on the task's requirements.
 
         This method can be overridden by specific tasks to implement custom logic for advancing the input state.
 
         Parameters
         ----------
-        *args
-            Positional arguments; the first item is the input state.
+        batch : Batch
+            The input state for each dataset.
+        *_args
+            Additional positional arguments, which are ignored by the default implementation.
         **_kwargs
             Additional keyword arguments, which are ignored by the default implementation.
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            The advanced input state for each dataset.
+        Batch
+            The advanced input state for each dataset (default: passthrough).
         """
-        return args[0]
+        return batch

@@ -19,7 +19,6 @@ from pathlib import Path
 import hydra
 import pandas as pd
 import pytorch_lightning as pl
-import torch
 from omegaconf import DictConfig
 from pytorch_lightning.utilities import rank_zero_only
 from rich.console import Console
@@ -155,10 +154,8 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @cached_property
     def model_summary(self) -> str:
-        example_input_array = self.get_example_input_array()
         if self.config.diagnostics.benchmark_profiler.model_summary.enabled:
-            model = self.model
-            return self.profiler.get_model_summary(model=model, example_input_array=example_input_array)
+            return self.profiler.get_model_summary(model=self.model)
         return None
 
     @rank_zero_only
@@ -300,24 +297,6 @@ class AnemoiProfiler(AnemoiTrainer):
                 )
         return callbacks
 
-    def get_example_input_array(self) -> dict[str, torch.Tensor]:
-        batch = next(iter(self.datamodule.train_dataloader()))
-        if type(batch) in [list, tuple]:
-            batch = batch[0]
-
-        example_input_array = self.task.get_inputs(batch, data_indices=self.data_indices)
-        for dataset_name in example_input_array:
-            # If the input batch is sharded, replicate it to its full size
-            if self.config.dataloader.read_group_size > 1:
-                example_input_array[dataset_name] = example_input_array[dataset_name].repeat(
-                    1,
-                    1,
-                    1,
-                    self.config.dataloader.read_group_size,
-                    1,
-                )
-        return example_input_array
-
     @cached_property
     def profiler(self) -> BenchmarkProfiler:
         return BenchmarkProfiler(self.config)
@@ -330,9 +309,8 @@ class AnemoiProfiler(AnemoiTrainer):
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
             self.config.system.output.profiler = Path(self.config.system.output.profiler, self.run_id)
-        elif self.config.training.fork_run_id:
-            parent_run = self.config.training.fork_run_id
-            self.config.system.output.profiler = Path(self.config.system.output.profiler, parent_run)
+        elif self._fork_run_id:
+            self.config.system.output.profiler = Path(self.config.system.output.profiler, self._fork_run_id)
         LOGGER.info("Profiler path: %s", self.config.system.output.profiler)
 
     def _close_logger(self) -> None:

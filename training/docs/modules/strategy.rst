@@ -30,9 +30,9 @@ strategies:
 
 * initializes the different process group layouts (model, reader, ensemble)
 * configures DDP and injects per-parameter gradient scaling hooks
-* exposes the ``shard_shapes`` that dataloaders need to produce correctly
-   partitioned batches, and passes the reader group of each rank to the
-   datasets in ``process_dataloader``
+* passes the reader group of each rank to the datasets in
+   ``process_dataloader``, so that each rank of a reader group reads its
+   own part of the grid
 * reports in ``distributed_sampler_kwargs`` how the samples are split
    between groups of ranks that train on the same samples
 * gives every rank the base seed of rank 0, so that a freshly drawn base seed

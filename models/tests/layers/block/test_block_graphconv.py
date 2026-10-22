@@ -20,6 +20,8 @@ from anemoi.models.layers.utils import load_layer_kernels
 
 
 class TestGraphConvProcessorBlock:
+    """Tests for the GraphConvProcessorBlock."""
+
     @given(
         in_channels=st.integers(min_value=1, max_value=100),
         out_channels=st.integers(min_value=1, max_value=100),
@@ -60,6 +62,8 @@ class TestGraphConvProcessorBlock:
 
 
 class TestGraphConvMapperBlock:
+    """Tests for the GraphConvMapperBlock."""
+
     @given(
         in_channels=st.integers(min_value=1, max_value=100),
         out_channels=st.integers(min_value=1, max_value=100),

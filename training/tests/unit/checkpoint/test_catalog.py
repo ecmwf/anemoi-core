@@ -20,6 +20,8 @@ from anemoi.training.checkpoint.catalog import ComponentCatalog
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from collections.abc import Iterator
     from unittest.mock import MagicMock
 
 
@@ -114,7 +116,10 @@ class TestComponentCatalog:
         assert "checkpoint" not in components
         # Only concrete classes should appear
         for name in components:
-            assert name in {"local", "http", "s3"}, f"Unexpected component: {name}"
+            # Catalog names are derived from the class name (RunIdSource -> run_id).
+            # The Hydra config group is named separately (source=run) and is the
+            # user-facing surface; these names drive discovery and listing only.
+            assert name in {"local", "http", "s3", "run_id"}, f"Unexpected component: {name}"
 
     @patch("anemoi.training.checkpoint.catalog.ComponentCatalog._discover_components")
     def test_get_source_target_when_empty(self, mock_discover: MagicMock) -> None:
@@ -160,3 +165,41 @@ class TestComponentCatalog:
 
         assert "Unknown model modifier: 'freeze'" in str(exc_info.value)
         assert "no modifiers are currently available" in str(exc_info.value)
+
+
+@pytest.fixture
+def _fresh_catalog() -> Iterator[None]:
+    """Run real discovery, and leave no cached discovery result behind for other tests."""
+    ComponentCatalog._sources = None
+    ComponentCatalog._loaders = None
+    ComponentCatalog._modifiers = None
+    yield
+    ComponentCatalog._sources = None
+    ComponentCatalog._loaders = None
+    ComponentCatalog._modifiers = None
+
+
+@pytest.mark.usefixtures("_fresh_catalog")
+@pytest.mark.parametrize(
+    ("lookup", "name", "suggestion"),
+    [
+        (ComponentCatalog.get_source_target, "loca", "local"),
+        (ComponentCatalog.get_loader_target, "weight", "weights_only"),
+    ],
+)
+def test_unknown_name_lists_available_names_and_suggests_a_match(
+    lookup: Callable[[str], str],
+    name: str,
+    suggestion: str,
+) -> None:
+    """A typo in a component name gives the available names and a suggestion."""
+    with pytest.raises(CheckpointConfigError) as exc_info:
+        lookup(name)
+
+    message = str(exc_info.value)
+    # The listing is the first line; the suggestion and examples follow on later lines.
+    first_line = message.splitlines()[0]
+    assert "Available" in first_line
+    listing = first_line.split("Available", 1)[1]
+    assert suggestion in listing
+    assert f"Did you mean: {suggestion}" in message

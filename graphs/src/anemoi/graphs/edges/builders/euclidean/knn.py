@@ -164,13 +164,7 @@ class ReversedKNNEdges(KNNEdges):
         Update the graph with the edges.
     """
 
-    def compute_edge_index_from_coords(
-        self,
-        source_coords: torch.Tensor,
-        target_coords: torch.Tensor,
-        **kwargs,
-    ) -> torch.Tensor:
-        return super().compute_edge_index_from_coords(target_coords, source_coords, skip_flip=True, **kwargs)
+    reversed_search = True
 
 
 class MutualKNNEdges(BaseDistanceEdgeBuilders):
@@ -257,6 +251,7 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         target_coords: torch.Tensor,
         num_nearest_neighbours: int,
         reversed_num_nearest_neighbours: int,
+        skip_flip: bool = False,
     ) -> torch.Tensor:
         # Forward: for each target node, its nearest source nodes.
         # knn(x=source, y=target) -> rows (target_idx, source_idx); flip -> (source, target).
@@ -264,7 +259,12 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         # Reversed: for each source node, its nearest target nodes.
         # knn(x=target, y=source) -> rows (source_idx, target_idx); already (source, target).
         reversed_ = knn(target_coords, source_coords, k=reversed_num_nearest_neighbours)
-        return intersect_edges(forward, reversed_)
+        edge_index = intersect_edges(forward, reversed_)
+        # The rows are already (source, target); skip_flip means the coordinate arguments were
+        # swapped upstream and are expected the other way round, matching the scikit-learn branch.
+        if skip_flip:
+            edge_index = torch.flip(edge_index, [0])
+        return edge_index
 
     def _compute_adj_matrix_sklearn(
         self,

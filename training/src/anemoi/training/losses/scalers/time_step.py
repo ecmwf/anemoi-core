@@ -70,8 +70,7 @@ class UniformTimeStepScaler(TimeStepScaler):
             task is not None
         ), "Task must be provided to TimeStepScaler to determine the number of output steps for scaling."
         del kwargs
-        num_output_timesteps = task.num_output_timesteps_by_dataset.get(dataset_name, task.num_output_timesteps)
-        weights = [1.0] * num_output_timesteps
+        weights = [1.0] * task.num_output_timesteps_by_dataset.get(dataset_name, task.num_output_timesteps)
         super().__init__(weights=weights, norm="unit-sum")
 
 

@@ -12,21 +12,18 @@ import logging
 from functools import cached_property
 
 import numpy as np
-import torch
 from rich.console import Console
 from rich.tree import Tree
 from torch.utils.data import Dataset
 
-from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.data_reader import RelativeTimeReader
-from anemoi.training.data.data_reader import dates_to_unix_ns
+from anemoi.models.data import BaseSample
+from anemoi.training.data.readers import DataReader
+from anemoi.training.data.usable_indices import Anchors
 from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
 from anemoi.training.utils.time_indices import offset_time_indices
-from anemoi.utils.dates import frequency_to_seconds
+from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,14 +31,13 @@ LOGGER = logging.getLogger(__name__)
 class MultiDataset(Dataset):
     """Multi-dataset wrapper that returns synchronized samples from multiple data readers.
 
-    Each index refers to one valid (sequence, position) anchor shared by all data
-    readers. The dataloader's sampler decides which indices a rank loads and in
-    which order.
+    Each index refers to one valid anchor shared by all data readers. The
+    dataloader's sampler decides which indices a rank loads and in which order.
     """
 
     def __init__(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         relative_date_indices: dict[str, TimeIndices],
         fake_dataloading: bool = False,
     ) -> None:
@@ -49,7 +45,7 @@ class MultiDataset(Dataset):
 
         Parameters
         ----------
-        data_readers : dict[str, BaseAnemoiReader]
+        data_readers : dict[str, DataReader]
             Dictionary mapping dataset names to their data_readers
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
         relative_date_indices : dict[str, TimeIndices]
@@ -60,31 +56,25 @@ class MultiDataset(Dataset):
         self.data_readers = data_readers
         self.dataset_names = list(data_readers.keys())
         self.relative_date_indices_are_native = True
+        self.frequency_seconds: int | None = None
+        self.stride = self._sampling_stride(data_readers)
+
         self.fake_dataloading = fake_dataloading
-        self._fake_sample: dict[str, torch.Tensor] | None = None
+        self._fake_sample: dict[str, BaseSample] | None = None
         if self.fake_dataloading:
             LOGGER.info("Using fake dataloading")
 
-        # Guard against mixing single-sequence (NativeGridDataset, global time axis)
-        # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
-        # intersection would silently keep only sequence-0 samples and produce
-        # semantically meaningless alignment between the two encoders.
-        single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
-        multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
-        if single_seq and multi_seq:
-            msg = (
-                "Currently mixing single-sequence datasets (global time axis) with "
-                "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
-                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
-            )
-            raise ValueError(msg)
-
         self.set_relative_date_indices(relative_date_indices)
 
-        # Reader group info, set by the DDP strategies. Each rank in a reader group
-        # reads its own part of the grid.
-        self.reader_group_rank = 0
-        self.shard_sizes: dict[str, ShardSizes] | None = None
+    @staticmethod
+    def _sampling_stride(data_readers: dict[str, DataReader]) -> int | None:
+        """Return the anchor stride the readers agree on; stride 1 when none is configured."""
+        configured = {name: reader.sampling.get("stride") for name, reader in data_readers.items() if reader.sampling}
+        strides = set(configured.values())
+        if len(strides) > 1:
+            msg = f"Data readers disagree on the sampling stride: {configured}."
+            raise ValueError(msg)
+        return strides.pop() if strides else 1
 
     def set_relative_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
         """Set the time steps loaded for each sample, and the samples that provide them.
@@ -92,10 +82,12 @@ class MultiDataset(Dataset):
         Call this before the dataloader is created: the number of samples changes
         with the time steps, and the sampler reads it when it is constructed.
         """
-        # Compute valid (sequence, position) anchors; each dataset index refers to one anchor.
-        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
+        # Find the anchors (times every reader can sample) for the required time steps.
+        # Each reader gets its own (sequence, position) per anchor, so readers need not share
+        # a frequency or date range. Each dataset index refers to one anchor.
+        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices, stride=self.stride)
 
-        # Normalize the date indices to use slices where possible.
+        # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
@@ -128,11 +120,6 @@ class MultiDataset(Dataset):
         """Return combined variables from all data readers."""
         return self._collect("variables")
 
-    @property
-    def data(self) -> dict:
-        """Return data from all data readers as dictionary."""
-        return self._collect("data")
-
     @cached_property
     def name_to_index(self) -> dict[str, dict]:
         """Return combined name_to_index mapping from all data readers."""
@@ -154,42 +141,39 @@ class MultiDataset(Dataset):
             assert freq == freq_ref, f"Data reader '{name}' has different frequency than other data readers"
         return freq_ref
 
-    def set_reader_group_info(
-        self,
-        reader_group_rank: int,
-        shard_sizes: dict[str, ShardSizes],
-    ) -> None:
+    def set_reader_group_info(self, reader_group_rank: int, reader_group_size: int) -> None:
         """Set the reader group information, called by the DDP strategies.
+
+        Each rank in a reader group reads its own part of the data.
 
         Parameters
         ----------
         reader_group_rank : int
-            Reader group rank
-        shard_sizes : dict[str, ShardSizes]
-            Shard sizes for all datasets
+            Reader group rank.
+        reader_group_size : int
+            Reader group size.
         """
-        self.reader_group_rank = reader_group_rank
-        self.shard_sizes = shard_sizes
+        for reader in self.data_readers.values():
+            reader.set_reader_group_info(reader_group_rank, reader_group_size)
 
-    def get_sample(self, index: int) -> dict[str, torch.Tensor]:
-        sequence, position = (int(v) for v in self.anchors[index])
-        x = {}
-        for name, dataset in self.data_readers.items():
+    def get_sample(self, index: int) -> dict[str, BaseSample]:
+        """Return per-dataset samples for ``index``.
+
+        Each value is the reader's :class:`~anemoi.models.data.BaseSample`, so that
+        the dataloader's collate function can build a :class:`anemoi.models.data.Batch`.
+        Observation timedeltas are measured from the sample's reference time.
+        """
+        x: dict[str, BaseSample] = {}
+        for name, data_reader in self.data_readers.items():
+            sequence, position = (int(v) for v in self.anchors.rows[name][index])
             time_steps = offset_time_indices(position, self.relative_date_indices[name])
-            # self.shard_sizes is lazily initalised to None
-            # This if statement guards against the case where shard_sizes is not set
-            # (e.g. if set_reader_group_info hasn't been called yet)
-            if self.shard_sizes is not None and self.shard_sizes[name] is not None:
-                start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
-                grid_indices = slice(start, end)
-            else:
-                grid_indices = slice(None)
-            x[name] = dataset.get_sample(sequence, time_steps, grid_indices)
+            sample = data_reader.get_sample(sequence, time_steps)
+            x[name] = data_reader.measure_from_reference(sample, position, time_steps)
 
         return x
 
-    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
-        """Return the synchronized samples of all data readers for one anchor.
+    def __getitem__(self, index: int) -> dict[str, BaseSample]:
+        """Return ``{dataset_name: BaseSample}`` for one anchor.
 
         Parameters
         ----------
@@ -198,9 +182,8 @@ class MultiDataset(Dataset):
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Dictionary mapping dataset names to their tensor samples
-            Format: {"dataset_a": tensor_a, "dataset_b": tensor_b, ...}
+        dict[str, BaseSample]
+            One sample for each dataset.
         """
         if not self.fake_dataloading:
             return self.get_sample(index)
@@ -217,184 +200,182 @@ class MultiDataset(Dataset):
 
     def tree(self) -> Tree:
         tree = Tree(f"{self.__class__.__name__}")
-        for name, dataset in self.data_readers.items():
-            subtree = dataset.tree(prefix=name)
+        for name, reader in self.data_readers.items():
+            subtree = reader.tree(prefix=name)
             tree.add(subtree)
         return tree
 
 
 class MixedFrequencyDataset(MultiDataset):
-    """Synchronized map-style dataset aligned on the highest-frequency reader."""
+    """Map-style dataset aligned on the highest-frequency reader's anchors."""
 
     def __init__(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         relative_date_indices: list[int],
-        frequency: str | datetime.timedelta,
+        frequency: datetime.timedelta,
+        tolerance: datetime.timedelta | None = None,
         fake_dataloading: bool = False,
     ) -> None:
         self.data_readers = data_readers
         self.dataset_names = list(data_readers)
         self.relative_date_indices_are_native = False
-        self.frequency_seconds = frequency_to_seconds(frequency)
+        self.frequency_seconds = int(frequency.total_seconds())
+        self.tolerance = tolerance
+        self.stride = self._sampling_stride(data_readers)
+        self.fake_dataloading = fake_dataloading
+        self._fake_sample: dict[str, BaseSample] | None = None
         self.model_relative_date_indices = np.array([], dtype=np.int64)
         self.model_relative_date_indices_by_dataset: dict[str, np.ndarray] = {}
         self.data_relative_date_indices_by_dataset: dict[str, np.ndarray] = {}
-        self.sample_readers: dict[str, RelativeTimeReader] = {}
-        self.fake_dataloading = fake_dataloading
-        self._fake_sample: dict[str, torch.Tensor] | None = None
+        self._sample_positions: dict[str, np.ndarray] = {}
+        self._reference_positions: dict[str, np.ndarray] = {}
+        self._reference_offsets: dict[str, np.ndarray] = {}
+        self._sequences: dict[str, int] = {}
         if self.fake_dataloading:
             LOGGER.info("Using fake dataloading")
 
-        multi_sequence = [name for name, reader in data_readers.items() if reader.num_sequences > 1]
-        if multi_sequence:
+        trajectory = [name for name, reader in data_readers.items() if reader.valid_anchors([0]).base_dates is not None]
+        if trajectory:
             msg = (
                 "Mixed-frequency alignment currently supports only datasets with a global time axis. "
-                f"Trajectory datasets are unsupported: {multi_sequence}."
+                f"Trajectory datasets are unsupported: {trajectory}."
             )
             raise ValueError(msg)
 
-        self.reader_group_rank = 0
-        self.shard_sizes: dict[str, ShardSizes] | None = None
         self.set_relative_date_indices(relative_date_indices)
 
     def set_relative_date_indices(self, relative_date_indices: list[int]) -> None:
-        """Set shared model-grid indices and resolve each reader's native subset."""
-        self.model_relative_date_indices = np.array(
-            sorted({int(index) for index in relative_date_indices}),
-            dtype=np.int64,
-        )
+        """Resolve shared model-grid indices to each reader's available timestamps."""
+        self.model_relative_date_indices = np.array(sorted({int(value) for value in relative_date_indices}))
         if len(self.model_relative_date_indices) == 0:
             msg = "`relative_date_indices` cannot be empty."
             raise ValueError(msg)
 
         self.model_relative_date_indices_by_dataset = self._build_model_relative_indices_by_dataset()
         self.data_relative_date_indices_by_dataset = {
-            name: self._to_native_relative_indices(name, model_relative_indices)
-            for name, model_relative_indices in self.model_relative_date_indices_by_dataset.items()
+            name: self._to_native_relative_indices(name, indices)
+            for name, indices in self.model_relative_date_indices_by_dataset.items()
         }
         self.relative_date_indices = {
             name: normalize_time_indices(indices.tolist())
             for name, indices in self.data_relative_date_indices_by_dataset.items()
         }
-        self._anchor_dataset_name = min(
-            self.dataset_names,
-            key=lambda name: frequency_to_seconds(self.data_readers[name].frequency),
-        )
-        anchor_reader = self.data_readers[self._anchor_dataset_name]
-        self.anchors = anchor_reader.compute_anchors(
-            self.data_relative_date_indices_by_dataset[self._anchor_dataset_name],
-        )
-        if len(self.anchors) == 0:
-            msg = f"Anchor dataset '{self._anchor_dataset_name}' has no valid anchors."
-            raise ValueError(msg)
 
-        anchor_dates_ns = dates_to_unix_ns(anchor_reader.dates)
-        if anchor_dates_ns is None:
-            msg = f"Anchor dataset '{self._anchor_dataset_name}' does not expose datetime dates."
-            raise ValueError(msg)
+        self._anchor_name = min(self.dataset_names, key=lambda name: self.data_readers[name].frequency)
+        anchor_offsets = {self._anchor_name: self.data_relative_date_indices_by_dataset[self._anchor_name]}
+        anchor_table = compute_valid_anchors(
+            {self._anchor_name: self.data_readers[self._anchor_name]},
+            anchor_offsets,
+            stride=self.stride,
+        )
+        anchor_times = anchor_table.times.astype("datetime64[s]").astype(np.int64)
+        valid = np.ones(len(anchor_times), dtype=bool)
+        sample_positions: dict[str, np.ndarray] = {}
+        reference_positions: dict[str, np.ndarray] = {}
+        reference_offsets: dict[str, np.ndarray] = {}
+        used_fallback = {}
 
-        valid_anchors = np.ones(len(self.anchors), dtype=bool)
-        anchor_positions = self.anchors[:, 1]
         for name, reader in self.data_readers.items():
-            if name == self._anchor_dataset_name:
+            if name == self._anchor_name:
+                used_fallback[name] = False
                 continue
-
-            reader_dates_ns = dates_to_unix_ns(reader.dates)
-            if reader_dates_ns is None:
-                msg = f"Dataset '{name}' does not expose datetime dates."
-                raise ValueError(msg)
-            available_mask = np.ones(len(reader_dates_ns), dtype=bool)
-            missing = np.asarray(sorted(reader.missing), dtype=np.int64)
-            available_mask[missing[(missing >= 0) & (missing < len(available_mask))]] = False
-            available_dates_ns = reader_dates_ns[available_mask]
-            if len(available_dates_ns) == 0:
+            available = reader.valid_anchors([0])
+            order = np.argsort(available.times)
+            available_times = available.times[order].astype("datetime64[s]").astype(np.int64)
+            available_positions = available.positions[order]
+            available_sequences = available.sequences[order]
+            if len(available_times) == 0:
                 msg = f"Dataset '{name}' has no available dates."
                 raise ValueError(msg)
+            if np.any(available_sequences != available_sequences[0]):
+                msg = f"Dataset '{name}' does not expose a single global time sequence."
+                raise ValueError(msg)
+            self._sequences[name] = int(available_sequences[0])
 
-            requested_dates_ns = anchor_dates_ns[anchor_positions, None] + (
-                self.model_relative_date_indices_by_dataset[name][None, :] * self.frequency_seconds * 1_000_000_000
+            requested = anchor_times[:, None] + (
+                self.model_relative_date_indices_by_dataset[name][None, :] * self.frequency_seconds
             )
-            previous_positions = np.searchsorted(available_dates_ns, requested_dates_ns, side="right") - 1
-            clipped_positions = np.clip(previous_positions, 0, len(available_dates_ns) - 1)
-            ages_ns = requested_dates_ns - available_dates_ns[clipped_positions]
-            tolerance_ns = frequency_to_seconds(reader.frequency) * 1_000_000_000
-            valid_anchors &= np.all((previous_positions >= 0) & (ages_ns <= tolerance_ns), axis=1)
+            indices = np.searchsorted(available_times, requested, side="right") - 1
+            clipped = np.clip(indices, 0, len(available_times) - 1)
+            age = requested - available_times[clipped]
+            tolerance_delta = self.tolerance if self.tolerance is not None else reader.frequency
+            tolerance = int(tolerance_delta.total_seconds())
+            valid &= np.all((indices >= 0) & (age <= tolerance), axis=1)
+            sample_positions[name] = available_positions[clipped]
+            used_fallback[name] = bool(np.any(age > 0))
 
-        self.anchors = self.anchors[valid_anchors]
-        if len(self.anchors) == 0:
+            reference_index = np.searchsorted(available_times, anchor_times, side="right") - 1
+            reference_clipped = np.clip(reference_index, 0, len(available_times) - 1)
+            reference_age = anchor_times - available_times[reference_clipped]
+            valid &= (reference_index >= 0) & (reference_age <= tolerance)
+            reference_positions[name] = available_positions[reference_clipped]
+            reference_offsets[name] = available_times[reference_clipped] - anchor_times
+
+        if not np.any(valid):
             msg = "No valid anchors found after mixed-frequency alignment across all datasets."
             raise ValueError(msg)
 
-        self.sample_readers = {
-            name: RelativeTimeReader(
-                reader,
-                native_relative_indices=self.data_relative_date_indices_by_dataset[name],
-                model_relative_indices=(
-                    self.model_relative_date_indices_by_dataset[name] if name != self._anchor_dataset_name else None
-                ),
-                frequency_seconds=self.frequency_seconds if name != self._anchor_dataset_name else None,
-                anchor_dates_ns=anchor_dates_ns if name != self._anchor_dataset_name else None,
-            )
-            for name, reader in self.data_readers.items()
-        }
-        self._fake_sample = None
-        LOGGER.info(
-            "MixedFrequencyDataset aligned %d samples on '%s'.",
-            len(self.anchors),
-            self._anchor_dataset_name,
+        self.anchors = Anchors(
+            times=anchor_table.times[valid],
+            base_dates=None,
+            rows={self._anchor_name: anchor_table.rows[self._anchor_name][valid]},
         )
+        self._sample_positions = {name: positions[valid] for name, positions in sample_positions.items()}
+        self._reference_positions = {name: positions[valid] for name, positions in reference_positions.items()}
+        self._reference_offsets = {name: offsets[valid] for name, offsets in reference_offsets.items()}
+        self._fake_sample = None
+
+        for name, fallback in used_fallback.items():
+            if fallback:
+                LOGGER.warning(
+                    "Dataset '%s' uses the most recent available timestamp within %s for some model times.",
+                    name,
+                    frequency_to_string(
+                        self.tolerance if self.tolerance is not None else self.data_readers[name].frequency,
+                    ),
+                )
+
+    def _build_model_relative_indices_by_dataset(self) -> dict[str, np.ndarray]:
+        result = {}
+        for name, reader in self.data_readers.items():
+            native_seconds = int(reader.frequency.total_seconds())
+            relative_seconds = self.model_relative_date_indices * self.frequency_seconds
+            indices = self.model_relative_date_indices[relative_seconds % native_seconds == 0]
+            if len(indices) == 0:
+                msg = (
+                    f"Dataset '{name}' has no native timestamps among model-relative indices "
+                    f"{self.model_relative_date_indices.tolist()}."
+                )
+                raise ValueError(msg)
+            result[name] = indices
+        return result
+
+    def _to_native_relative_indices(self, name: str, indices: np.ndarray) -> np.ndarray:
+        native_seconds = int(self.data_readers[name].frequency.total_seconds())
+        return (indices * self.frequency_seconds // native_seconds).astype(np.int64, copy=False)
 
     @cached_property
     def frequency(self) -> datetime.timedelta:
         """Return the highest native frequency across readers."""
-        return min(self._collect("frequency").values(), key=frequency_to_seconds)
+        return min(self._collect("frequency").values())
 
-    def get_sample(self, index: int) -> dict[str, torch.Tensor]:
-        sequence, position = (int(value) for value in self.anchors[index])
-        sample = {}
-        for name in self.data_readers:
-            if self.shard_sizes is not None and self.shard_sizes[name] is not None:
-                start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
-                grid_indices = slice(start, end)
+    def get_sample(self, index: int) -> dict[str, BaseSample]:
+        """Return every reader's windows measured from the shared anchor time."""
+        result = {}
+        for name, reader in self.data_readers.items():
+            if name == self._anchor_name:
+                sequence, reference = (int(value) for value in self.anchors.rows[name][index])
+                positions = reference + self.data_relative_date_indices_by_dataset[name]
+                offset = 0
             else:
-                grid_indices = slice(None)
-            sample[name] = self.sample_readers[name].get_sample(sequence, position, grid_indices)
-        return sample
-
-    def _build_model_relative_indices_by_dataset(self) -> dict[str, np.ndarray]:
-        """Build model-relative time indices available natively for each dataset."""
-        dataset_model_indices: dict[str, np.ndarray] = {}
-
-        for name, ds in self.data_readers.items():
-            dataset_frequency_seconds = frequency_to_seconds(ds.frequency)
-            requested_model_indices = self.model_relative_date_indices
-            requested_seconds = requested_model_indices * self.frequency_seconds
-            exact_mask = requested_seconds % dataset_frequency_seconds == 0
-            model_indices = requested_model_indices[exact_mask]
-
-            if len(model_indices) == 0:
-                msg = (
-                    f"Dataset '{name}' has no exact native timestamps for requested model-relative "
-                    f"indices {requested_model_indices.tolist()} with frequency {self.frequency_seconds} seconds."
-                )
-                raise ValueError(msg)
-
-            dataset_model_indices[name] = model_indices
-            LOGGER.info(
-                "Dataset '%s' uses %d model-relative indices (%s)",
-                name,
-                len(model_indices),
-                model_indices.tolist(),
-            )
-
-        return dataset_model_indices
-
-    def _to_native_relative_indices(self, dataset_name: str, model_relative_indices: np.ndarray) -> np.ndarray:
-        dataset_frequency_seconds = frequency_to_seconds(self.data_readers[dataset_name].frequency)
-        assert self.frequency_seconds is not None
-        rel_seconds = model_relative_indices * self.frequency_seconds
-        if np.any(rel_seconds % dataset_frequency_seconds != 0):
-            msg = f"Dataset '{dataset_name}' has non-exact native conversion for indices {model_relative_indices}."
-            raise ValueError(msg)
-        return (rel_seconds // dataset_frequency_seconds).astype(np.int64, copy=False)
+                sequence = self._sequences[name]
+                positions = self._sample_positions[name][index]
+                reference = int(self._reference_positions[name][index])
+                offset = int(self._reference_offsets[name][index])
+            sample = reader.get_sample(sequence, positions)
+            sample = reader.measure_from_reference(sample, reference, positions)
+            if reader.data_type == "tabular":
+                sample = sample.with_time_offsets([offset] * len(np.atleast_1d(positions)))
+            result[name] = sample
+        return result

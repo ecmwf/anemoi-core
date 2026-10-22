@@ -117,6 +117,71 @@ def get_edge_trainable_modules(model: Any, dataset_name: str) -> dict[tuple[str,
     return trainable_modules
 
 
+def _wrap_edges_at_antimeridian(
+    src_coords: np.ndarray,
+    dst_coords: np.ndarray,
+    data: np.ndarray,
+    period: float = 2 * np.pi,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build edge segments that take the shortest path in longitude.
+
+    Each edge is redrawn so that its two endpoints are at most half a period
+    apart in longitude; edges that then cross the antimeridian are split into
+    two segments, one on each side of the map. Without this, an edge joining
+    e.g. longitudes -1 and 1 degrees is drawn as a line spanning the whole map.
+
+    Parameters
+    ----------
+    src_coords : np.ndarray of shape (num_edges, 2)
+        Source (longitude, latitude) pairs.
+    dst_coords : np.ndarray of shape (num_edges, 2)
+        Destination (longitude, latitude) pairs.
+    data : np.ndarray of shape (num_edges,)
+        Value associated with each edge.
+    period : float, optional
+        Longitude period of the coordinates, by default ``2 * np.pi`` (radians).
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Segments of shape (num_segments, 2, 2) and the matching values of
+        shape (num_segments,).
+    """
+    half = period / 2
+    src = np.asarray(src_coords, dtype=float).copy()
+    dst = np.asarray(dst_coords, dtype=float).copy()
+    data = np.asarray(data)
+
+    # normalise source longitudes to [-half, half) and take the shortest path to the destination
+    src[:, 0] = (src[:, 0] + half) % period - half
+    dst[:, 0] = src[:, 0] + ((dst[:, 0] - src[:, 0] + half) % period - half)
+
+    crossing = np.abs(dst[:, 0]) > half
+    if not crossing.any():
+        return np.stack([src, dst], axis=1), data
+
+    src_in, dst_in = src[~crossing], dst[~crossing]
+    src_out, dst_out = src[crossing], dst[crossing]
+
+    # longitude of the map edge the segment crosses, and the latitude at which it does
+    edge_lon = np.sign(dst_out[:, 0]) * half
+    t = (edge_lon - src_out[:, 0]) / (dst_out[:, 0] - src_out[:, 0])
+    edge_lat = src_out[:, 1] + t * (dst_out[:, 1] - src_out[:, 1])
+
+    first = np.stack([src_out, np.stack([edge_lon, edge_lat], axis=1)], axis=1)
+    second = np.stack(
+        [
+            np.stack([-edge_lon, edge_lat], axis=1),
+            np.stack([dst_out[:, 0] - np.sign(dst_out[:, 0]) * period, dst_out[:, 1]], axis=1),
+        ],
+        axis=1,
+    )
+
+    segments = np.concatenate([np.stack([src_in, dst_in], axis=1), first, second], axis=0)
+    values = np.concatenate([data[~crossing], data[crossing], data[crossing]], axis=0)
+    return segments, values
+
+
 def edge_plot(
     fig: Figure,
     ax: plt.Axes,
@@ -131,28 +196,28 @@ def edge_plot(
     Parameters
     ----------
     fig : Figure
-        Figure object handle
+        Figure object handle.
     ax : matplotlib.axes
-        Axis object handle
+        Axis object handle.
     src_coords : np.ndarray of shape (num_edges, 2)
         Source latitudes and longitudes.
     dst_coords : np.ndarray of shape (num_edges, 2)
         Destination latitudes and longitudes.
     data : np.ndarray of shape (num_edges, 1)
-        Data to plot
+        Data to plot.
     cmap : str, optional
         Colormap string from matplotlib, by default "coolwarm".
     title : str, optional
-        Title for plot, by default None
+        Title for plot, by default None.
     """
-    edge_lines = np.stack([src_coords, dst_coords], axis=1)
+    edge_lines, data = _wrap_edges_at_antimeridian(src_coords, dst_coords, data)
     lc = LineCollection(edge_lines, cmap=cmap, linewidths=1)
     lc.set_array(data)
 
     psc = ax.add_collection(lc)
 
-    xmin, xmax = edge_lines[:, 0, 0].min(), edge_lines[:, 0, 0].max()
-    ymin, ymax = edge_lines[:, 1, 1].min(), edge_lines[:, 1, 1].max()
+    xmin, xmax = edge_lines[..., 0].min(), edge_lines[..., 0].max()
+    ymin, ymax = edge_lines[..., 1].min(), edge_lines[..., 1].max()
     ax.set_xlim((xmin - 0.1, xmax + 0.1))
     ax.set_ylim((ymin - 0.1, ymax + 0.1))
 
@@ -170,23 +235,30 @@ def plot_graph_node_features(
     node_attributes: NamedNodesAttributes,
     trainable_tensors: dict[str, Tensor],
     datashader: bool = False,
+    node_coordinates: dict[str, Tensor] | None = None,
 ) -> Figure:
     """Plot trainable graph node features.
 
     Parameters
     ----------
     node_attributes: NamedNodesAttributes
-        Node attributes object
+        Node attributes object.
     trainable_tensors: dict[str, torch.Tensor]
-        Node trainable tensors
+        Node trainable tensors.
     datashader: bool, optional
-        Scatter plot, by default False
+        Scatter plot, by default False.
+    node_coordinates: dict[str, torch.Tensor]
+        (lat, lon) coordinates in radians per node set, from the model graph; shape (num_nodes, 2).
 
     Returns
     -------
     Figure
-        Figure object handle
+        Figure object handle.
     """
+    del node_attributes  # the trainable node parameters no longer carry their coordinates
+    if node_coordinates is None:
+        msg = "plot_graph_node_features needs node_coordinates for each node set."
+        raise ValueError(msg)
     nrows = len(trainable_tensors)
     ncols = max(tt.shape[1] for tt in trainable_tensors.values())
 
@@ -194,7 +266,7 @@ def plot_graph_node_features(
     fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout=LAYOUT)
 
     for row, (mesh, trainable_tensor) in enumerate(trainable_tensors.items()):
-        latlons = node_attributes.get_coordinates(mesh).cpu().numpy()
+        latlons = node_coordinates[mesh].cpu().numpy()
         node_features = trainable_tensor.cpu().detach().numpy()
 
         lat, lon = latlons[:, 0], latlons[:, 1]
@@ -219,31 +291,38 @@ def plot_graph_edge_features(
     node_attributes: NamedNodesAttributes,
     trainable_modules: dict[tuple[str, str], Tensor],
     q_extreme_limit: float = 0.05,
+    node_coordinates: dict[str, Tensor] | None = None,
 ) -> Figure:
     """Plot trainable graph edge features.
 
     Parameters
     ----------
     node_attributes: NamedNodesAttributes
-        Node attributes object
+        Node attributes object.
     trainable_modules: dict[tuple[str, str], torch.Tensor]
         Edge trainable tensors.
     q_extreme_limit : float, optional
         Plot top & bottom quantile of edges trainable values, by default 0.05 (5%).
+    node_coordinates: dict[str, torch.Tensor]
+        (lat, lon) coordinates in radians per node set, from the model graph; shape (num_nodes, 2).
 
     Returns
     -------
     Figure
-        Figure object handle
+        Figure object handle.
     """
+    del node_attributes  # the trainable node parameters no longer carry their coordinates
+    if node_coordinates is None:
+        msg = "plot_graph_edge_features needs node_coordinates for each node set."
+        raise ValueError(msg)
     nrows = len(trainable_modules)
     ncols = max(tt.trainable.trainable.shape[1] for tt in trainable_modules.values())
     figsize = (ncols * 4, nrows * 3)
     fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout=LAYOUT)
 
     for row, ((src, dst), graph_mapper) in enumerate(trainable_modules.items()):
-        src_coords = node_attributes.get_coordinates(src).cpu().numpy()
-        dst_coords = node_attributes.get_coordinates(dst).cpu().numpy()
+        src_coords = node_coordinates[src].cpu().numpy()
+        dst_coords = node_coordinates[dst].cpu().numpy()
         edge_index = graph_mapper.edge_index_base.cpu().numpy()
         edge_features = graph_mapper.trainable.trainable.cpu().detach().numpy()
 
@@ -275,6 +354,7 @@ def graph_plot_fn(
     edge_trainable_modules: dict[tuple[str, str], Any],
     q_extreme_limit: float = 0.05,
     settings: PlottingSettings | None = None,
+    node_coordinates: dict[str, Tensor] | None = None,
     **_kwargs,
 ) -> Generator[tuple[Figure, str], None, None]:
     """Default plug-in function for :class:`GraphFeaturePlot`.
@@ -291,6 +371,7 @@ def graph_plot_fn(
             node_attributes,
             node_trainable_tensors,
             datashader=datashader,
+            node_coordinates=node_coordinates,
         )
         yield fig, f"node_trainable_params_{dataset_name}"
     else:
@@ -301,6 +382,7 @@ def graph_plot_fn(
             node_attributes,
             edge_trainable_modules,
             q_extreme_limit=q_extreme_limit,
+            node_coordinates=node_coordinates,
         )
         yield fig, f"edge_trainable_params_{dataset_name}"
     else:
