@@ -423,8 +423,8 @@ def _test_gnn_mapper_matches_unsharded_rank(
         remote_src_gradient[src_start:src_stop].abs() > 10 * allowed_gradient_error
     ).any(), f"Remote source-gradient contributions are too small to test communication on rank {rank}"
 
-    # Source input may be replicated; destination inputs are owned rows.
-    # Anemoi prepares source and edge shards internally from these declared layouts.
+    # Destination inputs stay owned even when source inputs are replicated.
+    # Production prepares edge shards from the full edge input.
     distributed_src_input = (x_src[src_start:src_stop] if source_is_sharded else x_src).clone().requires_grad_(True)
     local_dst_input = x_dst[dst_start:dst_stop].clone().requires_grad_(True)
     full_edge_input = edge_attr.clone().requires_grad_(True)
@@ -470,7 +470,12 @@ def _test_gnn_mapper_matches_unsharded_rank(
     local_loss.backward()
     combined_loss = local_loss.detach().clone()
     dist.all_reduce(combined_loss, group=group)
-    torch.testing.assert_close(combined_loss, global_loss.detach(), **tolerances)
+    torch.testing.assert_close(
+        combined_loss,
+        global_loss.detach(),
+        **tolerances,
+        msg=lambda details: f"global loss on rank {rank}\n{details}",
+    )
 
     # Compare completed activation gradients and partial parameter contributions.
     assert distributed_src_input.grad is not None, "Missing distributed source-input gradient"

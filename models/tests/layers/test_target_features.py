@@ -313,7 +313,12 @@ def _test_composite_target_layout_rank(
         dataset_name="data",
     )
     expected = torch.cat([encoded, coordinate_features, inputs.reshape(num_nodes, 2)], dim=1)
-    torch.testing.assert_close(actual, expected[start:stop] if input_is_sharded else expected)
+    # Callable messages retain numerical details while identifying the layout and rank.
+    torch.testing.assert_close(
+        actual,
+        expected[start:stop] if input_is_sharded else expected,
+        msg=lambda details: f"composite features on rank {rank}, input_is_sharded={input_is_sharded}\n{details}",
+    )
 
 
 @pytest.mark.distributed
