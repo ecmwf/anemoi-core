@@ -343,7 +343,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             processor_edge_attr,
             processor_edge_index,
             proc_edge_shard_sizes,
-        ) = self.processor_graph_provider.get_edges(
+        ) = self.processor_graph_provider[self._graph_name_hidden].get_edges(
             batch_size=bse,
             model_comm_group=model_comm_group,
         )
