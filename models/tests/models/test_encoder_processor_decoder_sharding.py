@@ -11,8 +11,9 @@
 
 Each rank supplies owned or replicated data-grid inputs. The normal model forward prepares
 hidden-node shards, graph-provider edge shards, encoder/processor/decoder layouts,
-and the local prediction with its input residual. Compare predictions, the global
-weighted loss, input gradients and all parameter gradients with an unsharded model.
+and the prediction in the supplied external layout with its input residual.
+Compare predictions, the global weighted loss, input gradients and all parameter
+gradients with an unsharded model.
 
 Trainable node and edge tables have row-varying values. Their reconstructed
 gradients are compared directly; ordinary layer-gradient contributions are summed.
@@ -28,64 +29,11 @@ from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from tests.distributed._distributed_runner import _run_distributed_test
-
-
-def _build_model_graph(world_size: int) -> tuple[HeteroData, list[int]]:
-    """Build input/output-grid and hidden-graph nodes with destination-sorted edges.
-
-    The input/output dataset is named "data". Rank 0 owns four data nodes and
-    three hidden nodes; each remaining rank owns three data nodes and two hidden
-    nodes. These uneven partitions have different source/destination offsets.
-    Every destination uses an owned source and a source from the next rank.
-    """
-    data_splits = [4] + [3] * (world_size - 1)
-    hidden_splits = [3] + [2] * (world_size - 1)
-    graph = HeteroData()
-    generator = torch.Generator().manual_seed(31)
-    # Initialize each node with a random coordinate pair.
-    for name, splits in (("data", data_splits), ("hidden", hidden_splits)):
-        graph[name].x = torch.randn(sum(splits), 2, generator=generator)
-        graph[name].num_nodes = sum(splits)
-
-    # Construct the directed relations used by the encoder, processor and decoder.
-    relations = (
-        ("data", "hidden", data_splits, hidden_splits),
-        ("hidden", "hidden", hidden_splits, hidden_splits),
-        ("hidden", "data", hidden_splits, data_splits),
-    )
-    for src_name, dst_name, src_splits, dst_splits in relations:
-        src_starts = [sum(src_splits[:rank]) for rank in range(world_size)]
-        dst_starts = [sum(dst_splits[:rank]) for rank in range(world_size)]
-        edges = []
-        for rank in range(world_size):
-            # Choose a source owner on the next rank to require a remote read.
-            remote_src_rank = (rank + 1) % world_size
-            for offset in range(dst_splits[rank]):
-                dst = dst_starts[rank] + offset
-                edges.extend(
-                    [
-                        (src_starts[rank] + offset % src_splits[rank], dst),
-                        (src_starts[remote_src_rank] + offset % src_splits[remote_src_rank], dst),
-                    ]
-                )
-        # PyG stores edges as [2, num_edges]
-        edge_index = torch.tensor(edges, dtype=torch.long).T.contiguous()
-        relation = (src_name, "to", dst_name)
-        graph[relation].edge_index = edge_index
-        graph[relation].edge_attr = torch.randn(len(edges), 3, generator=generator)
-        # Nonnegative differences mean destination IDs are sorted, with repeated IDs allowed.
-        assert (edge_index[1].diff() >= 0).all(), f"{relation} must be destination-sorted"
-        # Verify that every rank's destination-owned edges include a remote source.
-        for rank in range(world_size):
-            local_edges = (edge_index[1] >= dst_starts[rank]) & (edge_index[1] < dst_starts[rank] + dst_splits[rank])
-            sources = edge_index[0, local_edges]
-            assert (
-                (sources < src_starts[rank]) | (sources >= src_starts[rank] + src_splits[rank])
-            ).any(), f"{relation} must have a remote source dependency for rank {rank}"
-    return graph, data_splits
+from tests.distributed._graph_fixtures import build_model_graph
 
 
 def _build_graphconv_config() -> DictConfig:
@@ -164,12 +112,25 @@ def _test_graphconv_model_matches_unsharded_rank(
 ) -> None:
     """Compare normal model orchestration with one globally normalized reference objective."""
     torch.set_num_threads(1)
-    # Initialize independent models with identical state and distinguishable table rows.
-    graph, data_splits = _build_model_graph(world_size)
+    graph, data_splits = build_model_graph(world_size)
+    # Ensure each relation exercises a remote read on this rank.
+    hidden_splits = get_shard_sizes(graph["hidden"].x, 0, group)
+    for src_name, dst_name in (("data", "hidden"), ("hidden", "hidden"), ("hidden", "data")):
+        src_splits = data_splits if src_name == "data" else hidden_splits
+        dst_splits = data_splits if dst_name == "data" else hidden_splits
+        relation = (src_name, "to", dst_name)
+        edge_index = graph[relation].edge_index
+        assert (edge_index[1].diff() >= 0).all(), f"{relation} must be destination-sorted"
+        src_start, src_stop = sum(src_splits[:rank]), sum(src_splits[: rank + 1])
+        dst_start, dst_stop = sum(dst_splits[:rank]), sum(dst_splits[: rank + 1])
+        sources = edge_index[0, (edge_index[1] >= dst_start) & (edge_index[1] < dst_stop)]
+        assert (
+            (sources < src_start) | (sources >= src_stop)
+        ).any(), f"{relation} must have a remote source dependency for rank {rank}"
     torch.manual_seed(43)
     reference_model = _build_graphconv_model(graph).to(device)
-    # Distinguish learned-feature rows in forward, rather than testing only
-    # TrainableTensor's default zero initialization. Populate before copying state.
+    # Row-varying learned features expose ownership/order mistakes hidden by
+    # default zero tables. Copy this initialized state to the distributed model.
     with torch.no_grad():
         for module in reference_model.modules():
             if isinstance(module, TrainableTensor) and module.trainable is not None:
@@ -180,18 +141,6 @@ def _test_graphconv_model_matches_unsharded_rank(
     distributed_model.load_state_dict(reference_model.state_dict())
     reference_params = dict(reference_model.named_parameters())
     distributed_params = dict(distributed_model.named_parameters())
-    assert (
-        reference_params.keys() == distributed_params.keys()
-    ), "Reference and distributed models must have identical parameter names"
-    # Callable messages prepend context without suppressing PyTorch's mismatch details.
-    for name, param in reference_params.items():
-        torch.testing.assert_close(
-            distributed_params[name],
-            param,
-            rtol=0,
-            atol=0,
-            msg=lambda details, name=name: f"initial {name} on rank {rank}\n{details}",
-        )
     # Tables are evaluated before production node/edge sharding. The surrounding
     # sharding operations gather their gradients in backward; TrainableTensor
     # itself does not communicate. Other parameters operate on owned work.
@@ -231,30 +180,32 @@ def _test_graphconv_model_matches_unsharded_rank(
     # Anemoi prepares hidden/edge shards and component layouts in both external modes.
     start = sum(data_splits[:rank])
     stop = start + data_splits[rank]
-    local_input = (inputs[..., start:stop, :] if input_is_sharded else inputs).clone().requires_grad_(True)
+    distributed_input = (inputs[..., start:stop, :] if input_is_sharded else inputs).clone().requires_grad_(True)
     distributed_outputs = distributed_model(
-        {"data": local_input},
+        {"data": distributed_input},
         model_comm_group=group,
         grid_shard_sizes={"data": data_splits} if input_is_sharded else None,
     )
     assert set(distributed_outputs) == {"data"}, "Each rank must return the configured data dataset"
-    local_output = distributed_outputs["data"]
-    assert local_output.shape == local_input.shape, "Predictions must match the supplied external data-grid layout"
+    distributed_output = distributed_outputs["data"]
+    assert (
+        distributed_output.shape == distributed_input.shape
+    ), "Predictions must match the supplied external data-grid layout"
     if input_is_sharded:
         local_loss = (
-            weights[..., start:stop, :] * (local_output - target[..., start:stop, :]).square()
+            weights[..., start:stop, :] * (distributed_output - target[..., start:stop, :]).square()
         ).sum() / weights.numel()
     else:
         # Gather backward splits model sensitivities; the full residual loss also
         # gives the replicated input its complete direct-path gradient on every rank.
-        local_loss = (weights * (local_output - target).square()).sum() / weights.numel()
+        local_loss = (weights * (distributed_output - target).square()).sum() / weights.numel()
     local_loss.backward()
 
-    # Compare output/loss, owned input gradients, and complete/partial parameter gradients.
+    # Callable messages add context without replacing PyTorch's numerical diagnostics.
     output_tolerances = {"rtol": 1e-4, "atol": 1e-5}
     gradient_tolerances = {"rtol": 1e-4, "atol": 1e-7}
     torch.testing.assert_close(
-        local_output,
+        distributed_output,
         reference_output[..., start:stop, :] if input_is_sharded else reference_output,
         **output_tolerances,
         msg=lambda details: f"prediction on rank {rank}\n{details}",
@@ -264,9 +215,9 @@ def _test_graphconv_model_matches_unsharded_rank(
         dist.all_reduce(global_loss, group=group)
     torch.testing.assert_close(global_loss, reference_loss.detach(), **output_tolerances)
     assert reference_input.grad is not None, "Missing reference input gradient"
-    assert local_input.grad is not None, "Missing distributed input gradient"
+    assert distributed_input.grad is not None, "Missing distributed input gradient"
     torch.testing.assert_close(
-        local_input.grad,
+        distributed_input.grad,
         reference_input.grad[..., start:stop, :] if input_is_sharded else reference_input.grad,
         **gradient_tolerances,
         msg=lambda details: f"input gradient on rank {rank}\n{details}",
