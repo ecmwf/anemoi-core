@@ -71,22 +71,7 @@ class BaseGraphModel(nn.Module):
 
         self.dataset_names = list(data_indices.keys())
         self._graph_name_hidden = model_config.model.hidden_nodes_name
-        self._multiple_hidden_meshes = isinstance(self._graph_name_hidden, (dict, DictConfig))
-        if isinstance(self._graph_name_hidden, (dict, DictConfig)):
-            self.dataset2hidden = dict(self._graph_name_hidden)
-            missing_datasets = set(self.dataset_names) - set(self.dataset2hidden)
-            unknown_datasets = set(self.dataset2hidden) - set(self.dataset_names)
-            assert not missing_datasets, f"Hidden node names are missing for datasets {sorted(missing_datasets)}."
-            assert (
-                not unknown_datasets
-            ), f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
-            assert all(
-                isinstance(name, str) for name in self.dataset2hidden.values()
-            ), "Hidden node names must be strings."
-        elif isinstance(self._graph_name_hidden, str):
-            self.dataset2hidden = dict.fromkeys(self.dataset_names, self._graph_name_hidden)
-        else:
-            self.dataset2hidden = None
+        self._build_hidden_node_routing()
 
         self.latent_skip = model_config.model.latent_skip
 
@@ -120,6 +105,25 @@ class BaseGraphModel(nn.Module):
             data_indices=self.data_indices,
             statistics=self.statistics,
         )
+
+    def _build_hidden_node_routing(self) -> None:
+        """Build and validate the dataset routing for hidden nodes."""
+        self._multiple_hidden_meshes = isinstance(self._graph_name_hidden, (dict, DictConfig))
+        if self._multiple_hidden_meshes:
+            self.dataset2hidden = dict(self._graph_name_hidden)
+            missing_datasets = set(self.dataset_names) - set(self.dataset2hidden)
+            unknown_datasets = set(self.dataset2hidden) - set(self.dataset_names)
+            assert not missing_datasets, f"Hidden node names are missing for datasets {sorted(missing_datasets)}."
+            assert (
+                not unknown_datasets
+            ), f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
+            assert all(
+                isinstance(name, str) for name in self.dataset2hidden.values()
+            ), "Hidden node names must be strings."
+        elif isinstance(self._graph_name_hidden, str):
+            self.dataset2hidden = dict.fromkeys(self.dataset_names, self._graph_name_hidden)
+        else:
+            self.dataset2hidden = None
 
     def _build_encoder_routing(self, encoders_config: DotDict) -> None:
         """Builds the dataset routing for encoders."""
@@ -167,7 +171,7 @@ class BaseGraphModel(nn.Module):
         shared_modules = any(len(datasets) > 1 for datasets in self.encoder2datasets.values()) or any(
             len(datasets) > 1 for datasets in self.decoder2datasets.values()
         )
-        if shared_modules and not isinstance(self._graph_name_hidden, (dict, DictConfig)):
+        if shared_modules and not self._multiple_hidden_meshes:
             assert isinstance(
                 self._graph_name_hidden, str
             ), "Datasets sharing an encoder or decoder must be fused through one hidden node set."
@@ -256,7 +260,7 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
-        if isinstance(self._graph_name_hidden, (dict, DictConfig)):
+        if self._multiple_hidden_meshes:
             hidden_dims = {
                 hidden_name: self.node_attributes.attr_ndims[hidden_name]
                 for hidden_name in self._as_hidden_node_names(self._graph_name_hidden)

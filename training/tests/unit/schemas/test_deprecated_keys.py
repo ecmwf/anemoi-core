@@ -1,0 +1,164 @@
+# (C) Copyright 2026- Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+"""Removed config keys raise an informative error pointing to the new surface.
+
+``training.run_id`` / ``training.fork_run_id`` / ``system.input.warm_start`` and the
+legacy weight-loading keys ``training.load_weights_only`` /
+``training.transfer_learning`` / ``training.submodules_to_freeze`` were removed in
+favour of the ``training.checkpoint.{source,loading,modifiers}`` surface. The
+``_check_deprecated_keys`` before-validator on :class:`SchemaCommonMixin` rejects them
+on key *presence* (so a leftover ``key: null`` is still flagged), on both the
+validated and the unvalidated config paths.
+"""
+
+import pytest
+from omegaconf import OmegaConf
+from pydantic import ValidationError
+
+from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
+from anemoi.training.checkpoint.builder import build_resume_source
+from anemoi.training.schemas.base_schema import _DEPRECATED_KEYS
+from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.schemas.training import CheckpointPipelineSchema
+
+_RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
+_LOCAL_SOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
+_LOADERS = "anemoi.training.checkpoint.loading.strategies"
+_FREEZING = "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
+
+# The training.checkpoint block that the hint for each removed key tells the user to write.
+_REPLACEMENTS = {
+    "training.run_id": {"source": {"_target_": _RUN_SOURCE, "run_id": "abc", "fork": False}},
+    "training.fork_run_id": {"source": {"_target_": _RUN_SOURCE, "run_id": "abc", "fork": True}},
+    "system.input.warm_start": {"source": {"_target_": _LOCAL_SOURCE, "path": "/scratch/last.ckpt"}},
+    "training.load_weights_only": {
+        "source": {"_target_": _RUN_SOURCE, "run_id": "abc"},
+        "loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader"},
+    },
+    "training.transfer_learning": {
+        "source": {"_target_": _LOCAL_SOURCE, "path": "/scratch/last.ckpt"},
+        "loading": {"_target_": f"{_LOADERS}.TransferLearningLoader", "skip_mismatched": True},
+    },
+    "training.submodules_to_freeze": {
+        "modifiers": [{"_target_": _FREEZING, "submodules_to_freeze": ["model.model.encoder"]}],
+    },
+}
+
+
+def _nested(path_parts: tuple[str, ...], value: object) -> dict:
+    """Build a nested dict ``{a: {b: {c: value}}}`` from dotted path parts."""
+    config: dict = {}
+    node = config
+    for part in path_parts[:-1]:
+        node = node.setdefault(part, {})
+    node[path_parts[-1]] = value
+    return config
+
+
+@pytest.mark.parametrize("schema_cls", [BaseSchema, UnvalidatedBaseSchema])
+@pytest.mark.parametrize(
+    ("path_parts", "hint_fragment"),
+    [
+        (("training", "run_id"), "training.run_id has been removed"),
+        (("training", "fork_run_id"), "training.fork_run_id has been removed"),
+        (("system", "input", "warm_start"), "system.input.warm_start has been removed"),
+        (("training", "load_weights_only"), "training.load_weights_only has been removed"),
+        (("training", "transfer_learning"), "training.transfer_learning has been removed"),
+        (("training", "submodules_to_freeze"), "training.submodules_to_freeze has been removed"),
+    ],
+)
+def test_removed_key_raises(
+    schema_cls: type,
+    path_parts: tuple[str, ...],
+    hint_fragment: str,
+) -> None:
+    """A removed key with a value raises a hint naming the training.checkpoint replacement."""
+    config = _nested(path_parts, "some-value")
+    with pytest.raises(ValidationError, match=hint_fragment):
+        schema_cls(**config)
+
+
+@pytest.mark.parametrize("schema_cls", [BaseSchema, UnvalidatedBaseSchema])
+@pytest.mark.parametrize(
+    "path_parts",
+    [
+        ("training", "run_id"),
+        ("training", "fork_run_id"),
+        ("system", "input", "warm_start"),
+        ("training", "load_weights_only"),
+        ("training", "transfer_learning"),
+        ("training", "submodules_to_freeze"),
+    ],
+)
+def test_removed_key_present_as_null_still_raises(schema_cls: type, path_parts: tuple[str, ...]) -> None:
+    """The check fires on key presence, so a leftover ``key: null`` is still rejected."""
+    config = _nested(path_parts, None)
+    with pytest.raises(ValidationError, match="has been removed"):
+        schema_cls(**config)
+
+
+@pytest.mark.parametrize("schema_cls", [BaseSchema, UnvalidatedBaseSchema])
+def test_submodules_to_freeze_hint_names_the_model_model_prefix(schema_cls: type) -> None:
+    """The freezing replacement names the ``model.model.`` prefix; without it the listed paths resolve nothing.
+
+    ``FreezingModifierStage`` resolves ``submodules_to_freeze`` from the LightningModule.
+    The removed key addressed the graph model two attribute hops below it
+    (``model.model``), so a hint that omitted the prefix sent users to a configuration
+    that freezes nothing.
+    """
+    config = _nested(("training", "submodules_to_freeze"), ["encoder"])
+    with pytest.raises(ValidationError, match=r"model\.model\.<submodule>") as excinfo:
+        schema_cls(**config)
+    assert "FreezingModifierStage" in str(excinfo.value)
+    assert "submodule_root" not in str(excinfo.value)
+
+
+def test_every_removed_key_has_a_replacement() -> None:
+    assert set(_REPLACEMENTS) == set(_DEPRECATED_KEYS)
+
+
+@pytest.mark.parametrize(
+    ("removed_key", "expected_stages", "expected_resume_source"),
+    [
+        ("training.run_id", [], "RunIdSource"),
+        ("training.fork_run_id", [], "RunIdSource"),
+        ("system.input.warm_start", [], "LocalSource"),
+        ("training.load_weights_only", ["RunIdSource", "WeightsOnlyLoader"], None),
+        ("training.transfer_learning", ["LocalSource", "TransferLearningLoader"], None),
+        ("training.submodules_to_freeze", ["FreezingModifierStage"], None),
+    ],
+)
+def test_replacement_config_validates_and_builds(
+    removed_key: str,
+    expected_stages: list[str],
+    expected_resume_source: str | None,
+) -> None:
+    """The config that the hint for each removed key gives is valid and builds what the key used to do.
+
+    A source without a loader is a resume: the pipeline has no stages, and the runner
+    resolves the source for ``Trainer.fit(ckpt_path=)``, as the removed keys did.
+    """
+    checkpoint_block = _REPLACEMENTS[removed_key]
+
+    CheckpointPipelineSchema(**checkpoint_block)
+    cfg = OmegaConf.create({"training": {"checkpoint": checkpoint_block}})
+    pipeline = build_checkpoint_pipeline(cfg)
+    resume_source = build_resume_source(cfg)
+
+    assert [type(stage).__name__ for stage in pipeline.stages] == expected_stages
+    assert (type(resume_source).__name__ if resume_source is not None else None) == expected_resume_source
+    if removed_key in ("training.run_id", "training.fork_run_id"):
+        assert resume_source.run_id == "abc"
+        assert resume_source.fork is (removed_key == "training.fork_run_id")
+    elif removed_key == "training.transfer_learning":
+        assert pipeline.stages[1].skip_mismatched is True
+    elif removed_key == "training.submodules_to_freeze":
+        assert pipeline.stages[0].submodules_to_freeze == ["model.model.encoder"]
