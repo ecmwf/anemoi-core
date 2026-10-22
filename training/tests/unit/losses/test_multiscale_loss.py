@@ -571,3 +571,46 @@ def test_deepcopy_multiscale_loss_does_not_raise(mocker: MockerFixture) -> None:
     )
     loss = MultiscaleLossWrapper(per_scale_loss=MSELoss(), weights=[1.0])
     copy.deepcopy(loss)  # must not raise NotImplementedError on CSR tensors
+
+
+@pytest.mark.parametrize("nan_variable", ["a", "f"], ids=["paired_target", "unpaired_forcing"])
+def test_multiscale_masks_predictions_through_the_variable_mapping(mocker: MockerFixture, nan_variable: str) -> None:
+    """NaN targets mask the prediction variables they are compared with, also when the layouts differ.
+
+    Built from a config, the per-scale loss is wrapped in a LossVariableMapper: the prediction arrives in
+    the model-output layout and the target in the full data layout, which also holds the forcings. The
+    target's NaN mask therefore cannot be applied to the prediction position by position. A NaN in a
+    target variable that is not compared (the forcing) must not mask any prediction.
+    """
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        return_value=[_ring_smoother(), None],
+    )
+    # data layout: [f, a, b] with forcing "f"; model output layout: [a, b]
+    data_indices = IndexCollection(DictConfig({"forcing": ["f"], "diagnostic": []}), {"f": 0, "a": 1, "b": 2})
+    config = {
+        "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
+        "weights": [1.0, 2.0],
+        "loss_matrices": ["ring", None],
+        "per_scale_loss": {"_target_": "anemoi.training.losses.CRPS", "scalers": [], "ignore_nans": True},
+    }
+    multiscale_loss = get_loss_function(DictConfig(config), scalers={}, data_indices=data_indices)
+    pred, target, _ = _nan_target_inputs()  # two output variables, NaN in the first one ("a")
+    forcing = torch.randn((*target.shape[:-1], 1), generator=torch.Generator().manual_seed(1))
+    if nan_variable == "f":  # move the missing value from "a" to the forcing
+        forcing[0, 0, 0, 1, 0] = float("nan")
+        target = torch.nan_to_num(target, nan=0.5)
+    target_full = torch.cat([forcing, target], dim=-1)
+
+    loss = multiscale_loss(
+        _view(pred),
+        _view(target_full),
+        pred_layout=IndexSpace.MODEL_OUTPUT,
+        target_layout=IndexSpace.DATA_FULL,
+    )
+
+    # Same loss on tensors that are aligned beforehand, without a variable mapping.
+    aligned = MultiscaleLossWrapper(per_scale_loss=CRPS(ignore_nans=True), weights=[1.0, 2.0])
+    expected = aligned(_view(pred), _view(target))
+    assert torch.isfinite(loss)
+    torch.testing.assert_close(loss, expected)

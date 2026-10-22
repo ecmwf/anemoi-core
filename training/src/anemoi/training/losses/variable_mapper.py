@@ -300,21 +300,25 @@ class LossVariableMapper(BaseLossWrapper):
         remapped_scaler_indices = (*scaler_indices[:-1], self._restore_indexer_type(mapped_indices, variable_indexer))
         return remapped_scaler_indices, len(mapped_indices) == 0
 
-    def forward(
+    def variable_pairs(
         self,
-        pred: "Source",
-        target: "Source",
-        squash: bool = True,
-        *,
-        scaler_indices: tuple[Any, ...] | None = None,
-        without_scalers: list[str] | list[int] | None = None,
-        grid_shard_slice: slice | None = None,
-        group: ProcessGroup | None = None,
-        squash_mode: Squash_mode | None = None,
-        pred_layout: IndexSpace | str | None = None,
-        target_layout: IndexSpace | str | None = None,
-        **kwargs,
-    ) -> torch.Tensor:
+        pred_layout: IndexSpace | str | None,
+        target_layout: IndexSpace | str | None,
+    ) -> tuple[list[int], list[int]]:
+        """Return the prediction and target variable indices that the loss compares, position by position.
+
+        Parameters
+        ----------
+        pred_layout : IndexSpace | str | None
+            Variable layout of the predictions.
+        target_layout : IndexSpace | str | None
+            Variable layout of the targets.
+
+        Returns
+        -------
+        tuple[list[int], list[int]]
+            Indices into the prediction and into the target variables; entry ``i`` of both is a pair.
+        """
         if self.data_indices is None:
             msg = (
                 "LossVariableMapper must be initialised with data_indices before use. "
@@ -340,8 +344,24 @@ class LossVariableMapper(BaseLossWrapper):
             )
             raise ValueError(msg)
 
-        pred_indices = self.predicted_indices_by_layout[pred_layout]
-        target_indices = self.target_indices_by_layout[target_layout]
+        return self.predicted_indices_by_layout[pred_layout], self.target_indices_by_layout[target_layout]
+
+    def forward(
+        self,
+        pred: "Source",
+        target: "Source",
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[Any, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+        squash_mode: Squash_mode | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        pred_indices, target_indices = self.variable_pairs(pred_layout, target_layout)
 
         pred_filtered = pred.select(variables=pred_indices)
         target_filtered = target.select(variables=target_indices)

@@ -29,9 +29,11 @@ from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
+from anemoi.training.losses.variable_mapper import LossVariableMapper
 
 if TYPE_CHECKING:
     from anemoi.models.data.sources.gridded import GriddedSource
+    from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
@@ -308,6 +310,28 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             channel_shard_sizes_y,
         )
 
+    def _pred_nan_mask(
+        self,
+        target_nan_mask: torch.Tensor,
+        y_pred_ens: "GriddedSource",
+        pred_layout: "IndexSpace | str | None",
+        target_layout: "IndexSpace | str | None",
+    ) -> torch.Tensor:
+        """Carry the target's NaN mask over to the prediction variables they are compared with.
+
+        A ``LossVariableMapper`` per-scale loss takes the prediction in the model-output layout and the
+        target in the full data layout, which also holds the forcings, and compares the prediction
+        variable ``pred_indices[i]`` with the target variable ``target_indices[i]``. A source cannot hold
+        a variable twice, so every variable is in at most one pair. Prediction variables without a pair
+        are not masked; the mapper drops them. Variables are the last axis, as everywhere in this wrapper.
+        """
+        if not isinstance(self.loss, LossVariableMapper):
+            return target_nan_mask  # the per-scale loss compares the variables position by position
+        pred_indices, target_indices = self.loss.variable_pairs(pred_layout, target_layout)
+        pred_nan_mask = target_nan_mask.new_zeros((*target_nan_mask.shape[:-1], len(y_pred_ens.variables)))
+        pred_nan_mask[..., pred_indices] = target_nan_mask[..., target_indices]
+        return pred_nan_mask
+
     def _smooth_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply smoothing matrix to predictions and targets for loss computation."""
         if self.smoothing_matrices[i] is not None:
@@ -349,14 +373,20 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         channel_shard_sizes_y = None
         # Smoothing a NaN target spreads the NaN over the filter stencil, so the per-scale loss
         # would mask a halo around every missing point. So we put 0 in the target and, at the same
-        # points, in every ensemble member of the prediction before smoothing, so both sides are
-        # smoothed from the same points. The NaNs are restored in the target for each loss scale.
-        # The mask is taken in the grid-sharded layout.
+        # points, in every ensemble member of the prediction variable it is compared with, before
+        # smoothing, so both sides are smoothed from the same points. The NaNs are restored in the
+        # target for each loss scale. The masks are taken in the grid-sharded layout.
         target_nan_mask = torch.isnan(y.data) if self.ignore_nans else None
         if target_nan_mask is None:
             pred_data, y_data = y_pred_ens.data, y.data
         else:
-            pred_data = y_pred_ens.data.masked_fill(target_nan_mask, 0.0)
+            pred_nan_mask = self._pred_nan_mask(
+                target_nan_mask,
+                y_pred_ens,
+                kwargs.get("pred_layout"),
+                kwargs.get("target_layout"),
+            )
+            pred_data = y_pred_ens.data.masked_fill(pred_nan_mask, 0.0)
             y_data = y.data.masked_fill(target_nan_mask, 0.0)
         is_model_sharded = grid_shard_sizes is not None
         if is_model_sharded:
