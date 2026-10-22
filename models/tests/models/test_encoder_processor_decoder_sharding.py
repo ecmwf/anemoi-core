@@ -168,6 +168,8 @@ def _test_graphconv_model_matches_unsharded_rank(
     inputs = torch.randn(1, 1, 1, sum(data_splits), 2, generator=generator).to(device)
     target = torch.randn(inputs.shape, generator=generator).to(device)
     weights = (torch.arange(inputs.numel(), device=device).reshape_as(inputs) % 7 + 1).float() / 7
+    output_tolerances = {"rtol": 1e-4, "atol": 1e-5}
+    gradient_tolerances = {"rtol": 1e-4, "atol": 1e-7}
 
     # Reference execution uses all external inputs and no communication group.
     reference_input = inputs.clone().requires_grad_(True)
@@ -178,9 +180,21 @@ def _test_graphconv_model_matches_unsharded_rank(
     reference_loss = (weights * (reference_output - target).square()).sum() / weights.numel()
     reference_loss.backward()
 
+    # This one-step, all-prognostic fixture adds the input unchanged as its
+    # output residual. Remove that direct derivative analytically to ensure
+    # the learned path cannot disappear within the total-gradient tolerance.
+    assert reference_input.grad is not None, "Missing reference input gradient"
+    residual_gradient = 2 * weights * (reference_output.detach() - target) / weights.numel()
+    learned_input_gradient = reference_input.grad - residual_gradient
+
     # Anemoi prepares hidden/edge shards and component layouts in both external modes.
     start = sum(data_splits[:rank])
     stop = start + data_splits[rank]
+    owned_reference_gradient = reference_input.grad[..., start:stop, :]
+    allowed_error = gradient_tolerances["atol"] + gradient_tolerances["rtol"] * owned_reference_gradient.abs()
+    assert (
+        learned_input_gradient[..., start:stop, :].abs() > 10 * allowed_error
+    ).any(), f"Learned-path input gradient is too small to distinguish from the residual on rank {rank}"
     distributed_input = (inputs[..., start:stop, :] if input_is_sharded else inputs).clone().requires_grad_(True)
     distributed_outputs = distributed_model(
         {"data": distributed_input},
@@ -203,8 +217,6 @@ def _test_graphconv_model_matches_unsharded_rank(
     local_loss.backward()
 
     # Callable messages add context without replacing PyTorch's numerical diagnostics.
-    output_tolerances = {"rtol": 1e-4, "atol": 1e-5}
-    gradient_tolerances = {"rtol": 1e-4, "atol": 1e-7}
     torch.testing.assert_close(
         distributed_output,
         reference_output[..., start:stop, :] if input_is_sharded else reference_output,
@@ -220,7 +232,6 @@ def _test_graphconv_model_matches_unsharded_rank(
         **output_tolerances,
         msg=lambda details: f"global loss on rank {rank}\n{details}",
     )
-    assert reference_input.grad is not None, "Missing reference input gradient"
     assert distributed_input.grad is not None, "Missing distributed input gradient"
     torch.testing.assert_close(
         distributed_input.grad,
