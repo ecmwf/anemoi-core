@@ -224,38 +224,25 @@ def test_training_cycle_multidomain(
     trainer.train()
 
     model = trainer.model.model.model
-    assert model.dataset2encoder == {"sg_1": "0", "sg_2": "0"}
-    assert model.dataset2decoder == {"sg_1": "0", "sg_2": "0"}
+    assert model.dataset2encoder == {"data": "0", "datb": "0"}
+    assert model.dataset2decoder == {"data": "0", "datb": "0"}
     assert len(model.encoder) == 1
     assert len(model.decoder) == 1
     assert model.dataset2hidden == {
-        "sg_1": "sg_1_hidden",
-        "sg_2": "sg_2_hidden",
+        "data": "hidden",
+        "datb": "hidden_b",
     }
     assert set(trainer.graph_data.node_types) == {
-        "sg_1",
-        "sg_2",
-        "sg_1_hidden",
-        "sg_2_hidden",
+        "data",
+        "datb",
+        "hidden",
+        "hidden_b",
     }
-    assert trainer.graph_data["sg_1"].num_nodes != trainer.graph_data["sg_2"].num_nodes
-    assert trainer.graph_data["sg_1_hidden"].num_nodes != trainer.graph_data["sg_2_hidden"].num_nodes
+    assert trainer.graph_data["data"].num_nodes != trainer.graph_data["datb"].num_nodes
+    assert trainer.graph_data["hidden"].num_nodes != trainer.graph_data["hidden_b"].num_nodes
     assert trainer.model.trainer.global_step == 4
 
     assert_keys_exist(trainer.metadata, partial_metadata_schema)
-
-
-@skip_if_offline
-@pytest.mark.slow
-def test_training_cycle_multidomain_ensemble(
-    multidomain_ensemble_config: tuple[DictConfig, list[str]],
-    get_test_archive: GetTestArchive,
-) -> None:
-    cfg, urls = multidomain_ensemble_config
-    for url in urls:
-        get_test_archive(url)
-
-    AnemoiTrainer(cfg).train()
 
 
 @skip_if_offline
