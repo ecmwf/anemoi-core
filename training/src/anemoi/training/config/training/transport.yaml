@@ -10,6 +10,10 @@ defaults:
   - optional checkpoint/loading: null
   - optional checkpoint/modifiers: null
 
+# base seed of all random number generators. null takes the seed of the checkpoint the run
+# continues from, or draws a new one for a new run
+seed: null
+
 update_ds_stats_on_ckpt_load:
   states: False
   tendencies: True
@@ -42,6 +46,9 @@ strategy:
   read_group_size: ${dataloader.read_group_size}
   use_local_synchronization: True
   broadcast_buffers: False
+  # must be False when accum_grad_batches > 1
+  static_graph: True
+  find_unused_parameters: False
 
 loss_gradient_scaling: False
 

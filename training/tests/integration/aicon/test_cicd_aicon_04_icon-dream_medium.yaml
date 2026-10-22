@@ -235,6 +235,7 @@ task:
   validation_rollout: 1
 
 training:
+  seed: 42
   method:
     _target_: anemoi.training.train.methods.SingleTraining
   num_sanity_val_steps: 2

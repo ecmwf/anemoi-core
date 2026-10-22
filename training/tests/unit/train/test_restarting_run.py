@@ -60,7 +60,9 @@ def build_mock_config(
     ``LocalSource`` ``_target_`` dict), or ``None`` for a fresh run with nothing
     to resume.
     """
-    training = {"checkpoint": {"source": source}} if source is not None else {}
+    training = {"seed": 42}
+    if source is not None:
+        training["checkpoint"] = {"source": source}
     config_dict = {
         "config_validation": False,
         "training": training,

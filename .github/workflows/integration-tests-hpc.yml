@@ -15,15 +15,22 @@ on:
           - test_benchmark
           - test_training_cycle
           - test_accuracy
+      accuracy_reference_id:
+        description: "MLflow run ID to compare test_accuracy against (empty: hard-coded reference)"
+        type: string
+        default: ""
+      torch_version:
+        description: "torch minor version to install, e.g. 2.10 (empty: latest allowed by pyproject)"
+        type: string
+        default: ""
   pull_request:
     types: [synchronize, labeled]
   merge_group:
 
 jobs:
-  build-env:
-    name: build-env
-    runs-on: hpc
-    timeout-minutes: 120
+  # The dispatch inputs end up in the HPC shell templates, so only allow the expected formats.
+  validate-inputs:
+    runs-on: ubuntu-latest
     # On a pull_request the expensive tests only run when the author opted in
     # via the 'run-expensive-tests' label; schedule/dispatch/merge_group always run.
     if: >-
@@ -38,6 +45,25 @@ jobs:
           contains(github.event.pull_request.labels.*.name, 'run-expensive-tests')
         )
       }}
+    steps:
+      - env:
+          REFERENCE_ID: ${{ github.event.inputs.accuracy_reference_id }}
+          TORCH_VERSION: ${{ github.event.inputs.torch_version }}
+        run: |
+          if [ -n "$REFERENCE_ID" ] && ! [[ "$REFERENCE_ID" =~ ^[0-9a-f]{32}$ ]]; then
+            echo "accuracy_reference_id must be empty or a 32 character hex MLflow run ID" >&2
+            exit 1
+          fi
+          if [ -n "$TORCH_VERSION" ] && ! [[ "$TORCH_VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo "torch_version must be empty or a minor version such as 2.10" >&2
+            exit 1
+          fi
+
+  build-env:
+    name: build-env
+    needs: validate-inputs
+    runs-on: hpc
+    timeout-minutes: 120
     steps:
       - uses: ecmwf/reusable-workflows/ci-hpc-generic@v2
         with:
@@ -59,7 +85,8 @@ jobs:
             pip install --upgrade pip
             cd "$REPO_NAME"
             git show -s --format=oneline
-            pip install --no-cache-dir -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
+            TORCH_MINOR="${{ github.event.inputs.torch_version }}"
+            pip install --no-cache-dir -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests] ${TORCH_MINOR:+"torch==${TORCH_MINOR}.*"}
             # PyG 2.8+ uses pyg-lib for accelerated graph construction.
             TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
             pip install pyg-lib -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
@@ -100,7 +127,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_training_cycle' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: python3 -m pytest -v training/tests/integration/ --ignore=training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL
+      pytest_cmd: python3 -m pytest -v training/tests/integration/ --ignore=training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL; python3 -m pytest -v models/tests/integration/ --slow; python3 -m pytest -v graphs/tests/integration/
       timeout_minutes: 120
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_training_cycle
@@ -112,11 +139,12 @@ jobs:
     secrets: inherit
 
   test_accuracy:
-    needs: build-env
+    # validate-inputs listed directly: accuracy_reference_id goes into pytest_cmd.
+    needs: [validate-inputs, build-env]
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_accuracy' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: python3 -m pytest -v training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL
+      pytest_cmd: python3 -m pytest -v training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL --accuracy-reference-id=${{ github.event.inputs.accuracy_reference_id }}
       timeout_minutes: 120
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_accuracy
@@ -145,6 +173,7 @@ jobs:
       - uses: ecmwf/reusable-workflows/ci-hpc-generic@v2
         with:
           template: |
+            env | grep SLURM
             set -eux
             WORKDIR="$PERM/TESTING/integration-venvs/${{ github.run_id }}"
             rm -rf "$WORKDIR"

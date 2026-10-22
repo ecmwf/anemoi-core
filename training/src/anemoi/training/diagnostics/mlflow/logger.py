@@ -38,6 +38,7 @@ from typing_extensions import override
 from anemoi.training.diagnostics.mlflow import LOG_MODEL
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.training.diagnostics.mlflow.utils import FixedLengthSet
+from anemoi.training.diagnostics.mlflow.utils import check_params_length
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 from anemoi.training.diagnostics.mlflow.utils import expand_iterables
 from anemoi.utils.mlflow.auth import AuthBase
@@ -697,13 +698,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             expanded_params = clean_config_params(expanded_params)
 
         LOGGER.info("Logging %s parameters", len(expanded_params))
-        if len(expanded_params) > max_params_length:
-            msg = (
-                f"Too many params: {len(expanded_params)} > {max_params_length}",
-                "Please revisit the fields being logged and add redundant or irrelevant "
-                "ones to the clean_config_params function.",
-            )
-            raise ValueError(msg)
+        check_params_length(len(expanded_params), max_params_length)
 
         # Truncate parameter values.
         params_list = [Param(key=k, value=str(v)[:truncation_length]) for k, v in expanded_params.items()]

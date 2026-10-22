@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from anemoi.training.schemas.training import BaseDDPStrategySchema
 from anemoi.training.schemas.training import CheckpointPipelineSchema
+from anemoi.training.schemas.training import BaseTrainingSchema
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
@@ -48,6 +49,35 @@ def test_ddp_strategy_schema_defaults_to_local_synchronization() -> None:
     )
 
     assert schema.use_local_synchronization is True
+
+
+def _ddp_strategy(**kwargs: bool) -> BaseDDPStrategySchema:
+    return BaseDDPStrategySchema(
+        _target_="anemoi.training.distributed.strategy.DDPGroupStrategy",
+        num_gpus_per_model=1,
+        read_group_size=1,
+        **kwargs,
+    )
+
+
+def test_ddp_strategy_schema_defaults_to_static_graph() -> None:
+    schema = _ddp_strategy()
+
+    assert schema.static_graph is True
+    assert schema.find_unused_parameters is False
+
+
+def test_static_graph_rejected_with_gradient_accumulation() -> None:
+    training = BaseTrainingSchema.model_construct(accum_grad_batches=2, strategy=_ddp_strategy())
+
+    with pytest.raises(ValueError, match="static_graph must be false"):
+        training.check_static_graph_without_accumulation()
+
+
+def test_gradient_accumulation_allowed_without_static_graph() -> None:
+    training = BaseTrainingSchema.model_construct(accum_grad_batches=2, strategy=_ddp_strategy(static_graph=False))
+
+    assert training.check_static_graph_without_accumulation() is training
 
 
 def test_time_aggregate_loss_config_valid() -> None:

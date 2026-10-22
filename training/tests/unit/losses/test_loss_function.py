@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 import torch
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pytest_mock import MockerFixture
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -36,6 +37,7 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.methods.base import resolve_subgrid
 from anemoi.training.utils.enums import TensorDim
 
 spectral_loss_kwargs: dict[type[BaseLoss], dict[str, object]] = {
@@ -50,9 +52,8 @@ losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSEL
 
 
 def _resolve_subgrid(cfg: dict, output_mask: SimpleNamespace | None = None) -> None:
-    mock_method = SimpleNamespace(output_mask={"data": output_mask})
-    multi_cfg = {"data": cfg}
-    BaseTrainingModule._resolve_subgrid(mock_method, multi_cfg)
+    multi_cfg = OmegaConf.create({"data": cfg})
+    resolve_subgrid(multi_cfg, {"data": output_mask})
     return multi_cfg["data"]
 
 
@@ -929,6 +930,51 @@ def test_spectral_loss_subgrid_actually_applied(subgrid: str | tuple) -> None:
     assert result.numel() == 1
 
 
+def test_build_loss_configs_resolves_spectral_subgrid_through_module() -> None:
+    """``subgrid: output_mask`` must be resolved.
+
+    Test if this is indeed the case when a combined+spectral loss config
+    is processed through the training module's own config path.
+    """
+    training_loss = OmegaConf.create(
+        {
+            "datasets": {
+                "data": {
+                    "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                    "loss_weights": [0.5, 0.5],
+                    "ignore_nans": False,
+                    "losses": [
+                        {
+                            "_target_": "anemoi.training.losses.MSELoss",
+                            "scalers": ["node_weights"],
+                        },
+                        {
+                            "_target_": "anemoi.training.losses.FourierCorrelationLoss",
+                            "transform": "fft2d",
+                            "x_dim": 4,
+                            "y_dim": 2,
+                            "subgrid": "output_mask",
+                        },
+                    ],
+                },
+            },
+        },
+    )
+
+    mask_tuple = (0, 8)
+    mock_self = SimpleNamespace(
+        config=OmegaConf.create({"training": {"training_loss": training_loss}}),
+        output_mask={"data": SimpleNamespace(as_tuple=lambda: mask_tuple)},
+    )
+
+    loss_configs = BaseTrainingModule._build_loss_configs(mock_self)
+
+    sub_losses = loss_configs["data"]["losses"]
+
+    assert tuple(sub_losses[1]["subgrid"]) == mask_tuple
+    assert "subgrid" not in sub_losses[0]
+
+
 def test_spectral_loss_projection_wrong_output_size_raises(mocker: MockerFixture) -> None:
     """Projection that outputs wrong node count should raise on FFT2D reshape."""
     from scipy.sparse import csr_matrix
@@ -1113,6 +1159,12 @@ def test_spectral_crps_projection_from_existing_edges() -> None:
 @pytest.mark.parametrize(
     ("transform", "transform_kwargs"),
     [
+        pytest.param("regular_sht", {"nlat": 8, "nlon": 12}, id="regular-gaussian"),
+        pytest.param(
+            "regular_sht",
+            {"nlat": 8, "nlon": 12, "latitude_grid": "equiangular-poles"},
+            id="regular-equiangular-poles",
+        ),
         pytest.param("octahedral_sht", {"nlat": 8}, id="octahedral"),
         pytest.param("reduced_sht", {"grid": "n320", "truncation": 3}, id="reduced"),
     ],
@@ -1125,6 +1177,8 @@ def test_spectral_crps_sht_transforms(
     dtype: torch.dtype,
 ) -> None:
     ring_sizes = [20, 24, 28, 32, 32, 28, 24, 20]
+    if transform == "regular_sht":
+        ring_sizes = [transform_kwargs["nlon"]] * transform_kwargs["nlat"]
     if transform == "reduced_sht":
         # Use a small reduced grid while exercising the real ReducedSHT transform.
         latitudes = np.repeat(np.arange(len(ring_sizes)), ring_sizes)
@@ -1178,3 +1232,27 @@ def test_mse_nans() -> None:
 
     out = loss(pred, target)
     assert torch.isnan(out).any(), "Expected nan loss with ignore_nans=False"
+
+
+@pytest.mark.parametrize("subgrid", [None, (0, 12)])
+def test_regular_sht_loss_schema_and_subgrid(subgrid: tuple[int, int] | None) -> None:
+    from anemoi.training.schemas.training import SpectralLossSchema
+
+    config = {
+        "_target_": "anemoi.training.losses.SpectralCRPSLoss",
+        "scalers": [],
+        "transform": "regular_sht",
+        "nlat": 8,
+        "nlon": 12,
+        "latitude_grid": "equiangular-poles",
+        "subgrid": subgrid,
+    }
+    if subgrid is None:
+        schema = SpectralLossSchema.model_validate(config)
+        assert schema.model_dump()["latitude_grid"] == "equiangular-poles"
+        assert schema.model_dump()["nlon"] == 12
+    else:
+        with pytest.raises(ValueError, match="require the full grid"):
+            SpectralLossSchema.model_validate(config)
+        with pytest.raises(ValueError, match="require the full grid"):
+            SpectralCRPSLoss(transform="regular_sht", nlat=8, nlon=12, subgrid=subgrid)

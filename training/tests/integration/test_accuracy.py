@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import quote
 
-os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 # Required for deterministic cuBLAS (torch.use_deterministic_algorithms, enabled via
 # config.training.deterministic below). Must be set before CUDA is initialised, i.e.
 # before torch is imported transitively by the anemoi imports below.
@@ -29,6 +28,7 @@ from omegaconf import OmegaConf
 from torch.testing import assert_close
 
 from anemoi.training.diagnostics.benchmark_server import _is_repo_on_branch
+from anemoi.training.diagnostics.benchmark_server import mark_mlflow_run_used
 from anemoi.training.diagnostics.benchmark_server import prune_mlflow_runs
 from anemoi.training.diagnostics.benchmark_server import track_accuracy_final_loss
 from anemoi.training.train.train import AnemoiTrainer
@@ -44,7 +44,7 @@ LOGGER = logging.getLogger(__name__)
 
 @pytest.mark.mlflow
 @pytest.mark.slow
-def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
+def test_accuracy(tmp_path: Path, mlflow_server: str, pytestconfig: pytest.Config) -> None:
 
     # compose leaves interpolations such as
     # system.input.graph = ${system.output.root}/... unresolved; they depend on
@@ -61,6 +61,8 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
 
     config.system.output.root = str(tmp_path)
     config.diagnostics.log.mlflow.tracking_uri = mlflow_server
+    # The loss curve is compared with a reference run trained with the same seed.
+    config.training.seed = 42
     # Drive pl.Trainer(deterministic=True), which sets torch.use_deterministic_algorithms
     # and cudnn.deterministic. Combined with the module-level CUBLAS/cudnn settings, this
     # makes the loss curve reproducible on identical hardware/CUDA versions.
@@ -74,8 +76,13 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
 
     client = AnemoiMlflowClient(mlflow_server, authentication=True)
 
-    reference_id: Final = "eddb276a2bbd40f6a856b465cc9a995d"
+    # Record every change of reference_id in config/CHANGELOG.md.
+    reference_id: Final = "8e284859bf914877a406407b589862e6"
     metric: Final = "train_multi_dataset_loss_step"
+    # Optional override (e.g. from workflow_dispatch) to try out a candidate reference.
+    compare_id: Final = pytestconfig.getoption("accuracy_reference_id") or reference_id
+    if compare_id != reference_id:
+        LOGGER.info("Comparing against overridden reference run %s", compare_id)
 
     # Printed so a failing run's ID can be promoted to the new reference_id.
     LOGGER.info("Run ID from trainer: %s", trainer.run_id)
@@ -118,7 +125,9 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
             ),
         )
 
-    assert_similar(trainer.run_id, reference_id)
+    # Mark the reference as read, so pruning keeps it while it is still compared against.
+    mark_mlflow_run_used(client, compare_id)
+    assert_similar(trainer.run_id, compare_id)
 
     # Additionally push a scalar summary of the run to the anemoi benchmark
     # server (data@ecmwf.int), mirroring the pattern used by test_benchmark.py.
@@ -136,13 +145,8 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
     final_loss = float(epoch_history[-1].value)
     track_accuracy_final_loss(test_case="global", value=final_loss)
 
-    # I would like to point out a race condition in the pruning.  If there are two feature
-    # branches which both change the reference id and they are repeatedly run,
-    # they might exceed the last n runs and start deleting each others
-    # references.
-    # This will show up as a loud explicit failure.
-    # Preventing this makes the code much more complicated, so I would leave it
-    # as is, perhaps increase n and only if it turns out to be a problem fix it.
+    # Runs are pruned by last use; compare_id was tagged as used above, so a candidate
+    # reference that is being compared against survives other branches' runs.
     if _is_repo_on_branch("main"):
         prune_mlflow_runs(
             client=client,

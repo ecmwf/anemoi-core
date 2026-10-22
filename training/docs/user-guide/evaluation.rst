@@ -148,8 +148,8 @@ training. Set the hardware configuration as usual:
        num_gpus_per_node: 4
        num_nodes: 2
 
-The hidden script entry point ``.anemoi-training-evaluate`` is
-registered alongside ``.anemoi-training-train`` so that Lightning's
+The hidden script entry point ``_anemoi-training-evaluate`` is
+registered alongside ``_anemoi-training-train`` so that Lightning's
 interactive DDP can spawn rank > 0 processes correctly. Note that DDP
 wrapping is not applied during validation (Lightning only wraps the model
 for ``fit()``), but communication groups and sharding are set up
