@@ -4,19 +4,21 @@ defaults:
   - training_loss: multidomain
   - optimization: default
   - weight_averaging: null
+  - optional checkpoint/source: null
+  - optional checkpoint/loading: null
+  - optional checkpoint/modifiers: null
 
-run_id: null
-fork_run_id: null
-load_weights_only: False
+seed: null
+
 update_ds_stats_on_ckpt_load:
   states: False
   tendencies: True
 
-transfer_learning: False
-
 check_variables_compatibility:
   ignore_units: False
   ignore_processing_period: False
+
+allow_variable_subset: False
 
 deterministic: False
 precision: 16-mixed
@@ -83,6 +85,3 @@ metrics:
 
 max_epochs: null
 max_steps: 150000
-
-
-submodules_to_freeze: []

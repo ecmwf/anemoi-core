@@ -198,16 +198,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         fcstep = min(1, fcstep)
         # Process each dataset through its corresponding encoder
-        active_hidden_names = list(dict.fromkeys(self.dataset2hidden[dataset_name] for dataset_name in dataset_names))
-        if len(active_hidden_names) != 1:
-            raise ValueError(f"All datasets in a batch must use the same hidden mesh, got {active_hidden_names}.")
-        hidden_name = active_hidden_names[0]
         dataset_latents = {}
         x_skip_dict = {}
         x_data_latent_dict = {}
         shard_sizes_data_dict = {}
 
-        x_hidden_latent = self.node_attributes(hidden_name, batch_size=batch_ens_size)
+        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
         for dataset_name in x.keys():
@@ -261,21 +257,16 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x=x_latent,
             batch_size=batch_size,
             ensemble_size=ensemble_size,
-            grid_size=self.node_attributes.num_nodes[hidden_name],
+            grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             grid_shard_sizes=shard_sizes_hidden,
             model_comm_group=model_comm_group,
         )
 
-        processor_graph_provider = (
-            self.processor_graph_provider[hidden_name]
-            if self._multiple_hidden_meshes
-            else self.processor_graph_provider
-        )
         (
             processor_edge_attr,
             processor_edge_index,
             proc_edge_shard_sizes,
-        ) = processor_graph_provider.get_edges(
+        ) = self.processor_graph_provider.get_edges(
             batch_size=batch_ens_size,
             model_comm_group=model_comm_group,
         )
@@ -296,9 +287,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_latent_proc = x_latent_proc + x_latent
 
         x_out_dict = {}
-        for dataset_name in dataset_names:
-            if dataset_name not in self.target_datasets:
-                continue
+        for dataset_name in self.target_datasets:
             x_target_latent, shard_sizes_target = self._assemble_targets(
                 x[dataset_name],
                 x_data_latent_dict.get(dataset_name, None),

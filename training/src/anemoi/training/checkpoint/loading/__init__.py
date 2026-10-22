@@ -10,7 +10,6 @@
 """Checkpoint loading strategy implementations for the orchestration layer."""
 
 from .base import LoadingStrategy
-from .state import TrainingState
 from .strategies import ColdStartLoader
 from .strategies import TransferLearningLoader
 from .strategies import WarmStartLoader
@@ -20,7 +19,6 @@ from .utils import filter_state_dict
 __all__ = [
     "ColdStartLoader",
     "LoadingStrategy",
-    "TrainingState",
     "TransferLearningLoader",
     "WarmStartLoader",
     "WeightsOnlyLoader",
