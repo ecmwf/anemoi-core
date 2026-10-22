@@ -9,11 +9,13 @@
 
 import pytest
 import torch
-from batch_builders import build_batch
+from omegaconf import OmegaConf
 from torch import nn
 
 from anemoi.models.data import TensorLayout
+from anemoi.models.layers.aggregator import PointwiseCrossAttentionAggregator
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
+from tests.batch_builders import build_batch
 
 
 class _AggregationReached(RuntimeError):
@@ -87,15 +89,35 @@ def test_shared_encoder_preserves_each_dataset_latent() -> None:
     inputs = build_batch(
         data={name: torch.zeros(1, 1, 1, 1, 1) for name in model.input_datasets},
         coordinates={name: torch.zeros(1, 2) for name in model.input_datasets},
-        metadata={"static_coords": frozenset(model.input_datasets)},
         layouts={name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4) for name in model.input_datasets},
         variables={name: ["a"] for name in model.input_datasets},
         statistics={name: {} for name in model.input_datasets},
     )
 
     with pytest.raises(_AggregationReached):
-        model(inputs, target=inputs)
+        model(inputs, target_forcings=inputs, target_template=inputs.template())
 
     assert list(model.latent_aggregator.latents) == ["dataset_a", "dataset_b"]
     torch.testing.assert_close(model.latent_aggregator.latents["dataset_a"], torch.full((1, 4), 1.0))
     torch.testing.assert_close(model.latent_aggregator.latents["dataset_b"], torch.full((1, 4), 2.0))
+
+
+def test_build_latent_aggregator_passes_layer_kernels_to_aggregator() -> None:
+    model = _SharedEncoderModel()
+    aggregator_config = OmegaConf.create(
+        {
+            "_target_": "anemoi.models.layers.aggregator.PointwiseCrossAttentionAggregator",
+            "num_channels": 8,
+            "num_heads": 2,
+            "layer_kernels": {
+                "Linear": {"_target_": "torch.nn.Linear", "bias": False},
+            },
+        },
+    )
+
+    model._build_latent_aggregator(aggregator_config)
+
+    assert isinstance(model.latent_aggregator, PointwiseCrossAttentionAggregator)
+    assert model.latent_aggregator.input_channels == 4
+    assert model.latent_aggregator.source_channels == {"dataset_a": 4, "dataset_b": 4}
+    assert model.latent_aggregator.hidden_projection.bias is None

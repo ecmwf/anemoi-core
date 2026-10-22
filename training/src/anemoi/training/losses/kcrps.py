@@ -22,6 +22,7 @@ from anemoi.training.losses.base import Squash_mode
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
+    from anemoi.models.data import Source
     from anemoi.models.data import TensorLayout
 
 LOGGER = logging.getLogger(__name__)
@@ -182,7 +183,8 @@ class CRPS(BaseLoss):
         squash_mode: Squash_mode = "avg",
         **kwargs,
     ) -> torch.Tensor:
-        return pred.apply_pairwise(
+        return self._apply_pairwise(
+            pred,
             target,
             self._evaluate_loss_tensor,
             squash=squash,
@@ -205,6 +207,7 @@ class CRPS(BaseLoss):
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
         squash_mode: Squash_mode = "sum",
+        valid_counts: torch.Tensor | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
@@ -235,6 +238,7 @@ class CRPS(BaseLoss):
             squash=squash,
             squash_mode=squash_mode,
             group=group if is_sharded else None,
+            valid_counts=self._counts_like(valid_counts, crps, layout, scaler_indices),
         )
 
     @property

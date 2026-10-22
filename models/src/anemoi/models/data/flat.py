@@ -22,7 +22,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, eq=False, slots=True)
 class FlatSource:
     """A source flattened to node rows, ready for the encoder.
 

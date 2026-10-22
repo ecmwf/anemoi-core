@@ -11,19 +11,19 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from batch_builders import build_batch
-from batch_builders import build_source
 from omegaconf import DictConfig
 from torch import nn
 
 from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.aggregator import SumAggregator
 from anemoi.models.layers.graph_provider import DynamicGraphProvider
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
+from tests.batch_builders import build_batch
 
 
 class _NearestEdges:
@@ -106,7 +106,9 @@ def _model(model_type):
     model.decoders_target_input = {
         "0": SimpleNamespace(
             features=[SimpleNamespace(name="coordinates")],
-            tensor=lambda x, encoded, target, **kwargs: target.coordinates.new_zeros(target.coordinates.shape[0], 4),
+            tensor=lambda x, encoded, target, target_spec, **kwargs: target_spec.coordinates.new_zeros(
+                target_spec.coordinates.shape[0], 4
+            ),
         ),
     }
     model.data_indices = {
@@ -116,51 +118,17 @@ def _model(model_type):
     return model
 
 
-@pytest.mark.parametrize(
-    "model_type", [AnemoiModelEncProcDec, AnemoiTransportModelEncProcDec, AnemoiEnsModelEncProcDec]
-)
-def test_moving_grids_isolate_samples_and_members(model_type):
-    """Real graph construction and model routing keep all four node copies independent."""
-    model = _model(model_type)
-    layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    # Different values for each (sample, ensemble member), constant over its two grid points.
-    values = torch.tensor([[1.0, 2.0], [10.0, 20.0]])
-    data = values[:, None, :, None, None].expand(2, 2, 2, 2, 1).clone().requires_grad_()
-    batch = build_batch(
-        data={"grid": data},
-        coordinates={"grid": torch.tensor([[[0.0, 0.0], [0.2, 0.2]], [[0.01, 0.01], [0.21, 0.21]]])},
-        layouts={"grid": layout},
-        variables={"grid": ["a"]},
-        statistics={"grid": {}},
-    )
-    target = batch.with_data({"grid": torch.zeros(2, 1, 2, 2, 1)})
-
-    def forward(inputs):
-        if model_type is AnemoiTransportModelEncProcDec:
-            return model._forward_transport_network(inputs, target, {"grid": torch.zeros(2, 1, 2, 1, 1)})
-        return model(inputs, target)
-
-    output = forward(batch)["grid"].data
-    torch.testing.assert_close(output[:, 0, :, 0, 0], values)
-    output.sum().backward()
-    assert torch.all(data.grad[:, 0] > 0)
-
-    changed_data = data.detach().clone()
-    changed_data[0] += 100
-    changed = forward(batch.with_data({"grid": changed_data}))["grid"].data
-    torch.testing.assert_close(changed[1], output[1])
-    torch.testing.assert_close(changed[0], output[0] + 100)
-
-
-def test_moving_grid_feature_width_uses_time_layout():
+@pytest.mark.parametrize(("is_static", "expected"), [(True, 10), (False, 6)])
+def test_feature_width_counts_time_steps_per_node(is_static: bool, expected: int):
+    """Gridded datasets fold their steps into the features; tabular (non-static) ones carry one step per node."""
     model = _model(AnemoiModelEncProcDec)
-    model.is_dataset_static = {"grid": False}
-    model.data_layouts = {"grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)}
-    model.n_step_input = 3
+    model.is_dataset_static = {"grid": is_static}
+    model.n_step_input = {"grid": 3}
     model.num_input_channels = {"grid": 2}
     model.dynamic_node_attribute_dims = {}
-    # Three timesteps of two variables plus four coordinate features.
-    assert model._calculate_input_dim("grid") == 10
+    # Gridded: three timesteps of two variables plus four coordinate features.
+    # Tabular: the three windows are stacked on the node axis, so one step of two variables plus four.
+    assert model._calculate_input_dim("grid") == expected
 
 
 @pytest.mark.parametrize(
@@ -176,8 +144,10 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
     inputs = build_batch(
         data={"grid": samples},
         coordinates={"grid": coords},
+        timedeltas={"grid": [torch.zeros(len(c)) for c in coords]},
+        boundaries={"grid": [(slice(0, len(c)),) for c in coords]},
         variables={"grid": ["a"]},
-        layouts={"grid": TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)},
+        layouts={"grid": TensorLayout(ensemble=0, grid=1, variables=2)},
         statistics={"grid": {}},
     )
     if model_type is AnemoiTransportModelEncProcDec:
@@ -185,54 +155,26 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
         output = model._forward_transport_network(inputs, target, {"grid": torch.zeros(2, 1, 2, 1, 1)})
     else:
         target = inputs.select(variables=[])
-        output = model(inputs, target)
+        output = model(inputs, target_forcings=target, target_template=inputs.template())
     for expected, actual in zip(samples, output["grid"].data, strict=True):
         torch.testing.assert_close(actual, expected)
     sum(sample.sum() for sample in output["grid"].data).backward()
     assert all(torch.isfinite(sample.grad).all() and sample.grad.abs().sum() > 0 for sample in samples)
 
 
-def test_inference_forcing_only_target_preserves_output_metadata():
-    from anemoi.models.interface import AnemoiModelInterface
-    from anemoi.models.preprocessing import Processors
-    from anemoi.models.preprocessing.normalizer import InputNormalizer
-
-    model = _model(AnemoiModelEncProcDec)
-    model.statistics = {"grid": {"stdev": torch.tensor([2.0])}}
-    interface = AnemoiModelInterface.__new__(AnemoiModelInterface)
-    nn.Module.__init__(interface)
-    interface.model = model
-    interface.data_indices = model.data_indices
-    interface.statistics = model.statistics
-    interface.is_dataset_static = {"grid": True}
-    interface.data_layouts = {"grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)}
-    interface.n_step_input = 2
-    interface.pre_processors = nn.ModuleDict(
-        {"grid": Processors([["normalizer", InputNormalizer({"default": "std"})]])}
-    )
-    interface.post_processors = nn.ModuleDict(
-        {"grid": Processors([["normalizer", InputNormalizer({"default": "std"})]], inverse=True)}
-    )
-    result = interface.predict_step(
-        {"grid": torch.full((2, 1, 2, 1), 4.0)}, target={"grid": torch.empty(1, 1, 2, 0)}, gather_out=False
-    )["grid"]
-    torch.testing.assert_close(result["data"], torch.full((1, 1, 2, 1), 4.0))
-    assert result["variables"] == ["a"]
-    assert result["layout"] == ("time", "ensemble", "grid", "variables")
-    torch.testing.assert_close(result["latitudes"], torch.rad2deg(torch.tensor([0.0, 0.2])))
-
-
 @pytest.mark.parametrize("members", [1, 2])
 def test_sparse_transport_noise_embeddings_follow_member_node_order(members):
 
     samples = [torch.zeros(members, nodes, 1) for nodes in [2, 3]]
-    view = build_source(
+    view = TabularSource(
         name="obs",
         data=samples,
         variables=["a"],
         statistics={},
         coordinates=[torch.zeros(nodes, 2) for nodes in [2, 3]],
-        layout=TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True),
+        layout=TensorLayout(ensemble=0, grid=1, variables=2),
+        timedeltas=[torch.zeros(nodes) for nodes in [2, 3]],
+        boundaries=[(slice(0, nodes),) for nodes in [2, 3]],
     )
     noise = torch.arange(1.0, 2 * members + 1).reshape(2, 1, members, 1, 1).requires_grad_()
     model = _model(AnemoiTransportModelEncProcDec)

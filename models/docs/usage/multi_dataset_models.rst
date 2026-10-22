@@ -46,14 +46,14 @@ choose stable, descriptive names.
    encoders:
      global:                 # user-defined group name (appears in the state-dict)
        source_datasets: [ "era5", "ifs"]  # datasets encoded by this group
-       dataset_fusing_strategy: "not_supported"
+       dataset_fusing_strategy: "sequential"
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024
          # ... mapper configuration
      regional:
        source_datasets: [ "cerra" ]
-       dataset_fusing_strategy: "not_supported"
+       dataset_fusing_strategy: "none"
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024
@@ -81,8 +81,7 @@ choose stable, descriptive names.
 
 ``dataset_fusing_strategy``
    How multiple datasets within a single group are combined if passed during the
-   same forward pass. Currently only ``"not_supported"`` is available; it is a
-   placeholder for future fusing strategies.
+   same forward pass: ``"none"`` (default) or ``"sequential"``. See below.
 
 ``num_channels``
    Note that ``num_channels`` is configured **per mapper** (and on the
@@ -97,12 +96,16 @@ choose stable, descriptive names.
  Encoding multiple datasets with the same encoder
 ***************************************************
 
-The support for encoding multiple datasets with the same encoder is currently limited to one dataset per encoder.
-Future updates may introduce more flexible dataset fusing strategies. A different strategy can be chosen for each encoder
-by setting the ``dataset_fusing_strategy`` field, which supports the following values:
+A different strategy can be chosen for each encoder by setting the ``dataset_fusing_strategy`` field, which supports
+the following values:
 
-``not_supported``
-   Indicates that multiple datasets per encoder are not currently supported.
+``none``
+   No fusion (default). The natural choice for a single-source encoder. With several source datasets, each is encoded
+   separately and they must share an input dimension.
+
+``sequential``
+   One encoder pass per source dataset, in the order listed in ``source_datasets``, with shared encoder weights. The
+   resulting latents are combined by the latent aggregator.
 
 *******************
  Latent aggregator
@@ -134,6 +137,27 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
    concatenated in the configured dataset order, independently of
    the order of the mapping passed to the model. Every configured dataset
    must be active because omitting one would change the output width.
+
+``PointwiseCrossAttentionAggregator``
+   Pointwise cross-attention over the active dataset latents. The
+   initial hidden-node attributes provide the query and residual, while
+   each dataset latent is projected to ``num_channels`` and used as a
+   named key/value source. Encoder widths may differ and active dataset
+   subsets are supported. The output width is ``num_channels`` and must
+   match the processor width.
+
+   .. code:: yaml
+
+      latent_aggregator:
+        _target_: anemoi.models.layers.aggregator.PointwiseCrossAttentionAggregator
+        num_channels: ${model.num_channels}
+        num_heads: 16
+        attn_channels: null
+        dropout_p: 0.0
+        qkv_bias: false
+        qk_norm: false
+        gradient_checkpointing: true
+        layer_kernels: ${model.layer_kernels}
 
 *********************************
   Decoder target node features

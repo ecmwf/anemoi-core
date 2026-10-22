@@ -122,15 +122,26 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="MLFlow server for tests requiring MLFlow (only if --mlflow is set)",
     )
+    parser.addoption(
+        "--accuracy-reference-id",
+        dest="accuracy_reference_id",
+        default="",
+        help="MLflow run ID to compare the accuracy test against (empty: use the hard-coded reference)",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    # Fail at startup rather than hours into the run: an unset MLFLOW_TEST_URL in CI
+    # expands to an empty --mlflow-server, which only surfaces as an opaque
+    # "URL must be provided if authentication is enabled." once an MLFlow test is reached.
+    if config.getoption("mlflow") and not config.getoption("mlflow_server"):
+        msg = "MLFlow server must be provided via --mlflow-server when using --mlflow"
+        raise pytest.UsageError(msg)
 
 
 @pytest.fixture
 def mlflow_server(pytestconfig: Any) -> str:
-    mlflow_server = pytestconfig.getoption("mlflow_server")
-    if pytestconfig.getoption("mlflow") and mlflow_server is None:
-        e = ValueError("MLFlow server must be provided via --mlflow-server when using --mlflow")
-        raise e
-    return mlflow_server
+    return pytestconfig.getoption("mlflow_server")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

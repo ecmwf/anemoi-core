@@ -10,9 +10,11 @@
 
 import logging
 from abc import abstractmethod
+from pathlib import Path
 from typing import Optional
 
 import torch
+from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import ListConfig
 from torch import Tensor
@@ -21,15 +23,17 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
-from anemoi.models.data import TensorLayout
+from anemoi.graphs.utils import load_graph_from_file
+from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.data.batch import Batch
+from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NodeTrainableParameters
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
+from anemoi.models.models.target_features import time_steps_per_node
 from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
@@ -41,12 +45,11 @@ LOGGER = logging.getLogger(__name__)
 #   are only accepted if they share an input dimension, and each is encoded independently.
 # - "sequential": one encoder pass per source dataset with shared weights; the per-dataset
 #   latents are combined by the latent aggregator.
-# - "joint": a single encoder pass over the union of all source nodes.
-SUPPORTED_FUSING_STRATEGIES = {"none", "sequential", "joint"}
+SUPPORTED_FUSING_STRATEGIES = {"none", "sequential"}
 
 # Strategies for which per-dataset "thin" source projections are built, so that source
 # datasets of differing feature widths (channel counts) can share one encoder.
-PROJECTING_FUSING_STRATEGIES = {"sequential", "joint"}
+PROJECTING_FUSING_STRATEGIES = {"sequential"}
 
 
 def split_graph_config(
@@ -100,6 +103,52 @@ def split_graph_config(
     return DotDict(static_graph_config), DotDict(dynamic_graph_config)
 
 
+def load_existing_graph(
+    graph_path: str | Path | None,
+    is_dataset_static: dict[str, bool],
+    hidden_nodes_name: str | list[str],
+) -> tuple[HeteroData, DotDict]:
+    """Load a pre-built static graph and return it with an empty dynamic graph configuration.
+
+    This serves the existing-graph mode, where the graph config defines
+    no nodes or edges and the graph is read from ``system.input.graph``.
+
+    Parameters
+    ----------
+    graph_path : str | Path | None
+        Path to the serialised graph.
+    is_dataset_static : dict[str, bool]
+        Dictionary indicating whether each dataset is static. The hidden nodes are added as static.
+    hidden_nodes_name : str or list of str
+        Name(s) of the hidden nodes in the graph.
+
+    Returns
+    -------
+    tuple[HeteroData, DotDict]
+        The loaded graph and a dynamic graph configuration with no builders for any of its edges.
+    """
+    if graph_path is None:
+        msg = "The graph config defines no nodes, so a pre-built graph must be given in `system.input.graph`."
+        raise ValueError(msg)
+    dynamic_datasets = [name for name, is_static in is_dataset_static.items() if not is_static]
+    if dynamic_datasets:
+        msg = (
+            f"A pre-built graph only works with static datasets, but {dynamic_datasets} require a dynamic graph. "
+            "Define their nodes and edges in the graph config instead."
+        )
+        raise NotImplementedError(msg)
+
+    hidden_names = [hidden_nodes_name] if isinstance(hidden_nodes_name, str) else list(hidden_nodes_name)
+    for hidden_name in hidden_names:
+        is_dataset_static[hidden_name] = True
+
+    graph = load_graph_from_file(Path(graph_path))
+    validate_loaded_graph(graph, list(is_dataset_static))
+
+    dynamic_graph_config = {"nodes": {}, "edges": {edge_type: {} for edge_type in graph.edge_types}}
+    return graph, DotDict(dynamic_graph_config)
+
+
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
@@ -110,10 +159,9 @@ class BaseGraphModel(nn.Module):
         model_graph_config: DotDict,
         data_indices: dict[str, IndexCollection],
         statistics: dict[str, dict],
-        is_dataset_static: dict[str, bool],
-        data_layouts: dict[str, TensorLayout],
-        n_step_input: int,
-        n_step_output: int,
+        data_types: dict[str, str],
+        n_step_input: dict[str, int],
+        n_step_output: dict[str, int],
     ) -> None:
         """Initializes the graph neural network.
 
@@ -127,62 +175,76 @@ class BaseGraphModel(nn.Module):
             Data statistics
         model_graph_config : DotDict
             Graph configuration
+        data_types : dict[str, str]
+            Data types for each dataset. Data types are "tabular" or "gridded".
+        n_step_input : dict[str, int]
+            Number of input time steps (windows, for tabular datasets) for each dataset. Gridded datasets embed
+            all of them per node; tabular datasets stack their windows on the node axis, so each node carries one
+            (see ``target_features.time_steps_per_node``).
+        n_step_output : dict[str, int]
+            Number of output time steps (windows, for tabular datasets) for each dataset, with the same per-node
+            convention as ``n_step_input``.
         """
         super().__init__()
 
         model_config = DotDict(model_config)
         model_graph_config = DotDict(model_graph_config)
-        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        self._graph_name_hidden = model_config.model.hidden_nodes_name
+        self.is_dataset_static = {name: data_type == "gridded" for name, data_type in data_types.items()}
 
-        static_graph_config, dynamic_graph_config = split_graph_config(
-            model_graph_config, is_dataset_static, self._graph_name_hidden
-        )
-
-        self._graph_data = GraphCreator(static_graph_config).create()
+        if model_graph_config.get("nodes"):
+            static_graph_config, dynamic_graph_config = split_graph_config(
+                model_graph_config, self.is_dataset_static, self._graph_name_hidden
+            )
+            self._graph_data = GraphCreator(static_graph_config).create()
+        else:
+            # Existing-graph mode: no nodes in the graph config, load the graph from file. The model
+            # interface passes ``system.input.graph`` as the graph config's ``path``.
+            self._graph_data, dynamic_graph_config = load_existing_graph(
+                model_graph_config.get("path"),
+                self.is_dataset_static,
+                self._graph_name_hidden,
+            )
         self.data_indices = data_indices
         self.statistics = statistics
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
-        self.is_dataset_static = is_dataset_static
-        self.data_layouts = data_layouts
-        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        self._graph_name_hidden = model_config.model.hidden_nodes_name
 
-        self.latent_skip = model_config.model.model.latent_skip
+        self.latent_skip = model_config.model.latent_skip
 
-        self.node_attributes = NodeTrainableParameters(model_config.model.node_trainable_parameters, self._graph_data)
+        self.node_attributes = NodeTrainableParameters(model_config.node_trainable_parameters, self._graph_data)
 
         self.dynamic_node_attributes: dict[str, dict[str, object]] = {}
         self.dynamic_node_attribute_dims: dict[str, int] = {}
 
         self._configure_dynamic_node_attributes(dynamic_graph_config.nodes)
 
-        self._build_encoder_routing(model_config.model.encoders)
-        self._build_decoder_routing(model_config.model.decoders)
+        self._build_encoder_routing(model_config.encoders)
+        self._build_decoder_routing(model_config.decoders)
 
         self._calculate_shapes_and_indices(data_indices)
-
-        self._assert_model_routing()
 
         self._assert_model_routing()
         self._assert_matching_indices(data_indices)
         self._assert_hidden_nodes_name(self._graph_name_hidden)
 
         # build networks
-        self._build_networks(model_config.model, self._graph_data, dynamic_graph_config.edges)
+        self._build_networks(model_config, self._graph_data, dynamic_graph_config.edges)
 
         # build residual connection
         self._build_residual(
-            get_multiple_datasets_config(model_config.model.residual),
-            sparse_projector_config=model_config.model.get("sparse_projector", {}),
+            get_multiple_datasets_config(model_config.residual),
+            sparse_projector_config=model_config.get("sparse_projector", {}),
         )
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         # Multi-dataset: create ModuleDict with ModuleList per dataset
         self.boundings = build_boundings(
-            get_multiple_datasets_config(model_config.model.get("bounding", [])),
+            get_multiple_datasets_config(model_config.get("bounding", [])),
             data_indices=self.data_indices,
             statistics=self.statistics,
         )
@@ -199,7 +261,14 @@ class BaseGraphModel(nn.Module):
         self.dataset2encoder: dict[str, str] = {}
         self.encoder2datasets: dict[str, list[str]] = {}
         self.encoder_fusing_strategy: dict[str, str] = {}
+        # Width of the source latent returned by encoders whose mapper updates its source nodes
+        # (e.g. GNNForwardMapper); other mappers pass the source input through.
+        self.encoder_src_latent_dim: dict[str, int] = {}
         for encoder_name, encoder_config in encoders_config.items():
+            mapper_target = encoder_config.get("mapper", {}).get("_target_")
+            if mapper_target is not None and getattr(get_class(mapper_target), "returns_src_latent", False):
+                self.encoder_src_latent_dim[encoder_name] = encoder_config.mapper.num_channels
+
             datasets_to_encode = list(encoder_config["source_datasets"])
             self.encoder2datasets[encoder_name] = datasets_to_encode
             for d in datasets_to_encode:
@@ -245,34 +314,12 @@ class BaseGraphModel(nn.Module):
             not not_target_datasets
         ), f"Datasets {not_target_datasets} are referenced by decoders but missing from data_indices provided to the model. "
 
-        # Only one dataset is currently supported per encoder. Work in progress.
-        for encoder_name, datasets in self.encoder2datasets.items():
-            assert (
-                len(datasets) == 1
-            ), f"Encoder '{encoder_name}' must be associated with exactly one dataset for now. New dataset fusing strategies will be implemented soon."
-
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
             if fusing_strategy not in SUPPORTED_FUSING_STRATEGIES:
                 raise ValueError(
                     f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'. "
                     + f"Valid options are: {SUPPORTED_FUSING_STRATEGIES}"
                 )
-
-            source_datasets = self.encoder2datasets[encoder_name]
-            if len(source_datasets) == 1:
-                continue
-
-            if fusing_strategy == "joint":
-                # Gridded and tabular sources disagree on the destination index space: tabular
-                # sources are encoded against a batch-repeated hidden node set, gridded ones
-                # against the plain hidden nodes. They cannot share one joint encoder pass.
-                static_flags = {d: self.is_dataset_static[d] for d in source_datasets}
-                if len(set(static_flags.values())) > 1:
-                    raise ValueError(
-                        f"Encoder '{encoder_name}' fuses gridded and non-gridded datasets jointly "
-                        f"({static_flags}), which is not supported because they use different "
-                        "destination index spaces. Use dataset_fusing_strategy: 'sequential' instead."
-                    )
 
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():
@@ -323,17 +370,8 @@ class BaseGraphModel(nn.Module):
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        if not self.data_layouts[dataset_name].time_in_grid:
-            return (
-                self.n_step_input * self.num_input_channels[dataset_name]
-                + self.dynamic_node_attribute_dims.get(dataset_name, 0)
-                + COORDS_DIM
-                + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
-            )
-
-        # time is already part of the grid dimension
         return (
-            self.num_input_channels[dataset_name]
+            time_steps_per_node(self, dataset_name, self.n_step_input) * self.num_input_channels[dataset_name]
             + COORDS_DIM
             + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
             + self.dynamic_node_attribute_dims.get(dataset_name, 0)
@@ -362,7 +400,7 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
         """Calculate the decoder output dimension for a given dataset."""
-        return self.n_step_output * self.num_output_channels[dataset_name]
+        return time_steps_per_node(self, dataset_name, self.n_step_output) * self.num_output_channels[dataset_name]
 
     @staticmethod
     def _as_hidden_node_names(
@@ -425,7 +463,7 @@ class BaseGraphModel(nn.Module):
         """Per-dataset flag indicating whether the dataset is grid-sharded.
 
         Sharding metadata is carried by each source, which exposes it via
-        ``flatten().shard_sizes``.
+        ``.flatten().shard_sizes``.
 
         ``None`` means that dataset is replicated, not sharded.
         """
@@ -455,6 +493,14 @@ class BaseGraphModel(nn.Module):
         sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
         for dataset_name, residual_config in residual_configs.items():
             assert residual_config is not None, f"Residual config for dataset '{dataset_name}' is None."
+            # Only gridded datasets have a static grid, so a dynamic one is tabular.
+            if not self.is_dataset_static.get(dataset_name, True):
+                msg = (
+                    f"model.residual configures a residual connection for dataset '{dataset_name}', which is "
+                    "tabular. Residual connections need a gridded dataset with an explicit "
+                    f"time axis; remove model.residual.datasets.{dataset_name}."
+                )
+                raise ValueError(msg)
             self.residual[dataset_name] = instantiate(
                 residual_config,
                 graph=self._graph_data,
@@ -497,46 +543,103 @@ class BaseGraphModel(nn.Module):
         pass
 
     @staticmethod
-    def _apply_spatial_preprocessor(
-        tensors: tuple[Tensor, ...],
-        dataset_name: str,
-        spatial_pre_processors: Optional[nn.ModuleDict],
-        model_comm_group: Optional[ProcessGroup],
-    ) -> tuple[Tensor, ...]:
-        """Apply one dataset's spatial preprocessor to tensors sharing a source grid."""
-        grid_shard_sizes = None  # TODO: grid_shard_size will be carried with the data
+    def _shard_target_template(
+        target_template: dict[str, BaseTemplate],
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> dict[str, BaseTemplate]:
+        """Split the target templates across ``model_comm_group``, as the inputs are split for prediction.
 
-        if spatial_pre_processors is None or dataset_name not in spatial_pre_processors:
-            return tensors
+        The decoder reads its target nodes from the template, so with a distributed model each rank's
+        template must describe its own shard of the nodes.
+        """
+        if not model_is_distributed(model_comm_group):
+            return target_template
+        return {dataset_name: template.shard(model_comm_group) for dataset_name, template in target_template.items()}
 
-        source_grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
-        projected_tensors = []
-        output_grid_shard_sizes: ShardSizes = None
-        for index, tensor in enumerate(tensors):
-            projected_tensor, tensor_grid_shard_sizes = spatial_pre_processors[dataset_name](
-                tensor,
-                model_comm_group=model_comm_group,
-                grid_shard_sizes=source_grid_shard_sizes,
-            )
-            if index == 0:
-                output_grid_shard_sizes = tensor_grid_shard_sizes
-            elif tensor_grid_shard_sizes != output_grid_shard_sizes:
-                raise RuntimeError(
-                    f"Spatial preprocessor for {dataset_name!r} returned inconsistent target-grid shard sizes."
+    def _prepare_prediction_inputs(
+        self,
+        x: Batch,
+        target_forcing: Optional[Batch],
+        pre_processors: nn.ModuleDict,
+        model_comm_group: Optional[ProcessGroup] = None,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
+        **kwargs,
+    ) -> tuple[Batch, Batch]:
+        """Shard, project and normalise the inputs and the decoder conditioning of a prediction step.
+
+        Parameters
+        ----------
+        x : Batch
+            Input batched data (before pre-processing).
+        target_forcing : Optional[Batch]
+            Decoder conditioning (before pre-processing): the forcing variables at the output valid times.
+            ``None`` means there are no forcings.
+        pre_processors : nn.ModuleDict
+            Pre-processing module.
+        model_comm_group : Optional[ProcessGroup]
+            Process group for distributed training.
+        spatial_pre_processors : Optional[nn.ModuleDict]
+            Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector).
+            Applied after grid sharding and before normalisation, as in training.
+        **kwargs
+            Additional arguments for the pre-processors.
+
+        Returns
+        -------
+        tuple[Batch, Batch]
+            The normalised inputs and the normalised decoder conditioning, split across
+            ``model_comm_group`` when the model is distributed.
+        """
+        dataset_names = list(x.keys())
+        if target_forcing is None:
+            target_forcing = Batch({})
+
+        if model_is_distributed(model_comm_group):
+            for dataset_name in dataset_names:
+                x = x.replace(dataset_name, x[dataset_name].shard(model_comm_group))
+            for dataset_name in target_forcing.dataset_names:
+                target_forcing = target_forcing.replace(
+                    dataset_name, target_forcing[dataset_name].shard(model_comm_group)
                 )
-            projected_tensors.append(projected_tensor)
 
-        if grid_shard_sizes is not None:
-            grid_shard_sizes[dataset_name] = output_grid_shard_sizes
-        return tuple(projected_tensors)
+        # Spatial preprocessing: applied after grid sharding and, as in training, before
+        # normalisation, so projectors see raw values. The projected source is on the
+        # dataset's graph node set.
+        for dataset_name in dataset_names:
+            if spatial_pre_processors is not None and dataset_name in spatial_pre_processors:
+                projected = spatial_pre_processors[dataset_name].project_source(
+                    x[dataset_name],
+                    self._graph_data[dataset_name].x,
+                    model_comm_group=model_comm_group,
+                )
+                x = x.replace(dataset_name, projected)
+
+        processed_batch = x
+        for dataset_name in dataset_names:
+            processed_batch = processed_batch.replace(
+                dataset_name,
+                pre_processors[dataset_name](x[dataset_name], in_place=False, **kwargs),
+            )
+
+        # The target forcings condition the decoder, and need to go through the input processors
+        processed_forcing = target_forcing
+        for dataset_name in target_forcing.dataset_names:
+            if dataset_name not in pre_processors:
+                continue
+            processed_forcing = processed_forcing.replace(
+                dataset_name,
+                pre_processors[dataset_name](target_forcing[dataset_name], in_place=False, **kwargs),
+            )
+
+        return processed_batch, processed_forcing
 
     def predict_step(
         self,
         x: Batch,
-        target: Batch,
+        target_template: dict[str, BaseTemplate],
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
-        n_step_input: int,
+        target_forcing: Batch,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         spatial_pre_processors: Optional[nn.ModuleDict] = None,
@@ -551,22 +654,22 @@ class BaseGraphModel(nn.Module):
         ----------
         x : Batch
             Input batched data (before pre-processing).
-        target : Batch
+        target_template : dict[str, BaseTemplate]
             Decoder conditioning (before pre-processing): the forcing variables at the
-            output valid times, carrying the decode geometry and the output time extent.
+            output valid times.
         pre_processors : nn.ModuleDict
             Pre-processing module.
         post_processors : nn.ModuleDict
             Post-processing module.
-        n_step_input : int
-            Number of input timesteps.
+        target_forcing : Batch
+            Decoder conditioning (before pre-processing): the forcing variables at the output valid times.
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training.
         gather_out : bool
             Whether to gather output tensors across distributed processes.
         spatial_pre_processors : Optional[nn.ModuleDict]
             Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector).
-            Applied after grid sharding but before normalisation.
+            Applied after grid sharding and before normalisation, as in training.
         **kwargs
             Additional arguments.
 
@@ -577,44 +680,24 @@ class BaseGraphModel(nn.Module):
         ```
         """
         with torch.no_grad():
-            dataset_names = list(x.keys())
-
-            if model_is_distributed(model_comm_group):
-                for dataset_name in dataset_names:
-                    x = x.replace(dataset_name, x[dataset_name].shard(model_comm_group))
-                for dataset_name in target.dataset_names:
-                    target = target.replace(dataset_name, target[dataset_name].shard(model_comm_group))
-
-            processed_batch = x
-            for dataset_name in dataset_names:
-                processed_batch = processed_batch.replace(
-                    dataset_name,
-                    pre_processors[dataset_name](x[dataset_name], in_place=False, **kwargs),
-                )
-
-            # Spatial preprocessing: applied after grid sharding, before normalisation.
-            input_data = processed_batch
-            for dataset_name in dataset_names:
-                (projected_tensor,) = self._apply_spatial_preprocessor(
-                    (processed_batch[dataset_name],),
-                    dataset_name,
-                    spatial_pre_processors,
-                    model_comm_group,
-                )
-                input_data[dataset_name] = projected_tensor
-
-            # The target forcings condition the decoder, and need to go through the input processors
-            processed_target = target
-            for dataset_name in target.dataset_names:
-                if dataset_name not in pre_processors:
-                    continue
-                processed_target = processed_target.replace(
-                    dataset_name,
-                    pre_processors[dataset_name](target[dataset_name], in_place=False, **kwargs),
-                )
+            target_template = self._shard_target_template(target_template, model_comm_group)
+            processed_batch, processed_target = self._prepare_prediction_inputs(
+                x,
+                target_forcing,
+                pre_processors,
+                model_comm_group=model_comm_group,
+                spatial_pre_processors=spatial_pre_processors,
+                **kwargs,
+            )
 
             # Perform forward pass
-            y_hat = self.forward(processed_batch, target=processed_target, model_comm_group=model_comm_group, **kwargs)
+            y_hat = self.forward(
+                processed_batch,
+                target_forcings=processed_target,
+                target_template=target_template,
+                model_comm_group=model_comm_group,
+                **kwargs,
+            )
 
             # Apply post-processing
             for dataset_name in y_hat.dataset_names:

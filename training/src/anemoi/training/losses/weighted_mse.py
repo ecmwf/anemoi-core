@@ -40,6 +40,7 @@ class WeightedMSELoss(MSELoss):
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
         squash_mode: Squash_mode = "avg",
+        valid_counts: torch.Tensor | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Calculates the weighted MSE loss.
@@ -67,6 +68,8 @@ class WeightedMSELoss(MSELoss):
             Distributed group to reduce over, by default None.
         squash_mode : str, optional
             Squashing strategy, by default "avg".
+        valid_counts : torch.Tensor, optional
+            Tabular observations only: per-variable observation counts, see :meth:`BaseLoss.reduce`.
 
         Returns
         -------
@@ -96,4 +99,5 @@ class WeightedMSELoss(MSELoss):
             squash=squash,
             group=group if is_sharded else None,
             squash_mode=squash_mode,
+            valid_counts=self._counts_like(valid_counts, pred, layout, scaler_indices),
         )

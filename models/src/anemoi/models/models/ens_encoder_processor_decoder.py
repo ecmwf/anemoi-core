@@ -20,10 +20,9 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.models import AnemoiModelEncProcDec
@@ -44,20 +43,18 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         model_graph_config: DotDict,
         data_indices: dict[str, IndexCollection],
         statistics: dict[str, dict],
-        is_dataset_static: dict[str, bool],
-        data_layouts: dict[str, TensorLayout],
-        n_step_input: int,
-        n_step_output: int,
+        data_types: dict[str, str],
+        n_step_input: dict[str, int],
+        n_step_output: dict[str, int],
     ) -> None:
         # Read before super().__init__, which calls _calculate_input_dim.
-        self.condition_on_residual = DotDict(model_config).model.condition_on_residual
+        self.condition_on_residual = DotDict(model_config).condition_on_residual
         super().__init__(
             model_config=model_config,
             model_graph_config=model_graph_config,
             data_indices=data_indices,
             statistics=statistics,
-            is_dataset_static=is_dataset_static,
-            data_layouts=data_layouts,
+            data_types=data_types,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )
@@ -127,7 +124,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     def forward(
         self,
         batch: Batch,
-        target: Batch,
+        target_forcings: Batch,
+        target_template: dict[str, BaseTemplate],
         *,
         fcstep: int = 0,
         model_comm_group: Optional[ProcessGroup] = None,
@@ -139,8 +137,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         ----------
         batch : Batch
             Batch envelope, one source view per dataset.
-        target : Batch
+        target_forcings : Batch
             Decoder conditioning: the forcing variables at the output valid times.
+        target_template : dict[str, BaseTemplate]
+            What to predict for each decoded dataset: its nodes (coordinates, timedeltas,
+            sizes) and variables, e.g. from :meth:`Source.template`.
         fcstep : int, optional
             Forecast step to condition on, clamped to `min(1, fcstep)`.
         model_comm_group : Optional[ProcessGroup], optional
@@ -149,7 +150,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         Returns
         -------
         Batch
-            Model output, built by updating the `target` for each decoded dataset.
+            Model output, one source per decoded dataset.
         """
         dataset_names = list(batch.keys())
 
@@ -199,9 +200,6 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                     shard_sizes_hidden=shard_sizes_hidden,
                     model_comm_group=model_comm_group,
                 )
-                if source is None:  # no data points for this dataset in this batch
-                    continue
-
                 source = self._condition_source(source, fcstep)
                 x_skip_dict[dataset_name] = source.x_skip
                 sources.append(source)
@@ -238,7 +236,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             batch_size=batch_ens_size,
             model_comm_group=model_comm_group,
         )
-        processor_edge_attr = processor_edge_attr.to(dtype=x_latent.dtype)
+        processor_edge_attr = processor_edge_attr.to(device=x_latent.device, dtype=x_latent.dtype)
+        processor_edge_index = processor_edge_index.to(x_latent.device)
 
         x_latent_proc = self.processor(
             x=x_latent_noised,
@@ -256,76 +255,42 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         # Decoder
         x_out_dict = {}
-        for dataset_name in self.target_datasets:
+        for dataset_name, target_dataset_template in target_template.items():
+            if dataset_name not in self.target_datasets:
+                continue
+
             target_coords, target_data_latent, shard_sizes_data, data_batch_sizes, data_timedeltas = (
                 self._assemble_target(
                     batch[dataset_name],
                     x_data_latent_dict.get(dataset_name, None),
-                    target[dataset_name],
+                    target_forcings.get(dataset_name, None),
+                    target_dataset_template,
                     batch_size=batch_ens_size,
                     model_comm_group=model_comm_group,
                     dataset_name=dataset_name,
                 )
             )
 
-            if target_coords.numel() == 0:
-                LOGGER.debug(
-                    "No data points for dataset %s in the batch (data_coords.shape = %s), "
-                    + "will decode to a size-zero tensor ...",
-                    dataset_name,
-                    list(target_coords.shape),
-                )
-
-            graph_batch_kwargs = (
-                {"src_batch_sizes": hidden_batch_sizes, "dst_batch_sizes": data_batch_sizes}
-                if data_batch_sizes is not None
-                else {}
-            )
-            decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
-                dataset_name
-            ].get_edges(
+            x_out = self._decode_rows(
+                dataset_name,
+                x_latent_proc,
+                (target_coords, target_data_latent, shard_sizes_data, data_batch_sizes, data_timedeltas),
                 batch_size=batch_ens_size,
-                src_coords=hidden_coordinates_batched if data_batch_sizes is not None else hidden_coordinates,
-                dst_coords=target_coords,
-                dst_timedeltas=data_timedeltas,
-                model_comm_group=model_comm_group,
-                **graph_batch_kwargs,
-            )
-            decoder_edge_attr = decoder_edge_attr.to(dtype=x_latent.dtype)
-
-            dec_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_hidden,
-                dst_nodes=shard_sizes_data,  # None if not sharded
-                edges=dec_edge_shard_sizes,
-            )
-
-            decoder_name = self.dataset2decoder[dataset_name]
-            x_out = self.decoder[decoder_name](
-                (x_latent_proc, target_data_latent),
-                batch_size=batch_ens_size,
-                shard_info=dec_shard_info,
-                edge_attr=decoder_edge_attr,
-                edge_index=decoder_edge_index,
-                model_comm_group=model_comm_group,
+                hidden_coordinates=hidden_coordinates,
+                hidden_coordinates_batched=hidden_coordinates_batched,
+                hidden_batch_sizes=hidden_batch_sizes,
+                shard_sizes_hidden=shard_sizes_hidden,
+                edge_dtype=x_latent.dtype,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
+                model_comm_group=model_comm_group,
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,
                 x_skip_dict.get(dataset_name, None),
-                target[dataset_name],
+                target_dataset_template,
                 dtype=x_out.dtype,
                 dataset_name=dataset_name,
             )
 
-        # Preserve the reconstructed output metadata rather than the decoder
-        # conditioning metadata carried by target.
-        output = target
-        for dataset_name in x_out_dict.keys():
-            do_coords_match = target[dataset_name].coordinates == x_out_dict[dataset_name].coordinates
-            assert (
-                do_coords_match if isinstance(do_coords_match, bool) else torch.all(do_coords_match)
-            ), "Target and output coordinates must match."
-            output = output.replace(dataset_name, x_out_dict[dataset_name])
-
-        return output
+        return Batch(x_out_dict)

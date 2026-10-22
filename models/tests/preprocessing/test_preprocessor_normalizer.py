@@ -11,10 +11,11 @@
 import numpy as np
 import pytest
 import torch
-from batch_builders import build_source
 from omegaconf import DictConfig
 
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing.normalizer import InputNormalizer
 
 VARIABLES = ["x", "y", "z", "q", "other"]
@@ -36,29 +37,28 @@ def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
     points, num_vars = payload.shape
     data = payload.reshape(1, 1, points, num_vars).clone()
     layout = TensorLayout(batch=0, time=1, grid=2, variables=3)
-    return build_source(
+    return GriddedSource(
         name="gridded",
         data=data,
         variables=list(variables),
         statistics=statistics,
-        coordinates=None,
+        coordinates=torch.zeros(points, 2),
         layout=layout,
-        coordinates_are_static=True,
     )
 
 
 def make_tabular_view(payload: torch.Tensor, variables=VARIABLES, statistics=STATISTICS):
     """Wrap a (points, variables) payload in a TabularSource (single tensor)."""
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    return build_source(
+    layout = TensorLayout(grid=0, variables=1)
+    return TabularSource(
         name="tabular",
         data=[payload.clone()],
         variables=list(variables),
         statistics=statistics,
-        coordinates=None,
+        coordinates=[torch.zeros(t.shape[0], 2) for t in [payload]],
         layout=layout,
-        coordinates_are_static=False,
-        boundaries=None,
+        timedeltas=[torch.zeros(t.shape[0]) for t in [payload]],
+        boundaries=[(slice(0, t.shape[0]),) for t in [payload]],
     )
 
 
@@ -120,16 +120,35 @@ def test_norm_parameters_cache_is_device_aware(input_normalizer) -> None:
     assert add_cpu.device.type == "cpu"
 
     # The cache key must encode the device so a different device cannot reuse these tensors.
-    assert (tuple(name_to_index.keys()), "cpu") in input_normalizer._param_cache
+    assert any(key[:2] == (tuple(name_to_index.keys()), "cpu") for key in input_normalizer._param_cache)
 
     if torch.cuda.is_available():
         mul_gpu, add_gpu = input_normalizer.get_norm_parameters(STATISTICS, name_to_index, torch.device("cuda:0"))
         assert mul_gpu.device.type == "cuda"
         assert add_gpu.device.type == "cuda"
-        assert (tuple(name_to_index.keys()), "cuda:0") in input_normalizer._param_cache
+        assert any(key[:2] == (tuple(name_to_index.keys()), "cuda:0") for key in input_normalizer._param_cache)
         # The original CPU entry is preserved, not clobbered by the GPU call.
         mul_cpu_again, _ = input_normalizer.get_norm_parameters(STATISTICS, name_to_index, torch.device("cpu"))
         assert mul_cpu_again.device.type == "cpu"
+
+
+def test_norm_parameters_cache_is_statistics_aware(input_normalizer) -> None:
+    """Sources of the same variables with other statistics (another reader, a tendency) get their own parameters."""
+    name_to_index = {name: idx for idx, name in enumerate(VARIABLES)}
+    other_statistics = {key: np.asarray(value) * 2.0 for key, value in STATISTICS.items()}
+
+    mul, add = input_normalizer.get_norm_parameters(STATISTICS, name_to_index, torch.device("cpu"))
+    other_mul, other_add = input_normalizer.get_norm_parameters(other_statistics, name_to_index, torch.device("cpu"))
+
+    assert len(input_normalizer._param_cache) == 2
+    assert not torch.equal(mul, other_mul)
+    # The second set's parameters are computed from its own statistics, as without a cache.
+    input_normalizer.reset_cache()
+    expected_mul, expected_add = input_normalizer.get_norm_parameters(
+        other_statistics, name_to_index, torch.device("cpu")
+    )
+    torch.testing.assert_close(other_mul, expected_mul)
+    torch.testing.assert_close(other_add, expected_add)
 
 
 def test_normalizer_not_inplace(input_normalizer, make_view, base_payload) -> None:
@@ -229,20 +248,83 @@ def test_parameter_caching(input_normalizer, make_view, base_payload) -> None:
 
 
 def test_tabular_multiple_tensors(input_normalizer, normalized_payload) -> None:
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1)
     payload_a = torch.Tensor([[1.0, 2.0, 3.0, 4.0, 5.0], [6.0, 7.0, 8.0, 9.0, 10.0]])
     payload_b = payload_a.clone()
-    view = build_source(
+    view = TabularSource(
         name="tabular",
         data=[payload_a, payload_b],
         variables=list(VARIABLES),
         statistics=STATISTICS,
-        coordinates=None,
+        coordinates=[torch.zeros(t.shape[0], 2) for t in [payload_a, payload_b]],
         layout=layout,
-        coordinates_are_static=False,
-        boundaries=None,
+        timedeltas=[torch.zeros(t.shape[0]) for t in [payload_a, payload_b]],
+        boundaries=[(slice(0, t.shape[0]),) for t in [payload_a, payload_b]],
     )
     out = input_normalizer(view, in_place=False)
     assert len(out.data) == 2
     for tensor in out.data:
         assert torch.allclose(tensor, normalized_payload)
+
+
+@pytest.fixture()
+def remap_normalizer():
+    config = DictConfig(
+        {
+            "default": "mean-std",
+            "remap": {"x": "z", "y": "x"},
+            "min-max": ["x"],
+            "max": ["y"],
+            "none": ["z"],
+            "mean-std": ["q"],
+        },
+    )
+    return InputNormalizer(config=config)
+
+
+def test_normalize_remap(remap_normalizer, make_view, base_payload) -> None:
+    """x uses z's statistics; y uses x's original statistics, not the remapped ones."""
+    out = remap_normalizer(make_view(base_payload))
+    expected = torch.Tensor([[0.0, 2 / 11, 3.0, -0.5, 1 / 7], [5 / 9, 7 / 11, 8.0, 4.5, 0.5]])
+    torch.testing.assert_close(view_data_2d(out), expected)
+
+
+def test_normalize_remap_inverse_roundtrip(remap_normalizer, make_view, base_payload) -> None:
+    transformed = remap_normalizer(make_view(base_payload), in_place=False)
+    restored = remap_normalizer(transformed, inverse=True, in_place=False)
+    torch.testing.assert_close(view_data_2d(restored), base_payload)
+
+
+def test_remap_keeps_physical_fraction(make_view) -> None:
+    """With cp and sf normalised by tp's stdev, a normalised fraction of tp is the same physical fraction."""
+    config = DictConfig({"default": "none", "std": ["tp", "cp", "sf"], "remap": {"cp": "tp", "sf": "tp"}})
+    normalizer = InputNormalizer(config=config)
+    statistics = {key: np.array([2.4e-3, 1.3e-3, 3.9e-4]) for key in ("mean", "stdev", "minimum", "maximum")}
+    payload = torch.Tensor([[4.0e-3, 1.0e-3, 4.0e-3]])
+    out = view_data_2d(normalizer(make_view(payload, variables=["tp", "cp", "sf"], statistics=statistics)))
+    torch.testing.assert_close(out[:, 1:] / out[:, :1], payload[:, 1:] / payload[:, :1])
+
+
+def test_remap_does_not_modify_statistics(make_view, base_payload) -> None:
+    config = DictConfig({"default": "mean-std", "remap": {"x": "z"}})
+    normalizer = InputNormalizer(config=config)
+    statistics = {key: torch.as_tensor(value, dtype=torch.float32) for key, value in STATISTICS.items()}
+    original = {key: value.clone() for key, value in statistics.items()}
+    normalizer(make_view(base_payload, statistics=statistics))
+    for key, value in statistics.items():
+        torch.testing.assert_close(value, original[key])
+
+
+def test_remap_skips_variables_absent_from_view(remap_normalizer, make_view, base_payload) -> None:
+    """A view without the remapped variable (e.g. inputs without diagnostic cp) is normalised as usual."""
+    statistics = {key: value[[2, 3, 4]] for key, value in STATISTICS.items()}
+    view = make_view(base_payload[:, [2, 3, 4]], variables=["z", "q", "other"], statistics=statistics)
+    out = remap_normalizer(view)
+    torch.testing.assert_close(view_data_2d(out), torch.Tensor([[3.0, -0.5, 1 / 7], [8.0, 4.5, 0.5]]))
+
+
+def test_remap_without_source_variable_raises(remap_normalizer, make_view, base_payload) -> None:
+    statistics = {key: value[[0, 3]] for key, value in STATISTICS.items()}
+    view = make_view(base_payload[:, [0, 3]], variables=["x", "q"], statistics=statistics)
+    with pytest.raises(ValueError, match="'z' is not in this view"):
+        remap_normalizer(view)

@@ -252,10 +252,7 @@ def test_on_load_checkpoint_restores_name_to_index() -> None:
     dataset_name = "test_dataset"
     module.task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     module.config = types.SimpleNamespace(
-        training=types.SimpleNamespace(
-            load_weights_only=False,
-            update_ds_stats_on_ckpt_load=types.SimpleNamespace(states=False, tendencies=False),
-        ),
+        training=types.SimpleNamespace(load_weights_only=False),
     )
 
     mock_name_to_index = {"var1": 0, "var2": 1}

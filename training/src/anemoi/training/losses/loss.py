@@ -126,10 +126,18 @@ def _build_wrapped_loss(
     scalers_to_include: list,
     scalers: dict[str, TENSOR_SPEC] | None,
     data_indices: "IndexCollection | None",
+    graph_data: object | None = None,
+    data_node_name: str | None = None,
 ) -> BaseLoss:
     """Instantiate a WRAPPED_LOSSES target (e.g. TimeAggregateLossWrapper)."""
     inner_loss_config = loss_config.pop("loss_fn")
-    inner_loss = get_loss_function(OmegaConf.create(inner_loss_config), scalers, data_indices)
+    inner_loss = get_loss_function(
+        OmegaConf.create(inner_loss_config),
+        scalers,
+        data_indices,
+        graph_data=graph_data,
+        data_node_name=data_node_name,
+    )
     wrapper = instantiate(loss_config, loss_fn=inner_loss)
     # Apply any scalers specified on the wrapper itself (delegated to the inner loss).
     if scalers_to_include and scalers:
@@ -140,6 +148,12 @@ def _build_wrapped_loss(
         )
         _apply_scalers(wrapper, resolved, scalers, data_indices)
     return wrapper
+
+
+def _check_subgrid_resolved(loss_config: dict) -> None:
+    if isinstance(loss_config.get("subgrid"), str):
+        msg = f"'subgrid' must be resolved to a tuple before instantiation, got {loss_config['subgrid']!r}"
+        raise TypeError(msg)
 
 
 # Future import breaks other type hints TODO Harrison Cook
@@ -186,6 +200,7 @@ def get_loss_function(
         If scaler is not found in valid scalers
     """
     loss_config = OmegaConf.to_container(config, resolve=True)
+    _check_subgrid_resolved(loss_config)
     has_scalers_config = "scalers" in loss_config
     scalers_to_include = loss_config.pop("scalers", [])
     target_cls = get_class(loss_config["_target_"])
@@ -209,6 +224,7 @@ def get_loss_function(
             data_node_name=data_node_name,
             **kwargs,
         )
+
         return instantiate(
             loss_config,
             per_scale_loss=per_scale_loss,
@@ -217,7 +233,14 @@ def get_loss_function(
         )
 
     if target in WRAPPED_LOSSES:
-        return _build_wrapped_loss(loss_config, scalers_to_include, scalers, data_indices)
+        return _build_wrapped_loss(
+            loss_config,
+            scalers_to_include,
+            scalers,
+            data_indices,
+            graph_data=graph_data,
+            data_node_name=data_node_name,
+        )
 
     scalers = scalers or {}
 

@@ -9,23 +9,15 @@
 
 import datetime
 import logging
-import os
-import random
-from collections.abc import Iterator
 from functools import cached_property
 
-import numpy as np
-import torch
 from rich.console import Console
 from rich.tree import Tree
-from torch.utils.data import IterableDataset
+from torch.utils.data import Dataset
 
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
-from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.usable_indices import compute_valid_data_indices
-from anemoi.training.utils.seeding import SeedContext
-from anemoi.training.utils.seeding import derive_seed
-from anemoi.training.utils.seeding import get_base_seed
+from anemoi.models.data import BaseSample
+from anemoi.training.data.readers import DataReader
+from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
 from anemoi.training.utils.time_indices import offset_time_indices
@@ -33,114 +25,71 @@ from anemoi.training.utils.time_indices import offset_time_indices
 LOGGER = logging.getLogger(__name__)
 
 
-class MultiDataset(IterableDataset):
-    """Multi-dataset wrapper that returns synchronized samples from multiple data readers."""
+class MultiDataset(Dataset):
+    """Multi-dataset wrapper that returns synchronized samples from multiple data readers.
+
+    Each index refers to one valid anchor shared by all data readers. The
+    dataloader's sampler decides which indices a rank loads and in which order.
+    """
 
     def __init__(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         relative_date_indices: dict[str, TimeIndices],
-        shuffle: bool = True,
-        label: str = "multi",
-        epoch: int = 0,
-        rollout: int = 1,
         fake_dataloading: bool = False,
     ) -> None:
         """Initialize multi-dataset with synchronized data readers.
 
         Parameters
         ----------
-        data_readers : dict[str, BaseAnemoiReader]
+        data_readers : dict[str, DataReader]
             Dictionary mapping dataset names to their data_readers
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
         relative_date_indices : dict[str, TimeIndices]
             Precomputed relative date indices for each data reader
-        shuffle : bool, optional
-            Shuffle batches, by default True
-        label : str, optional
-            label for the dataset, by default "multi"
-        epoch : int, optional
-            Epoch used for deterministic epoch-dependent shuffling, by default 0
-        rollout : int, optional
-            Rollout length represented by the loaded relative date indices, by default 1
         fake_dataloading : bool, optional
             Load one real sample and reuse it for subsequent accesses, by default False
         """
         self.data_readers = data_readers
-        self.label = label
-        self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
-
-        self.static_coord_datasets: tuple[str, ...] = tuple(
-            name for name, reader in data_readers.items() if getattr(reader, "is_static_grid", True)
-        )
-        self.epoch = epoch
-        self.rollout = rollout
-        self.set_epoch(epoch, rollout=rollout, relative_date_indices=relative_date_indices)
+        self.stride = self._sampling_stride(data_readers)
 
         self.fake_dataloading = fake_dataloading
+        self._fake_sample: dict[str, BaseSample] | None = None
         if self.fake_dataloading:
             LOGGER.info("Using fake dataloading")
 
-        # Guard against mixing single-sequence (NativeGridDataset, global time axis)
-        # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
-        # intersection would silently keep only sequence-0 samples and produce
-        # semantically meaningless alignment between the two encoders.
-        single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
-        multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
-        if False:  # single_seq and multi_seq: # TODO: Fix temporal downscaler with forecast data
-            msg = (
-                "Currently mixing single-sequence datasets (global time axis) with "
-                "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
-                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
-            )
+        self.set_relative_date_indices(relative_date_indices)
+
+    @staticmethod
+    def _sampling_stride(data_readers: dict[str, DataReader]) -> int | None:
+        """Return the anchor stride the readers agree on; stride 1 when none is configured."""
+        configured = {name: reader.sampling.get("stride") for name, reader in data_readers.items() if reader.sampling}
+        strides = set(configured.values())
+        if len(strides) > 1:
+            msg = f"Data readers disagree on the sampling stride: {configured}."
             raise ValueError(msg)
+        return strides.pop() if strides else 1
 
-        self._lazy_init_model_and_reader_group_info()
+    def set_relative_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
+        """Set the time steps loaded for each sample, and the samples that provide them.
 
-    def set_epoch(
-        self,
-        epoch: int,
-        *,
-        rollout: int | None = None,
-        relative_date_indices: dict[str, TimeIndices] | None = None,
-    ) -> None:
-        """Set epoch-dependent sampling state before DataLoader workers are launched."""
-        self.epoch = epoch
-        if rollout is not None:
-            self.rollout = rollout
-
-        if relative_date_indices is None:
-            return
-
-        # Refresh which sample dates can provide the currently required time steps.
-        self.valid_date_indices = compute_valid_data_indices(self.data_readers, relative_date_indices)
+        Call this before the dataloader is created: the number of samples changes
+        with the time steps, and the sampler reads it when it is constructed.
+        """
+        # Find the anchors (times every reader can sample) for the required time steps.
+        # Each reader gets its own (sequence, position) per anchor, so readers need not share
+        # a frequency or date range. Each dataset index refers to one anchor.
+        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices, stride=self.stride)
 
         # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
 
-    def _lazy_init_model_and_reader_group_info(self) -> None:
-        """Lazy initialize model and reader group info."""
-        # lazy init model and reader group info, will be set by the DDPGroupStrategy:
-        self.model_comm_group_rank = 0
-        self.model_comm_num_groups = 1
-        self.model_comm_group_id = 0
-        self.global_rank = 0
-
-        self.sample_comm_num_groups = 1  # groups that work on the same sample / batch
-        self.sample_comm_group_id = 0
-
-        self.ens_comm_group_rank = 0
-        self.ens_comm_num_groups = 1
-        self.ens_comm_group_id = 0
-
-        self.shard_sizes = None
-
-        # additional state vars (lazy init)
-        self.n_samples_per_worker = 0
-        self.chunk_index_range: np.ndarray | None = None
+    def __len__(self) -> int:
+        """Number of valid samples."""
+        return len(self.anchors)
 
     def _collect(self, attr_name: str) -> dict:
         """Helper method to collect attributes from all data readers."""
@@ -166,11 +115,6 @@ class MultiDataset(IterableDataset):
         """Return combined variables from all data readers."""
         return self._collect("variables")
 
-    @property
-    def data(self) -> dict:
-        """Return data from all data readers as dictionary."""
-        return self._collect("data")
-
     @cached_property
     def name_to_index(self) -> dict[str, dict]:
         """Return combined name_to_index mapping from all data readers."""
@@ -192,221 +136,56 @@ class MultiDataset(IterableDataset):
             assert freq == freq_ref, f"Data reader '{name}' has different frequency than other data readers"
         return freq_ref
 
-    @property
-    def is_static_dataset(self) -> dict[str, bool]:
-        """Return whether each underlying reader exposes a static grid."""
-        return {name: bool(getattr(dataset, "is_static_grid", True)) for name, dataset in self.data_readers.items()}
+    def set_reader_group_info(self, reader_group_rank: int, reader_group_size: int) -> None:
+        """Set the reader group information, called by the DDP strategies.
 
-    def set_comm_group_info(
-        self,
-        global_rank: int,
-        model_comm_group_id: int,
-        model_comm_group_rank: int,
-        model_comm_num_groups: int,
-        reader_group_rank: int,
-        reader_group_size: int,
-    ) -> None:
-        """Set model and reader communication group information (called by DDPGroupStrategy).
+        Each rank in a reader group reads its own part of the data.
 
         Parameters
         ----------
-        global_rank : int
-            Global rank
-        model_comm_group_id : int
-            Model communication group ID
-        model_comm_group_rank : int
-            Model communication group rank
-        model_comm_num_groups : int
-            Number of model communication groups
         reader_group_rank : int
-            Reader group rank
+            Reader group rank.
         reader_group_size : int
-            Reader group size
+            Reader group size.
         """
-        self.global_rank = global_rank
-        self.model_comm_group_id = model_comm_group_id
-        self.model_comm_group_rank = model_comm_group_rank
-        self.model_comm_num_groups = model_comm_num_groups
-        self.reader_group_rank = reader_group_rank
-        self.reader_group_size = reader_group_size
+        for reader in self.data_readers.values():
+            reader.set_reader_group_info(reader_group_rank, reader_group_size)
 
-        self.sample_comm_group_id = model_comm_group_id
-        self.sample_comm_num_groups = model_comm_num_groups
-
-        # pass reader group info to readers:
-        for dataset in self.data_readers.values():
-            dataset.set_reader_group_info(reader_group_rank, reader_group_size)
-
-        LOGGER.info(
-            "MultiDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
-            "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d, "
-            "sample_comm_group_id %d, sample_comm_num_groups %d",
-            global_rank,
-            model_comm_group_id,
-            model_comm_group_rank,
-            model_comm_num_groups,
-            self.reader_group_rank,
-            self.sample_comm_group_id,
-            self.sample_comm_num_groups,
-        )
-
-    def set_ens_comm_group_info(
-        self,
-        ens_comm_group_id: int,
-        ens_comm_group_rank: int,
-        ens_comm_num_groups: int,
-    ) -> None:
-        """Set ensemble communication group information (called by DDPGroupStrategy).
-
-        Parameters
-        ----------
-        ens_comm_group_id : int
-            Ensemble communication group ID
-        ens_comm_group_rank : int
-            Ensemble communication group rank
-        ens_comm_num_groups : int
-            Number of ensemble communication groups
-        """
-        self.ens_comm_group_id = ens_comm_group_id
-        self.ens_comm_group_rank = ens_comm_group_rank
-        self.ens_comm_num_groups = ens_comm_num_groups
-
-        self.sample_comm_group_id = ens_comm_group_id
-        self.sample_comm_num_groups = ens_comm_num_groups
-
-        LOGGER.info(
-            "MultiDataset.set_ens_comm_group_info(): global_rank %d, ens_comm_group_id %d, "
-            "ens_comm_group_rank %d, ens_comm_num_groups %d, reader_group_rank %d, "
-            "sample_comm_group_id %d, sample_comm_num_groups %d",
-            self.global_rank,
-            ens_comm_group_id,
-            ens_comm_group_rank,
-            ens_comm_num_groups,
-            self.reader_group_rank,
-            self.sample_comm_group_id,
-            self.sample_comm_num_groups,
-        )
-
-    def per_worker_init(self, n_workers: int, worker_id: int) -> None:
-        """Initialize all data readers for this worker."""
-        self.worker_id = worker_id
-
-        # 1. divide valid date indices into shards for sample communication groups (DDP ranks)
-        # note that we need even splits here across DDP ranks, so we might throw away some samples
-        shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
-        shard_start = self.sample_comm_group_id * shard_size
-
-        self.n_samples_per_worker = shard_size // n_workers
-
-        # 2. partition the shard across workers (here we can have uneven splits, so we use a balanced partition)
-        low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
-
-        self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
-
-        LOGGER.info(
-            "%s sample counts: %d valid globally, %d assigned to sample rank %d/%d, %d assigned to worker %d/%d.",
-            self.label.capitalize(),
-            len(self.valid_date_indices),
-            shard_size,
-            self.sample_comm_group_id,
-            self.sample_comm_num_groups,
-            high - low,
-            worker_id,
-            n_workers,
-        )
-        LOGGER.info(
-            "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
-            worker_id,
-            os.getpid(),
-            self.global_rank,
-            self.model_comm_group_id,
-            low,
-            high,
-        )
-
-        base_seed = get_base_seed()
-        # The datamodule checkpoints this epoch and restores it before new workers
-        # start, so resuming from an epoch checkpoint derives the same seed.
-        seed = derive_seed(base_seed, SeedContext.DATALOADER, self.epoch)
-
-        torch.manual_seed(seed)
-        random.seed(seed)
-        self.seed = seed
-        self.rng = np.random.default_rng(seed=seed)
-        sanity_rnd = self.rng.random(1)[0]
-        LOGGER.info(
-            ("Worker %d (%s, pid %d, epoch %d, rollout %d, seed %d, sanity rnd %f)"),
-            worker_id,
-            self.label,
-            os.getpid(),
-            self.epoch,
-            self.rollout,
-            seed,
-            sanity_rnd,
-        )
-
-    def get_sample(self, index: int) -> dict[str, dict]:
+    def get_sample(self, index: int) -> dict[str, BaseSample]:
         """Return per-dataset samples for ``index``.
 
-        Each value is a dict ``{"data": tensor, "coordinates": (N, 2) tensor,
-        ...}`` so that the dataloader's collate function can build a
-        :class:`anemoi.models.data.Batch`. Sparse observation
-        readers additionally include a ``"timedeltas"`` tensor and a
-        ``"metadata": {"boundaries": ...}`` entry.
+        Each value is the reader's :class:`~anemoi.models.data.BaseSample`, so that
+        the dataloader's collate function can build a :class:`anemoi.models.data.Batch`.
+        Observation timedeltas are measured from the sample's reference time.
         """
-        x: dict[str, dict[str, torch.Tensor]] = {}
-        for name, dataset in self.data_readers.items():
-            time_steps = offset_time_indices(index, self.relative_date_indices[name])
-            x[name] = dataset.get_sample(time_steps)
-            LOGGER.debug(
-                "Worker %d (pid %d) read sample for dataset '%s' : %s",
-                self.worker_id,
-                os.getpid(),
-                name,
-                x[name],
-            )
+        x: dict[str, BaseSample] = {}
+        for name, data_reader in self.data_readers.items():
+            sequence, position = (int(v) for v in self.anchors.rows[name][index])
+            time_steps = offset_time_indices(position, self.relative_date_indices[name])
+            sample = data_reader.get_sample(sequence, time_steps)
+            x[name] = data_reader.measure_from_reference(sample, position, time_steps)
 
         return x
 
-    def __iter__(self) -> Iterator[dict[str, dict]]:
-        """Return an iterator that yields per-dataset coordinate-rich payloads.
+    def __getitem__(self, index: int) -> dict[str, BaseSample]:
+        """Return ``{dataset_name: BaseSample}`` for one anchor.
 
-        Yields
-        ------
-        dict[str, dict]
-            Mapping ``{name: {"data": tensor, "coordinates": tensor, ...}}``
-            for each synchronized sample.
+        Parameters
+        ----------
+        index : int
+            Index of the anchor, in the range [0, len(self)).
+
+        Returns
+        -------
+        dict[str, BaseSample]
+            One sample for each dataset.
         """
-        # Get the shuffled indices from the primary dataset
-        # All data readers will use the same shuffled indices for synchronization
-        if self.shuffle:
-            shuffled_chunk_indices = self.rng.choice(
-                self.valid_date_indices,
-                size=len(self.valid_date_indices),
-                replace=False,
-            )[self.chunk_index_range]
-        else:
-            shuffled_chunk_indices = self.valid_date_indices[self.chunk_index_range]
-
-        LOGGER.debug(
-            "%s worker pid %d, worker id %d, using synchronized indices[0:10]: %s",
-            self.__class__.__name__,
-            os.getpid(),
-            self.worker_id,
-            shuffled_chunk_indices[:10],
-        )
-
-        initial_batch = None
-
-        # TODO(): improve this...
-        for i in shuffled_chunk_indices:
-            if not self.fake_dataloading:
-                yield self.get_sample(i)
-            elif initial_batch is None:
-                initial_batch = self.get_sample(i)
-                yield initial_batch
-            else:
-                yield initial_batch
+        if not self.fake_dataloading:
+            return self.get_sample(index)
+        # Each worker process reads one real sample and then returns it for every index.
+        if self._fake_sample is None:
+            self._fake_sample = self.get_sample(index)
+        return self._fake_sample
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
@@ -416,7 +195,7 @@ class MultiDataset(IterableDataset):
 
     def tree(self) -> Tree:
         tree = Tree(f"{self.__class__.__name__}")
-        for name, dataset in self.data_readers.items():
-            subtree = dataset.tree(prefix=name)
+        for name, reader in self.data_readers.items():
+            subtree = reader.tree(prefix=name)
             tree.add(subtree)
         return tree

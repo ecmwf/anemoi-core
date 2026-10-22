@@ -5,14 +5,15 @@ defaults:
   - optimization: default
   - weight_averaging: null
 
+# base seed of all random number generators. null takes the seed of the checkpoint the run
+# continues from, or draws a new one for a new run
+seed: null
+
 # resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
 run_id: null
 fork_run_id: null
 transfer_learning: False # activate to perform transfer learning
 load_weights_only: False # only load model weights, do not restore optimiser states etc.
-update_ds_stats_on_ckpt_load:
-  states: False # rebuild state processors from current dataset when loading a checkpoint
-  tendencies: True # rebuild tendency processors from current dataset when loading a checkpoint
 
 # Options forwarded to Variable.check_compatibility when checking checkpoint vs. current
 # dataset (fine-tuning / transfer learning). Set ignore_units/ignore_processing_period to True to
@@ -55,6 +56,9 @@ strategy:
   read_group_size: ${dataloader.read_group_size}
   use_local_synchronization: True
   broadcast_buffers: False
+  # must be False when accum_grad_batches > 1
+  static_graph: True
+  find_unused_parameters: False
 
 # loss functions
 
@@ -76,7 +80,7 @@ validation_metrics:
       fkcrps:
         _target_: anemoi.training.losses.CRPS
         scalers: ['node_weights', 'time_steps']
-        ignore_nans: False
+        ignore_nans: True
         alpha: 1.0
 
       multiscale:
@@ -94,7 +98,7 @@ validation_metrics:
           # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
           # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
           # scalers: ['pressure_level', 'general_variable', 'node_weights']
-          ignore_nans: False
+          ignore_nans: True
           no_autocast: True
           alpha: 1.0
 

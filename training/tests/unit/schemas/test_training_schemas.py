@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from anemoi.training.schemas.training import BaseDDPStrategySchema
+from anemoi.training.schemas.training import BaseTrainingSchema
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
@@ -47,6 +48,35 @@ def test_ddp_strategy_schema_defaults_to_local_synchronization() -> None:
     )
 
     assert schema.use_local_synchronization is True
+
+
+def _ddp_strategy(**kwargs: bool) -> BaseDDPStrategySchema:
+    return BaseDDPStrategySchema(
+        _target_="anemoi.training.distributed.strategy.DDPGroupStrategy",
+        num_gpus_per_model=1,
+        read_group_size=1,
+        **kwargs,
+    )
+
+
+def test_ddp_strategy_schema_defaults_to_static_graph() -> None:
+    schema = _ddp_strategy()
+
+    assert schema.static_graph is True
+    assert schema.find_unused_parameters is False
+
+
+def test_static_graph_rejected_with_gradient_accumulation() -> None:
+    training = BaseTrainingSchema.model_construct(accum_grad_batches=2, strategy=_ddp_strategy())
+
+    with pytest.raises(ValueError, match="static_graph must be false"):
+        training.check_static_graph_without_accumulation()
+
+
+def test_gradient_accumulation_allowed_without_static_graph() -> None:
+    training = BaseTrainingSchema.model_construct(accum_grad_batches=2, strategy=_ddp_strategy(static_graph=False))
+
+    assert training.check_static_graph_without_accumulation() is training
 
 
 def test_time_aggregate_loss_config_valid() -> None:
@@ -242,3 +272,31 @@ def test_combined_loss_with_multiscale_mixed_mode_rejected() -> None:
                 ],
             },
         )
+
+
+# (schema, base config, key of the inner loss) for the loss wrappers that accept ``ignore_nans``.
+_LOSS_WRAPPERS = [
+    pytest.param(TimeAggregateLossWrapperSchema, _TIME_AGG_CFG, "loss_fn", id="time_aggregate"),
+    pytest.param(MultiScaleLossSchema, _MULTISCALE_BASE, "per_scale_loss", id="multiscale"),
+]
+
+
+@pytest.mark.parametrize(("schema", "base", "inner"), _LOSS_WRAPPERS)
+def test_loss_wrapper_accepts_ignore_nans(schema: type, base: dict, inner: str) -> None:
+    """The wrapper classes take ``ignore_nans``, so their schemas must too (the packaged ensemble losses set it)."""
+    cfg = {**base, "ignore_nans": True, inner: {**base[inner], "ignore_nans": True}}
+    assert schema(**cfg).ignore_nans is True
+
+
+@pytest.mark.parametrize(("schema", "base", "inner"), _LOSS_WRAPPERS)
+def test_loss_wrapper_ignore_nans_defaults_to_the_inner_loss(schema: type, base: dict, inner: str) -> None:
+    """Leaving the wrapper's flag unset is valid whatever the inner loss says."""
+    cfg = {**base, inner: {**base[inner], "ignore_nans": True}}
+    assert schema(**cfg).ignore_nans is False
+
+
+@pytest.mark.parametrize(("schema", "base", "inner"), _LOSS_WRAPPERS)
+def test_loss_wrapper_ignore_nans_requires_it_on_the_inner_loss(schema: type, base: dict, inner: str) -> None:
+    """A wrapper ignoring NaNs around an inner loss that does not fails validation, as ``BaseLossWrapper`` would."""
+    with pytest.raises(ValidationError, match="inner loss does not"):
+        schema(**{**base, "ignore_nans": True, inner: {**base[inner], "ignore_nans": False}})

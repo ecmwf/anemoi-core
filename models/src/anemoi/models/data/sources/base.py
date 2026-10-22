@@ -13,8 +13,12 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Mapping
+from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import field
 from dataclasses import replace
+from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
@@ -22,8 +26,14 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.models.data.layout import TensorLayout
-from anemoi.models.data.spec import SourceSpec
-from anemoi.models.distributed.shapes import ShardSizes
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch.distributed import ProcessGroup
+
+    from anemoi.models.data.flat import FlatSource
+    from anemoi.models.distributed.shapes import ShardSizes
 
 LOGGER = logging.getLogger(__name__)
 
@@ -94,59 +104,81 @@ def _cached_static_coords(name, value, device, *, cache: dict, non_blocking: boo
     return moved
 
 
-@dataclass(frozen=True, slots=True)
+def _index_list(indices: slice | Sequence[int] | torch.Tensor | int, size: int) -> list[int]:
+    """Resolve ``indices`` along an axis of length ``size`` to a list of ints.
+
+    A plain list indexes lists, numpy arrays and tensors alike, and a single int
+    becomes a one-element list so the indexed axis is kept.
+    """
+    if isinstance(indices, slice):
+        return list(range(*indices.indices(size)))
+    if isinstance(indices, int):
+        return [indices]
+    if isinstance(indices, torch.Tensor):
+        return indices.tolist()
+    return [int(i) for i in indices]
+
+
+@dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class Source(ABC):
     """Per-dataset view returned by :meth:`Batch.view`.
 
-    Bundles the per-dataset payload (data, coordinates, timedeltas) with
-    its :class:`TensorLayout` so callers can index logical axes (``time``,
-    ``variables``) without hard-coded dimension positions. The same API
-    works for gridded and sparse observation datasets thanks to the
-    ``layout.time_in_grid`` dispatch.
+    Bundles the per-dataset payload with the metadata that describes it (name,
+    variables, layout, statistics) so callers can index logical axes (``time``,
+    ``variables``) without hard-coded dimension positions. The same API works for
+    gridded and tabular (observation) datasets; the subclass decides how each
+    operation maps onto the payload.
+
+    This base class only holds the metadata. The payload fields are declared by each
+    subclass with its own types: every subclass has ``data``, ``coordinates``,
+    ``shard_sizes`` and ``coordinates_are_static``, and may add more (e.g. the
+    ``timedeltas`` and ``boundaries`` of :class:`TabularSource`).
+
+    Parameters
+    ----------
+    name : str
+        Dataset name, as keyed in :class:`~anemoi.models.data.batch.Batch`.
+    variables : list[str]
+        Variable names along the layout's ``variables`` axis, in order. Must be
+        unique.
+    layout : TensorLayout
+        Mapping from logical axes to physical dimension positions.
+    statistics : Mapping[str, Any], optional
+        Per-statistic arrays over the variable axis (``mean``, ``stdev``, ...), as
+        produced by ``anemoi-datasets``. Values are normally :class:`numpy.ndarray`
+        but torch tensors are accepted.
+    metadata : Mapping[str, Any], optional
+        Free-form per-source metadata (e.g. ``dataset.metadata``, per-variable
+        metadata). Not interpreted here.
     """
 
-    spec: SourceSpec
-    data: torch.Tensor | list[torch.Tensor] | None
-    coordinates: torch.Tensor | list[torch.Tensor] = None
-    timedeltas: torch.Tensor | list[torch.Tensor] | None = None
-    boundaries: list[tuple[slice, ...]] | None = None
-    shard_sizes: ShardSizes | list[ShardSizes] = None
+    name: str
+    variables: list[str]
+    layout: TensorLayout
+    statistics: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    _name_to_index: dict[str, int] = field(init=False, repr=False, compare=False)
+
+    # Tensor fields, besides ``coordinates``, that :meth:`to` moves and :meth:`pin_memory` pins.
+    _PAYLOAD_FIELDS = ("data",)
 
     def __post_init__(self) -> None:
-        """Validate the payload against the spec that describes it.
+        """Validate the metadata and the payload it describes."""
+        if self.variables is None or len(set(self.variables)) != len(self.variables):
+            raise ValueError(f"Source {self.name!r} requires unique variable names.")
 
-        Metadata-only checks (unique variable names) live on
-        :class:`~anemoi.models.data.spec.SourceSpec`; what remains here is
-        everything that needs a materialized tensor.
-        """
+        if self.data is None:
+            msg = (
+                f"{self.__class__.__name__} {self.name!r} requires data; "
+                "use a template (see Source.template) to describe a source without data."
+            )
+            raise ValueError(msg)
+
         if self.coordinates is None:
             msg = f"{self.__class__.__name__} {self.name!r} requires coordinates."
             raise ValueError(msg)
 
-    @property
-    def name(self) -> str:
-        """Dataset name."""
-        return self.spec.name
-
-    @property
-    def variables(self) -> list[str]:
-        """Variable names along the variables axis, in order."""
-        return self.spec.variables
-
-    @property
-    def layout(self) -> TensorLayout:
-        """Mapping from logical axes to physical dimension positions."""
-        return self.spec.layout
-
-    @property
-    def statistics(self) -> dict[str, Any]:
-        """Per-statistic arrays over the variable axis."""
-        return self.spec.statistics
-
-    @property
-    def coordinates_are_static(self) -> bool:
-        """Whether the coordinate tensor is fixed for the whole run."""
-        return self.spec.coordinates_are_static
+        object.__setattr__(self, "_name_to_index", {name: idx for idx, name in enumerate(self.variables)})
 
     @property
     @abstractmethod
@@ -185,30 +217,55 @@ class Source(ABC):
         ...
 
     @abstractmethod
-    def empty(self) -> "Source":
-        """Return a new view with no data."""
+    def template(self) -> "BaseTemplate":
+        """Return this source without its data: what it holds and where, but not the values.
+
+        ``template.unflatten(x)`` rebuilds a source of the same kind and shape from a flat
+        ``(nodes, features)`` tensor, which is how the model builds its predictions.
+        """
         ...
 
     @property
     def name_to_index(self) -> dict[str, int]:
         """Mapping from variable name to index along the variables axis.
 
-        Memoised on the spec, so it survives repeated ``batch[name]`` access.
+        Built once per source, so it survives repeated ``batch[name]`` access.
         """
-        return self.spec.name_to_index
+        return self._name_to_index
+
+    @property
+    def n_variables(self) -> int:
+        """Number of variables along the variables axis."""
+        return len(self.variables)
 
     def contiguous(self) -> "Source":
         """Return a new view whose underlying data tensors are contiguous."""
-        return self.apply_func(lambda t, **_: t.contiguous())
+        return self.map_data(torch.Tensor.contiguous)
 
     def clone(self, **kwargs) -> "Source":
-        """Return a new view with replacements, sharing fields that are not replaced.
-
-        To change what the spec says, replace the spec::
-
-            source.clone(spec=source.spec.clone(variables=[...]))
-        """
+        """Return a new view with replacements, sharing fields that are not replaced."""
         return replace(self, **kwargs)
+
+    def _metadata_kwargs(self) -> dict[str, Any]:
+        """Return the fields describing this source, independent of its payload."""
+        return {
+            "name": self.name,
+            "variables": self.variables,
+            "layout": self.layout,
+            "statistics": self.statistics,
+            "metadata": self.metadata,
+        }
+
+    def _select_variable_metadata(self, indices: Sequence[int] | torch.Tensor | slice) -> dict[str, Any]:
+        """Return ``variables`` and ``statistics`` restricted to ``indices``, as clone kwargs.
+
+        Both are indexed together, so they stay consistent with the data tensor the
+        caller indexes alongside.
+        """
+        index = _index_list(indices, self.n_variables)
+        variables = [self.variables[i] for i in index]
+        statistics = {key: value[index] for key, value in self.statistics.items()}
+        return {"variables": variables, "statistics": statistics}
 
     def select(self, **kwargs) -> "Source":
         """Return a new view restricted to the given indices along logical dimensions.
@@ -238,7 +295,7 @@ class Source(ABC):
     ) -> "Source":
         """Return a copy of this source with every tensor on ``device``.
 
-        Data, coordinates and timedeltas move together; consumers rely on that, since
+        All tensor fields move together; consumers rely on that, since
         :meth:`allgather` gathers coordinates alongside data in one collective and
         does not move them itself.
 
@@ -257,13 +314,10 @@ class Source(ABC):
             else:
                 coordinates = _to_device(coordinates, device, non_blocking=non_blocking)
 
-        return self.clone(
-            data=_to_device(self.data, device, non_blocking=non_blocking),
-            coordinates=coordinates,
-            timedeltas=(
-                None if self.timedeltas is None else _to_device(self.timedeltas, device, non_blocking=non_blocking)
-            ),
-        )
+        payload = {
+            name: _to_device(getattr(self, name), device, non_blocking=non_blocking) for name in self._PAYLOAD_FIELDS
+        }
+        return self.clone(coordinates=coordinates, **payload)
 
     def pin_memory(self) -> "Source":
         """Return a copy with host memory pinned. Static coordinates are left untouched.
@@ -275,15 +329,15 @@ class Source(ABC):
         if coordinates is not None and not self.coordinates_are_static:
             coordinates = _pin(coordinates)
 
-        return self.clone(
-            data=_pin(self.data),
-            coordinates=coordinates,
-            timedeltas=None if self.timedeltas is None else _pin(self.timedeltas),
-        )
+        payload = {name: _pin(getattr(self, name)) for name in self._PAYLOAD_FIELDS}
+        return self.clone(coordinates=coordinates, **payload)
 
     @abstractmethod
     def flatten(self) -> "FlatSource":
-        """Return a flat source (nodes, features)."""
+        """Return a flat source (nodes, features).
+
+        The inverse is ``self.template().unflatten(flat.data)``.
+        """
         pass
 
     @abstractmethod
@@ -297,19 +351,100 @@ class Source(ABC):
         pass
 
     @abstractmethod
-    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "Source":
-        """Apply a function to this view, returning a new view with the same metadata."""
+    def map_data(self, func: Callable[[torch.Tensor], torch.Tensor], **overrides: Any) -> "Source":
+        """Return a new view with ``func`` applied to each data tensor.
+
+        For plain tensor operations (``.to(dtype)``, ``.detach()``, ``.cpu()``, ...): ``func``
+        takes only the tensor, and the data is not cloned first. It is applied once to a
+        gridded source and once per sample to a tabular one. Use :meth:`apply_func` for
+        functions that need the source's statistics or variable indices, such as processors.
+
+        ``func`` must not modify its input in place; return a new tensor instead.
+        ``overrides`` replace other fields in the same step (e.g. ``variables`` and
+        ``statistics`` when ``func`` changes the variable width).
+        """
         pass
 
     @abstractmethod
-    def apply_pairwise(self, other: "Source", func: Callable, **kwargs) -> torch.Tensor:
-        """Combine this source with another through ``func``, returning a tensor.
+    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "Source":
+        """Apply a function to this view, returning a new view with the same metadata.
 
-        The pairwise counterpart of :meth:`apply_func`; a loss is the motivating
-        case. Both sources must describe the same thing: same layout, same
-        coordinates, same number of samples.
+        ``func`` is called as ``func(tensor, statistics=..., name_to_index=..., **kwargs)`` on
+        a clone of the data (or the data itself when ``in_place``). For functions of the
+        tensor alone, use :meth:`map_data`.
         """
         pass
+
+    # Structure-agnostic payload operations
+    @property
+    @abstractmethod
+    def is_tabular(self) -> bool:
+        """Whether time is folded into the grid axis (sparse observation sources)."""
+        ...
+
+    @property
+    @abstractmethod
+    def grid_shard_sizes(self) -> ShardSizes:
+        """Grid shard sizes of the payload tensor, or ``None`` when it is not grid-sharded.
+
+        Tabular sources shard per time window, not along one grid axis, so they report ``None``.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def condition_shape(self) -> tuple[int, int, int, int, int]:
+        """``(batch, 1, ensemble, 1, 1)`` shape of a per-sample, per-member condition (e.g. a noise level)."""
+        ...
+
+    @abstractmethod
+    def zip_map_data(self, fn: Callable[..., torch.Tensor], *others: "Source") -> "Source":
+        """Return a new view with ``fn(self_payload, *other_payloads)`` applied sample by sample.
+
+        ``others`` must have the same structure as this source.
+        """
+        ...
+
+    @abstractmethod
+    def map_with_condition(
+        self,
+        fn: Callable[..., torch.Tensor],
+        condition: torch.Tensor,
+        *others: "Source",
+    ) -> "Source":
+        """Return a new view with ``fn(self_payload, *other_payloads, condition)`` applied.
+
+        ``condition`` is a 5-D ``(batch, 1, ensemble, 1, 1)`` per-sample, per-member tensor
+        (e.g. a noise level); each sample receives the slice that broadcasts against it.
+        """
+        ...
+
+    @abstractmethod
+    def condition_per_sample(self, condition: torch.Tensor) -> torch.Tensor | list[torch.Tensor]:
+        """Return ``condition`` (see :meth:`map_with_condition`) laid out like this source's payload."""
+        ...
+
+    @abstractmethod
+    def randn_like(self, model_comm_group: ProcessGroup | None = None) -> "Source":
+        """Return a new view whose payload is standard-normal noise of the same structure.
+
+        Grid-sharded payloads draw noise consistently across ``model_comm_group``.
+        """
+        ...
+
+    @abstractmethod
+    def pairwise(self, other: "Source", func: Callable[..., torch.Tensor], *args: Any, **kwargs) -> torch.Tensor:
+        """Apply the tensor-level ``func(pred, target, layout=..., ...)`` to this view and ``other``.
+
+        Tabular sources call ``func`` once per sample and average over non-empty samples.
+        """
+        ...
+
+    def _check_same_structure(self, others: Sequence["Source"]) -> None:
+        """Raise when ``others`` do not share this source's gridded/tabular structure."""
+        for other in others:
+            if other.is_tabular != self.is_tabular:
+                raise TypeError("Cannot combine gridded and tabular transport data.")
 
     @abstractmethod
     def shard(self, group: ProcessGroup | None) -> "Source":
@@ -376,3 +511,101 @@ class Source(ABC):
 
     @abstractmethod
     def tree(self, prefix: str = "") -> Tree: ...
+
+
+@dataclass(frozen=True, eq=False, slots=True, kw_only=True)
+class BaseTemplate(ABC):
+    """A source without its data: what it holds (variables) and where (its nodes).
+
+    A template describes a source completely except for the values: the dataset name,
+    variables and layout, its nodes (coordinates and, for tabular data, timedeltas and
+    time windows), its shard sizes and its batch, ensemble and time sizes. It is what the
+    model is asked to predict: the model decodes at the template's nodes and names the
+    output channels after the template's variables.
+
+    Get one from an existing source with :meth:`Source.template`, or build one directly
+    when there is no data (e.g. for inference). Use :class:`GriddedTemplate` or
+    :class:`TabularTemplate`.
+
+    Parameters
+    ----------
+    name : str
+        Dataset name.
+    variables : list[str]
+        The variables to decode, in order. Must be unique.
+    layout : TensorLayout
+        Layout of the source that :meth:`unflatten` builds.
+    statistics : Mapping[str, Any], optional
+        Per-statistic arrays over ``variables``. Not needed to decode; carried along for
+        whoever needs them afterwards, e.g. to un-normalise the prediction.
+    metadata : Mapping[str, Any], optional
+        Free-form per-source metadata, passed on to the built source.
+    """
+
+    name: str
+    variables: list[str]
+    layout: TensorLayout
+    statistics: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.variables is None or len(set(self.variables)) != len(self.variables):
+            raise ValueError(f"{self.__class__.__name__} {self.name!r} requires unique variable names.")
+
+    @property
+    def n_variables(self) -> int:
+        """Number of variables to decode."""
+        return len(self.variables)
+
+    def _metadata_kwargs(self) -> dict[str, Any]:
+        """Return the fields shared with the source that :meth:`unflatten` builds."""
+        return {
+            "name": self.name,
+            "variables": self.variables,
+            "layout": self.layout,
+            "statistics": self.statistics,
+            "metadata": self.metadata,
+        }
+
+    def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "BaseTemplate":
+        """Return the same nodes with only the variables at ``indices`` (and their statistics)."""
+        index = _index_list(indices, self.n_variables)
+        variables = [self.variables[i] for i in index]
+        statistics = {key: value[index] for key, value in self.statistics.items()}
+        return replace(self, variables=variables, statistics=statistics)
+
+    def with_variables(self, variables: list[str], statistics: Mapping[str, Any] | None = None) -> "BaseTemplate":
+        """Return the same nodes with other variables to decode.
+
+        ``statistics`` should cover exactly ``variables``; it defaults to none.
+        """
+        return replace(self, variables=list(variables), statistics={} if statistics is None else statistics)
+
+    def with_ensemble_size(self, ensemble_size: int) -> "BaseTemplate":
+        """Return the same template for ``ensemble_size`` members per sample."""
+        return replace(self, ensemble_size=ensemble_size)
+
+    # Every subclass also provides ``batch_size``, ``ensemble_size``, ``time_size``,
+    # ``coordinates``, ``shard_sizes`` and ``coordinates_are_static``, as fields or properties.
+    # They are not declared here: a dataclass field in a subclass cannot override a property.
+
+    @abstractmethod
+    def shard(self, group: ProcessGroup | None) -> "BaseTemplate":
+        """Return this rank's part of the nodes when split across ``group``, as :meth:`Source.shard` splits a source.
+
+        A template that is already sharded, or a ``group`` that is not distributed, gives back the template itself.
+        """
+        ...
+
+    @abstractmethod
+    def flatten(self) -> "FlatSource":
+        """Return the flat nodes (``data=None``): the decoder's target coordinates, timedeltas and sizes."""
+        ...
+
+    @abstractmethod
+    def unflatten(self, data: torch.Tensor) -> Source:
+        """Build a source from ``data``, a flat ``(nodes, features)`` tensor laid out like :meth:`flatten`.
+
+        The source's variables, statistics and metadata are the template's.
+        """
+        ...

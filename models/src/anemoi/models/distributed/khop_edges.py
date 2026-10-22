@@ -10,6 +10,7 @@
 
 import os
 from dataclasses import dataclass
+from dataclasses import replace
 from typing import Optional
 from typing import Tuple
 from typing import Union
@@ -67,6 +68,10 @@ class GraphPartition:
         Per-partition destination node counts.
     edge_splits : list[int]
         Per-partition edge counts (derived from dst-sorted edge structure).
+    src_splits : list[int], optional
+        Per-partition source node counts, independent of destination ownership.
+        ``None`` when the source nodes are not sharded. Building halo metadata
+        requires it.
     """
 
     num_nodes: tuple[int, int]
@@ -74,6 +79,7 @@ class GraphPartition:
     num_parts: int
     dst_splits: list[int]
     edge_splits: list[int]
+    src_splits: Optional[list[int]] = None
 
     def materialise(
         self,
@@ -220,6 +226,7 @@ def build_graph_partition_from_shard_info(
     n_src = sum(shard_info.src_nodes) if shard_info.src_is_sharded() else x_src.size(0)
     n_dst = sum(shard_info.dst_nodes) if shard_info.dst_is_sharded() else x_dst.size(0)
     comm_size = model_comm_group.size() if model_comm_group is not None else 1
+    src_splits = shard_info.src_nodes
 
     if shard_info.edges_are_sharded():  # build partition from existing edge shard info:
         n_edges = sum(shard_info.edges)
@@ -233,10 +240,12 @@ def build_graph_partition_from_shard_info(
             num_parts=comm_size,
             dst_splits=dst_splits,
             edge_splits=edge_splits,
+            src_splits=src_splits,
         )
 
     # otherwise: edge_index is not sharded, so we can build the partition directly from it
-    return build_graph_partition(edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst))
+    partition = build_graph_partition(edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst))
+    return replace(partition, src_splits=src_splits)
 
 
 def ensure_edges_are_dst_sorted(
@@ -343,7 +352,8 @@ def shard_graph_to_local(
     model_comm_group : ProcessGroup, optional
         Model communication group.
     cond : tuple[Tensor, Tensor], optional
-        Conditioning tensors (cond_src, cond_dst).
+        Conditioning tensors (cond_src, cond_dst), with the same node ordering
+        and sharding as the corresponding source and destination features.
 
     Returns
     -------
@@ -397,7 +407,25 @@ def shard_graph_to_local(
     cond_local = None
     if cond is not None:
         cond_src, cond_dst = cond
-        cond_src_full = sync_tensor(cond_src, 0, shard_info.src_nodes, model_comm_group)
+        cond_src_full = sync_tensor(
+            cond_src,
+            0,
+            shard_info.src_nodes,
+            model_comm_group,
+            gather_in_fwd=shard_info.src_is_sharded(),
+        )
+        if cond_src_full.shape[0] != x_src_full.shape[0]:
+            raise ValueError(
+                f"Source conditioning has {cond_src_full.shape[0]} rows, "
+                f"but source node features have {x_src_full.shape[0]} rows."
+            )
+        if not shard_info.dst_is_sharded():
+            cond_dst = shard_tensor(cond_dst, 0, partition.dst_splits, model_comm_group)
+        if cond_dst.shape[0] != x_dst.shape[0]:
+            raise ValueError(
+                f"Destination conditioning has {cond_dst.shape[0]} rows, "
+                f"but destination node features have {x_dst.shape[0]} rows."
+            )
         cond_local = (cond_src_full[src_ids], cond_dst)
 
     updated_shard_info = BipartiteGraphShardInfo(

@@ -11,7 +11,6 @@ from collections.abc import Callable
 
 import pytest
 import torch
-from batch_builders import build_batch
 
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
@@ -25,6 +24,7 @@ from anemoi.models.transport.schedules import ExponentialSigmaSchedule
 from anemoi.models.transport.schedules import KarrasSigmaSchedule
 from anemoi.models.transport.schedules import LinearSigmaSchedule
 from anemoi.models.transport.schedules import SigmaSchedule
+from tests.batch_builders import build_batch
 
 DATASET_NAME = "test_dataset"
 
@@ -64,9 +64,8 @@ class RecordingZeroDenoiser:
         y: Batch,
         sigma: dict[str, torch.Tensor],
         model_comm_group=None,
-        grid_shard_sizes=None,
     ) -> Batch:
-        del model_comm_group, grid_shard_sizes
+        del model_comm_group
         self.call_count += 1
         if self.validator is not None:
             self.validator(x, y, sigma)
@@ -259,9 +258,8 @@ def test_vector_field_samplers_integrate_constant_velocity(
         y: Batch,
         time: dict[str, torch.Tensor],
         model_comm_group=None,
-        grid_shard_sizes=None,
     ) -> Batch:
-        del model_comm_group, grid_shard_sizes
+        del model_comm_group
         time_expanded = time[DATASET_NAME]
         assert time_expanded.dtype == x[DATASET_NAME].data.dtype == y[DATASET_NAME].data.dtype
         assert time_expanded.shape == (
@@ -290,9 +288,8 @@ def test_vector_field_heun_matches_linear_ode_euler_final_step() -> None:
         y: Batch,
         time: dict[str, torch.Tensor],
         model_comm_group=None,
-        grid_shard_sizes=None,
     ) -> Batch:
-        del x, model_comm_group, grid_shard_sizes
+        del x, model_comm_group
         return y.with_data({DATASET_NAME: 2.0 * y[DATASET_NAME].data + time[DATASET_NAME]})
 
     sampler = VectorFieldHeunSampler(dtype=torch.float64, euler_final_step=True)
@@ -320,9 +317,8 @@ def test_vector_field_heun_can_use_predictor_corrector_on_final_step() -> None:
         y: Batch,
         time: dict[str, torch.Tensor],
         model_comm_group=None,
-        grid_shard_sizes=None,
     ) -> Batch:
-        del x, model_comm_group, grid_shard_sizes
+        del x, model_comm_group
         return y.with_data({DATASET_NAME: 2.0 * y[DATASET_NAME].data + time[DATASET_NAME]})
 
     sampler = VectorFieldHeunSampler(dtype=torch.float64, euler_final_step=False)

@@ -9,13 +9,12 @@
 
 
 import einops
-import numpy as np
 import pytest
 import torch
 from torch import nn
 from torch_geometric.data import HeteroData
 
-from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.graph import NodeTrainableParameters
 from anemoi.models.layers.graph import TrainableTensor
 
 
@@ -28,21 +27,16 @@ class TestTrainableTensor:
     def trainable_tensor(self, init):
         return TrainableTensor(*init)
 
-    @pytest.fixture
-    def x(self, init):
-        size = init[0]
-        return torch.rand(size, size)
-
     def test_init(self, trainable_tensor):
         assert isinstance(trainable_tensor, TrainableTensor)
         assert isinstance(trainable_tensor.trainable, nn.Parameter)
 
-    def test_forward_backward(self, init, trainable_tensor, x):
+    def test_forward_backward(self, init, trainable_tensor):
         batch_size = 5
-        output = trainable_tensor(x, batch_size)
+        output = trainable_tensor(batch_size)
 
         assert isinstance(output, torch.Tensor)
-        assert output.shape == (batch_size * x.shape[0], sum(init))
+        assert output.shape == (batch_size * init[0], init[1])
 
         # Dummy loss
         target = torch.rand(output.shape)
@@ -57,140 +51,69 @@ class TestTrainableTensor:
             assert param.grad is not None
             assert param.grad.shape == param.shape
 
-    def test_forward_no_trainable(self, init, x):
-        tensor_size, trainable_size = init[0], 0
-
-        trainable_tensor = TrainableTensor(tensor_size, trainable_size)
+    def test_forward_no_trainable(self, init):
+        trainable_tensor = TrainableTensor(init[0], 0)
         assert trainable_tensor.trainable is None
-
-        batch_size = 5
-        output = trainable_tensor(x, batch_size)
-        assert output.shape == (batch_size * x.shape[0], tensor_size + trainable_size)
+        assert trainable_tensor(batch_size=5) is None
 
 
-class TestNamedNodesAttributes:
-    """Test suite for the NamedNodesAttributes class.
-
-    This class contains test cases to verify the functionality of the NamedNodesAttributes class,
-    including initialization, attribute registration, and forward pass operations.
-    """
+class TestNodeTrainableParameters:
+    """Test suite for the NodeTrainableParameters class."""
 
     nodes_names: list[str] = ["nodes1", "nodes2"]
-    ndim: int = 2
     num_trainable_params: dict[str, int] = {"nodes1": 3, "nodes2": 5, "nodes1tonodes2": 4}
 
     @pytest.fixture
     def graph_data(self):
         graph = HeteroData()
-        for i, nodes_name in enumerate(TestNamedNodesAttributes.nodes_names):
-            graph[nodes_name].x = TestNamedNodesAttributes.get_n_random_coords(10 + 5 ** (i + 1))
+        for i, nodes_name in enumerate(TestNodeTrainableParameters.nodes_names):
+            graph[nodes_name].x = torch.rand(10 + 5 ** (i + 1), 2)
         return graph
 
-    @staticmethod
-    def get_n_random_coords(n: int) -> torch.Tensor:
-        coords = torch.rand(n, TestNamedNodesAttributes.ndim)
-        coords[:, 0] = np.pi * (coords[:, 0] - 1 / 2)
-        coords[:, 1] = 2 * np.pi * coords[:, 1]
-        return coords
-
     @pytest.fixture
-    def nodes_attributes(self, graph_data: HeteroData) -> NamedNodesAttributes:
-        return NamedNodesAttributes(TestNamedNodesAttributes.num_trainable_params, graph_data)
+    def node_parameters(self, graph_data: HeteroData) -> NodeTrainableParameters:
+        return NodeTrainableParameters(TestNodeTrainableParameters.num_trainable_params, graph_data)
 
-    def test_init(self, nodes_attributes):
-        assert isinstance(nodes_attributes, NamedNodesAttributes)
+    def test_init(self, node_parameters):
+        assert isinstance(node_parameters, NodeTrainableParameters)
 
         for nodes_name in self.nodes_names:
-            assert isinstance(nodes_attributes.num_nodes[nodes_name], int)
-            assert (
-                nodes_attributes.attr_ndims[nodes_name] - 2 * TestNamedNodesAttributes.ndim
-                == TestNamedNodesAttributes.num_trainable_params[nodes_name]
-            )
-            assert isinstance(nodes_attributes.trainable_tensors[nodes_name], TrainableTensor)
+            assert node_parameters.num_trainable_parameters[nodes_name] == self.num_trainable_params[nodes_name]
+            assert isinstance(node_parameters.trainable_tensors[nodes_name], TrainableTensor)
 
-    def test_forward(self, nodes_attributes, graph_data):
+        # Only graph node types get trainable tensors
+        assert "nodes1tonodes2" not in node_parameters.trainable_tensors
+        # Missing node types default to 0 trainable parameters
+        assert node_parameters.num_trainable_parameters["unknown"] == 0
+
+    def test_contains(self, node_parameters, graph_data):
+        for nodes_name in self.nodes_names:
+            assert nodes_name in node_parameters
+        assert "unknown" not in node_parameters
+
+        no_trainable = NodeTrainableParameters({}, graph_data)
+        for nodes_name in self.nodes_names:
+            assert nodes_name not in no_trainable
+
+    def test_forward(self, node_parameters, graph_data):
         batch_size = 3
         for nodes_name in self.nodes_names:
-            output = nodes_attributes(nodes_name, batch_size)
+            output = node_parameters(nodes_name, batch_size)
 
             expected_shape = (
                 batch_size * graph_data[nodes_name].num_nodes,
-                2 * TestNamedNodesAttributes.ndim + TestNamedNodesAttributes.num_trainable_params[nodes_name],
+                self.num_trainable_params[nodes_name],
             )
             assert output.shape == expected_shape
+            assert output.requires_grad
 
-            # Check if the first part of the output matches the sin-cos transformed coordinates
-            latlons = getattr(nodes_attributes, f"latlons_{nodes_name}")
-            repeated_latlons = einops.repeat(latlons, "n f -> (b n) f", b=batch_size)
-            assert torch.allclose(output[:, : 2 * TestNamedNodesAttributes.ndim], repeated_latlons)
+            trainable = node_parameters.trainable_tensors[nodes_name].trainable
+            assert torch.equal(output, einops.repeat(trainable, "n f -> (b n) f", b=batch_size))
 
-            # Check if the last part of the output is trainable (requires grad)
-            assert output[:, 2 * TestNamedNodesAttributes.ndim :].requires_grad
+    def test_forward_unknown_nodes(self, node_parameters):
+        assert node_parameters("unknown", batch_size=2) is None
 
     def test_forward_no_trainable(self, graph_data):
-        no_trainable_attributes = NamedNodesAttributes({}, graph_data)
-        batch_size = 2
-
+        no_trainable = NodeTrainableParameters({}, graph_data)
         for nodes_name in self.nodes_names:
-            output = no_trainable_attributes(nodes_name, batch_size)
-
-            expected_shape = batch_size * graph_data[nodes_name].num_nodes, 2 * TestNamedNodesAttributes.ndim
-            assert output.shape == expected_shape
-
-            # Check if the output exactly matches the sin-cos transformed coordinates
-            latlons = getattr(no_trainable_attributes, f"latlons_{nodes_name}")
-            repeated_latlons = einops.repeat(latlons, "n f -> (b n) f", b=batch_size)
-            assert torch.allclose(output, repeated_latlons)
-
-    def test_forward_with_coords_matches_static_buffer(self, nodes_attributes, graph_data):
-        """Passing the same coords as registered must reproduce the static-buffer output."""
-        batch_size = 3
-        for nodes_name in self.nodes_names:
-            torch.manual_seed(0)  # trainable params are zero-init, but be safe
-            static_out = nodes_attributes(nodes_name, batch_size)
-
-            # Feed the *raw* coords that were registered at __init__ time.
-            raw_coords = graph_data[nodes_name].x
-            dynamic_out = nodes_attributes(nodes_name, batch_size, coords=raw_coords)
-
-            assert dynamic_out.shape == static_out.shape
-            assert torch.allclose(dynamic_out, static_out)
-
-    def test_forward_with_coords_uses_provided_values(self, nodes_attributes, graph_data):
-        """Different coords must produce a different sin/cos prefix."""
-        batch_size = 2
-        for nodes_name in self.nodes_names:
-            n_nodes = graph_data[nodes_name].num_nodes
-            new_coords = TestNamedNodesAttributes.get_n_random_coords(n_nodes)
-
-            output = nodes_attributes(nodes_name, batch_size, coords=new_coords)
-            expected_prefix = einops.repeat(
-                torch.cat([torch.sin(new_coords), torch.cos(new_coords)], dim=-1),
-                "n f -> (b n) f",
-                b=batch_size,
-            )
-            assert torch.allclose(output[:, : 2 * TestNamedNodesAttributes.ndim], expected_prefix)
-
-            # And it must differ from the static-buffer output (sanity).
-            static_out = nodes_attributes(nodes_name, batch_size)
-            assert not torch.allclose(
-                output[:, : 2 * TestNamedNodesAttributes.ndim],
-                static_out[:, : 2 * TestNamedNodesAttributes.ndim],
-            )
-
-    def test_forward_with_coords_no_trainable(self, graph_data):
-        """coords= path also works when there are no trainable params."""
-        no_trainable_attributes = NamedNodesAttributes({}, graph_data)
-        batch_size = 2
-
-        for nodes_name in self.nodes_names:
-            n_nodes = graph_data[nodes_name].num_nodes
-            new_coords = TestNamedNodesAttributes.get_n_random_coords(n_nodes)
-
-            output = no_trainable_attributes(nodes_name, batch_size, coords=new_coords)
-            expected = einops.repeat(
-                torch.cat([torch.sin(new_coords), torch.cos(new_coords)], dim=-1),
-                "n f -> (b n) f",
-                b=batch_size,
-            )
-            assert torch.allclose(output, expected)
+            assert no_trainable(nodes_name, batch_size=2) is None

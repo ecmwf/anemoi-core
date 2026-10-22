@@ -10,6 +10,7 @@
 
 import functools
 import logging
+from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
@@ -20,8 +21,12 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.scaler_tensor import ScaleTensor
+from anemoi.training.losses.scaler_tensor import as_dimension_tuple
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
+
+if TYPE_CHECKING:
+    from anemoi.models.data import Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -112,10 +117,10 @@ class LossVariableMapper(BaseLossWrapper):
 
     def _filter_variable_axis_scaler(
         self,
-        dimension: int | tuple[int],
+        dimension: int | str | tuple[int | str, ...],
         scaler: torch.Tensor,
     ) -> torch.Tensor:
-        dims = (dimension,) if isinstance(dimension, int) else tuple(dimension)
+        dims = as_dimension_tuple(dimension)
         if TensorDim.VARIABLE not in dims:
             return scaler
 
@@ -295,21 +300,25 @@ class LossVariableMapper(BaseLossWrapper):
         remapped_scaler_indices = (*scaler_indices[:-1], self._restore_indexer_type(mapped_indices, variable_indexer))
         return remapped_scaler_indices, len(mapped_indices) == 0
 
-    def forward(
+    def variable_pairs(
         self,
-        pred: "Source",
-        target: "Source",
-        squash: bool = True,
-        *,
-        scaler_indices: tuple[Any, ...] | None = None,
-        without_scalers: list[str] | list[int] | None = None,
-        grid_shard_slice: slice | None = None,
-        group: ProcessGroup | None = None,
-        squash_mode: Squash_mode | None = None,
-        pred_layout: IndexSpace | str | None = None,
-        target_layout: IndexSpace | str | None = None,
-        **kwargs,
-    ) -> torch.Tensor:
+        pred_layout: IndexSpace | str | None,
+        target_layout: IndexSpace | str | None,
+    ) -> tuple[list[int], list[int]]:
+        """Return the prediction and target variable indices that the loss compares, position by position.
+
+        Parameters
+        ----------
+        pred_layout : IndexSpace | str | None
+            Variable layout of the predictions.
+        target_layout : IndexSpace | str | None
+            Variable layout of the targets.
+
+        Returns
+        -------
+        tuple[list[int], list[int]]
+            Indices into the prediction and into the target variables; entry ``i`` of both is a pair.
+        """
         if self.data_indices is None:
             msg = (
                 "LossVariableMapper must be initialised with data_indices before use. "
@@ -335,8 +344,24 @@ class LossVariableMapper(BaseLossWrapper):
             )
             raise ValueError(msg)
 
-        pred_indices = self.predicted_indices_by_layout[pred_layout]
-        target_indices = self.target_indices_by_layout[target_layout]
+        return self.predicted_indices_by_layout[pred_layout], self.target_indices_by_layout[target_layout]
+
+    def forward(
+        self,
+        pred: "Source",
+        target: "Source",
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[Any, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+        squash_mode: Squash_mode | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        pred_indices, target_indices = self.variable_pairs(pred_layout, target_layout)
 
         pred_filtered = pred.select(variables=pred_indices)
         target_filtered = target.select(variables=target_indices)

@@ -8,127 +8,185 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 if TYPE_CHECKING:
-    from anemoi.training.data.data_reader import BaseAnemoiReader
+    from anemoi.training.data.readers import DataReader
 
 LOGGER = logging.getLogger(__name__)
 
+# Anchors are matched on (base date, valid time) in seconds; base is 0 for single-sequence readers.
+_KEY = np.dtype([("base", np.int64), ("time", np.int64)])
 
-def _intersect_anchor_rows(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Return the ``(sequence, position)`` rows present in both anchor arrays.
+
+@dataclass(frozen=True)
+class ReaderAnchors:
+    """Valid anchors of one reader, keyed by time.
 
     Parameters
     ----------
-    a, b : np.ndarray
-        Arrays of shape ``(n, 2)`` of ``(sequence, position)`` anchors.
-
-    Returns
-    -------
-    np.ndarray
-        Array of shape ``(m, 2)`` with the common anchors, sorted.
+    times : np.ndarray
+        ``(n,)`` valid time of the anchor (the time at relative offset 0).
+    sequences : np.ndarray
+        ``(n,)`` reader sequence of each anchor.
+    positions : np.ndarray
+        ``(n,)`` position within the sequence of each anchor.
+    base_dates : np.ndarray, optional
+        ``(n,)`` forecast initialisation of each anchor, for trajectory readers.
+        Anchors of readers without base dates match on ``times`` only.
     """
-    if a.size == 0 or b.size == 0:
-        return np.empty((0, 2), dtype=np.int64)
-    dtype = np.dtype((np.void, a.dtype.itemsize * a.shape[1]))
-    common = np.intersect1d(
-        np.ascontiguousarray(a).view(dtype),
-        np.ascontiguousarray(b).view(dtype),
-    )
-    return common.view(a.dtype).reshape(-1, 2)
+
+    times: np.ndarray
+    sequences: np.ndarray
+    positions: np.ndarray
+    base_dates: np.ndarray | None = None
+
+    def __len__(self) -> int:
+        return len(self.times)
+
+    def keys(self) -> np.ndarray:
+        return _keys(self.times, self.base_dates)
+
+
+@dataclass(frozen=True)
+class Anchors:
+    """Anchors shared by all readers, sorted by base date then valid time.
+
+    ``rows[name][i]`` is the ``(sequence, position)`` reader ``name`` loads for sample ``i``.
+    """
+
+    times: np.ndarray
+    base_dates: np.ndarray | None
+    rows: dict[str, np.ndarray]
+
+    def __len__(self) -> int:
+        return len(self.times)
+
+
+def _keys(times: np.ndarray, base_dates: np.ndarray | None = None) -> np.ndarray:
+    keys = np.empty(len(times), dtype=_KEY)
+    keys["time"] = np.asarray(times).astype("datetime64[s]").astype(np.int64)
+    keys["base"] = 0 if base_dates is None else np.asarray(base_dates).astype("datetime64[s]").astype(np.int64)
+    return keys
+
+
+def _lookup(table: np.ndarray, query: np.ndarray) -> np.ndarray:
+    """Return the index of each ``query`` key in ``table``, or -1 where it is absent."""
+    order = np.argsort(table, order=("base", "time"))
+    sorted_table = table[order]
+    pos = np.searchsorted(sorted_table, query)
+    clipped = np.minimum(pos, len(sorted_table) - 1)
+    found = (pos < len(sorted_table)) & (sorted_table[clipped] == query)
+    return np.where(found, order[clipped], -1)
+
+
+def _query_for(table: ReaderAnchors, keys: np.ndarray) -> np.ndarray:
+    if table.base_dates is not None:
+        return keys
+    query = keys.copy()
+    query["base"] = 0
+    return query
+
+
+def _stride_steps(
+    stride: int | None,
+    data_readers: dict[str, "DataReader"],
+    relative_date_indices: dict[str, np.ndarray | list[int]],
+) -> tuple[int, int]:
+    """Return ``(stride, grid)``: the stride in steps of the shared anchor grid of ``grid`` seconds."""
+    seconds = {name: int(reader.frequency.total_seconds()) for name, reader in data_readers.items()}
+    grid = math.lcm(*seconds.values())
+    if stride is None:
+        # non-overlapping: the next window starts after the widest window of any reader
+        span = max(
+            (int(np.max(relative_date_indices[name])) - int(np.min(relative_date_indices[name]))) * seconds[name]
+            for name in seconds
+        )
+        return span // grid + 1, grid
+    return stride, grid
+
+
+def _apply_stride(keys: np.ndarray, stride: int, grid: int) -> np.ndarray:
+    """Keep every ``stride``-th grid step per base date, counted from its first anchor."""
+    group_start = np.r_[True, keys["base"][1:] != keys["base"][:-1]]
+    first = np.maximum.accumulate(np.where(group_start, np.arange(len(keys)), 0))
+    return keys[(keys["time"] - keys["time"][first]) % (stride * grid) == 0]
 
 
 def compute_valid_anchors(
-    data_readers: dict[str, "BaseAnemoiReader"],
+    data_readers: dict[str, "DataReader"],
     relative_date_indices: dict[str, np.ndarray | list[int]],
-) -> np.ndarray:
-    """Return the valid ``(sequence, position)`` anchors shared by all readers.
+    stride: int | None = 1,
+) -> Anchors:
+    """Return the anchors every reader can sample, aligned by time.
 
-    An anchor ``(s, p)`` is valid if every reader can sample the positions
-    ``p + i`` for all of its relative offsets ``i`` within sequence ``s``.
-    Returns the intersection of the valid anchors across all data readers.
+    Each reader lists its valid anchors as times (plus base dates for trajectory
+    readers). An anchor is kept when every reader has it: readers with base dates
+    must agree on ``(base date, time)``, the others on ``time``. Readers may have
+    different frequencies and date ranges; each one gets its own
+    ``(sequence, position)`` for every shared anchor.
 
     Parameters
     ----------
-    data_readers : dict[str, BaseAnemoiReader]
+    data_readers : dict[str, DataReader]
         Mapping of dataset name to data reader.
     relative_date_indices : dict[str, np.ndarray | list[int]]
-        Relative offsets (in positions) requested for each reader.
+        Relative offsets (in each reader's own positions) requested for each reader.
+    stride : int | None
+        Keep every ``stride``-th step of the shared anchor grid per base date;
+        ``None`` keeps non-overlapping windows.
 
     Returns
     -------
-    np.ndarray
-        Array of shape ``(n_anchors, 2)`` with the shared ``(sequence, position)``
-        anchors.
+    Anchors
+        The shared anchors and each reader's ``(sequence, position)`` rows.
     """
-    intersection: np.ndarray | None = None
-    for dataset_name, ds in data_readers.items():
-        anchors = ds.compute_anchors(relative_date_indices[dataset_name])
+    if stride is not None and stride < 1:
+        msg = f"sampling stride must be >= 1, got {stride}."
+        raise ValueError(msg)
 
-        if len(anchors) == 0:
-            msg = f"No valid anchors found for data reader '{dataset_name}': {ds}"
+    valid_anchors: dict[str, ReaderAnchors] = {}
+    for name, reader in data_readers.items():
+        valid_anchors[name] = reader.valid_anchors(relative_date_indices[name])
+        if len(valid_anchors[name]) == 0:
+            msg = f"No valid anchors found for data reader '{name}': {reader}"
             raise ValueError(msg)
+        LOGGER.info("Data reader '%s' has %d valid anchors", name, len(valid_anchors[name]))
 
-        intersection = anchors if intersection is None else _intersect_anchor_rows(intersection, anchors)
+    with_base = [name for name, table in valid_anchors.items() if table.base_dates is not None]
+    reference = valid_anchors[with_base[0] if with_base else next(iter(valid_anchors))]
+    keys = np.sort(reference.keys(), order=("base", "time"))
+    for table in valid_anchors.values():
+        keys = keys[_lookup(table.keys(), _query_for(table, keys)) >= 0]
 
-        LOGGER.info("Data reader '%s' has %d valid anchors", dataset_name, len(anchors))
-
-    if intersection is None or len(intersection) == 0:
+    if len(keys) == 0:
         msg = "No valid anchors found after intersection across all datasets."
         raise ValueError(msg)
 
-    LOGGER.info("MultiDataset has %d valid anchors after intersection.", len(intersection))
+    if stride != 1:
+        keys = _apply_stride(keys, *_stride_steps(stride, data_readers, relative_date_indices))
 
-    return intersection
+    rows = {}
+    for name, table in valid_anchors.items():
+        index = _lookup(table.keys(), _query_for(table, keys))
+        rows[name] = np.stack([table.sequences[index], table.positions[index]], axis=1).astype(np.int64)
 
-
-def compute_valid_data_indices(
-    data_readers: dict[str, "BaseAnemoiReader"],
-    relative_date_indices: dict[str, np.ndarray | list[int]],
-) -> np.ndarray:
-    """Return valid date indices.
-
-    A date t is valid if we can sample the elements t + i
-    for every relative_date_index i across all data readers.
-
-    Returns the intersection of valid indices from all data readers.
-    """
-    valid_date_indices_intersection = None
-    for dataset_name, ds in data_readers.items():
-        valid_date_indices = get_usable_indices(
-            ds.missing,
-            len(ds.dates),
-            relative_date_indices[dataset_name],
-            ds.trajectory_ids if ds.has_trajectories else None,
-        )
-        if valid_date_indices_intersection is None:
-            valid_date_indices_intersection = valid_date_indices
-        else:
-            valid_date_indices_intersection = np.intersect1d(valid_date_indices_intersection, valid_date_indices)
-
-        if len(valid_date_indices) == 0:
-            msg = f"No valid date indices found for data reader '{dataset_name}': {ds}"
-            raise ValueError(msg)
-
-        LOGGER.debug("Data reader '%s' has %d valid indices", dataset_name, len(valid_date_indices))
-
-    if len(valid_date_indices_intersection) == 0:
-        msg = "No valid date indices found after intersection across all datasets."
-        raise ValueError(msg)
-
-    LOGGER.debug("MultiDataset has %d valid indices after intersection.", len(valid_date_indices_intersection))
-
-    return valid_date_indices_intersection
+    LOGGER.info("MultiDataset has %d valid anchors after intersection.", len(keys))
+    return Anchors(
+        times=keys["time"].astype("datetime64[s]"),
+        base_dates=keys["base"].astype("datetime64[s]") if with_base else None,
+        rows=rows,
+    )
 
 
 def get_usable_indices(
     missing_indices: set[int],
     series_length: int,
     relative_indices: np.ndarray | list[int],
-    trajectory_ids: np.ndarray | None = None,
 ) -> np.ndarray:
     """Get the usable indices of a series with missing indices.
 
@@ -140,34 +198,22 @@ def get_usable_indices(
         Length of the series.
     relative_indices: np.ndarray | list[int]
         Array of relative indices requested at each index i.
-    trajectory_ids: np.ndarray | None
-        Array of integers of length series length that indicates which forecast trajectory a time index belongs to.
-        When training on analysis: None
 
     Returns
     -------
     usable_indices : np.array
-        Array of usable indices.
+        Indices ``i`` such that every ``i + relative_index`` is in range and not missing.
     """
-    if isinstance(relative_indices, list):
-        relative_indices = np.array(relative_indices)
+    relative_indices = np.asarray(relative_indices, dtype=np.int64)
+    start = max(0, -int(relative_indices.min()))
+    stop = min(series_length, series_length - int(relative_indices.max()))
+    usable_indices = np.arange(start, max(start, stop), dtype=np.int64)
 
-    usable_indices = np.arange(series_length)
-
-    # Restrict to indices where all relative positions are within bounds
-    max_offset = int(max(relative_indices))
-    min_offset = int(min(relative_indices))
-    usable_indices = usable_indices[(usable_indices + min_offset >= 0) & (usable_indices + max_offset < series_length)]
-
-    # Avoid crossing model runs by selecting only relative indices with the same model run id
-    if trajectory_ids is not None:
-        rel_run = usable_indices[None] + relative_indices[:, None]
-        include = (trajectory_ids[rel_run] == trajectory_ids[rel_run[0]]).all(axis=0)
-        usable_indices = usable_indices[include]
-
-    # Missing indices
-    for i in missing_indices:
-        rel_missing = i - relative_indices  # indices which have their relative indices match the missing.
-        usable_indices = usable_indices[np.all(usable_indices != rel_missing[:, np.newaxis], axis=0)]
+    missing = [i for i in missing_indices if 0 <= i < series_length]
+    if missing and usable_indices.size:
+        is_missing = np.zeros(series_length, dtype=bool)
+        is_missing[missing] = True
+        reads_missing = is_missing[usable_indices[:, None] + relative_indices[None, :]].any(axis=1)
+        usable_indices = usable_indices[~reads_missing]
 
     return usable_indices

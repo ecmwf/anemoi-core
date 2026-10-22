@@ -11,6 +11,7 @@ import logging
 from collections.abc import Callable
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import replace
 
 import einops
 import torch
@@ -18,10 +19,12 @@ from rich.tree import Tree
 from torch.distributed import ProcessGroup
 
 from anemoi.models.data.flat import FlatSource
-from anemoi.models.data.sources import FLATTEN_PATTERN
+from anemoi.models.data.sources.base import BaseTemplate
 from anemoi.models.data.sources.base import Source
+from anemoi.models.data.sources.base import _index_list
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
@@ -29,8 +32,27 @@ from anemoi.models.distributed.utils import model_is_distributed
 LOGGER = logging.getLogger(__name__)
 
 
+# No slots=True: it rebuilds the class, which breaks the zero-argument super() in __post_init__.
+@dataclass(frozen=True, eq=False, kw_only=True)
 class GriddedSource(Source):
-    """Gridded data source."""
+    """Gridded data source: every sample of the batch shares one grid.
+
+    Parameters
+    ----------
+    data : torch.Tensor
+        ``(batch, time, ensemble, grid, variables)``, laid out per ``layout``.
+    coordinates : torch.Tensor
+        ``(grid, 2)`` latitudes and longitudes in radians, shared by the whole batch.
+    shard_sizes : ShardSizes, optional
+        Per-rank grid sizes when the source is sharded, ``None`` when it is replicated.
+    """
+
+    data: torch.Tensor
+    coordinates: torch.Tensor
+    shard_sizes: ShardSizes | None = None
+
+    # How a source's axes collapse into ``(nodes, features)``.
+    FLATTEN_PATTERN = "(batch ensemble grid) (time variables)"
 
     def __post_init__(self):
         super().__post_init__()
@@ -42,6 +64,10 @@ class GriddedSource(Source):
         if isinstance(self.coordinates, list):
             msg = f"Source {self.name!r} coordinates must be a tensor, not a list."
             raise TypeError(msg)
+
+        if self.coordinates.ndim != 2:
+            msg = f"Source {self.name!r} coordinates must have shape (grid, 2); got {tuple(self.coordinates.shape)}."
+            raise ValueError(msg)
 
         if self.layout.time is None:
             msg = f"{self.__class__.__name__} requires a layout with a time axis; got {self.layout!r}."
@@ -55,6 +81,15 @@ class GriddedSource(Source):
                     f"{self.__class__.__name__} {self.name!r} has {num_channels} variable channels "
                     f"but {len(self.variables)} names."
                 )
+
+    @property
+    def coordinates_are_static(self) -> bool:
+        """Always ``True``: a gridded dataset keeps one grid for the whole run.
+
+        The coordinate tensor is therefore shared by reference across batches rather
+        than transferred each time (see :meth:`Source.to`).
+        """
+        return True
 
     @property
     def device(self) -> torch.device:
@@ -95,24 +130,29 @@ class GriddedSource(Source):
 
         return self.data.shape[self.layout.time]
 
-    def empty(self) -> "EmptyGriddedSource":
-        """Return a copy with ``data`` dropped, keeping shape metadata that ``data`` would otherwise supply.
-
-        ``EmptyGriddedSource`` reads ``device``, ``dtype``, ``grid_size``, ``batch_size``
-        and ``ensemble_size`` from values captured here, since none of them can be
-        derived from a ``None`` tensor.
-        """
-        return EmptyGriddedSource(
-            spec=self.spec,
-            data=None,
+    def template(self) -> "GriddedTemplate":
+        """Return this source without its data (see :class:`GriddedTemplate`)."""
+        return GriddedTemplate(
+            **self._metadata_kwargs(),
             coordinates=self.coordinates,
             shard_sizes=self.shard_sizes,
-            _device=self.device,
-            _dtype=self.dtype,
-            _grid_size=self.grid_size,
-            _batch_size=self.batch_size,
-            _ensemble_size=self.ensemble_size,
+            batch_size=self.batch_size,
+            ensemble_size=self.ensemble_size,
+            time_size=self.time_size,
         )
+
+    def map_data(self, func: Callable[[torch.Tensor], torch.Tensor], **overrides) -> "GriddedSource":
+        """Return a new view with ``func`` applied to each data tensor.
+
+        For plain tensor operations (``.to(dtype)``, ``.detach()``, ``.cpu()``, ...): ``func``
+        takes only the tensor, and the data is not cloned first. It is applied once to a
+        gridded source and once per sample to a tabular one. Use :meth:`apply_func` for
+        functions that need the source's statistics or variable indices, such as processors.
+
+        ``func`` must not modify its input in place; return a new tensor instead.
+        """
+        new_data = func(self.data)
+        return self.clone(data=new_data, **overrides)
 
     def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "GriddedSource":
         """Apply a function to this view, returning a new view with the same metadata."""
@@ -124,69 +164,74 @@ class GriddedSource(Source):
         )
         return self.clone(data=new_data)
 
-    def flatten(self) -> "GriddedSource":
-        """Flatten the gridded source into a flat source."""
-        assert (
-            self.layout.batch is not None
-        ), f"{self.__class__.__name__} requires to have a batch axis to be flattened."
+    @property
+    def is_tabular(self) -> bool:
+        return False
 
-        if self.data is not None:
-            current_pattern = self.layout.normalized(self.data.ndim).pattern
-            flattened_data = einops.rearrange(self.data, f"{current_pattern} -> {FLATTEN_PATTERN}")
-        else:
-            flattened_data = None
+    @property
+    def grid_shard_sizes(self) -> ShardSizes:
+        return self.shard_sizes
 
-        flattened_coords = einops.repeat(
-            self.coordinates,
-            "grid latlon -> (batch ensemble grid) latlon",
-            batch=self.batch_size,
-            ensemble=self.ensemble_size,
+    @property
+    def condition_shape(self) -> tuple[int, int, int, int, int]:
+        if self.data.ndim != 5:
+            raise ValueError(f"Expected dense transport data to be 5D, got shape {tuple(self.data.shape)}.")
+        return self.batch_size, 1, self.ensemble_size, 1, 1
+
+    def zip_map_data(self, fn: Callable[..., torch.Tensor], *others: Source) -> "GriddedSource":
+        self._check_same_structure(others)
+        return self.clone(data=fn(self.data, *(other.data for other in others)))
+
+    def map_with_condition(
+        self,
+        fn: Callable[..., torch.Tensor],
+        condition: torch.Tensor,
+        *others: Source,
+    ) -> "GriddedSource":
+        self._check_same_structure(others)
+        # (batch, 1, ensemble, 1, 1) broadcasts against (batch, time, ensemble, grid, variables).
+        return self.clone(data=fn(self.data, *(other.data for other in others), condition))
+
+    def condition_per_sample(self, condition: torch.Tensor) -> torch.Tensor:
+        return condition
+
+    def randn_like(self, model_comm_group: ProcessGroup | None = None) -> "GriddedSource":
+        # Imported here: anemoi.models.transport imports this package.
+        from anemoi.models.transport.random_fields import randn_like_with_grid_sharding
+
+        noise = randn_like_with_grid_sharding(
+            self.data,
+            model_comm_group=model_comm_group,
+            grid_shard_sizes=self.grid_shard_sizes,
         )
-        # already on device; see Batch.to()
+        return self.clone(data=noise)
 
-        return FlatSource(
-            data=flattened_data,
-            coordinates=flattened_coords,
-            shard_sizes=self.shard_sizes,
-            device=self.device,
-        )
-
-    def unflatten(self, data: torch.Tensor, **kwargs) -> "GriddedSource":
-        new_data = einops.rearrange(
-            data,
-            f"{FLATTEN_PATTERN} -> {self.layout.normalized(self.data.ndim).pattern}",
-            batch=self.batch_size,
-            ensemble=self.ensemble_size,
-            time=self.data.shape[self.layout.time],
-        )
-
-        return self.clone(data=new_data, **kwargs)
-
-    def apply_pairwise(
-        self, other: "GriddedSource", func: Callable, *, per_sample_kwargs=None, **kwargs
-    ) -> torch.Tensor:
-        """Combine two gridded sources through ``func``."""
-        if per_sample_kwargs is not None:
-            raise ValueError("Gridded losses take batched arguments; per_sample_kwargs is only for tabular sources.")
+    def pairwise(self, other: Source, func: Callable[..., torch.Tensor], *args, **kwargs) -> torch.Tensor:
         if not isinstance(other, GriddedSource):
-            msg = f"Other source must be a GriddedSource; got {type(other).__name__}."
-            raise TypeError(msg)
+            raise TypeError(f"Other source must be a GriddedSource; got {type(other).__name__}.")
+
+        if kwargs.pop("per_sample_kwargs", None) is not None:
+            raise ValueError("Gridded losses take batched arguments; per_sample_kwargs is only for tabular sources.")
+
         if self.layout != other.layout:
-            msg = f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}."
-            raise ValueError(msg)
-        # assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
-        if self.coordinates is None or other.coordinates is None:
-            assert self.coordinates is other.coordinates, "Both views must agree on whether coordinates are available."
-        else:
-            assert torch.equal(self.coordinates, other.coordinates), "Both views must have the same coordinates."
+            raise ValueError(f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}.")
+
+        assert torch.equal(self.coordinates, other.coordinates), "Both views must have the same coordinates."
         return func(
             self.data,
             other.data,
+            *args,
             layout=self.layout,
             statistics=self.statistics,
             name_to_index=self.name_to_index,
             **kwargs,
         )
+
+    def flatten(self) -> FlatSource:
+        """Flatten the source into ``(batch ensemble grid, time variables)`` rows."""
+        current_pattern = self.layout.normalized(self.data.ndim).pattern
+        data = einops.rearrange(self.data, f"{current_pattern} -> {GriddedSource.FLATTEN_PATTERN}")
+        return replace(self.template().flatten(), data=data)
 
     def shard(self, group: ProcessGroup | None) -> "GriddedSource":
         """Split this source across ``group`` along its grid axis."""
@@ -246,6 +291,13 @@ class GriddedSource(Source):
         check_shard_sizes_match_group(self.shard_sizes, group, context=f"gridded source view {self.name!r}")
 
         if not model_is_distributed(group):
+            # One rank holds the whole grid. Across several ranks, gather_tensor checks each piece.
+            if self.data.shape[self.layout.grid] != self.shard_sizes[0]:
+                msg = (
+                    f"Gridded source view {self.name!r} holds {self.data.shape[self.layout.grid]} grid points, "
+                    f"but its shard sizes {self.shard_sizes} say {self.shard_sizes[0]}."
+                )
+                raise ValueError(msg)
             return self.clone(shard_sizes=None)
 
         gathered_coords = self.coordinates
@@ -282,7 +334,7 @@ class GriddedSource(Source):
         datasets. Coordinates / timedeltas / boundaries are unchanged.
         """
         new_data = self._index_vars(self.data, indices)
-        return self.clone(data=new_data, spec=self.spec.select_variables(indices))
+        return self.clone(data=new_data, **self._select_variable_metadata(indices))
 
     def select_time(self, indices: "slice | Sequence[int] | int") -> "GriddedSource":
         """Return a new view restricted to the given time indices.
@@ -306,19 +358,7 @@ class GriddedSource(Source):
             msg = f"Layout {self.layout!r} has no time axis."
             raise ValueError(msg)
 
-        if isinstance(indices, slice):
-            time_size = self.data.shape[self.layout.time]
-            idx_list = list(range(*indices.indices(time_size)))
-        elif isinstance(indices, int):
-            idx_list = [int(indices)]
-        else:
-            idx_list = [int(i) for i in indices]
-
-        if self.layout.time is None:
-            msg = f"Layout {self.layout!r} has no time axis; cannot select_time on a gridded view."
-            raise ValueError(msg)
-
-        assert isinstance(self.data, torch.Tensor), "Gridded view must wrap a single tensor."
+        idx_list = _index_list(indices, self.data.shape[self.layout.time])
         idx = torch.as_tensor(idx_list, dtype=torch.long, device=self.data.device)
         new_data = self.data.index_select(self.layout.time, idx)
         return self.clone(data=new_data)
@@ -349,43 +389,93 @@ class GriddedSource(Source):
         return tree
 
 
-@dataclass(frozen=True)
-class EmptyGriddedSource(GriddedSource):
-    """A :class:`GriddedSource` with no data, produced by :meth:`GriddedSource.empty`.
+@dataclass(frozen=True, eq=False, kw_only=True)
+class GriddedTemplate(BaseTemplate):
+    """A :class:`GriddedSource` without its data.
 
-    ``device``, ``dtype``, ``grid_size``, ``batch_size`` and ``ensemble_size`` are
-    normally read off ``self.data``; with ``data=None`` that is no longer possible,
-    so this subclass carries them as explicit fields instead and overrides the
-    properties to return them.
+    Parameters
+    ----------
+    coordinates : torch.Tensor
+        ``(grid, 2)`` latitudes and longitudes in radians, shared by the whole batch.
+    shard_sizes : ShardSizes, optional
+        Per-rank grid sizes when sharded, ``None`` when replicated.
+    batch_size : int
+        Number of samples.
+    ensemble_size : int
+        Number of ensemble members per sample.
+    time_size : int
+        Number of time steps.
     """
 
-    _device: torch.device = None
-    _dtype: torch.dtype = None
-    _grid_size: int | None = None
-    _batch_size: int = 0
-    _ensemble_size: int = 1
+    coordinates: torch.Tensor
+    shard_sizes: ShardSizes | None = None
+    batch_size: int
+    ensemble_size: int
+    time_size: int
 
     @property
-    def device(self) -> torch.device:
-        """Device the source lived on before its data was dropped."""
-        return self._device
+    def coordinates_are_static(self) -> bool:
+        """Always ``True``: a gridded dataset keeps one grid for the whole run."""
+        return True
 
     @property
-    def dtype(self) -> torch.dtype:
-        """Data type the source had before its data was dropped."""
-        return self._dtype
+    def grid_size(self) -> int:
+        """Number of grid points (on this rank, when sharded)."""
+        return self.coordinates.shape[0]
 
-    @property
-    def grid_size(self) -> int | None:
-        """Full grid size before sharding, captured before data was dropped."""
-        return self._grid_size
+    def shard(self, group: ProcessGroup | None) -> "GriddedTemplate":
+        """Split the grid across ``group``, as :meth:`GriddedSource.shard` splits a source's data."""
+        if self.shard_sizes is not None or not model_is_distributed(group):
+            return self
 
-    @property
-    def batch_size(self) -> int:
-        """Number of samples (batch size), captured before data was dropped."""
-        return self._batch_size
+        sizes = get_shard_sizes(self.coordinates, -2, model_comm_group=group)
+        return replace(self, coordinates=shard_tensor(self.coordinates, -2, sizes, group), shard_sizes=sizes)
 
-    @property
-    def ensemble_size(self) -> int:
-        """Number of ensemble members, captured before data was dropped."""
-        return self._ensemble_size
+    def flatten(self) -> FlatSource:
+        """Return the flat nodes: the grid repeated for every ``(sample, member)``."""
+        coordinates = einops.repeat(
+            self.coordinates,
+            "grid latlon -> (batch ensemble grid) latlon",
+            batch=self.batch_size,
+            ensemble=self.ensemble_size,
+        )
+        return FlatSource(
+            data=None,
+            coordinates=coordinates,
+            shard_sizes=self.shard_sizes,
+            device=self.coordinates.device,
+        )
+
+    def unflatten(self, data: torch.Tensor) -> GriddedSource:
+        """Build a :class:`GriddedSource` from ``(batch ensemble grid, time variables)`` rows."""
+        expected = (
+            self.batch_size * self.ensemble_size * self.grid_size,
+            self.time_size * self.n_variables,
+        )
+        if tuple(data.shape) != expected:
+            msg = (
+                f"{self.__class__.__name__} {self.name!r} expects flat data of shape {expected} "
+                f"(batch*ensemble*grid, time*variables), got {tuple(data.shape)}."
+            )
+            raise ValueError(msg)
+
+        metadata_kwargs = self._metadata_kwargs()
+        if self.layout.batch is None:
+            LOGGER.debug(f"{self.__class__.__name__}: Adding batch dimension to target layout.")
+            metadata_kwargs["layout"] = self.layout.with_batch_dim()
+
+        target_pattern = metadata_kwargs["layout"].normalized(metadata_kwargs["layout"].ndim).pattern
+        data = einops.rearrange(
+            data,
+            f"{GriddedSource.FLATTEN_PATTERN} -> {target_pattern}",
+            batch=self.batch_size,
+            ensemble=self.ensemble_size,
+            time=self.time_size,
+        )
+
+        return GriddedSource(
+            data=data,
+            coordinates=self.coordinates,
+            shard_sizes=self.shard_sizes,
+            **metadata_kwargs,
+        )

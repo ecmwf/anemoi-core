@@ -24,52 +24,21 @@ from anemoi.training.utils.enums import TensorDim
 LOGGER = logging.getLogger(__name__)
 
 
-def grad_scaler(
-    module: nn.Module,
-    grad_in: tuple[torch.Tensor, ...],
-    grad_out: tuple[torch.Tensor, ...],
-) -> tuple[torch.Tensor, ...] | None:
-    """Scales the loss gradients.
-
-    Uses the formula in https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
-
-    Use <module>.register_full_backward_hook(grad_scaler, prepend=False) to register this hook.
-
-    Parameters
-    ----------
-    module : nn.Module
-        Loss object (not used)
-    grad_in : tuple[torch.Tensor, ...]
-        Loss gradients
-    grad_out : tuple[torch.Tensor, ...]
-        Output gradients (not used)
-
-    Returns
-    -------
-    tuple[torch.Tensor, ...]
-        Re-scaled input gradients
-
-    """
-    del module, grad_out
-    # first grad_input is that of the predicted state and the second is that of the "ground truth" (== zero)
-    channels = grad_in[0].shape[-1]  # number of channels
-    channel_weights = torch.reciprocal(torch.sum(torch.abs(grad_in[0]), dim=1, keepdim=True))  # channel-wise weights
-    new_grad_in = (
-        (channels * channel_weights) / torch.sum(channel_weights, dim=-1, keepdim=True) * grad_in[0]
-    )  # rescaled gradient
-    return new_grad_in, grad_in[1]
-
-
 def reshape_scaler(dims: tuple[str, ...], scaler: torch.Tensor, layout: TensorLayout) -> torch.Tensor:
-    """Reshapes a scaler tensor to align with specific logical axes of a target layout for broadcasting."""
+    """Reshapes a scaler tensor to align with specific logical axes of a target layout for broadcasting.
+
+    The scaler's axes follow ``dims``, which need not be in the layout's order: they are permuted
+    into that order first, so e.g. a ``(variables, grid)`` scaler lines up with a grid-first layout.
+    """
     target_ndim = layout.ndim
+    physical_dims = [layout.axis(dim_name, ndim=target_ndim) for dim_name in dims]
+    order = sorted(range(len(dims)), key=physical_dims.__getitem__)
+
     new_shape = [1] * target_ndim
+    for i in order:
+        new_shape[physical_dims[i]] = scaler.shape[i]
 
-    for i, dim_name in enumerate(dims):
-        physical_dim = layout.axis(dim_name, ndim=target_ndim)
-        new_shape[physical_dim] = scaler.shape[i]
-
-    return scaler.view(new_shape)
+    return scaler.permute(order).reshape(new_shape)
 
 
 def as_dimension_tuple(dimensions: int | str | Sequence[int | str]) -> tuple[int | str, ...]:
@@ -118,22 +87,20 @@ class ScaleTensor(nn.Module):
     Allows a user to specify a scaler and the dimensions it should be applied to.
     The class will then enforce that additional scalers are compatible with the specified dimensions.
 
-    When `get_scaler` or `scale` is called, the class will return the product of all scalers, resolved
-    to the dimensional size of the input tensor.
+    Dimensions are named (`TensorDim`), and `scale_iteratively` multiplies the input tensor by
+    every scaler, aligned to the input's axes through a `TensorLayout`.
 
     Additionally, the class can be subsetted to only return a subset of the scalers, but
     only from those given names.
 
     Examples
     --------
-    >>> tensor = torch.randn(3, 4, 5)
-    >>> scalers = ScaleTensor((0, torch.randn(3)), (1, torch.randn(4)))
-    >>> scaled_tensor = scalers.scale(tensor)
-    >>> scalers.get_scaler(tensor.ndim).shape
-    torch.Size([3, 4, 1])
-    >>> scalers.add_scaler(-1, torch.randn(5))
-    >>> scalers.get_scaler(tensor.ndim).shape
-    torch.Size([3, 4, 5])
+    >>> layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+    >>> tensor = torch.randn(2, 1, 1, 4, 5)
+    >>> scalers = ScaleTensor(grid=(TensorDim.GRID, torch.randn(4)))
+    >>> scalers.add_scaler(TensorDim.VARIABLE, torch.randn(5), name="variable")
+    >>> scalers.scale_iteratively(tensor, layout=layout).shape
+    torch.Size([2, 1, 1, 4, 5])
     """
 
     _tensors: dict[str, TENSOR_SPEC]
@@ -159,7 +126,6 @@ class ScaleTensor(nn.Module):
         super().__init__()
 
         self._tensors = {}
-        self._runtime_scalers: dict[str, torch.Tensor] = {}
 
         named_tensors.update(scalers or {})
         self.add(named_tensors)
@@ -179,28 +145,16 @@ class ScaleTensor(nn.Module):
             return tensors[name][1]
         return super().__getattr__(name)
 
-    def get_scaler_tensor(self, name: str) -> torch.Tensor:
-        """Return a scaler from either explicit runtime state or registered buffers."""
-        if name in self._runtime_scalers:
-            return self._runtime_scalers[name]
-        if name in self._buffers:
-            return self.get_buffer(name)
-
-        msg = f"Scaler {name!r} has no associated tensor."
-        raise KeyError(msg)
-
     def _apply(self, fn: Callable, recurse: bool = True) -> Self:
-        """Apply device and dtype conversions to registered and runtime scalers.
+        """Apply device and dtype conversions to the scalers.
 
         ``nn.Module._apply`` handles parameters and registered buffers. The scaler
-        tensors (``_tensors``) and runtime scalers (``_runtime_scalers``) are
-        deliberately neither, so we apply the same conversion to both explicit dicts.
+        tensors (``_tensors``) are deliberately neither, so we apply the same
+        conversion to them explicitly.
         """
         super()._apply(fn, recurse=recurse)
         for name, (dimension, scaler) in self._tensors.items():
             self._tensors[name] = (dimension, fn(scaler))
-        for name, scaler in self._runtime_scalers.items():
-            self._runtime_scalers[name] = fn(scaler)
         return self
 
     @property
@@ -234,13 +188,17 @@ class ScaleTensor(nn.Module):
         """Check if there is a scaler for the given dimension."""
         return len(self.subset_by_dim(dim.value).tensors) > 0
 
-    def validate_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor) -> None:
+    def has_dim(self, dimension: int | str) -> bool:
+        """Whether any scaler applies along ``dimension`` (an axis number or a `TensorDim`)."""
+        return any(dimension in dims for dims, _ in self._tensors.values())
+
+    def validate_scaler(self, dimension: int | str | tuple[int | str, ...], scaler: torch.Tensor) -> None:
         """Check if the scaler is compatible with the given dimension.
 
         Parameters
         ----------
-        dimension : int | tuple[int]
-            Dimensions to check `scaler` against
+        dimension : int | str | tuple[int | str, ...]
+            Dimensions to check `scaler` against: an axis number, a `TensorDim`, or a tuple of them
         scaler : torch.Tensor
             Scaler tensor to check
 
@@ -249,11 +207,8 @@ class ScaleTensor(nn.Module):
         ValueError
             If the scaler is not compatible with the given dimension
         """
-        if isinstance(dimension, int):
-            dimension = [dimension]
-
-        for scaler_dim, dim in enumerate(dimension):
-            if dim not in self or scaler.shape[scaler_dim] == 1 or self.shape[dim] == 1 or dim == TensorDim.GRID:
+        for scaler_dim, dim in enumerate(as_dimension_tuple(dimension)):
+            if not self.has_dim(dim) or scaler.shape[scaler_dim] == 1 or self.shape[dim] == 1 or dim == TensorDim.GRID:
                 continue
 
             if self.shape[dim] != scaler.shape[scaler_dim]:
@@ -456,7 +411,8 @@ class ScaleTensor(nn.Module):
         Parameters
         ----------
         scaler_identifier : str | Sequence[str] | int | Sequence[int]
-            Name/s or dimension/s of the scalers to get
+            Name/s or dimension/s of the scalers to get. Axis numbers and `TensorDim`
+            members are dimensions; any other string is a scaler name.
 
         Returns
         -------
@@ -465,7 +421,7 @@ class ScaleTensor(nn.Module):
         """
         if isinstance(scaler_identifier, str | int):
             scaler_identifier = [scaler_identifier]
-        if any(isinstance(scaler, int) for scaler in scaler_identifier):
+        if any(isinstance(scaler, int | TensorDim) for scaler in scaler_identifier):
             return self.subset_by_dim(scaler_identifier)
         return self.subset_by_str(scaler_identifier)
 
@@ -521,7 +477,8 @@ class ScaleTensor(nn.Module):
         Parameters
         ----------
         scaler_identifier : str | Sequence[str] | int | Sequence[int]
-            Name/s or dimension/s of the scalers to exclude
+            Name/s or dimension/s of the scalers to exclude. Axis numbers and
+            `TensorDim` members are dimensions; any other string is a scaler name.
 
         Returns
         -------
@@ -530,9 +487,11 @@ class ScaleTensor(nn.Module):
         """
         if isinstance(scaler_identifier, str | int):
             scaler_identifier = [scaler_identifier]
-        if any(isinstance(scaler, int) for scaler in scaler_identifier):
-            return self.without_by_dim(scaler_identifier)
-        return self.without_by_str(scaler_identifier)
+        # TensorDim is a StrEnum, so it must be told apart from a scaler name by type.
+        dimensions = [s for s in scaler_identifier if isinstance(s, int | TensorDim)]
+        names = [s for s in scaler_identifier if not isinstance(s, int | TensorDim)]
+        subset = self.without_by_dim(dimensions) if dimensions else self
+        return subset.without_by_str(names) if names else subset
 
     def without_by_str(self, scalers: str | Sequence[str]) -> Self:
         """Get subset of the scalers, filtering out by name.
@@ -607,10 +566,9 @@ class ScaleTensor(nn.Module):
             msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
             raise TypeError(msg)
 
-        if subset_indices is not None and subset_indices != (...,):
-            x_subset = x[subset_indices]
-        else:
-            x_subset = x
+        # Determine the subset of the input tensor to work with
+        x_subset = x[subset_indices] if subset_indices is not None and subset_indices != (...,) else x
+
         out = x_subset.clone()
 
         for dims, scaler in self.tensors.values():
@@ -634,86 +592,6 @@ class ScaleTensor(nn.Module):
 
         return out
 
-    def scale(
-        self,
-        x: torch.Tensor,
-        subset_indices: tuple[int, ...] | None = None,
-        *,
-        grid_shard_slice: slice | None = None,
-    ) -> torch.Tensor:
-        """Scale a given tensor by the scalers.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Input tensor to scale
-        subset_indices : tuple[int, ...] | None, optional
-            Indices to select along one tensor dimension.
-        grid_shard_slice : slice | None, optional
-            Grid slice to select from a full-grid scaler.
-
-        Returns
-        -------
-        torch.Tensor
-            Scaled tensor
-        """
-        if subset_indices is not None and not isinstance(subset_indices, tuple):
-            msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
-            raise TypeError(msg)
-        x_subset = x[subset_indices] if subset_indices is not None else x
-        scaler = self.get_scaler(x_subset.ndim)
-        if grid_shard_slice is not None and scaler.shape[TensorDim.GRID] > 1:
-            slices = [slice(None)] * x_subset.ndim
-            slices[TensorDim.GRID] = grid_shard_slice
-            scaler = scaler[tuple(slices)]
-
-        return x_subset * scaler
-
-    def get_scaler(self, ndim: int, device: str | None = None) -> torch.Tensor:
-        """Get completely resolved scaler tensor.
-
-        Parameters
-        ----------
-        ndim : int
-            Number of dimensions of the tensor to resolve the scalers to
-            Used to resolve relative indices, and add singleton dimensions
-        device: str | None, optional
-            Device to move the scaler to, by default None
-
-        Returns
-        -------
-        torch.Tensor
-            Scaler tensor
-
-        Raises
-        ------
-        ValueError
-            If resolving relative indices is invalid
-        """
-        complete_scaler = None
-
-        for dims, scaler in self.tensors.values():
-            missing_dims = [d for d in range(ndim) if d not in dims]
-            reshape = [1] * len(missing_dims)
-            reshape.extend(scaler.shape)
-
-            reshaped_scaler = scaler.reshape(reshape)
-            reshaped_scaler = torch.moveaxis(reshaped_scaler, list(range(ndim)), (*missing_dims, *dims))
-
-            complete_scaler = reshaped_scaler if complete_scaler is None else complete_scaler * reshaped_scaler
-
-        complete_scaler = torch.ones(1) if complete_scaler is None else complete_scaler
-
-        if device is not None:
-            return complete_scaler.to(device)
-        return complete_scaler
-
-    def __mul__(self, tensor: torch.Tensor) -> torch.Tensor:
-        return self.scale(tensor)
-
-    def __rmul__(self, tensor: torch.Tensor) -> torch.Tensor:
-        return self.scale(tensor)
-
     def __repr__(self):
         return (
             f"ScalerTensor:\n - With tensors  : {list(self._tensors.keys())}\n"
@@ -721,16 +599,12 @@ class ScaleTensor(nn.Module):
         )
 
     def __contains__(self, dimension: int | tuple[int] | str) -> bool:
-        """Check if either scaler by name or dimension by int/tuple is being scaled."""
+        """Check if a scaler name, or a dimension (axis number, `TensorDim` or tuple of them) is being scaled."""
         if isinstance(dimension, tuple):
             return dimension in self.specified_dimensions.values()
-        if isinstance(dimension, str):
-            return dimension in self._tensors
-
-        result = False
-        for dim_assign, _ in self._tensors.values():
-            result = dimension in dim_assign or result
-        return result
+        if isinstance(dimension, int | TensorDim):
+            return self.has_dim(dimension)
+        return dimension in self._tensors
 
     def __len__(self):
         return len(self._tensors)

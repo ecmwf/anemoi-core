@@ -19,7 +19,6 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
-from batch_builders import build_batch
 
 from anemoi.models.data import Source
 from anemoi.models.data import TensorLayout
@@ -39,6 +38,7 @@ from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
+from tests.batch_builders import build_batch
 
 
 # --- BatchOutputPlot builders used by this test module ----------------------
@@ -347,7 +347,6 @@ def _make_gridded_batch(tensor: torch.Tensor, *, dataset_name: str = "data") -> 
     return build_batch(
         data={dataset_name: tensor},
         coordinates={dataset_name: coordinates},
-        static_coords=frozenset({dataset_name}),
         layouts={dataset_name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={dataset_name: [f"v{i}" for i in range(num_vars)]},
         statistics={dataset_name: {}},
@@ -376,7 +375,7 @@ def _make_sparse_batch(
         coordinates={dataset_name: [coordinates]},
         boundaries={dataset_name: boundaries},
         timedeltas={dataset_name: [torch.arange(input_nodes + output_nodes, dtype=torch.float32)]},
-        layouts={dataset_name: TensorLayout(grid=0, variables=1, time_in_grid=True)},
+        layouts={dataset_name: TensorLayout(grid=0, variables=1)},
         variables={dataset_name: [chr(ord("a") + i) for i in range(num_vars)]},
         statistics={dataset_name: {}},
     )
@@ -638,9 +637,9 @@ def test_plot_loss_temporal_downscaler():
     outputs = _step_output(
         [{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)}],
     )
-    # get_targets returns (target, target_forcing); the callback keeps the target Source.
+    # get_targets returns (target, target_template, target_forcing); the callback keeps the target Source.
     target_batch = _make_gridded_batch(torch.randn(batch_size, 1, 1, nlatlon, nvar))
-    pl_module.task.get_targets = MagicMock(return_value=(target_batch, None))
+    pl_module.task.get_targets = MagicMock(return_value=(target_batch, None, None))
     pl_module.task.get_metric_name = MagicMock(return_value="")
     # The loss value is irrelevant here (we assert on the figure count); return a plain tensor
     # so ``reduce_to_last_dim`` yields a per-variable vector.
@@ -701,7 +700,7 @@ def test_plot_loss_single_step_transport():
     target_batch = _make_gridded_batch(torch.randn(batch_size, n_step_output, 1, nlatlon, nvar))
     callback.loss = {"data": MagicMock(return_value=torch.randn(batch_size, n_step_output, 1, nlatlon, nvar))}
     pl_module.task.steps.return_value = [{}]
-    pl_module.task.get_targets.return_value = (target_batch, None)
+    pl_module.task.get_targets.return_value = (target_batch, None, None)
     pl_module.task.get_metric_name.return_value = ""
 
     with (
@@ -761,7 +760,7 @@ def test_plot_loss_forecaster():
     target_batch = _make_gridded_batch(torch.randn(batch_size, n_step_output, 1, nlatlon, nvar))
     callback.loss = {"data": MagicMock(return_value=torch.randn(batch_size, n_step_output, 1, nlatlon, nvar))}
     pl_module.task.steps.return_value = [{"rollout_step": i} for i in range(output_times)]
-    pl_module.task.get_targets.return_value = (target_batch, None)
+    pl_module.task.get_targets.return_value = (target_batch, None, None)
     pl_module.task.get_metric_name.return_value = ""
 
     with (

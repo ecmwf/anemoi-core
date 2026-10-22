@@ -15,6 +15,7 @@ import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
+from anemoi.models.preprocessing import resolve_variable_indices
 from anemoi.models.preprocessing.mappings import affine_transform
 from anemoi.models.preprocessing.mappings import asinh_converter
 from anemoi.models.preprocessing.mappings import atanh_converter
@@ -105,6 +106,7 @@ class Remapper(BasePreprocessor):
         self.num_training_output_vars = len(name_to_index_training_output)
         self.num_inference_output_vars = len(name_to_index_inference_output)
 
+        self.remapped_names = []
         (
             self.remappers,
             self.backmappers,
@@ -127,6 +129,7 @@ class Remapper(BasePreprocessor):
         for name in name_to_index_training_input:
             method = self.methods.get(name, self.default)
             if method in self.supported_methods:
+                self.remapped_names.append(name)
                 self.remappers.append(self.supported_methods[method][0])
                 self.backmappers.append(self.supported_methods[method][1])
                 self.index_training_input.append(name_to_index_training_input[name])
@@ -150,35 +153,51 @@ class Remapper(BasePreprocessor):
             else:
                 raise KeyError(f"Unknown remapping method for {name}: {method}")
 
-    def transform(self, x, in_place: bool = True, **_kwargs) -> torch.Tensor:
+    def transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        name_to_index: Optional[dict[str, int]] = None,
+        **_kwargs,
+    ) -> torch.Tensor:
+        """Remap the variables of ``x``, located by name (``name_to_index``) or, failing that, by width."""
         if not in_place:
             x = x.clone()
-        if x.shape[-1] == self.num_training_input_vars:
-            idx = self.index_training_input
-        elif x.shape[-1] == self.num_inference_input_vars:
-            idx = self.index_inference_input
-        else:
-            raise ValueError(
-                f"Input tensor ({x.shape[-1]}) does not match the training "
-                f"({self.num_training_input_vars}) or inference shape ({self.num_inference_input_vars})",
-            )
+        idx = resolve_variable_indices(
+            self.__class__.__name__,
+            self.remapped_names,
+            x.shape[-1],
+            name_to_index,
+            {
+                "training input": (self.num_training_input_vars, self.index_training_input),
+                "inference input": (self.num_inference_input_vars, self.index_inference_input),
+            },
+        )
         for i, remapper, kwargs in zip(idx, self.remappers, self.remapper_kwargs):
             if i is not None:
                 x[..., i] = remapper(x[..., i], **kwargs)
         return x
 
-    def inverse_transform(self, x, in_place: bool = True, **_kwargs) -> torch.Tensor:
+    def inverse_transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        name_to_index: Optional[dict[str, int]] = None,
+        **_kwargs,
+    ) -> torch.Tensor:
+        """Map the variables of ``x`` back, located by name (``name_to_index``) or, failing that, by width."""
         if not in_place:
             x = x.clone()
-        if x.shape[-1] == self.num_training_output_vars:
-            idx = self.index_training_out
-        elif x.shape[-1] == self.num_inference_output_vars:
-            idx = self.index_inference_output
-        else:
-            raise ValueError(
-                f"Input tensor ({x.shape[-1]}) does not match the training "
-                f"({self.num_training_output_vars}) or inference shape ({self.num_inference_output_vars})",
-            )
+        idx = resolve_variable_indices(
+            self.__class__.__name__,
+            self.remapped_names,
+            x.shape[-1],
+            name_to_index,
+            {
+                "training output": (self.num_training_output_vars, self.index_training_out),
+                "inference output": (self.num_inference_output_vars, self.index_inference_output),
+            },
+        )
         for i, backmapper, kwargs in zip(idx, self.backmappers, self.remapper_kwargs):
             if i is not None:
                 x[..., i] = backmapper(x[..., i], **kwargs)

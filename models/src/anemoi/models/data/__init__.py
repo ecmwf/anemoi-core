@@ -11,19 +11,29 @@
 from .batch import Batch
 from .flat import FlatSource
 from .layout import TensorLayout
-from .sample import SourceSample
+from .sample import BaseSample
+from .sample import GriddedSample
+from .sample import TabularSample
+from .sample import create_batched_struct
+from .sources import BaseTemplate
 from .sources import GriddedSource
+from .sources import GriddedTemplate
 from .sources import Source
 from .sources import TabularSource
-from .spec import SourceSpec
+from .sources import TabularTemplate
 
 __all__ = [
     "Batch",
-    "SourceSample",
-    "SourceSpec",
+    "BaseSample",
+    "GriddedSample",
+    "TabularSample",
+    "create_batched_struct",
     "TensorLayout",
     "GriddedSource",
     "TabularSource",
     "Source",
     "FlatSource",
+    "BaseTemplate",
+    "GriddedTemplate",
+    "TabularTemplate",
 ]

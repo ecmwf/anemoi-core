@@ -11,7 +11,6 @@ from collections.abc import Callable
 
 import pytest
 import torch
-from batch_builders import build_source
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pydantic import TypeAdapter
@@ -20,7 +19,7 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources.tabular import GriddedSource
+from anemoi.models.data.sources.gridded import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.losses import CRPS
@@ -45,14 +44,13 @@ from anemoi.training.utils.index_space import IndexSpace
 
 def _view(data: torch.Tensor) -> GriddedSource:
     """Attach the layout and coordinates used by the score fixtures."""
-    return build_source(
+    return GriddedSource(
         name="data",
         data=data,
         variables=[f"v{i}" for i in range(data.shape[-1])],
         statistics={},
         coordinates=torch.zeros(data.shape[-2], 2, device=data.device),
         layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
-        coordinates_are_static=True,
     )
 
 

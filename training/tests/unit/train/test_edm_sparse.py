@@ -5,11 +5,11 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 
 import pytest
 import torch
 
+from anemoi.models.data.layout import TensorLayout
 from anemoi.models.transport.settings import EdmSettings
 from anemoi.models.transport.settings import StochasticInterpolantSettings
 from anemoi.models.transport.settings import TransportSourceSettings
@@ -18,23 +18,7 @@ from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObj
 from anemoi.training.train.methods.stochastic_interpolant import StochasticInterpolantTransportObjective
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.utils.index_space import IndexSpace
-
-if TYPE_CHECKING:
-    from collections.abc import KeysView
-
-
-class _Batch:
-    def __init__(self, data: dict[str, torch.Tensor | list[torch.Tensor]]) -> None:
-        self.data = data
-
-    def __getitem__(self, dataset_name: str) -> torch.Tensor | list[torch.Tensor]:
-        return self[dataset_name].data
-
-    def keys(self) -> KeysView[str]:
-        return self.data.keys()
-
-    def with_data(self, data: dict[str, torch.Tensor | list[torch.Tensor]]) -> _Batch:
-        return _Batch(data)
+from tests.batch_builders import build_batch
 
 
 def _no_grid_shards(_source: object) -> None:
@@ -82,11 +66,23 @@ def _si_module(
 
 
 def _prepared_sparse_target() -> PreparedPredictionTarget:
-    data = {
-        "grid": torch.ones(2, 1, 1, 3, 1),
-        "obs": [torch.ones(2, 1), torch.full((4, 1), 2.0)],
-    }
-    batch = _Batch(data)
+    """Model targets of a grid and of observations, two samples each.
+
+    The observations of each sample are ``(ensemble, observations, variables)``, all in one output window.
+    """
+    obs = [torch.ones(1, 2, 1), torch.full((1, 4, 1), 2.0)]
+    batch = build_batch(
+        data={"grid": torch.ones(2, 1, 1, 3, 1), "obs": obs},
+        coordinates={"grid": torch.zeros(3, 2), "obs": [torch.zeros(sample.shape[1], 2) for sample in obs]},
+        timedeltas={"obs": [torch.zeros(sample.shape[1]) for sample in obs]},
+        metadata={"static_coords": frozenset({"grid"}), "obs": {"boundaries": [(slice(0, s.shape[1]),) for s in obs]}},
+        layouts={
+            "grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
+            "obs": TensorLayout(ensemble=0, grid=1, variables=2),
+        },
+        variables={"grid": ["value"], "obs": ["value"]},
+        statistics={"grid": {}, "obs": {}},
+    )
     return PreparedPredictionTarget(
         model_target=batch,
         loss_target=batch,
@@ -107,8 +103,9 @@ def test_edm_prepare_accepts_sparse_targets_with_zero_source() -> None:
     torch.testing.assert_close(objective_data.conditioned_target["grid"].data, prepared.model_target["grid"].data)
     torch.testing.assert_close(objective_data.conditioned_target["obs"].data[0], prepared.model_target["obs"].data[0])
     torch.testing.assert_close(objective_data.conditioned_target["obs"].data[1], prepared.model_target["obs"].data[1])
+    # One weight per sample, shaped to spread over its (ensemble, observations, variables) values.
     assert isinstance(objective_data.weights["obs"], list)
-    assert [weight.shape for weight in objective_data.weights["obs"]] == [torch.Size([]), torch.Size([])]
+    assert [weight.shape for weight in objective_data.weights["obs"]] == [torch.Size([1, 1, 1])] * 2
 
 
 def test_edm_prepare_rejects_reference_state_for_sparse_targets() -> None:
@@ -176,7 +173,7 @@ def test_stochastic_interpolant_prepare_accepts_sparse_targets_with_gaussian_sou
     expected_grid_source = torch.full_like(prepared.model_target["grid"].data, 2.0)
     expected_grid_interpolant = 0.75 * expected_grid_source + 0.25 * prepared.model_target["grid"].data
     expected_grid_drift = -expected_grid_source + prepared.model_target["grid"].data
-    torch.testing.assert_close(objective_data.aux["source"]["grid"], expected_grid_source)
+    torch.testing.assert_close(objective_data.aux["source"]["grid"].data, expected_grid_source)
     torch.testing.assert_close(objective_data.conditioned_target["grid"].data, expected_grid_interpolant)
     torch.testing.assert_close(objective_data.loss_target["grid"].data, expected_grid_drift)
 
@@ -189,7 +186,7 @@ def test_stochastic_interpolant_prepare_accepts_sparse_targets_with_gaussian_sou
         -source_sample + clean_sample
         for source_sample, clean_sample in zip(expected_obs_source, prepared.model_target["obs"].data, strict=True)
     ]
-    _assert_sparse_close(objective_data.aux["source"]["obs"], expected_obs_source)
+    _assert_sparse_close(objective_data.aux["source"]["obs"].data, expected_obs_source)
     _assert_sparse_close(objective_data.conditioned_target["obs"].data, expected_obs_interpolant)
     _assert_sparse_close(objective_data.loss_target["obs"].data, expected_obs_drift)
 

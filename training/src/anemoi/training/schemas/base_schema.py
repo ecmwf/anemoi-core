@@ -1,4 +1,4 @@
-# (C) Copyright 2024-2026 Anemoi contributors.
+# (C) Copyright 2026- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -22,6 +22,7 @@ from pydantic import model_validator
 from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
 from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
 from anemoi.models.schemas.models import ModelSchema
@@ -247,7 +248,7 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     @model_validator(mode="after")
     def check_frequency_null_for_trajectory_datasets(self) -> Self:
         """Assert data.frequency is null when any trajectory (forecast) dataset is configured."""
-        from anemoi.training.schemas.dataloader import TrajectoryDatasetSchema
+        from anemoi.training.schemas.dataloader import TrajectoryDataReaderSchema
 
         all_splits = [
             self.dataloader.training,
@@ -255,7 +256,7 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
             self.dataloader.test,
         ]
         uses_trajectory = any(
-            isinstance(dataset, TrajectoryDatasetSchema) and dataset.trajectory is not None
+            isinstance(dataset, TrajectoryDataReaderSchema) and dataset.trajectory is not None
             for split in all_splits
             for dataset in split.values()
         )
@@ -278,12 +279,18 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     @model_validator(mode="after")
     def check_bounding_not_used_with_data_extractor_zero(self) -> Self:
         """Check that bounding is not used with zero data extractor."""
+        bounding = self.model.bounding
+        # A plain list of boundings belongs to the default dataset, as in the model.
+        if isinstance(bounding, dict) and "datasets" in bounding:
+            boundings = bounding["datasets"]
+        else:
+            boundings = {DEFAULT_DATASET_NAME: bounding}
         for decoder_name, decoder in self.model.decoders.items():
             mapper = decoder.mapper
             dataset_names = decoder.target_datasets
             if isinstance(mapper, GraphTransformerDecoderSchema) and mapper.initialise_data_extractor_zero:
                 for dataset_name in dataset_names:
-                    if self.model.bounding[dataset_name]:
+                    if boundings.get(dataset_name):
                         error = "bounding_conflict_with_data_extractor_zero"
                         msg = (
                             f"Boundings for dataset '{dataset_name}' cannot be used with zero initialized weights"

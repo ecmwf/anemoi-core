@@ -250,3 +250,5 @@ def test_compute_edge_index_from_coords_sklearn_fallback(monkeypatch):
     fallback = builder.compute_edge_index_from_coords(source_coords, target_coords)
 
     assert _edge_set(primary) == _edge_set(fallback)
+    # Message passing needs int64 indices on both paths.
+    assert primary.dtype == fallback.dtype == torch.int64

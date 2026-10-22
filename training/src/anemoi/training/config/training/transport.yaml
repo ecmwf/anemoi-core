@@ -5,13 +5,14 @@ defaults:
   - optimization: default
   - weight_averaging: null
 
+# base seed of all random number generators. null takes the seed of the checkpoint the run
+# continues from, or draws a new one for a new run
+seed: null
+
 run_id: null
 fork_run_id: null
 transfer_learning: False
 load_weights_only: False
-update_ds_stats_on_ckpt_load:
-  states: False
-  tendencies: True
 
 deterministic: False
 precision: bf16-mixed
@@ -41,6 +42,9 @@ strategy:
   read_group_size: ${dataloader.read_group_size}
   use_local_synchronization: True
   broadcast_buffers: False
+  # must be False when accum_grad_batches > 1
+  static_graph: True
+  find_unused_parameters: False
 
 loss_gradient_scaling: False
 

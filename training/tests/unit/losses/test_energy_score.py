@@ -9,13 +9,13 @@
 
 import pytest
 import torch
-from batch_builders import build_source
 from omegaconf import DictConfig
 from pydantic import TypeAdapter
 from pytest_mock import MockerFixture
 from torch.autograd import gradcheck
 
 from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data.sources.base import Source
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import EnergyScoreLoss
@@ -30,14 +30,13 @@ from anemoi.training.utils.index_space import IndexSpace
 
 def _view(data: torch.Tensor) -> Source:
     """Attach the layout and coordinates used by the score fixtures."""
-    return build_source(
+    return GriddedSource(
         name="data",
         data=data,
         variables=[f"v{i}" for i in range(data.shape[-1])],
         statistics={},
         coordinates=torch.zeros(data.shape[-2], 2, device=data.device),
         layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
-        coordinates_are_static=True,
     )
 
 

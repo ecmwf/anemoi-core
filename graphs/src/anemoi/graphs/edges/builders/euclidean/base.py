@@ -18,18 +18,11 @@ from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
+from anemoi.graphs.utils import PYG_INSTRUCTIONS
 from anemoi.graphs.utils import cuda_device_of
 from anemoi.graphs.utils import is_pyg_lib_available
 
 LOGGER = logging.getLogger(__name__)
-
-
-PYG_LIB_INSTRUCTIONS = r"""The 'pyg_lib' library is not installed.
-Installing 'pyg_lib' can significantly improve performance for graph creation.
-You can install it using:
-    TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
-    pip install pyg-lib -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
-"""
 
 
 class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
@@ -43,6 +36,10 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
     def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
         """Prepare keyword arguments."""
         return {}
+
+    def _use_pyg_lib(self) -> bool:
+        """Whether to compute the edges with pyg-lib rather than sklearn."""
+        return is_pyg_lib_available()
 
     @abstractmethod
     def _compute_edge_index_pyg(
@@ -90,18 +87,22 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         if skip_flip:
             source_coords, target_coords = target_coords, source_coords
 
-        if is_pyg_lib_available():
+        if self._use_pyg_lib():
             # pyg-lib's kernels install no device guard of their own; see cuda_device_of.
             with cuda_device_of(source_coords.device):
                 edge_index = self._compute_edge_index_pyg(source_coords, target_coords, skip_flip=skip_flip, **kwargs)
         else:
-            LOGGER.warning(PYG_LIB_INSTRUCTIONS)
+            if not is_pyg_lib_available():
+                LOGGER.warning(PYG_INSTRUCTIONS)
             adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords, **kwargs)
 
+            # scipy stores the indices as int32; edge indices are int64, as on the pyg-lib path.
             if skip_flip:
-                edge_index = torch.from_numpy(np.stack([adj_matrix.row, adj_matrix.col], axis=0))
+                edge_index = torch.from_numpy(np.stack([adj_matrix.row, adj_matrix.col], axis=0).astype(np.int64))
             else:
-                edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
+                edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0).astype(np.int64))
+            # sklearn runs on the CPU; return the edges on the coordinates' device, as the pyg-lib path does.
+            edge_index = edge_index.to(source_coords.device)
 
         return edge_index
 

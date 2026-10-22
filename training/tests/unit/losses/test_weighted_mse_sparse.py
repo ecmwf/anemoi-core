@@ -4,25 +4,29 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
-from batch_builders import build_source
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources.base import Source
+from anemoi.models.data.sources import TabularSource
 from anemoi.training.losses import WeightedMSELoss
+
+if TYPE_CHECKING:
+    from anemoi.models.data.sources.base import Source
 
 
 def _sparse_view(data: list[torch.Tensor]) -> Source:
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    return build_source(
+    layout = TensorLayout(grid=0, variables=1)
+    return TabularSource(
         name="obs",
         data=data,
         variables=["a", "b"],
         statistics={},
         coordinates=[torch.zeros(sample.shape[0], 2) for sample in data],
         layout=layout,
-        coordinates_are_static=False,
-        boundaries=None,
+        boundaries=[(slice(0, sample.shape[0]),) for sample in data],
+        timedeltas=[torch.zeros(sample.shape[0]) for sample in data],
     )
 
 

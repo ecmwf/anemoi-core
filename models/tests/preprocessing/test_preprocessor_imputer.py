@@ -11,10 +11,11 @@
 import numpy as np
 import pytest
 import torch
-from batch_builders import build_source
 from omegaconf import DictConfig
 
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing.imputer import ConstantImputer
 from anemoi.models.preprocessing.imputer import CopyImputer
 from anemoi.models.preprocessing.imputer import InputImputer
@@ -34,29 +35,28 @@ def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
     points, num_vars = payload.shape
     data = payload.reshape(1, 1, points, num_vars).clone()
     layout = TensorLayout(batch=0, time=1, grid=2, variables=3)
-    return build_source(
+    return GriddedSource(
         name="gridded",
         data=data,
         variables=list(variables),
         statistics=statistics,
-        coordinates=None,
+        coordinates=torch.zeros(points, 2),
         layout=layout,
-        coordinates_are_static=True,
     )
 
 
 def make_tabular_view(payload: torch.Tensor, variables=VARIABLES, statistics=STATISTICS):
     """Wrap a (points, variables) payload in a TabularSource (single tensor)."""
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    return build_source(
+    layout = TensorLayout(grid=0, variables=1)
+    return TabularSource(
         name="tabular",
         data=[payload.clone()],
         variables=list(variables),
         statistics=statistics,
-        coordinates=None,
+        coordinates=[torch.zeros(t.shape[0], 2) for t in [payload]],
         layout=layout,
-        coordinates_are_static=False,
-        boundaries=None,
+        timedeltas=[torch.zeros(t.shape[0]) for t in [payload]],
+        boundaries=[(slice(0, t.shape[0]),) for t in [payload]],
     )
 
 
@@ -184,7 +184,7 @@ def test_transform_with_nan(imputer_fixture, data_fixture, make_view, request) -
     """The imputer replaces NaNs with the configured values."""
     base, expected = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
-    out = imputer.transform(make_view(base))
+    out = imputer(make_view(base))
     assert torch.allclose(view_data_2d(out), expected, equal_nan=True)
 
 
@@ -193,7 +193,7 @@ def test_transform_noop_without_nan(imputer_fixture, data_fixture, make_view, re
     """Transforming NaN-free data leaves it unchanged."""
     _, expected = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
-    out = imputer.transform(make_view(expected))
+    out = imputer(make_view(expected))
     assert torch.allclose(view_data_2d(out), expected, equal_nan=True)
 
 
@@ -202,8 +202,8 @@ def test_inverse_transform_is_noop(imputer_fixture, data_fixture, make_view, req
     """inverse_transform is a no-op: filled values are returned unchanged (NaNs not restored)."""
     base, expected = request.getfixturevalue(data_fixture)
     imputer = request.getfixturevalue(imputer_fixture)
-    transformed = imputer.transform(make_view(base), in_place=False)
-    restored = imputer.inverse_transform(transformed, in_place=False)
+    transformed = imputer(make_view(base), in_place=False)
+    restored = imputer(transformed, in_place=False, inverse=True)
     assert torch.allclose(view_data_2d(restored), expected, equal_nan=True)
     assert not torch.isnan(view_data_2d(restored)).any()
 
@@ -212,7 +212,7 @@ def test_copy_imputer_raises_on_nan_source(copy_imputer, make_view) -> None:
     """CopyImputer must fail if the source variable is NaN where the target needs imputation."""
     base = torch.tensor([[np.nan, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, 7.0, 8.0, 9.0, 10.0, 1.0]])
     with pytest.raises(AssertionError):
-        copy_imputer.transform(make_view(base))
+        copy_imputer(make_view(base))
 
 
 def test_input_imputer_uses_view_statistics(non_default_input_imputer, make_view) -> None:
@@ -224,26 +224,26 @@ def test_input_imputer_uses_view_statistics(non_default_input_imputer, make_view
         "minimum": np.array([1.0, 1.0, 1.0, 42.0, 1.0, 0.0]),
         "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0, 2.0]),
     }
-    out = non_default_input_imputer.transform(make_view(base, statistics=custom_statistics))
+    out = non_default_input_imputer(make_view(base, statistics=custom_statistics))
     # q uses the "minimum" statistic -> 42.0
     assert view_data_2d(out)[0, 3] == pytest.approx(42.0)
 
 
 def test_tabular_multiple_tensors(default_constant_imputer) -> None:
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1)
     base = torch.tensor([[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]])
     expected = torch.tensor([[1.0, 2.0, 3.0, 22.7, 5.0, 1.0], [6.0, 22.7, 8.0, 9.0, 22.7, 1.0]])
-    view = build_source(
+    view = TabularSource(
         name="tabular",
         data=[base.clone(), base.clone()],
         variables=list(VARIABLES),
         statistics=STATISTICS,
-        coordinates=None,
+        coordinates=[torch.zeros(t.shape[0], 2) for t in [base, base]],
         layout=layout,
-        coordinates_are_static=False,
-        boundaries=None,
+        timedeltas=[torch.zeros(t.shape[0]) for t in [base, base]],
+        boundaries=[(slice(0, t.shape[0]),) for t in [base, base]],
     )
-    out = default_constant_imputer.transform(view, in_place=False)
+    out = default_constant_imputer(view, in_place=False)
     assert len(out.data) == 2
     for tensor in out.data:
         assert torch.allclose(tensor, expected, equal_nan=True)

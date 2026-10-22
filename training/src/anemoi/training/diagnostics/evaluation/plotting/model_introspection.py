@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 import numpy as np
+import torch
 
 from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_trainable_modules
 from anemoi.training.diagnostics.evaluation.plotting.graph import get_node_trainable_tensors
@@ -52,15 +53,21 @@ def extract_graph_inputs(pl_module: pl.LightningModule, dataset_name: str) -> di
     """Return kwargs for a ``GraphFeaturePlot`` ``plot_fn``.
 
     Keys: ``dataset_name``, ``node_attributes``, ``node_trainable_tensors``,
-    ``edge_trainable_modules``. ``edge_trainable_modules`` is empty for
-    hierarchical models (they carry no trainable edge parameters).
+    ``edge_trainable_modules``, ``node_coordinates``. ``edge_trainable_modules`` is empty for
+    hierarchical models (they carry no trainable edge parameters). ``node_coordinates`` holds
+    each graph node set's (lat, lon) in radians, with longitudes wrapped to (-pi, pi].
     """
     model = unwrap_anemoi_model(pl_module)
+    graph = model._graph_data
+    node_coordinates = {
+        name: torch.atan2(torch.sin(graph[name].x), torch.cos(graph[name].x)) for name in graph.node_types
+    }
     return {
         "dataset_name": dataset_name,
         "node_attributes": model.node_attributes,
         "node_trainable_tensors": get_node_trainable_tensors(model.node_attributes),
         "edge_trainable_modules": get_edge_trainable_modules(model, dataset_name),
+        "node_coordinates": node_coordinates,
     }
 
 

@@ -6,22 +6,19 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-# How a source's axes collapse into ``(nodes, features)``.
-FLATTEN_PATTERN = "(batch ensemble grid) (time variables)"
 
+from .base import BaseTemplate
 from .base import Source
 from .gridded import GriddedSource
+from .gridded import GriddedTemplate
 from .tabular import TabularSource
+from .tabular import TabularTemplate
 
 __all__ = [
     "GriddedSource",
+    "GriddedTemplate",
     "TabularSource",
+    "TabularTemplate",
     "Source",
+    "BaseTemplate",
 ]
-
-
-def make_source(spec: "SourceSpec", **kwargs) -> Source:
-    if spec.layout.time_in_grid:
-        return TabularSource(spec=spec, **kwargs)
-
-    return GriddedSource(spec=spec, **kwargs)

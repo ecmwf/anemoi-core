@@ -19,16 +19,36 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import StaticGraphProvider
 from anemoi.models.preprocessing import Processors
-from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.training.utils import seeding
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import derive_seed
+from anemoi.training.utils.seeding import get_base_seed
 
 
 class DummyIndex:
     def __init__(self) -> None:
         self.name_to_index: dict[str, int] = {}
+
+
+@pytest.fixture(autouse=True)
+def _reset_base_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the base seed that restoring a checkpoint sets from leaking into other tests."""
+    monkeypatch.setattr(seeding, "_base_seed", None)
+
+
+def _run_metadata(base_seed: int = 7) -> dict:
+    """Seed entries of the run metadata, as AnemoiTrainer builds them before a checkpoint is restored."""
+    seeds = {"base_seed": base_seed, "seed": derive_seed(base_seed, SeedContext.TRAINER)}
+    return {**seeds, "metadata_inference": dict(seeds)}
+
+
+def _resume_hyper_parameters(base_seed: int = 4321) -> dict:
+    """Hyperparameters of a checkpoint trained with the given base seed."""
+    return {"data_indices": {"data": DummyIndex()}, "metadata": {"base_seed": base_seed}}
 
 
 class DummyIndexWithCompare(DummyIndex):
@@ -53,6 +73,14 @@ class DummyProcessor(torch.nn.Module):
         return x
 
 
+class LegacyStepwiseProcessors(torch.nn.Module):
+    """State-dict layout of the removed ``StepwiseProcessors``, as stored in older checkpoints."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._processors = torch.nn.ModuleDict()
+
+
 class DummyModel(torch.nn.Module):
     def __init__(self, lead_times: list[str], offset: float) -> None:
         super().__init__()
@@ -61,14 +89,11 @@ class DummyModel(torch.nn.Module):
             {"data": Processors([["dummy", DummyProcessor(offset + 100)]], inverse=True)},
         )
 
-        pre_tend = StepwiseProcessors(lead_times)
-        post_tend = StepwiseProcessors(lead_times)
+        pre_tend = LegacyStepwiseProcessors()
+        post_tend = LegacyStepwiseProcessors()
         for idx, lead_time in enumerate(lead_times):
-            pre_tend.set(lead_time, Processors([["dummy", DummyProcessor(offset + idx)]]))
-            post_tend.set(
-                lead_time,
-                Processors([["dummy", DummyProcessor(offset + idx + 50)]], inverse=True),
-            )
+            pre_tend._processors[lead_time] = Processors([["dummy", DummyProcessor(offset + idx)]])
+            post_tend._processors[lead_time] = Processors([["dummy", DummyProcessor(offset + idx + 50)]], inverse=True)
 
         self.pre_processors_tendencies = torch.nn.ModuleDict({"data": pre_tend})
         self.post_processors_tendencies = torch.nn.ModuleDict({"data": post_tend})
@@ -103,22 +128,16 @@ class DummyTrainingModule(BaseTrainingModule):
         raise NotImplementedError
 
 
-def _make_update_cfg(states: bool, tendencies: bool) -> SimpleNamespace:
-    return SimpleNamespace(states=states, tendencies=tendencies)
-
-
-def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tendencies: bool) -> DummyTrainingModule:
+def _make_dummy_module(model: torch.nn.Module) -> DummyTrainingModule:
     module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
     module.task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     module.model = model
     module._device = torch.device("cpu")
     module.config = SimpleNamespace(
-        training=SimpleNamespace(
-            load_weights_only=False,
-            update_ds_stats_on_ckpt_load=_make_update_cfg(update_states, update_tendencies),
-        ),
+        training=SimpleNamespace(seed=None, load_weights_only=False),
     )
+    module._set_hparams({"metadata": _run_metadata()})
     return module
 
 
@@ -126,137 +145,12 @@ def _make_minimal_ckpt_config() -> SimpleNamespace:
     return SimpleNamespace(model=SimpleNamespace(processor=SimpleNamespace(num_layers=1, num_chunks=1)))
 
 
-def test_on_load_checkpoint_rebuilds_tendency_processors_for_fewer_steps() -> None:
-    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
-    new_model = DummyModel(["6h", "12h"], offset=1.0)
-
-    checkpoint = {
-        "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
-        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
-    }
-
-    module = _make_dummy_module(new_model, update_states=False, update_tendencies=True)
-
-    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
-
-    state_dict = checkpoint["state_dict"]
-    assert not any(
-        "18h" in key for key in state_dict if key.startswith("model.pre_processors_tendencies.")
-    ), "Extra tendency processors from the checkpoint should be dropped."
-
-    new_state = new_model.state_dict()
-    old_state = old_model.state_dict()
-    for key, value in new_state.items():
-        full_key = f"model.{key}"
-        if full_key.startswith(("model.pre_processors_tendencies.", "model.post_processors_tendencies.")):
-            assert torch.equal(state_dict[full_key], value)
-        elif full_key.startswith(("model.pre_processors.", "model.post_processors.")):
-            assert torch.equal(state_dict[full_key], old_state[key])
-
-
-def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
-    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
-    new_model = DummyModel(["6h", "12h"], offset=1.0)
-
-    checkpoint = {
-        "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
-        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
-    }
-
-    module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
-
-    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
-
-    state_dict = checkpoint["state_dict"]
-    assert any(
-        "18h" in key for key in state_dict if key.startswith("model.pre_processors_tendencies.")
-    ), "Checkpoint tendency processors should be preserved when rebuilding is disabled."
-
-    old_state = old_model.state_dict()
-    for key, value in old_state.items():
-        full_key = f"model.{key}"
-        if full_key.startswith(
-            (
-                "model.pre_processors.",
-                "model.post_processors.",
-                "model.pre_processors_tendencies.",
-                "model.post_processors_tendencies.",
-            ),
-        ):
-            assert torch.equal(state_dict[full_key], value)
-
-
-def test_transfer_learning_loading_updates_processors_when_enabled(
-    tmp_path: Path,
-) -> None:
-    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
-    new_model = DummyModel(["6h", "12h"], offset=1.0)
-
-    old_module = _make_dummy_module(old_model, update_states=False, update_tendencies=False)
-    new_module = _make_dummy_module(new_model, update_states=True, update_tendencies=True)
-    new_state_before = new_module.state_dict()
-
-    checkpoint = {
-        "state_dict": old_module.state_dict(),
-        "hyper_parameters": {
-            "config": _make_minimal_ckpt_config(),
-            "data_indices": {"data": SimpleNamespace(name_to_index={})},
-        },
-    }
-    ckpt_path = tmp_path / "checkpoint.pt"
-    torch.save(checkpoint, ckpt_path)
-
-    transfer_learning_loading(new_module, ckpt_path)
-
-    state_dict = new_module.state_dict()
-    assert torch.equal(
-        state_dict["model.pre_processors.data.processors.dummy.value"],
-        new_state_before["model.pre_processors.data.processors.dummy.value"],
-    )
-    assert torch.equal(
-        state_dict["model.pre_processors_tendencies.data._processors.6h.processors.dummy.value"],
-        new_state_before["model.pre_processors_tendencies.data._processors.6h.processors.dummy.value"],
-    )
-
-
-def test_transfer_learning_loading_preserves_checkpoint_processors_when_disabled(
-    tmp_path: Path,
-) -> None:
-    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
-    new_model = DummyModel(["6h", "12h"], offset=1.0)
-
-    old_module = _make_dummy_module(old_model, update_states=False, update_tendencies=False)
-    new_module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
-
-    checkpoint = {
-        "state_dict": old_module.state_dict(),
-        "hyper_parameters": {
-            "config": _make_minimal_ckpt_config(),
-            "data_indices": {"data": SimpleNamespace(name_to_index={})},
-        },
-    }
-    ckpt_path = tmp_path / "checkpoint.pt"
-    torch.save(checkpoint, ckpt_path)
-
-    transfer_learning_loading(new_module, ckpt_path)
-
-    state_dict = new_module.state_dict()
-    assert torch.equal(
-        state_dict["model.pre_processors.data.processors.dummy.value"],
-        old_module.state_dict()["model.pre_processors.data.processors.dummy.value"],
-    )
-    assert torch.equal(
-        state_dict["model.pre_processors_tendencies.data._processors.6h.processors.dummy.value"],
-        old_module.state_dict()["model.pre_processors_tendencies.data._processors.6h.processors.dummy.value"],
-    )
-
-
 def test_transfer_learning_loading_populates_ckpt_indices_from_dict(tmp_path: Path) -> None:
     old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
     new_model = DummyModel(["6h", "12h"], offset=1.0)
 
-    old_module = _make_dummy_module(old_model, update_states=False, update_tendencies=False)
-    new_module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
+    old_module = _make_dummy_module(old_model)
+    new_module = _make_dummy_module(new_model)
 
     checkpoint = {
         "state_dict": old_module.state_dict(),
@@ -280,7 +174,7 @@ def test_transfer_learning_loading_populates_ckpt_indices_from_dict(tmp_path: Pa
 
 
 def test_transfer_learning_loading_filters_trainable_edge_mismatch_before_migration(tmp_path: Path) -> None:
-    new_module = _make_dummy_module(DummyGraphModel(trainable_size=2), update_states=False, update_tendencies=False)
+    new_module = _make_dummy_module(DummyGraphModel(trainable_size=2))
     trainable_key = "model.graph_provider.trainable.trainable"
     layout_version_key = "model.graph_provider.trainable_layout_version"
     trainable_before = new_module.state_dict()[trainable_key].clone()
@@ -309,8 +203,8 @@ def test_transfer_learning_loading_raises_on_old_checkpoint_data_indices_format(
     old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
     new_model = DummyModel(["6h", "12h"], offset=1.0)
 
-    old_module = _make_dummy_module(old_model, update_states=False, update_tendencies=False)
-    new_module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
+    old_module = _make_dummy_module(old_model)
+    new_module = _make_dummy_module(new_model)
 
     checkpoint = {
         "state_dict": old_module.state_dict(),
@@ -412,6 +306,7 @@ def _make_module_with_forecaster_task(
     rollout_cfg: dict,
     *,
     load_weights_only: bool = False,
+    seed: int | None = None,
 ) -> tuple[DummyTrainingModule, Forecaster]:
     """Build a minimal DummyTrainingModule whose task is a Forecaster."""
     module = DummyTrainingModule.__new__(DummyTrainingModule)
@@ -420,10 +315,11 @@ def _make_module_with_forecaster_task(
     module.task = task
     module.config = SimpleNamespace(  # type: ignore[assignment]
         training=SimpleNamespace(
+            seed=seed,
             load_weights_only=load_weights_only,
-            update_ds_stats_on_ckpt_load=_make_update_cfg(False, False),
         ),
     )
+    module._set_hparams({"metadata": _run_metadata()})
     return module, task
 
 
@@ -447,7 +343,7 @@ def test_on_load_checkpoint_overrides_configured_rollout_start(caplog: pytest.Lo
 
     checkpoint = {
         "task_state": {"rollout": {"step": 4, "last_increased_epoch": 3}},
-        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+        "hyper_parameters": _resume_hyper_parameters(),
         "state_dict": {},
     }
     caplog.set_level(logging.INFO)
@@ -477,7 +373,7 @@ def test_on_load_checkpoint_load_weights_only_starts_rollout_schedule_from_confi
 
     checkpoint = {
         "task_state": {"rollout": {"step": 4, "last_increased_epoch": 3}},
-        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+        "hyper_parameters": _resume_hyper_parameters(),
         "state_dict": {},
     }
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
@@ -521,7 +417,7 @@ def test_on_load_checkpoint_synchronizes_dataloader_time_window() -> None:
 
     checkpoint = {
         "task_state": {"rollout": {"step": 3, "last_increased_epoch": 1}},
-        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+        "hyper_parameters": _resume_hyper_parameters(),
         "state_dict": {},
     }
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
@@ -545,7 +441,7 @@ def test_rollout_step_not_spuriously_incremented_on_resume() -> None:
 
     # --- restore into a fresh module via on_load_checkpoint ---
     resumed_module, resumed_task = _make_module_with_forecaster_task(rollout_cfg)
-    checkpoint["hyper_parameters"] = {"data_indices": {"data": DummyIndex()}}
+    checkpoint["hyper_parameters"] = _resume_hyper_parameters()
     checkpoint["state_dict"] = {}
     BaseTrainingModule.on_load_checkpoint(resumed_module, checkpoint)
 
@@ -571,7 +467,7 @@ def test_rollout_schedule_continues_at_configured_interval_after_resume() -> Non
 
     checkpoint: dict = {}
     BaseTrainingModule.on_save_checkpoint(module, checkpoint)
-    checkpoint["hyper_parameters"] = {"data_indices": {"data": DummyIndex()}}
+    checkpoint["hyper_parameters"] = _resume_hyper_parameters()
     checkpoint["state_dict"] = {}
 
     resumed_module, resumed_task = _make_module_with_forecaster_task(rollout_cfg)
@@ -590,7 +486,7 @@ def test_on_load_checkpoint_without_task_state_leaves_rollout_at_start() -> None
     module, task = _make_module_with_forecaster_task({"start": 2, "epoch_increment": 1, "maximum": 5})
 
     checkpoint = {
-        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+        "hyper_parameters": _resume_hyper_parameters(),
         "state_dict": {},
     }
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
@@ -772,3 +668,110 @@ def test_validate_transfer_learning_units_ignore_units_option() -> None:
 
     # Should not raise because ignore_units=True
     AnemoiTrainer._validate_transfer_learning_units(trainer, model)
+
+
+def _attach_trainer(module: DummyTrainingModule) -> None:
+    """Attach a stand-in for the Trainer that restores the checkpoint in a training run."""
+    module._trainer = SimpleNamespace(datamodule=None)
+
+
+def test_on_load_checkpoint_continues_with_checkpoint_base_seed() -> None:
+    """Without a seed in the config, a resumed run trains with the checkpoint's seed and records it."""
+    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    _attach_trainer(module)
+    checkpoint = {"hyper_parameters": _resume_hyper_parameters(base_seed=4321), "state_dict": {}}
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert get_base_seed() == 4321
+    assert module.hparams["metadata"] == _run_metadata(base_seed=4321)
+
+
+def test_on_load_checkpoint_keeps_configured_base_seed() -> None:
+    """A seed set in the config replaces the checkpoint's seed."""
+    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5}, seed=1234)
+    _attach_trainer(module)
+    checkpoint = {"hyper_parameters": _resume_hyper_parameters(base_seed=4321), "state_dict": {}}
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert get_base_seed() == 1234
+    assert module.hparams["metadata"] == _run_metadata(base_seed=1234)
+
+
+def test_on_load_checkpoint_load_weights_only_keeps_run_base_seed() -> None:
+    """Loading only the weights starts a new run, which keeps its own seed."""
+    seeding.set_base_seed(7)
+    module, _ = _make_module_with_forecaster_task(
+        {"start": 1, "epoch_increment": 1, "maximum": 5},
+        load_weights_only=True,
+    )
+    _attach_trainer(module)
+    checkpoint = {"hyper_parameters": _resume_hyper_parameters(base_seed=4321), "state_dict": {}}
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert get_base_seed() == 7
+    assert module.hparams["metadata"] == _run_metadata(base_seed=7)
+
+
+def test_on_load_checkpoint_without_stored_base_seed_keeps_run_base_seed(caplog: pytest.LogCaptureFixture) -> None:
+    """A checkpoint from an older version without a stored base seed resumes with the run's own seed."""
+    seeding.set_base_seed(7)
+    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    _attach_trainer(module)
+    hyper_parameters = _resume_hyper_parameters()
+    del hyper_parameters["metadata"]["base_seed"]
+    checkpoint = {"hyper_parameters": hyper_parameters, "state_dict": {}}
+
+    with caplog.at_level(logging.WARNING):
+        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert get_base_seed() == 7
+    assert module.hparams["metadata"] == _run_metadata(base_seed=7)
+    assert "stores no base seed" in caplog.text
+
+
+def test_on_load_checkpoint_without_trainer_leaves_base_seed() -> None:
+    """Converting a checkpoint loads it without a Trainer and leaves the seeds alone.
+
+    The config stored in a checkpoint trained before ``training.seed`` existed has no seed entry.
+    """
+    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    del module.config.training.seed
+    checkpoint = {"hyper_parameters": _resume_hyper_parameters(base_seed=4321), "state_dict": {}}
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert seeding._base_seed is None
+    assert module.hparams["metadata"] == _run_metadata()
+
+
+@pytest.mark.parametrize(
+    ("batches_run", "epoch_advances"),
+    [
+        pytest.param(6, True, id="all-batches"),
+        pytest.param(4, False, id="stopped-early"),
+    ],
+)
+def test_on_train_epoch_end_advances_epoch_state_only_after_full_epoch(
+    batches_run: int,
+    epoch_advances: bool,
+) -> None:
+    """Stopping early keeps the rollout and data epoch, so a run resumed inside the epoch uses them."""
+    module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    datamodule = _RecordingDataModule(task)
+    batch_progress = SimpleNamespace(current=SimpleNamespace(ready=batches_run))
+    module._fabric = None
+    module._jit_is_scripting = False
+    module._trainer = SimpleNamespace(
+        datamodule=datamodule,
+        current_epoch=0,
+        num_training_batches=6,
+        fit_loop=SimpleNamespace(epoch_loop=SimpleNamespace(batch_progress=batch_progress)),
+    )
+
+    BaseTrainingModule.on_train_epoch_end(module)
+
+    assert task.rollout.step == (2 if epoch_advances else 1)
+    assert datamodule.epoch == (1 if epoch_advances else 0)

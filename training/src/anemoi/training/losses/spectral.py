@@ -31,6 +31,7 @@ import einops
 import torch
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
@@ -39,6 +40,7 @@ from anemoi.models.layers.spectral_transforms import DCT2D
 from anemoi.models.layers.spectral_transforms import FFT2D
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import ReducedSHT
+from anemoi.models.layers.spectral_transforms import RegularSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
@@ -98,6 +100,7 @@ class SpectralLoss(BaseLoss):
         self,
         transform: Literal[
             "fft2d",
+            "regular_sht",
             "reduced_sht",
             "octahedral_sht",
             "dct2d",
@@ -152,7 +155,7 @@ class SpectralLoss(BaseLoss):
         # subgrid selects a contiguous block of the grid before the transform. This only makes
         # sense for the Cartesian transforms (FFT2D/DCT2D); spherical harmonic transforms need the
         # whole domain to compute the spectra, so reject an explicit subgrid for them.
-        if subgrid is not None and transform in ("reduced_sht", "octahedral_sht"):
+        if subgrid is not None and transform in ("regular_sht", "reduced_sht", "octahedral_sht"):
             msg = (
                 f"subgrid is not supported for the '{transform}' transform: "
                 "spherical harmonic transforms require the full grid"
@@ -173,6 +176,9 @@ class SpectralLoss(BaseLoss):
         elif transform == "dct2d":
             LOGGER.info("Using DCT2D spectral transform in spectral loss.")
             self.transform = DCT2D(**kwargs)
+        elif transform == "regular_sht":
+            LOGGER.info("Using regular-grid SHT spectral transform in spectral loss.")
+            self.transform = RegularSHT(**kwargs)
         elif transform == "reduced_sht":
             # expected additional args: grid
             # optional args: truncation, use_graphed_rfft
@@ -191,14 +197,21 @@ class SpectralLoss(BaseLoss):
     def needs_shard_layout_info(self) -> bool:
         return True
 
-    def _select_subgrid(self, x: torch.Tensor) -> torch.Tensor:
+    @staticmethod
+    def _resolve_dims(layout: TensorLayout, ndim: int, grid_dim: int | None) -> tuple[int, int]:
+        """Return the (grid, variables) tensor axes as ints, taken from ``layout`` unless ``grid_dim`` is given."""
+        grid_dim = layout.axis(TensorDim.GRID, ndim=ndim) if grid_dim is None else grid_dim % ndim
+        return grid_dim, layout.axis(TensorDim.VARIABLE, ndim=ndim)
+
+    def _select_subgrid(self, x: torch.Tensor, grid_dim: int = -2) -> torch.Tensor:
         # Obtain a subgrid by slicing the grid dim as a view, avoiding an explicit index-tensor allocation.
         index = [slice(None)] * x.ndim
-        index[TensorDim.GRID] = self.subgrid
+        index[grid_dim] = self.subgrid
         return x[tuple(index)]
 
     def _select_and_project(self, x: torch.Tensor) -> torch.Tensor:
-        x = self._select_subgrid(x)
+        # the spectral transforms expect (..., grid, variables)
+        x = self._select_subgrid(x, grid_dim=-2)
         LOGGER.debug("Spectral loss: shape after subgrid selection: %s", tuple(x.shape))
         if self.projection_provider is not None:
             projection_matrix = self.projection_provider.get_edges(device=x.device)
@@ -224,6 +237,7 @@ class SpectralLoss(BaseLoss):
         grid_shard_slice: slice | None,
         grid_shard_sizes: ShardSizes,
         grid_dim: int,
+        variable_dim: int = -1,
     ) -> tuple[torch.Tensor, torch.Tensor, list[int] | None]:
         """Move grid-sharded tensors to full-grid, channel-sharded layout."""
         is_grid_sharded = grid_shard_slice is not None
@@ -239,8 +253,8 @@ class SpectralLoss(BaseLoss):
             msg = "Spectral losses require a process group for sharded inputs."
             raise ValueError(msg)
 
-        channel_shard_sizes_pred = get_shard_sizes(pred, TensorDim.VARIABLE, group)
-        channel_shard_sizes_target = get_shard_sizes(target, TensorDim.VARIABLE, group)
+        channel_shard_sizes_pred = get_shard_sizes(pred, variable_dim, group)
+        channel_shard_sizes_target = get_shard_sizes(target, variable_dim, group)
         if channel_shard_sizes_pred != channel_shard_sizes_target:
             msg = (
                 "Prediction and target variable shard sizes must match for spectral losses: "
@@ -250,7 +264,7 @@ class SpectralLoss(BaseLoss):
 
         pred = all_to_all_transpose(
             pred,
-            TensorDim.VARIABLE,
+            variable_dim,
             channel_shard_sizes_pred,
             grid_dim,
             grid_shard_sizes,
@@ -258,7 +272,7 @@ class SpectralLoss(BaseLoss):
         )
         target = all_to_all_transpose(
             target,
-            TensorDim.VARIABLE,
+            variable_dim,
             channel_shard_sizes_target,
             grid_dim,
             grid_shard_sizes,
@@ -273,6 +287,7 @@ class SpectralLoss(BaseLoss):
         group: ProcessGroup | None,
         channel_shard_sizes: list[int] | None,
         spectral_grid_dim: int,
+        variable_dim: int = -1,
     ) -> tuple[torch.Tensor, slice | None, int]:
         """Move a full-mode, channel-sharded loss back to mode-sharded layout and report its global slice.
 
@@ -297,7 +312,7 @@ class SpectralLoss(BaseLoss):
             loss_tensor,
             spectral_grid_dim,
             spectral_shard_sizes,
-            TensorDim.VARIABLE,
+            variable_dim,
             channel_shard_sizes,
             group,
         )
@@ -317,7 +332,8 @@ class SpectralLoss(BaseLoss):
         **kwargs,
     ) -> torch.Tensor:
         """Dispatch to the tensor-level _forward_impl via the source view's layout."""
-        return pred.apply_pairwise(
+        return apply_pairwise(
+            pred,
             target,
             self._forward_impl,
             squash=squash,
@@ -360,7 +376,7 @@ class SpectralAMSELoss(SpectralLoss):
     The physical interpretation of :math:`L` and :math:`M` depends on the
     spectral transform:
 
-    - ``octahedral_sht`` / ``reduced_sht``: :math:`L` is the total wavenumber
+    - ``regular_sht`` / ``octahedral_sht`` / ``reduced_sht``: :math:`L` is the total wavenumber
       and :math:`M` is the zonal wavenumber, consistent with the original paper.
       The sum over :math:`M` gives per-total-wavenumber power spectra.
     - ``fft2d`` / ``dct2d``: currently not supported. These transforms require
@@ -394,8 +410,7 @@ class SpectralAMSELoss(SpectralLoss):
         squash_mode: str = "avg",
         **_kwargs,
     ) -> torch.Tensor:
-        # is_sharded = grid_shard_slice is not None
-        grid_dim = TensorDim.GRID if grid_dim is None else grid_dim
+        grid_dim, variable_dim = self._resolve_dims(layout, pred.ndim, grid_dim)
         pred, target, channel_shard_sizes = self._prepare_for_spectral_transform(
             pred,
             target,
@@ -403,6 +418,7 @@ class SpectralAMSELoss(SpectralLoss):
             grid_shard_slice,
             grid_shard_sizes,
             grid_dim,
+            variable_dim,
         )
         is_sharded = channel_shard_sizes is not None
         group = group if is_sharded else None
@@ -431,6 +447,7 @@ class SpectralAMSELoss(SpectralLoss):
             group,
             channel_shard_sizes,
             grid_dim,
+            variable_dim,
         )
         _assert_spectral_scalers_compatible(self.scaler, global_spectral_size)
         result = self.scale(
@@ -491,8 +508,7 @@ class PowerSpectrumLoss(SpectralLoss):
         squash_mode: Squash_mode = "avg",
         **_kwargs,
     ) -> torch.Tensor:
-        # is_sharded = grid_shard_slice is not None
-        grid_dim = TensorDim.GRID if grid_dim is None else grid_dim
+        grid_dim, variable_dim = self._resolve_dims(layout, pred.ndim, grid_dim)
         pred, target, channel_shard_sizes = self._prepare_for_spectral_transform(
             pred,
             target,
@@ -500,6 +516,7 @@ class PowerSpectrumLoss(SpectralLoss):
             grid_shard_slice,
             grid_shard_sizes,
             grid_dim,
+            variable_dim,
         )
         is_sharded = channel_shard_sizes is not None
         group = group if is_sharded else None
@@ -515,6 +532,7 @@ class PowerSpectrumLoss(SpectralLoss):
             group,
             channel_shard_sizes,
             grid_dim,
+            variable_dim,
         )
         _assert_spectral_scalers_compatible(self.scaler, global_spectral_size)
         result = self.scale(
@@ -545,7 +563,7 @@ class LogSpectralDistance(SpectralLoss):
         squash_mode: Squash_mode = "avg",
         **_kwargs,
     ) -> torch.Tensor:
-        grid_dim = TensorDim.GRID if grid_dim is None else grid_dim
+        grid_dim, variable_dim = self._resolve_dims(layout, pred.ndim, grid_dim)
         pred, target, channel_shard_sizes = self._prepare_for_spectral_transform(
             pred,
             target,
@@ -553,6 +571,7 @@ class LogSpectralDistance(SpectralLoss):
             grid_shard_slice,
             grid_shard_sizes,
             grid_dim,
+            variable_dim,
         )
         is_sharded = channel_shard_sizes is not None
         group = group if is_sharded else None
@@ -570,6 +589,7 @@ class LogSpectralDistance(SpectralLoss):
             group,
             channel_shard_sizes,
             grid_dim,
+            variable_dim,
         )
 
         _assert_spectral_scalers_compatible(self.scaler, global_spectral_size)
@@ -601,7 +621,7 @@ class FourierCorrelationLoss(SpectralLoss):
         squash_mode: Squash_mode = "avg",
         **_kwargs,
     ) -> torch.Tensor:
-        grid_dim = TensorDim.GRID if grid_dim is None else grid_dim
+        grid_dim, variable_dim = self._resolve_dims(layout, pred.ndim, grid_dim)
         pred, target, channel_shard_sizes = self._prepare_for_spectral_transform(
             pred,
             target,
@@ -609,6 +629,7 @@ class FourierCorrelationLoss(SpectralLoss):
             grid_shard_slice,
             grid_shard_sizes,
             grid_dim,
+            variable_dim,
         )
         is_sharded = channel_shard_sizes is not None
         group = group if is_sharded else None
@@ -631,6 +652,7 @@ class FourierCorrelationLoss(SpectralLoss):
             group,
             channel_shard_sizes,
             grid_dim,
+            variable_dim,
         )
         _assert_spectral_scalers_compatible(self.scaler, global_spectral_size)
         result = self.scale(
@@ -670,6 +692,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
     Works with:
       - FFT2D
       - DCT2D
+      - Regular SHT (Gaussian or equiangular latitudes)
       - Reduced SHT
       - Octahedral SHT
     """
@@ -679,6 +702,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         transform: Literal[
             "fft2d",
             "dct2d",
+            "regular_sht",
             "reduced_sht",
             "octahedral_sht",
         ] = "fft2d",
@@ -722,7 +746,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         squash_mode: Squash_mode = "avg",
         **_kwargs,
     ) -> torch.Tensor:
-        grid_dim = TensorDim.GRID if grid_dim is None else grid_dim
+        grid_dim, variable_dim = self._resolve_dims(layout, pred.ndim, grid_dim)
         pred, target, channel_shard_sizes = self._prepare_for_spectral_transform(
             pred,
             target,
@@ -730,6 +754,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
             grid_shard_slice,
             grid_shard_sizes,
             grid_dim,
+            variable_dim,
         )
         is_sharded = channel_shard_sizes is not None
         group = group if is_sharded else None
@@ -755,6 +780,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
             group,
             channel_shard_sizes,
             grid_dim,
+            variable_dim,
         )
 
         _assert_spectral_scalers_compatible(self.scaler, global_spectral_size)

@@ -16,19 +16,17 @@ from collections.abc import Iterable
 from collections.abc import Iterator
 from collections.abc import Sequence
 from dataclasses import dataclass
-from dataclasses import fields
 from typing import Any
+from typing import Self
 
 import torch
+from rich.console import Console
+from rich.tree import Tree
 from torch.distributed import ProcessGroup
-from torch.utils.data import default_collate
 
-from anemoi.models.data.layout import TensorLayout
-from anemoi.models.data.sample import SourceSample
-from anemoi.models.data.sources import make_source
+from anemoi.models.data.sample import BaseSample
+from anemoi.models.data.sources.base import BaseTemplate
 from anemoi.models.data.sources.base import Source
-from anemoi.models.data.spec import SourceSpec
-from anemoi.models.data.spec import make_spec
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,26 +40,15 @@ def _broadcast_to_dict(value, keys: Iterable[str]) -> dict[str, Any]:
     return {key: value for key in keys}
 
 
-def build_source(**kwargs) -> Source:
-    """Build one source, taking the spec's fields flat alongside the payload.
-
-    >>> build_source(name="era5", data=x, variables=["t"], layout=layout)
-    """
-    spec_fields = [f.name for f in fields(SourceSpec)]
-    spec_kwargs = {key: kwargs.pop(key) for key in spec_fields if key in kwargs}
-    spec = make_spec(**spec_kwargs)
-    return make_source(spec=spec, **kwargs)
-
-
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, eq=False, slots=True)
 class Batch:
     """A batch of per-dataset sources.
 
     A batch is one mapping from dataset name to
     :class:`~anemoi.models.data.source.Source`. Each source owns its own
     payload (data, coordinates, timedeltas, shard sizes, boundaries) together with
-    the :class:`~anemoi.models.data.spec.SourceSpec` that describes it, so there is
-    a single place per dataset where that information lives.
+    the metadata that describes it (name, variables, layout, statistics), so there
+    is a single place per dataset where that information lives.
 
     Per-dataset payload shapes are as the sources define them: gridded datasets hold
     one stacked tensor of shape ``(batch, time, ensemble, grid, vars)``; sparse
@@ -77,19 +64,12 @@ class Batch:
 
     sources: dict[str, Source]
 
-    @property
-    def spec(self) -> dict[str, SourceSpec]:
-        """Per-dataset specs for this batch, without any of its data."""
-        return {name: source.spec for name, source in self.sources.items()}
-
-    def empty(self) -> "Batch":
-        """Return the same batch with no data, but coordinates preserved and boundaries preserved."""
-        empty_sources = {name: source.empty() for name, source in self.sources.items()}
-        return Batch(sources=empty_sources)
+    def template(self) -> dict[str, BaseTemplate]:
+        """Return every source without its data, keyed by dataset name (see :meth:`Source.template`)."""
+        return {name: source.template() for name, source in self.sources.items()}
 
     @property
     def batch_size(self) -> int:
-        """Number of samples (batch size) in this batch."""
         batch_sizes = {name: source.batch_size for name, source in self.sources.items()}
         if not batch_sizes:
             msg = "Cannot determine batch size of an empty batch."
@@ -100,6 +80,17 @@ class Batch:
             raise ValueError(msg)
 
         return next(iter(batch_sizes.values()))
+
+    @property
+    def ensemble_size(self) -> int:
+        ensemble_sizes = {name: source.ensemble_size for name, source in self.sources.items()}
+        if not ensemble_sizes:
+            raise ValueError("Cannot determine ensemble size of an empty batch.")
+
+        if len(set(ensemble_sizes.values())) != 1:
+            raise ValueError(f"Inconsistent ensemble sizes across datasets: {ensemble_sizes}")
+
+        return next(iter(ensemble_sizes.values()))
 
     @property
     def dataset_names(self) -> tuple[str, ...]:
@@ -231,7 +222,7 @@ class Batch:
     def with_data(self, new_data: dict[str, torch.Tensor | list[torch.Tensor]]) -> "Batch":
         """Return a new :class:`Batch` with the data payloads replaced.
 
-        Everything else about each source - coordinates, timedeltas, spec - is shared
+        Everything else about each source - coordinates, timedeltas, variables, statistics - is shared
         by reference, which preserves static-coord identity (no extra H2D, no copy).
         Passing a subset of the dataset names narrows the batch to those datasets.
 
@@ -252,28 +243,21 @@ class Batch:
 
         return Batch(sources={name: self.sources[name].clone(data=payload) for name, payload in new_data.items()})
 
-    def apply(self, func: Callable, **kwargs) -> "Batch":
-        """Return a new batch with ``func`` applied to every source's data."""
-        return Batch(sources={name: source.apply_func(func, **kwargs) for name, source in self.sources.items()})
+    def map_data(self, fn: Callable[[torch.Tensor], torch.Tensor]) -> "Batch":
+        """Return a new batch with ``fn`` applied to every dataset's payload (see :meth:`Source.map_data`)."""
+        return Batch(sources={name: source.map_data(fn) for name, source in self.sources.items()})
 
-    def apply_pairwise(self, other: "Batch", func: Callable, **kwargs) -> dict[str, torch.Tensor]:
-        """Apply ``func`` to each ``(self[name], other[name])`` pair.
+    def zip_map_data(self, fn: Callable[..., torch.Tensor], *others: "Batch") -> "Batch":
+        """Return a new batch with ``fn`` applied dataset by dataset to this batch and ``others``.
 
-        The per-dataset counterpart of a loss over two batches::
-
-            batch.apply_pairwise(target, loss_fn)
-
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            One result per dataset name, as returned by
-            :meth:`Source.apply_pairwise`.
+        Every batch in ``others`` must contain this batch's datasets (see :meth:`Source.zip_map_data`).
         """
-        missing = set(self.sources) - set(other.sources)
-        if missing:
-            msg = f"Other batch is missing dataset(s) {sorted(missing)}."
-            raise ValueError(msg)
-        return {name: source.apply_pairwise(other[name], func, **kwargs) for name, source in self.sources.items()}
+        return Batch(
+            sources={
+                name: source.zip_map_data(fn, *(other[name] for other in others))
+                for name, source in self.sources.items()
+            },
+        )
 
     def select(self, **kwargs) -> "Batch":
         """Return a new :class:`Batch` with per-dataset selection applied.
@@ -320,22 +304,13 @@ class Batch:
         return Batch(sources=new_sources)
 
     @staticmethod
-    def collate(samples: list[dict[str, SourceSample]] | dict[str, SourceSample]) -> "Batch":
-        """Collate per-sample :class:`SourceSample` payloads into a :class:`Batch`.
+    def collate(samples: list[dict[str, BaseSample]] | dict[str, BaseSample]) -> Self:
+        """Collate per-sample :class:`BaseSample` payloads into a :class:`Batch`.
 
-        Each sample is a mapping ``{dataset_name: SourceSample}``. The sample itself
-        says how it must be collated, so there is no side channel:
-
-        * **Gridded** (``layout.time_in_grid`` false) - every sample has the same
-          shape, so data and (non-static) coordinates are stacked along a new leading
-          batch axis via :func:`torch.utils.data.default_collate`, and the layout is
-          shifted with :meth:`TensorLayout.with_batch_dim`. A sample whose
-          ``coordinates_are_static`` is set reuses the first sample's coordinate
-          tensor by reference - no stacking, no copy.
-        * **Tabular** (``layout.time_in_grid`` true) - the grid extent varies per
-          sample, so data, coordinates, timedeltas, boundaries and shard sizes each
-          become a list of length ``B`` and the per-sample layout stands, the batch
-          axis being the list itself.
+        Each sample is a mapping ``{dataset_name: BaseSample}``. The class of each
+        dataset's sample decides how it is collated (see
+        :meth:`GriddedSample.collate` and :meth:`TabularSample.collate`),
+        so every sample of a dataset must be of the same class.
         """
         if isinstance(samples, dict):
             samples = [samples]
@@ -350,59 +325,14 @@ class Batch:
         sources: dict[str, Source] = {}
         for name, head in first.items():
             per_sample = [sample[name] for sample in samples]
+            sample_cls = type(head)
+            if not isinstance(head, BaseSample) or any(type(s) is not sample_cls for s in per_sample):
+                kinds = sorted({type(s).__name__ for s in per_sample})
+                msg = f"Dataset {name!r} must be collated from a single BaseSample subclass; got {kinds}."
+                raise TypeError(msg)
 
-            if head.is_tabular:
-                data: Any = [s.data for s in per_sample]
-                coordinates = [s.coordinates for s in per_sample]
-                timedeltas = [s.timedeltas for s in per_sample]
-                boundaries = [s.boundaries for s in per_sample]
-                shard_sizes = [s.shard_sizes for s in per_sample]
-                layout = head.layout
-            else:
-                data = default_collate([s.data for s in per_sample])
-                coordinates = head.coordinates
-                timedeltas = None
-                boundaries = None
-                shard_sizes = head.shard_sizes
-                layout = head.layout.with_batch_dim()
-
-            _validate_layout_against(name, layout, data)
-
-            sources[name] = build_source(
-                name=name,
-                variables=head.variables,
-                layout=layout,
-                statistics=head.statistics,
-                grid_size=head.grid_size,
-                coordinates_are_static=head.coordinates_are_static,
-                data=data,
-                coordinates=coordinates,
-                timedeltas=timedeltas,
-                boundaries=boundaries,
-                shard_sizes=shard_sizes,
-            )
+            sources[name] = sample_cls.collate(name, per_sample)
 
         batch = Batch(sources)
         LOGGER.debug("Batch.collate produced:\n%r", batch)
         return batch
-
-
-def _validate_layout_against(name: str, layout: TensorLayout, data: torch.Tensor | list[torch.Tensor]) -> None:
-    """Check every non-None axis position is a valid axis of the collated tensor.
-
-    Catches reader-side mistakes early instead of letting them surface as cryptic
-    errors deep inside model code.
-    """
-    ref = data[0] if isinstance(data, list) else data
-    ndim = ref.ndim
-    for axis_name in TensorLayout.AXES:
-        pos = getattr(layout, axis_name)
-        if pos is None:
-            continue
-        if not (-ndim <= pos < ndim):
-            msg = (
-                f"TensorLayout for dataset {name!r} declares {axis_name}={pos} but the "
-                f"collated tensor only has {ndim} dimensions (shape={tuple(ref.shape)}). "
-                f"Layout: {layout!r}."
-            )
-            raise ValueError(msg)

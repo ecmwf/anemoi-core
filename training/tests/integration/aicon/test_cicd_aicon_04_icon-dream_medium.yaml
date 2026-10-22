@@ -173,7 +173,7 @@ model:
   encoders:
     "0":
       source_datasets: [ "data" ]
-      dataset_fusing_strategy: "not_supported"
+      dataset_fusing_strategy: "none"
       mapper:
         _target_: anemoi.models.layers.mapper.GNNForwardMapper
         num_channels: ${model.num_channels}
@@ -236,6 +236,7 @@ task:
   validation_rollout: 1
 
 training:
+  seed: 42
   run_id: null
   fork_run_id: null
   transfer_learning: False # activate to perform transfer learning

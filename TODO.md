@@ -3,34 +3,39 @@
 branch: feat/richer-batch
 
 ### General
-- [ ] Support model parallel (where should sharding logic live?)
-- [ ] Updates tests
+
+- [ ] Update unit tests
+- [ ] Update integration
 - [ ] Update docs
-- [ ] Update schemas
-- [ ] Update ensemble
-- [ ] Update diffusion/transport
-- [ ] Update temporal downscaler with forecast data. `compute_anchors` -> usable_indices.py. Instead of 4 sequences properties, a `DatasetSequence` (or similar) class with the `missing`, `length`, ... properties.
+- [ ] Trajectory datasets
+- [ ] Ensemble model: decode through the shared `_decode_rows`, as the deterministic and transport models do.
 
-### Normalizer
-- remap ???
-- date_index ???
-- implement `.clone()`
 
-### Scalers
-- Scalers over time dimension not implemented for `layout.time_in_grid = True` (TabularDatasets)
+### Inference
+- [x] Model interface `predict_step` with gridded datasets IN & OUT.
+- [x] Diffusion model interface `predict_step`: transport models take the interface's inputs, target templates and optional forcings, and sample onto the templates.
+- [ ] Add support for tabular datasets IN (transport `predict_step` already takes them).
+- [ ] Add integration test in anemoi-models
+- [ ] Prediction across GPUs: split the target templates like the inputs (deterministic and transport). Until then prediction is correct on one GPU only.
 
-### Batch
+### Transport
+- [ ] Short training runs after the latest changes: EDM state and tendency on the grid, flow matching, EDM with observations.
+- [ ] Training across 2 GPUs with observations, plus a gradient check against 1 GPU.
+- [ ] Save, reload and run a transport checkpoint through the inference interface.
+- [ ] Decide whether datasets that are only decoded should have their noisy target encoded.
+
+### Metadata
+- [ ] Bump model metadata version
+- [ ] add predic_step() signature to metadata_inference with dtypes and shapes?
+- [x] add data_type (tabular/gridded) to metadata_inferece
+
+### Batch
 - Does it make sense to have the `Batch` or can we have a `dict[str, SourceView]`?
-- [ ] Add more information like `ds.metadata` (as variable_metadata ??), `ds.statistics`, ...
-- [ ] Split current `Batch` into `data` + `spec`. The motivation is to pass the target spec to the `model.forward()`. Another alternative would be implement an `empty()` to return a batch without the data.
-- [ ] We currently have `Batch.apply(func)` as a batch method, we would like something similar to use with 2 batches. Motivation: loss function -> `loss(y, y_pred)`.
-- [ ] Introduce `SingletonSourceView` to avoid `torch.cat` operation with lists of one dataset.
+- [ ] Add date to Sample/Sources/Templates, it should match `time_size`
+- [ ] Clean and refactor all examples
+- [ ] Write new explanation of Samples, Sources and Templates. Improve those connections and assumptions.
 
 ### Evaluation
 - [ ] Update scalers. Use `TensorLayout` from the batch instead of the `TensorDim`.
 - [ ] Validation metrics
 - [ ] Callbacks
-
-### Naming
-- Alternatives to `Batch`.
-- Alternatives to `SourceView`. Alternatives to `flatten_data_2d()`, `flatten_coords_2d()`, ...

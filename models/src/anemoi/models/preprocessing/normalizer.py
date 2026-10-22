@@ -21,6 +21,23 @@ from anemoi.models.preprocessing._caching import cached_parameters
 LOGGER = logging.getLogger(__name__)
 
 
+def _statistics_fingerprint(statistics: dict) -> tuple:
+    """Hashable fingerprint of a statistics mapping, for keying cached normalisation parameters.
+
+    Sources of the same variables can carry different statistics (another reader, or a
+    tendency normalised per lead time), so the variable names alone do not identify the
+    parameters.
+    """
+    return tuple(
+        (key, np.asarray(value.detach().cpu() if torch.is_tensor(value) else value).tobytes())
+        for key, value in sorted(statistics.items())
+    )
+
+
+def _norm_parameters_key(statistics: dict, name_to_index: dict, device: torch.device) -> tuple:
+    return (tuple(name_to_index.keys()), str(device), _statistics_fingerprint(statistics))
+
+
 class InputNormalizer(BasePreprocessor):
     """Normalizes input data with a configurable method.
 
@@ -41,14 +58,14 @@ class InputNormalizer(BasePreprocessor):
 
         self._validate_normalization_inputs()
 
-        # Cache for norm parameters, keyed on (variable_set, device), 2 entries: transform & inverse_transform
+        # Cache for norm parameters, keyed on (variable_set, device, statistics)
         self._param_cache: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
 
-    @cached_parameters(key_fn=lambda statistics, name_to_index, device: (tuple(name_to_index.keys()), str(device)))
+    @cached_parameters(key_fn=_norm_parameters_key)
     def get_norm_parameters(
         self, statistics: dict, name_to_index: dict, device: torch.device
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Compute normalization parameters, cached per (variable_set, device).
+        """Compute normalization parameters, cached per (variable_set, device, statistics).
 
         Parameters
         ----------
@@ -83,6 +100,19 @@ class InputNormalizer(BasePreprocessor):
         for key, value in values.items():
             if value.ndim != 1 or value.shape[0] != len(name_to_index):
                 raise ValueError(f"Statistic {key!r} must contain one value per variable.")
+
+        # Optionally reuse the statistics of one variable for another (e.g. cp, sf -> tp, so that a
+        # FractionBounding of cp by tp is a physical fraction). Every remapped variable takes the
+        # source's original statistics, so the result does not depend on the order of the mapping.
+        stats_index = list(range(len(name_to_index)))
+        for name, source in self.remap.items():
+            if name not in name_to_index:
+                continue
+            if source not in name_to_index:
+                msg = f"Cannot normalise {name!r} with the statistics of {source!r}: {source!r} is not in this view."
+                raise ValueError(msg)
+            stats_index[name_to_index[name]] = name_to_index[source]
+        values = {key: value[stats_index] for key, value in values.items()}
 
         norm_mul = torch.ones(len(name_to_index), dtype=torch.float32, device=device)
         norm_add = torch.zeros(len(name_to_index), dtype=torch.float32, device=device)
@@ -129,7 +159,8 @@ class InputNormalizer(BasePreprocessor):
     def reset_cache(self) -> None:
         """Clear the cached normalization parameters.
 
-        Call this if statistics are updated after initialization (rare).
+        Entries are keyed on the statistics, so new statistics never reuse stale parameters;
+        this only frees the cached tensors.
         """
         self._param_cache.clear()
 

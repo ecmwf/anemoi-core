@@ -24,12 +24,24 @@ from anemoi.models.distributed.graph import shard_tensor
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
+    from anemoi.models.data.flat import FlatSource
     from anemoi.models.data.sources.base import Source
-    from anemoi.models.data_adapter import FlatSource
     from anemoi.models.distributed.shapes import ShardSizes
     from anemoi.models.models.base import BaseGraphModel
 
 LOGGER = logging.getLogger(__name__)
+
+
+def time_steps_per_node(model: "BaseGraphModel", dataset_name: str, n_steps: dict[str, int]) -> int:
+    """Number of time steps carried in each node's features for ``dataset_name``.
+
+    Gridded datasets fold their time steps into the feature axis. Tabular datasets, which are
+    the datasets without a static grid (gridded grids are always static), stack their time
+    windows on the node axis instead, so each node carries a single step.
+    """
+    is_static = getattr(model, "is_dataset_static", {}).get(dataset_name, True)
+    return n_steps[dataset_name] if is_static else 1
+
 
 TARGET_FEATURE_REGISTRY: dict[str, type[DecodingTargetFeature]] = {}
 
@@ -112,12 +124,7 @@ class DecodingTargetFeature(ABC):
         ), f"dataset_name must be provided to {self.__class__.__name__}.tensor() for sharding and validation."
 
         out = self._compute(
-            x_input_data,
-            x_encoded_data,
-            x_target,
-            target_spec,
-            batch_size=batch_size,
-            dataset_name=dataset_name
+            x_input_data, x_encoded_data, x_target, target_spec, batch_size=batch_size, dataset_name=dataset_name
         )
 
         if self.needs_sharding and grid_shard_sizes is not None:
@@ -166,7 +173,9 @@ class InputForcingsFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return self.model.n_step_input * self.model.num_input_channels_forcings[self.datasets_names[0]]
+        dataset_name = self.datasets_names[0]
+        steps = time_steps_per_node(self.model, dataset_name, self.model.n_step_input)
+        return steps * self.model.num_input_channels_forcings[dataset_name]
 
     def _compute(
         self,
@@ -180,8 +189,8 @@ class InputForcingsFeature(DecodingTargetFeature):
         indices = self.model._forcing_input_idx[dataset_name]
         # Layout-agnostic: for gridded views flatten folds time into the feature axis
         # ((batch ensemble grid) (time vars)); for tabular obs time lives on the node axis.
-        x_flat = x_input_data.select(time=slice(0, self.model.n_step_input), variables=indices).flatten()
-        return x_flat.data
+        x_flat = x_input_data.select(time=slice(0, self.model.n_step_input[dataset_name]), variables=indices)
+        return x_flat.flatten().data
 
 
 @register_target_feature("target_forcings")
@@ -202,7 +211,9 @@ class TargetForcingsFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return self.model.n_step_output * self.model.num_input_channels_forcings[self.datasets_names[0]]
+        dataset_name = self.datasets_names[0]
+        steps = time_steps_per_node(self.model, dataset_name, self.model.n_step_output)
+        return steps * self.model.num_input_channels_forcings[dataset_name]
 
     def _compute(
         self,
@@ -238,7 +249,9 @@ class PrognosticsFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return self.model.n_step_input * self.model.num_input_channels_prognostic[self.datasets_names[0]]
+        dataset_name = self.datasets_names[0]
+        steps = time_steps_per_node(self.model, dataset_name, self.model.n_step_input)
+        return steps * self.model.num_input_channels_prognostic[dataset_name]
 
     def _compute(
         self,
@@ -252,7 +265,8 @@ class PrognosticsFeature(DecodingTargetFeature):
         indices = self.model._internal_input_idx[dataset_name]
         # Layout-agnostic: for gridded views flatten folds time into the feature axis
         # ((batch ensemble grid) (time vars)); for tabular obs time lives on the node axis.
-        return flatten(x_input_data.select(time=slice(0, self.model.n_step_input), variables=indices)).data
+        prognostics = x_input_data.select(time=slice(0, self.model.n_step_input[dataset_name]), variables=indices)
+        return prognostics.flatten().data
 
 
 @register_target_feature("trainable_parameters")
@@ -319,7 +333,14 @@ class EncodedDataFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return self.model.input_dim[self.datasets_names[0]]
+        dataset_name = self.datasets_names[0]
+        # An encoder whose mapper updates its source nodes (e.g. GNNForwardMapper) returns the
+        # source latent; other mappers, and projecting encoders, hand over the assembled input.
+        encoder_name = getattr(self.model, "dataset2encoder", {}).get(dataset_name)
+        latent_dim = getattr(self.model, "encoder_src_latent_dim", {}).get(encoder_name)
+        if latent_dim is not None and not self.model._encoder_projects_sources(encoder_name):
+            return latent_dim
+        return self.model.input_dim[dataset_name]
 
     def _compute(
         self,

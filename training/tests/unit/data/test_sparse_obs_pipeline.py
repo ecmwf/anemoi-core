@@ -11,7 +11,7 @@
 
 Covers:
 
-* :meth:`ObservationDataReader.get_sample` — single-round-trip unpack.
+* :meth:`TabularDataReader.get_sample` — single-round-trip unpack.
 * :meth:`Batch.collate` on a mixed gridded + sparse batch.
 * :meth:`Batch.to` on the same mixed batch (CPU-only round-trip; the
   test asserts behaviour, not GPU availability).
@@ -26,12 +26,14 @@ import numpy as np
 import pytest
 import torch
 
+from anemoi.models.data import GriddedSample
+from anemoi.models.data import TabularSample
+from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.batch import TensorLayout
-from anemoi.training.data.data_reader import ObservationDataReader
-from anemoi.training.data.data_reader import create_dataset
+from anemoi.training.data.readers import TabularDataReader
+from anemoi.training.data.readers import create_reader
 from anemoi.training.schemas.dataloader import DatasetConfigSchema
-from anemoi.training.schemas.dataloader import TrajectoryDatasetSchema
+from anemoi.training.schemas.dataloader import NativeDatasetSchema
 
 _DATASET_NAME = "npp_atms"
 
@@ -39,10 +41,10 @@ _DATASET_NAME = "npp_atms"
 def test_make_anemoi_reader(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = _make_obs_payload(v=5)
     dataset = _make_obs_reader(payload).data
-    monkeypatch.setattr("anemoi.training.data.data_reader.open_dataset", lambda _config: dataset)
-    reader = ObservationDataReader(dataset_config={"dataset": "test-observations"})
+    monkeypatch.setattr("anemoi.training.data.readers.base.open_dataset", lambda _config: dataset)
+    reader = TabularDataReader(dataset_config={"dataset": "test-observations"})
 
-    sample = reader.get_sample(slice(0, 2))
+    sample = reader.get_sample(0, slice(0, 2))
 
     dataset.__getitem__.assert_called_once_with(slice(0, 2))
     assert sample.data.shape == (1, 5, 5)
@@ -53,8 +55,8 @@ def test_make_anemoi_reader(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_factory_handles_validated_observation_config(monkeypatch: pytest.MonkeyPatch) -> None:
     dataset = _make_obs_reader(_make_obs_payload()).data
     dataset.dates = np.array(["2020-01-01T00", "2020-01-01T12", "2020-01-02T00"], dtype="datetime64[h]")
-    monkeypatch.setattr("anemoi.training.data.data_reader.open_dataset", lambda _config: dataset)
-    config = TrajectoryDatasetSchema(
+    monkeypatch.setattr("anemoi.training.data.readers.base.open_dataset", lambda _config: dataset)
+    config = NativeDatasetSchema(
         dataset_config=DatasetConfigSchema(
             dataset="test-observations",
             frequency="12h",
@@ -65,9 +67,9 @@ def test_factory_handles_validated_observation_config(monkeypatch: pytest.Monkey
         max_rows_per_window=3,
     )
 
-    reader = create_dataset(config)
+    reader = create_reader(config)
 
-    assert isinstance(reader, ObservationDataReader)
+    assert isinstance(reader, TabularDataReader)
     assert reader.max_rows_per_window == 3
     np.testing.assert_array_equal(reader.dates, dataset.dates[:2])
 
@@ -78,8 +80,8 @@ def test_batch_collate_and_to() -> None:
 
     # ``Batch`` is a per-dataset envelope, so each sample must be wrapped
     # under its dataset name (here "npp_atms") before collation.
-    sample1 = {_DATASET_NAME: reader.get_sample(slice(20, 24))}
-    sample2 = {_DATASET_NAME: reader.get_sample(slice(40, 44))}
+    sample1 = {_DATASET_NAME: reader.get_sample(0, slice(20, 24))}
+    sample2 = {_DATASET_NAME: reader.get_sample(0, slice(40, 44))}
 
     # Collate the samples into a batch.
     batch = Batch.collate([sample1, sample2])
@@ -89,8 +91,8 @@ def test_batch_collate_and_to() -> None:
     moved_batch = batch.to(device)
 
     # Assert that the data is on the correct device.
-    assert moved_batch.data[_DATASET_NAME][0].device.type == device.type
-    assert moved_batch.data[_DATASET_NAME][1].device.type == device.type
+    assert moved_batch[_DATASET_NAME].data[0].device.type == device.type
+    assert moved_batch[_DATASET_NAME].data[1].device.type == device.type
 
 
 # ----------------------------------------------------------------- helpers
@@ -111,14 +113,14 @@ def _make_obs_payload(n: int = 5, v: int = 3, n_times: int = 2) -> SimpleNamespa
     )
 
 
-def _make_obs_reader(payload: SimpleNamespace) -> ObservationDataReader:
+def _make_obs_reader(payload: SimpleNamespace) -> TabularDataReader:
     """Attach controlled dataset output to the real reader."""
     dataset = MagicMock()
     dataset.__getitem__.return_value = payload
     dataset.variables = [f"variable_{i}" for i in range(payload.data.shape[1])]
     dataset.name_to_index = {name: i for i, name in enumerate(dataset.variables)}
     dataset.statistics = {"mean": np.zeros(payload.data.shape[1], dtype=np.float32)}
-    reader = ObservationDataReader.__new__(ObservationDataReader)
+    reader = TabularDataReader.__new__(TabularDataReader)
     reader.data = dataset
     reader.row_filters = {}
     reader.max_rows_per_window = None
@@ -127,26 +129,46 @@ def _make_obs_reader(payload: SimpleNamespace) -> ObservationDataReader:
     return reader
 
 
-def _make_obs_sample(n: int = 5, v: int = 3, n_times: int = 2) -> dict:
-    """Build a sparse sample matching the ObservationDataReader contract."""
-    return _make_obs_reader(_make_obs_payload(n=n, v=v, n_times=n_times)).get_sample(slice(0, n_times))
+def _make_obs_sample(n: int = 5, v: int = 3, n_times: int = 2) -> TabularSample:
+    """Build a sparse sample matching the TabularDataReader contract."""
+    return _make_obs_reader(_make_obs_payload(n=n, v=v, n_times=n_times)).get_sample(0, slice(0, n_times))
 
 
-def _make_grid_sample(grid: int = 4, vars_: int = 2, t: int = 1, e: int = 1) -> dict:
+def test_tabular_reader_measures_timedeltas_from_the_reference_time() -> None:
+    """Each window's timedeltas move from the window's own date onto the sample's reference time."""
+    payload = _make_obs_payload(n=4, v=1, n_times=2)
+    reader = _make_obs_reader(payload)
+    reader.data.dates = np.arange("2024-01-01T00", "2024-01-02T00", np.timedelta64(6, "h"), dtype="datetime64[s]")
+    sample = reader.get_sample(0, [1, 2])
+
+    measured = reader.measure_from_reference(sample, reference=2, positions=[1, 2])
+
+    # Window 0 is read at 06h and window 1 at 12h; the reference time is 12h.
+    expected = torch.as_tensor(payload.timedeltas, dtype=torch.float32) + torch.tensor([-21600.0] * 2 + [0.0] * 2)
+    torch.testing.assert_close(measured.timedeltas, expected)
+
+
+def test_tabular_sample_rejects_offsets_for_a_different_number_of_windows() -> None:
+    sample = _make_obs_sample(n=4, v=1, n_times=2)
+
+    with pytest.raises(ValueError, match="has 2 time windows, but 3 window offsets"):
+        sample.with_time_offsets([0.0, 1.0, 2.0])
+
+
+def _make_grid_sample(grid: int = 4, vars_: int = 2, t: int = 1, e: int = 1) -> GriddedSample:
     coords = torch.stack(
         [torch.linspace(-1.0, 1.0, grid), torch.linspace(0.0, 6.0, grid)],
         dim=-1,
     )
-    return {
-        "data": torch.arange(t * e * grid * vars_, dtype=torch.float32).reshape(t, e, grid, vars_),
-        "coordinates": coords,
-        "metadata": {},
-        "layout": TensorLayout(time=0, ensemble=1, grid=2, variables=3),
-        "variables": [f"v{i}" for i in range(vars_)],
-    }
+    return GriddedSample(
+        data=torch.arange(t * e * grid * vars_, dtype=torch.float32).reshape(t, e, grid, vars_),
+        coordinates=coords,
+        layout=TensorLayout(time=0, ensemble=1, grid=2, variables=3),
+        variables=[f"v{i}" for i in range(vars_)],
+    )
 
 
-# ---------------------------------------------- ObservationDataReader.get_sample
+# ---------------------------------------------- TabularDataReader.get_sample
 
 
 def test_get_sample_returns_unified_contract() -> None:
@@ -154,13 +176,13 @@ def test_get_sample_returns_unified_contract() -> None:
     payload = _make_obs_payload(n=n, v=v, n_times=2)
 
     reader = _make_obs_reader(payload)
-    sample = reader.get_sample(slice(0, 2))
+    sample = reader.get_sample(0, slice(0, 2))
     reader.data.__getitem__.assert_called_once_with(slice(0, 2))
 
-    assert {"data", "layout", "coordinates", "timedeltas", "metadata"}.issubset(sample)
+    assert isinstance(sample, TabularSample)
     # Each sample has one ensemble member and no explicit time axis.
     assert sample.data.shape == (1, n, v)
-    assert sample.layout == TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+    assert sample.layout == TensorLayout(ensemble=0, grid=1, variables=2)
     assert sample.data.dtype == torch.float32
     np.testing.assert_allclose(sample.data[0].numpy(), payload.data)
 
@@ -181,9 +203,9 @@ def test_get_sample_returns_unified_contract() -> None:
     assert sample.timedeltas.shape == (n,)
     torch.testing.assert_close(sample.timedeltas, torch.tensor(payload.timedeltas, dtype=torch.float32))
 
-    # The reader retains both time windows and reports their shard sizes.
+    # The reader retains both time windows; a single reader reads everything, so nothing is sharded.
     assert list(sample.boundaries) == list(payload.boundaries)
-    assert sample.shard_sizes == [[3], [3]]
+    assert sample.shard_sizes is None
     assert all(isinstance(s, slice) for s in sample.boundaries)
 
 
@@ -194,17 +216,17 @@ def test_get_sample_filters_and_limits_each_window() -> None:
     reader.row_filters = {"variable_1": [1, 3]}
     reader.max_rows_per_window = 3
 
-    sample = reader.get_sample(slice(0, 2))
+    sample = reader.get_sample(0, slice(0, 2))
 
-    assert sample.data.shape == (6, 3)
+    assert sample.data.shape == (1, 6, 3)
     assert list(sample.boundaries) == [slice(0, 3), slice(3, 6)]
-    assert sample.shard_sizes == [[3], [3]]
-    assert set(sample.data[:, 1].tolist()) <= {1.0, 3.0}
+    assert sample.shard_sizes is None
+    assert set(sample.data[0, :, 1].tolist()) <= {1.0, 3.0}
 
 
-def test_observation_reader_is_not_static_grid() -> None:
-    reader = ObservationDataReader.__new__(ObservationDataReader)
-    assert reader.is_static_grid is False
+def test_tabular_reader_data_type() -> None:
+    reader = TabularDataReader.__new__(TabularDataReader)
+    assert reader.data_type == "tabular"
 
 
 # ----------------------------------------------- Batch.collate (mixed batch)
@@ -245,10 +267,10 @@ def test_collate_mixed_gridded_and_sparse_batch() -> None:
 
     # Sparse timedeltas are list[(N_i,)] tensors per sample, stored separately
     # from coordinates.
-    assert isinstance(batch.timedeltas["obs"], list)
-    assert len(batch.timedeltas["obs"]) == 2
-    assert batch.timedeltas["obs"][0].shape == (5,)
-    assert batch.timedeltas["obs"][1].shape == (7,)
+    assert isinstance(batch["obs"].timedeltas, list)
+    assert len(batch["obs"].timedeltas) == 2
+    assert batch["obs"].timedeltas[0].shape == (5,)
+    assert batch["obs"].timedeltas[1].shape == (7,)
 
     # Static-grid coordinates reused by reference (single tensor, no batch dim).
     assert batch["grid"].coordinates.shape == (grid, 2)
@@ -262,9 +284,9 @@ def test_collate_mixed_gridded_and_sparse_batch() -> None:
         assert all(isinstance(s, slice) for s in entry)
 
 
-def test_collate_rejects_sparse_dataset_in_static_set() -> None:
-    samples = [{"obs": _make_obs_sample()}, {"obs": _make_obs_sample(n=6)}]
-    with pytest.raises(ValueError, match="sparse"):
+def test_collate_rejects_mixed_sample_kinds_for_one_dataset() -> None:
+    samples = [{"obs": _make_obs_sample()}, {"obs": _make_grid_sample()}]
+    with pytest.raises(TypeError, match="single BaseSample subclass"):
         Batch.collate(samples)
 
 
@@ -297,8 +319,8 @@ def test_to_mixed_batch_moves_tensors_and_preserves_boundaries() -> None:
     # Sparse coordinates and timedeltas moved per-list-entry.
     assert isinstance(moved["obs"].coordinates, list)
     assert all(t.device.type == "cpu" for t in moved["obs"].coordinates)
-    assert isinstance(moved.timedeltas["obs"], list)
-    assert all(t.device.type == "cpu" for t in moved.timedeltas["obs"])
+    assert isinstance(moved["obs"].timedeltas, list)
+    assert all(t.device.type == "cpu" for t in moved["obs"].timedeltas)
 
     # Boundaries are passed through unchanged (identity-preserved).
     assert moved["obs"].boundaries is batch["obs"].boundaries

@@ -426,6 +426,21 @@ class MultiscaleConfigOnTheFlySchema(BaseModel):
         return self
 
 
+def _check_wrapper_ignore_nans(wrapper: str, ignore_nans: bool, inner: BaseModel) -> None:
+    """Reject ``ignore_nans`` on a loss wrapper whose inner loss does not ignore NaNs.
+
+    Mirrors ``BaseLossWrapper``: the wrapper's effective ``ignore_nans`` is its own value or-ed with
+    the inner loss's, and a wrapper that ignores NaNs around an inner loss that does not is an error.
+    The flag is not passed down, so set it on the inner loss.
+    """
+    if ignore_nans and not inner.ignore_nans:
+        msg = (
+            f"{wrapper} sets 'ignore_nans: true' but its inner loss does not. "
+            "Set 'ignore_nans: true' on the inner loss too (the wrapper does not pass it down)."
+        )
+        raise ValueError(msg)
+
+
 class TimeAggregateLossWrapperSchema(BaseModel):
     """Schema for TimeAggregateLossWrapper used inside CombinedLoss."""
 
@@ -436,6 +451,8 @@ class TimeAggregateLossWrapperSchema(BaseModel):
     "Inner loss function applied to each time-aggregated output."
     scalers: list[str] | None = None
     "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
+    ignore_nans: bool = False
+    "Allow nans in the loss. Or-ed with ``loss_fn.ignore_nans``; ``true`` requires it on ``loss_fn`` too."
 
     @field_validator("loss_fn", mode="before")
     @classmethod
@@ -455,6 +472,11 @@ class TimeAggregateLossWrapperSchema(BaseModel):
                     v["scalers"] = []
         return v
 
+    @model_validator(mode="after")
+    def check_ignore_nans_matches_inner(self) -> Self:
+        _check_wrapper_ignore_nans("TimeAggregateLossWrapper", self.ignore_nans, self.loss_fn)
+        return self
+
 
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
@@ -471,6 +493,8 @@ class MultiScaleLossSchema(BaseModel):
     weights: list[float]
     multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
     sparse_projector_num_chunks: PositiveInt = 1
+    ignore_nans: bool = False
+    "Allow nans in the loss. Or-ed with ``per_scale_loss.ignore_nans``; ``true`` requires it there too."
     # Deprecated: pass inside multiscale_config instead.
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
@@ -492,6 +516,11 @@ class MultiScaleLossSchema(BaseModel):
                 with open_dict(v):
                     v["scalers"] = []
         return v
+
+    @model_validator(mode="after")
+    def check_ignore_nans_matches_inner(self) -> Self:
+        _check_wrapper_ignore_nans("MultiscaleLossWrapper", self.ignore_nans, self.per_scale_loss)
+        return self
 
     @model_validator(mode="after")
     def check_no_deprecated_mixed_with_on_the_fly(self) -> Self:
@@ -573,9 +602,9 @@ class SpectralProjectionConfigSchema(BaseModel):
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
-    transform: Literal["fft2d", "dct2d", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
+    transform: Literal["fft2d", "dct2d", "regular_sht", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
-    subgrid: tuple[int, int | None] | str | None = None
+    subgrid: tuple[int, int | None] | Literal["output_mask"] | None = None
     """Optional slice or string to select a subgrid before the transform."""
     projection_config: SpectralProjectionConfigSchema | None = None
     """Optional sparse projection applied to the data before the spectral transform."""
@@ -584,7 +613,7 @@ class SpectralLossSchema(BaseLossSchema):
 
     @model_validator(mode="after")
     def check_subgrid_transform(self) -> Self:
-        if self.subgrid is not None and self.transform in ("reduced_sht", "octahedral_sht"):
+        if self.subgrid is not None and self.transform in ("regular_sht", "reduced_sht", "octahedral_sht"):
             msg = (
                 f"subgrid is not supported for the '{self.transform}' transform: "
                 "spherical harmonic transforms require the full grid"
@@ -738,6 +767,12 @@ class BaseDDPStrategySchema(BaseModel):
     "Use synchronization local to the group when creating process groups."
     broadcast_buffers: bool = Field(default=False, example=False)
     "Broadcast model buffers at the start of each iteration. Defaults to False."
+    static_graph: bool = Field(default=True, example=True)
+    """Tell DDP that the same parameters are trained in every step. Must be false when
+    training.accum_grad_batches > 1."""
+    find_unused_parameters: bool = Field(default=False, example=False)
+    """Let DDP check every step for parameters that receive no gradient. Together with static_graph: false,
+    DDP sums the gradients in the same groups in every step, so a resumed run continues bitwise identically."""
 
 
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
@@ -752,18 +787,13 @@ StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema | Si
 VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]] | None
 
 
-class UpdateDsStatsOnCkptLoadSchema(BaseModel):
-    """Configuration for updating processor statistics on checkpoint load."""
-
-    states: bool = Field(default=False, example=False)
-    "Rebuild state pre/post-processing statistics from the current dataset."
-    tendencies: bool = Field(default=True, example=True)
-    "Rebuild tendency pre/post-processing statistics from the current dataset."
-
-
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
+    seed: NonNegativeInt | None = Field(default=None, example=None)
+    """Base seed of all random number generators. If null, a run continuing from a checkpoint takes the
+    checkpoint's seed and a new run draws one. A seed that differs from the checkpoint's changes the rest of the
+    interrupted epoch."""
     run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
     fork_run_id: str | None = Field(example=None)
@@ -776,8 +806,6 @@ class BaseTrainingSchema(BaseModel):
         default_factory=CheckVariablesCompatibilitySchema,
     )
     "Options forwarded to ``Variable.check_compatibility`` when checking checkpoint vs. current dataset (fine-tuning)."
-    update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
-    "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
     submodules_to_freeze: list[str] = Field(example=["processor"])
     "List of submodules to freeze during transfer learning."
     deterministic: bool = Field(default=False)
@@ -801,7 +829,7 @@ class BaseTrainingSchema(BaseModel):
     weight_averaging: WeightAveragingSchema | None = Field(default=None)
     "Config for weight averaging (SWA or EMA). Set to null to disable."
     loss_gradient_scaling: bool = False
-    "Dynamic rescaling of the loss gradient. Not yet tested."
+    "Dynamic rescaling of the loss gradient. Temporarily unavailable: must be false."
     scalers: DatasetDict[dict[str, ScalerSchema]]
     "Scalers to use in the computation of the loss and validation scores."
     validation_metrics: DatasetDict[dict[str, LossSchemas] | None]
@@ -818,6 +846,14 @@ class BaseTrainingSchema(BaseModel):
     "List of metrics"
     ensemble_size_per_device: PositiveInt = 1
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
+
+    @model_validator(mode="after")
+    def check_static_graph_without_accumulation(self) -> Self:
+        """DDP's static graph does not support accumulating gradients over several batches."""
+        if self.accum_grad_batches > 1 and getattr(self.strategy, "static_graph", False):
+            error_msg = "training.strategy.static_graph must be false when training.accum_grad_batches > 1."
+            raise ValueError(error_msg)
+        return self
 
 
 class SingleTrainingMethodSchema(BaseModel):

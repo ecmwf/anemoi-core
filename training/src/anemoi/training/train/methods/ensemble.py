@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data.layout import TensorLayout
+    from anemoi.models.data.sources import BaseTemplate
     from anemoi.models.data.sources import Source
     from anemoi.training.train.step_output import TrainingStepOutput
     from anemoi.training.train.training_task.base import BaseTask
@@ -45,7 +46,7 @@ class EnsembleTraining(BaseTrainingModule):
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict,
-        data_readers: dict,
+        data_types: dict[str, str],
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -61,8 +62,8 @@ class EnsembleTraining(BaseTrainingModule):
             Statistics of the training data
         data_indices : dict
             Indices of the training data,
-        data_readers : dict
-            Per-dataset readers; the model interface derives ``is_dataset_static`` from them.
+        data_types : dict[str, str]
+            Kind of data of each dataset (``"gridded"``, ``"tabular"``).
         metadata : dict
             Provenance information
         """
@@ -72,7 +73,7 @@ class EnsembleTraining(BaseTrainingModule):
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
-            data_readers=data_readers,
+            data_types=data_types,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
@@ -178,6 +179,18 @@ class EnsembleTraining(BaseTrainingModule):
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, shapes)
         return batch.with_data(new_data)
 
+    def _member_template(self, templates: dict[str, BaseTemplate]) -> dict[str, BaseTemplate]:
+        """What the model predicts for the tiled members, given the task's target ``templates``.
+
+        The decoder reads its target node count from the template, so it must describe as many
+        members as the tiled input. Only the member count changes: the targets themselves keep
+        their single member for the loss, and nothing is copied.
+        """
+        return {
+            name: template.with_ensemble_size(template.ensemble_size * self.nens_per_device)
+            for name, template in templates.items()
+        }
+
     def _tile_members(self, data: torch.Tensor, layout: TensorLayout) -> torch.Tensor:
         """Repeat the data nens_per_device times along its ensemble axis (identified from the layout)."""
         repeats = [1] * data.ndim
@@ -195,7 +208,8 @@ class EnsembleTraining(BaseTrainingModule):
         target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], Source]:
-        ensemble_axis = y_pred.layout.axis(TensorDim.ENSEMBLE_DIM, ndim=y_pred.ndim)
+        # a Source has no ndim; the layout's rank is the per-tensor rank (per sample for tabular sources)
+        ensemble_axis = y_pred.layout.axis(TensorDim.ENSEMBLE_DIM, ndim=y_pred.layout.ndim)
 
         def gather_members(tensor: torch.Tensor) -> torch.Tensor:
             return gather_tensor(
@@ -291,19 +305,25 @@ class EnsembleTraining(BaseTrainingModule):
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for step_index, task_step_kwargs in enumerate(task_steps):
-            # get_targets returns (targets, target_forcings): the full target slice used for the
-            # loss, and the output-time forcing variables that condition the decoder.
-            raw_targets, target_forcings = self.task.get_targets(
+            # get_targets returns (targets, target_template, target_forcings): the full target slice
+            # used for the loss, what the model predicts at the target nodes, and the output-time
+            # forcing variables that condition the decoder.
+            raw_targets, target_template, target_forcings = self.task.get_targets(
                 batch,
                 data_indices=self.data_indices,
                 **task_step_kwargs,
             )
             y = self.preprocess_targets(raw_targets)
-            # the target forcings are consumed by the decoder, so they are model *inputs* and
-            # must be preprocessed accordingly (e.g., with NaN masking)
-            target_forcings = self.preprocess_inputs(target_forcings)
+            # the target forcings are consumed by the decoder, so they are model inputs and
+            # must be preprocessed accordingly (e.g., with NaN masking) and tiled like x
+            target_forcings = self._expand_ens_dim(self.preprocess_inputs(target_forcings))
 
-            y_pred = self(x, target=target_forcings, **task_step_kwargs)
+            y_pred = self(
+                x,
+                target_forcings=target_forcings,
+                target_template=self._member_template(target_template),
+                **task_step_kwargs,
+            )
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
@@ -325,6 +345,8 @@ class EnsembleTraining(BaseTrainingModule):
                     **task_step_kwargs,
                     data_indices=self.data_indices,
                     output_mask=self.output_mask,
+                    # The LAM boundary refill indexes the local grid shard.
+                    grid_shard_slice={name: self._grid_shard_slice(view) for name, view in x.items()},
                 )
 
             step_losses.append(loss_next)
