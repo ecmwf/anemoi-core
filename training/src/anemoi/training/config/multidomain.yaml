@@ -1,13 +1,17 @@
 defaults:
-- data: multidomain
-- dataloader: multidomain
+- data: zarr
+- dataloader: native_grid
 - diagnostics: evaluation
 - system: example
 - graph: multidomain
-- model: graphtransformer_multidomain
+- model: graphtransformer
 - task: forecaster
-- training: multidomain
+- training: stretched
 - _self_
+
+# Two-domain (multidomain) setup: the single-domain `stretched` configs describe the
+# first domain `data`; everything below adds the second domain `datb`
+# (and overrides the settings that differ for multidomain training).
 
 config_validation: True
 
@@ -18,12 +22,18 @@ system:
 
 diagnostics:
   plot:
-    datasets_to_plot: [sg_1, sg_2]
+    datasets_to_plot: [data, datb]
+
+data:
+  datasets:
+    datb: ${data.datasets.data}
 
 dataloader:
+  loading_policy:
+    _target_: anemoi.training.data.loading.CrossDatasetLoadingPolicy
   training:
     datasets:
-      sg_1:
+      data:
         dataset_config:
           dataset:
             cutout:
@@ -33,7 +43,7 @@ dataloader:
             - dataset: ${system.input.forcing_dataset}
             adjust: all
             min_distance_km: 0
-      sg_2:
+      datb:
         dataset_config:
           dataset:
             cutout:
@@ -43,5 +53,78 @@ dataloader:
             - dataset: ${system.input.forcing_dataset}
             adjust: all
             min_distance_km: 0
-        start: ${dataloader.training.datasets.sg_1.start}
-        end: ${dataloader.training.datasets.sg_1.end}
+          frequency: ${data.frequency}
+        start: ${dataloader.training.datasets.data.start}
+        end: ${dataloader.training.datasets.data.end}
+  validation:
+    datasets:
+      data:
+        dataset_config:
+          dataset: ${dataloader.training.datasets.data.dataset_config.dataset}
+      datb:
+        dataset_config:
+          dataset: ${dataloader.training.datasets.datb.dataset_config.dataset}
+          frequency: ${data.frequency}
+        start: ${dataloader.validation.datasets.data.start}
+        end: ${dataloader.validation.datasets.data.end}
+  test:
+    datasets:
+      data:
+        dataset_config:
+          dataset: ${dataloader.training.datasets.data.dataset_config.dataset}
+      datb:
+        dataset_config:
+          dataset: ${dataloader.training.datasets.datb.dataset_config.dataset}
+          frequency: ${data.frequency}
+        start: ${dataloader.test.datasets.data.start}
+        end: ${dataloader.test.datasets.data.end}
+
+model:
+  model:
+    hidden_nodes_name:
+      data: hidden
+      datb: hidden_b
+  encoders:
+    "0":
+      source_datasets: [data, datb]
+  decoders:
+    "0":
+      target_datasets: [data, datb]
+  residual:
+    datasets:
+      datb: ${model.residual.datasets.data}
+  output_mask:
+    datasets:
+      datb: ${model.output_mask.datasets.data}
+  node_trainable_parameters:
+    data: 0
+    hidden: 0
+    datb: 0
+    hidden_b: 0
+  edge_trainable_parameters:
+    data2hidden: 0
+    hidden2hidden: 0
+    hidden2data: 0
+  bounding:
+    datasets:
+      datb: ${model.bounding.datasets.data}
+
+training:
+  scalers:
+    datasets:
+      data:
+        node_weights:
+          weight_frac_of_total: 0.25
+      datb: ${training.scalers.datasets.data}
+  training_loss:
+    datasets:
+      datb: ${training.training_loss.datasets.data}
+  validation_metrics:
+    datasets:
+      datb: ${training.validation_metrics.datasets.data}
+  variable_groups:
+    datasets:
+      datb: ${training.variable_groups.datasets.data}
+  metrics:
+    datasets:
+      datb: ${training.metrics.datasets.data}
