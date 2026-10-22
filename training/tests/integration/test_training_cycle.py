@@ -23,6 +23,7 @@ from omegaconf import open_dict
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.train.evaluate import AnemoiEvaluator
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
@@ -132,8 +133,6 @@ def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None
     else:
         config = OmegaConf.to_object(config)
         config = UnvalidatedBaseSchema(**DictConfig(config))
-
-    from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
     config = convert_to_omegaconf(config)
 
@@ -245,6 +244,16 @@ def test_training_cycle_multidomain(
     assert trainer.model.trainer.global_step == 4
 
     assert_keys_exist(trainer.metadata, partial_metadata_schema)
+
+
+def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, list[str]]) -> None:
+    cfg, _ = multidomain_config
+    cfg = convert_to_omegaconf(BaseSchema(**cfg))
+    assert cfg.dataloader.loading_policy._target_ == "anemoi.training.data.loading.CrossDatasetLoadingPolicy"
+    assert cfg.model.model.hidden_nodes_name == {
+        "data": "hidden",
+        "datb": "hidden_b",
+    }
 
 
 @skip_if_offline
