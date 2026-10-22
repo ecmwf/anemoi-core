@@ -7,9 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Gate sources-g4: S3Source.
-
-CANONICAL GATE TEST — DO NOT MODIFY.
+"""Tests for S3Source.
 
 S3Source downloads via ``anemoi.utils.remote.s3.download_file`` (obstore-backed).
 boto3 is not a dependency.
@@ -24,8 +22,10 @@ from unittest.mock import patch
 
 import pytest
 import torch
+from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.base import CheckpointContext
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 from anemoi.training.checkpoint.exceptions import CheckpointSourceError
@@ -52,14 +52,96 @@ def test_s3_source_does_not_import_anemoi_utils_at_module_level() -> None:
 
     saved = sys.modules.pop("anemoi.utils.remote.s3", None)
     try:
-        importlib.reload(importlib.import_module("anemoi.training.checkpoint.sources.s3"))
+        s3_module = importlib.reload(importlib.import_module("anemoi.training.checkpoint.sources.s3"))
+        assert not hasattr(s3_module, "download_file")
+        # Construction must not need the optional dependency either.
+        assert s3_module.S3Source(url="s3://bucket/key.ckpt").url == "s3://bucket/key.ckpt"
     finally:
         if saved is not None:
             sys.modules["anemoi.utils.remote.s3"] = saved
 
 
-@pytest.mark.asyncio
-async def test_s3_source_calls_anemoi_utils_download_file() -> None:
+def _recording_download(downloaded: list[str]) -> ModuleType:
+    """Stub ``anemoi.utils.remote.s3`` that records each URL and writes an empty checkpoint."""
+
+    def fake_download(url: str, target: str, *_args: object, **_kwargs: object) -> None:
+        downloaded.append(url)
+        torch.save({"state_dict": {}}, target)
+
+    return _fake_anemoi_utils_s3(fake_download)
+
+
+@pytest.mark.parametrize(
+    ("url", "match"),
+    [
+        ("s3a://bucket/model.ckpt", "scheme"),
+        ("s3:///model.ckpt", "bucket"),
+        ("s3://bucket/", "key"),
+    ],
+    ids=["wrong-scheme", "no-bucket", "no-key"],
+)
+def test_s3_source_rejects_a_malformed_url_before_the_download(url: str, match: str) -> None:
+    """A malformed URL raises CheckpointConfigError. The download does not start."""
+    downloaded: list[str] = []
+
+    with (
+        patch.dict(sys.modules, {"anemoi.utils.remote.s3": _recording_download(downloaded)}),
+        pytest.raises(CheckpointConfigError, match=match),
+    ):
+        S3Source(url=url).process(CheckpointContext())
+
+    assert downloaded == []
+
+
+@pytest.mark.parametrize(
+    ("source_url", "config", "expected"),
+    [
+        ("s3://constructor/model.ckpt", {"url": "s3://config/model.ckpt"}, "s3://constructor/model.ckpt"),
+        (None, {"url": "s3://config/model.ckpt"}, "s3://config/model.ckpt"),
+        (None, OmegaConf.create({"url": "s3://config/model.ckpt"}), "s3://config/model.ckpt"),
+    ],
+    ids=["constructor-wins", "dict-config", "omegaconf-config"],
+)
+def test_s3_source_resolves_the_url(source_url: str | None, config: object, expected: str) -> None:
+    """The constructor URL has priority. If it is not set, the source reads ``url`` from the config."""
+    downloaded: list[str] = []
+
+    with patch.dict(sys.modules, {"anemoi.utils.remote.s3": _recording_download(downloaded)}):
+        result = S3Source(url=source_url).process(CheckpointContext(config=config))
+
+    assert downloaded == [expected]
+    assert result.metadata["source_url"] == expected
+    assert result.metadata["s3_bucket"] == expected.split("/")[2]
+    assert result.metadata["s3_key"] == "model.ckpt"
+
+
+def test_s3_source_without_a_url_raises_config_error() -> None:
+    downloaded: list[str] = []
+
+    with (
+        patch.dict(sys.modules, {"anemoi.utils.remote.s3": _recording_download(downloaded)}),
+        pytest.raises(CheckpointConfigError, match="URL"),
+    ):
+        S3Source().process(CheckpointContext())
+
+    assert downloaded == []
+
+
+@pytest.mark.parametrize(
+    ("location", "expected"),
+    [
+        ("s3://bucket/model.ckpt", True),
+        (Path("/models/model.ckpt"), False),
+        ("http://example.com/model.ckpt", False),
+        ("/models/model.ckpt", False),
+    ],
+    ids=["s3-url", "path-object", "http-url", "local-path"],
+)
+def test_s3_source_supports_only_s3_urls(location: str | Path, expected: bool) -> None:
+    assert S3Source.supports(location) is expected
+
+
+def test_s3_source_calls_anemoi_utils_download_file() -> None:
     """S3Source forwards the URL to anemoi.utils.remote.s3.download_file."""
     source = S3Source(url="s3://my-bucket/checkpoints/model.ckpt")
     context = CheckpointContext()
@@ -73,7 +155,7 @@ async def test_s3_source_calls_anemoi_utils_download_file() -> None:
 
     fake_module = _fake_anemoi_utils_s3(fake_download)
     with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}):
-        result = await source.process(context)
+        result = source.process(context)
 
     assert captured["url"] == "s3://my-bucket/checkpoints/model.ckpt"
     assert result.checkpoint_data == {"state_dict": {}}
@@ -82,8 +164,7 @@ async def test_s3_source_calls_anemoi_utils_download_file() -> None:
     assert result.metadata["s3_key"] == "checkpoints/model.ckpt"
 
 
-@pytest.mark.asyncio
-async def test_s3_source_raises_not_found_for_missing_object() -> None:
+def test_s3_source_raises_not_found_for_missing_object() -> None:
     """FileNotFoundError from anemoi-utils -> CheckpointNotFoundError."""
     source = S3Source(url="s3://bucket/missing.ckpt")
     context = CheckpointContext()
@@ -94,11 +175,10 @@ async def test_s3_source_raises_not_found_for_missing_object() -> None:
 
     fake_module = _fake_anemoi_utils_s3(fake_download)
     with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointNotFoundError):
-        await source.process(context)
+        source.process(context)
 
 
-@pytest.mark.asyncio
-async def test_s3_source_raises_source_error_for_transport_failure() -> None:
+def test_s3_source_raises_source_error_for_transport_failure() -> None:
     """OSError/RuntimeError from anemoi-utils -> CheckpointSourceError."""
     source = S3Source(url="s3://bucket/key.ckpt")
     context = CheckpointContext()
@@ -109,11 +189,10 @@ async def test_s3_source_raises_source_error_for_transport_failure() -> None:
 
     fake_module = _fake_anemoi_utils_s3(fake_download)
     with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointSourceError):
-        await source.process(context)
+        source.process(context)
 
 
-@pytest.mark.asyncio
-async def test_s3_source_raises_when_obstore_missing() -> None:
+def test_s3_source_raises_when_obstore_missing() -> None:
     """ImportError raised by anemoi-utils download_file (obstore missing) -> CheckpointSourceError."""
     source = S3Source(url="s3://bucket/key.ckpt")
     context = CheckpointContext()
@@ -125,28 +204,85 @@ async def test_s3_source_raises_when_obstore_missing() -> None:
     fake_module = _fake_anemoi_utils_s3(fake_download)
     patched = patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module})
     with patched, pytest.raises(CheckpointSourceError) as excinfo:
-        await source.process(context)
+        source.process(context)
     assert "obstore" in str(excinfo.value)
     assert "anemoi-utils[s3]" in str(excinfo.value)
 
 
-@pytest.mark.asyncio
-async def test_s3_source_cleans_up_temp_file_on_failure() -> None:
-    """Temp file must be cleaned up even if loading fails."""
+def test_s3_source_deletes_download_on_load_failure() -> None:
+    """The download is deleted even when loading it fails."""
     source = S3Source(url="s3://bucket/corrupt.ckpt")
     context = CheckpointContext()
+    downloaded: list[Path] = []
 
     def fake_download(_url: str, target: str, *_args: object, **_kwargs: object) -> None:
+        downloaded.append(Path(target))
         Path(target).write_text("not a valid checkpoint")
 
     fake_module = _fake_anemoi_utils_s3(fake_download)
-    with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointLoadError):
-        await source.process(context)
+    try:
+        with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointLoadError):
+            source.process(context)
+
+        assert len(downloaded) == 1
+        assert not downloaded[0].exists()
+        assert context.checkpoint_path is None
+    finally:
+        for path in downloaded:
+            path.unlink(missing_ok=True)
+
+
+def test_s3_source_deletes_partial_download_on_download_failure() -> None:
+    """A download that fails part-way leaves no file behind."""
+    source = S3Source(url="s3://bucket/model.ckpt")
+    context = CheckpointContext()
+    downloaded: list[Path] = []
+
+    def fake_download(_url: str, target: str, *_args: object, **_kwargs: object) -> None:
+        downloaded.append(Path(target))
+        Path(target).write_bytes(b"partial")
+        msg = "connection reset"
+        raise OSError(msg)
+
+    fake_module = _fake_anemoi_utils_s3(fake_download)
+    try:
+        with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointSourceError):
+            source.process(context)
+
+        assert len(downloaded) == 1
+        assert not downloaded[0].exists()
+        assert context.checkpoint_data is None
+    finally:
+        for path in downloaded:
+            path.unlink(missing_ok=True)
+
+
+def test_s3_source_deletes_download_after_loading() -> None:
+    """A successful load populates the context, then deletes the download."""
+    source = S3Source(url="s3://bucket/model.ckpt")
+    context = CheckpointContext()
+    downloaded: list[Path] = []
+
+    def fake_download(_url: str, target: str, *_args: object, **_kwargs: object) -> None:
+        downloaded.append(Path(target))
+        torch.save({"state_dict": {}}, target)
+
+    fake_module = _fake_anemoi_utils_s3(fake_download)
+    try:
+        with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}):
+            result = source.process(context)
+
+        assert result.checkpoint_data == {"state_dict": {}}
+        assert len(downloaded) == 1
+        assert not downloaded[0].exists()
+        assert result.checkpoint_path is None
+    finally:
+        for path in downloaded:
+            path.unlink(missing_ok=True)
 
 
 @pytest.mark.network
-@pytest.mark.asyncio
-async def test_s3_source_downloads_from_real_public_bucket(
+def test_s3_source_downloads_from_real_public_bucket(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -178,6 +314,6 @@ async def test_s3_source_downloads_from_real_public_bucket(
     # download path, not the torch.load step. Calling _download_from_s3
     # directly tests the anemoi-utils wiring without needing a valid ckpt.
     target = tmp_path / "ghcn.csv"
-    await S3Source._download_from_s3("s3://noaa-ghcn-pds/csv/by_year/1763.csv", target)
+    S3Source._download_from_s3("s3://noaa-ghcn-pds/csv/by_year/1763.csv", target)
     assert target.stat().st_size > 0
     assert "ID,DATE,ELEMENT" in target.read_text()[:80]

@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from anemoi.training.schemas.training import BaseDDPStrategySchema
 from anemoi.training.schemas.training import BaseTrainingSchema
+from anemoi.training.schemas.training import CheckpointPipelineSchema
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
@@ -300,3 +301,35 @@ def test_loss_wrapper_ignore_nans_requires_it_on_the_inner_loss(schema: type, ba
     """A wrapper ignoring NaNs around an inner loss that does not fails validation, as ``BaseLossWrapper`` would."""
     with pytest.raises(ValidationError, match="inner loss does not"):
         schema(**{**base, "ignore_nans": True, inner: {**base[inner], "ignore_nans": False}})
+
+
+def test_checkpoint_pipeline_schema_valid() -> None:
+    """source/loading/modifiers validate and expose the _target_ alias + extra kwargs."""
+    schema = CheckpointPipelineSchema(
+        source={"_target_": "anemoi.training.checkpoint.sources.local.LocalSource", "path": "/ckpt.pt"},
+        loading={"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader", "strict": False},
+        modifiers=[{"_target_": "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"}],
+    )
+    assert schema.source.target_.endswith("LocalSource")
+    assert schema.loading.strict is False
+    assert schema.modifiers[0].target_.endswith("FreezingModifierStage")
+
+
+def test_checkpoint_pipeline_schema_all_none() -> None:
+    """An empty checkpoint block is valid (a fresh run with no pipeline)."""
+    schema = CheckpointPipelineSchema()
+    assert schema.source is None
+    assert schema.loading is None
+    assert schema.modifiers is None
+
+
+def test_checkpoint_pipeline_schema_source_requires_target() -> None:
+    """A source block without _target_ is rejected."""
+    with pytest.raises(ValidationError):
+        CheckpointPipelineSchema(source={"path": "/ckpt.pt"})
+
+
+def test_checkpoint_pipeline_schema_loading_requires_target() -> None:
+    """A loading block without _target_ is rejected."""
+    with pytest.raises(ValidationError):
+        CheckpointPipelineSchema(loading={"strict": True})
