@@ -9,29 +9,24 @@
 
 """HTTP/HTTPS checkpoint source.
 
-Downloads checkpoint data from an HTTP or HTTPS URL using async
-download with retry and exponential backoff, then loads it into
-the pipeline context.
+Downloads checkpoint data from an HTTP or HTTPS URL with retry and
+exponential backoff, then loads it into the pipeline context.
 
 Example
 -------
 >>> source = HTTPSource(url="https://models.ecmwf.int/model.ckpt")
 >>> context = CheckpointContext()
->>> result = await source.process(context)
+>>> result = source.process(context)
 >>> assert result.checkpoint_data is not None
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import pickle
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
-
-import torch
 
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 
@@ -44,11 +39,12 @@ LOGGER = logging.getLogger(__name__)
 class HTTPSource(CheckpointSource):
     """Checkpoint source for HTTP/HTTPS URLs.
 
-    Downloads a checkpoint file to a temporary location using
+    Downloads a checkpoint file to a node-local temporary location using
     :func:`~anemoi.training.checkpoint.utils.download_with_retry`,
-    which provides async streaming with exponential-backoff retry.
-    The downloaded file is loaded with PyTorch and the temporary
-    file is cleaned up afterwards.
+    which provides streaming with exponential-backoff retry.
+    The download is deleted straight after loading. A resume cannot use
+    this source, because ``Trainer.fit(ckpt_path=)`` needs a local file:
+    download the checkpoint and use ``LocalSource``.
 
     The URL is provided at construction time (compatible with Hydra
     instantiation) rather than via ``context.checkpoint_path``,
@@ -76,7 +72,7 @@ class HTTPSource(CheckpointSource):
     ...     timeout=600,
     ... )
     >>> context = CheckpointContext()
-    >>> result = await source.process(context)
+    >>> result = source.process(context)
     """
 
     def __init__(
@@ -103,15 +99,16 @@ class HTTPSource(CheckpointSource):
         self.timeout = timeout
         self.expected_checksum = expected_checksum
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Download and load a checkpoint from an HTTP/HTTPS URL.
+
+        The download goes to a temporary file that is deleted straight after
+        loading, also when the download, the checksum or the load fails.
 
         Parameters
         ----------
         context : CheckpointContext
-            Pipeline context. The ``checkpoint_path`` field will be
-            updated to point at the downloaded temporary file during
-            format detection.
+            Pipeline context.
 
         Returns
         -------
@@ -125,21 +122,22 @@ class HTTPSource(CheckpointSource):
             If the download fails after all retries
         CheckpointTimeoutError
             If the download times out
+        CheckpointValidationError
+            If ``expected_checksum`` is set and does not match
         CheckpointLoadError
             If the downloaded file cannot be loaded by PyTorch
         """
-        from anemoi.training.checkpoint.exceptions import CheckpointLoadError
         from anemoi.training.checkpoint.utils import calculate_checksum
         from anemoi.training.checkpoint.utils import download_with_retry
 
         LOGGER.info("Downloading checkpoint from %s", self.url)
 
-        # Create a named temp file that persists until we explicitly delete it
+        # Deleted in the ``finally`` below, once the checkpoint is loaded.
         with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as tmp_fd:
             tmp_path = Path(tmp_fd.name)
 
         try:
-            await download_with_retry(
+            download_with_retry(
                 url=self.url,
                 dest=tmp_path,
                 max_retries=self.max_retries,
@@ -164,19 +162,9 @@ class HTTPSource(CheckpointSource):
                     self.url,
                 )
 
-            try:
-                # SECURITY: weights_only=False is required for Anemoi checkpoints that
-                # contain non-tensor metadata (hyper_parameters, callbacks, etc.).
-                raw_data = await asyncio.to_thread(torch.load, tmp_path, weights_only=False, map_location="cpu")
-            except (OSError, RuntimeError, EOFError, ValueError, pickle.UnpicklingError) as e:
-                raise CheckpointLoadError(tmp_path, e) from e
-
-            self._load_and_populate(context, raw_data)
-
+            self._load_from_path(context, tmp_path)
         finally:
-            if tmp_path.exists():
-                tmp_path.unlink()
-                LOGGER.debug("Cleaned up temporary file %s", tmp_path)
+            tmp_path.unlink(missing_ok=True)
 
         context.update_metadata(
             source_type="http",
