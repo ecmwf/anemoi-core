@@ -115,7 +115,11 @@ class DummyTrainingModule(BaseTrainingModule):
         raise NotImplementedError
 
 
-def _make_dummy_module(model: torch.nn.Module) -> DummyTrainingModule:
+def _make_update_cfg(states: bool, tendencies: bool) -> SimpleNamespace:
+    return SimpleNamespace(states=states, tendencies=tendencies)
+
+
+def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tendencies: bool) -> DummyTrainingModule:
     module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
     module.task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
@@ -382,6 +386,7 @@ def _make_module_with_forecaster_task(
     module.config = SimpleNamespace(  # type: ignore[assignment]
         training=SimpleNamespace(
             seed=seed,
+            update_ds_stats_on_ckpt_load=_make_update_cfg(False, False),
         ),
     )
     module._set_hparams({"metadata": _run_metadata()})

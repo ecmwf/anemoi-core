@@ -257,7 +257,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # `save_hyperparameters` and are not meaningful to persist in the
         # checkpoint hyperparameters anyway.
         self.save_hyperparameters(
-            ignore=["task"] + list(config.diagnostics.checkpoint.exclude_hyperparameters),
+            ignore=["task", *config.diagnostics.checkpoint.exclude_hyperparameters],
         )
 
         self.statistics_tendencies = statistics_tendencies
