@@ -47,7 +47,8 @@ class Checkpoint(Command):
             from anemoi.training.utils.checkpoint import save_inference_checkpoint
 
             module, metadata = load_and_prepare_model(args.input, graph_path=args.graph)
-            path = save_inference_checkpoint(module, metadata, args.output)
+            supporting_arrays, module.supporting_arrays = module.supporting_arrays, None
+            path = save_inference_checkpoint(module, metadata, args.output, supporting_arrays=supporting_arrays)
 
             LOG.info("Inference checkpoint saved to %s", path)
             return
