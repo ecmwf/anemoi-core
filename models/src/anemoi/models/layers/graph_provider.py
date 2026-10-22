@@ -270,12 +270,11 @@ class StaticGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup],
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Implementation of get_edges."""
+        # edge_index is expanded once per sample below, so edge_attr must be too (trainable or not)
+        edge_attr = einops.repeat(self.edge_attr, "e f -> (repeat e) f", repeat=batch_size)
         edge_trainable_params = self.trainable(batch_size)
         if edge_trainable_params is not None:
-            edge_attr = einops.repeat(self.edge_attr, "e f -> (repeat e) f", repeat=batch_size)
             edge_attr = torch.cat([edge_attr, edge_trainable_params], dim=1)
-        else:
-            edge_attr = self.edge_attr
 
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
 
