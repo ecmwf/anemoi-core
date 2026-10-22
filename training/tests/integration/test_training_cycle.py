@@ -23,6 +23,7 @@ from omegaconf import open_dict
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.train.evaluate import AnemoiEvaluator
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
@@ -133,8 +134,6 @@ def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None
         config = OmegaConf.to_object(config)
         config = UnvalidatedBaseSchema(**DictConfig(config))
 
-    from anemoi.training.schemas.base_schema import convert_to_omegaconf
-
     config = convert_to_omegaconf(config)
 
     # Minimal inputs required by get_mlflow_logger
@@ -226,25 +225,35 @@ def test_training_cycle_multidomain(
     trainer.train()
 
     model = trainer.model.model.model
-    assert model.dataset2encoder == {"sg_1": "0", "sg_2": "0"}
-    assert model.dataset2decoder == {"sg_1": "0", "sg_2": "0"}
+    assert model.dataset2encoder == {"data": "0", "data_2": "0"}
+    assert model.dataset2decoder == {"data": "0", "data_2": "0"}
     assert len(model.encoder) == 1
     assert len(model.decoder) == 1
     assert model.dataset2hidden == {
-        "sg_1": "sg_1_hidden",
-        "sg_2": "sg_2_hidden",
+        "data": "hidden",
+        "data_2": "hidden_2",
     }
     assert set(trainer.graph_data.node_types) == {
-        "sg_1",
-        "sg_2",
-        "sg_1_hidden",
-        "sg_2_hidden",
+        "data",
+        "data_2",
+        "hidden",
+        "hidden_2",
     }
-    assert trainer.graph_data["sg_1"].num_nodes != trainer.graph_data["sg_2"].num_nodes
-    assert trainer.graph_data["sg_1_hidden"].num_nodes != trainer.graph_data["sg_2_hidden"].num_nodes
+    assert trainer.graph_data["data"].num_nodes != trainer.graph_data["data_2"].num_nodes
+    assert trainer.graph_data["hidden"].num_nodes != trainer.graph_data["hidden_2"].num_nodes
     assert trainer.model.trainer.global_step == 4
 
     assert_keys_exist(trainer.metadata, partial_metadata_schema)
+
+
+def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, list[str]]) -> None:
+    cfg, _ = multidomain_config
+    cfg = convert_to_omegaconf(BaseSchema(**cfg))
+    assert cfg.dataloader.loading_policy._target_ == "anemoi.training.data.loading.CrossDatasetLoadingPolicy"
+    assert cfg.model.model.hidden_nodes_name == {
+        "data": "hidden",
+        "data_2": "hidden_2",
+    }
 
 
 @skip_if_offline
