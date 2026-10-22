@@ -249,7 +249,11 @@ def multidomain_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, list[str]]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multidomain"):
+    with initialize_config_module(
+        version_base=None,
+        config_module="anemoi.training.config",
+        job_name="test_multidomain",
+    ):
         template = compose(config_name="multidomain")
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidomain.yaml")
