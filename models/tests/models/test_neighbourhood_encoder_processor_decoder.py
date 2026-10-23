@@ -204,3 +204,46 @@ def test_rotary_embeddings_reach_encoder_processor_and_decoder():
     out = model(_inputs())["data"]
     out.pow(2).mean().backward()
     assert all(p.grad is not None for name, p in model.named_parameters() if ".attention.lin_" in name)
+
+
+def test_icosahedral_processor_between_plain_attention_mappers():
+    """A processor on the refined icosahedron, configured and checked as training does, trains end to end."""
+    from anemoi.models.layers.neighbourhood_attention import IcosahedralAttentionWrapper
+    from tests.layers.test_icosahedral_grid import icosahedron_coords
+
+    config = _model_config({"grid": "octahedral", "backend": "sdpa"})
+    config.model.processor.neighbourhood = {"grid": "icosahedral", "radius": 2, "backend": "sdpa"}
+    config.model.processor.rotary_embeddings = {"max_frequency": 30.0, "backend": "torch"}
+    for part in (config.model.encoders["0"].mapper, config.model.decoders["0"].mapper):
+        part.attention_implementation = "scaled_dot_product_attention"
+        part.neighbourhood = None
+    # Training passes the checked and filled-in configuration on to the model.
+    checked = BaseModelSchema(**OmegaConf.to_container(config.model)).model_dump(by_alias=True)
+    assert checked["processor"]["neighbourhood"] == {"grid": "icosahedral", "radius": 2, "backend": "sdpa"}
+
+    graph = _graph()
+    graph["hidden"].x = icosahedron_coords(2).float()
+    graph["hidden"].num_nodes = graph["hidden"].x.shape[0]
+    model = AnemoiModelEncProcDec(
+        model_config=DictConfig(checked),
+        data_indices=_data_indices(),
+        statistics={"data": None},
+        n_step_input=2,
+        n_step_output=1,
+        graph_data=graph,
+    )
+    assert all(isinstance(layer.attention.attention, IcosahedralAttentionWrapper) for layer in model.processor.proc)
+
+    out = model(_inputs())["data"]
+    out.pow(2).mean().backward()
+    processor = [
+        p for name, p in model.named_parameters() if name.startswith("processor.") and ".attention.lin_" in name
+    ]
+    assert processor and all(p.grad is not None and p.grad.abs().sum() > 0 for p in processor)
+
+
+def test_icosahedral_neighbourhood_is_refused_in_mappers():
+    config = _model_config({"grid": "octahedral", "backend": "sdpa"})
+    config.model.encoders["0"].mapper.neighbourhood = {"grid": "icosahedral", "radius": 2}
+    with pytest.raises(ValueError, match="kernel_size"):
+        BaseModelSchema(**OmegaConf.to_container(config.model))

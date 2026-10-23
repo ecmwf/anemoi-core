@@ -19,8 +19,8 @@ from pydantic import NonNegativeInt
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
-from .common_components import NeighbourhoodSchema
 from .common_components import PointWiseModelComponent
+from .common_components import ProcessorNeighbourhoodSchema
 from .common_components import RotaryEmbeddingsSchema
 from .common_components import TransformerModelComponent
 from .common_components import check_neighbourhood_attention
@@ -98,7 +98,7 @@ class TransformerProcessorSchema(TransformerModelComponent):
     "Normalize the query and key vectors. Default to False."
     softcap: NonNegativeFloat = Field(example=0.0)
     "Softcap value for attention. Default to 0.0."
-    neighbourhood: Optional[NeighbourhoodSchema] = Field(default=None)
+    neighbourhood: Optional[ProcessorNeighbourhoodSchema] = Field(default=None)
     "Grid and neighbourhood size for attention_implementation 'neighbourhood'. Default to None."
     rotary_embeddings: Optional[RotaryEmbeddingsSchema] = Field(default=None)
     "Rotary position embeddings from the positions of the nodes on the sphere; off when None. Default to None."

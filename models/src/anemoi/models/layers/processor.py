@@ -19,6 +19,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.graph import halo_exchange
 from anemoi.models.distributed.halo import HaloInfo
 from anemoi.models.distributed.halo import build_halo_info
 from anemoi.models.distributed.halo import cache_specs as halo_cache_specs
@@ -36,6 +37,9 @@ from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
+from anemoi.models.layers.neighbourhood_attention import IcosahedralGridNeighbourhood
+from anemoi.models.layers.neighbourhood_attention import IcosahedralShards
 from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBands
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
 from anemoi.models.layers.neighbourhood_attention import write_own_points
@@ -321,11 +325,16 @@ class TransformerProcessor(BaseProcessor):
         # forward_in_bands): on one GPU when num_bands > 1, and whenever the points are split across
         # GPUs, with num_bands bands of each GPU's own rows.
         self.bands: Optional[NeighbourhoodBands] = None
-        if grid_neighbourhood is not None and grid_neighbourhood.in_grid_order:
+        if isinstance(grid_neighbourhood, GridNeighbourhood) and grid_neighbourhood.in_grid_order:
             if cpu_offload and grid_neighbourhood.num_bands > 1:
                 raise ValueError("Neighbourhood attention in bands (num_bands > 1) does not work with cpu_offload.")
             if not cpu_offload:
                 self.bands = NeighbourhoodBands(grid_neighbourhood)
+        # Icosahedral neighbourhood attention fetches the halo of each GPU's points before each
+        # layer when the points are split across GPUs (see forward_with_halo).
+        self.icosahedral_shards: Optional[IcosahedralShards] = None
+        if isinstance(grid_neighbourhood, IcosahedralGridNeighbourhood) and not cpu_offload:
+            self.icosahedral_shards = IcosahedralShards(grid_neighbourhood)
 
         self.offload_layers(cpu_offload)
 
@@ -348,6 +357,8 @@ class TransformerProcessor(BaseProcessor):
         sharded = model_comm_group is not None and model_comm_group.size() > 1
         if self.bands is not None and (self.bands.num_bands > 1 or sharded):
             return self.forward_in_bands(x, batch_size, shard_info, model_comm_group, cond=kwargs.get("cond"))
+        if self.icosahedral_shards is not None and sharded:
+            return self.forward_with_halo(x, shard_info, model_comm_group, cond=kwargs.get("cond"))
 
         (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
 
@@ -403,6 +414,30 @@ class TransformerProcessor(BaseProcessor):
                     out = out_band.new_empty(batch_size, num_own, out_band.shape[-1])
                 write_own_points(out, out_band, band, plan)
             x = out.view(batch_size * num_own, -1)
+        return x
+
+    def forward_with_halo(
+        self,
+        x: Tensor,
+        shard_info: GraphShardInfo,
+        model_comm_group: ProcessGroup,
+        cond: Optional[Tensor] = None,
+    ) -> Tensor:
+        """The layers on this GPU's own points of the icosahedron, with one checkpoint per layer.
+
+        ``x`` holds this GPU's own points (batch size 1) and so does the output. Before each layer
+        the GPU fetches the inputs of the points of other GPUs that its queries reach, its halo
+        (see :class:`anemoi.models.layers.neighbourhood_attention.IcosahedralShards`); attention
+        then runs without communication.
+        """
+        if shard_info.nodes is None:
+            raise ValueError("Neighbourhood attention split across GPUs needs the processor input split as well.")
+        plan = self.icosahedral_shards.plan(shard_info.nodes, model_comm_group.rank(), x.device)
+        cond_keys = None if cond is None else halo_exchange(cond, plan.halo_info, model_comm_group)[None]
+        for layer in self.proc:
+            x_keys = halo_exchange(x, plan.halo_info, model_comm_group)[None]
+            out = maybe_checkpoint(layer.forward_band, self.gradient_checkpointing, x_keys, plan.band, cond_keys)
+            x = out[0]
         return x
 
 

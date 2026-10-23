@@ -34,6 +34,15 @@ layer_kernels:
 # hidden nodes from ReducedGaussianGridNodes (grid: o48).
 # kernel_size is [latitude rows, points per row], both odd. backend is "triton" (GPU),
 # "flex" or "sdpa" (dense mask, small grids only).
+#
+# The processor can also run on a refined icosahedron: every node attends to the nodes within
+# `radius` hops (radius 3, 5, 7: 37, 91, 169 nodes). Build the hidden nodes with TriNodes and
+# `ordering: diamonds`, keep encoder and decoder of another kind (e.g. graph transformer mappers),
+# and set
+#   neighbourhood:
+#     grid: icosahedral
+#     radius: 5
+#     backend: triton  # or sdpa (dense mask, small meshes only)
 
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor

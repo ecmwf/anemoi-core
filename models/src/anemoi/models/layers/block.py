@@ -43,6 +43,7 @@ from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.mlp import build_feedforward_layer
 from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
+from anemoi.models.layers.neighbourhood_attention import IcosahedralGridNeighbourhood
 from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBand
 from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
@@ -136,7 +137,7 @@ class TransformerProcessorBlock(BaseBlock):
         attention_implementation: str = "flash_attention",
         mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
-        neighbourhood: Optional[GridNeighbourhood] = None,
+        neighbourhood: Optional[GridNeighbourhood | IcosahedralGridNeighbourhood] = None,
         rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
         super().__init__()
@@ -212,8 +213,7 @@ class TransformerProcessorBlock(BaseBlock):
         Tensor
             Output of the band's query points, shape ``(batch, band query points, num_channels)``.
         """
-        first = band.query_points.start - band.key_points.start
-        queries = slice(first, first + band.query_points.stop - band.query_points.start)
+        queries = band.queries_in_keys
         cond_kwargs = {"cond": cond} if cond is not None else {}
         cond_query_kwargs = {"cond": cond[:, queries]} if cond is not None else {}
 

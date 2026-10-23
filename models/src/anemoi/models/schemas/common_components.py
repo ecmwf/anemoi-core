@@ -7,15 +7,18 @@
 # nor does it submit to any jurisdiction.
 #
 
+from typing import Annotated
 from typing import Any
 from typing import Literal
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
+from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
+from pydantic import Tag
 from pydantic import field_validator
 
 from anemoi.utils.schemas import BaseModel
@@ -48,6 +51,30 @@ class NeighbourhoodSchema(BaseModel):
         if any(k % 2 == 0 for k in kernel_size):
             raise ValueError(f"kernel_size entries must be odd, got {kernel_size}.")
         return kernel_size
+
+
+class IcosahedralNeighbourhoodSchema(BaseModel):
+    grid: Literal["icosahedral"] = Field(example="icosahedral")
+    "The refined icosahedron, nodes built with anemoi-graphs TriNodes and 'ordering: diamonds'."
+    radius: PositiveInt = Field(example=5)
+    "Each node attends to the nodes within this many hops."
+    backend: Literal["triton", "sdpa"] = Field(default="triton")
+    "Kernels to use: 'triton' (GPU) or 'sdpa' (dense mask, small meshes). Default to 'triton'."
+
+
+def _neighbourhood_kind(value: Any) -> str:
+    grid = value.get("grid") if isinstance(value, dict) else getattr(value, "grid", None)
+    return "icosahedral" if grid == "icosahedral" else "reduced"
+
+
+ProcessorNeighbourhoodSchema = Annotated[
+    Union[
+        Annotated[NeighbourhoodSchema, Tag("reduced")],
+        Annotated[IcosahedralNeighbourhoodSchema, Tag("icosahedral")],
+    ],
+    Discriminator(_neighbourhood_kind),
+]
+"Neighbourhood of a processor: a reduced grid of GRID_KERNELS or the refined icosahedron."
 
 
 class RotaryEmbeddingsSchema(BaseModel):

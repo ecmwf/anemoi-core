@@ -29,8 +29,10 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
+from anemoi.models.layers.neighbourhood_attention import IcosahedralGridNeighbourhood
 from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionWrapper
 from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBand
+from anemoi.models.layers.neighbourhood_attention import neighbourhood_attention_module
 from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
 from anemoi.utils.config import DotDict
 
@@ -64,7 +66,7 @@ class MultiHeadSelfAttention(nn.Module):
 
     "neighbourhood"
         Each query attends only to the keys around it on a registered grid family, such as octahedral
-        or HEALPix grids. The grids and the neighbourhood size come from ``neighbourhood``. The
+        or HEALPix grids, or the refined icosahedron. The grids and the neighbourhood size come from ``neighbourhood``. The
         ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND environment variable does not change it, as the
         other implementations attend to different keys.
     """
@@ -82,7 +84,7 @@ class MultiHeadSelfAttention(nn.Module):
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
         softcap: Optional[float] = None,
-        neighbourhood: Optional[GridNeighbourhood] = None,
+        neighbourhood: Optional[GridNeighbourhood | IcosahedralGridNeighbourhood] = None,
         rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
         """Initialize MultiHeadSelfAttention.
@@ -114,7 +116,7 @@ class MultiHeadSelfAttention(nn.Module):
             implementation, by default "flash_attention"
         softcap : float, optional
             Anything > 0 activates softcapping attention, by default None
-        neighbourhood : GridNeighbourhood, optional
+        neighbourhood : GridNeighbourhood or IcosahedralGridNeighbourhood, optional
             Query and key grids and neighbourhood size, needed for the "neighbourhood" implementation
         rotary : SphericalRotaryEmbedding, optional
             Rotary position embeddings that turn queries and keys by the positions of their nodes,
@@ -180,7 +182,7 @@ class MultiHeadSelfAttention(nn.Module):
         if self.attention_implementation == "neighbourhood":
             if self.neighbourhood is None:
                 raise ValueError("The 'neighbourhood' attention implementation needs a GridNeighbourhood.")
-            self.attention = attn_funcs[self.attention_implementation](self.neighbourhood)
+            self.attention = neighbourhood_attention_module(self.neighbourhood)
         else:
             self.attention = attn_funcs[self.attention_implementation]()
 
@@ -331,8 +333,7 @@ class MultiHeadSelfAttention(nn.Module):
         Tensor
             Attention output of the band's query points, shape ``(batch, band query points, embed_dim)``.
         """
-        first = band.query_points.start - band.key_points.start
-        queries = x[:, first : first + band.query_points.stop - band.query_points.start]
+        queries = x[:, band.queries_in_keys]
         return self.attend_band(self.lin_q(queries), self.lin_k(x), self.lin_v(x), band)
 
 
