@@ -370,10 +370,9 @@ def build_checkpoint_pipeline(
 def _reject_lora_dropout_with_model_sharding(pipeline: CheckpointPipeline, cfg: DictConfig) -> None:
     """Refuse LoRA dropout when the model is sharded across GPUs.
 
-    Processors refuse dropout under model sharding, but they only check their own
-    ``dropout_p``: dropout inside a LoRA adapter would pass that check unseen. The
-    stage cannot see the hardware config, so the builder checks it here, before
-    training starts.
+    With the model sharded, dropout inside a LoRA adapter would make the ranks draw
+    different masks for the same nodes. The stage cannot see the hardware config,
+    so the builder refuses it here, before training starts.
 
     Parameters
     ----------

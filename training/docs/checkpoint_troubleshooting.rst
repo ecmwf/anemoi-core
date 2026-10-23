@@ -464,9 +464,9 @@ use a full-path regex (``model\.model\.processor\..*lin_query``), or
    CheckpointConfigError: lora_dropout=0.1 is not supported when the model is
    sharded (system.hardware.num_gpus_per_model=2). Set lora_dropout to 0.
 
-**What it means:** the processors refuse dropout when the model is sharded
-across GPUs, but they only check their own dropout setting. Dropout inside the
-adapters would get past that check, so the pipeline refuses it when it is built.
+**What it means:** with the model sharded across GPUs, dropout inside the
+adapters would make the ranks draw different masks for the same nodes. The
+pipeline refuses it when it is built, before training starts.
 
 **How to fix it:** set ``lora_dropout: 0.0``, or train on one GPU per model.
 
