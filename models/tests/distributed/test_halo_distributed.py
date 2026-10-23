@@ -71,7 +71,12 @@ GRAPHS = {"directed": _directed_edges, "sparse-requests": _sparse_request_edges}
 def _build_processor_case(
     graph: str, world_size: int, device: torch.device
 ) -> tuple[GraphTransformerProcessor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Return a processor, node/edge inputs, edge indices and fixed linear-loss weights."""
+    """Construct a processor and complete graph inputs on ``device``.
+
+    Returns the processor, node features, edge attributes, edge indices and
+    fixed linear-loss weights, in that order. No rank-local slicing or
+    communication occurs here.
+    """
     generator = torch.Generator().manual_seed(0)
     edge_index = GRAPHS[graph](generator, world_size)
     edge_index, perm = sort_edge_index_by_dst(edge_index, max_value=NUM_NODES)
