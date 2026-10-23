@@ -151,6 +151,21 @@ class BaseForecaster(BaseTask):
         """
         return _shift_point_times(targets, -self._rollout_shift * rollout_step)
 
+    def _requested_input_relative_times(self, dataset_name: str, rollout_step: int = 0, **kwargs) -> list[int]:
+        values = super()._requested_input_relative_times(dataset_name, **kwargs)
+        if not self.dataset_time_maps or rollout_step == 0:
+            return values
+        if self.model_timestep is None or self._rollout_shift % self.model_timestep:
+            msg = "Mixed-frequency rollout requires a model timestep compatible with the rollout shift."
+            raise ValueError(msg)
+        shift = int(self._rollout_shift // self.model_timestep) * rollout_step
+        return [value + shift for value in values]
+
+    def get_input_times(self, batch: "Batch", rollout_step: int = 0, **kwargs) -> "Batch":
+        """Select inputs and measure point times from the current rollout reference."""
+        inputs = super().get_input_times(batch, rollout_step=rollout_step, **kwargs)
+        return _shift_point_times(inputs, -self._rollout_shift * rollout_step)
+
     def _advance_gridded_input(
         self,
         x: torch.Tensor,
@@ -252,7 +267,22 @@ class BaseForecaster(BaseTask):
         next input times. Tabular (observation) datasets advance their time windows the same way
         (see ``_advance_tabular_input``).
         """
-        del rollout_step
+        if self.dataset_time_maps:
+            return x.with_sources(
+                {
+                    dataset_name: self._advance_mixed_source(
+                        view,
+                        y_pred.get(dataset_name),
+                        output_values[dataset_name],
+                        dataset_name=dataset_name,
+                        rollout_step=rollout_step,
+                        data_indices=data_indices[dataset_name],
+                        output_mask=None if output_mask is None else output_mask[dataset_name],
+                        grid_shard_slice=None if grid_shard_slice is None else grid_shard_slice.get(dataset_name),
+                    )
+                    for dataset_name, view in x.items()
+                },
+            )
         return x.with_sources(
             {
                 dataset_name: self._advance_source(
@@ -266,6 +296,100 @@ class BaseForecaster(BaseTask):
                 for dataset_name, view in x.items()
             },
         )
+
+    def _advance_mixed_source(
+        self,
+        x: "Source",
+        prediction: "Source | None",
+        truth: "Source",
+        *,
+        dataset_name: str,
+        rollout_step: int,
+        data_indices: IndexCollection,
+        output_mask: object | None,
+        grid_shard_slice: slice | None,
+    ) -> "Source":
+        """Advance one source using its dataset-specific model-grid windows."""
+        current_times = self._requested_input_relative_times(dataset_name, rollout_step=rollout_step)
+        next_times = self._requested_input_relative_times(dataset_name, rollout_step=rollout_step + 1)
+        output_times = self._requested_output_relative_times(dataset_name, rollout_step=rollout_step)
+        if truth.time_size != len(next_times):
+            msg = f"Source '{dataset_name}' provides {truth.time_size} next inputs, expected {len(next_times)}."
+            raise ValueError(msg)
+
+        if x.is_tabular:
+            return self._advance_mixed_tabular_source(
+                x,
+                prediction,
+                truth,
+                current_times=current_times,
+                next_times=next_times,
+                output_times=output_times,
+                data_indices=data_indices,
+            )
+
+        next_source = truth.select_variables(data_indices.data.input.full)
+        new_data = next_source.data.to(x.dtype)
+        if prediction is not None and new_data.shape[2] == 1 and prediction.data.shape[2] != 1:
+            new_data = new_data.expand(-1, -1, prediction.data.shape[2], -1, -1)
+        new_data = new_data.clone()
+        for input_idx, relative_time in enumerate(next_times):
+            if relative_time in current_times:
+                new_data[:, input_idx] = x.data[:, current_times.index(relative_time)]
+        for input_idx, relative_time in enumerate(next_times):
+            if prediction is None or relative_time not in output_times:
+                continue
+            output_idx = output_times.index(relative_time)
+            new_data[:, input_idx, ..., data_indices.model.input.prognostic] = prediction.data[
+                :,
+                output_idx,
+                ...,
+                data_indices.model.output.prognostic,
+            ].to(new_data.dtype)
+            if output_mask is not None:
+                true_state = truth.data[:, input_idx]
+                if true_state.shape[1] == 1 and new_data[:, input_idx].shape[1] != 1:
+                    true_state = true_state.expand(-1, new_data[:, input_idx].shape[1], -1, -1)
+                new_data[:, input_idx] = output_mask.rollout_boundary(
+                    new_data[:, input_idx],
+                    true_state,
+                    data_indices,
+                    grid_shard_slice=grid_shard_slice,
+                )
+        return next_source.clone(data=new_data)
+
+    def _advance_mixed_tabular_source(
+        self,
+        x: "TabularSource",
+        prediction: "TabularSource | None",
+        truth: "TabularSource",
+        *,
+        current_times: list[int],
+        next_times: list[int],
+        output_times: list[int],
+        data_indices: IndexCollection,
+    ) -> "TabularSource":
+        """Advance one tabular source using its dataset-specific model-grid windows."""
+        if not next_times:
+            return _match_ensemble_size(
+                truth.select_variables(data_indices.data.input.full),
+                x.ensemble_size,
+            ).map_data(lambda value: value.to(x.dtype))
+
+        windows = []
+        for input_idx, relative_time in enumerate(next_times):
+            if relative_time in current_times:
+                window = x.select_time([current_times.index(relative_time)])
+                shift = self._rollout_shift.total_seconds()
+                window = window.clone(timedeltas=[timedeltas - shift for timedeltas in window.timedeltas])
+            else:
+                window = truth.select_time([input_idx]).select_variables(data_indices.data.input.full)
+                window = _match_ensemble_size(window, x.ensemble_size)
+            if prediction is not None and relative_time in output_times:
+                output_idx = output_times.index(relative_time)
+                window = _with_predicted_prognostics(window, prediction.select_time([output_idx]), data_indices)
+            windows.append(window.map_data(lambda value: value.to(x.dtype)))
+        return windows[0].concat_time(*windows[1:])
 
     def _advance_source(
         self,

@@ -16,6 +16,7 @@ import traceback
 from abc import ABC
 from abc import abstractmethod
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -68,7 +69,7 @@ _UNSET_MEMBERS: Any = _Unset()
 
 def _unwrap_plot_fn(plot_fn: Any) -> Any:
     """Return the underlying function of a (possibly functools.partial) plot_fn."""
-    while hasattr(plot_fn, "func"):
+    while isinstance(plot_fn, partial):
         plot_fn = plot_fn.func
     return plot_fn
 
@@ -1142,10 +1143,15 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                     for _, _, auxiliary, auxiliary_suffix in pl_module.plot_adapter.iter_plot_samples(
                         data,
                         auxiliary_tensor,
+                        dataset_name=dataset_name,
                     )
                 }
 
-            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(
+                data,
+                output_tensor,
+                dataset_name=dataset_name,
+            ):
                 fig = self.plot_fn(
                     **spatial_inputs,
                     x=x,

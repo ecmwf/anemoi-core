@@ -917,7 +917,11 @@ def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pyte
         data_indices={"data": DummyIndex()},
         graph_data=object(),
         metadata={},
-        datamodule=SimpleNamespace(statistics={}, statistics_tendencies={}),
+        datamodule=SimpleNamespace(
+            statistics={},
+            statistics_tendencies={},
+            ds_train=SimpleNamespace(data_readers={"data": SimpleNamespace(data_type="gridded")}),
+        ),
         supporting_arrays=object(),
     )
     with warnings.catch_warnings():

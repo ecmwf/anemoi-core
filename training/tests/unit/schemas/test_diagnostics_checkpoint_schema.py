@@ -76,12 +76,3 @@ def test_resume_error_comes_before_conversion_error() -> None:
 def test_excluding_unknown_hyperparameter_raises() -> None:
     with pytest.raises(ValidationError, match="graph_dat"):
         CheckpointSchema(exclude_hyperparameters=["graph_dat"])
-
-
-def test_excluding_optional_conversion_hyperparameter_warns(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.WARNING):
-        schema = CheckpointSchema(exclude_hyperparameters=["graph_data"])
-    assert schema.exclude_hyperparameters == ["graph_data"]
-    assert "checkpoint inference" in caplog.text
-    assert "graph_data" in caplog.text
-    assert OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION["graph_data"] in caplog.text

@@ -18,7 +18,7 @@ INIT_HYPERPARAMETERS = frozenset(
     {
         "config",
         "task",
-        "graph_data",
+        "data_types",
         "statistics",
         "statistics_tendencies",
         "data_indices",
@@ -32,7 +32,7 @@ HYPERPARAMETERS_FOR_RESUME = frozenset({"config", "data_indices", "metadata"})
 
 # Hyperparameters that ``anemoi-training checkpoint inference`` can do without, mapped to the option
 # of the command with which they have to be supplied instead
-OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION = {"graph_data": "--graph"}
+OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION = {}
 # Hyperparameters required for ``anemoi-training checkpoint inference``
 REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION = INIT_HYPERPARAMETERS - set(
     OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION,

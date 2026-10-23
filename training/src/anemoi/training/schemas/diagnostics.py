@@ -364,8 +364,7 @@ class CheckpointSchema(BaseModel):
     "Checkpointing by training step frequency."
     exclude_hyperparameters: list[str] = Field(default_factory=list)
     "Init arguments of the training module not to store as hyperparameters in the checkpoint. \
-            Only 'graph_data' can be excluded; converting the checkpoint with \
-            `anemoi-training checkpoint inference` then requires the graph through --graph."
+            Hyperparameters required to resume training or convert the checkpoint for inference cannot be excluded."
 
     @field_validator("exclude_hyperparameters")
     @classmethod
