@@ -73,45 +73,53 @@ Additional datasets can be introduced by adding entries under ``dataloader.train
 
 **Example multi-dataset configuration**
 
-The following example illustrates two global ERA5 datasets on different grids: ``era5_o96`` (O96) and ``era5_n320`` (N320). Both are intended to use the shared model architecture. The example retains the dataset selection and diagnostic settings from the original configuration.
+The following example illustrates two global ERA5 datasets on different grids, ``era5_o96`` (O96) and ``era5_n320`` (N320), with different date ranges:
 
 .. code-block:: yaml
 
-   data:
-       datasets:
-           era5_o96:
-               dataset_config:
-                   dataset: ${system.input.dataset.era5_o96}
-                   frequency: ${data.frequency}
-                   drop: [u_600, z]
-                   select: [2t, tp, u_500, tp, cp]
-                   reorder: sort
-                   statistics: /path/to/statistics.zarr
+   dataloader:
+       training:
+           datasets:
+               era5_o96:
+                   dataset_config:
+                       dataset: /path/to/era5_o96.zarr
+                       frequency: ${data.frequency}
+                       drop: [u_600, z]
                    start: 1985
                    end: 2020
-                   trajectory: null
-               diagnostic: [tp, cp]
-           era5_n320:
-               dataset: ${system.input.dataset.era5_n320}
-               frequency: ${data.frequency}
-               drop: ${data.datasets.era5_o96.dataset_config.drop}
-               select: ${data.datasets.era5_o96.dataset_config.select}
-               reorder: sort
-               start: 1979
-               end: 2000
-               trajectory: null
-               diagnostic: ${data.datasets.era5_o96.diagnostic}
+               era5_n320:
+                   dataset_config:
+                       dataset: /path/to/era5_n320.zarr
+                       frequency: ${data.frequency}
+                       drop: ${dataloader.training.datasets.era5_o96.dataset_config.drop}
+                   start: 1979
+                   end: 2000
 
-The second dataset reuses the first dataset's ``drop``, ``select``, and ``diagnostic`` settings through configuration references. This helps keep the variable selection consistent across datasets, even when their grids and time ranges differ.
+The second dataset reuses the first dataset's ``drop`` setting through a configuration reference. This helps keep the variable selection consistent across datasets, even when their grids and time ranges differ.
 
-.. note::
+Loading Policy and Model Configuration
+**************************************
 
-   Check the nesting of ``dataset_config`` and the placement of ``start``, ``end``, and ``trajectory`` against your project's configuration schema before using this example. The structure above preserves the supplied example; it has not been validated against the training code.
+Multi-domain training is enabled by selecting the cross-dataset loading policy, which builds one independently indexed dataset per domain and keeps every batch domain-homogeneous:
+
+.. code-block:: yaml
+
+   dataloader:
+       loading_policy:
+           _target_: anemoi.training.data.loading.CrossDatasetLoadingPolicy
+
+The model must then name the hidden mesh of each dataset under ``model.model.hidden_nodes_name`` and list the datasets that share an encoder or decoder group under ``source_datasets`` and ``target_datasets``. The configuration is described in :doc:`/modules/data`, and a complete example is the top-level ``multidomain`` configuration.
+
+The following constraints apply:
+
+- Only flat encoder-processor-decoder models support per-dataset hidden meshes. Hierarchical and transport models do not.
+- Hidden node and edge feature dimensions must match across the hidden meshes, because the weights are shared.
+- Trainable node and edge parameters must be set to 0, because the active graph-specific parameters would change between batches.
 
 Graph Creation
 **************
 
-Multi-domain training requires graph definitions that support each dataset's spatial structure. Since datasets may have different resolutions, geographical domains, and numbers of spatial nodes, their graphs can differ. The graph recipe must define the data nodes associated with each dataset, using the dataset names to identify the corresponding nodes. For example, when training with ``era5_o96`` and ``era5_n320``, the graph configuration must provide appropriate data-node definitions for both datasets.
+Multi-domain training requires graph definitions that support each dataset's spatial structure. Since datasets may have different resolutions, geographical domains, and numbers of spatial nodes, their graphs can differ. The graph recipe must define the data nodes associated with each dataset, using the dataset names to identify the corresponding nodes. For example, when training with ``era5_o96`` and ``era5_n320``, the graph configuration must provide appropriate data-node definitions for both datasets, together with the hidden mesh of each dataset and the data-to-hidden, hidden-to-hidden, and hidden-to-data edges.
 
 During training, the graph associated with the selected dataset is used to encode and decode its spatial representation, while the shared model parameters are reused across the different graph structures.
 
