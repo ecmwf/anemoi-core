@@ -125,6 +125,15 @@ def test_cross_attention_is_refused() -> None:
         build_grid_neighbourhood("neighbourhood", {"grid": "icosahedral", "radius": 1}, coords, coords)
 
 
+def test_attention_rejects_other_sizes() -> None:
+    neighbourhood = build_grid_neighbourhood(
+        "neighbourhood", {"grid": "icosahedral", "radius": 1, "backend": "sdpa"}, icosahedron_coords(2)
+    )
+    q = torch.randn(1, 2, neighbourhood.tables.num_points, 8)
+    with pytest.raises(ValueError, match=f"set up for {q.shape[-2]} queries"):
+        neighbourhood.attention_module()(q[:, :, :-1], q, q, 1)
+
+
 def test_split_attention_matches_whole() -> None:
     """Each GPU's band attends from its own points to its own points and halo as attention over the whole grid does."""
     neighbourhood = build_grid_neighbourhood(

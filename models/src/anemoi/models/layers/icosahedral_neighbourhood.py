@@ -20,6 +20,7 @@ from __future__ import annotations
 import itertools
 from dataclasses import dataclass
 from functools import cached_property
+from typing import Callable
 from typing import Optional
 
 import numpy as np
@@ -125,36 +126,23 @@ class IcosahedralAttentionWrapper(NeighbourhoodAttention):
 
     Takes ``(batch, heads, points, head_dim)`` queries of the shard's own points and keys and
     values of its key points (see :class:`anemoi.models.layers.icosahedral_grid.IcosahedralShard`).
-
-    ``"triton"``
-        The kernels of :mod:`anemoi.models.triton.icosahedral_attention`. GPU only; the head
-        dimension must be a power of two of at least 16. No dropout.
-    ``"sdpa"``
-        ``scaled_dot_product_attention`` with the full ``queries x keys`` boolean mask, for small
-        grids and tests.
     """
 
     def __init__(self, neighbourhood: IcosahedralGridNeighbourhood, shard: IcosahedralShard) -> None:
         super().__init__(neighbourhood)
         self.shard = shard
-        self._kernel = None
-        self._masks: dict[torch.device, Tensor] = {}
 
-    def __getstate__(self) -> dict:
-        # The masks are built again on first use, so they are left out when the model is saved.
-        state = self.__dict__.copy()
-        state["_masks"] = {}
-        state["_kernel"] = None
-        return state
+    def build_mask(self, device: torch.device) -> Tensor:
+        queries = np.arange(self.shard.own.start, self.shard.own.stop)
+        reach = self.neighbourhood.tables.within_radius(queries)
+        keys = np.concatenate([queries, self.shard.halo])
+        return torch.as_tensor(reach[:, keys].toarray(), device=device)
 
-    def _mask_on(self, device: torch.device) -> Tensor:
-        if device not in self._masks:
-            shard = self.shard
-            queries = np.arange(shard.own.start, shard.own.stop)
-            reach = self.neighbourhood.tables.within_radius(queries)
-            keys = np.concatenate([queries, shard.halo])
-            self._masks[device] = torch.as_tensor(reach[:, keys].toarray(), device=device)
-        return self._masks[device]
+    def kernel_path(self) -> str:
+        return self.neighbourhood.grid_family.self_attention
+
+    def run_kernel(self, kernel: Callable, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
+        return kernel(query, key, value, self.shard)
 
     def forward(
         self,
@@ -166,18 +154,8 @@ class IcosahedralAttentionWrapper(NeighbourhoodAttention):
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
     ) -> Tensor:
-        if query.shape[-2] != self.shard.num_queries or key.shape[-2] != self.shard.num_keys:
-            raise ValueError(
-                f"Icosahedral attention is set up for {self.shard.num_queries} queries and {self.shard.num_keys} "
-                f"keys, got {query.shape[-2]} and {key.shape[-2]}."
-            )
-        if self.backend == "sdpa":
-            return torch.nn.functional.scaled_dot_product_attention(
-                query, key, value, attn_mask=self._mask_on(query.device), dropout_p=dropout_p
-            )
-        if self._kernel is None:
-            self._kernel = self.neighbourhood.grid_family.load_self_attention()
-        return self._kernel(query, key, value, self.shard)
+        self.check_lengths(query, key, self.shard.num_queries, self.shard.num_keys)
+        return self.attend(query, key, value, dropout_p)
 
 
 @dataclass(frozen=True, eq=False)

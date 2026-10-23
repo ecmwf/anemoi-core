@@ -13,8 +13,7 @@
 # It is based on the fused attention example from the Triton-lang github repo (MIT license) (Credits: OpenAI kernel team)
 # https://triton-lang.org/main/getting-started/tutorials/06-fused-attention.html
 #
-# It has been extended to support sliding window attention, and cross attention between sequences of
-# different lengths.
+# It supports sliding window attention, and cross attention between sequences of different lengths.
 
 
 import math

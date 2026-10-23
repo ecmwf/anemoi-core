@@ -20,8 +20,9 @@ family of its nodes in its configuration, for example::
 
 and the node coordinates of the graph fix the resolution and the order of the points.
 
-:data:`GRID_FAMILIES` lists every grid family with its settings, its backends (the Triton kernels
-and the PyTorch versions that compute the same thing) and whether it does cross attention.
+:data:`GRID_FAMILIES` lists every grid family with its settings, its Triton kernels and whether it
+does cross attention; :data:`NEIGHBOURHOOD_BACKENDS` lists the backends every family has (the
+Triton kernels and PyTorch attention with a dense mask, which compute the same thing).
 :func:`build_grid_neighbourhood` checks a configuration against it and builds the family's
 :class:`Neighbourhood` when the model is built: it checks that the nodes form a grid of the family,
 and the attention layer then checks that the backend works with its options and head size. A
@@ -80,7 +81,7 @@ from anemoi.models.triton.utils import is_triton_available
 LOGGER = logging.getLogger(__name__)
 
 
-def _load(path: str):
+def load(path: str):
     """The object named by an import path ``"module:name"``."""
     module, name = path.split(":")
     return getattr(importlib.import_module(module), name)
@@ -90,7 +91,6 @@ def _load(path: str):
 class NeighbourhoodBackend:
     """One way of computing neighbourhood attention, and what it cannot do."""
 
-    description: str
     unsupported: frozenset[str]
     "Options of the attention layer it cannot honour, named as in the model config."
     needs_triton: bool = False
@@ -98,17 +98,14 @@ class NeighbourhoodBackend:
 
 
 # Neighbourhood attention sets its own mask, so no backend takes a sliding window.
-TRITON_BACKEND = NeighbourhoodBackend(
-    "Triton kernels that only visit the keys each tile of queries can reach. GPU only.",
-    unsupported=frozenset({"dropout_p", "window_size"}),
-    needs_triton=True,
-)
-SDPA_BACKEND = NeighbourhoodBackend(
-    "scaled_dot_product_attention with the full queries x keys boolean mask, one byte per pair; for CPUs, small grids and tests.",
-    unsupported=frozenset({"window_size"}),
-)
-NEIGHBOURHOOD_BACKENDS = {"triton": TRITON_BACKEND, "sdpa": SDPA_BACKEND}
-"""The backends of every grid family: the Triton kernels, and PyTorch attention with a dense mask that runs anywhere."""
+NEIGHBOURHOOD_BACKENDS = {
+    # The family's Triton kernels, which only visit the keys each tile of queries can reach. GPU only.
+    "triton": NeighbourhoodBackend(unsupported=frozenset({"dropout_p", "window_size"}), needs_triton=True),
+    # scaled_dot_product_attention with the full queries x keys mask, one byte per pair; for CPUs,
+    # small grids and tests.
+    "sdpa": NeighbourhoodBackend(unsupported=frozenset({"window_size"})),
+}
+"""The backends of every grid family, by the name used in the configuration."""
 
 
 def _is_octahedral(grid: ReducedGrid) -> bool:
@@ -124,16 +121,15 @@ def _is_healpix(grid: ReducedGrid) -> bool:
 
 @dataclass(frozen=True, kw_only=True)
 class GridFamily:
-    """A family of grids with neighbourhood attention: how it is set up, its backends and its Triton kernels.
+    """A family of grids with neighbourhood attention: how it is set up and its Triton kernels.
 
     The neighbourhood class and the kernels are named by import path, ``"module:name"``, and
-    imported on first use, so the registry can be read on machines without Triton.
+    imported on first use (:func:`load`), so the registry can be read on machines without Triton.
     """
 
     description: str
     neighbourhood: str
     "The :class:`Neighbourhood` class that checks the settings and nodes and builds the neighbourhood."
-    backends: dict[str, NeighbourhoodBackend]
     self_attention: str
     "The Triton kernel of self attention."
     cross_attention: Optional[str] = None
@@ -141,21 +137,11 @@ class GridFamily:
     is_member: Optional[Callable[[ReducedGrid], bool]] = None
     "For reduced grids: whether a grid belongs to the family."
 
-    def load_neighbourhood(self) -> type[Neighbourhood]:
-        return _load(self.neighbourhood)
-
-    def load_self_attention(self) -> Callable:
-        return _load(self.self_attention)
-
-    def load_cross_attention(self) -> Callable:
-        return _load(self.cross_attention)
-
 
 GRID_FAMILIES: dict[str, GridFamily] = {
     "octahedral": GridFamily(
         description="octahedral reduced Gaussian grids O<N>: rows of 20, 24, 28, ... points from each pole",
         neighbourhood="anemoi.models.layers.neighbourhood_attention:GridNeighbourhood",
-        backends=NEIGHBOURHOOD_BACKENDS,
         self_attention="anemoi.models.triton.reduced_grid_attention:reduced_grid_attention",
         cross_attention="anemoi.models.triton.reduced_grid_cross_attention:reduced_grid_cross_attention",
         is_member=_is_octahedral,
@@ -163,7 +149,6 @@ GRID_FAMILIES: dict[str, GridFamily] = {
     "healpix": GridFamily(
         description="HEALPix grids in ring or nested ordering: 12 * nside**2 points",
         neighbourhood="anemoi.models.layers.neighbourhood_attention:GridNeighbourhood",
-        backends=NEIGHBOURHOOD_BACKENDS,
         self_attention="anemoi.models.triton.reduced_grid_attention:reduced_grid_attention",
         cross_attention="anemoi.models.triton.reduced_grid_cross_attention:reduced_grid_cross_attention",
         is_member=_is_healpix,
@@ -171,7 +156,6 @@ GRID_FAMILIES: dict[str, GridFamily] = {
     "icosahedral": GridFamily(
         description="refined icosahedra in diamond order (anemoi-graphs TriNodes, ordering: diamonds): 10 * 4**r + 2 points",
         neighbourhood="anemoi.models.layers.icosahedral_neighbourhood:IcosahedralGridNeighbourhood",
-        backends=NEIGHBOURHOOD_BACKENDS,
         self_attention="anemoi.models.triton.icosahedral_attention:icosahedral_attention",
     ),
 }
@@ -186,14 +170,15 @@ def grid_family(name: Optional[str]) -> GridFamily:
 
 
 def check_settings(
-    config: Optional[dict], settings: set[str], key_coords: Optional[Tensor], query_coords: Optional[Tensor]
+    config: dict, settings: set[str], key_coords: Optional[Tensor], query_coords: Optional[Tensor]
 ) -> tuple[str, str]:
     """Check what every grid family's configuration has in common, and give its family and backend.
 
     Parameters
     ----------
     config : dict
-        The ``neighbourhood`` section of a model component.
+        The ``neighbourhood`` section of a model component, checked to be present by
+        :func:`build_grid_neighbourhood`.
     settings : set[str]
         The settings the family takes, ``grid`` and ``backend`` among them.
     key_coords, query_coords : Tensor, optional
@@ -204,8 +189,6 @@ def check_settings(
     tuple[str, str]
         The name of the grid family and of the backend, ``"triton"`` by default.
     """
-    if config is None:
-        raise ValueError("attention_implementation 'neighbourhood' needs a 'neighbourhood' configuration.")
     if key_coords is None:
         raise ValueError("Neighbourhood attention needs the coordinates of the graph nodes.")
     name = config.get("grid")
@@ -216,9 +199,9 @@ def check_settings(
             f"Unknown neighbourhood settings {sorted(unknown)} for grid '{name}'; use {', '.join(sorted(settings))}."
         )
     backend = config.get("backend", "triton")
-    if backend not in family.backends:
+    if backend not in NEIGHBOURHOOD_BACKENDS:
         raise ValueError(
-            f"Neighbourhood attention backend must be one of {list(family.backends)} on {name} grids, got '{backend}'."
+            f"Neighbourhood attention backend must be one of {list(NEIGHBOURHOOD_BACKENDS)}, got '{backend}'."
         )
     if query_coords is not None and family.cross_attention is None:
         raise ValueError(f"Neighbourhood attention on {name} grids only does self attention, as in the processor.")
@@ -235,7 +218,7 @@ class Neighbourhood(ABC):
     family: str
     "The name of the grid family in :data:`GRID_FAMILIES`."
     backend: str
-    "The name of the backend among the family's backends."
+    "The name of the backend in :data:`NEIGHBOURHOOD_BACKENDS`."
 
     @property
     def grid_family(self) -> GridFamily:
@@ -243,7 +226,7 @@ class Neighbourhood(ABC):
 
     @property
     def backend_spec(self) -> NeighbourhoodBackend:
-        return self.grid_family.backends[self.backend]
+        return NEIGHBOURHOOD_BACKENDS[self.backend]
 
     @classmethod
     @abstractmethod
@@ -261,10 +244,13 @@ class Neighbourhood(ABC):
         """How a model component splits its queries into bands, or None if it always runs on all points at once."""
 
 
-class NeighbourhoodAttention(AttentionWrapper):
-    """Base class of the attention modules of neighbourhoods: what their backend can do.
+class NeighbourhoodAttention(AttentionWrapper, ABC):
+    """Base class of the attention modules of neighbourhoods.
 
-    Takes ``(batch, heads, points, head_dim)`` tensors, like the other attention backends.
+    Takes ``(batch, heads, points, head_dim)`` tensors, like the other attention backends, and runs
+    them through one of :data:`NEIGHBOURHOOD_BACKENDS`: the family's Triton kernel, or
+    ``scaled_dot_product_attention`` with the dense mask of the neighbourhood. Subclasses say how
+    the mask is built and how the kernel is called.
     """
 
     def __init__(self, neighbourhood: Neighbourhood) -> None:
@@ -277,6 +263,49 @@ class NeighbourhoodAttention(AttentionWrapper):
                 f"Neighbourhood attention backend '{self.backend}' needs Triton and a GPU; use the 'sdpa' backend "
                 "on machines without them."
             )
+        # Masks depend only on the grids and the device, so each is built once per device.
+        self._masks: dict[torch.device, Tensor] = {}
+        self._kernel: Optional[Callable] = None
+
+    def __getstate__(self) -> dict:
+        # The masks and the kernel are set up again on first use, so they are left out when the
+        # model is saved.
+        state = self.__dict__.copy()
+        state["_masks"] = {}
+        state["_kernel"] = None
+        return state
+
+    @abstractmethod
+    def build_mask(self, device: torch.device) -> Tensor:
+        """The ``(queries, keys)`` boolean mask of the neighbourhood, True where a query attends to a key."""
+
+    @abstractmethod
+    def kernel_path(self) -> str:
+        """The import path of the Triton kernel, ``"module:name"``."""
+
+    @abstractmethod
+    def run_kernel(self, kernel: Callable, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
+        """Neighbourhood attention with the Triton kernel ``kernel``."""
+
+    def check_lengths(self, query: Tensor, key: Tensor, num_queries: int, num_keys: int) -> None:
+        """Raises if ``query`` and ``key`` do not hold the ``num_queries`` and ``num_keys`` points the module is set up for."""
+        if query.shape[-2] != num_queries or key.shape[-2] != num_keys:
+            raise ValueError(
+                f"{self.describe()} is set up for {num_queries} queries and {num_keys} keys, "
+                f"got {query.shape[-2]} and {key.shape[-2]}."
+            )
+
+    def attend(self, query: Tensor, key: Tensor, value: Tensor, dropout_p: float) -> Tensor:
+        """Neighbourhood attention with the backend, on queries and keys in grid order."""
+        if self.backend == "sdpa":
+            if query.device not in self._masks:
+                self._masks[query.device] = self.build_mask(query.device)
+            return torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=self._masks[query.device], dropout_p=dropout_p
+            )
+        if self._kernel is None:
+            self._kernel = load(self.kernel_path())
+        return self.run_kernel(self._kernel, query, key, value)
 
     def describe(self) -> str:
         return f"Neighbourhood attention on {self.neighbourhood.family} grids with the '{self.backend}' backend"
@@ -415,7 +444,7 @@ def build_grid_neighbourhood(
         return None
     if config is None:
         raise ValueError("attention_implementation 'neighbourhood' needs a 'neighbourhood' configuration.")
-    neighbourhood_class = grid_family(config.get("grid")).load_neighbourhood()
+    neighbourhood_class = load(grid_family(config.get("grid")).neighbourhood)
     return neighbourhood_class.from_config(config, key_coords, query_coords)
 
 
@@ -435,14 +464,14 @@ def grid_from_coords(family: str, coords: Tensor) -> tuple[ReducedGrid, Optional
         The grid, and the order that sorts the nodes into it (node ``order[i]`` is point ``i`` of
         the grid), or None when the nodes are already in grid order.
     """
-    kernels = grid_family(family)
-    if kernels.is_member is None:
+    is_member = grid_family(family).is_member
+    if is_member is None:
         raise ValueError(f"'{family}' is not a family of reduced grids.")
     grid, order = ReducedGrid.from_unordered_coords(coords)
-    if not kernels.is_member(grid):
+    if not is_member(grid):
         raise ValueError(
             f"The {coords.shape[0]} nodes, in {grid.num_rows} latitude rows, do not form one of the "
-            f"{kernels.description}."
+            f"{grid_family(family).description}."
         )
     if torch.equal(order, torch.arange(order.numel(), device=order.device)):
         return grid, None
@@ -633,16 +662,6 @@ class NeighbourhoodAttentionWrapper(NeighbourhoodAttention):
 
     Takes ``(batch, heads, points, head_dim)`` tensors with the points in node order, puts them in
     grid order when the two differ, and puts the output back in node order.
-
-    Two backends compute the same thing:
-
-    ``"triton"``
-        The kernels registered for the grid family in :data:`GRID_FAMILIES`, which only visit the
-        keys each tile of queries can reach. GPU only; the head dimension must be a power of two
-        of at least 16. No dropout.
-    ``"sdpa"``
-        ``scaled_dot_product_attention`` with the full ``queries x keys`` boolean mask. Runs
-        anywhere; the mask takes one byte per query-key pair, so it suits CPUs, small grids and tests.
     """
 
     def __init__(self, neighbourhood: GridNeighbourhood) -> None:
@@ -665,37 +684,20 @@ class NeighbourhoodAttentionWrapper(NeighbourhoodAttention):
                 neighbourhood.query_grid, neighbourhood.key_grid, neighbourhood.kernel_size
             )
 
-        # Masks depend only on the grids and device, so they are built once per device.
-        self._masks: dict[torch.device, Tensor] = {}
-        self._kernel = None
+    def build_mask(self, device: torch.device) -> Tensor:
+        q_idx = torch.arange(self.neighbourhood.query_grid.num_points, device=device)
+        k_idx = torch.arange(self.neighbourhood.key_grid.num_points, device=device)
+        return self.mask_rule.to(device)(q_idx[:, None], k_idx[None, :])
 
-    def __getstate__(self) -> dict:
-        # The masks and the kernel are set up again on first use, so they are left out when the
-        # model is saved.
-        state = self.__dict__.copy()
-        state["_masks"] = {}
-        state["_kernel"] = None
-        return state
+    def kernel_path(self) -> str:
+        family = self.neighbourhood.grid_family
+        return family.self_attention if self.neighbourhood.is_self_attention else family.cross_attention
 
-    def _mask_on(self, device: torch.device) -> Tensor:
-        if device not in self._masks:
-            q_idx = torch.arange(self.neighbourhood.query_grid.num_points, device=device)
-            k_idx = torch.arange(self.neighbourhood.key_grid.num_points, device=device)
-            self._masks[device] = self.mask_rule.to(device)(q_idx[:, None], k_idx[None, :])
-        return self._masks[device]
-
-    def _attend(self, query: Tensor, key: Tensor, value: Tensor, dropout_p: float) -> Tensor:
-        if self.backend == "sdpa":
-            return torch.nn.functional.scaled_dot_product_attention(
-                query, key, value, attn_mask=self._mask_on(query.device), dropout_p=dropout_p
-            )
+    def run_kernel(self, kernel: Callable, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
         nb = self.neighbourhood
-        if self._kernel is None:
-            kernels = nb.grid_family
-            self._kernel = kernels.load_self_attention() if nb.is_self_attention else kernels.load_cross_attention()
         if nb.is_self_attention:
-            return self._kernel(query, key, value, nb.key_grid, nb.kernel_size)
-        return self._kernel(query, key, value, nb.query_grid, nb.key_grid, nb.kernel_size)
+            return kernel(query, key, value, nb.key_grid, nb.kernel_size)
+        return kernel(query, key, value, nb.query_grid, nb.key_grid, nb.kernel_size)
 
     def forward(
         self,
@@ -707,13 +709,7 @@ class NeighbourhoodAttentionWrapper(NeighbourhoodAttention):
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
     ) -> Tensor:
-        n_q = self.neighbourhood.query_grid.num_points
-        n_k = self.neighbourhood.key_grid.num_points
-        if query.shape[-2] != n_q or key.shape[-2] != n_k:
-            raise ValueError(
-                f"Neighbourhood attention is set up for {n_q} queries and {n_k} keys, "
-                f"got {query.shape[-2]} and {key.shape[-2]}."
-            )
+        self.check_lengths(query, key, self.neighbourhood.query_grid.num_points, self.neighbourhood.key_grid.num_points)
 
         if self._reorder_queries:
             query = _ReorderPoints.apply(query, self.query_order, self.query_inverse)
@@ -721,7 +717,7 @@ class NeighbourhoodAttentionWrapper(NeighbourhoodAttention):
             key = _ReorderPoints.apply(key, self.key_order, self.key_inverse)
             value = _ReorderPoints.apply(value, self.key_order, self.key_inverse)
 
-        out = self._attend(query, key, value, dropout_p)
+        out = self.attend(query, key, value, dropout_p)
 
         if self._reorder_queries:
             out = _ReorderPoints.apply(out, self.query_inverse, self.query_order)
@@ -952,19 +948,6 @@ class NeighbourhoodBands(LayerSplit):
         return self._exchanges[cache_key]
 
 
-def write_own_points(out: Tensor, band_out: Tensor, band: NeighbourhoodBand, plan: ShardPlan) -> None:
-    """Copy the outputs of the band's query points that the GPU owns into ``out``.
-
-    ``band_out`` holds the outputs of all of the band's query points and ``out`` those of the GPU's
-    own points, both laid out ``(batch, points, channels)``.
-    """
-    first = max(band.query_points.start, plan.own_points.start)
-    stop = min(band.query_points.stop, plan.own_points.stop)
-    if stop > first:
-        own_start, band_start = plan.own_points.start, band.query_points.start
-        out[:, first - own_start : stop - own_start] = band_out[:, first - band_start : stop - band_start]
-
-
 @dataclass(eq=False)
 class BandWork(GpuWork):
     """The bands of one GPU on reduced grids (see :class:`ShardPlan`).
@@ -1010,5 +993,10 @@ class BandWork(GpuWork):
     def keep(self, out: Optional[Tensor], band_out: Tensor, band: NeighbourhoodBand) -> Tensor:
         if out is None:
             out = band_out.new_empty(self.batch_size, self.num_own_queries, band_out.shape[-1])
-        write_own_points(out, band_out, band, self.plan)
+        # Copy the outputs of the band's query points that this GPU owns.
+        own = self.plan.own_points
+        first, stop = max(band.query_points.start, own.start), min(band.query_points.stop, own.stop)
+        if stop > first:
+            start = band.query_points.start
+            out[:, first - own.start : stop - own.start] = band_out[:, first - start : stop - start]
         return out

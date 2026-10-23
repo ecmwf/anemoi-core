@@ -139,7 +139,7 @@ def test_triton_bfloat16_dk_with_nearly_one_hot_attention(grid_name):
     grid, kernel_size = _grid(grid_name), (5, 7)
     dense = self_attention(grid, kernel_size, backend="sdpa")
     query = grid.num_points // 2
-    keys = dense._mask_on(torch.device("cuda"))[query].nonzero().flatten()[:2]
+    keys = dense.build_mask(torch.device("cuda"))[query].nonzero().flatten()[:2]
     q = torch.zeros(1, 1, grid.num_points, 64, device="cuda", dtype=torch.bfloat16)
     k, v, grad_out = torch.zeros_like(q), torch.zeros_like(q), torch.zeros_like(q)
     q[..., 0] = 8.0
@@ -178,7 +178,7 @@ def test_triton_output_depends_only_on_keys_in_the_window(grid_name):
     attention = self_attention(grid, kernel_size, backend="triton")
     out = attention(q, k, v, q.shape[0])
 
-    mask = self_attention(grid, kernel_size, backend="sdpa")._mask_on(torch.device("cuda"))
+    mask = self_attention(grid, kernel_size, backend="sdpa").build_mask(torch.device("cuda"))
     for key in (0, int(grid.row_starts[10]) + 3, grid.num_points - 1):
         k2, v2 = k.clone(), v.clone()
         k2[..., key, :] += 10.0

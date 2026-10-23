@@ -54,12 +54,12 @@ class MultiHeadSelfAttention(nn.Module):
         SDPA is a pytorch function. It runs on CPUs and GPUs. A sliding window becomes a mask of one
         byte per query-key pair.
 
-    With both, a sliding window needs queries and keys of the same length: position i of one is
-    position i of the other. Cross attention between sequences of different lengths attends to every key.
-
     "triton_attention"
         The flash attention algorithm written in Triton, for GPUs. It does self attention and cross
         attention between sequences of any length, and sliding windows but not dropout.
+
+    With both, a sliding window needs queries and keys of the same length: position i of one is
+    position i of the other. Cross attention between sequences of different lengths attends to every key.
 
     "neighbourhood"
         Each query attends only to the keys around it on a registered grid family, such as octahedral

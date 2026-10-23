@@ -145,7 +145,7 @@ def test_triton_bfloat16_dk_with_nearly_one_hot_attention(query_name, key_name, 
     query_grid, key_grid = _grid(query_name), _grid(key_name)
     dense = cross_attention(query_grid, key_grid, kernel_size, backend="sdpa")
     query = query_grid.num_points // 2
-    keys = dense._mask_on(torch.device("cuda"))[query].nonzero().flatten()[:2]
+    keys = dense.build_mask(torch.device("cuda"))[query].nonzero().flatten()[:2]
     q = torch.zeros(1, 1, query_grid.num_points, 64, device="cuda", dtype=torch.bfloat16)
     k = torch.zeros(1, 1, key_grid.num_points, 64, device="cuda", dtype=torch.bfloat16)
     v, grad_out = torch.zeros_like(k), torch.zeros_like(q)
@@ -181,7 +181,7 @@ def test_output_depends_only_on_keys_in_the_window(query_name, key_name):
     query_grid, key_grid, kernel_size = _grid(query_name), _grid(key_name), (5, 7)
     q, k, v = _tensors(query_grid, key_grid, 32, torch.float32)
     attention = cross_attention(query_grid, key_grid, kernel_size, backend="triton")
-    mask = cross_attention(query_grid, key_grid, kernel_size, backend="sdpa")._mask_on(torch.device("cuda"))
+    mask = cross_attention(query_grid, key_grid, kernel_size, backend="sdpa").build_mask(torch.device("cuda"))
     out = attention(q, k, v, q.shape[0])
     for key in (0, key_grid.num_points // 2 + 5, key_grid.num_points - 1):
         k2, v2 = k.clone(), v.clone()

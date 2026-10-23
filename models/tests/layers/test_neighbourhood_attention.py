@@ -29,6 +29,7 @@ from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionW
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
 from anemoi.models.layers.neighbourhood_attention import check_every_key_attended
 from anemoi.models.layers.neighbourhood_attention import grid_from_coords
+from anemoi.models.layers.neighbourhood_attention import load
 from anemoi.models.layers.processor import TransformerProcessor
 from anemoi.models.layers.reduced_grid import ReducedGrid
 from anemoi.models.layers.utils import load_layer_kernels
@@ -72,10 +73,10 @@ def test_registered_grids_are_recognised_from_coords(family, grid):
 def test_every_registered_family_names_importable_neighbourhoods_and_kernels():
     pytest.importorskip("triton")
     for family in GRID_FAMILIES.values():
-        assert issubclass(family.load_neighbourhood(), Neighbourhood)
-        assert callable(family.load_self_attention())
+        assert issubclass(load(family.neighbourhood), Neighbourhood)
+        assert callable(load(family.self_attention))
         if family.cross_attention is not None:
-            assert callable(family.load_cross_attention())
+            assert callable(load(family.cross_attention))
 
 
 def test_grid_of_another_family_is_rejected():
@@ -105,7 +106,6 @@ def test_nodes_in_any_order_are_sorted_into_the_grid():
 @pytest.mark.parametrize(
     ("config", "message"),
     [
-        (None, "needs a 'neighbourhood' configuration"),
         ({"grid": "octahedral", "kernel_size": [4, 5]}, "two positive odd numbers"),
         ({"grid": "octahedral", "kernel_size": [3, 5, 7]}, "two positive odd numbers"),
         ({"grid": "octahedral", "kernel_size": [3, 5], "backend": "natten"}, "backend must be one of"),
@@ -146,6 +146,8 @@ def test_neighbourhood_is_only_built_for_neighbourhood_attention():
     assert build_grid_neighbourhood("scaled_dot_product_attention", None, coords) is None
     with pytest.raises(ValueError, match="only used with attention_implementation 'neighbourhood'"):
         build_grid_neighbourhood("triton_attention", NEIGHBOURHOOD, coords)
+    with pytest.raises(ValueError, match="needs a 'neighbourhood' configuration"):
+        build_grid_neighbourhood("neighbourhood", None, coords)
     neighbourhood = build_grid_neighbourhood("neighbourhood", NEIGHBOURHOOD, coords)
     assert neighbourhood.is_self_attention
     assert neighbourhood.kernel_size == (3, 5)
@@ -305,7 +307,7 @@ def test_processor_only_mixes_neighbouring_nodes():
     node = 7
     order = wrapper.query_order
     grid_index = int(torch.nonzero(order == node))
-    allowed_in_grid = wrapper._mask_on(torch.device("cpu"))[grid_index]
+    allowed_in_grid = wrapper.build_mask(torch.device("cpu"))[grid_index]
     allowed = torch.zeros(grid.num_points, dtype=torch.bool)
     allowed[order[allowed_in_grid]] = True
 

@@ -121,7 +121,7 @@ def test_from_coords_rejects_other_layouts():
 def test_mask_matches_the_definition():
     grid = ReducedGrid.octahedral(8)
     attention = self_attention(grid, KERNEL_SIZE, backend="sdpa")
-    mask = attention._mask_on(torch.device("cpu"))
+    mask = attention.build_mask(torch.device("cpu"))
     rows, positions = grid.rows_and_positions
 
     away_from_poles = (rows >= KERNEL_SIZE[0] // 2) & (rows < grid.num_rows - KERNEL_SIZE[0] // 2)
@@ -134,7 +134,7 @@ def test_mask_matches_the_definition():
 
 def test_window_wraps_round_the_globe():
     grid = ReducedGrid.octahedral(8)
-    mask = self_attention(grid, KERNEL_SIZE, backend="sdpa")._mask_on(torch.device("cpu"))
+    mask = self_attention(grid, KERNEL_SIZE, backend="sdpa").build_mask(torch.device("cpu"))
     start, n = int(grid.row_starts[4]), grid.row_lengths[4]
     # The first point of a row sees the last points of the same row.
     assert mask[start, start + n - 1] and mask[start, start + n - KERNEL_SIZE[1] // 2]
@@ -142,7 +142,7 @@ def test_window_wraps_round_the_globe():
 
 def test_window_reaches_over_the_pole():
     grid, kernel_size = ReducedGrid.octahedral(16), (7, 13)
-    mask = self_attention(grid, kernel_size, backend="sdpa")._mask_on(torch.device("cpu"))
+    mask = self_attention(grid, kernel_size, backend="sdpa").build_mask(torch.device("cpu"))
     starts = grid.row_starts.tolist()
     # The first point sees rows 0-3: rows 0-2 also over the pole, so whole, and 13 points of row 3.
     assert mask[0].sum() == 20 + 24 + 28 + 13
@@ -157,7 +157,7 @@ def test_window_reaches_over_the_pole():
 def test_every_point_near_a_query_is_attended():
     """Every point within three row spacings of a query is in its window, next to the poles too."""
     grid, kernel_size = ReducedGrid.octahedral(24), (7, 13)
-    mask = self_attention(grid, kernel_size, backend="sdpa")._mask_on(torch.device("cpu"))
+    mask = self_attention(grid, kernel_size, backend="sdpa").build_mask(torch.device("cpu"))
     lat, lon = grid.coords[:, 0], grid.coords[:, 1]
     cos_angle = torch.sin(lat)[:, None] * torch.sin(lat)[None, :] + torch.cos(lat)[:, None] * torch.cos(lat)[
         None, :
@@ -189,7 +189,7 @@ def test_sdpa_matches_reference(kernel_size):
 
 def test_window_wider_than_short_rows_takes_their_whole_ring():
     grid, kernel_size = ReducedGrid.octahedral(8), (5, 27)
-    mask = self_attention(grid, kernel_size, backend="sdpa")._mask_on(torch.device("cpu"))
+    mask = self_attention(grid, kernel_size, backend="sdpa").build_mask(torch.device("cpu"))
     # A point of the first row sees rows 0-2 of 20, 24 and 28 points: the two shortest whole.
     assert mask[0].sum() == 20 + 24 + 27
     rows, positions = grid.rows_and_positions
@@ -229,7 +229,7 @@ def test_octahedral_latitudes_are_symmetric_and_decreasing():
 def test_cross_mask_matches_the_definition(n_query, n_key, kernel_size):
 
     query_grid, key_grid = ReducedGrid.octahedral(n_query), ReducedGrid.octahedral(n_key)
-    mask = cross_attention(query_grid, key_grid, kernel_size, backend="sdpa")._mask_on(torch.device("cpu"))
+    mask = cross_attention(query_grid, key_grid, kernel_size, backend="sdpa").build_mask(torch.device("cpu"))
     rows, positions = query_grid.rows_and_positions
     for i in range(query_grid.num_points):
         expected = torch.zeros(key_grid.num_points, dtype=torch.bool)
@@ -240,8 +240,8 @@ def test_cross_mask_matches_the_definition(n_query, n_key, kernel_size):
 def test_cross_mask_on_the_same_grid_is_self_attention():
 
     grid = ReducedGrid.octahedral(8)
-    cross = cross_attention(grid, grid, KERNEL_SIZE, backend="sdpa")._mask_on(torch.device("cpu"))
-    own = self_attention(grid, KERNEL_SIZE, backend="sdpa")._mask_on(torch.device("cpu"))
+    cross = cross_attention(grid, grid, KERNEL_SIZE, backend="sdpa").build_mask(torch.device("cpu"))
+    own = self_attention(grid, KERNEL_SIZE, backend="sdpa").build_mask(torch.device("cpu"))
     assert torch.equal(cross, own)
 
 
@@ -286,7 +286,7 @@ def test_unordered_coords_are_sorted_into_rings():
 @pytest.mark.parametrize("kernel_size", [(3, 5), (5, 13)])
 def test_healpix_mask_matches_the_definition(kernel_size):
     grid = ReducedGrid.healpix(4)
-    mask = self_attention(grid, kernel_size, backend="sdpa")._mask_on(torch.device("cpu"))
+    mask = self_attention(grid, kernel_size, backend="sdpa").build_mask(torch.device("cpu"))
     rows, positions = grid.rows_and_positions
     for i in range(grid.num_points):
         expected = torch.zeros(grid.num_points, dtype=torch.bool)
@@ -325,7 +325,7 @@ def test_healpix_sdpa_matches_reference():
 def test_cross_between_healpix_and_octahedral_matches_the_definition(query_grid, key_grid):
 
     kernel_size = (3, 5)
-    mask = cross_attention(query_grid, key_grid, kernel_size, backend="sdpa")._mask_on(torch.device("cpu"))
+    mask = cross_attention(query_grid, key_grid, kernel_size, backend="sdpa").build_mask(torch.device("cpu"))
     rows, positions = query_grid.rows_and_positions
     for i in range(query_grid.num_points):
         expected = torch.zeros(key_grid.num_points, dtype=torch.bool)
