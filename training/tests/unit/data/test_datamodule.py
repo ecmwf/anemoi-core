@@ -13,6 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pytest_mock import MockFixture
 from torch.utils.data import IterableDataset
 
@@ -159,6 +160,7 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
     """Datasets constructed after set_epoch receive the datamodule's current epoch."""
     datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
     datamodule.epoch = 7
+    datamodule.config = OmegaConf.create({"dataloader": {"ignore_metadata": True}})
     datamodule.task = mocker.Mock()
     datamodule.task.steps.return_value = ({}, {})
 
@@ -173,6 +175,7 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
     datamodule._get_dataset({"data": object()}, shuffle=False, label="validation")
 
     create_dataset.assert_called_once()
+    assert create_dataset.call_args.kwargs["ignore_metadata"] is True
     multi_dataset.assert_called_once_with(
         data_readers={"data": data_reader},
         relative_date_indices={"data": [0, 1]},
