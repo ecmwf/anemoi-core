@@ -492,16 +492,27 @@ class Source(ABC):
         pass
 
     def _index_vars(self, tensor: torch.Tensor, indices: Sequence[int] | torch.Tensor | slice) -> torch.Tensor:
-        """Return a new tensor indexed along the variable axis."""
+        """Index ``tensor`` along the variable axis.
+
+        Selecting all variables in order returns ``tensor`` itself and a contiguous block of indices is
+        a view, so neither copies; any other selection is an ``index_select`` copy.
+        """
         var_dim = self.layout.axis("variables", ndim=tensor.ndim)
         if isinstance(indices, slice):
             slicer: list[Any] = [slice(None)] * tensor.ndim
             slicer[var_dim] = indices
             return tensor[tuple(slicer)]
-        idx = torch.as_tensor(
-            list(indices) if not isinstance(indices, torch.Tensor) else indices, dtype=torch.long, device=tensor.device
-        )
-        return tensor.index_select(var_dim, idx)
+        if isinstance(indices, torch.Tensor):
+            if indices.device.type != "cpu":
+                # Inspecting device indices on the host would sync, so always copy.
+                return tensor.index_select(var_dim, indices.to(device=tensor.device, dtype=torch.long))
+            indices = indices.tolist()
+        positions = list(indices)
+        if positions and positions == list(range(positions[0], positions[0] + len(positions))):
+            if positions[0] == 0 and len(positions) == tensor.shape[var_dim]:
+                return tensor
+            return tensor.narrow(var_dim, positions[0], len(positions))
+        return tensor.index_select(var_dim, torch.as_tensor(positions, dtype=torch.long, device=tensor.device))
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)

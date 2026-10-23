@@ -198,6 +198,18 @@ class TestSourceTransformations:
         assert selected.variables == ["c"]
         assert selected.statistics["mean"].tolist() == [2.0]
 
+    @pytest.mark.parametrize(
+        ("indices", "shares_memory"),
+        [([0, 1, 2], True), (torch.tensor([1, 2]), True), ([0, 2], False), ([2, 1], False)],
+    )
+    def test_select_variables_copies_only_scattered_indices(self, indices, shares_memory) -> None:
+        # All variables in order and contiguous blocks avoid a copy, as the loss variable mapper relies on.
+        view = gridded_batch()["grid"]
+        selected = view.select(variables=indices)
+        index = torch.as_tensor(indices if isinstance(indices, list) else indices.tolist())
+        torch.testing.assert_close(selected.data, view.data.index_select(view.layout.variables, index))
+        assert (selected.data.untyped_storage().data_ptr() == view.data.untyped_storage().data_ptr()) is shares_memory
+
     @pytest.mark.parametrize("indices", [1, slice(1, 2), [1], torch.tensor([1])])
     def test_select_time_keeps_the_time_axis(self, indices) -> None:
         view = gridded_batch()["grid"]
