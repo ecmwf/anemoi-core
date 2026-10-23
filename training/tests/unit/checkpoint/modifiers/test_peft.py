@@ -312,6 +312,20 @@ def test_stage_builds_from_a_hydra_config() -> None:
     assert adapted_paths(result.model) == ["model.model.decoder.data"]
 
 
+def test_peft_preset_builds_and_adapts_the_graph_model() -> None:
+    """The shipped preset instantiates as written and adapts every Linear in the graph model."""
+    from importlib.resources import files
+
+    preset = files("anemoi.training") / "config" / "training" / "checkpoint" / "modifiers" / "peft.yaml"
+    (stage_cfg,) = OmegaConf.create(preset.read_text())
+    assert set(stage_cfg) == {"_target_", "peft_config", "trainable_modules"}
+
+    (stage,) = CheckpointPipeline(stages=[stage_cfg]).stages
+    result = stage.process(CheckpointContext(model=TrainingModule()))
+
+    assert adapted_paths(result.model) == ALL_INNER_LINEARS
+
+
 def test_all_linear_on_a_real_processor() -> None:
     from anemoi.models.layers.processor import TransformerProcessor
     from anemoi.models.layers.utils import load_layer_kernels

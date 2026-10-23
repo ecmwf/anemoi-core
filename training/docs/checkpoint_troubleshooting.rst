@@ -389,6 +389,144 @@ older ``data_indices`` format.
    with ``LocalSource`` (or upload the migrated copy).
 
 *********************************
+ PEFT adapter errors
+*********************************
+
+``peft`` is not installed
+=========================
+
+**Message** (one of):
+
+.. code:: text
+
+   CheckpointConfigError: PeftModifierStage needs the peft package. Install it
+   with: pip install anemoi-training[peft]
+   CheckpointConfigError: The checkpoint holds PEFT adapters; loading it needs
+   the peft package. Install it with: pip install anemoi-training[peft]
+
+**What it means:** the config lists a ``PeftModifierStage``, or the checkpoint
+you load was trained with LoRA adapters, and ``peft`` is not installed.
+
+**How to fix it:** ``pip install anemoi-training[peft]``. Inference
+checkpoints never need it: their adapters are merged into the base weights.
+
+A LoRA option is refused
+========================
+
+**Message** (example):
+
+.. code:: text
+
+   CheckpointConfigError: PeftModifierStage refuses these LoRA options:
+   use_dora=True (DoRA is not supported yet).
+
+**What it means:** the option would change other modules' checkpoint keys,
+rewrite the base weights, or train parameters outside the adapters, or it is
+not supported yet. The message names each refused option and why.
+
+**How to fix it:** remove the option. To keep whole modules training next to
+the adapters, use ``trainable_modules`` instead of ``modules_to_save``.
+
+``target_modules`` does not resolve
+===================================
+
+**Message** (one of):
+
+.. code:: text
+
+   CheckpointConfigError: target_modules must be full paths under 'model.model':
+   ['lin_query'].
+   CheckpointConfigError: target_modules paths not found (full paths from the
+   training module): ['model.model.processor.proc.0.lin_q'].
+   CheckpointConfigError: target_modules regex 'processor.*' matched no nn.Linear
+   module under 'model.model'.
+   CheckpointConfigError: target_modules selects modules that are not nn.Linear:
+   ['model.model.processor.proc.0.layer_norm_mlp'].
+
+**What it means:** ``target_modules`` takes full paths from the LightningModule,
+as for freezing. A bare name such as ``lin_query`` is not a path, a regular
+expression has to match a full path in full, and only ``Linear`` layers inside
+the graph model (``model.model``) can be adapted.
+
+**How to fix it:** list exact paths (``model.model.processor.proc.0.lin_query``),
+use a full-path regex (``model\.model\.processor\..*lin_query``), or
+``all-linear``. To see the paths, print
+``dict(model.model.model.named_modules()).keys()`` and prefix each with
+``model.model.``.
+
+``lora_dropout`` with a sharded model
+=====================================
+
+**Message:**
+
+.. code:: text
+
+   CheckpointConfigError: lora_dropout=0.1 is not supported when the model is
+   sharded (system.hardware.num_gpus_per_model=2). Set lora_dropout to 0.
+
+**What it means:** the processors refuse dropout when the model is sharded
+across GPUs, but they only check their own dropout setting. Dropout inside the
+adapters would get past that check, so the pipeline refuses it when it is built.
+
+**How to fix it:** set ``lora_dropout: 0.0``, or train on one GPU per model.
+
+Freezing after LoRA
+===================
+
+**Message:**
+
+.. code:: text
+
+   CheckpointConfigError: Invalid checkpoint pipeline [..., 'PeftModifierStage',
+   'FreezingModifierStage']: FreezingModifierStage after PeftModifierStage could
+   freeze the adapters. List freezing first, or use the PEFT stage's
+   trainable_modules.
+
+**What it means:** the PEFT stage decides which parameters train. A freezing
+stage after it could freeze the adapters it just added.
+
+**How to fix it:** list the freezing stage before the PEFT stage, or drop it:
+the PEFT stage already freezes everything except the adapters and
+``trainable_modules``.
+
+Adapter weights without an adapter record
+=========================================
+
+**Message** (example):
+
+.. code:: text
+
+   CheckpointIncompatibleError: The checkpoint holds PEFT adapter weights but no
+   adapter record in its metadata, so the adapters cannot be rebuilt (e.g.
+   model.model.processor.proc.0.lin_query.base_layer.weight).
+
+**What it means:** the checkpoint has LoRA-shaped keys (``.base_layer.``,
+``.lora_A.``, ``.lora_B.``) but its metadata does not say which adapters made
+them, typically because it was written outside anemoi-training. Loading it into
+a plain model would skip the adapted layers silently, so it is refused.
+
+**How to fix it:** load the merged inference checkpoint of that run instead, or
+re-save the training checkpoint with a current anemoi-training.
+
+The model already holds different adapters
+==========================================
+
+**Message:**
+
+.. code:: text
+
+   CheckpointIncompatibleError: The model already holds PEFT adapters ... that
+   differ from the ones the checkpoint records ...
+
+**What it means:** on a resume, the run's own ``PeftModifierStage`` added
+adapters before the checkpoint was loaded, and they do not match the ones the
+checkpoint was trained with (different layers, ``r`` or ``lora_alpha``).
+
+**How to fix it:** resume with the same PEFT stage settings the run used, or
+remove the PEFT stage from the config: the checkpoint's record rebuilds the
+adapters on its own.
+
+*********************************
  Source and download errors
 *********************************
 

@@ -898,6 +898,48 @@ decoder.
    ``training.checkpoint.modifiers`` to a list with a ``FreezingModifierStage``,
    as shown above.
 
+********************
+ LoRA Fine-Tuning
+********************
+
+Instead of freezing whole parts of a pre-trained model, you can train small
+LoRA adapters next to its layers and leave the loaded weights as they are. It
+needs the optional ``peft`` extra:
+
+.. code:: bash
+
+   pip install anemoi-training[peft]
+
+Select the ``peft`` modifier group, or list a ``PeftModifierStage`` under
+``training.checkpoint.modifiers`` yourself:
+
+.. code:: bash
+
+   anemoi-training train training/checkpoint/modifiers=peft
+
+.. code:: yaml
+
+   training:
+      checkpoint:
+        source:
+          _target_: anemoi.training.checkpoint.sources.local.LocalSource
+          path: /path/to/pretrained.ckpt
+        loading:
+          _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+        modifiers:
+          - _target_: anemoi.training.checkpoint.modifiers.peft.PeftModifierStage
+            peft_config:
+              r: 8
+              lora_alpha: 16
+              target_modules: model\.model\.processor\..*
+
+``target_modules`` takes full paths, like ``submodules_to_freeze`` above. The
+checkpoints of such a run record their adapters, so you can resume or load them
+like any other checkpoint, and the inference checkpoints hold merged weights
+that load without ``peft``. All options, what is refused and why, and how
+adapters on adapters work are in :ref:`the checkpoint pipeline reference
+<cp_peft>`.
+
 Freezing can be particularly beneficial in scenarios such as fine-tuning
 when only specific components (e.g., the encoder, the decoder) need to
 adapt to a new task while keeping others (e.g., the processor) fixed.
