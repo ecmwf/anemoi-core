@@ -24,6 +24,7 @@ Key components:
 
 from .base import CheckpointContext
 from .base import PipelineStage
+from .builder import build_checkpoint_pipeline
 from .catalog import ComponentCatalog
 from .exceptions import CheckpointConfigError
 from .exceptions import CheckpointError
@@ -41,8 +42,6 @@ from .utils import estimate_checkpoint_memory
 from .utils import format_size
 from .utils import get_checkpoint_metadata
 from .utils import validate_checkpoint
-from .validation import CheckpointPipelineValidator
-from .validation import validate_pipeline_health
 
 __all__ = [
     # Exceptions
@@ -54,13 +53,13 @@ __all__ = [
     "CheckpointLoadError",
     "CheckpointNotFoundError",
     "CheckpointPipeline",
-    "CheckpointPipelineValidator",
     "CheckpointSourceError",
     "CheckpointTimeoutError",
     "CheckpointValidationError",
     "ComponentCatalog",
     "PipelineStage",
     # Utilities
+    "build_checkpoint_pipeline",
     "calculate_checksum",
     "compare_state_dicts",
     "download_with_retry",
@@ -68,7 +67,4 @@ __all__ = [
     "format_size",
     "get_checkpoint_metadata",
     "validate_checkpoint",
-    "validate_pipeline_health",
 ]
-
-__version__ = "0.1.0"
