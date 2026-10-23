@@ -12,7 +12,6 @@ import logging
 import pytorch_lightning as pl
 from omegaconf import OmegaConf
 
-from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
 
 LOGGER = logging.getLogger(__name__)
@@ -57,9 +56,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer.
-        pl_module : pl.LightningModule
-            Training module.
+            Pytorch Lightning trainer
+        _ : pl.LightningModule
+            Not used
         """
         data_name_to_index = trainer.datamodule.ds_train.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
@@ -86,12 +85,6 @@ class CheckVariableOrder(pl.callbacks.Callback):
             **compat_options,
         )
 
-        for dataset_name in pl_module.target_dataset_names:
-            check_loss_tree_variable_units(
-                pl_module.loss[dataset_name],
-                trainer.datamodule.metadata[dataset_name].get("variables_metadata"),
-            )
-
         allow_subset = bool(trainer.datamodule.config.training.get("allow_variable_subset", False))
         check_variables_metadata_compatibility(
             ckpt_variables_metadata,
@@ -106,9 +99,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer.
-        pl_module : pl.LightningModule
-            Training module.
+            Pytorch Lightning trainer
+        _ : pl.LightningModule
+            Not used
         """
         data_name_to_index = trainer.datamodule.ds_valid.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
@@ -120,9 +113,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer.
-        pl_module : pl.LightningModule
-            Training module.
+            Pytorch Lightning trainer
+        _ : pl.LightningModule
+            Not used
         """
         data_name_to_index = trainer.datamodule.ds_test.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)

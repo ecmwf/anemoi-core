@@ -163,6 +163,8 @@ class CrossDataset(ConcatDataset):
         super().__init__(datasets)
         self.data_readers = {name: reader for dataset in datasets for name, reader in dataset.data_readers.items()}
 
+    # TODO(dieter): the properties below duplicate MultiDataset's reader-collecting properties;
+    # extract them into a mixin shared by MultiDataset and CrossDataset.
     @property
     def statistics(self) -> dict:
         return {name: reader.statistics for name, reader in self.data_readers.items()}

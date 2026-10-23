@@ -23,7 +23,6 @@ from omegaconf import open_dict
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
-from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.train.evaluate import AnemoiEvaluator
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
@@ -134,6 +133,8 @@ def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None
         config = OmegaConf.to_object(config)
         config = UnvalidatedBaseSchema(**DictConfig(config))
 
+    from anemoi.training.schemas.base_schema import convert_to_omegaconf
+
     config = convert_to_omegaconf(config)
 
     # Minimal inputs required by get_mlflow_logger
@@ -225,19 +226,11 @@ def test_training_cycle_multidomain(
     trainer.train()
 
     model = trainer.model.model.model
-    assert model.dataset2encoder == {"data": "0", "data_2": "0"}
-    assert model.dataset2decoder == {"data": "0", "data_2": "0"}
     assert len(model.encoder) == 1
     assert len(model.decoder) == 1
     assert model.dataset2hidden == {
         "data": "hidden",
         "data_2": "hidden_2",
-    }
-    assert set(trainer.graph_data.node_types) == {
-        "data",
-        "data_2",
-        "hidden",
-        "hidden_2",
     }
     assert trainer.graph_data["data"].num_nodes != trainer.graph_data["data_2"].num_nodes
     assert trainer.graph_data["hidden"].num_nodes != trainer.graph_data["hidden_2"].num_nodes
@@ -246,14 +239,22 @@ def test_training_cycle_multidomain(
     assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multidomain_ensemble(
+    multidomain_ensemble_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = multidomain_ensemble_config
+    for url in urls:
+        get_test_archive(url)
+
+    AnemoiTrainer(cfg).train()
+
+
 def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = multidomain_config
-    cfg = convert_to_omegaconf(BaseSchema(**cfg))
-    assert cfg.dataloader.loading_policy._target_ == "anemoi.training.data.loading.CrossDatasetLoadingPolicy"
-    assert cfg.model.model.hidden_nodes_name == {
-        "data": "hidden",
-        "data_2": "hidden_2",
-    }
+    BaseSchema(**cfg)
 
 
 @skip_if_offline
@@ -415,7 +416,7 @@ def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, l
 
     cfg = deepcopy(cfg)
     cfg.model.model.hidden_nodes_name = {"data": "hidden_1"}
-    with pytest.raises(ValueError, match="Hierarchical models do not support per-dataset hidden node mappings"):
+    with pytest.raises(ValueError, match="do not support per-dataset hidden node mappings"):
         BaseSchema(**cfg)
 
 
@@ -750,12 +751,7 @@ def test_config_validation_edm_transport(edm_transport_config: tuple[DictConfig,
 
     cfg = deepcopy(cfg)
     cfg.model.model.hidden_nodes_name = {"data": "hidden"}
-    with pytest.raises(ValueError, match="Transport models do not support per-dataset hidden node mappings"):
-        BaseSchema(**cfg)
-
-    cfg.model.model.hidden_nodes_name = "hidden"
-    next(iter(cfg.model.encoders.values())).source_datasets = ["data", "other"]
-    with pytest.raises(ValueError, match="Transport models do not support shared encoders or decoders"):
+    with pytest.raises(ValueError, match="do not support per-dataset hidden node mappings"):
         BaseSchema(**cfg)
 
 

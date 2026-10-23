@@ -249,26 +249,17 @@ class BaseModelSchema(PydanticBaseModel):
         return data
 
     @model_validator(mode="after")
-    def validate_supported_routing(self) -> "BaseModelSchema":
-        hierarchical_models = {
+    def validate_single_hidden_mesh(self) -> "BaseModelSchema":
+        single_hidden_mesh_models = {
             DefinedModels.ANEMOI_MODEL_HIER_ENC_PROC_DEC,
             DefinedModels.ANEMOI_MODEL_HIER_ENC_PROC_DEC_SHORT,
-        }
-        transport_models = {
             DefinedModels.ANEMOI_TRANSPORT_MODEL_ENC_PROC_DEC,
             DefinedModels.ANEMOI_TRANSPORT_MODEL_ENC_PROC_DEC_SHORT,
             DefinedModels.ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC,
             DefinedModels.ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC_SHORT,
         }
-        if self.model.target_ in hierarchical_models and isinstance(self.model.hidden_nodes_name, dict):
-            raise ValueError("Hierarchical models do not support per-dataset hidden node mappings.")
-        if self.model.target_ in transport_models:
-            if isinstance(self.model.hidden_nodes_name, dict):
-                raise ValueError("Transport models do not support per-dataset hidden node mappings.")
-            if any(len(encoder.source_datasets) > 1 for encoder in self.encoders.values()) or any(
-                len(decoder.target_datasets) > 1 for decoder in self.decoders.values()
-            ):
-                raise ValueError("Transport models do not support shared encoders or decoders.")
+        if self.model.target_ in single_hidden_mesh_models and isinstance(self.model.hidden_nodes_name, dict):
+            raise ValueError("Hierarchical and transport models do not support per-dataset hidden node mappings.")
         return self
 
 

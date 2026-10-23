@@ -75,7 +75,6 @@ def fake_pl_module(mocker: Any, name_to_index: dict) -> MagicMock:
     pl_module = mocker.Mock()
     pl_module._ckpt_model_name_to_index = {"data": name_to_index}
     pl_module._ckpt_variables_metadata = None
-    pl_module.target_dataset_names = []
     return pl_module
 
 
@@ -295,7 +294,6 @@ def test_check_variable_units_compatible(mocker: Any) -> None:
     }
     trainer.datamodule.config.training.get.return_value = {}
     pl_module = mocker.Mock()
-    pl_module.target_dataset_names = []
     pl_module._ckpt_variables_metadata = {
         "era5": {
             "t2m": {"units": "K"},
@@ -321,7 +319,6 @@ def test_check_variable_units_incompatible(mocker: Any) -> None:
     }
     trainer.datamodule.config.training.get.return_value = {}
     pl_module = mocker.Mock()
-    pl_module.target_dataset_names = []
     pl_module._ckpt_variables_metadata = {
         "era5": {
             "t2m": {"units": "K"},
@@ -340,7 +337,6 @@ def test_check_variable_units_no_checkpoint_metadata(mocker: Any) -> None:
     trainer.datamodule.metadata = {"era5": {"variables_metadata": {"t2m": {"units": "K"}}}}
     trainer.datamodule.config.training.get.return_value = {}
     pl_module = mocker.Mock()
-    pl_module.target_dataset_names = []
     pl_module._ckpt_variables_metadata = None
 
     # Should not raise
@@ -354,7 +350,6 @@ def test_check_variable_units_no_dataset_metadata(mocker: Any) -> None:
     trainer.datamodule.metadata = {"era5": {}}
     trainer.datamodule.config.training.get.return_value = {}
     pl_module = mocker.Mock()
-    pl_module.target_dataset_names = []
     pl_module._ckpt_variables_metadata = {"era5": {"t2m": {"units": "K"}}}
 
     # Should not raise
@@ -373,12 +368,8 @@ def test_check_variable_units_ignore_units_option(mocker: Any) -> None:
             },
         },
     }
-    trainer.datamodule.config.training.get.return_value = {
-        "ignore_units": True,
-        "ignore_processing_period": False,
-    }
+    trainer.datamodule.config.training.get.return_value = {"ignore_units": True, "ignore_processing_period": False}
     pl_module = mocker.Mock()
-    pl_module.target_dataset_names = []
     pl_module._ckpt_variables_metadata = {
         "era5": {
             "t2m": {"units": "K"},
