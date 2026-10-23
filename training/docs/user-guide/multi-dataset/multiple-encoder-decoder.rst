@@ -26,7 +26,7 @@ Dataset-Specific Configuration
 ------------------------------
 
 Any training component that must be configured per dataset (e.g. normalisation, dataset-specific options) is now defined under a dataset-specific configuration block. This makes it possible to mix datasets with different preprocessing requirements while still benefiting from shared representation learning.
-Similarly, dataset-specific encoders and decoders can handle differing input/output variable sets. 
+Similarly, dataset-specific encoders and decoders can handle differing input/output variable sets.
 
 .. image:: ../../images/multi-dataset/prog-forc-diag.png
     :scale: 50%
