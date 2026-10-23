@@ -36,6 +36,7 @@ from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.sharded_dropout import refuse_dropout_when_sharded
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -454,6 +455,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
 
         kwargs_forward = {
             "x": x,
@@ -854,6 +856,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
         return maybe_checkpoint(
             self.mapper_forward,
             self.gradient_checkpointing,
@@ -1152,6 +1155,7 @@ class PointWiseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
         return maybe_checkpoint(
             self.mapper_forward,
             self.gradient_checkpointing,
@@ -1414,6 +1418,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
         return maybe_checkpoint(
             self.mapper_forward,
             self.gradient_checkpointing,
