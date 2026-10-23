@@ -39,6 +39,12 @@ LOGGER = logging.getLogger(__name__)
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
+    # Whether the forward pass knows the rollout step, which ``first_step_only`` encoders need.
+    supports_first_step_only_encoders: bool = False
+    # Set per instance from the encoders config. The class-level default keeps models pickled before it
+    # existed (the evaluated checkpoints) loadable.
+    first_step_only_datasets: frozenset[str] = frozenset()
+
     def __init__(
         self,
         *,
@@ -110,12 +116,17 @@ class BaseGraphModel(nn.Module):
         self.dataset2encoder: dict[str, str] = {}
         self.encoder2datasets: dict[str, list[str]] = {}
         self.encoder_fusing_strategy: dict[str, str] = {}
+        # Datasets encoded only at the first rollout step (``first_step_only: true``): information that
+        # exists at the initial time only, e.g. the analysis uncertainty. Later steps leave them out.
+        self.first_step_only_datasets: set[str] = set()
         for encoder_name, encoder_config in encoders_config.items():
             datasets_to_encode = encoder_config["source_datasets"]
             self.encoder2datasets[encoder_name] = datasets_to_encode
             for d in datasets_to_encode:
                 self.dataset2encoder[d] = encoder_name
             self.encoder_fusing_strategy[encoder_name] = encoder_config.dataset_fusing_strategy
+            if encoder_config.get("first_step_only", False):
+                self.first_step_only_datasets.update(datasets_to_encode)
 
         self.input_datasets = list(self.dataset2encoder.keys())
 
@@ -158,6 +169,21 @@ class BaseGraphModel(nn.Module):
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
             if fusing_strategy not in ("not_supported"):
                 raise ValueError(f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'.")
+
+        if self.first_step_only_datasets:
+            if not self.supports_first_step_only_encoders:
+                raise ValueError(
+                    f"{type(self).__name__} does not know the rollout step, so it cannot use first_step_only "
+                    f"encoders (datasets {sorted(self.first_step_only_datasets)})."
+                )
+            predicted = self.first_step_only_datasets & set(self.target_datasets)
+            if predicted:
+                raise ValueError(
+                    f"first_step_only datasets {sorted(predicted)} are also decoded: a dataset the model "
+                    "predicts is needed as input at every rollout step."
+                )
+            if not set(self.input_datasets) - self.first_step_only_datasets:
+                raise ValueError("At least one encoder must run at every rollout step (not first_step_only).")
 
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():
@@ -513,14 +539,17 @@ class BaseGraphModel(nn.Module):
                 **kwargs,
             )
 
+            # Input-only datasets (e.g. a first_step_only encoder's) have no output.
+            output_names = [dataset_name for dataset_name in dataset_names if dataset_name in y_hat]
+
             # Apply post-processing
-            for dataset_name in dataset_names:
+            for dataset_name in output_names:
                 y_hat[dataset_name] = post_processors[dataset_name](y_hat[dataset_name], in_place=False)
 
             # Gather output if needed
             if gather_out and model_comm_group is not None:
                 assert grid_shard_sizes is not None
-                for dataset_name in dataset_names:
+                for dataset_name in output_names:
                     y_hat[dataset_name] = gather_tensor(
                         y_hat[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
                     )

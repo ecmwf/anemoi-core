@@ -21,6 +21,7 @@ class SeedContext(IntEnum):
     MODEL = 1
     DATALOADER = 2
     INPUT_NOISE = 3
+    INPUT_DATASET_DROPOUT = 4
 
 
 def derive_seed(base_seed: int, context: SeedContext, *keys: int) -> int:

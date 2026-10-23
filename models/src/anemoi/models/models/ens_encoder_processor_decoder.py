@@ -9,6 +9,7 @@
 
 
 import logging
+from collections.abc import Collection
 from typing import Optional
 
 import einops
@@ -26,6 +27,7 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.layers.aggregator import SumAggregator
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
 
@@ -34,6 +36,9 @@ LOGGER = logging.getLogger(__name__)
 
 class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     """Message passing graph neural network with ensemble functionality."""
+
+    # The forward pass gets the rollout step (fcstep), so first_step_only encoders can be skipped after it.
+    supports_first_step_only_encoders = True
 
     # Model-input positions passed on to the encoder when the input noise consumes some
     # channels. A class-level default keeps models pickled before it existed loadable.
@@ -123,6 +128,19 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             graph_data=self._graph_data,
             sparse_projector_num_chunks=model_config.get("sparse_projector", {}).get("num_chunks", 1),
         )
+
+    def _check_dropped_input_datasets(self, dropped: set[str]) -> None:
+        not_first_step_only = dropped - set(self.first_step_only_datasets)
+        if not_first_step_only:
+            raise ValueError(
+                f"Only first_step_only datasets can be dropped, not {sorted(not_first_step_only)} "
+                f"(first_step_only: {sorted(self.first_step_only_datasets)})."
+            )
+        if not isinstance(self.latent_aggregator, SumAggregator):
+            raise ValueError(
+                "Dropping an input dataset zeroes its latent, which equals leaving it out only for a sum: "
+                f"set model.latent_aggregator to SumAggregator (it is {type(self.latent_aggregator).__name__})."
+            )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         base_input_dim = super()._calculate_input_dim(dataset_name)
@@ -259,6 +277,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         ensemble_members_total: Optional[int] = None,
         ensemble_group_id: int = 0,
         input_noise_seed: Optional[int] = None,
+        dropped_input_datasets: Collection[str] = (),
         **kwargs,
     ) -> dict[str, Tensor]:
         """Forward operator.
@@ -286,6 +305,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             Base seed of the input noise, set by training from the run seed. Without
             it the noise follows torch's seed, so differently seeded inference runs
             draw different members.
+        dropped_input_datasets : Collection[str], optional
+            first_step_only datasets to leave out of this sample at the first step (training dropout,
+            ``training.input_dataset_dropout``). Their encoder still runs, but contributes a zero latent:
+            with a sum of the latents that is exactly leaving them out, and every parameter stays in the
+            graph, as DDP's static graph requires.
         **kwargs
             Additional keyword arguments.
 
@@ -328,7 +352,13 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             )
             input_noise = self.input_noise.sample()
 
+        # Datasets whose encoder runs only at the first step (first_step_only) are left out afterwards, so
+        # information that exists at the initial time only never enters a later step, whatever the input holds.
+        first_step = fcstep == 0
         fcstep = min(1, fcstep)
+        dropped_input_datasets = set(dropped_input_datasets)
+        if dropped_input_datasets:
+            self._check_dropped_input_datasets(dropped_input_datasets)
         # Process each dataset through its corresponding encoder
         dataset_latents = {}
         x_skip_dict = {}
@@ -340,6 +370,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
         for dataset_name in x.keys():
             if dataset_name not in self.input_datasets:
+                continue
+            if not first_step and dataset_name in self.first_step_only_datasets:
                 continue
 
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
@@ -383,6 +415,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
             x_data_latent_dict[dataset_name] = x_data_latent
+            if first_step and dataset_name in dropped_input_datasets:
+                x_latent = x_latent * 0.0
             dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents

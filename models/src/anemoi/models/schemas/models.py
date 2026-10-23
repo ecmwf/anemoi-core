@@ -164,6 +164,8 @@ class EncodersSchema(BaseModel):
     "List of datasets for which the encoder is applicable."
     dataset_fusing_strategy: Literal["not_supported"] = Field(default="not_supported")
     "Dataset fusing strategy. Default to 'not_supported'."
+    first_step_only: bool = Field(default=False)
+    "Encode these datasets at the first rollout step only (ensemble model): for information that exists at the initial time only."
     mapper: Union[
         GNNEncoderSchema,
         GraphTransformerEncoderSchema,

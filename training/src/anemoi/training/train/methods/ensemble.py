@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import logging
+import random
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 import torch
@@ -25,6 +27,8 @@ from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from omegaconf import DictConfig
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
@@ -48,6 +52,8 @@ class EnsembleTraining(BaseTrainingModule):
     ens_comm_group_size = 1
     # Set from the run seed in __init__; None lets the input noise follow torch's seed.
     input_noise_seed: int | None = None
+    # training.input_dataset_dropout, set in __init__ ({dataset: probability}); none by default.
+    input_dataset_dropout: Mapping[str, float] = MappingProxyType({})
 
     def __init__(
         self,
@@ -118,6 +124,16 @@ class EnsembleTraining(BaseTrainingModule):
         # one seed (ANEMOI_BASE_SEED) in control of all randomness, identical on every rank.
         self.input_noise_seed = derive_seed(get_base_seed(), SeedContext.INPUT_NOISE)
 
+        # Input datasets left out of some training samples (dataset name -> probability). Only datasets the
+        # model encodes at the first rollout step alone (first_step_only) qualify: without them in training,
+        # the steps after the first, where the model never has them, would be inputs it has not seen.
+        self.input_dataset_dropout = self._validated_input_dataset_dropout(
+            config.training.get("input_dataset_dropout", None),
+            getattr(self.model.model, "first_step_only_datasets", frozenset()),
+        )
+        if self.input_dataset_dropout:
+            LOGGER.info("Input datasets left out of training samples with probability %s", self.input_dataset_dropout)
+
         # lazy init ensemble group info, will be set by the DDPEnsGroupStrategy.
         # Defaults are the single-device values used by SingleDeviceStrategy,
         # which does not set up communication groups. A ``None`` process group
@@ -183,6 +199,41 @@ class EnsembleTraining(BaseTrainingModule):
         if not hasattr(self, "_ensemble_plot_adapter"):
             self._ensemble_plot_adapter = EnsemblePlotAdapterWrapper(self.task._plot_adapter)
         return self._ensemble_plot_adapter
+
+    @staticmethod
+    def _validated_input_dataset_dropout(dropout: dict | None, first_step_only: set[str] | frozenset[str]) -> dict:
+        """training.input_dataset_dropout as {dataset: probability}, checked against the first_step_only datasets."""
+        dropout = {name: float(probability) for name, probability in (dropout or {}).items()}
+        for name, probability in dropout.items():
+            if name not in first_step_only:
+                msg = (
+                    f"training.input_dataset_dropout: '{name}' is not a first_step_only input dataset of the "
+                    f"model (those are {sorted(first_step_only)})."
+                )
+                raise ValueError(msg)
+            if not 0.0 <= probability <= 1.0:
+                msg = (
+                    f"training.input_dataset_dropout: the probability for '{name}' must be in [0, 1], "
+                    f"got {probability}."
+                )
+                raise ValueError(msg)
+        return dropout
+
+    def _dropped_input_datasets(self) -> tuple[str, ...]:
+        """first_step_only input datasets to leave out of this training sample (training.input_dataset_dropout).
+
+        The draw depends only on the run seed and the global step, so every rank (and every member of an
+        ensemble spread over several GPUs) makes the same choice. The model then zeroes their latents at the
+        first step; later rollout steps never encode them anyway.
+        """
+        dropped = []
+        for index, (name, probability) in enumerate(sorted(self.input_dataset_dropout.items())):
+            draw = random.Random(  # noqa: S311 (a reproducible training draw, not cryptography)
+                derive_seed(get_base_seed(), SeedContext.INPUT_DATASET_DROPOUT, int(self.global_step), index),
+            ).random()
+            if draw < probability:
+                dropped.append(name)
+        return tuple(dropped)
 
     def _expand_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Expand the ensemble dimension in the input batch by stacking the data nens_per_device times."""
@@ -288,10 +339,11 @@ class EnsembleTraining(BaseTrainingModule):
 
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
         x = self._expand_ens_dim(x)
+        dropped = () if validation_mode else self._dropped_input_datasets()
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for i, task_step_kwargs in enumerate(task_steps):
-            y_pred = self(x, **task_step_kwargs)
+            y_pred = self(x, dropped_input_datasets=dropped, **task_step_kwargs)
 
             y = self.task.get_targets(batch, **task_step_kwargs)
 

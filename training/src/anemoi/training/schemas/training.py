@@ -825,6 +825,8 @@ class BaseTrainingSchema(BaseModel):
     "List of metrics"
     ensemble_size_per_device: PositiveInt = 1
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
+    input_dataset_dropout: dict[str, float] = Field(default_factory=dict)
+    "Ensemble training: probability, per first_step_only input dataset, of leaving it out of a training sample."
 
 
 class SingleTrainingMethodSchema(BaseModel):
