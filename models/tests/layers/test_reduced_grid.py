@@ -176,13 +176,12 @@ def test_rows_of_a_grid_count_the_rows_beyond_them():
     assert band.rows(1, 4).row_lengths == grid.rows(4, 7).row_lengths
 
 
-@pytest.mark.parametrize("backend", ["sdpa", "flex"])
 @pytest.mark.parametrize("kernel_size", [KERNEL_SIZE, (3, 45)])
-def test_backends_match_reference(backend, kernel_size):
+def test_sdpa_matches_reference(kernel_size):
     grid = ReducedGrid.octahedral(6)
     generator = torch.Generator().manual_seed(0)
     q, k, v = (torch.randn(1, 2, grid.num_points, 8, generator=generator) for _ in range(3))
-    attention = self_attention(grid, kernel_size, backend=backend)
+    attention = self_attention(grid, kernel_size, backend="sdpa")
     torch.testing.assert_close(
         attention(q, k, v, q.shape[0]), reference_attention(q, k, v, grid, kernel_size), rtol=1e-4, atol=1e-5
     )
@@ -246,15 +245,14 @@ def test_cross_mask_on_the_same_grid_is_self_attention():
     assert torch.equal(cross, own)
 
 
-@pytest.mark.parametrize("backend", ["sdpa", "flex"])
 @pytest.mark.parametrize(("n_query", "n_key"), [(4, 8), (8, 4)])
-def test_cross_backends_match_reference(backend, n_query, n_key):
+def test_cross_sdpa_matches_reference(n_query, n_key):
 
     query_grid, key_grid = ReducedGrid.octahedral(n_query), ReducedGrid.octahedral(n_key)
     generator = torch.Generator().manual_seed(0)
     q = torch.randn(1, 2, query_grid.num_points, 8, generator=generator)
     k, v = (torch.randn(1, 2, key_grid.num_points, 8, generator=generator) for _ in range(2))
-    attention = cross_attention(query_grid, key_grid, (3, 5), backend=backend)
+    attention = cross_attention(query_grid, key_grid, (3, 5), backend="sdpa")
     expected = reference_cross_attention(q, k, v, query_grid, key_grid, (3, 5))
     torch.testing.assert_close(attention(q, k, v, q.shape[0]), expected, rtol=1e-4, atol=1e-5)
 
@@ -309,12 +307,11 @@ def test_healpix_matching_is_the_nearest_longitude():
             assert distances[centre] <= min(distances) + 1e-12
 
 
-@pytest.mark.parametrize("backend", ["sdpa", "flex"])
-def test_healpix_backends_match_reference(backend):
+def test_healpix_sdpa_matches_reference():
     grid = ReducedGrid.healpix(2)
     generator = torch.Generator().manual_seed(0)
     q, k, v = (torch.randn(1, 2, grid.num_points, 8, generator=generator) for _ in range(3))
-    attention = self_attention(grid, (3, 5), backend=backend)
+    attention = self_attention(grid, (3, 5), backend="sdpa")
     torch.testing.assert_close(
         attention(q, k, v, q.shape[0]), reference_attention(q, k, v, grid, (3, 5)), rtol=1e-4, atol=1e-5
     )
@@ -363,7 +360,7 @@ def test_cross_between_healpix_and_octahedral_matches_the_definition(query_grid,
 )
 def test_connection_counts_match_the_mask(query_grid, key_grid, kernel_size):
     rule = ReducedGridCrossNeighbourhoodMask(query_grid, key_grid, kernel_size)
-    mask = rule(0, 0, torch.arange(query_grid.num_points)[:, None], torch.arange(key_grid.num_points)[None, :])
+    mask = rule(torch.arange(query_grid.num_points)[:, None], torch.arange(key_grid.num_points)[None, :])
     assert torch.equal(rule.times_attended(), mask.sum(0))
     assert torch.equal(rule.keys_per_query(), mask.sum(1))
 
@@ -371,7 +368,7 @@ def test_connection_counts_match_the_mask(query_grid, key_grid, kernel_size):
 @pytest.mark.parametrize("grid", [ReducedGrid.octahedral(8), ReducedGrid.healpix(4)], ids=["octahedral", "healpix"])
 def test_connection_counts_on_one_grid_match_the_mask(grid):
     rule = ReducedGridNeighbourhoodMask(grid, (5, 13))
-    mask = rule(0, 0, torch.arange(grid.num_points)[:, None], torch.arange(grid.num_points)[None, :])
+    mask = rule(torch.arange(grid.num_points)[:, None], torch.arange(grid.num_points)[None, :])
     assert torch.equal(rule.times_attended(), mask.sum(0))
     assert torch.equal(rule.keys_per_query(), mask.sum(1))
 

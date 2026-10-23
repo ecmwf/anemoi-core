@@ -13,9 +13,7 @@ import pytest
 import torch
 
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadCrossAttention
-from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
 from anemoi.models.layers.reduced_grid import ReducedGrid
 from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
@@ -206,24 +204,3 @@ def test_neighbourhood_cross_attention_with_either_backend():
     )
     shard = BipartiteGraphShardInfo(src_nodes=[2 * data.num_points], dst_nodes=[2 * hidden.num_points])
     _assert_layers_agree(layers, inputs, shard, 2)
-
-
-def test_sliding_window_flash_attention_with_either_backend():
-    pytest.importorskip("flash_attn")
-    grid = ReducedGrid.octahedral(16)
-    settings = {
-        "cls": MultiHeadSelfAttention,
-        "kwargs": dict(
-            num_heads=4,
-            embed_dim=128,
-            layer_kernels=load_layer_kernels(),
-            attention_implementation="flash_attention",
-            window_size=64,
-            softcap=0.0,
-        ),
-    }
-    layers = _layers(
-        settings, lambda backend: SphericalRotaryEmbedding(grid.coords.float(), None, 32, 100.0, backend=backend)
-    )
-    inputs = torch.randn(2 * grid.num_points, 128, device="cuda")
-    _assert_layers_agree(layers, inputs, GraphShardInfo(nodes=[2 * grid.num_points]), 2)

@@ -227,7 +227,6 @@ class TransformerProcessor(BaseProcessor):
         dropout_p: float = 0.0,
         attention_implementation: str = "triton_attention",
         mlp_implementation: MLPImplementation = "mlp",
-        softcap: Optional[float] = None,
         window_size: Optional[int] = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
@@ -264,8 +263,6 @@ class TransformerProcessor(BaseProcessor):
             implementation, by default "triton_attention"
         mlp_implementation: MLPImplementation
             Implementation of feed-forward blocks in processor layers.
-        softcap : float, optional
-            Anything > 0 activates softcapping attention, by default None
         window_size: int, optional
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
@@ -309,7 +306,6 @@ class TransformerProcessor(BaseProcessor):
             dropout_p=dropout_p,
             attention_implementation=attention_implementation,
             mlp_implementation=mlp_implementation,
-            softcap=softcap,
             neighbourhood=grid_neighbourhood,
             rotary=build_spherical_rotary(rotary_embeddings, (attn_channels or num_channels) // num_heads, node_coords),
         )

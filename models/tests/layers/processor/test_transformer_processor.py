@@ -33,7 +33,6 @@ class TransformerProcessorConfig:
     attn_channels: Optional[int] = None
     dropout_p: float = 0.1
     attention_implementation: str = "scaled_dot_product_attention"
-    softcap: Optional[float] = None
     window_size: Optional[int] = None
     qk_norm: bool = True
     cpu_offload: bool = False

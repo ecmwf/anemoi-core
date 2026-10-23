@@ -1289,7 +1289,6 @@ class TransformerBaseMapper(BaseMapper, ABC):
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "scaled_dot_product_attention",
-        softcap: Optional[float] = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         neighbourhood: Optional[dict] = None,
@@ -1326,8 +1325,6 @@ class TransformerBaseMapper(BaseMapper, ABC):
         attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "scaled_dot_product_attention"
-        softcap : float, optional
-            Anything > 0 activates softcapping flash attention, by default 0
         window_size: int, optional
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
@@ -1373,7 +1370,6 @@ class TransformerBaseMapper(BaseMapper, ABC):
             qk_norm=qk_norm,
             mlp_implementation=mlp_implementation,
             attention_implementation=attention_implementation,
-            softcap=softcap,
             neighbourhood=grid_neighbourhood,
             rotary=build_spherical_rotary(
                 rotary_embeddings, (attn_channels or num_channels) // num_heads, dst_node_coords, src_node_coords
@@ -1553,7 +1549,6 @@ class TransformerForwardMapper(TransformerBaseMapper):
         dropout_p: float = 0.0,
         mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "scaled_dot_product_attention",
-        softcap: float = None,
         cpu_offload: bool = False,
         window_size: Optional[int] = None,
         layer_kernels: DotDict,
@@ -1587,8 +1582,6 @@ class TransformerForwardMapper(TransformerBaseMapper):
         attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "scaled_dot_product_attention"
-        softcap : float, optional
-            Anything > 0 activates softcapping flash attention, by default 0
         window_size: int, optional
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
@@ -1613,7 +1606,6 @@ class TransformerForwardMapper(TransformerBaseMapper):
             qk_norm=qk_norm,
             mlp_implementation=mlp_implementation,
             attention_implementation=attention_implementation,
-            softcap=softcap,
             **kwargs,
         )
 
@@ -1670,7 +1662,6 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         dropout_p: float = 0.0,
         mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "scaled_dot_product_attention",
-        softcap: float = None,
         cpu_offload: bool = False,
         window_size: Optional[int] = None,
         layer_kernels: DotDict,
@@ -1704,8 +1695,6 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "scaled_dot_product_attention"
-        softcap : float, optional
-            Anything > 0 activates softcapping flash attention, by default 0
         window_size: int, optional
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
@@ -1730,7 +1719,6 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             qk_norm=qk_norm,
             mlp_implementation=mlp_implementation,
             attention_implementation=attention_implementation,
-            softcap=softcap,
             **kwargs,
         )
 

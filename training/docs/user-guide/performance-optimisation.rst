@@ -298,31 +298,29 @@ The processor is a large component of the overall runtime. Both the
 GraphTransformer and Transformer processors support multiple backends
 which have different performance characteristics.
 
-For the Transformer processor, the 'flash attention' backend is the
-fastest. Flash attention can be selected in the config like so:
-
-.. code::
-
-   model.processor.attention_implementation: 'flash_attention'
-
-Flash attention is currently available on Nvidia and AMD GPUs only. On
-Nvidia GPUs, there are multiple versions of the flash attention library
-(2, 3 and 4) corresponding to different hardware generations (Ampere,
-Hopper and Blackwell) which take advantage of hardware-specific features
-for further speedups.
-
-Flash attention is not the default as it must be compiled from source.
-
-The Transformer processor also supports a Triton backend. Its speed is
-close to flash-attention 2. It is supported on Nvidia and AMD GPUs. It is
-enabled by default for the processor. The Triton backend does not support
-cross attention, so the encoder and decoder of the transformer mappers
-use PyTorch's scaled dot product attention by default. It can be selected
-in the config like so:
+For the Transformer processor, the Triton backend is the fastest. It
+implements the flash attention algorithm in Triton, supports sliding
+windows, and runs on Nvidia and AMD GPUs. It is the default for the
+processor:
 
 .. code::
 
    model.processor.attention_implementation: 'triton_attention'
+
+The Triton backend also does the cross attention of the transformer
+mappers, between the data and the hidden grid, and is their default.
+
+PyTorch's scaled dot product attention runs on CPUs and GPUs. It can be
+selected for the processor and the mappers:
+
+.. code::
+
+   model.processor.attention_implementation: 'scaled_dot_product_attention'
+
+With a sliding window, scaled dot product attention builds a mask of one
+byte per query-key pair, so it suits CPUs and small grids. A sliding
+window needs queries and keys of the same length, so the mappers attend
+to every key.
 
 
 For the GraphTransformer processor, the 'triton' backend is the fastest.
@@ -354,7 +352,7 @@ supported on CPUs.
 
    The override is applied once on the first forward pass. Valid values
    are the same as the corresponding config options (e.g.
-   ``flash_attention``, ``scaled_dot_product_attention`` for the
+   ``triton_attention``, ``scaled_dot_product_attention`` for the
    Transformer; ``triton``, ``pyg`` for the GraphTransformer).
 
 Compiling

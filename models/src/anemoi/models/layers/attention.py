@@ -17,9 +17,9 @@ from typing import Optional
 from typing import Union
 
 import einops
+import torch
 from torch import Tensor
 from torch import nn
-from torch import where
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import PairTensor
 
@@ -43,30 +43,23 @@ ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKE
 class MultiHeadSelfAttention(nn.Module):
     """Multi Head Self Attention Pytorch Layer
 
-    allows for four different attention implementations:
+    allows for three different attention implementations:
     - scaled dot product attention, see https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
-    - flash attention, see https://github.com/Dao-AILab/flash-attention
     - Triton attention, the flash attention algorithm written in Triton, see :mod:`anemoi.models.triton.attention`
     - neighbourhood attention on a global grid, see :mod:`anemoi.models.layers.neighbourhood_attention`
 
     The config parameter "model.processor.attention_implementation" is used to control which attention implementation is used.
 
     "scaled_dot_product_attention" (SDPA)
-        SDPA is a pytorch function, so it is easiest to use but the least performant.
-        It runs on CPUs and GPUs.
+        SDPA is a pytorch function. It runs on CPUs and GPUs. A sliding window becomes a mask of one
+        byte per query-key pair.
 
-    "flash_attention"
-        Flash attention is optimised for efficient usage of the GPUs memory hierarchy. It loads smaller chunks
-        into fast local memory, and fuses attention into a single kernel to reduce the passes through memory.
-        It runs on Nvidia Ampere (e.g. A100) GPUs or newer and AMD MI200 GPUs or newer. Check the GitHub for
-        the full requirements.
-        You have to install flash attention yourself. If you are running on an x86 system, there are prebuilt
-        wheels available on the GitHub repo. On an aarch64 system, you have to build flash attention from source.
+    With both, a sliding window needs queries and keys of the same length: position i of one is
+    position i of the other. Cross attention between sequences of different lengths attends to every key.
 
     "triton_attention"
-        The flash attention algorithm written in Triton, for GPUs where flash attention is not installed.
-        It supports sliding windows but not dropout or softcap, and only self attention or cross attention
-        between sequences of the same length.
+        The flash attention algorithm written in Triton, for GPUs. It does self attention and cross
+        attention between sequences of any length, and sliding windows but not dropout.
 
     "neighbourhood"
         Each query attends only to the keys around it on a registered grid family, such as octahedral
@@ -87,14 +80,10 @@ class MultiHeadSelfAttention(nn.Module):
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         attention_implementation: str = "scaled_dot_product_attention",
-        softcap: Optional[float] = None,
         neighbourhood: Optional[Neighbourhood] = None,
         rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
         """Initialize MultiHeadSelfAttention.
-
-        For the flash attention implementation, softcapping is available: it prevents the logits from
-        growing excessively large.
 
         Parameters
         ----------
@@ -118,8 +107,6 @@ class MultiHeadSelfAttention(nn.Module):
         attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "scaled_dot_product_attention"
-        softcap : float, optional
-            Anything > 0 activates softcapping attention, by default None
         neighbourhood : Neighbourhood, optional
             The grids and neighbourhood of the "neighbourhood" implementation (see
             :func:`anemoi.models.layers.neighbourhood_attention.build_grid_neighbourhood`)
@@ -144,7 +131,6 @@ class MultiHeadSelfAttention(nn.Module):
         self.dropout_p = dropout_p
         self.is_causal = is_causal
         self.qk_norm = qk_norm
-        self.softcap = softcap
         self.neighbourhood = neighbourhood
         self.rotary = rotary
 
@@ -163,7 +149,6 @@ class MultiHeadSelfAttention(nn.Module):
 
     def set_attention_function(self):
         attn_funcs = {
-            "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
             "triton_attention": TritonAttentionWrapper,
         }
@@ -195,9 +180,7 @@ class MultiHeadSelfAttention(nn.Module):
             self.attention = self.neighbourhood.attention_module()
         else:
             self.attention = attn_funcs[self.attention_implementation]()
-        self.attention.check_supported(
-            dropout_p=self.dropout_p > 0, softcap=bool(self.softcap), window_size=self.window_size is not None
-        )
+        self.attention.check_supported(dropout_p=self.dropout_p > 0, window_size=self.window_size is not None)
         self.attention.check_head_dim(self.head_dim)
 
     def attention_computation(
@@ -252,7 +235,6 @@ class MultiHeadSelfAttention(nn.Module):
             causal=False,
             window_size=self.window_size,
             dropout_p=dropout_p,
-            softcap=self.softcap,
         )
 
         # Shard sequence: split along sequence/grid (dim -2), gather along heads (dim -3)
@@ -326,7 +308,6 @@ class MultiHeadSelfAttention(nn.Module):
             query.shape[0],
             window_size=self.window_size,
             dropout_p=self.dropout_p if self.training else 0.0,
-            softcap=self.softcap,
         )
         out = einops.rearrange(out, "batch heads grid vars -> batch grid (heads vars)")
         return self.projection(out)
@@ -351,12 +332,21 @@ class MultiHeadSelfAttention(nn.Module):
         return self.attend_band(self.lin_q(queries), self.lin_k(x), self.lin_v(x), band)
 
 
+def check_window_lengths(query: Tensor, key: Tensor, window_size: Optional[int]) -> None:
+    """Raises if a sliding window is asked for between sequences of different lengths."""
+    if window_size is not None and query.shape[-2] != key.shape[-2]:
+        raise ValueError(
+            "A sliding window needs queries and keys of the same length, as position i of one is "
+            f"position i of the other; got {query.shape[-2]} queries and {key.shape[-2]} keys. Use "
+            "window_size: null for global cross attention, or neighbourhood attention for local "
+            "cross attention between two grids."
+        )
+
+
 class SDPAAttentionWrapper(AttentionWrapper):
     """Wrapper for Pytorch scaled dot product attention
     To use this attention implementation: model.processor.attention_implementation='scaled_dot_product_attention'
     """
-
-    unsupported = frozenset({"softcap"})
 
     def __init__(self):
         super().__init__()
@@ -367,45 +357,28 @@ class SDPAAttentionWrapper(AttentionWrapper):
         LOGGER.info("Using scaled_dot_product_attention.")
 
         self.attn_mask = None
-        from torch.nn.attention.flex_attention import create_mask
 
-        self.create_mask = create_mask
-
-    def create_sliding_window_mask(self, B, H, Q_LEN, KV_LEN, window_size, device="cpu") -> Tensor:
-        """Create a mask for sliding window attention compatible with SDPA.
+    @staticmethod
+    def create_sliding_window_mask(num_queries: int, num_keys: int, window_size: int, device="cpu") -> Tensor:
+        """Mask of the keys within ``window_size`` positions of each query, on either side.
 
         Parameters
         ----------
-        B : int
-            Batch size.
-        H : int
-            Number of heads.
-        Q_LEN : int
-            Query sequence length.
-        KV_LEN : int
-            Key/value sequence length.
-        window_size : tuple
-            Tuple of (left_window, right_window). Use -1 for unlimited.
+        num_queries, num_keys : int
+            Number of queries and keys.
+        window_size : int
+            Number of positions a query reaches on each side.
         device : str
             Device for the mask tensor.
 
         Returns
         -------
         Tensor
-            2D attention mask.
+            Boolean mask of shape ``(num_queries, num_keys)``, True where the query attends to the key.
         """
-        window_size_l = KV_LEN if window_size[0] == -1 else window_size[0]
-        window_size_r = KV_LEN if window_size[1] == -1 else window_size[1]
-
-        def sliding_window_mask(b, h, q_idx, kv_idx):
-            l_mask = where(kv_idx <= q_idx, abs(q_idx - kv_idx) <= window_size_l, False)
-            r_mask = where(q_idx <= kv_idx, abs(q_idx - kv_idx) <= window_size_r, False)
-            return l_mask | r_mask
-
-        # a mask for use with SDPA: tensor type, < 4D
-        mask = self.create_mask(sliding_window_mask, B, H, Q_LEN, KV_LEN, device=device)
-        mask = mask[0, 0, :, :]
-        return mask
+        query_idx = torch.arange(num_queries, device=device)[:, None]
+        key_idx = torch.arange(num_keys, device=device)[None, :]
+        return (query_idx - key_idx).abs() <= window_size
 
     def forward(
         self,
@@ -416,23 +389,20 @@ class SDPAAttentionWrapper(AttentionWrapper):
         causal=False,
         window_size=None,
         dropout_p=0.0,
-        softcap=None,
     ):
+        check_window_lengths(query, key, window_size)
         if window_size is not None and self.attn_mask is None:
-            # build the attention mask for sliding window attention. We build the mask once and reuse it,
-            # since it is the same for every forward pass (assuming the sequence length does not change).
-
-            if isinstance(window_size, int):
-                window_size = (window_size, window_size)
+            # The mask is the same for every forward pass as long as the sequence lengths do not
+            # change, so it is built once and kept.
             self.attn_mask = self.create_sliding_window_mask(
-                1, query.shape[1], query.shape[2], key.shape[2], window_size, device=query.device
+                query.shape[2], key.shape[2], window_size, device=query.device
             )
 
         out = self.attention(
             query,
             key,
             value,
-            # self.attn_mask is None if global or causal attention is used, since SDPA will automatically apply a causal mask if causal=True. If window_size is used, we use the precomputed attn_mask.
+            # No mask for global attention; the sliding window mask otherwise.
             attn_mask=self.attn_mask,
             is_causal=False,
             dropout_p=dropout_p,
@@ -441,131 +411,13 @@ class SDPAAttentionWrapper(AttentionWrapper):
         return out
 
 
-class FlashAttentionWrapper(AttentionWrapper):
-    """Wrapper for Flash attention.
+class TritonAttentionWrapper(AttentionWrapper):
+    """Wrapper for Anemoi Triton attention, the flash attention algorithm written in Triton.
 
-    Either flash attn v2, v3 (optimised for hoppers and newer) or v4, based on what is installed.
-    Only flash attention v2 supports dropout; v4 also has no softcap.
-
+    Queries and keys may differ in number, as in the transformer mappers.
     """
 
-    def __init__(self):
-        super().__init__()
-
-        self.attention = self._import_flash_attn()
-
-        if self.use_flash_attn_v4:
-            self.unsupported = frozenset({"dropout_p", "softcap"})
-        elif self.use_flash_attn_v3:
-            self.unsupported = frozenset({"dropout_p"})
-
-    def _import_flash_attn(self) -> tuple:
-        """imports either flash attention v2, v3 or v4, based on what is installed. prioritising v4, then v3, then v2. if none are installed, raises an error.
-
-        returns:
-            flash attention function
-        """
-        # will be set to a valid version if either flash attention v2, v3 or v4 is successfully imported
-        flash_attn_func = None
-
-        self.use_flash_attn_v3 = False
-        self.use_flash_attn_v4 = False
-
-        e_v4 = None
-        e_v3 = None
-        e_v2 = None
-
-        try:
-            from flash_attn.cute import flash_attn_func
-
-            LOGGER.info("Using flash attention v4")
-            self.use_flash_attn_v4 = True
-            return flash_attn_func
-        except ImportError as e:
-            e_v4 = e
-            LOGGER.debug(f"Flash attention v4 not available: {e_v4}")
-
-        try:
-            from flash_attn_interface import flash_attn_func
-
-            LOGGER.info("Using flash attention v3")
-            self.use_flash_attn_v3 = True
-            return flash_attn_func
-        except ImportError as e:
-            e_v3 = e
-            LOGGER.debug(f"Flash attention v3 not available: {e_v3}")
-        try:
-            from flash_attn import flash_attn_func
-
-            LOGGER.info("Using flash attention v2")
-            return flash_attn_func
-        except ImportError as e:
-            e_v2 = e
-            LOGGER.debug(f"Flash attention v2 not available: {e_v2}")
-
-        raise ImportError(
-            "Flash attention is not installed. Please install flash attention v4, v3 or v2 to use this attention implementation. "
-            f"Attempted imports resulted in the following errors: "
-            f"v4 import error: {e_v4} "
-            f"v3 import error: {e_v3} "
-            f"v2 import error: {e_v2} "
-        )
-
-    def forward(
-        self,
-        query,
-        key,
-        value,
-        batch_size: int,
-        causal: bool = False,
-        window_size: Optional[int] = None,
-        dropout_p: float = 0.0,
-        softcap: Optional[float] = None,
-    ):
-        query, key, value = (
-            einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
-        )
-
-        if self.use_flash_attn_v4:
-            out = self.attention(
-                query,
-                key,
-                value,
-                softmax_scale=1.0 / math.sqrt(query.shape[-1]),
-                causal=False,
-                window_size=(window_size, window_size) if window_size is not None else (-1, -1),
-            )[0]
-        elif self.use_flash_attn_v3:
-            out = self.attention(
-                query,
-                key,
-                value,
-                causal=False,
-                window_size=(window_size, window_size) if window_size is not None else (-1, -1),
-                softcap=softcap,
-            )
-            if isinstance(out, tuple):
-                out = out[
-                    0
-                ]  # early versions of flash attention v3 returns a tuple with '(out, softmax_lse)'. here we drop to 'out'
-        else:
-            out = self.attention(
-                query,
-                key,
-                value,
-                causal=False,
-                window_size=(window_size, window_size) if window_size is not None else (-1, -1),
-                dropout_p=dropout_p,
-                softcap=softcap,
-            )
-        out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
-        return out
-
-
-class TritonAttentionWrapper(AttentionWrapper):
-    """Wrapper for Anemoi Triton attention. An implementation of the flash attention algorithm, intended to be a portable alternative when flash attention is not available"""
-
-    unsupported = frozenset({"dropout_p", "softcap"})
+    unsupported = frozenset({"dropout_p"})
 
     def __init__(self):
         super().__init__()
@@ -596,17 +448,8 @@ class TritonAttentionWrapper(AttentionWrapper):
         causal: bool = False,
         window_size: int = None,
         dropout_p: float = 0.0,
-        softcap=None,
     ):
-
-        if query.shape[-2] != key.shape[-2]:
-            # Cross attention between grids of different sizes (e.g. transformer mappers)
-            raise NotImplementedError(
-                "Cross attention between sequences of different lengths is not yet implemented in the Triton-Attention "
-                f"backend (query length {query.shape[-2]}, key/value length {key.shape[-2]}).\n"
-                "Please use a different attention backend, or create a ticket on the anemoi-core repository"
-            )
-
+        check_window_lengths(query, key, window_size)
         softmax_scale = 1 / math.sqrt(query.size(-1))
 
         out = self.attention.apply(query, key, value, causal, window_size, softmax_scale).to(query.dtype)

@@ -165,7 +165,6 @@ class IcosahedralAttentionWrapper(NeighbourhoodAttention):
         causal: bool = False,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
-        softcap: Optional[float] = None,
     ) -> Tensor:
         if query.shape[-2] != self.shard.num_queries or key.shape[-2] != self.shard.num_keys:
             raise ValueError(

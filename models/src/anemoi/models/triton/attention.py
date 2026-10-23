@@ -13,7 +13,8 @@
 # It is based on the fused attention example from the Triton-lang github repo (MIT license) (Credits: OpenAI kernel team)
 # https://triton-lang.org/main/getting-started/tutorials/06-fused-attention.html
 #
-# It has been extended to support sliding window attention.
+# It has been extended to support sliding window attention, and cross attention between sequences of
+# different lengths.
 
 
 import math
@@ -62,11 +63,11 @@ set_allocator()
 @triton.jit
 def _window_bounds(
     start,  # first position of the fixed block
-    N_CTX: tl.constexpr,
+    N_ITER: tl.constexpr,  # length of the iterated sequence
     BLOCK_FIXED: tl.constexpr,
     BLOCK_ITER: tl.constexpr,
     WINDOW: tl.constexpr,
-    UNEVEN_CTX: tl.constexpr,
+    UNEVEN_ITER: tl.constexpr,  # whether N_ITER is not a multiple of the largest block size
 ):
     """Range of iter blocks that the fixed block [start, start + BLOCK_FIXED) sees through the sliding window.
 
@@ -81,7 +82,7 @@ def _window_bounds(
     # - - X X X
     # - - - X X
     lo = tl.maximum(0, start - WINDOW)
-    hi = tl.minimum(N_CTX, start + BLOCK_FIXED + WINDOW)
+    hi = tl.minimum(N_ITER, start + BLOCK_FIXED + WINDOW)
     # round lo down and hi up to the nearest multiple of BLOCK_ITER
     lo = (lo // BLOCK_ITER) * BLOCK_ITER
     hi = ((hi + BLOCK_ITER - 1) // BLOCK_ITER) * BLOCK_ITER
@@ -90,9 +91,9 @@ def _window_bounds(
     # c >= start + BLOCK_FIXED - 1 - WINDOW and c + BLOCK_ITER - 1 <= start + WINDOW.
     lo_in = ((tl.maximum(start + BLOCK_FIXED - 1 - WINDOW, 0) + BLOCK_ITER - 1) // BLOCK_ITER) * BLOCK_ITER
     hi_in = ((start + WINDOW + 1) // BLOCK_ITER) * BLOCK_ITER
-    if UNEVEN_CTX:
+    if UNEVEN_ITER:
         # the last, partly filled block always takes the masked path
-        hi_in = tl.minimum(hi_in, (N_CTX // BLOCK_ITER) * BLOCK_ITER)
+        hi_in = tl.minimum(hi_in, (N_ITER // BLOCK_ITER) * BLOCK_ITER)
     lo_in = tl.minimum(tl.maximum(lo_in, lo), hi)
     hi_in = tl.maximum(tl.minimum(hi_in, hi), lo_in)
     return (
@@ -122,10 +123,10 @@ def _attn_fwd_inner(
     CAUSAL: tl.constexpr,  # whether to apply causal masking.
     offs_fixed: tl.constexpr,  # offset pointers for the block of Q and O which this kernel is responsible for, used for masking
     offs_iter: tl.constexpr,  # offset pointers for the block of K and V which this kernel is responsible for, used for masking
-    N_CTX: tl.constexpr,  # the context length.
+    N_KV: tl.constexpr,  # the number of keys.
     WINDOW: tl.constexpr,  # The sliding window size for attention. If 0, no sliding window masking is applied.
     WARP_SPECIALIZE: tl.constexpr,  # Whether or not warp specialization should be used.
-    UNEVEN_CTX: tl.constexpr,  # bool, true if N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER. padding, dynamic tensor descriptor block sizes and masked loads will be used to handle the uneven context
+    UNEVEN_KV: tl.constexpr,  # bool, true if N_KV is not divisible by BLOCK_FIXED or BLOCK_ITER. padding, dynamic tensor descriptor block sizes and masked loads will be used to handle the uneven context
     MASKED: tl.constexpr,  # False when every pair in [lo, hi) is inside the window and the context, so no mask is applied
 ):
     """Tiled calculation of the attention algorithm. Inner loop.
@@ -137,7 +138,7 @@ def _attn_fwd_inner(
     Outside this function, output is stored back to global memory.
 
     Optionally, causal or sliding window masking can be performed.
-    Uneven context handling: When N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context which doesnt fit into a full block.
+    Uneven context handling: When N_KV is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context which doesnt fit into a full block.
 
     """
     # Score given to hidden keys. It must lie below every score q . k can take, or a hidden key wins
@@ -152,20 +153,20 @@ def _attn_fwd_inner(
     # loop over k, v and update accumulator
     for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
         curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
-        tail_iter_block = curr_iter + BLOCK_ITER > N_CTX
+        tail_iter_block = curr_iter + BLOCK_ITER > N_KV
 
         # -- compute qk  (load Kt, optionally mask it, load compute QKt, optionally mask it)----
         k = desc_k.load([iter_offset, 0]).T
-        if MASKED and UNEVEN_CTX and tail_iter_block:
+        if MASKED and UNEVEN_KV and tail_iter_block:
             k = tl.where(
-                (curr_iter + offs_iter)[None, :] < N_CTX, k, 0.0
-            )  # mask out-of-bounds k values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
+                (curr_iter + offs_iter)[None, :] < N_KV, k, 0.0
+            )  # mask out-of-bounds k values to 0, so they dont contribute to output. This is needed when N_KV is not divisible by BLOCK_FIXED
 
         qk = tl.dot(q, k, input_precision=INPUT_PRECISION)
 
         if MASKED:
-            if UNEVEN_CTX and tail_iter_block:
-                qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
+            if UNEVEN_KV and tail_iter_block:
+                qk = tl.where((curr_iter + offs_iter)[None, :] < N_KV, qk, MINUS_INF)
 
             # apply Causal or Window masking if needed.
             if WINDOW >= 0:
@@ -197,10 +198,10 @@ def _attn_fwd_inner(
         acc = acc * alpha[:, None]
         # prepare p and v for the dot
         v = desc_v.load([iter_offset, 0])
-        if MASKED and UNEVEN_CTX and tail_iter_block:
+        if MASKED and UNEVEN_KV and tail_iter_block:
             v = tl.where(
-                (curr_iter + offs_iter)[:, None] < N_CTX, v, 0.0
-            )  # mask out-of-bounds v values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_ITER
+                (curr_iter + offs_iter)[:, None] < N_KV, v, 0.0
+            )  # mask out-of-bounds v values to 0, so they dont contribute to output. This is needed when N_KV is not divisible by BLOCK_ITER
         p = p.to(dtype)
 
         # compute the final dot product and update accumulator
@@ -315,14 +316,14 @@ def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
 
 @triton.autotune(
     configs=_generate_configs(try_warp_spec=False),
-    key=["N_CTX", "HEAD_DIM", "INPUT_PRECISION"],
+    key=["N_Q", "N_KV", "HEAD_DIM", "INPUT_PRECISION"],
     cache_results=False,
 )
 @triton.jit
 def _attn_fwd(
     sm_scale,  # softmax scaling factor.
-    M,  # pointer to row-wise softmax max values (m_i) in unscaled logits, shape [Z*H*n_ctx_rounded]
-    INV_L,  # pointer to row-wise inverse softmax sum (1/l_i), shape [Z*H*n_ctx_rounded]
+    M,  # pointer to row-wise softmax max values (m_i) in unscaled logits, shape [Z*H*n_q_rounded]
+    INV_L,  # pointer to row-wise inverse softmax sum (1/l_i), shape [Z*H*n_q_rounded]
     Z,  # batch size
     H,  # num heads
     # tensor descriptors or raw pointers, depending on hardware support for host descriptors. If raw pointers are passed, they will be converted to tensor descriptors in the kernel with block sizes determined by autotuning
@@ -332,7 +333,8 @@ def _attn_fwd(
     desc_o,
     # raw pointers for output when using uneven ctx, to handle the dynamic block sizes and masked stores required for uneven ctx.
     o,
-    N_CTX: tl.constexpr,  # context length
+    N_Q: tl.constexpr,  # number of queries
+    N_KV: tl.constexpr,  # number of keys and values
     HEAD_DIM: tl.constexpr,  # head dimension
     WINDOW: tl.constexpr,  # sliding window size. If negative, no sliding window masking is applied. Only values within the window around the BLOCK_FIXED section of Q loaded by the kernel will be attended to.
     BLOCK_FIXED: tl.constexpr,  # size of the block of Q loaded into shared memory
@@ -341,8 +343,9 @@ def _attn_fwd(
     WARP_SPECIALIZE: tl.constexpr,  # whether to use warp specialization
     dtype: tl.constexpr,  # output dtype
     INPUT_PRECISION: tl.constexpr,  # precision of the matrix products for float32 inputs, see _dot_input_precision
-    n_ctx_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_CTX, used for calculating offsets and strides when UNEVEN_CTX is false
-    UNEVEN_CTX: tl.constexpr,  # bool, true if N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER. padding, dynamic tensor descriptor block sizes and masked loads will be used to handle the uneven context
+    n_q_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_Q, used for calculating offsets and strides when UNEVEN_Q is false
+    UNEVEN_Q: tl.constexpr,  # bool, true if N_Q is not divisible by BLOCK_FIXED or BLOCK_ITER. padding, dynamic tensor descriptor block sizes and masked loads will be used to handle the uneven context
+    UNEVEN_KV: tl.constexpr,  # the same for N_KV
 ):
     """Tiled forward pass of attention.
 
@@ -350,7 +353,9 @@ def _attn_fwd(
     and iterates over K and V in blocks of BLOCK_ITER (inside the kernel _attn_fwd_inner)
     until the entire BLOCK_FIXED sized output O is accumulated.
 
-    Uneven context handling: When N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context which doesnt fit into a full block.
+    Queries and keys may differ in number (cross attention), without masks.
+
+    Uneven context handling: When N_Q or N_KV is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context which doesnt fit into a full block.
     """
 
     # ***** 1) determine which section of the output this program is responsible for *****
@@ -366,8 +371,9 @@ def _attn_fwd(
 
     # ****** 2) create tensor descriptors for the input and output tensors, with block sizes determined by autotuning *****
 
-    # number of elements in all non-head-dim dimensions (use actual N_CTX for q,k,v,o layout)
-    y_dim = Z * H * N_CTX
+    # number of elements in all non-head-dim dimensions of q and o, and of k and v
+    y_dim = Z * H * N_Q
+    y_dim_kv = Z * H * N_KV
 
     # tensor descriptors might have already been created on host (in system_specific_settings())
     # If host descriptors aren't supported on the hardware, then tensor descripotrs are created now
@@ -379,20 +385,20 @@ def _attn_fwd(
     )
     desc_v = _maybe_make_tensor_descriptor(
         desc_v,
-        shape=[y_dim, HEAD_DIM],
+        shape=[y_dim_kv, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_ITER, HEAD_DIM],
     )
     desc_k = _maybe_make_tensor_descriptor(
         desc_k,
-        shape=[y_dim, HEAD_DIM],
+        shape=[y_dim_kv, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_ITER, HEAD_DIM],
     )
 
     # For output: only create tensor descriptor when NOT in tail case
     # (tail case uses raw pointer arithmetic to handle dynamic block size)
-    tail_case = ((start_fixed + 1) * BLOCK_FIXED) > N_CTX
+    tail_case = ((start_fixed + 1) * BLOCK_FIXED) > N_Q
     desc_o = _maybe_make_tensor_descriptor(
         desc_o,
         shape=[y_dim, HEAD_DIM],
@@ -403,9 +409,9 @@ def _attn_fwd(
     # ****** 3) calculate offsets into the input and output tensors which this kernel is responsible for *****
 
     # Offsets into the start of the K and V tensors which this kernel will iterate over )
-    iter_offset = off_z * H * N_CTX + off_h * N_CTX
+    iter_offset = off_z * H * N_KV + off_h * N_KV
     # Offsets into the middle of the Q tensor which this kernel will keep in memory, and the O tensor which it will write to.
-    fixed_offset = iter_offset + start_fixed * BLOCK_FIXED
+    fixed_offset = off_z * H * N_Q + off_h * N_Q + start_fixed * BLOCK_FIXED
 
     # initialize offset pointers (used for normal tensors)
     offs_fixed = start_fixed * BLOCK_FIXED + tl.arange(0, BLOCK_FIXED)
@@ -427,16 +433,16 @@ def _attn_fwd(
     # load q: it will stay in SRAM throughout
     q = desc_q.load([fixed_offset, 0])
 
-    if UNEVEN_CTX and tail_case:
-        # mask out-of-bounds q values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
-        q = tl.where(offs_fixed[:, None] < N_CTX, q, 0.0)
+    if UNEVEN_Q and tail_case:
+        # mask out-of-bounds q values to 0, so they dont contribute to output. This can happen when N_Q is not divisible by BLOCK_FIXED
+        q = tl.where(offs_fixed[:, None] < N_Q, q, 0.0)
 
     # ****** 5) main loop, iterating over blocks of K and V, and updating the output accumulator, m_i and l_i for each block *****
     if WINDOW >= 0:
         # Key blocks inside the window of every query of this block need no mask, so only the blocks
         # at the two edges of the window go through the masked loop.
         lo, lo_in, hi_in, hi = _window_bounds(
-            start_fixed * BLOCK_FIXED, N_CTX, BLOCK_FIXED, BLOCK_ITER, WINDOW, UNEVEN_CTX
+            start_fixed * BLOCK_FIXED, N_KV, BLOCK_FIXED, BLOCK_ITER, WINDOW, UNEVEN_KV
         )
         acc, l_i, m_i = _attn_fwd_inner(
             acc,
@@ -456,10 +462,10 @@ def _attn_fwd(
             CAUSAL,
             offs_fixed,
             offs_iter,
-            N_CTX,
+            N_KV,
             WINDOW,
             WARP_SPECIALIZE,
-            UNEVEN_CTX,
+            UNEVEN_KV,
             True,
         )
         acc, l_i, m_i = _attn_fwd_inner(
@@ -480,10 +486,10 @@ def _attn_fwd(
             CAUSAL,
             offs_fixed,
             offs_iter,
-            N_CTX,
+            N_KV,
             WINDOW,
             WARP_SPECIALIZE,
-            UNEVEN_CTX,
+            UNEVEN_KV,
             False,
         )
         acc, l_i, m_i = _attn_fwd_inner(
@@ -504,10 +510,10 @@ def _attn_fwd(
             CAUSAL,
             offs_fixed,
             offs_iter,
-            N_CTX,
+            N_KV,
             WINDOW,
             WARP_SPECIALIZE,
-            UNEVEN_CTX,
+            UNEVEN_KV,
             True,
         )
     else:
@@ -518,7 +524,7 @@ def _attn_fwd(
             # X X X - -
             # X X X X -
             # X X X X X
-            lo, hi = 0, tl.minimum((start_fixed + 1) * BLOCK_FIXED, N_CTX)
+            lo, hi = 0, tl.minimum((start_fixed + 1) * BLOCK_FIXED, N_KV)
             hi = tl.multiple_of(hi, BLOCK_FIXED)
         else:
             # Attends within the following range
@@ -527,8 +533,8 @@ def _attn_fwd(
             # X X X X X
             # X X X X X
             # X X X X X
-            lo, hi = 0, N_CTX
-        if not UNEVEN_CTX:
+            lo, hi = 0, N_KV
+        if not UNEVEN_KV:
             hi = tl.multiple_of(hi, BLOCK_ITER)
         acc, l_i, m_i = _attn_fwd_inner(
             acc,
@@ -548,10 +554,10 @@ def _attn_fwd(
             CAUSAL,
             offs_fixed,
             offs_iter,
-            N_CTX,
+            N_KV,
             WINDOW,
             WARP_SPECIALIZE,
-            UNEVEN_CTX,
+            UNEVEN_KV,
             True,
         )
     # epilogue
@@ -560,21 +566,21 @@ def _attn_fwd(
     # that can occur when forming the combined M = m + log2(l).
     inv_l_i = 1.0 / l_i
     acc = acc * inv_l_i[:, None]
-    m_ptrs = M + off_hz * n_ctx_rounded + offs_fixed  # Use n_ctx_rounded since M is allocated with that dimension
-    inv_l_ptrs = INV_L + off_hz * n_ctx_rounded + offs_fixed
+    m_ptrs = M + off_hz * n_q_rounded + offs_fixed  # Use n_q_rounded since M is allocated with that dimension
+    inv_l_ptrs = INV_L + off_hz * n_q_rounded + offs_fixed
 
     # ***** 6) store output *****
 
     # store output values, handling uneven ctx by masking out-of-bounds values and adjusting block size of output when necessary
-    if UNEVEN_CTX and tail_case:
-        # mask the store to m so that we dont write out-of-bounds values when N_CTX is not divisible by BLOCK_FIXED.
-        tl.store(m_ptrs, m_i, mask=offs_fixed < N_CTX)
-        tl.store(inv_l_ptrs, inv_l_i, mask=offs_fixed < N_CTX)
+    if UNEVEN_Q and tail_case:
+        # mask the store to m so that we dont write out-of-bounds values when N_Q is not divisible by BLOCK_FIXED.
+        tl.store(m_ptrs, m_i, mask=offs_fixed < N_Q)
+        tl.store(inv_l_ptrs, inv_l_i, mask=offs_fixed < N_Q)
         # need to write a smaller block size when using uneven ctx to avoid writing into the next SMs region
         # o is a tensor descriptor which doesnt support different block sizes, so access o as a regular pointer with 2D indexing
         offs_d = tl.arange(0, HEAD_DIM)
-        o_ptrs = o + off_hz.to(tl.int64) * N_CTX * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + offs_d[None, :]
-        tl.store(o_ptrs, acc.to(dtype), mask=offs_fixed[:, None] < N_CTX)
+        o_ptrs = o + off_hz.to(tl.int64) * N_Q * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + offs_d[None, :]
+        tl.store(o_ptrs, acc.to(dtype), mask=offs_fixed[:, None] < N_Q)
     else:
         tl.store(m_ptrs, m_i)
         tl.store(inv_l_ptrs, inv_l_i)
@@ -598,14 +604,14 @@ def _attn_bwd_dkdv_inner(
     hi,  # end of the query positions this call iterates over
     qk_scale,
     offs_fixed,  # positions of the fixed block of K and V
-    N_CTX: tl.constexpr,
+    N_Q: tl.constexpr,
     BLOCK_ITER: tl.constexpr,
     CAUSAL: tl.constexpr,
     WINDOW: tl.constexpr,
     WARP_SPECIALIZE: tl.constexpr,
     dtype: tl.constexpr,
     INPUT_PRECISION: tl.constexpr,  # precision of the matrix products for float32 inputs
-    UNEVEN_CTX: tl.constexpr,
+    UNEVEN_Q: tl.constexpr,
     MASKED: tl.constexpr,  # False when every pair in [lo, hi) is inside the window and the context, so no mask is applied
 ):
     """Inner loop of _attn_bwd_dkdv over the blocks of Q between lo and hi."""
@@ -619,15 +625,15 @@ def _attn_bwd_dkdv_inner(
         curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
         curr_offs = curr_iter + offs_iter
         qT = desc_q.load([iter_offset, 0]).T
-        tail_iter_block = MASKED and UNEVEN_CTX and (curr_iter + BLOCK_ITER > N_CTX)
+        tail_iter_block = MASKED and UNEVEN_Q and (curr_iter + BLOCK_ITER > N_Q)
         if tail_iter_block:
-            # mask out-of-bounds q values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
-            qT = tl.where(curr_offs[None, :] < N_CTX, qT, 0.0)
+            # mask out-of-bounds q values to 0, so they dont contribute to output. This is needed when N_Q is not divisible by BLOCK_FIXED
+            qT = tl.where(curr_offs[None, :] < N_Q, qT, 0.0)
 
         # Load m and inv_l before computing qk to reduce pipeline stall.
         if tail_iter_block:
-            m = tl.load(M + curr_offs, mask=curr_offs < N_CTX, other=0.0)
-            inv_l = tl.load(INV_L + curr_offs, mask=curr_offs < N_CTX, other=0.0)
+            m = tl.load(M + curr_offs, mask=curr_offs < N_Q, other=0.0)
+            inv_l = tl.load(INV_L + curr_offs, mask=curr_offs < N_Q, other=0.0)
         else:
             m = tl.load(M + curr_offs)
             inv_l = tl.load(INV_L + curr_offs)
@@ -636,7 +642,7 @@ def _attn_bwd_dkdv_inner(
         # Apply masking.
         if MASKED:
             if tail_iter_block:
-                qkT = tl.where((curr_offs[None, :] < N_CTX), qkT, MINUS_INF)
+                qkT = tl.where((curr_offs[None, :] < N_Q), qkT, MINUS_INF)
             if CAUSAL:
                 mask = curr_offs[None, :] >= offs_fixed[:, None]
                 qkT = tl.where(mask, qkT, MINUS_INF)
@@ -654,13 +660,13 @@ def _attn_bwd_dkdv_inner(
 
         do = desc_do.load([iter_offset, 0])
         if tail_iter_block:
-            # mask out-of-bounds do values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
-            do = tl.where(curr_offs[:, None] < N_CTX, do, 0.0)
+            # mask out-of-bounds do values to 0, so they dont contribute to output. This is needed when N_Q is not divisible by BLOCK_FIXED
+            do = tl.where(curr_offs[:, None] < N_Q, do, 0.0)
         # Compute dV.
         dv += tl.dot(pT.to(dtype), do, input_precision=INPUT_PRECISION)
         if tail_iter_block:
-            Di = tl.load(D + curr_offs, mask=curr_offs < N_CTX, other=0.0)
-            lam = tl.load(LAM + curr_offs, mask=curr_offs < N_CTX, other=0.0)
+            Di = tl.load(D + curr_offs, mask=curr_offs < N_Q, other=0.0)
+            lam = tl.load(LAM + curr_offs, mask=curr_offs < N_Q, other=0.0)
         else:
             Di = tl.load(D + curr_offs)
             lam = tl.load(LAM + curr_offs)
@@ -683,7 +689,7 @@ def _attn_bwd_dkdv_inner(
     # Autotuning is crucial to get good performance at larger head dims
     # For an o96 2048c configuration, got a 3x speedup from autotuning
     configs=_generate_configs(try_warp_spec=False),
-    key=["N_CTX", "HEAD_DIM", "INPUT_PRECISION"],
+    key=["N_Q", "N_KV", "HEAD_DIM", "INPUT_PRECISION"],
     cache_results=False,
 )
 @triton.jit
@@ -705,7 +711,8 @@ def _attn_bwd_dkdv(
     # shared by Q/K/V/DO.
     Z: tl.constexpr,  # batch size
     H: tl.constexpr,  # num heads
-    N_CTX: tl.constexpr,  # context length
+    N_Q: tl.constexpr,  # number of queries
+    N_KV: tl.constexpr,  # number of keys and values
     BLOCK_ITER: tl.constexpr,  # size of the block of Q iterated over
     BLOCK_FIXED: tl.constexpr,  # size of the block of K and V loaded into shared memory
     HEAD_DIM: tl.constexpr,  # head dimension
@@ -714,15 +721,16 @@ def _attn_bwd_dkdv(
     WARP_SPECIALIZE: tl.constexpr,  # whether to use warp specialization
     dtype: tl.constexpr,  # output dtype
     INPUT_PRECISION: tl.constexpr,  # precision of the matrix products for float32 inputs, see _dot_input_precision
-    UNEVEN_CTX: tl.constexpr,  # bool, true if N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER
-    n_ctx_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_CTX, used for M/L/D indexing
+    UNEVEN_Q: tl.constexpr,  # bool, true if N_Q is not divisible by BLOCK_FIXED or BLOCK_ITER
+    UNEVEN_KV: tl.constexpr,  # the same for N_KV
+    n_q_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_Q, used for M/L/D indexing
 ):
     """Tiled backward pass for dK and dV.
 
     Each kernel loads a single BLOCK_FIXED-sized block of K and V into shared memory,
     and iterates over columns of Q in blocks of BLOCK_ITER, accumulating gradients dK and dV.
 
-    Uneven context handling: When N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context.
+    Uneven context handling: When N_Q or N_KV is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context.
     """
     RCP_LN2: tl.constexpr = (
         1.44269504  # 1/log(2), used to merge with sm_scale to make calculating exponent faster by using exp2() later
@@ -738,23 +746,24 @@ def _attn_bwd_dkdv(
 
     # Index into head and batch
     off_hz = tl.program_id(2)  # Which head and batch this program is responsible for
-    off_chz = (off_hz * n_ctx_rounded).to(tl.int64)  # Use n_ctx_rounded since M/L/D are allocated with that dimension
+    off_chz = (off_hz * n_q_rounded).to(tl.int64)  # Use n_q_rounded since M/L/D are allocated with that dimension
     off_z = off_hz // H
     off_h = off_hz % H
 
     # ***** 2) calculate offsets into the input and output tensors which this kernel is responsible for *****
 
     iter_offset = (
-        off_z * H * N_CTX + off_h * N_CTX
+        off_z * H * N_Q + off_h * N_Q
     )  # Offsets into the start of the Q tensor which this kernel will iterate over
     fixed_offset = (
-        iter_offset + start_fixed
+        off_z * H * N_KV + off_h * N_KV + start_fixed
     )  # Offsets into the middle of the K/V tensors which this kernel will keep in memory, and the dK/dV tensors which it will write to
 
     # ***** 3) create tensor descriptors for the input and output tensors, with block sizes determined by autotuning *****
 
-    # number of elements in all non-head-dim dimensions (use actual N_CTX for q,k,v,do layout)
-    y_dim: tl.constexpr = Z * H * N_CTX
+    # number of elements in all non-head-dim dimensions of q and do, and of k, v, dk and dv
+    y_dim: tl.constexpr = Z * H * N_Q
+    y_dim_kv: tl.constexpr = Z * H * N_KV
     desc_q = _maybe_make_tensor_descriptor(
         desc_q,
         shape=[y_dim, HEAD_DIM],
@@ -763,13 +772,13 @@ def _attn_bwd_dkdv(
     )
     desc_v = _maybe_make_tensor_descriptor(
         desc_v,
-        shape=[y_dim, HEAD_DIM],
+        shape=[y_dim_kv, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
     desc_k = _maybe_make_tensor_descriptor(
         desc_k,
-        shape=[y_dim, HEAD_DIM],
+        shape=[y_dim_kv, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
@@ -782,13 +791,13 @@ def _attn_bwd_dkdv(
 
     desc_dk = _maybe_make_tensor_descriptor(
         desc_dk,
-        shape=[y_dim, HEAD_DIM],
+        shape=[y_dim_kv, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
     desc_dv = _maybe_make_tensor_descriptor(
         desc_dv,
-        shape=[y_dim, HEAD_DIM],
+        shape=[y_dim_kv, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_FIXED, HEAD_DIM],
     )
@@ -802,7 +811,7 @@ def _attn_bwd_dkdv(
     LAM += off_chz
 
     # start_fixed is an element offset here (pid * BLOCK_FIXED), not a block index as in _attn_fwd
-    tail_fixed_block = (start_fixed + BLOCK_FIXED) > N_CTX
+    tail_fixed_block = (start_fixed + BLOCK_FIXED) > N_KV
 
     offs_fixed = start_fixed + tl.arange(0, BLOCK_FIXED)
 
@@ -816,10 +825,10 @@ def _attn_bwd_dkdv(
     # exp2 amplifies that mismatch dramatically for sharp attention.
     qk_scale = tl.full((), sm_scale, tl.float32) * RCP_LN2
     v = desc_v.load([fixed_offset, 0])
-    if UNEVEN_CTX and tail_fixed_block:
-        # mask out-of-bounds k and v values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED/BLOCK_ITER
-        k = tl.where(offs_fixed[:, None] < N_CTX, k, 0.0)
-        v = tl.where(offs_fixed[:, None] < N_CTX, v, 0.0)
+    if UNEVEN_KV and tail_fixed_block:
+        # mask out-of-bounds k and v values to 0, so they dont contribute to output. This can happen when N_KV is not divisible by BLOCK_FIXED/BLOCK_ITER
+        k = tl.where(offs_fixed[:, None] < N_KV, k, 0.0)
+        v = tl.where(offs_fixed[:, None] < N_KV, v, 0.0)
 
     # This is a single stage kernel, which loops over columns of Q
     # When masking (causal or sliding-window) is used, it must determine where the
@@ -834,7 +843,7 @@ def _attn_bwd_dkdv(
     if WINDOW >= 0:
         # Rather then iterating across the whole context, we iterate over a window around the
         # position of the K and V blocks; query blocks inside the window of every key need no mask.
-        lo, lo_in, hi_in, hi = _window_bounds(start_fixed, N_CTX, BLOCK_FIXED, BLOCK_ITER, WINDOW, UNEVEN_CTX)
+        lo, lo_in, hi_in, hi = _window_bounds(start_fixed, N_Q, BLOCK_FIXED, BLOCK_ITER, WINDOW, UNEVEN_Q)
         dk, dv = _attn_bwd_dkdv_inner(
             dk,
             dv,
@@ -851,14 +860,14 @@ def _attn_bwd_dkdv(
             lo_in,
             qk_scale,
             offs_fixed,
-            N_CTX,
+            N_Q,
             BLOCK_ITER,
             CAUSAL,
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
             INPUT_PRECISION,
-            UNEVEN_CTX,
+            UNEVEN_Q,
             True,
         )
         dk, dv = _attn_bwd_dkdv_inner(
@@ -877,14 +886,14 @@ def _attn_bwd_dkdv(
             hi_in,
             qk_scale,
             offs_fixed,
-            N_CTX,
+            N_Q,
             BLOCK_ITER,
             CAUSAL,
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
             INPUT_PRECISION,
-            UNEVEN_CTX,
+            UNEVEN_Q,
             False,
         )
         dk, dv = _attn_bwd_dkdv_inner(
@@ -903,14 +912,14 @@ def _attn_bwd_dkdv(
             hi,
             qk_scale,
             offs_fixed,
-            N_CTX,
+            N_Q,
             BLOCK_ITER,
             CAUSAL,
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
             INPUT_PRECISION,
-            UNEVEN_CTX,
+            UNEVEN_Q,
             True,
         )
     else:
@@ -934,38 +943,38 @@ def _attn_bwd_dkdv(
             LAM,
             iter_offset,
             lo,
-            N_CTX,
+            N_Q,
             qk_scale,
             offs_fixed,
-            N_CTX,
+            N_Q,
             BLOCK_ITER,
             CAUSAL,
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
             INPUT_PRECISION,
-            UNEVEN_CTX,
+            UNEVEN_Q,
             True,
         )
 
     # ***** 6) store gradients dK and dV *****
 
     # Store computed dK and dV
-    # when N_CTX is not divisible by BLOCK_FIXED, we may have computed values for out-of-bounds positions,
+    # when N_KV is not divisible by BLOCK_FIXED, we may have computed values for out-of-bounds positions,
     # In this case, we set the block size of desc_d[vk] to be smaller in the tail case, such that the store only writes the in-bounds values.
 
-    if UNEVEN_CTX and tail_fixed_block:
+    if UNEVEN_KV and tail_fixed_block:
         # need to write a smaller block size when using uneven ctx to avoid writing into the next SMs region
         # to do this, access dk and dv as regular pointers with 2D indexing
         out_ptrs = (
-            off_hz.to(tl.int64) * N_CTX * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + (tl.arange(0, HEAD_DIM))[None, :]
+            off_hz.to(tl.int64) * N_KV * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + (tl.arange(0, HEAD_DIM))[None, :]
         )
         dv_ptrs = dv_ptr + out_ptrs
         dk_ptrs = dk_ptr + out_ptrs
 
-        tl.store(dv_ptrs, dv.to(dtype), mask=offs_fixed[:, None] < N_CTX)
+        tl.store(dv_ptrs, dv.to(dtype), mask=offs_fixed[:, None] < N_KV)
         dk *= sm_scale
-        tl.store(dk_ptrs, dk.to(dtype), mask=offs_fixed[:, None] < N_CTX)
+        tl.store(dk_ptrs, dk.to(dtype), mask=offs_fixed[:, None] < N_KV)
     else:
         desc_dv.store([fixed_offset, 0], dv.to(dtype))
         dk *= sm_scale
@@ -990,14 +999,14 @@ def _attn_bwd_dq_inner(
     hi,  # end of the key positions this call iterates over
     qk_scale,
     offs_fixed,  # positions of the fixed block of Q
-    N_CTX: tl.constexpr,
+    N_KV: tl.constexpr,
     BLOCK_ITER: tl.constexpr,
     CAUSAL: tl.constexpr,
     WINDOW: tl.constexpr,
     WARP_SPECIALIZE: tl.constexpr,
     dtype: tl.constexpr,
     INPUT_PRECISION: tl.constexpr,  # precision of the matrix products for float32 inputs
-    UNEVEN_CTX: tl.constexpr,
+    UNEVEN_KV: tl.constexpr,
     MASKED: tl.constexpr,  # False when every pair in [lo, hi) is inside the window and the context, so no mask is applied
 ):
     """Inner loop of _attn_bwd_dq over the blocks of K and V between lo and hi."""
@@ -1009,21 +1018,21 @@ def _attn_bwd_dq_inner(
 
     for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
         curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
-        tail_iter_block = MASKED and UNEVEN_CTX and ((curr_iter + BLOCK_ITER) > N_CTX)
+        tail_iter_block = MASKED and UNEVEN_KV and ((curr_iter + BLOCK_ITER) > N_KV)
 
         kT = desc_k.load([iter_offset, 0]).T
         vT = desc_v.load([iter_offset, 0]).T
         if tail_iter_block:
-            # mask out-of-bounds k and q values to 0, so they dont contribute to output when N_CTX is not divisible by BLOCK_FIXED
-            kT = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, kT, 0.0)
-            vT = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, vT, 0.0)
+            # mask out-of-bounds k and q values to 0, so they dont contribute to output when N_KV is not divisible by BLOCK_FIXED
+            kT = tl.where((curr_iter + offs_iter)[None, :] < N_KV, kT, 0.0)
+            vT = tl.where((curr_iter + offs_iter)[None, :] < N_KV, vT, 0.0)
 
         qk = tl.dot(q, kT, input_precision=INPUT_PRECISION)
 
         # apply masking
         if MASKED:
             if tail_iter_block:
-                qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
+                qk = tl.where((curr_iter + offs_iter)[None, :] < N_KV, qk, MINUS_INF)
             if CAUSAL:
                 iter_pos = (curr_iter + offs_iter)[None, :]
                 fixed_pos = offs_fixed[:, None]
@@ -1067,7 +1076,7 @@ def _attn_bwd_dq_inner(
     # Autotuning is crucial to get good performance at larger head dims
     # For an o96 2048c configuration, got a 3x speedup from autotuning
     configs=_generate_configs(try_warp_spec=False),
-    key=["N_CTX", "HEAD_DIM", "INPUT_PRECISION"],
+    key=["N_Q", "N_KV", "HEAD_DIM", "INPUT_PRECISION"],
     cache_results=False,
 )
 @triton.jit
@@ -1087,7 +1096,8 @@ def _attn_bwd_dq(
     # shared by Q/K/V/DO.
     Z: tl.constexpr,  # batch size
     H: tl.constexpr,  # num heads
-    N_CTX: tl.constexpr,  # context length
+    N_Q: tl.constexpr,  # number of queries
+    N_KV: tl.constexpr,  # number of keys and values
     BLOCK_ITER: tl.constexpr,  # size of the block of K and V iterated over
     BLOCK_FIXED: tl.constexpr,  # size of the block of Q loaded into shared memory
     HEAD_DIM: tl.constexpr,  # head dimension
@@ -1096,15 +1106,16 @@ def _attn_bwd_dq(
     WARP_SPECIALIZE: tl.constexpr,  # whether to use warp specialization
     dtype: tl.constexpr,  # output dtype
     INPUT_PRECISION: tl.constexpr,  # precision of the matrix products for float32 inputs, see _dot_input_precision
-    n_ctx_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_CTX, used for M/D indexing
-    UNEVEN_CTX: tl.constexpr,  # bool, true if N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER
+    n_q_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_Q, used for M/D indexing
+    UNEVEN_Q: tl.constexpr,  # bool, true if N_Q is not divisible by BLOCK_FIXED or BLOCK_ITER
+    UNEVEN_KV: tl.constexpr,  # the same for N_KV
 ):
     """Tiled backward pass for dQ.
 
     Each kernel loads a single BLOCK_FIXED-sized block of Q and dO into shared memory,
     and iterates over columns of K and V in blocks of BLOCK_ITER, accumulating gradients dQ.
 
-    Uneven context handling: When N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context.
+    Uneven context handling: When N_Q or N_KV is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context.
     """
 
     RCP_LN2: tl.constexpr = 1.44269504  # = 1/ln(2), matching the forward and dK/dV kernels
@@ -1120,23 +1131,24 @@ def _attn_bwd_dq(
 
     # Index into head and batch
     off_hz = tl.program_id(2)  # Which head and batch this program is responsible for
-    off_chz = off_hz * n_ctx_rounded
+    off_chz = off_hz * n_q_rounded
     off_z = off_hz // H
     off_h = off_hz % H
 
     # ***** 2) calculate offsets into the input and output tensors which this kernel is responsible for *****
 
     iter_offset = (
-        off_z * (N_CTX * H) + off_h * N_CTX
+        off_z * (N_KV * H) + off_h * N_KV
     )  # Offsets into the start of the K and V tensors which this kernel will iterate over
     fixed_offset = (
-        iter_offset + start_fixed
+        off_z * (N_Q * H) + off_h * N_Q + start_fixed
     )  # Offsets into the middle of the Q tensor which this kernel will keep in memory, and the dQ tensor which it will write to
 
     # ***** 3) create tensor descriptors for the input and output tensors, with block sizes determined by autotuning *****
 
-    # How many elements in the first 3 dimensions (use actual N_CTX for q,k,v,do layout)
-    y_dim = Z * H * N_CTX
+    # How many elements in the first 3 dimensions of q, do and dq, and of k and v
+    y_dim = Z * H * N_Q
+    y_dim_kv = Z * H * N_KV
     # Build tensor descriptors if they havent already been built in _system_specific_settings()
     desc_q = _maybe_make_tensor_descriptor(
         desc_q,
@@ -1146,13 +1158,13 @@ def _attn_bwd_dq(
     )
     desc_v = _maybe_make_tensor_descriptor(
         desc_v,
-        shape=[y_dim, HEAD_DIM],
+        shape=[y_dim_kv, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_ITER, HEAD_DIM],
     )
     desc_k = _maybe_make_tensor_descriptor(
         desc_k,
-        shape=[y_dim, HEAD_DIM],
+        shape=[y_dim_kv, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_ITER, HEAD_DIM],
     )
@@ -1179,7 +1191,7 @@ def _attn_bwd_dq(
 
     # generate offset array for fixed block
     offs_fixed = start_fixed + tl.arange(0, BLOCK_FIXED)
-    tail_fixed_block = (start_fixed + BLOCK_FIXED) > N_CTX
+    tail_fixed_block = (start_fixed + BLOCK_FIXED) > N_Q
 
     q = desc_q.load([fixed_offset, 0])
     dq = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)  # gradient accumulator for dQ
@@ -1195,16 +1207,14 @@ def _attn_bwd_dq(
     ds_sum = tl.zeros([BLOCK_FIXED], dtype=tl.float32)
     p_sum = tl.zeros([BLOCK_FIXED], dtype=tl.float32)
     do = desc_do.load([fixed_offset, 0])
-    if UNEVEN_CTX and tail_fixed_block:
-        # mask out-of-bounds q values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
-        q = tl.where(offs_fixed[:, None] < N_CTX, q, 0.0)
-        do = tl.where(
-            offs_fixed[:, None] < N_CTX, do, 0.0
-        )  # mask out-of-bounds do values to 0, so they dont contribute
+    if UNEVEN_Q and tail_fixed_block:
+        # mask out-of-bounds q values to 0, so they dont contribute to output. This can happen when N_Q is not divisible by BLOCK_FIXED
+        q = tl.where(offs_fixed[:, None] < N_Q, q, 0.0)
+        do = tl.where(offs_fixed[:, None] < N_Q, do, 0.0)  # mask out-of-bounds do values to 0, so they dont contribute
 
-    if UNEVEN_CTX and tail_fixed_block:
-        m = tl.load(M + offs_fixed, mask=offs_fixed < N_CTX, other=0.0)  # Add masking to prevent loading garbage values
-        inv_l = tl.load(INV_L + offs_fixed, mask=offs_fixed < N_CTX, other=0.0)
+    if UNEVEN_Q and tail_fixed_block:
+        m = tl.load(M + offs_fixed, mask=offs_fixed < N_Q, other=0.0)  # Add masking to prevent loading garbage values
+        inv_l = tl.load(INV_L + offs_fixed, mask=offs_fixed < N_Q, other=0.0)
     else:
         m = tl.load(M + offs_fixed)
         inv_l = tl.load(INV_L + offs_fixed)
@@ -1213,12 +1223,12 @@ def _attn_bwd_dq(
     # delta = rowsum(O * dO), the per-query scalar of the softmax backward. It is worked out here from
     # the saved output of this block and stored for the dK/dV kernel.
     o = tl.load(
-        Out + off_hz.to(tl.int64) * N_CTX * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + tl.arange(0, HEAD_DIM)[None, :],
-        mask=offs_fixed[:, None] < N_CTX,
+        Out + off_hz.to(tl.int64) * N_Q * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + tl.arange(0, HEAD_DIM)[None, :],
+        mask=offs_fixed[:, None] < N_Q,
         other=0.0,
     )
     Di = tl.sum(o.to(tl.float32) * do.to(tl.float32), axis=1)
-    tl.store(D + offs_fixed, Di, mask=offs_fixed < N_CTX)
+    tl.store(D + offs_fixed, Di, mask=offs_fixed < N_Q)
 
     # This is a single stage kernel, which loops over columns of K and V
     # When masking (causal or sliding-window) is used, it must determine where the
@@ -1231,7 +1241,7 @@ def _attn_bwd_dq(
     # ***** 5) main loop, iterating over blocks of K and V, and updating the gradient accumulator dQ for each block *****
 
     if WINDOW >= 0:
-        lo, lo_in, hi_in, hi = _window_bounds(start_fixed, N_CTX, BLOCK_FIXED, BLOCK_ITER, WINDOW, UNEVEN_CTX)
+        lo, lo_in, hi_in, hi = _window_bounds(start_fixed, N_KV, BLOCK_FIXED, BLOCK_ITER, WINDOW, UNEVEN_KV)
         dq, p_k, ds_sum, p_sum = _attn_bwd_dq_inner(
             dq,
             p_k,
@@ -1249,14 +1259,14 @@ def _attn_bwd_dq(
             lo_in,
             qk_scale,
             offs_fixed,
-            N_CTX,
+            N_KV,
             BLOCK_ITER,
             CAUSAL,
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
             INPUT_PRECISION,
-            UNEVEN_CTX,
+            UNEVEN_KV,
             True,
         )
         dq, p_k, ds_sum, p_sum = _attn_bwd_dq_inner(
@@ -1276,14 +1286,14 @@ def _attn_bwd_dq(
             hi_in,
             qk_scale,
             offs_fixed,
-            N_CTX,
+            N_KV,
             BLOCK_ITER,
             CAUSAL,
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
             INPUT_PRECISION,
-            UNEVEN_CTX,
+            UNEVEN_KV,
             False,
         )
         dq, p_k, ds_sum, p_sum = _attn_bwd_dq_inner(
@@ -1303,14 +1313,14 @@ def _attn_bwd_dq(
             hi,
             qk_scale,
             offs_fixed,
-            N_CTX,
+            N_KV,
             BLOCK_ITER,
             CAUSAL,
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
             INPUT_PRECISION,
-            UNEVEN_CTX,
+            UNEVEN_KV,
             True,
         )
     else:
@@ -1320,7 +1330,7 @@ def _attn_bwd_dq(
             # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
             hi = tl.multiple_of(hi, BLOCK_ITER)
         else:
-            hi = N_CTX
+            hi = N_KV
         dq, p_k, ds_sum, p_sum = _attn_bwd_dq_inner(
             dq,
             p_k,
@@ -1338,31 +1348,31 @@ def _attn_bwd_dq(
             hi,
             qk_scale,
             offs_fixed,
-            N_CTX,
+            N_KV,
             BLOCK_ITER,
             CAUSAL,
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
             INPUT_PRECISION,
-            UNEVEN_CTX,
+            UNEVEN_KV,
             True,
         )
 
     # ***** 6) store gradient dQ *****
 
     lam = tl.where(p_sum > 0, ds_sum / p_sum, 0.0)
-    tl.store(LAM + offs_fixed, lam, mask=offs_fixed < N_CTX)
+    tl.store(LAM + offs_fixed, lam, mask=offs_fixed < N_Q)
     dq = (dq - lam[:, None] * p_k) * sm_scale
-    # to avoid writing out of bounds when N_CTX is not divisible by BLOCK_FIXED, the block size of desc_dq is set to be smaller in the last block, so we only write the in-bounds values
-    if UNEVEN_CTX and tail_fixed_block:
+    # to avoid writing out of bounds when N_Q is not divisible by BLOCK_FIXED, the block size of desc_dq is set to be smaller in the last block, so we only write the in-bounds values
+    if UNEVEN_Q and tail_fixed_block:
         dq_ptrs = (
             dq_ptr
-            + off_hz.to(tl.int64) * N_CTX * HEAD_DIM
+            + off_hz.to(tl.int64) * N_Q * HEAD_DIM
             + offs_fixed[:, None] * HEAD_DIM
             + tl.arange(0, HEAD_DIM)[None, :]
         )
-        tl.store(dq_ptrs, dq.to(dtype), mask=offs_fixed[:, None] < N_CTX)
+        tl.store(dq_ptrs, dq.to(dtype), mask=offs_fixed[:, None] < N_Q)
     else:
         desc_dq.store([fixed_offset, 0], dq.to(dtype))
 
@@ -1446,6 +1456,16 @@ def _dot_input_precision() -> str:
     return "tf32" if allow_tf32 and not is_hip() else "ieee"
 
 
+def _rounded_lengths(n_q: int, n_kv: int) -> tuple[int, bool, bool]:
+    """The number of queries rounded up to the largest block size, and whether each length is not a multiple of it.
+
+    The block sizes are only known after autotuning, so the largest one stands in for all of them.
+    """
+    max_block_size = 128
+    n_q_rounded = math.ceil(n_q / max_block_size) * max_block_size
+    return n_q_rounded, n_q_rounded != n_q, n_kv % max_block_size != 0
+
+
 class TritonAttention(torch.autograd.Function):
 
     @staticmethod
@@ -1453,9 +1473,11 @@ class TritonAttention(torch.autograd.Function):
         """This function implements a tiled version of the attention algorithm.
         Causal and sliding window masking are supported. Arbitrary context lengths are supported.
         Currently the following Head dimensions are supported: 16, 32, 64, 128, 256.
-        Sequence lengths are assumed to match for Q, K and V tensors.
+        Q may have a different number of points than K and V (cross attention, as in the
+        transformer mappers); every query then attends to every key, without causal or sliding
+        window masks, which need the two sequences to line up.
 
-        Input matrices are in the shape [BATCH, N_HEAD, N_CTX, HEAD_DIM]
+        Q is in the shape [BATCH, N_HEAD, N_Q, HEAD_DIM], K and V in the shape [BATCH, N_HEAD, N_KV, HEAD_DIM].
 
         Inputs may be float16, bfloat16 or float32. With float32 inputs the matrix products follow
         PyTorch's float32 matmul precision (torch.backends.cuda.matmul.fp32_precision, or
@@ -1480,21 +1502,25 @@ class TritonAttention(torch.autograd.Function):
         assert not (causal and window >= 0), "causal and window not supported in combination"
         assert q.ndim == k.ndim == v.ndim == 4, "TritonAttention expects [batch, head, sequence, dim] tensors"
         assert (
-            q.shape[:3] == k.shape[:3] == v.shape[:3]
-        ), "TritonAttention requires q, k and v to share batch, head, and sequence dimensions"
+            q.shape[:2] == k.shape[:2] == v.shape[:2]
+        ), "TritonAttention requires q, k and v to share batch and head dimensions"
+        assert k.shape[2] == v.shape[2], "TritonAttention requires k and v to have the same sequence length"
+        if q.shape[2] != k.shape[2]:
+            assert window < 0 and not causal, (
+                "TritonAttention between sequences of different lengths attends to every key; causal and "
+                "sliding window masks need queries and keys of the same length"
+            )
         assert q.dtype == k.dtype == v.dtype, "TritonAttention requires q, k and v to use the same dtype"
         assert q.device == k.device == v.device, "TritonAttention requires q, k and v to be on the same device"
 
-        n_ctx = q.shape[2]
-        MAX_BLOCK_SIZE = 128  # not possible to infer BLOCK_SIZE determined by autotuning at this point, so we use the max possible block size to ensure we never read out of bounds.
-        n_ctx_rounded = math.ceil(n_ctx / MAX_BLOCK_SIZE) * MAX_BLOCK_SIZE
+        n_q, n_kv = q.shape[2], k.shape[2]
+        n_q_rounded, uneven_q, uneven_kv = _rounded_lengths(n_q, n_kv)
 
-        # Pad M tensor to avoid out-of-bounds reads when N_CTX is not a multiple of BLOCK_FIXED.
-        uneven_ctx = n_ctx_rounded != n_ctx
-        M = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
+        # Pad M tensor to avoid out-of-bounds reads when N_Q is not a multiple of BLOCK_FIXED.
+        M = torch.empty((q.shape[0], q.shape[1], n_q_rounded), device=q.device, dtype=torch.float32)
         # inv_l (1/l_i per token) is kept apart from M rather than folded into
         # M = m + log2(l).  See _attn_fwd epilogue for rationale.
-        inv_l = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
+        inv_l = torch.empty((q.shape[0], q.shape[1], n_q_rounded), device=q.device, dtype=torch.float32)
 
         # Convert tensors from raw pointers to (host) tensor descriptors if the system supports it,
         # Tensor descriptors encode the shape, stride and block shape and pass this information to the compiler, allowing further optimisations and use of hardware features like TMA.
@@ -1509,7 +1535,7 @@ class TritonAttention(torch.autograd.Function):
         # Depending on BLOCK_FIXED, the context window might also be split across SMs
         # BLOCK_FIXED is a hyperparameter which triton sets at runtime by running small performance tests
         def grid(META):
-            return (triton.cdiv(n_ctx, META["BLOCK_FIXED"]), q.shape[0] * q.shape[1], 1)
+            return (triton.cdiv(n_q, META["BLOCK_FIXED"]), q.shape[0] * q.shape[1], 1)
 
         _attn_fwd[grid](
             sm_scale,  # scaling factor applied to softmax
@@ -1523,14 +1549,16 @@ class TritonAttention(torch.autograd.Function):
             desc_v,
             desc_o,  #
             o,  # raw output tensor (required for uneven ctx case to handle tail case where a smaller block size is needed to avoid overwriting neighbours data)
-            N_CTX=n_ctx,  # context length,
+            N_Q=n_q,  # number of queries
+            N_KV=n_kv,  # number of keys and values
             HEAD_DIM=HEAD_DIM_K,  # head dimension
             WINDOW=window,  # window length for sliding window attention. If negative, no sliding window masking is applied
             CAUSAL=causal,  # whether to apply causal masking
             dtype=torch_dtype_to_triton(q.dtype),
             INPUT_PRECISION=input_precision,
-            n_ctx_rounded=n_ctx_rounded,  # rounded context length used for indexing in M and D tensors to avoid out-of-bounds when N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER
-            UNEVEN_CTX=uneven_ctx,  # bool, whether N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER, used to handle edge case with masked loads and stores
+            n_q_rounded=n_q_rounded,  # rounded number of queries used for indexing in M and D tensors to avoid out-of-bounds when N_Q is not divisible by BLOCK_FIXED or BLOCK_ITER
+            UNEVEN_Q=uneven_q,  # bool, whether N_Q is not divisible by BLOCK_FIXED or BLOCK_ITER, used to handle edge case with masked loads and stores
+            UNEVEN_KV=uneven_kv,  # the same for N_KV
             **extra_kern_args,  # any additional system-specific kernel arguments
         )
 
@@ -1538,7 +1566,6 @@ class TritonAttention(torch.autograd.Function):
         ctx.sm_scale = sm_scale
         ctx.causal = causal
         ctx.window = window
-        ctx.n_ctx = n_ctx
         ctx.input_precision = input_precision  # the backward uses the forward's precision
 
         ctx.save_for_backward(q, k, v, o, M, inv_l)
@@ -1557,16 +1584,13 @@ class TritonAttention(torch.autograd.Function):
         dq = torch.empty_like(q).contiguous()
         dk = torch.empty_like(k).contiguous()
         dv = torch.empty_like(v).contiguous()
-        BATCH, N_HEAD, N_CTX, HEAD_DIM = q.shape
+        BATCH, N_HEAD, N_Q, HEAD_DIM = q.shape
+        N_KV = k.shape[2]
 
         delta = torch.empty_like(M)
         lam = torch.empty_like(M)
 
-        n_ctx = q.shape[2]
-        MAX_BLOCK_SIZE = 128
-        # not possible to infer BLOCK_SIZE determined by autotuning at this point, so we use the max possible block size to ensure we never read out of bounds.
-        n_ctx_rounded = math.ceil(n_ctx / MAX_BLOCK_SIZE) * MAX_BLOCK_SIZE
-        uneven_ctx = n_ctx_rounded != n_ctx
+        n_q_rounded, uneven_q, uneven_kv = _rounded_lengths(N_Q, N_KV)
 
         desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, False)
         desc_dq, desc_dk, desc_dv, desc_do, extra_kern_args = _system_specific_settings(dq, dk, dv, do, False)
@@ -1576,10 +1600,10 @@ class TritonAttention(torch.autograd.Function):
         # There is at least one kernel per BATCH * NUM_HEAD.
         # Depending on BLOCK_FIXED, the context dimension can be further split across kernels
         def grid_dkdv(META):
-            return (triton.cdiv(n_ctx, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
+            return (triton.cdiv(N_KV, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
 
         def grid_dq(META):
-            return (triton.cdiv(n_ctx, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
+            return (triton.cdiv(N_Q, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
 
         # for some reason, when using device-side tensor descriptors, the allocator must be set explictly before the backward pass, otherwise triton complains no allocator has been set
         if not supports_host_descriptor():
@@ -1602,14 +1626,16 @@ class TritonAttention(torch.autograd.Function):
             ctx.sm_scale,
             Z=BATCH,
             H=N_HEAD,
-            N_CTX=N_CTX,  #
+            N_Q=N_Q,  #
+            N_KV=N_KV,
             HEAD_DIM=HEAD_DIM,  #
             CAUSAL=ctx.causal,  #
             WINDOW=ctx.window,  #
             dtype=torch_dtype_to_triton(q.dtype),
             INPUT_PRECISION=ctx.input_precision,
-            n_ctx_rounded=n_ctx_rounded,
-            UNEVEN_CTX=uneven_ctx,
+            n_q_rounded=n_q_rounded,
+            UNEVEN_Q=uneven_q,
+            UNEVEN_KV=uneven_kv,
             **extra_kern_args,
         )
 
@@ -1631,14 +1657,16 @@ class TritonAttention(torch.autograd.Function):
             ctx.sm_scale,
             Z=BATCH,
             H=N_HEAD,
-            N_CTX=N_CTX,  #
+            N_Q=N_Q,  #
+            N_KV=N_KV,
             HEAD_DIM=HEAD_DIM,  #
             CAUSAL=ctx.causal,  #
             WINDOW=ctx.window,  #
             dtype=torch_dtype_to_triton(q.dtype),
             INPUT_PRECISION=ctx.input_precision,
-            n_ctx_rounded=n_ctx_rounded,
-            UNEVEN_CTX=uneven_ctx,
+            n_q_rounded=n_q_rounded,
+            UNEVEN_Q=uneven_q,
+            UNEVEN_KV=uneven_kv,
             **extra_kern_args,
         )
 

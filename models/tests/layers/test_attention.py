@@ -97,9 +97,7 @@ requires_triton = pytest.mark.skipif(not is_triton_available(), reason="Triton a
 @pytest.mark.parametrize(
     "attention_implementation,option",
     [
-        ("scaled_dot_product_attention", {"softcap": 0.5}),
         pytest.param("triton_attention", {"dropout_p": 0.1}, marks=requires_triton),
-        pytest.param("triton_attention", {"softcap": 0.5}, marks=requires_triton),
     ],
 )
 @pytest.mark.parametrize("attention_module", [MultiHeadSelfAttention, MultiHeadCrossAttention])
@@ -201,6 +199,52 @@ def test_multi_head_cross_attention_forward_sdpa(batch_size, num_heads, embed_di
     assert output.shape == x.shape
 
 
+def test_sdpa_cross_attention_refuses_a_window_between_sequences_of_different_lengths(layer_kernels):
+    attention = MultiHeadCrossAttention(
+        num_heads=2,
+        embed_dim=8,
+        layer_kernels=layer_kernels,
+        window_size=4,
+        attention_implementation="scaled_dot_product_attention",
+    )
+    keys, queries = torch.randn(12, 8), torch.randn(6, 8)
+    shard_info = BipartiteGraphShardInfo(src_nodes=[12], dst_nodes=[6])
+    with pytest.raises(ValueError, match="needs queries and keys of the same length"):
+        attention((keys, queries), shard_info, batch_size=1)
+
+
+@requires_triton
+def test_triton_cross_attention_between_sequences_of_different_lengths_matches_sdpa(layer_kernels):
+    torch.manual_seed(0)
+    layers = [
+        MultiHeadCrossAttention(
+            num_heads=4, embed_dim=128, layer_kernels=layer_kernels, attention_implementation=implementation
+        ).cuda()
+        for implementation in ("scaled_dot_product_attention", "triton_attention")
+    ]
+    layers[1].load_state_dict(layers[0].state_dict())
+    keys, queries = torch.randn(2 * 500, 128, device="cuda"), torch.randn(2 * 130, 128, device="cuda")
+    shard_info = BipartiteGraphShardInfo(src_nodes=[2 * 500], dst_nodes=[2 * 130])
+    expected, got = (layer((keys, queries), shard_info, batch_size=2) for layer in layers)
+    assert got.shape == (2 * 130, 128)
+    torch.testing.assert_close(got, expected, rtol=1e-4, atol=1e-5)
+
+
+@requires_triton
+def test_triton_cross_attention_refuses_a_window_between_sequences_of_different_lengths(layer_kernels):
+    attention = MultiHeadCrossAttention(
+        num_heads=2,
+        embed_dim=32,
+        layer_kernels=layer_kernels,
+        window_size=4,
+        attention_implementation="triton_attention",
+    ).cuda()
+    keys, queries = torch.randn(12, 32, device="cuda"), torch.randn(6, 32, device="cuda")
+    shard_info = BipartiteGraphShardInfo(src_nodes=[12], dst_nodes=[6])
+    with pytest.raises(ValueError, match="needs queries and keys of the same length"):
+        attention((keys, queries), shard_info, batch_size=1)
+
+
 @pytest.mark.gpu
 @given(
     batch_size=st.integers(min_value=1, max_value=64),
@@ -295,8 +339,6 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels, de
     ), "Sliding window output should differ from global attention output"
 
     # Memory usage using sliding window should not be greater then using global attention
-    # Since flex_attentions block mask funciton is used to handle the sliding window,
-    # masking naively with a seq_len^2 array
     assert (
         peak_alloc_memory_after_sliding_window_mb <= peak_alloc_memory_after_global_mb
     ), "Sliding window attention should not use more memory than global attention"

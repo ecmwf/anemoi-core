@@ -64,7 +64,6 @@ def _transformer(family: str, kernel_size, num_bands: int, backend: str) -> dict
         "attention_implementation": "neighbourhood",
         "neighbourhood": {"grid": family, "kernel_size": list(kernel_size), "backend": backend, "num_bands": num_bands},
         "rotary_embeddings": {"max_frequency": 30.0, "backend": "torch" if backend == "sdpa" else "triton"},
-        "softcap": 0.0,
         "cpu_offload": False,
         "gradient_checkpointing": True,
         "layer_kernels": {},

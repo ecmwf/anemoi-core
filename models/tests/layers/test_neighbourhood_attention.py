@@ -145,17 +145,16 @@ def test_neighbourhood_is_only_built_for_neighbourhood_attention():
     coords = grid_coords(ReducedGrid.octahedral(8))
     assert build_grid_neighbourhood("scaled_dot_product_attention", None, coords) is None
     with pytest.raises(ValueError, match="only used with attention_implementation 'neighbourhood'"):
-        build_grid_neighbourhood("flash_attention", NEIGHBOURHOOD, coords)
+        build_grid_neighbourhood("triton_attention", NEIGHBOURHOOD, coords)
     neighbourhood = build_grid_neighbourhood("neighbourhood", NEIGHBOURHOOD, coords)
     assert neighbourhood.is_self_attention
     assert neighbourhood.kernel_size == (3, 5)
 
 
-@pytest.mark.parametrize("backend", ["sdpa", "flex"])
-def test_self_attention_follows_the_node_order(backend):
+def test_self_attention_follows_the_node_order():
     """Nodes stored in another order give the same result for each node."""
     grid = ReducedGrid.octahedral(8)
-    config = {**NEIGHBOURHOOD, "backend": backend}
+    config = {**NEIGHBOURHOOD, "backend": "sdpa"}
     in_order = NeighbourhoodAttentionWrapper(GridNeighbourhood.from_config(config, grid_coords(grid)))
     coords, perm = shuffled(grid_coords(grid))
     out_of_order = NeighbourhoodAttentionWrapper(GridNeighbourhood.from_config(config, coords))
@@ -202,10 +201,13 @@ def test_wrapper_rejects_other_sizes():
 @pytest.mark.parametrize(
     ("backend", "option", "name"),
     [
-        ("sdpa", {"softcap": 1.0}, "softcap"),
         ("sdpa", {"window_size": 16}, "window_size"),
-        ("flex", {"dropout_p": 0.1}, "dropout_p"),
-        ("flex", {"softcap": 1.0}, "softcap"),
+        pytest.param(
+            "triton",
+            {"dropout_p": 0.1},
+            "dropout_p",
+            marks=pytest.mark.skipif(not is_triton_available(), reason="Triton and a GPU are needed"),
+        ),
     ],
 )
 def test_layer_refuses_options_the_backend_cannot_honour_when_built(backend, option, name):
@@ -361,7 +363,6 @@ def _processor_schema(**kwargs):
         dropout_p=0.0,
         attention_implementation="neighbourhood",
         qk_norm=False,
-        softcap=0.0,
         **kwargs,
     )
 
@@ -385,7 +386,7 @@ def test_schema_accepts_neighbourhood_settings():
         ({"neighbourhood": {"grid": "octahedral", "kernel_size": [6, 13]}}, "must be odd"),
         ({"neighbourhood": NEIGHBOURHOOD, "window_size": 512}, "window_size must be null"),
         (
-            {"neighbourhood": NEIGHBOURHOOD, "attention_implementation": "flash_attention"},
+            {"neighbourhood": NEIGHBOURHOOD, "attention_implementation": "triton_attention"},
             "only used with attention_implementation 'neighbourhood'",
         ),
     ],
@@ -408,7 +409,6 @@ def test_decoder_schema_accepts_neighbourhood_settings():
         window_size=None,
         dropout_p=0.0,
         attention_implementation="neighbourhood",
-        softcap=0.0,
         neighbourhood={"grid": "octahedral", "kernel_size": [3, 5]},
     )
     assert schema.neighbourhood.kernel_size == (3, 5)

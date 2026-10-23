@@ -82,8 +82,6 @@ class TransformerDecoderSchema(TransformerModelComponent):
     "Dropout probability used for multi-head self attention, default 0.0"
     attention_implementation: str = Field(example="scaled_dot_product_attention")
     "Attention implementation to use. Default to 'scaled_dot_product_attention'."
-    softcap: NonNegativeFloat = Field(example=0.0)
-    "Softcap value for attention. Default to 0.0."
     neighbourhood: Optional[NeighbourhoodSchema] = Field(default=None)
     "Grid and neighbourhood size for attention_implementation 'neighbourhood'. Default to None."
     rotary_embeddings: Optional[RotaryEmbeddingsSchema] = Field(default=None)

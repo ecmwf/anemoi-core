@@ -96,8 +96,6 @@ class TransformerProcessorSchema(TransformerModelComponent):
     "Attention implementation to use. Default to 'triton_attention'."
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
-    softcap: NonNegativeFloat = Field(example=0.0)
-    "Softcap value for attention. Default to 0.0."
     neighbourhood: Optional[ProcessorNeighbourhoodSchema] = Field(default=None)
     "Grid and neighbourhood size for attention_implementation 'neighbourhood'. Default to None."
     rotary_embeddings: Optional[RotaryEmbeddingsSchema] = Field(default=None)

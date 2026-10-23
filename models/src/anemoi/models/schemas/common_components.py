@@ -29,8 +29,8 @@ class NeighbourhoodSchema(BaseModel):
     "Grid family of the nodes, a reduced-grid family of anemoi.models.layers.neighbourhood_attention.GRID_FAMILIES, e.g. 'octahedral' or 'healpix'."
     kernel_size: tuple[PositiveInt, PositiveInt] = Field(example=(7, 13))
     "Latitude rows and points per row each query attends to; both odd."
-    backend: Literal["triton", "flex", "sdpa"] = Field(default="triton")
-    "Kernels to use: 'triton' (GPU), 'flex' (flex attention) or 'sdpa' (dense mask, small grids). Default to 'triton'."
+    backend: Literal["triton", "sdpa"] = Field(default="triton")
+    "Kernels to use: 'triton' (GPU) or 'sdpa' (dense mask; CPUs and small grids). Default to 'triton'."
     num_bands: PositiveInt = Field(default=1)
     "Number of bands of query rows worked through one at a time, each with its own checkpoint, to save memory on large grids; per GPU when the points are split across GPUs. Each query attends to the same keys whatever the number. Default to 1."
 
@@ -96,8 +96,6 @@ def check_neighbourhood_attention(component: Any) -> Any:
         raise ValueError("attention_implementation 'neighbourhood' needs a 'neighbourhood' section.")
     if component.window_size is not None:
         raise ValueError("Neighbourhood attention sets its own mask; window_size must be null.")
-    if component.softcap:
-        raise ValueError("Neighbourhood attention does not support softcap.")
     return component
 
 

@@ -54,7 +54,7 @@ def _mask(kind: str) -> torch.Tensor:
         num_q = num_k = SELF_GRID.num_points
     rule = rule.to(torch.device("cuda"))
     q_idx, k_idx = torch.arange(num_q, device="cuda"), torch.arange(num_k, device="cuda")
-    return rule(None, None, q_idx[:, None], k_idx[None, :])
+    return rule(q_idx[:, None], k_idx[None, :])
 
 
 def _inputs(kind: str, logit_size: float, dtype: torch.dtype):

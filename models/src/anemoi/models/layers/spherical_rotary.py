@@ -17,7 +17,7 @@ query, which graph transformers get from their edge features. A model component 
       max_frequency: 10000
       backend: triton
 
-It works with every attention implementation (scaled dot product, flash and neighbourhood attention)
+It works with every attention implementation (scaled dot product, Triton and neighbourhood attention)
 and for self attention on one set of nodes as well as cross attention between two.
 """
 

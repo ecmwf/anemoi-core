@@ -32,8 +32,8 @@ layer_kernels:
 # The node coordinates of the graph fix the resolution and the order of the points, so the
 # hidden nodes must lie on a grid of the same family, e.g. graph=encoder_decoder_only with
 # hidden nodes from ReducedGaussianGridNodes (grid: o48).
-# kernel_size is [latitude rows, points per row], both odd. backend is "triton" (GPU),
-# "flex" or "sdpa" (dense mask, small grids only).
+# kernel_size is [latitude rows, points per row], both odd. backend is "triton" (GPU) or
+# "sdpa" (dense mask; CPUs and small grids).
 #
 # The processor can also run on a refined icosahedron: every node attends to the nodes within
 # `radius` hops (radius 3, 5, 7: 37, 91, 169 nodes). Build the hidden nodes with TriNodes and
@@ -60,7 +60,6 @@ processor:
     kernel_size: [7, 13]
     backend: triton
   qk_norm: False # Transformer and GraphTransformer only
-  softcap: 0.0 # Transformer only
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
@@ -86,7 +85,6 @@ encoders:
         grid: octahedral
         kernel_size: [5, 5] # hidden node rows attend to key rows of the finer data grid
         backend: triton
-      softcap: 0.0
       qk_norm: False
       cpu_offload: ${model.cpu_offload}
       gradient_checkpointing: True
@@ -116,7 +114,6 @@ decoders:
         grid: octahedral
         kernel_size: [3, 5]
         backend: triton
-      softcap: 0.0
       qk_norm: False
       cpu_offload: ${model.cpu_offload}
       gradient_checkpointing: True

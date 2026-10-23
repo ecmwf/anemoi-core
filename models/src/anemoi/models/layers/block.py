@@ -135,7 +135,6 @@ class TransformerProcessorBlock(BaseBlock):
         qk_norm: bool = False,
         attention_implementation: str = "triton_attention",
         mlp_implementation: MLPImplementation = "mlp",
-        softcap: Optional[float] = None,
         neighbourhood: Optional[Neighbourhood] = None,
         rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
@@ -155,7 +154,6 @@ class TransformerProcessorBlock(BaseBlock):
             dropout_p=dropout_p,
             layer_kernels=layer_kernels,
             attention_implementation=attention_implementation,
-            softcap=softcap,
             neighbourhood=neighbourhood,
             rotary=rotary,
         )
@@ -236,7 +234,6 @@ class TransformerMapperBlock(BaseBlock):
         qk_norm: bool = False,
         attention_implementation: str = "scaled_dot_product_attention",
         mlp_implementation: MLPImplementation = "mlp",
-        softcap: Optional[float] = None,
         neighbourhood: Optional[Neighbourhood] = None,
         rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
@@ -259,7 +256,6 @@ class TransformerMapperBlock(BaseBlock):
             dropout_p=dropout_p,
             layer_kernels=layer_kernels,
             attention_implementation=attention_implementation,
-            softcap=softcap,
             neighbourhood=neighbourhood,
             rotary=rotary,
         )

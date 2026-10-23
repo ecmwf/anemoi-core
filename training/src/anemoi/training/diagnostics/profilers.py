@@ -503,8 +503,8 @@ class BenchmarkProfiler(Profiler):
 
         from torchinfo import summary
 
-        # when using flash attention model, we need to convert the input and model to float16 and cuda
-        # since FlashAttention only supports fp16 and bf16 data type
+        # The summary runs one forward pass on the GPU in half precision, since the Triton attention
+        # kernels only run on GPUs.
         for dataset_name in example_input_array:
             example_input_array[dataset_name] = example_input_array[dataset_name].to(dtype=torch.float16)
             example_input_array[dataset_name] = example_input_array[dataset_name].to("cuda")

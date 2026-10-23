@@ -52,7 +52,7 @@ def dense(rule) -> torch.Tensor:
     """The whole query x key mask of a neighbourhood rule."""
     q_idx = torch.arange(len(rule.q_rows))[:, None]
     k_idx = torch.arange(len(rule.k_rows))[None, :]
-    return rule(None, None, q_idx, k_idx)
+    return rule(q_idx, k_idx)
 
 
 def neighbourhood(family: str, query_grid: ReducedGrid, key_grid: ReducedGrid | None, kernel_size) -> GridNeighbourhood:

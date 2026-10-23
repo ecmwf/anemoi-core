@@ -249,7 +249,8 @@ class ReducedGridCrossNeighbourhoodMask:
     globe. A key row contributes its whole ring, each point once, when it is not longer than
     ``kernel_size[1]``, or when it can also be reached over the pole (:func:`over_the_pole`): a
     query next to a pole then sees the points just across it.
-    Instances are called with the ``mask_mod`` signature used by flex attention.
+    Called with query and key indices that broadcast against each other, it says for each pair
+    whether the query attends to the key.
     """
 
     def __init__(
@@ -296,7 +297,7 @@ class ReducedGridCrossNeighbourhoodMask:
         short = kernel_w // 2 >= k_length // 2
         return short | over_the_pole(centre_row, k_row, self.num_k_rows, self.rows_beyond, kernel_h // 2)
 
-    def __call__(self, b, h, q_idx, kv_idx):
+    def __call__(self, q_idx: Tensor, kv_idx: Tensor) -> Tensor:
         kernel_h, kernel_w = self.kernel_size
         q_row, k_row = self.q_rows[q_idx], self.k_rows[kv_idx]
         centre_row = self.row_map[q_row]
