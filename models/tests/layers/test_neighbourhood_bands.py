@@ -186,7 +186,7 @@ def _same_results(make, run, num_bands: int, gradient_checkpointing: bool, backe
     whole = make(1).to(settings["device"], settings["dtype"])
     banded = make(num_bands).to(settings["device"], settings["dtype"])
     banded.load_state_dict(whole.state_dict())
-    assert banded.bands is not None and len(banded.bands.plans()[0].bands) >= min(num_bands, 4)
+    assert banded.split is not None and len(banded.split.plans()[0].bands) >= min(num_bands, 4)
     for layer in (whole, banded):
         layer.gradient_checkpointing = gradient_checkpointing
 

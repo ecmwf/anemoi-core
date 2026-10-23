@@ -28,11 +28,9 @@ from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
-from anemoi.models.layers.neighbourhood_attention import IcosahedralGridNeighbourhood
-from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionWrapper
+from anemoi.models.layers.attention_wrapper import AttentionWrapper
+from anemoi.models.layers.neighbourhood_attention import Neighbourhood
 from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBand
-from anemoi.models.layers.neighbourhood_attention import neighbourhood_attention_module
 from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
 from anemoi.utils.config import DotDict
 
@@ -40,26 +38,6 @@ LOGGER = logging.getLogger(__name__)
 
 # Change attention implementation during inference runtime
 ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND", "")
-
-
-class AttentionWrapper(nn.Module):
-    """Base class of the attention backends.
-
-    Each backend lists in ``unsupported`` the options of MultiHeadSelfAttention it cannot honour,
-    named as in the model config. MultiHeadSelfAttention checks them once, when it sets up the
-    backend, so a config asking for one fails when the model is built rather than at the first step.
-    """
-
-    unsupported: frozenset[str] = frozenset()
-
-    def check_supported(self, **options: bool) -> None:
-        """Raises if any of the options that are switched on is one this backend cannot honour."""
-        requested = sorted(name for name, used in options.items() if used and name in self.unsupported)
-        if requested:
-            raise NotImplementedError(
-                f"{type(self).__name__} does not support: {', '.join(requested)}. "
-                "Please switch to a different attention_implementation, or disable these options."
-            )
 
 
 class MultiHeadSelfAttention(nn.Module):
@@ -110,7 +88,7 @@ class MultiHeadSelfAttention(nn.Module):
         dropout_p: float = 0.0,
         attention_implementation: str = "scaled_dot_product_attention",
         softcap: Optional[float] = None,
-        neighbourhood: Optional[GridNeighbourhood | IcosahedralGridNeighbourhood] = None,
+        neighbourhood: Optional[Neighbourhood] = None,
         rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
         """Initialize MultiHeadSelfAttention.
@@ -142,8 +120,9 @@ class MultiHeadSelfAttention(nn.Module):
             implementation, by default "scaled_dot_product_attention"
         softcap : float, optional
             Anything > 0 activates softcapping attention, by default None
-        neighbourhood : GridNeighbourhood or IcosahedralGridNeighbourhood, optional
-            Query and key grids and neighbourhood size, needed for the "neighbourhood" implementation
+        neighbourhood : Neighbourhood, optional
+            The grids and neighbourhood of the "neighbourhood" implementation (see
+            :func:`anemoi.models.layers.neighbourhood_attention.build_grid_neighbourhood`)
         rotary : SphericalRotaryEmbedding, optional
             Rotary position embeddings that turn queries and keys by the positions of their nodes,
             shared by the attention layers of a model component; works with every implementation
@@ -186,7 +165,6 @@ class MultiHeadSelfAttention(nn.Module):
         attn_funcs = {
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
-            "neighbourhood": NeighbourhoodAttentionWrapper,
             "triton_attention": TritonAttentionWrapper,
         }
 
@@ -202,17 +180,25 @@ class MultiHeadSelfAttention(nn.Module):
             )
             self.attention_implementation = ATTENTION_BACKEND
 
-        assert self.attention_implementation in attn_funcs, f"backend '{self.attention_implementation}' not supported. \
-              Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
+        implementations = [*attn_funcs, "neighbourhood"]
+        assert (
+            self.attention_implementation in implementations
+        ), f"backend '{self.attention_implementation}' not supported. \
+              Please change model.processor.attention_implementation to one of: {implementations}"
 
         # initalise the attn func here
         if self.attention_implementation == "neighbourhood":
             if self.neighbourhood is None:
-                raise ValueError("The 'neighbourhood' attention implementation needs a GridNeighbourhood.")
-            self.attention = neighbourhood_attention_module(self.neighbourhood)
+                raise ValueError(
+                    "The 'neighbourhood' attention implementation needs a neighbourhood, see build_grid_neighbourhood."
+                )
+            self.attention = self.neighbourhood.attention_module()
         else:
             self.attention = attn_funcs[self.attention_implementation]()
-            self.attention.check_supported(dropout_p=self.dropout_p > 0, softcap=bool(self.softcap))
+        self.attention.check_supported(
+            dropout_p=self.dropout_p > 0, softcap=bool(self.softcap), window_size=self.window_size is not None
+        )
+        self.attention.check_head_dim(self.head_dim)
 
     def attention_computation(
         self,
@@ -596,6 +582,10 @@ class TritonAttentionWrapper(AttentionWrapper):
         from anemoi.models.triton.attention import TritonAttention
 
         self.attention = TritonAttention
+
+    def check_head_dim(self, head_dim: int) -> None:
+        if head_dim not in (16, 32, 64, 128, 256):
+            raise ValueError(f"{self.describe()} needs heads of 16, 32, 64, 128 or 256 channels, got {head_dim}.")
 
     def forward(
         self,

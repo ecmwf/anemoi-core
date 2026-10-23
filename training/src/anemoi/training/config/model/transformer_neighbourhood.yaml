@@ -25,7 +25,7 @@ layer_kernels:
 
 # Neighbourhood attention: every query attends only to the nodes around it on a global grid.
 # The encoder, processor and decoder name the grid family of their nodes, which selects the
-# attention kernels (see GRID_KERNELS in anemoi.models.layers.neighbourhood_attention):
+# attention kernels (see GRID_FAMILIES in anemoi.models.layers.neighbourhood_attention):
 #   octahedral  octahedral reduced Gaussian grids, e.g. O96 data with O48 hidden nodes
 #   healpix     HEALPix grids, in ring or nested ordering; build HEALPixNodes with
 #               nest_ordering: False, as nodes in nested order are reordered in every layer

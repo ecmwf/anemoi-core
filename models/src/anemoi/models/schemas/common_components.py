@@ -26,7 +26,7 @@ from anemoi.utils.schemas import BaseModel
 
 class NeighbourhoodSchema(BaseModel):
     grid: str = Field(example="octahedral")
-    "Grid family of the nodes, a key of anemoi.models.layers.neighbourhood_attention.GRID_KERNELS, e.g. 'octahedral' or 'healpix'."
+    "Grid family of the nodes, a reduced-grid family of anemoi.models.layers.neighbourhood_attention.GRID_FAMILIES, e.g. 'octahedral' or 'healpix'."
     kernel_size: tuple[PositiveInt, PositiveInt] = Field(example=(7, 13))
     "Latitude rows and points per row each query attends to; both odd."
     backend: Literal["triton", "flex", "sdpa"] = Field(default="triton")
@@ -37,11 +37,13 @@ class NeighbourhoodSchema(BaseModel):
     @field_validator("grid")
     @classmethod
     def check_grid(cls, grid: str) -> str:
-        from anemoi.models.layers.neighbourhood_attention import GRID_KERNELS
+        from anemoi.models.layers.neighbourhood_attention import GRID_FAMILIES
 
-        if grid not in GRID_KERNELS:
+        reduced = [name for name, family in GRID_FAMILIES.items() if family.is_member is not None]
+        if grid not in reduced:
             raise ValueError(
-                f"No neighbourhood attention kernels for grid '{grid}'. Known grids: {list(GRID_KERNELS)}."
+                f"No neighbourhood attention kernels with a kernel_size for grid '{grid}'. Known grids: {reduced}; "
+                "the processor can also use grid 'icosahedral' with a radius."
             )
         return grid
 
@@ -74,7 +76,7 @@ ProcessorNeighbourhoodSchema = Annotated[
     ],
     Discriminator(_neighbourhood_kind),
 ]
-"Neighbourhood of a processor: a reduced grid of GRID_KERNELS or the refined icosahedron."
+"Neighbourhood of a processor: a reduced grid of GRID_FAMILIES or the refined icosahedron."
 
 
 class RotaryEmbeddingsSchema(BaseModel):

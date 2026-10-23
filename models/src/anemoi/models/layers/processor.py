@@ -19,7 +19,6 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import halo_exchange
 from anemoi.models.distributed.halo import HaloInfo
 from anemoi.models.distributed.halo import build_halo_info
 from anemoi.models.distributed.halo import cache_specs as halo_cache_specs
@@ -27,8 +26,6 @@ from anemoi.models.distributed.khop_edges import ANEMOI_DEBUG_SHARDING
 from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
-from anemoi.models.distributed.point_ranges import PointRun
-from anemoi.models.distributed.point_ranges import fetch_point_range
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.utils import model_is_distributed
@@ -37,12 +34,8 @@ from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
-from anemoi.models.layers.neighbourhood_attention import IcosahedralGridNeighbourhood
-from anemoi.models.layers.neighbourhood_attention import IcosahedralShards
-from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBands
+from anemoi.models.layers.neighbourhood_attention import LayerSplit
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
-from anemoi.models.layers.neighbourhood_attention import write_own_points
 from anemoi.models.layers.spherical_rotary import build_spherical_rotary
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
@@ -281,8 +274,8 @@ class TransformerProcessor(BaseProcessor):
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         neighbourhood : dict, optional
-            Grid family, kernel size and backend for attention_implementation "neighbourhood",
-            see :func:`anemoi.models.layers.neighbourhood_attention.GridNeighbourhood.from_config`
+            Grid family, its settings and backend for attention_implementation "neighbourhood",
+            see :func:`anemoi.models.layers.neighbourhood_attention.build_grid_neighbourhood`
         rotary_embeddings : dict, optional
             Highest frequency and backend of rotary position embeddings, shared by all layers,
             see :func:`anemoi.models.layers.spherical_rotary.build_spherical_rotary`
@@ -321,20 +314,11 @@ class TransformerProcessor(BaseProcessor):
             rotary=build_spherical_rotary(rotary_embeddings, (attn_channels or num_channels) // num_heads, node_coords),
         )
 
-        # Neighbourhood attention on nodes in grid order works through bands of whole rows (see
-        # forward_in_bands): on one GPU when num_bands > 1, and whenever the points are split across
-        # GPUs, with num_bands bands of each GPU's own rows.
-        self.bands: Optional[NeighbourhoodBands] = None
-        if isinstance(grid_neighbourhood, GridNeighbourhood) and grid_neighbourhood.in_grid_order:
-            if cpu_offload and grid_neighbourhood.num_bands > 1:
-                raise ValueError("Neighbourhood attention in bands (num_bands > 1) does not work with cpu_offload.")
-            if not cpu_offload:
-                self.bands = NeighbourhoodBands(grid_neighbourhood)
-        # Icosahedral neighbourhood attention fetches the halo of each GPU's points before each
-        # layer when the points are split across GPUs (see forward_with_halo).
-        self.icosahedral_shards: Optional[IcosahedralShards] = None
-        if isinstance(grid_neighbourhood, IcosahedralGridNeighbourhood) and not cpu_offload:
-            self.icosahedral_shards = IcosahedralShards(grid_neighbourhood)
+        # The grid family of neighbourhood attention says when the layers work through bands of
+        # queries, and how each GPU gathers their inputs (see forward_in_bands).
+        self.split: Optional[LayerSplit] = (
+            None if grid_neighbourhood is None else grid_neighbourhood.layer_split(cpu_offload)
+        )
 
         self.offload_layers(cpu_offload)
 
@@ -355,10 +339,8 @@ class TransformerProcessor(BaseProcessor):
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
         sharded = model_comm_group is not None and model_comm_group.size() > 1
-        if self.bands is not None and (self.bands.num_bands > 1 or sharded):
+        if self.split is not None and self.split.used(sharded):
             return self.forward_in_bands(x, batch_size, shard_info, model_comm_group, cond=kwargs.get("cond"))
-        if self.icosahedral_shards is not None and sharded:
-            return self.forward_with_halo(x, shard_info, model_comm_group, cond=kwargs.get("cond"))
 
         (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
 
@@ -379,65 +361,31 @@ class TransformerProcessor(BaseProcessor):
         besides the input and output of the layer.
 
         When the points are split across GPUs, ``x`` holds this GPU's own points and so does the
-        output. Before each layer the GPU fetches the inputs of the points its rows reach from the
-        GPUs that own them, one exchange per layer (see :class:`ShardPlan`), and reads its own
-        points in place; the bands then run without communication.
+        output. Before each layer the GPU fetches the inputs of the points of other GPUs that its
+        bands reach, one exchange per layer, and the bands then run without communication; how
+        depends on the grid family (see :class:`anemoi.models.layers.neighbourhood_attention.LayerSplit`).
         """
         sharded = model_comm_group is not None and model_comm_group.size() > 1
-        if sharded and shard_info.nodes is None:
-            raise ValueError("Neighbourhood attention split across GPUs needs the processor input split as well.")
-        shard_sizes = shard_info.nodes if sharded else None
-        rank = model_comm_group.rank() if sharded else 0
-        plan = self.bands.plans(shard_sizes)[rank]
-        exchange = self.bands.key_exchange(shard_sizes, shard_sizes, rank, x.device) if sharded else None
-
-        def run_of_key_points(t: Tensor) -> PointRun:
-            """``t`` for the key points this GPU's rows reach, its own points read in place."""
-            if exchange is None:
-                return PointRun.whole(t.view(batch_size, self.bands.num_key_points, -1))
-            return fetch_point_range(t, exchange, model_comm_group)
-
-        num_own = plan.own_points.stop - plan.own_points.start
-        cond_keys = None if cond is None else run_of_key_points(cond)
+        work = self.split.work(
+            batch_size,
+            x.device,
+            model_comm_group if sharded else None,
+            query_shard_sizes=shard_info.nodes if sharded else None,
+        )
+        cond_keys = None if cond is None else work.gather_keys(cond)
         for layer in self.proc:
-            x_keys = run_of_key_points(x)
+            x_keys = work.gather_keys(x)
             out = None
-            for band in plan.bands:
+            for band in work.bands:
                 out_band = maybe_checkpoint(
                     layer.forward_band,
                     self.gradient_checkpointing,
-                    x_keys.take(band.key_points),
+                    work.keys_of(x_keys, band),
                     band,
-                    None if cond_keys is None else cond_keys.take(band.key_points),
+                    None if cond_keys is None else work.keys_of(cond_keys, band),
                 )
-                if out is None:
-                    out = out_band.new_empty(batch_size, num_own, out_band.shape[-1])
-                write_own_points(out, out_band, band, plan)
-            x = out.view(batch_size * num_own, -1)
-        return x
-
-    def forward_with_halo(
-        self,
-        x: Tensor,
-        shard_info: GraphShardInfo,
-        model_comm_group: ProcessGroup,
-        cond: Optional[Tensor] = None,
-    ) -> Tensor:
-        """The layers on this GPU's own points of the icosahedron, with one checkpoint per layer.
-
-        ``x`` holds this GPU's own points (batch size 1) and so does the output. Before each layer
-        the GPU fetches the inputs of the points of other GPUs that its queries reach, its halo
-        (see :class:`anemoi.models.layers.neighbourhood_attention.IcosahedralShards`); attention
-        then runs without communication.
-        """
-        if shard_info.nodes is None:
-            raise ValueError("Neighbourhood attention split across GPUs needs the processor input split as well.")
-        plan = self.icosahedral_shards.plan(shard_info.nodes, model_comm_group.rank(), x.device)
-        cond_keys = None if cond is None else halo_exchange(cond, plan.halo_info, model_comm_group)[None]
-        for layer in self.proc:
-            x_keys = halo_exchange(x, plan.halo_info, model_comm_group)[None]
-            out = maybe_checkpoint(layer.forward_band, self.gradient_checkpointing, x_keys, plan.band, cond_keys)
-            x = out[0]
+                out = work.keep(out, out_band, band)
+            x = out.view(batch_size * work.num_own_queries, -1)
         return x
 
 

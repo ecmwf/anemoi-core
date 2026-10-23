@@ -16,9 +16,9 @@ from anemoi.graphs.generate.icosahedral_diamonds import IcosahedralDiamonds
 from anemoi.graphs.generate.icosahedral_diamonds import label_icosahedron
 from anemoi.models.layers.icosahedral_grid import IcosahedralNeighbourhood
 from anemoi.models.layers.icosahedral_grid import hexagon_offsets
-from anemoi.models.layers.neighbourhood_attention import IcosahedralAttentionWrapper
-from anemoi.models.layers.neighbourhood_attention import IcosahedralGridNeighbourhood
-from anemoi.models.layers.neighbourhood_attention import IcosahedralShards
+from anemoi.models.layers.icosahedral_neighbourhood import IcosahedralAttentionWrapper
+from anemoi.models.layers.icosahedral_neighbourhood import IcosahedralGridNeighbourhood
+from anemoi.models.layers.icosahedral_neighbourhood import IcosahedralShards
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
 
 
@@ -110,7 +110,7 @@ def test_config_needs_diamond_order() -> None:
     ("config", "match"),
     [
         ({"grid": "icosahedral"}, "needs a 'radius'"),
-        ({"grid": "icosahedral", "radius": 2, "kernel_size": [3, 3]}, "Unknown icosahedral"),
+        ({"grid": "icosahedral", "radius": 2, "kernel_size": [3, 3]}, "Unknown neighbourhood settings"),
         ({"grid": "icosahedral", "radius": 2, "backend": "flex"}, "backend must be one of"),
     ],
 )
@@ -147,7 +147,7 @@ def test_split_attention_matches_whole() -> None:
 def test_halo_exchange_plan_is_consistent() -> None:
     """What each GPU sends to another is what that GPU expects to receive from it, in the order it holds its halo."""
     neighbourhood = build_grid_neighbourhood(
-        "neighbourhood", {"grid": "icosahedral", "radius": 3}, icosahedron_coords(3)
+        "neighbourhood", {"grid": "icosahedral", "radius": 3, "backend": "sdpa"}, icosahedron_coords(3)
     )
     sizes = [161, 160, 161, 160]
     starts = np.cumsum([0] + sizes)

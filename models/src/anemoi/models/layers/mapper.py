@@ -30,18 +30,15 @@ from anemoi.models.distributed.khop_edges import build_graph_partition_from_shar
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.khop_edges import shard_graph_to_local
-from anemoi.models.distributed.point_ranges import PointRun
-from anemoi.models.distributed.point_ranges import fetch_point_range
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.neighbourhood_attention import LayerSplit
 from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBand
-from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBands
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
-from anemoi.models.layers.neighbourhood_attention import write_own_points
 from anemoi.models.layers.spherical_rotary import build_spherical_rotary
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
@@ -1339,8 +1336,8 @@ class TransformerBaseMapper(BaseMapper, ABC):
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         neighbourhood : dict, optional
-            Grid family, kernel size and backend for attention_implementation "neighbourhood",
-            see :func:`anemoi.models.layers.neighbourhood_attention.GridNeighbourhood.from_config`
+            Grid family, its settings and backend for attention_implementation "neighbourhood",
+            see :func:`anemoi.models.layers.neighbourhood_attention.build_grid_neighbourhood`
         rotary_embeddings : dict, optional
             Highest frequency and backend of rotary position embeddings,
             see :func:`anemoi.models.layers.spherical_rotary.build_spherical_rotary`
@@ -1383,15 +1380,11 @@ class TransformerBaseMapper(BaseMapper, ABC):
             ),
         )
 
-        # Neighbourhood attention on nodes in grid order works through bands of whole destination
-        # rows (see forward_in_bands): on one GPU when num_bands > 1, and whenever the points are
-        # split across GPUs, with num_bands bands of each GPU's own destination rows.
-        self.bands: Optional[NeighbourhoodBands] = None
-        if grid_neighbourhood is not None and grid_neighbourhood.in_grid_order:
-            if cpu_offload and grid_neighbourhood.num_bands > 1:
-                raise ValueError("Neighbourhood attention in bands (num_bands > 1) does not work with cpu_offload.")
-            if not cpu_offload:
-                self.bands = NeighbourhoodBands(grid_neighbourhood)
+        # The grid family of neighbourhood attention says when the mapper works through bands of
+        # destination points, and how each GPU gathers their inputs (see forward_in_bands).
+        self.split: Optional[LayerSplit] = (
+            None if grid_neighbourhood is None else grid_neighbourhood.layer_split(cpu_offload)
+        )
 
         self.offload_layers(cpu_offload)
 
@@ -1449,7 +1442,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         **kwargs,
     ) -> PairTensor:
         sharded = model_comm_group is not None and model_comm_group.size() > 1
-        if self.bands is not None and (self.bands.num_bands > 1 or sharded):
+        if self.split is not None and self.split.used(sharded):
             return self.forward_in_bands(
                 x, batch_size, shard_info, model_comm_group, keep_x_dst_sharded, cond=kwargs.get("cond")
             )
@@ -1479,13 +1472,12 @@ class TransformerBaseMapper(BaseMapper, ABC):
         destination points and the source points they attend to, so only one band is held in
         memory at a time.
 
-        When the points are split across GPUs, each GPU works through the bands of the
-        destination rows that hold its own destination points. It first fetches, from the GPUs
-        that own them, the destination points of those whole rows and the source points they
-        reach (see :class:`ShardPlan`), and reads its own points in place; the bands then run
-        without communication. The output
-        holds the GPU's own destination points, and is gathered onto every GPU unless
-        ``keep_x_dst_sharded``.
+        When the points are split across GPUs, each GPU works through the bands that hold its own
+        destination points. It first fetches, from the GPUs that own them, the destination and
+        source points those bands read (see
+        :class:`anemoi.models.layers.neighbourhood_attention.LayerSplit`); the bands then run
+        without communication. The output holds the GPU's own destination points, and is gathered
+        onto every GPU unless ``keep_x_dst_sharded``.
         """
         x_src, x_dst = x
         sharded = model_comm_group is not None and model_comm_group.size() > 1
@@ -1498,46 +1490,33 @@ class TransformerBaseMapper(BaseMapper, ABC):
                 )
             x_src, src_sizes = ensure_sharded(x_src, 0, shard_info.src_nodes, model_comm_group)
             x_dst, dst_sizes = ensure_sharded(x_dst, 0, shard_info.dst_nodes, model_comm_group)
-            rank = model_comm_group.rank()
         else:
-            dst_sizes, rank = None, 0
-        plan = self.bands.plans(dst_sizes)[rank]
-        if sharded:
-            src_exchange = self.bands.key_exchange(dst_sizes, src_sizes, rank, x_src.device)
-            dst_exchange = self.bands.query_exchange(dst_sizes, rank, x_dst.device)
+            src_sizes = dst_sizes = None
+        work = self.split.work(
+            batch_size,
+            x_src.device,
+            model_comm_group if sharded else None,
+            query_shard_sizes=dst_sizes,
+            key_shard_sizes=src_sizes,
+        )
 
-        def run_of_src(t: Tensor) -> PointRun:
-            """``t`` for the source points this GPU's rows reach, its own points read in place."""
-            if not sharded:
-                return PointRun.whole(t.view(batch_size, self.bands.num_key_points, -1))
-            return fetch_point_range(t, src_exchange, model_comm_group)
-
-        def run_of_dst(t: Tensor) -> PointRun:
-            """``t`` for the destination points of this GPU's whole rows, its own points read in place."""
-            if not sharded:
-                return PointRun.whole(t.view(batch_size, self.bands.num_query_points, -1))
-            return fetch_point_range(t, dst_exchange, model_comm_group)
-
-        x_src, x_dst = run_of_src(x_src), run_of_dst(x_dst)
+        x_src, x_dst = work.gather_keys(x_src), work.gather_queries(x_dst)
         if cond is not None:
-            cond = (run_of_src(cond[0]), run_of_dst(cond[1]))
+            cond = (work.gather_keys(cond[0]), work.gather_queries(cond[1]))
 
-        num_own = plan.own_points.stop - plan.own_points.start
         out = None
-        for band in plan.bands:
-            band_cond = None if cond is None else (cond[0].take(band.key_points), cond[1].take(band.query_points))
+        for band in work.bands:
+            band_cond = None if cond is None else (work.keys_of(cond[0], band), work.queries_of(cond[1], band))
             out_band = maybe_checkpoint(
                 self.forward_band,
                 self.gradient_checkpointing,
-                x_src.take(band.key_points),
-                x_dst.take(band.query_points),
+                work.keys_of(x_src, band),
+                work.queries_of(x_dst, band),
                 band,
                 band_cond,
             )
-            if out is None:
-                out = out_band.new_empty(batch_size, num_own, out_band.shape[-1])
-            write_own_points(out, out_band, band, plan)
-        out = out.view(batch_size * num_own, -1)
+            out = work.keep(out, out_band, band)
+        out = out.view(batch_size * work.num_own_queries, -1)
 
         if sharded and not keep_x_dst_sharded:
             out = gather_tensor(out, 0, dst_sizes, model_comm_group)

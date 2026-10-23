@@ -42,8 +42,7 @@ from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.mlp import build_feedforward_layer
-from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
-from anemoi.models.layers.neighbourhood_attention import IcosahedralGridNeighbourhood
+from anemoi.models.layers.neighbourhood_attention import Neighbourhood
 from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBand
 from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
@@ -137,7 +136,7 @@ class TransformerProcessorBlock(BaseBlock):
         attention_implementation: str = "triton_attention",
         mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
-        neighbourhood: Optional[GridNeighbourhood | IcosahedralGridNeighbourhood] = None,
+        neighbourhood: Optional[Neighbourhood] = None,
         rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
         super().__init__()
@@ -238,7 +237,7 @@ class TransformerMapperBlock(BaseBlock):
         attention_implementation: str = "scaled_dot_product_attention",
         mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
-        neighbourhood: Optional[GridNeighbourhood] = None,
+        neighbourhood: Optional[Neighbourhood] = None,
         rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
         super().__init__()

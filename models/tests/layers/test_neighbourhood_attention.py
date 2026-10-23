@@ -18,11 +18,13 @@ from pydantic import ValidationError
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers import attention as attention_module
+from anemoi.models.layers import neighbourhood_attention as neighbourhood_attention_module
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.mapper import TransformerBackwardMapper
 from anemoi.models.layers.mapper import TransformerForwardMapper
-from anemoi.models.layers.neighbourhood_attention import GRID_KERNELS
+from anemoi.models.layers.neighbourhood_attention import GRID_FAMILIES
 from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
+from anemoi.models.layers.neighbourhood_attention import Neighbourhood
 from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionWrapper
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
 from anemoi.models.layers.neighbourhood_attention import check_every_key_attended
@@ -32,6 +34,7 @@ from anemoi.models.layers.reduced_grid import ReducedGrid
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.schemas.decoder import TransformerDecoderSchema
 from anemoi.models.schemas.processor import TransformerProcessorSchema
+from anemoi.models.triton.utils import is_triton_available
 
 NEIGHBOURHOOD = {"grid": "octahedral", "kernel_size": [3, 5], "backend": "sdpa"}
 
@@ -66,11 +69,13 @@ def test_registered_grids_are_recognised_from_coords(family, grid):
     assert order is None
 
 
-def test_every_registered_family_names_importable_kernels():
+def test_every_registered_family_names_importable_neighbourhoods_and_kernels():
     pytest.importorskip("triton")
-    for kernels in GRID_KERNELS.values():
-        assert callable(kernels.load_self_attention())
-        assert callable(kernels.load_cross_attention())
+    for family in GRID_FAMILIES.values():
+        assert issubclass(family.load_neighbourhood(), Neighbourhood)
+        assert callable(family.load_self_attention())
+        if family.cross_attention is not None:
+            assert callable(family.load_cross_attention())
 
 
 def test_grid_of_another_family_is_rejected():
@@ -186,25 +191,74 @@ def test_node_orders_are_not_saved_with_the_weights():
     assert wrapper.state_dict() == {}
 
 
-def test_wrapper_rejects_other_masks_and_sizes():
+def test_wrapper_rejects_other_sizes():
     grid = ReducedGrid.octahedral(8)
     wrapper = NeighbourhoodAttentionWrapper(GridNeighbourhood.from_config(NEIGHBOURHOOD, grid_coords(grid)))
     q = torch.randn(1, 2, grid.num_points, 8)
-    with pytest.raises(ValueError, match="causal and window_size"):
-        wrapper(q, q, q, 1, window_size=16)
-    with pytest.raises(NotImplementedError, match="Softcap"):
-        wrapper(q, q, q, 1, softcap=1.0)
     with pytest.raises(ValueError, match="set up for 544 queries"):
         wrapper(q[:, :, :-1], q, q, 1)
 
 
-def _self_attention_layer(neighbourhood):
+@pytest.mark.parametrize(
+    ("backend", "option", "name"),
+    [
+        ("sdpa", {"softcap": 1.0}, "softcap"),
+        ("sdpa", {"window_size": 16}, "window_size"),
+        ("flex", {"dropout_p": 0.1}, "dropout_p"),
+        ("flex", {"softcap": 1.0}, "softcap"),
+    ],
+)
+def test_layer_refuses_options_the_backend_cannot_honour_when_built(backend, option, name):
+    grid = ReducedGrid.octahedral(8)
+    neighbourhood = GridNeighbourhood.from_config({**NEIGHBOURHOOD, "backend": backend}, grid_coords(grid))
+    with pytest.raises(NotImplementedError, match=f"'{backend}' backend does not support: {name}"):
+        MultiHeadSelfAttention(
+            num_heads=2,
+            embed_dim=16,
+            layer_kernels=load_layer_kernels(),
+            attention_implementation="neighbourhood",
+            neighbourhood=neighbourhood,
+            **option,
+        )
+
+
+def test_sdpa_backend_takes_dropout():
+    grid = ReducedGrid.octahedral(8)
+    neighbourhood = GridNeighbourhood.from_config({**NEIGHBOURHOOD, "backend": "sdpa"}, grid_coords(grid))
+    layer = _self_attention_layer(neighbourhood, dropout_p=0.1)
+    assert isinstance(layer.attention, NeighbourhoodAttentionWrapper)
+
+
+@pytest.mark.skipif(not is_triton_available(), reason="Triton and a GPU are needed")
+def test_triton_backend_refuses_head_sizes_its_kernels_cannot_take_when_built():
+    grid = ReducedGrid.octahedral(8)
+    neighbourhood = GridNeighbourhood.from_config({**NEIGHBOURHOOD, "backend": "triton"}, grid_coords(grid))
+    with pytest.raises(ValueError, match="power of two of at least 16 channels, got 12"):
+        MultiHeadSelfAttention(
+            num_heads=2,
+            embed_dim=24,
+            layer_kernels=load_layer_kernels(),
+            attention_implementation="neighbourhood",
+            neighbourhood=neighbourhood,
+        )
+
+
+def test_triton_backend_needs_triton_when_built(monkeypatch):
+    monkeypatch.setattr(neighbourhood_attention_module, "is_triton_available", lambda: False)
+    grid = ReducedGrid.octahedral(8)
+    neighbourhood = GridNeighbourhood.from_config({**NEIGHBOURHOOD, "backend": "triton"}, grid_coords(grid))
+    with pytest.raises(ImportError, match="needs Triton and a GPU"):
+        neighbourhood.attention_module()
+
+
+def _self_attention_layer(neighbourhood, **options):
     return MultiHeadSelfAttention(
         num_heads=2,
         embed_dim=16,
         layer_kernels=load_layer_kernels(),
         attention_implementation="neighbourhood",
         neighbourhood=neighbourhood,
+        **options,
     )
 
 
@@ -219,7 +273,7 @@ def test_self_attention_layer_ignores_the_backend_environment_variable(monkeypat
 
 
 def test_self_attention_layer_needs_a_neighbourhood():
-    with pytest.raises(ValueError, match="needs a GridNeighbourhood"):
+    with pytest.raises(ValueError, match="needs a neighbourhood"):
         _self_attention_layer(None)
 
 

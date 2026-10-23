@@ -7,16 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Neighbourhood attention on global grids, with a registry of the grids that have kernels.
+"""Neighbourhood attention on global grids, with a registry of the grid families that have kernels.
 
-Each query attends only to the keys around it on the sphere: ``kernel_size[0]`` latitude rows
-centred on its own and, in each row, the ``kernel_size[1]`` points nearest in longitude, going round
-the globe, with whole rings of the rows it reaches over a pole (see
-:class:`anemoi.models.layers.reduced_grid.ReducedGridCrossNeighbourhoodMask`).
-Queries and keys may sit on the same grid (self attention, as in the processor) or on two grids
-of the same family (cross attention, as in the encoder and decoder).
-
-A model component names the grid family in its configuration, for example::
+Each query attends only to the keys around it on the sphere. A model component names the grid
+family of its nodes in its configuration, for example::
 
     attention_implementation: neighbourhood
     neighbourhood:
@@ -26,22 +20,35 @@ A model component names the grid family in its configuration, for example::
 
 and the node coordinates of the graph fix the resolution and the order of the points.
 
-With ``num_bands`` above one, a model component works through its queries in bands of whole
-latitude rows, each band with only the key rows its queries reach (see :func:`split_into_bands`).
-Each query attends to exactly the same keys, and only one band is held in memory at a time.
+:data:`GRID_FAMILIES` lists every grid family with its settings, its backends (the Triton kernels
+and the PyTorch versions that compute the same thing) and whether it does cross attention.
+:func:`build_grid_neighbourhood` checks a configuration against it and builds the family's
+:class:`Neighbourhood` when the model is built: it checks that the nodes form a grid of the family,
+and the attention layer then checks that the backend works with its options and head size. A
+neighbourhood gives the attention module of its grids and says how a model component splits its
+queries into bands, on one GPU or across several (:class:`LayerSplit`).
 
-When the points are split across GPUs, each GPU works through bands of the rows that hold its own
-points, with ``num_bands`` bands per GPU. Before each layer it fetches from its neighbours the
-points just outside its share that those rows reach (see :class:`ShardPlan`); attention itself
-needs no communication.
+Two kinds of grid have kernels:
 
-On the refined icosahedron (``grid: icosahedral``, see :class:`IcosahedralGridNeighbourhood`)
-each point attends to the points within ``radius`` hops, in self attention. When the points are
-split across GPUs, each GPU fetches before each layer the points of other GPUs its queries reach
-(see :class:`IcosahedralShards`).
+- Reduced grids (``octahedral``, ``healpix``), in this module: a query attends to
+  ``kernel_size[0]`` latitude rows centred on its own and, in each row, the ``kernel_size[1]``
+  points nearest in longitude, going round the globe, with whole rings of the rows it reaches
+  over a pole (see :class:`anemoi.models.layers.reduced_grid.ReducedGridCrossNeighbourhoodMask`).
+  Queries and keys may sit on the same grid (self attention, as in the processor) or on two grids
+  of the same family (cross attention, as in the encoder and decoder). With ``num_bands`` above
+  one a model component works through its queries in bands of whole latitude rows, each with
+  only the key rows its queries reach (see :func:`split_into_bands`). When the points are split
+  across GPUs, each GPU works through bands of the rows that hold its own points and fetches
+  before each layer the points just outside its share that those rows reach (see
+  :class:`ShardPlan`).
+- The refined icosahedron (``icosahedral``, in
+  :mod:`anemoi.models.layers.icosahedral_neighbourhood`): each point attends to the points
+  within ``radius`` hops, in self attention. Split across GPUs, each GPU fetches the points of
+  other GPUs its queries reach before each layer.
 
-The kernels compare queries and keys by content only; rotary position embeddings
-(:mod:`anemoi.models.layers.spherical_rotary`) add where each key lies relative to its query.
+Attention itself needs no communication. The kernels compare queries and keys by content only;
+rotary position embeddings (:mod:`anemoi.models.layers.spherical_rotary`) add where each key lies
+relative to its query.
 """
 
 from __future__ import annotations
@@ -49,30 +56,62 @@ from __future__ import annotations
 import importlib
 import itertools
 import logging
+from abc import ABC
+from abc import abstractmethod
 from dataclasses import dataclass
 from dataclasses import replace
-from functools import cached_property
 from typing import Callable
 from typing import Optional
 
-import numpy as np
 import torch
 from torch import Tensor
-from torch import nn
+from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.graphs.generate.icosahedral_diamonds import IcosahedralDiamonds
-from anemoi.models.distributed.halo import HaloInfo
 from anemoi.models.distributed.point_ranges import PointRangeExchange
+from anemoi.models.distributed.point_ranges import PointRun
 from anemoi.models.distributed.point_ranges import build_point_range_exchange
-from anemoi.models.layers.icosahedral_grid import IcosahedralNeighbourhood
-from anemoi.models.layers.icosahedral_grid import IcosahedralShard
+from anemoi.models.distributed.point_ranges import fetch_point_range
+from anemoi.models.layers.attention_wrapper import AttentionWrapper
 from anemoi.models.layers.reduced_grid import ReducedGrid
 from anemoi.models.layers.reduced_grid import ReducedGridCrossNeighbourhoodMask
 from anemoi.models.layers.reduced_grid import ReducedGridNeighbourhoodMask
+from anemoi.models.triton.utils import is_triton_available
 
 LOGGER = logging.getLogger(__name__)
 
-BACKENDS = ("triton", "flex", "sdpa")
+
+def _load(path: str):
+    """The object named by an import path ``"module:name"``."""
+    module, name = path.split(":")
+    return getattr(importlib.import_module(module), name)
+
+
+@dataclass(frozen=True)
+class NeighbourhoodBackend:
+    """One way of computing neighbourhood attention, and what it cannot do."""
+
+    description: str
+    unsupported: frozenset[str]
+    "Options of the attention layer it cannot honour, named as in the model config."
+    needs_triton: bool = False
+    "Whether it runs Triton kernels, which need a GPU and heads of a power of two of at least 16 channels."
+
+
+# Neighbourhood attention sets its own mask, so no backend takes a sliding window, and none caps
+# the logits.
+TRITON_BACKEND = NeighbourhoodBackend(
+    "Triton kernels that only visit the keys each tile of queries can reach. GPU only.",
+    unsupported=frozenset({"dropout_p", "softcap", "window_size"}),
+    needs_triton=True,
+)
+FLEX_BACKEND = NeighbourhoodBackend(
+    "Flex attention with a block mask, so blocks of keys outside every neighbourhood are skipped; compiled on GPU.",
+    unsupported=frozenset({"dropout_p", "softcap", "window_size"}),
+)
+SDPA_BACKEND = NeighbourhoodBackend(
+    "scaled_dot_product_attention with the full queries x keys boolean mask, one byte per pair; for small grids and tests.",
+    unsupported=frozenset({"softcap", "window_size"}),
+)
 
 
 def _is_octahedral(grid: ReducedGrid) -> bool:
@@ -86,46 +125,303 @@ def _is_healpix(grid: ReducedGrid) -> bool:
     return nside > 0 and grid.num_rows == 4 * nside - 1 and grid == ReducedGrid.healpix(nside)
 
 
-@dataclass(frozen=True)
-class GridKernels:
-    """The grids of one family and the Triton kernels that compute neighbourhood attention on them.
+@dataclass(frozen=True, kw_only=True)
+class GridFamily:
+    """A family of grids with neighbourhood attention: how it is set up, its backends and its Triton kernels.
 
-    The kernels are named by import path, ``"module:function"``, and imported on first use, so
-    the registry can be read on machines without Triton.
+    The neighbourhood class and the kernels are named by import path, ``"module:name"``, and
+    imported on first use, so the registry can be read on machines without Triton.
     """
 
     description: str
-    is_member: Callable[[ReducedGrid], bool]
+    neighbourhood: str
+    "The :class:`Neighbourhood` class that checks the settings and nodes and builds the neighbourhood."
+    backends: dict[str, NeighbourhoodBackend]
     self_attention: str
-    cross_attention: str
+    "The Triton kernel of self attention."
+    cross_attention: Optional[str] = None
+    "The Triton kernel of cross attention, or None if the family only does self attention."
+    is_member: Optional[Callable[[ReducedGrid], bool]] = None
+    "For reduced grids: whether a grid belongs to the family."
 
-    @staticmethod
-    def _load(path: str) -> Callable:
-        module, name = path.split(":")
-        return getattr(importlib.import_module(module), name)
+    def load_neighbourhood(self) -> type[Neighbourhood]:
+        return _load(self.neighbourhood)
 
     def load_self_attention(self) -> Callable:
-        return self._load(self.self_attention)
+        return _load(self.self_attention)
 
     def load_cross_attention(self) -> Callable:
-        return self._load(self.cross_attention)
+        return _load(self.cross_attention)
 
 
-GRID_KERNELS: dict[str, GridKernels] = {
-    "octahedral": GridKernels(
+_REDUCED_GRID_BACKENDS = {"triton": TRITON_BACKEND, "flex": FLEX_BACKEND, "sdpa": SDPA_BACKEND}
+
+GRID_FAMILIES: dict[str, GridFamily] = {
+    "octahedral": GridFamily(
         description="octahedral reduced Gaussian grids O<N>: rows of 20, 24, 28, ... points from each pole",
+        neighbourhood="anemoi.models.layers.neighbourhood_attention:GridNeighbourhood",
+        backends=_REDUCED_GRID_BACKENDS,
+        self_attention="anemoi.models.triton.reduced_grid_attention:reduced_grid_attention",
+        cross_attention="anemoi.models.triton.reduced_grid_cross_attention:reduced_grid_cross_attention",
         is_member=_is_octahedral,
-        self_attention="anemoi.models.triton.reduced_grid_attention:reduced_grid_attention",
-        cross_attention="anemoi.models.triton.reduced_grid_cross_attention:reduced_grid_cross_attention",
     ),
-    "healpix": GridKernels(
+    "healpix": GridFamily(
         description="HEALPix grids in ring or nested ordering: 12 * nside**2 points",
-        is_member=_is_healpix,
+        neighbourhood="anemoi.models.layers.neighbourhood_attention:GridNeighbourhood",
+        backends=_REDUCED_GRID_BACKENDS,
         self_attention="anemoi.models.triton.reduced_grid_attention:reduced_grid_attention",
         cross_attention="anemoi.models.triton.reduced_grid_cross_attention:reduced_grid_cross_attention",
+        is_member=_is_healpix,
+    ),
+    "icosahedral": GridFamily(
+        description="refined icosahedra in diamond order (anemoi-graphs TriNodes, ordering: diamonds): 10 * 4**r + 2 points",
+        neighbourhood="anemoi.models.layers.icosahedral_neighbourhood:IcosahedralGridNeighbourhood",
+        backends={"triton": TRITON_BACKEND, "sdpa": SDPA_BACKEND},
+        self_attention="anemoi.models.triton.icosahedral_attention:icosahedral_attention",
     ),
 }
-"""Grid families with neighbourhood attention kernels, by the name used in the configuration."""
+"""Grid families with neighbourhood attention, by the name used in the configuration."""
+
+
+def grid_family(name: Optional[str]) -> GridFamily:
+    """The registered grid family ``name``."""
+    if name not in GRID_FAMILIES:
+        raise ValueError(f"No neighbourhood attention kernels for grid '{name}'. Known grids: {list(GRID_FAMILIES)}.")
+    return GRID_FAMILIES[name]
+
+
+def check_settings(
+    config: Optional[dict], settings: set[str], key_coords: Optional[Tensor], query_coords: Optional[Tensor]
+) -> tuple[str, str]:
+    """Check what every grid family's configuration has in common, and give its family and backend.
+
+    Parameters
+    ----------
+    config : dict
+        The ``neighbourhood`` section of a model component.
+    settings : set[str]
+        The settings the family takes, ``grid`` and ``backend`` among them.
+    key_coords, query_coords : Tensor, optional
+        Coordinates of the key and query nodes; no query coordinates for self attention.
+
+    Returns
+    -------
+    tuple[str, str]
+        The name of the grid family and of the backend, ``"triton"`` by default.
+    """
+    if config is None:
+        raise ValueError("attention_implementation 'neighbourhood' needs a 'neighbourhood' configuration.")
+    if key_coords is None:
+        raise ValueError("Neighbourhood attention needs the coordinates of the graph nodes.")
+    name = config.get("grid")
+    family = grid_family(name)
+    unknown = set(config) - settings
+    if unknown:
+        raise ValueError(
+            f"Unknown neighbourhood settings {sorted(unknown)} for grid '{name}'; use {', '.join(sorted(settings))}."
+        )
+    backend = config.get("backend", "triton")
+    if backend not in family.backends:
+        raise ValueError(
+            f"Neighbourhood attention backend must be one of {list(family.backends)} on {name} grids, got '{backend}'."
+        )
+    if query_coords is not None and family.cross_attention is None:
+        raise ValueError(f"Neighbourhood attention on {name} grids only does self attention, as in the processor.")
+    return name, backend
+
+
+class Neighbourhood(ABC):
+    """What a model component needs to know about the grids of its neighbourhood attention.
+
+    Each grid family has its own subclass, built once per model component by
+    :func:`build_grid_neighbourhood` and shared by all of its layers.
+    """
+
+    family: str
+    "The name of the grid family in :data:`GRID_FAMILIES`."
+    backend: str
+    "The name of the backend among the family's backends."
+
+    @property
+    def grid_family(self) -> GridFamily:
+        return GRID_FAMILIES[self.family]
+
+    @property
+    def backend_spec(self) -> NeighbourhoodBackend:
+        return self.grid_family.backends[self.backend]
+
+    @classmethod
+    @abstractmethod
+    def from_config(
+        cls, config: dict, key_coords: Optional[Tensor], query_coords: Optional[Tensor] = None
+    ) -> Neighbourhood:
+        """Check the configuration and the nodes, and build the neighbourhood."""
+
+    @abstractmethod
+    def attention_module(self) -> NeighbourhoodAttention:
+        """The attention module on all points of the grids."""
+
+    @abstractmethod
+    def layer_split(self, cpu_offload: bool) -> Optional[LayerSplit]:
+        """How a model component splits its queries into bands, or None if it always runs on all points at once."""
+
+
+class NeighbourhoodAttention(AttentionWrapper):
+    """Base class of the attention modules of neighbourhoods: what their backend can do.
+
+    Takes ``(batch, heads, points, head_dim)`` tensors, like the other attention backends.
+    """
+
+    def __init__(self, neighbourhood: Neighbourhood) -> None:
+        super().__init__()
+        self.neighbourhood = neighbourhood
+        self.backend = neighbourhood.backend
+        self.unsupported = neighbourhood.backend_spec.unsupported
+        if neighbourhood.backend_spec.needs_triton and not is_triton_available():
+            raise ImportError(
+                f"Neighbourhood attention backend '{self.backend}' needs Triton and a GPU; use the 'sdpa' backend "
+                "on machines without them."
+            )
+
+    def describe(self) -> str:
+        return f"Neighbourhood attention on {self.neighbourhood.family} grids with the '{self.backend}' backend"
+
+    def check_head_dim(self, head_dim: int) -> None:
+        if self.neighbourhood.backend_spec.needs_triton and (head_dim < 16 or head_dim & (head_dim - 1)):
+            raise ValueError(
+                f"{self.describe()} needs heads of a power of two of at least 16 channels, got {head_dim}."
+            )
+
+
+@dataclass(frozen=True, eq=False)
+class NeighbourhoodBand:
+    """A band of query points and the key points its queries reach.
+
+    On reduced grids a band is a run of whole query rows, contiguous in grid order, which is also
+    the node order, and its keys are the run of key rows they reach. On the icosahedron a band is
+    the run of points one GPU owns, and its keys are those points followed by the points of
+    other GPUs they reach. The key points include every key any query of the band attends to,
+    and include the query points themselves in self attention.
+    """
+
+    query_points: slice
+    key_points: slice | Tensor
+    "The key points, as a run or as the numbers of the points in the order they are held."
+    queries_in_keys: Optional[slice]
+    "Where the query points sit among the key points, in self attention."
+    attention: NeighbourhoodAttention
+
+
+class GpuWork(ABC):
+    """The bands one GPU works through in each layer, and how it gathers their inputs and keeps their outputs.
+
+    A model component gathers the inputs of all key points of its bands once per layer, then runs
+    each band on its share of them. With the points split across GPUs, gathering fetches the
+    points of other GPUs; on one GPU it only reshapes.
+    """
+
+    bands: list[NeighbourhoodBand]
+    num_own_queries: int
+    "The query points whose outputs this GPU returns."
+
+    @abstractmethod
+    def gather_keys(self, x: Tensor) -> object:
+        """The inputs of every key point the bands reach, from this GPU's ``(batch * points, channels)`` key inputs."""
+
+    @abstractmethod
+    def keys_of(self, keys: object, band: NeighbourhoodBand) -> Tensor:
+        """The band's key inputs, ``(batch, band key points, channels)``, out of :meth:`gather_keys`."""
+
+    def gather_queries(self, x: Tensor) -> object:
+        """The inputs of every query point of the bands, in cross attention."""
+        raise NotImplementedError(f"{type(self).__name__} only does self attention.")
+
+    def queries_of(self, queries: object, band: NeighbourhoodBand) -> Tensor:
+        """The band's query inputs, ``(batch, band query points, channels)``, out of :meth:`gather_queries`."""
+        raise NotImplementedError(f"{type(self).__name__} only does self attention.")
+
+    @abstractmethod
+    def keep(self, out: Optional[Tensor], band_out: Tensor, band: NeighbourhoodBand) -> Tensor:
+        """Add the outputs of the band's query points this GPU owns to ``out``, ``(batch, own queries, channels)``.
+
+        ``out`` is None for the first band, and the result is passed in for the next one.
+        """
+
+
+class LayerSplit(ABC):
+    """How a model component works through its queries in bands, on one GPU or split across GPUs."""
+
+    @abstractmethod
+    def used(self, sharded: bool) -> bool:
+        """Whether the component works band by band, rather than on all points at once."""
+
+    @abstractmethod
+    def work(
+        self,
+        batch_size: int,
+        device: torch.device,
+        model_comm_group: Optional[ProcessGroup] = None,
+        query_shard_sizes: Optional[list[int]] = None,
+        key_shard_sizes: Optional[list[int]] = None,
+    ) -> GpuWork:
+        """The work of this GPU.
+
+        Parameters
+        ----------
+        batch_size : int
+            Batch size.
+        device : torch.device
+            Device of the inputs.
+        model_comm_group : ProcessGroup, optional
+            The GPUs the points are split across, or None on one GPU.
+        query_shard_sizes, key_shard_sizes : list[int], optional
+            Number of query and key points of each GPU, in rank order, when the points are split
+            across GPUs. The key shard sizes are those of the queries in self attention.
+
+        Returns
+        -------
+        GpuWork
+            The bands of this GPU and how it gathers their inputs.
+        """
+
+
+def build_grid_neighbourhood(
+    attention_implementation: str,
+    config: Optional[dict],
+    key_coords: Optional[Tensor],
+    query_coords: Optional[Tensor] = None,
+) -> Optional[Neighbourhood]:
+    """The neighbourhood of a model component, or None if it does not use neighbourhood attention.
+
+    Parameters
+    ----------
+    attention_implementation : str
+        The component's attention implementation.
+    config : dict, optional
+        Its ``neighbourhood`` section: ``grid`` (a key of :data:`GRID_FAMILIES`), optionally
+        ``backend`` (a backend of that family, ``"triton"`` by default) and the family's own
+        settings.
+    key_coords : Tensor, optional
+        Latitude and longitude of the key nodes in radians, shape ``(num_keys, 2)``.
+    query_coords : Tensor, optional
+        Coordinates of the query nodes. Leave out for self attention.
+
+    Returns
+    -------
+    Neighbourhood or None
+        The neighbourhood of the grid family named in ``config``.
+    """
+    if attention_implementation != "neighbourhood":
+        if config is not None:
+            raise ValueError(
+                "'neighbourhood' settings are only used with attention_implementation 'neighbourhood', "
+                f"got '{attention_implementation}'."
+            )
+        return None
+    if config is None:
+        raise ValueError("attention_implementation 'neighbourhood' needs a 'neighbourhood' configuration.")
+    neighbourhood_class = grid_family(config.get("grid")).load_neighbourhood()
+    return neighbourhood_class.from_config(config, key_coords, query_coords)
 
 
 def grid_from_coords(family: str, coords: Tensor) -> tuple[ReducedGrid, Optional[Tensor]]:
@@ -134,7 +430,7 @@ def grid_from_coords(family: str, coords: Tensor) -> tuple[ReducedGrid, Optional
     Parameters
     ----------
     family : str
-        A key of :data:`GRID_KERNELS`.
+        A reduced-grid family of :data:`GRID_FAMILIES`.
     coords : Tensor
         Latitude and longitude of each node in radians, shape ``(num_nodes, 2)``.
 
@@ -144,16 +440,14 @@ def grid_from_coords(family: str, coords: Tensor) -> tuple[ReducedGrid, Optional
         The grid, and the order that sorts the nodes into it (node ``order[i]`` is point ``i`` of
         the grid), or None when the nodes are already in grid order.
     """
-    if family not in GRID_KERNELS:
-        raise ValueError(
-            f"No neighbourhood attention kernels for grid '{family}'. "
-            f"Known grids: {[*GRID_KERNELS, 'icosahedral']}."
-        )
+    kernels = grid_family(family)
+    if kernels.is_member is None:
+        raise ValueError(f"'{family}' is not a family of reduced grids.")
     grid, order = ReducedGrid.from_unordered_coords(coords)
-    if not GRID_KERNELS[family].is_member(grid):
+    if not kernels.is_member(grid):
         raise ValueError(
             f"The {coords.shape[0]} nodes, in {grid.num_rows} latitude rows, do not form one of the "
-            f"{GRID_KERNELS[family].description}."
+            f"{kernels.description}."
         )
     if torch.equal(order, torch.arange(order.numel(), device=order.device)):
         return grid, None
@@ -212,8 +506,8 @@ def check_every_key_attended(query_grid: ReducedGrid, key_grid: ReducedGrid, ker
 
 
 @dataclass(frozen=True, eq=False)
-class GridNeighbourhood:
-    """Everything a neighbourhood attention layer needs to know about its query and key grids.
+class GridNeighbourhood(Neighbourhood):
+    """The query and key grids of neighbourhood attention on a family of reduced grids.
 
     Built once per model component and shared by all of its layers.
     """
@@ -240,10 +534,10 @@ class GridNeighbourhood:
         Parameters
         ----------
         config : dict
-            ``grid`` (a key of :data:`GRID_KERNELS`), ``kernel_size`` (two odd numbers: latitude
-            rows and points per row), optionally ``backend`` (``"triton"``, the default,
-            ``"flex"`` or ``"sdpa"``) and optionally ``num_bands`` (the number of bands of query
-            rows to work through one at a time, 1 by default).
+            ``grid`` (a reduced-grid family of :data:`GRID_FAMILIES`), ``kernel_size`` (two odd
+            numbers: latitude rows and points per row), optionally ``backend`` (``"triton"``,
+            the default, ``"flex"`` or ``"sdpa"``) and optionally ``num_bands`` (the number of
+            bands of query rows to work through one at a time, 1 by default).
         key_coords : Tensor
             Coordinates of the key nodes in radians, shape ``(num_keys, 2)``.
         query_coords : Tensor, optional
@@ -254,22 +548,14 @@ class GridNeighbourhood:
         GridNeighbourhood
             The query and key grids, the point orders and the neighbourhood settings.
         """
-        if config is None:
-            raise ValueError("attention_implementation 'neighbourhood' needs a 'neighbourhood' configuration.")
-        if key_coords is None:
-            raise ValueError("Neighbourhood attention needs the coordinates of the graph nodes.")
-        unknown = set(config) - {"grid", "kernel_size", "backend", "num_bands"}
-        if unknown:
-            raise ValueError(
-                f"Unknown neighbourhood settings {sorted(unknown)}; use grid, kernel_size, backend and num_bands."
-            )
-        family = config["grid"]
+        family, backend = check_settings(
+            config, {"grid", "kernel_size", "backend", "num_bands"}, key_coords, query_coords
+        )
+        if "kernel_size" not in config:
+            raise ValueError(f"Neighbourhood attention on {family} grids needs a kernel_size.")
         kernel_size = tuple(int(k) for k in config["kernel_size"])
-        backend = config.get("backend", "triton")
         if len(kernel_size) != 2 or any(k <= 0 or k % 2 == 0 for k in kernel_size):
             raise ValueError(f"kernel_size must be two positive odd numbers, got {config['kernel_size']}.")
-        if backend not in BACKENDS:
-            raise ValueError(f"Neighbourhood attention backend must be one of {BACKENDS}, got '{backend}'.")
         num_bands = int(config.get("num_bands", 1))
         if num_bands < 1:
             raise ValueError(f"num_bands must be at least 1, got {num_bands}.")
@@ -299,13 +585,24 @@ class GridNeighbourhood:
         )
 
     @property
-    def kernels(self) -> GridKernels:
-        return GRID_KERNELS[self.family]
-
-    @property
     def in_grid_order(self) -> bool:
         """Whether the query and key nodes are stored in grid order, row by row from north to south."""
         return self.query_order is None and self.key_order is None
+
+    def attention_module(self) -> NeighbourhoodAttentionWrapper:
+        return NeighbourhoodAttentionWrapper(self)
+
+    def layer_split(self, cpu_offload: bool) -> Optional[NeighbourhoodBands]:
+        """Bands of whole rows, for nodes in grid order: on one GPU when num_bands > 1, and whenever
+        the points are split across GPUs, with num_bands bands of each GPU's own rows.
+        """
+        if not self.in_grid_order:
+            return None
+        if cpu_offload:
+            if self.num_bands > 1:
+                raise ValueError("Neighbourhood attention in bands (num_bands > 1) does not work with cpu_offload.")
+            return None
+        return NeighbourhoodBands(self)
 
 
 def _gather_points(x: Tensor, order: Tensor) -> Tensor:
@@ -336,7 +633,7 @@ class _ReorderPoints(torch.autograd.Function):
         return _gather_points(grad, inverse), None, None
 
 
-class NeighbourhoodAttentionWrapper(nn.Module):
+class NeighbourhoodAttentionWrapper(NeighbourhoodAttention):
     """Neighbourhood attention on the grids described by a :class:`GridNeighbourhood`.
 
     Takes ``(batch, heads, points, head_dim)`` tensors with the points in node order, puts them in
@@ -345,7 +642,7 @@ class NeighbourhoodAttentionWrapper(nn.Module):
     Three backends compute the same thing:
 
     ``"triton"``
-        The kernels registered for the grid family in :data:`GRID_KERNELS`, which only visit the
+        The kernels registered for the grid family in :data:`GRID_FAMILIES`, which only visit the
         keys each tile of queries can reach. GPU only; the head dimension must be a power of two
         of at least 16. No dropout.
     ``"flex"``
@@ -357,9 +654,7 @@ class NeighbourhoodAttentionWrapper(nn.Module):
     """
 
     def __init__(self, neighbourhood: GridNeighbourhood) -> None:
-        super().__init__()
-        self.neighbourhood = neighbourhood
-        self.backend = neighbourhood.backend
+        super().__init__(neighbourhood)
 
         # The point orders move with the module to the GPU but are not part of the saved weights.
         self._reorder_queries = neighbourhood.query_order is not None
@@ -412,15 +707,10 @@ class NeighbourhoodAttentionWrapper(nn.Module):
             return torch.nn.functional.scaled_dot_product_attention(
                 query, key, value, attn_mask=self._mask_on(query.device), dropout_p=dropout_p
             )
-        if dropout_p > 0.0:
-            raise NotImplementedError(
-                f"Dropout is not supported by the {self.backend} backend of neighbourhood attention."
-            )
-
         nb = self.neighbourhood
         if self.backend == "triton":
             if self._kernel is None:
-                kernels = nb.kernels
+                kernels = nb.grid_family
                 self._kernel = kernels.load_self_attention() if nb.is_self_attention else kernels.load_cross_attention()
             if nb.is_self_attention:
                 return self._kernel(query, key, value, nb.key_grid, nb.kernel_size)
@@ -444,10 +734,6 @@ class NeighbourhoodAttentionWrapper(nn.Module):
         dropout_p: float = 0.0,
         softcap: Optional[float] = None,
     ) -> Tensor:
-        if causal or window_size is not None:
-            raise ValueError("Neighbourhood attention sets its own mask; causal and window_size must not be used.")
-        if softcap is not None and softcap > 0:
-            raise NotImplementedError("Softcap is not supported by neighbourhood attention.")
         n_q = self.neighbourhood.query_grid.num_points
         n_k = self.neighbourhood.key_grid.num_points
         if query.shape[-2] != n_q or key.shape[-2] != n_k:
@@ -467,25 +753,6 @@ class NeighbourhoodAttentionWrapper(nn.Module):
         if self._reorder_queries:
             out = _ReorderPoints.apply(out, self.query_inverse, self.query_order)
         return out
-
-
-@dataclass(frozen=True, eq=False)
-class NeighbourhoodBand:
-    """A band of query points and the key points its queries reach.
-
-    On reduced grids a band is a run of whole query rows, contiguous in grid order, which is also
-    the node order, and its keys are the run of key rows they reach. On the icosahedron a band is
-    the run of points one GPU owns, and its keys are those points followed by the points of
-    other GPUs they reach. The key points include every key any query of the band attends to,
-    and include the query points themselves in self attention.
-    """
-
-    query_points: slice
-    key_points: slice | Tensor
-    "The key points, as a run or as the numbers of the points in the order they are held."
-    queries_in_keys: Optional[slice]
-    "Where the query points sit among the key points, in self attention."
-    attention: nn.Module
 
 
 def centre_rows(neighbourhood: GridNeighbourhood) -> Tensor:
@@ -618,7 +885,7 @@ def plan_shard(neighbourhood: GridNeighbourhood, num_bands: int, own_points: sli
     )
 
 
-class NeighbourhoodBands:
+class NeighbourhoodBands(LayerSplit):
     """The bands of one model component, for the query points each GPU owns.
 
     On a single GPU there is one plan, owning every query point. When the query points are split
@@ -638,6 +905,35 @@ class NeighbourhoodBands:
         state = self.__dict__.copy()
         state["_exchanges"] = {}
         return state
+
+    def used(self, sharded: bool) -> bool:
+        return self.num_bands > 1 or sharded
+
+    def work(
+        self,
+        batch_size: int,
+        device: torch.device,
+        model_comm_group: Optional[ProcessGroup] = None,
+        query_shard_sizes: Optional[list[int]] = None,
+        key_shard_sizes: Optional[list[int]] = None,
+    ) -> BandWork:
+        if model_comm_group is None:
+            return BandWork(self.plans()[0], batch_size, self.num_key_points, self.num_query_points)
+        if query_shard_sizes is None:
+            raise ValueError("Neighbourhood attention split across GPUs needs its input split as well.")
+        key_shard_sizes = query_shard_sizes if key_shard_sizes is None else key_shard_sizes
+        rank = model_comm_group.rank()
+        return BandWork(
+            self.plans(query_shard_sizes)[rank],
+            batch_size,
+            self.num_key_points,
+            self.num_query_points,
+            model_comm_group=model_comm_group,
+            key_exchange=self.key_exchange(query_shard_sizes, key_shard_sizes, rank, device),
+            query_exchange=(
+                None if self.neighbourhood.is_self_attention else self.query_exchange(query_shard_sizes, rank, device)
+            ),
+        )
 
     @property
     def num_query_points(self) -> int:
@@ -696,256 +992,50 @@ def write_own_points(out: Tensor, band_out: Tensor, band: NeighbourhoodBand, pla
         out[:, first - own_start : stop - own_start] = band_out[:, first - band_start : stop - band_start]
 
 
-def build_grid_neighbourhood(
-    attention_implementation: str,
-    config: Optional[dict],
-    key_coords: Optional[Tensor],
-    query_coords: Optional[Tensor] = None,
-) -> Optional[GridNeighbourhood | IcosahedralGridNeighbourhood]:
-    """The neighbourhood of a model component, or None if it does not use neighbourhood attention.
+@dataclass(eq=False)
+class BandWork(GpuWork):
+    """The bands of one GPU on reduced grids (see :class:`ShardPlan`).
 
-    ``grid: icosahedral`` gives an :class:`IcosahedralGridNeighbourhood`, the reduced grids of
-    :data:`GRID_KERNELS` a :class:`GridNeighbourhood`.
-    """
-    if attention_implementation != "neighbourhood":
-        if config is not None:
-            raise ValueError(
-                "'neighbourhood' settings are only used with attention_implementation 'neighbourhood', "
-                f"got '{attention_implementation}'."
-            )
-        return None
-    if config is not None and config.get("grid") == "icosahedral":
-        return IcosahedralGridNeighbourhood.from_config(config, key_coords, query_coords)
-    return GridNeighbourhood.from_config(config, key_coords, query_coords)
-
-
-def neighbourhood_attention_module(neighbourhood: GridNeighbourhood | IcosahedralGridNeighbourhood) -> nn.Module:
-    """The attention module of a neighbourhood on all points of its grids."""
-    if isinstance(neighbourhood, IcosahedralGridNeighbourhood):
-        return IcosahedralAttentionWrapper(neighbourhood, neighbourhood.whole_shard)
-    return NeighbourhoodAttentionWrapper(neighbourhood)
-
-
-ICOSAHEDRAL_BACKENDS = ("triton", "sdpa")
-
-
-@dataclass(frozen=True, eq=False)
-class IcosahedralGridNeighbourhood:
-    """Neighbourhood attention on the refined icosahedron: every point attends to the points within ``radius`` hops.
-
-    Self attention only, with the nodes stored in diamond order (anemoi-graphs ``TriNodes`` with
-    ``ordering: diamonds``); see :mod:`anemoi.models.layers.icosahedral_grid`. Configured as::
-
-        attention_implementation: neighbourhood
-        neighbourhood:
-          grid: icosahedral
-          radius: 5
-          backend: triton
+    On one GPU the inputs are those of all points and are only reshaped. Split across GPUs, the
+    GPU fetches the runs of key points (and in cross attention of query points) its whole rows
+    reach from the GPUs that own them, and reads its own points in place.
     """
 
-    tables: IcosahedralNeighbourhood
-    backend: str
-    family: str = "icosahedral"
-    is_self_attention: bool = True
-    num_bands: int = 1
+    plan: ShardPlan
+    batch_size: int
+    num_key_points: int
+    num_query_points: int
+    model_comm_group: Optional[ProcessGroup] = None
+    key_exchange: Optional[PointRangeExchange] = None
+    query_exchange: Optional[PointRangeExchange] = None
 
-    @classmethod
-    def from_config(
-        cls, config: dict, key_coords: Optional[Tensor], query_coords: Optional[Tensor] = None
-    ) -> IcosahedralGridNeighbourhood:
-        """Set up icosahedral neighbourhood attention from its configuration and the node coordinates.
+    @property
+    def bands(self) -> list[NeighbourhoodBand]:
+        return self.plan.bands
 
-        Parameters
-        ----------
-        config : dict
-            ``grid: icosahedral``, ``radius`` (hops) and optionally ``backend`` (``"triton"``,
-            the default, or ``"sdpa"``).
-        key_coords : Tensor
-            Latitude and longitude of the nodes in radians, shape ``(num_nodes, 2)``.
-        query_coords : Tensor, optional
-            Must be left out: the icosahedral kernels only do self attention.
+    @property
+    def num_own_queries(self) -> int:
+        return self.plan.own_points.stop - self.plan.own_points.start
 
-        Returns
-        -------
-        IcosahedralGridNeighbourhood
-            The lookup tables of the mesh and the backend.
-        """
-        unknown = set(config) - {"grid", "radius", "backend"}
-        if unknown:
-            raise ValueError(
-                f"Unknown icosahedral neighbourhood settings {sorted(unknown)}; use grid, radius and backend."
-            )
-        if query_coords is not None:
-            raise ValueError("Icosahedral neighbourhood attention only does self attention, as in the processor.")
-        if key_coords is None:
-            raise ValueError("Neighbourhood attention needs the coordinates of the graph nodes.")
-        if "radius" not in config:
-            raise ValueError("Icosahedral neighbourhood attention needs a 'radius', the number of hops to attend over.")
-        radius = int(config["radius"])
-        backend = config.get("backend", "triton")
-        if backend not in ICOSAHEDRAL_BACKENDS:
-            raise ValueError(
-                f"Icosahedral neighbourhood attention backend must be one of {ICOSAHEDRAL_BACKENDS}, got '{backend}'."
-            )
-        layout = IcosahedralDiamonds.from_num_points(key_coords.shape[0])
-        check_diamond_order(key_coords, layout)
-        return cls(IcosahedralNeighbourhood(layout.resolution, radius), backend)
+    def _gather(self, x: Tensor, exchange: Optional[PointRangeExchange], num_points: int) -> PointRun:
+        if exchange is None:
+            return PointRun.whole(x.view(self.batch_size, num_points, -1))
+        return fetch_point_range(x, exchange, self.model_comm_group)
 
-    @cached_property
-    def whole_shard(self) -> IcosahedralShard:
-        """The tables and lists for all points on one GPU."""
-        return self.tables.shard()
+    def gather_keys(self, x: Tensor) -> PointRun:
+        return self._gather(x, self.key_exchange, self.num_key_points)
 
+    def keys_of(self, keys: PointRun, band: NeighbourhoodBand) -> Tensor:
+        return keys.take(band.key_points)
 
-def check_diamond_order(coords: Tensor, layout: IcosahedralDiamonds) -> None:
-    """Check that the nodes at ``coords`` (radians) are the refined icosahedron in diamond order.
+    def gather_queries(self, x: Tensor) -> PointRun:
+        return self._gather(x, self.query_exchange, self.num_query_points)
 
-    In diamond order the points joined by the lattice are neighbours on the sphere, so all lattice
-    edges are about equally long; in any other order some of them span the globe.
-    """
-    lat, lon = coords[:, 0].double(), coords[:, 1].double()
-    xyz = torch.stack([lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()], dim=1)
-    triangles = torch.as_tensor(layout.triangles(), device=coords.device)
-    ends = torch.cat([triangles[:, [0, 1]], triangles[:, [1, 2]], triangles[:, [2, 0]]])
-    lengths = torch.acos((xyz[ends[:, 0]] * xyz[ends[:, 1]]).sum(-1).clamp(-1.0, 1.0))
-    if not bool(lengths.max() < 2 * lengths.min()):
-        raise ValueError(
-            f"The {coords.shape[0]} nodes are not a refined icosahedron in diamond order; build them with "
-            "anemoi-graphs TriNodes and 'ordering: diamonds'."
-        )
+    def queries_of(self, queries: PointRun, band: NeighbourhoodBand) -> Tensor:
+        return queries.take(band.query_points)
 
-
-class IcosahedralAttentionWrapper(nn.Module):
-    """Neighbourhood attention on the refined icosahedron for the queries and keys of one shard.
-
-    Takes ``(batch, heads, points, head_dim)`` queries of the shard's own points and keys and
-    values of its key points (see :class:`anemoi.models.layers.icosahedral_grid.IcosahedralShard`).
-
-    ``"triton"``
-        The kernels of :mod:`anemoi.models.triton.icosahedral_attention`. GPU only; the head
-        dimension must be a power of two of at least 16. No dropout.
-    ``"sdpa"``
-        ``scaled_dot_product_attention`` with the full ``queries x keys`` boolean mask, for small
-        grids and tests.
-    """
-
-    def __init__(self, neighbourhood: IcosahedralGridNeighbourhood, shard: IcosahedralShard) -> None:
-        super().__init__()
-        self.neighbourhood = neighbourhood
-        self.shard = shard
-        self.backend = neighbourhood.backend
-        self._masks: dict[torch.device, Tensor] = {}
-
-    def __getstate__(self) -> dict:
-        # The masks are built again on first use, so they are left out when the model is saved.
-        state = self.__dict__.copy()
-        state["_masks"] = {}
-        return state
-
-    def _mask_on(self, device: torch.device) -> Tensor:
-        if device not in self._masks:
-            shard = self.shard
-            queries = np.arange(shard.own.start, shard.own.stop)
-            reach = self.neighbourhood.tables.within_radius(queries)
-            keys = np.concatenate([queries, shard.halo])
-            self._masks[device] = torch.as_tensor(reach[:, keys].toarray(), device=device)
-        return self._masks[device]
-
-    def forward(
-        self,
-        query: Tensor,
-        key: Tensor,
-        value: Tensor,
-        batch_size: int,
-        causal: bool = False,
-        window_size: Optional[int] = None,
-        dropout_p: float = 0.0,
-        softcap: Optional[float] = None,
-    ) -> Tensor:
-        if causal or window_size is not None:
-            raise ValueError("Neighbourhood attention sets its own mask; causal and window_size must not be used.")
-        if softcap is not None and softcap > 0:
-            raise NotImplementedError("Softcap is not supported by neighbourhood attention.")
-        if query.shape[-2] != self.shard.num_queries or key.shape[-2] != self.shard.num_keys:
-            raise ValueError(
-                f"Icosahedral attention is set up for {self.shard.num_queries} queries and {self.shard.num_keys} "
-                f"keys, got {query.shape[-2]} and {key.shape[-2]}."
-            )
-        if self.backend == "sdpa":
-            return torch.nn.functional.scaled_dot_product_attention(
-                query, key, value, attn_mask=self._mask_on(query.device), dropout_p=dropout_p
-            )
-        if dropout_p > 0.0:
-            raise NotImplementedError("Dropout is not supported by the triton backend of neighbourhood attention.")
-        from anemoi.models.triton.icosahedral_attention import icosahedral_attention
-
-        return icosahedral_attention(query, key, value, self.shard)
-
-
-@dataclass(frozen=True, eq=False)
-class IcosahedralShardPlan:
-    """The work of one GPU in icosahedral attention: its own points as one band, and the halo it fetches."""
-
-    band: NeighbourhoodBand
-    halo_info: HaloInfo
-
-
-class IcosahedralShards:
-    """The plans of icosahedral attention for each way of splitting the points across GPUs.
-
-    Each GPU owns a run of consecutive points in diamond order. Before each layer it fetches the
-    points of other GPUs that its queries reach (its halo); attention itself needs no
-    communication. Every GPU works out the halos of all GPUs, so they agree on what is sent where
-    without talking to each other. The plans are worked out once for each way of splitting.
-    """
-
-    def __init__(self, neighbourhood: IcosahedralGridNeighbourhood) -> None:
-        self.neighbourhood = neighbourhood
-        self._plans: dict[tuple, IcosahedralShardPlan] = {}
-
-    def __getstate__(self) -> dict:
-        # The plans hold tensors on a device; they are worked out again where the model is loaded.
-        state = self.__dict__.copy()
-        state["_plans"] = {}
-        return state
-
-    def plan(self, shard_sizes: list[int], rank: int, device: torch.device) -> IcosahedralShardPlan:
-        """The plan of GPU ``rank`` when GPU ``r`` owns ``shard_sizes[r]`` points, in rank order."""
-        cache_key = (tuple(shard_sizes), rank, device)
-        if cache_key not in self._plans:
-            self._plans[cache_key] = self._make_plan(list(shard_sizes), rank, device)
-        return self._plans[cache_key]
-
-    def _make_plan(self, shard_sizes: list[int], rank: int, device: torch.device) -> IcosahedralShardPlan:
-        tables = self.neighbourhood.tables
-        if sum(shard_sizes) != tables.num_points:
-            raise ValueError(f"The shard sizes {shard_sizes} do not add up to the {tables.num_points} points.")
-        starts = [0, *itertools.accumulate(shard_sizes)]
-        runs = [slice(start, stop) for start, stop in zip(starts[:-1], starts[1:])]
-        shards = [tables.shard(run) for run in runs]
-        own, shard = runs[rank], shards[rank]
-
-        # The halo is in increasing order, so the points from each GPU come in rank order.
-        def from_run(points: np.ndarray, run: slice) -> np.ndarray:
-            return points[(points >= run.start) & (points < run.stop)]
-
-        send_indices = tuple(
-            torch.as_tensor(from_run(other.halo, own) - own.start, dtype=torch.long, device=device) for other in shards
-        )
-        recv_counts = tuple(len(from_run(shard.halo, run)) for run in runs)
-        halo_info = HaloInfo(
-            num_local_src_nodes=shard.num_queries,
-            num_local_dst_nodes=shard.num_queries,
-            num_halo_nodes=len(shard.halo),
-            send_indices=send_indices,
-            recv_counts=recv_counts,
-            edge_index_local=torch.empty((2, 0), dtype=torch.long, device=device),
-        )
-        key_points = np.concatenate([np.arange(own.start, own.stop), shard.halo])
-        band = NeighbourhoodBand(
-            query_points=own,
-            key_points=torch.as_tensor(key_points, dtype=torch.long, device=device),
-            queries_in_keys=slice(0, shard.num_queries),
-            attention=IcosahedralAttentionWrapper(self.neighbourhood, shard),
-        )
-        return IcosahedralShardPlan(band=band, halo_info=halo_info)
+    def keep(self, out: Optional[Tensor], band_out: Tensor, band: NeighbourhoodBand) -> Tensor:
+        if out is None:
+            out = band_out.new_empty(self.batch_size, self.num_own_queries, band_out.shape[-1])
+        write_own_points(out, band_out, band, self.plan)
+        return out

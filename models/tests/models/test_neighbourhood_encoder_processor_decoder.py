@@ -208,7 +208,7 @@ def test_rotary_embeddings_reach_encoder_processor_and_decoder():
 
 def test_icosahedral_processor_between_plain_attention_mappers():
     """A processor on the refined icosahedron, configured and checked as training does, trains end to end."""
-    from anemoi.models.layers.neighbourhood_attention import IcosahedralAttentionWrapper
+    from anemoi.models.layers.icosahedral_neighbourhood import IcosahedralAttentionWrapper
     from tests.layers.test_icosahedral_grid import icosahedron_coords
 
     config = _model_config({"grid": "octahedral", "backend": "sdpa"})
