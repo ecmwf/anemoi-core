@@ -13,6 +13,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.nodes.attributes import AnemoiDatasetVariableWeights
 from anemoi.graphs.nodes.attributes import CosineLatWeightedAttribute
 from anemoi.graphs.nodes.attributes import IsolatitudeAreaWeights
 from anemoi.graphs.nodes.attributes import MaskedPlanarAreaWeights
@@ -111,18 +112,18 @@ def test_planar_area_weights_exact_on_lattices():
     for dx, dy in [(0.1, 0.1), (0.5, 0.1), (1.0, 0.1)]:
         x, y = np.meshgrid(np.arange(40) * dx, np.arange(30) * dy)
         latlons = np.column_stack([x.ravel(), y.ravel()])
-        areas = PlanarAreaWeights().compute_area_weights(latlons)
+        areas = PlanarAreaWeights()._compute_area_weights(latlons)
         np.testing.assert_allclose(areas, dx * dy, rtol=1e-9)
 
 
 def test_planar_area_weights_degenerate_inputs():
     """Collinear nodes fall back to uniform weights; duplicated nodes stay finite."""
     collinear = np.column_stack([np.arange(50) * 0.1, np.zeros(50)])
-    np.testing.assert_array_equal(PlanarAreaWeights().compute_area_weights(collinear), 1.0)
+    np.testing.assert_array_equal(PlanarAreaWeights()._compute_area_weights(collinear), 1.0)
 
     x, y = np.meshgrid(np.arange(20) * 0.1, np.arange(20) * 0.1)
     duplicated = np.vstack([np.column_stack([x.ravel(), y.ravel()]), [[0.5, 0.5]]])
-    areas = PlanarAreaWeights().compute_area_weights(duplicated)
+    areas = PlanarAreaWeights()._compute_area_weights(duplicated)
     assert np.isfinite(areas).all() and (areas > 0).all()
 
 
@@ -174,3 +175,12 @@ def test_voronoi_region_areas_matches_convexhull():
 
     areas = attr._voronoi_region_areas(v, np.array([target]))
     np.testing.assert_allclose(areas[0], hull_area, rtol=1e-9, atol=0.0)
+
+
+def test_anemoi_dataset_variable_weights_init():
+    """Test AnemoiDatasetVariableWeights stores name, norm and dtype correctly."""
+    node_attr_builder = AnemoiDatasetVariableWeights(variable="lsm", name="lsm_weights", norm="unit-max")
+    assert node_attr_builder.variable == "lsm"
+    assert node_attr_builder.name == "lsm_weights"
+    assert node_attr_builder.norm == "unit-max"
+    assert node_attr_builder.dtype == torch.float32

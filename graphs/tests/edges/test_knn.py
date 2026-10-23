@@ -31,5 +31,5 @@ def test_fail_init(edge_builder, num_nearest_neighbours: str):
 def test_knn(edge_builder, graph_with_nodes):
     """Test KNNEdges."""
     builder = edge_builder("test_nodes", "test_nodes", 3)
-    graph = builder.update_graph(graph_with_nodes)
-    assert ("test_nodes", "to", "test_nodes") in graph.edge_types
+    builder.update_graph(graph_with_nodes)
+    assert ("test_nodes", "to", "test_nodes") in graph_with_nodes.edge_types
