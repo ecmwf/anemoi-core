@@ -1,4 +1,14 @@
+# (C) Copyright 2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 """Node-local dataset cache with cross-node reads over ZeroMQ."""
+
 import errno
 import fcntl
 import hashlib
@@ -19,14 +29,12 @@ import pytorch_lightning as pl
 import torch.distributed as dist
 from numcodecs import Blosc
 
-from anemoi.training.utils.cache_transport import (
-    CacheClient,
-    CacheKey,
-    CacheServer,
-    Endpoint,
-    RemoteCacheMiss,
-    RemoteCacheUnavailable,
-)
+from anemoi.training.utils.cache_transport import CacheClient
+from anemoi.training.utils.cache_transport import CacheKey
+from anemoi.training.utils.cache_transport import CacheServer
+from anemoi.training.utils.cache_transport import Endpoint
+from anemoi.training.utils.cache_transport import RemoteCacheMiss
+from anemoi.training.utils.cache_transport import RemoteCacheUnavailable
 
 LOGGER = logging.getLogger(__name__)
 
@@ -138,6 +146,7 @@ class DatasetCacheNamespace:
             for entry in sequence.glob("*.npy.blosc")
         )
 
+
 class DatasetCache(pl.LightningDataModule):
     """Datamodule proxy coordinating one SSD cache per node."""
 
@@ -157,6 +166,7 @@ class DatasetCache(pl.LightningDataModule):
         self.total_fetches = Value("q", 0)
         self.cache_full = Value("b", False)
         self.cache_writes_skipped = Value("q", 0)
+        self.cache_remote_errors = Value("q", 0)
         # update_global_view() runs in the training process, but check_cache() runs in dataloader
         # workers, which are forked once and persist across epochs. The view is therefore published
         # to a file and workers reload it whenever this shared version counter changes.
@@ -332,7 +342,16 @@ class DatasetCache(pl.LightningDataModule):
                     self._locations.setdefault(keys[index], set()).add(node)
                 unresolved.difference_update(batch)
                 self._increment(self.cache_hits_remote, len(batch))
-            except (RemoteCacheMiss, RemoteCacheUnavailable):
+            except (RemoteCacheMiss, RemoteCacheUnavailable) as error:
+                self._increment(self.cache_remote_errors, 1)
+                leader = getattr(self, "_leaders", {}).get(node)
+                LOGGER.warning(
+                    "Remote cache read from node %d (%s) failed: %s: %s",
+                    node,
+                    self.hostnames[leader] if leader is not None else "unknown host",
+                    type(error).__name__,
+                    error,
+                )
                 for index in batch:
                     self._locations[keys[index]].discard(node)
 
@@ -349,7 +368,7 @@ class DatasetCache(pl.LightningDataModule):
 
         # check if cache is full
         total, used, free = shutil.disk_usage(self.cache_root)
-        if (used/total) > .8:
+        if (used / total) > 0.8:
             LOGGER.warning("Dataset cache is full on node %s", self.node_id)
             self.cache_full.value = True
 
@@ -409,7 +428,15 @@ class DatasetCache(pl.LightningDataModule):
             for dataset_id, sequence, position, grid_id, node in entries:
                 locations.setdefault(CacheKey(dataset_id, sequence, position, grid_id), set()).add(node)
         self._publish_view(locations)
-        LOGGER.info("Rank %d had %d fetches (%d local hits, %d remote hits, %d misses)", self.global_rank, self.total_fetches.value, self.cache_hits_local.value, self.cache_hits_remote.value, self.cache_misses.value)
+        LOGGER.info(
+            "Rank %d had %d fetches (%d local hits, %d remote hits, %d misses, %d remote errors)",
+            self.global_rank,
+            self.total_fetches.value,
+            self.cache_hits_local.value,
+            self.cache_hits_remote.value,
+            self.cache_misses.value,
+            self.cache_remote_errors.value,
+        )
 
     def teardown(self, stage=None):
         self.close_writer()

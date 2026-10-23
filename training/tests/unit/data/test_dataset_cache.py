@@ -10,7 +10,6 @@
 """Unit tests for anemoi.training.utils.dataset_cache."""
 
 import errno
-import io
 import multiprocessing
 import threading
 from pathlib import Path
@@ -18,18 +17,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from anemoi.training.utils.dataset_cache import (
-    CacheKey,
-    CacheClient,
-    CacheServer,
-    DatasetCache,
-    DatasetCacheNamespace,
-    Endpoint,
-    RemoteCacheMiss,
-    _is_capacity_error,
-    save_cache_array,
-)
-
+from anemoi.training.utils.dataset_cache import CacheClient
+from anemoi.training.utils.dataset_cache import CacheKey
+from anemoi.training.utils.dataset_cache import CacheServer
+from anemoi.training.utils.dataset_cache import DatasetCache
+from anemoi.training.utils.dataset_cache import DatasetCacheNamespace
+from anemoi.training.utils.dataset_cache import Endpoint
+from anemoi.training.utils.dataset_cache import RemoteCacheMiss
+from anemoi.training.utils.dataset_cache import _is_capacity_error
+from anemoi.training.utils.dataset_cache import save_cache_array
 
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
@@ -71,10 +67,7 @@ class TestProcessZMQCacheServerClient:
     def cache_data(self):
         """Create fake cached entries keyed by dataset, sequence, and position."""
         rng = np.random.default_rng(99)
-        return {
-            CacheKey("dataset", 0, index): rng.standard_normal((3, 5)).astype(np.float32)
-            for index in range(20)
-        }
+        return {CacheKey("dataset", 0, index): rng.standard_normal((3, 5)).astype(np.float32) for index in range(20)}
 
     @pytest.fixture
     def running_server(self, cache_data, tmp_path):
@@ -117,7 +110,9 @@ class TestProcessZMQCacheServerClient:
         key = CacheKey("other-dataset", 0, 5)
         expected = np.full((3, 5), 17, dtype=np.float32)
         cache_data[key] = expected
-        path = Path(running_server.entries[key.dataset_id]) / key.grid_id / str(key.sequence) / f"{key.position}.npy.blosc"
+        path = (
+            Path(running_server.entries[key.dataset_id]) / key.grid_id / str(key.sequence) / f"{key.position}.npy.blosc"
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("wb") as target:
             save_cache_array(target, expected)
@@ -241,7 +236,11 @@ class TestDatasetCacheNamespace:
 
 
 def test_check_cache_prefers_local(tmp_path, sample_data, monkeypatch):
-    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    namespace = DatasetCacheNamespace(
+        tmp_path,
+        "analysis:fingerprint",
+        TestDatasetCacheNamespace.FakeReader(sample_data),
+    )
     namespace.store(0, 3, sample_data[3])
     cache = DatasetCache(object(), tmp_path)
     cache.namespaces[namespace.dataset_id] = namespace
@@ -256,7 +255,11 @@ def test_check_cache_prefers_local(tmp_path, sample_data, monkeypatch):
 
 
 def test_check_cache_returns_partial_values_and_missing_indices(tmp_path, sample_data):
-    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    namespace = DatasetCacheNamespace(
+        tmp_path,
+        "analysis:fingerprint",
+        TestDatasetCacheNamespace.FakeReader(sample_data),
+    )
     namespace.store(0, 3, sample_data[3])
     cache = DatasetCache(object(), tmp_path)
     cache.namespaces[namespace.dataset_id] = namespace
@@ -270,7 +273,11 @@ def test_check_cache_returns_partial_values_and_missing_indices(tmp_path, sample
 
 
 def test_check_cache_reads_missing_records_from_multiple_nodes(tmp_path, sample_data, monkeypatch):
-    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    namespace = DatasetCacheNamespace(
+        tmp_path,
+        "analysis:fingerprint",
+        TestDatasetCacheNamespace.FakeReader(sample_data),
+    )
     cache = DatasetCache(object(), tmp_path)
     cache.namespaces[namespace.dataset_id] = namespace
     cache.node_id = 0
@@ -296,7 +303,11 @@ def test_check_cache_reads_missing_records_from_multiple_nodes(tmp_path, sample_
 
 
 def test_check_cache_does_not_probe_without_location_snapshot(tmp_path, sample_data, monkeypatch):
-    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    namespace = DatasetCacheNamespace(
+        tmp_path,
+        "analysis:fingerprint",
+        TestDatasetCacheNamespace.FakeReader(sample_data),
+    )
     cache = DatasetCache(object(), tmp_path)
     cache.namespaces[namespace.dataset_id] = namespace
     cache.node_id = 0
@@ -310,8 +321,12 @@ def test_check_cache_does_not_probe_without_location_snapshot(tmp_path, sample_d
     assert missing == [0]
 
 
-def test_check_cache_falls_back_after_stale_remote_batch(tmp_path, sample_data, monkeypatch):
-    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+def test_check_cache_falls_back_after_stale_remote_batch(tmp_path, sample_data, monkeypatch, caplog):
+    namespace = DatasetCacheNamespace(
+        tmp_path,
+        "analysis:fingerprint",
+        TestDatasetCacheNamespace.FakeReader(sample_data),
+    )
     cache = DatasetCache(object(), tmp_path)
     cache.namespaces[namespace.dataset_id] = namespace
     cache.node_id = 0
@@ -332,10 +347,16 @@ def test_check_cache_falls_back_after_stale_remote_batch(tmp_path, sample_data, 
     assert missing == [0, 1]
     assert cache._locations[CacheKey(namespace.dataset_id, 0, 3)] == set()
     assert cache._locations[CacheKey(namespace.dataset_id, 0, 4)] == set()
+    assert cache.cache_remote_errors.value == 1
+    assert "Remote cache read from node 1 (unknown host) failed: RemoteCacheMiss" in caplog.text
 
 
 def test_check_cache_tries_only_one_advertised_node(tmp_path, sample_data, monkeypatch):
-    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    namespace = DatasetCacheNamespace(
+        tmp_path,
+        "analysis:fingerprint",
+        TestDatasetCacheNamespace.FakeReader(sample_data),
+    )
     cache = DatasetCache(object(), tmp_path)
     cache.namespaces[namespace.dataset_id] = namespace
     cache.node_id = 0
@@ -363,7 +384,11 @@ def test_check_cache_tries_only_one_advertised_node(tmp_path, sample_data, monke
 
 
 def test_grid_shards_are_cached_separately(tmp_path, sample_data):
-    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    namespace = DatasetCacheNamespace(
+        tmp_path,
+        "analysis:fingerprint",
+        TestDatasetCacheNamespace.FakeReader(sample_data),
+    )
     cache = DatasetCache(object(), tmp_path)
     cache.cache_path = tmp_path
     cache.namespaces[namespace.dataset_id] = namespace
@@ -381,7 +406,11 @@ def test_grid_shards_are_cached_separately(tmp_path, sample_data):
 
 
 def test_async_writes_skip_work_while_writer_is_busy(tmp_path, sample_data, monkeypatch):
-    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    namespace = DatasetCacheNamespace(
+        tmp_path,
+        "analysis:fingerprint",
+        TestDatasetCacheNamespace.FakeReader(sample_data),
+    )
     cache = DatasetCache(object(), tmp_path, async_writes=True)
     cache.namespaces[namespace.dataset_id] = namespace
     first_write_started = threading.Event()
@@ -409,3 +438,46 @@ def test_async_writes_skip_work_while_writer_is_busy(tmp_path, sample_data, monk
     cache.close_writer()
 
     assert writes == [[0], [2]]
+
+
+def test_global_view_reaches_persistent_dataloader_workers(tmp_path, sample_data, monkeypatch):
+    """Workers forked before update_global_view() must still see the new view.
+
+    check_cache() runs in dataloader workers that persist across epochs, while the view is
+    updated in the training process at the end of each epoch.
+    """
+    from torch.utils.data import DataLoader
+    from torch.utils.data import IterableDataset
+
+    namespace = DatasetCacheNamespace(
+        tmp_path,
+        "analysis:fingerprint",
+        TestDatasetCacheNamespace.FakeReader(sample_data),
+    )
+    cache = DatasetCache(object(), tmp_path)
+    cache.namespaces[namespace.dataset_id] = namespace
+    cache.node_id = 0
+
+    class Remote:
+        def request_shard(self, key, positions):
+            return sample_data[positions]
+
+    monkeypatch.setattr(cache, "_remote_cache", lambda node: Remote())
+
+    class Reads(IterableDataset):
+        def __iter__(self):
+            _, missing = cache.check_cache(namespace.dataset_id, 0, [3, 4])
+            yield len(missing)
+
+    loader = DataLoader(
+        Reads(),
+        batch_size=None,
+        num_workers=1,
+        persistent_workers=True,
+        multiprocessing_context="fork",
+    )
+
+    assert list(loader) == [2]  # epoch 0: nothing advertised yet
+    cache._publish_view({CacheKey(namespace.dataset_id, 0, p): {1} for p in (3, 4)})
+    assert list(loader) == [0]  # epoch 1: same worker process, served by node 1
+    assert cache.cache_hits_remote.value == 2

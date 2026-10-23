@@ -38,7 +38,9 @@ class HardwareSchema(BaseModel):
     cache_dir: Path | None = None
     "Directory for the node-local dataset cache."
     cache_async_writes: bool = False
-    "Write cache records in a background thread without an fsync per record."
+    "Write cache records in a background thread. When a write is in progress, the next record is not written."
+    hostname_suffix: str | None = None
+    "Text to add to each hostname for cache connections between nodes, for example the high-speed network name."
 
 
 class InputSchema(PydanticBaseModel):
