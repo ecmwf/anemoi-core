@@ -1,7 +1,8 @@
 defaults:
 - multidomain
-- override model: graphtransformer_multidomain_ens
-- override training: multidomain_ensemble
+- override model: graphtransformer_ens
+- override training: ensemble
+- override training/scalers: stretched
 - _self_
 
 system:
