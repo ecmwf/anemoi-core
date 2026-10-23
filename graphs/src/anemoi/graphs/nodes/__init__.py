@@ -16,6 +16,7 @@ from .builders.from_healpix import HEALPixNodes
 from .builders.from_healpix import LimitedAreaHEALPixNodes
 from .builders.from_icon import ICONCellGridNodes
 from .builders.from_icon import ICONMultiMeshNodes
+from .builders.from_kmeans_clusters import KMeansClusteredNodes
 from .builders.from_reduced_gaussian import ReducedGaussianGridNodes
 from .builders.from_refined_icosahedron import HexNodes
 from .builders.from_refined_icosahedron import LimitedAreaHexNodes
@@ -26,19 +27,20 @@ from .builders.from_vectors import LatLonNodes
 
 __all__ = [
     "AnemoiDatasetNodes",
-    "NPZFileNodes",
-    "TriNodes",
     "HexNodes",
     "HEALPixNodes",
-    "LatLonNodes",
-    "LimitedAreaHEALPixNodes",
-    "LimitedAreaNPZFileNodes",
-    "LimitedAreaTriNodes",
-    "LimitedAreaHexNodes",
-    "ReducedGaussianGridNodes",
-    "StretchedTriNodes",
     "ICONMultiMeshNodes",
     "ICONCellGridNodes",
+    "KMeansClusteredNodes",
+    "LatLonNodes",
+    "LimitedAreaHEALPixNodes",
+    "LimitedAreaHexNodes",
+    "LimitedAreaNPZFileNodes",
+    "LimitedAreaTriNodes",
+    "NPZFileNodes",
     "TextNodes",
+    "TriNodes",
+    "ReducedGaussianGridNodes",
+    "StretchedTriNodes",
     "XArrayNodes",
 ]

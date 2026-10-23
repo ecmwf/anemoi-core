@@ -38,3 +38,12 @@ available methods of this kind are:
    node_coordinates/tri_refined_icosahedron
    node_coordinates/hex_refined_icosahedron
    node_coordinates/healpix
+
+For domains that are irregular or only cover part of the globe, the
+nodes can instead be placed so that they follow the shape of the area of
+interest:
+
+.. toctree::
+   :maxdepth: 1
+
+   node_coordinates/kmeans_clusters

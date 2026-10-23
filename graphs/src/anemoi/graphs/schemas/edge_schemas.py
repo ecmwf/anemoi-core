@@ -114,6 +114,15 @@ class ICONTopologicalEdgeSchema(BaseModel):
     "Mask to apply to target nodes of the edges. Default to None."
 
 
+class DelaunayEdgeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.edges.SphericalDelaunayEdges"] = Field(..., alias="_target_")
+    "Delaunay triangulation based edges implementation from anemoi.graphs.edges."
+    source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    "Mask to apply to source nodes of the edges. Default to None."
+    target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    "Mask to apply to target nodes of the edges. Default to None."
+
+
 class EdgeAttributeSchema(BaseModel):
     target_: Literal["anemoi.graphs.edges.attributes.EdgeLength", "anemoi.graphs.edges.attributes.EdgeDirection"] = (
         Field("anemoi.graphs.edges.attributes.EdgeLength", alias="_target_")
@@ -129,6 +138,7 @@ EdgeBuilderSchemas = Annotated[
     | CutoffEdgeSchema
     | MultiScaleEdgeSchema
     | HEALPixMultiScaleEdgesSchema
-    | ICONTopologicalEdgeSchema,
+    | ICONTopologicalEdgeSchema
+    | DelaunayEdgeSchema,
     Field(discriminator="target_"),
 ]
