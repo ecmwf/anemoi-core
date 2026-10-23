@@ -34,6 +34,7 @@ from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.sharded_dropout import ShardedDropoutGuard
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -56,7 +57,7 @@ class NoOpProcessor(nn.Module):
         return x
 
 
-class BaseProcessor(nn.Module, ABC):
+class BaseProcessor(ShardedDropoutGuard, nn.Module, ABC):
     """Base Processor."""
 
     def __init__(
@@ -100,8 +101,6 @@ class BaseProcessor(nn.Module, ABC):
 
         self.layer_factory = load_layer_kernels(layer_kernels)
 
-        self._has_dropout = kwargs.get("dropout_p", 0.0) > 0 if "dropout_p" in kwargs else False
-
         assert (
             num_layers % num_chunks == 0
         ), f"Number of processor layers ({num_layers}) has to be divisible by the number of processor chunks ({num_chunks})."
@@ -144,11 +143,6 @@ class BaseProcessor(nn.Module, ABC):
 
     def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
         """Example forward pass."""
-
-        if (model_comm_group := kwargs.get("model_comm_group", None)) is not None:
-            assert (
-                model_comm_group.size() == 1 or not self._has_dropout
-            ), f"Dropout is not supported when model is sharded across {model_comm_group.size()} GPUs"
 
         x = self.run_layers((x,), *args, **kwargs)
         return x
