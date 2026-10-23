@@ -228,20 +228,35 @@ class CheckpointPipeline:
         placed. The builder always emits stages in the canonical order, so only
         hand-built pipelines are bitten.
 
+        Among the modifiers, a ``FreezingModifierStage`` must not follow a
+        ``PeftModifierStage``: the PEFT stage sets the trainable parameters, and
+        freezing after it could freeze the adapters.
+
         Raises
         ------
         CheckpointConfigError
             If a source follows a loader or a modifier, a modifier precedes a
-            loader, or there is more than one loading strategy.
+            loader, there is more than one loading strategy, or freezing follows PEFT.
         """
+        from .exceptions import CheckpointConfigError
+        from .modifiers.freezing import FreezingModifierStage
+        from .modifiers.peft import PeftModifierStage
+
+        names = [type(stage).__name__ for stage in self.stages]
         rank = {"source": 0, "loader": 1, "modifier": 2}
         ranks = [rank[role] for role in map(self._stage_role, self.stages) if role is not None]
         if ranks != sorted(ranks) or ranks.count(rank["loader"]) > 1:
-            from .exceptions import CheckpointConfigError
-
-            names = [type(stage).__name__ for stage in self.stages]
             msg = f"Invalid checkpoint pipeline {names}: use the order source -> one loader -> modifiers."
             raise CheckpointConfigError(msg, config_path="training.checkpoint")
+
+        peft_at = [i for i, stage in enumerate(self.stages) if isinstance(stage, PeftModifierStage)]
+        freezing_at = [i for i, stage in enumerate(self.stages) if isinstance(stage, FreezingModifierStage)]
+        if peft_at and freezing_at and max(freezing_at) > min(peft_at):
+            msg = (
+                f"Invalid checkpoint pipeline {names}: FreezingModifierStage after PeftModifierStage could "
+                "freeze the adapters. List freezing first, or use the PEFT stage's trainable_modules."
+            )
+            raise CheckpointConfigError(msg, config_path="training.checkpoint.modifiers")
 
     def execute(self, initial_context: CheckpointContext) -> CheckpointContext:
         """Execute the pipeline stages in sequence.
