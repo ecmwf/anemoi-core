@@ -16,6 +16,7 @@ import anemoi.models.models.transport_encoder_processor_decoder as transport_mod
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportSpatialDownscalerModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
+from anemoi.models.models.transport_encoder_processor_decoder import normalise_delta
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.preprocessing.imputer import InputImputer
@@ -106,6 +107,27 @@ def _make_model() -> AnemoiTransportTendModelEncProcDec:
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     model.data_indices = {"data": _make_index_collection()}
     return model
+
+
+def test_normalise_delta_normalises_prognostics_as_delta_and_diagnostics_as_state() -> None:
+    indices = _make_index_collection()
+    prognostic = indices.model.output.prognostic
+    diagnostic = indices.model.output.diagnostic
+    target = torch.tensor([[[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]]])
+    target_before = target.clone()
+    reference = torch.tensor([[[1.0, 2.0], [3.0, 4.0]]])
+    state_proc = SequenceProcessor(100.0, [indices.data.output.diagnostic])
+    delta_proc = SequenceProcessor(10.0, [indices.data.output.prognostic])
+
+    out = normalise_delta(target, reference, state_proc, delta_proc, indices, skip_imputation=True)
+
+    expected = target.clone()
+    expected[..., prognostic] = target[..., prognostic] - reference + 10.0
+    expected[..., diagnostic] = target[..., diagnostic] + 100.0
+    assert torch.allclose(out, expected)
+    assert torch.equal(target, target_before)
+    assert state_proc.calls == 1
+    assert delta_proc.calls == 1
 
 
 def test_compute_tendency_uses_expected_indices() -> None:

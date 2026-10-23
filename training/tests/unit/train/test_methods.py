@@ -327,6 +327,7 @@ def test_after_batch_transfer_replaces_source_grid_shard_metadata() -> None:
             super().__init__()
             self.spatial_pre_processors = torch.nn.ModuleDict({"data": RegriddingSpatialProcessor()})
             self.pre_processors = torch.nn.ModuleDict({"data": Processors([])})
+            self.model = SimpleNamespace(target2anchor={"data": "data"})
 
     comm_group = object()
     module = SingleTraining.__new__(SingleTraining)
@@ -344,6 +345,49 @@ def test_after_batch_transfer_replaces_source_grid_shard_metadata() -> None:
     assert result["data"].shape[-2] == 2
     assert module.grid_shard_sizes == {"data": target_grid_shard_sizes}
     assert module.grid_shard_slice == {"data": slice(2, 4)}
+
+
+def _module_with_attached_target(target_grid_shard_sizes: list[int]) -> SingleTraining:
+    """``out`` is decoded on the nodes of ``in_lres``, which is projected from [4, 4] to [2, 2] shards."""
+
+    class RegriddingSpatialProcessor(torch.nn.Module):
+        def forward(self, x: torch.Tensor, **_kwargs: Any) -> tuple[torch.Tensor, list[int]]:
+            return x[..., :2, :], [2, 2]
+
+    model = torch.nn.Module()
+    model.spatial_pre_processors = torch.nn.ModuleDict({"in_lres": RegriddingSpatialProcessor()})
+    model.pre_processors = torch.nn.ModuleDict({"in_lres": Processors([]), "out": Processors([])})
+    model.model = SimpleNamespace(target2anchor={"out": "in_lres"})
+
+    module = SingleTraining.__new__(SingleTraining)
+    pl.LightningModule.__init__(module)
+    module.model = model
+    module.model_comm_group = object()
+    module.model_comm_group_rank = 0
+    module.grid_shard_sizes = {"in_lres": [4, 4], "out": target_grid_shard_sizes}
+    module.grid_shard_slice = {"in_lres": slice(0, 4), "out": slice(0, target_grid_shard_sizes[0])}
+    module._setup_batch_sharding = lambda batch: batch
+    module._prepare_loss_scalers = lambda: None
+    return module
+
+
+def _attached_target_batch() -> dict[str, torch.Tensor]:
+    return {"in_lres": torch.zeros(1, 1, 1, 4, 1), "out": torch.zeros(1, 1, 1, 2, 1)}
+
+
+def test_after_batch_transfer_accepts_a_target_sharded_like_its_anchor() -> None:
+    module = _module_with_attached_target([2, 2])
+
+    module.on_after_batch_transfer(_attached_target_batch(), 0)
+
+    assert module.grid_shard_sizes == {"in_lres": [2, 2], "out": [2, 2]}
+
+
+def test_after_batch_transfer_rejects_a_target_sharded_unlike_its_anchor() -> None:
+    module = _module_with_attached_target([3, 1])
+
+    with pytest.raises(RuntimeError, match=r"'out'.*'in_lres'"):
+        module.on_after_batch_transfer(_attached_target_batch(), 0)
 
 
 def _allgather_module(reader_group_size: int = 2) -> SingleTraining:

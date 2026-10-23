@@ -24,6 +24,7 @@ import torch
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
+import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportSpatialDownscalerModelEncProcDec
@@ -373,6 +374,64 @@ def test_before_sampling_raises_when_an_input_dataset_is_missing() -> None:
             spatial_pre_processors={},
             post_processors={"in_lres": _AdditiveProcessor(offset=0.0)},
         )
+
+
+def test_sampling_input_datasets_are_the_inference_inputs_not_the_batch_keys() -> None:
+    model = _make_bare_model()
+    batch = {"out_hres": torch.zeros(1), "in_hres": torch.zeros(1), "in_lres": torch.zeros(1)}
+
+    assert model._sampling_input_datasets(batch) == ["in_lres", "in_hres"]
+
+
+def test_base_sampling_input_datasets_are_the_batch_keys() -> None:
+    model = AnemoiTransportModelEncProcDec.__new__(AnemoiTransportModelEncProcDec)
+
+    assert model._sampling_input_datasets({"b": torch.zeros(1), "a": torch.zeros(1)}) == ["b", "a"]
+
+
+def test_before_sampling_shards_on_the_source_grid_then_projects_then_normalises(monkeypatch) -> None:
+    model = _make_bare_model()
+    comm_group = object()
+    source_shard_sizes = [3, 3]
+    # Deliberately unbalanced: the target must follow its anchor, not recompute a partition.
+    projected_shard_sizes = [1, 3]
+    events: list[str] = []
+
+    def _shard_tensor(tensor, *_args, **_kwargs):
+        events.append("shard")
+        return tensor
+
+    class _RecordingProjector:
+        def __call__(self, x, model_comm_group=None, grid_shard_sizes=None):
+            assert model_comm_group is comm_group
+            assert grid_shard_sizes == source_shard_sizes
+            events.append("project")
+            return x, projected_shard_sizes
+
+    class _RecordingNormaliser(_AdditiveProcessor):
+        def __call__(self, x, **kwargs):
+            events.append("normalise")
+            return super().__call__(x, **kwargs)
+
+    monkeypatch.setattr(transport_model_module, "get_shard_sizes", lambda *_args, **_kwargs: source_shard_sizes)
+    monkeypatch.setattr(transport_model_module, "shard_tensor", _shard_tensor)
+
+    (xs, _, _), grid_shard_sizes = model._before_sampling(
+        {"in_lres": torch.zeros(1, 1, 4, 2), "in_hres": torch.zeros(1, 1, 4, 1)},
+        pre_processors={"in_lres": _RecordingNormaliser(0.0), "in_hres": _AdditiveProcessor(0.0)},
+        n_step_input=1,
+        model_comm_group=comm_group,
+        spatial_pre_processors={"in_lres": _RecordingProjector()},
+        post_processors={"in_lres": _AdditiveProcessor(0.0)},
+    )
+
+    assert events[:3] == ["shard", "project", "normalise"]
+    assert set(xs) == {"in_lres", "in_hres"}
+    assert grid_shard_sizes == {
+        "in_lres": projected_shard_sizes,
+        "in_hres": source_shard_sizes,
+        "out_hres": projected_shard_sizes,
+    }
 
 
 def test_build_sampling_source_rejects_a_reference_that_is_not_on_the_target_grid() -> None:

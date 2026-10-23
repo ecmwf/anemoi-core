@@ -14,14 +14,13 @@ from typing import Optional
 
 import einops
 import torch
-import torch.distributed as dist
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -47,6 +46,57 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 SamplingData = tuple[dict[str, torch.Tensor], ...]
+
+
+def normalise_delta(
+    target: torch.Tensor,
+    reference_prognostic: torch.Tensor,
+    pre_processor_state: Callable,
+    pre_processor_delta: Callable,
+    data_indices: IndexCollection,
+    skip_imputation: bool = False,
+) -> torch.Tensor:
+    """Split a denormalized target into a normalized delta on prognostics and a normalized state on diagnostics.
+
+    Shared by the tendency (reference: latest input state) and residual (reference:
+    projected dataset) models.
+
+    Parameters
+    ----------
+    target : torch.Tensor
+        Denormalized target in model-output variable order.
+    reference_prognostic : torch.Tensor
+        Denormalized reference, holding the target's prognostic variables in model-output order.
+    pre_processor_state : Callable
+        State pre-processor, applied to the diagnostic variables.
+    pre_processor_delta : Callable
+        Delta (tendency or residual) pre-processor, applied to ``target - reference`` on prognostics.
+    data_indices : IndexCollection
+        Data indices of the target dataset.
+    skip_imputation : bool, optional
+        Skip imputation in both pre-processors, by default False.
+
+    Returns
+    -------
+    torch.Tensor
+        Normalized delta/state tensor in model-output variable order.
+    """
+    prognostic = data_indices.model.output.prognostic
+    diagnostic = data_indices.model.output.diagnostic
+    delta = target.clone()
+    delta[..., prognostic] = pre_processor_delta(
+        target[..., prognostic] - reference_prognostic,
+        in_place=False,
+        data_index=data_indices.data.output.prognostic,
+        skip_imputation=skip_imputation,
+    )
+    delta[..., diagnostic] = pre_processor_state(
+        target[..., diagnostic],
+        in_place=False,
+        data_index=data_indices.data.output.diagnostic,
+        skip_imputation=skip_imputation,
+    )
+    return delta
 
 
 class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
@@ -485,6 +535,36 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         return x_out_dict
 
+    def _sampling_input_datasets(self, batch: dict[str, torch.Tensor]) -> list[str]:
+        """Datasets that ``_before_sampling`` reads from ``batch``."""
+        return list(batch)
+
+    def _prepare_sampling_inputs(
+        self,
+        tensors: tuple[torch.Tensor, ...],
+        dataset_name: str,
+        pre_processors: dict[str, nn.Module],
+        model_comm_group: Optional[ProcessGroup],
+        spatial_pre_processors: Optional[nn.ModuleDict],
+        grid_shard_sizes: DatasetShardSizes | None,
+    ) -> tuple[tuple[torch.Tensor, ...], DatasetShardSizes | None]:
+        """Shard tensors on one dataset's source grid, project them, then normalise them."""
+        if model_comm_group is not None:
+            assert grid_shard_sizes is not None
+            shard_sizes = get_shard_sizes(tensors[0], -2, model_comm_group=model_comm_group)
+            grid_shard_sizes[dataset_name] = shard_sizes
+            tensors = tuple(shard_tensor(tensor, -2, shard_sizes, model_comm_group) for tensor in tensors)
+
+        tensors, grid_shard_sizes = self._apply_spatial_preprocessor(
+            tensors,
+            dataset_name,
+            spatial_pre_processors,
+            model_comm_group,
+            grid_shard_sizes,
+        )
+        tensors = tuple(pre_processors[dataset_name](tensor, in_place=False) for tensor in tensors)
+        return tensors, grid_shard_sizes
+
     def _before_sampling(
         self,
         batch: dict[str, torch.Tensor],
@@ -523,28 +603,17 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         if model_comm_group is not None:
             grid_shard_sizes = {}
 
-        for dataset_name, x in batch.items():
+        for dataset_name in self._sampling_input_datasets(batch):
             # Dimensions are batch, timesteps, grid, variables
-            x = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
-
-            if model_comm_group is not None:
-                shard_sizes = get_shard_sizes(x, -2, model_comm_group=model_comm_group)
-                assert grid_shard_sizes is not None
-                grid_shard_sizes[dataset_name] = shard_sizes
-                x = shard_tensor(x, -2, shard_sizes, model_comm_group)
-
-            # Spatial preprocessing: applied after grid sharding, before normalisation.
-            (x,), grid_shard_sizes = self._apply_spatial_preprocessor(
+            x = batch[dataset_name][:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
+            (xs[dataset_name],), grid_shard_sizes = self._prepare_sampling_inputs(
                 (x,),
                 dataset_name,
-                spatial_pre_processors,
+                pre_processors,
                 model_comm_group,
+                spatial_pre_processors,
                 grid_shard_sizes,
             )
-
-            x = pre_processors[dataset_name](x, in_place=False)
-
-            xs[dataset_name] = x
 
         return (xs,), grid_shard_sizes
 
@@ -874,23 +943,14 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                     skip_imputation=skip_imputation,
                 )
 
-            tendency = x_t1[dataset_name].clone()
-            tendency[..., self.data_indices[dataset_name].model.output.prognostic] = pre_processors_tendencies[
-                dataset_name
-            ](
-                x_t1[dataset_name][..., self.data_indices[dataset_name].model.output.prognostic] - x_t0[dataset_name],
-                in_place=False,
-                data_index=self.data_indices[dataset_name].data.output.prognostic,
+            tendencies[dataset_name] = normalise_delta(
+                x_t1[dataset_name],
+                x_t0[dataset_name],
+                pre_processors_state[dataset_name],
+                pre_processors_tendencies[dataset_name],
+                self.data_indices[dataset_name],
                 skip_imputation=skip_imputation,
             )
-            # Diagnostic variables are kept as normalized full fields from x_t1.
-            tendency[..., self.data_indices[dataset_name].model.output.diagnostic] = pre_processors_state[dataset_name](
-                x_t1[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic],
-                in_place=False,
-                data_index=self.data_indices[dataset_name].data.output.diagnostic,
-                skip_imputation=skip_imputation,
-            )
-            tendencies[dataset_name] = tendency
 
         return tendencies
 
@@ -986,33 +1046,20 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         if model_comm_group is not None:
             grid_shard_sizes = {}
 
-        for dataset_name, x in batch.items():
+        for dataset_name in self._sampling_input_datasets(batch):
+            x = batch[dataset_name]
             # Dimensions are batch, timesteps, grid, variables
             x_in = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
             x_t0 = x[:, -1:, None, ...]  # keep time dim and add dummy ensemble dimension
 
-            if model_comm_group is not None:
-                shard_sizes = get_shard_sizes(x_in, -2, model_comm_group=model_comm_group)
-                assert grid_shard_sizes is not None
-                grid_shard_sizes[dataset_name] = shard_sizes
-                x_in = shard_tensor(x_in, -2, shard_sizes, model_comm_group)
-                shard_sizes = get_shard_sizes(x_t0, -2, model_comm_group=model_comm_group)
-                x_t0 = shard_tensor(x_t0, -2, shard_sizes, model_comm_group)
-
-            # Spatial preprocessing: applied after grid sharding, before normalisation.
-            (x_in, x_t0), grid_shard_sizes = self._apply_spatial_preprocessor(
+            (xs[dataset_name], x_t0s[dataset_name]), grid_shard_sizes = self._prepare_sampling_inputs(
                 (x_in, x_t0),
                 dataset_name,
-                spatial_pre_processors,
+                pre_processors,
                 model_comm_group,
+                spatial_pre_processors,
                 grid_shard_sizes,
             )
-
-            x_in = pre_processors[dataset_name](x_in, in_place=False)
-            x_t0 = pre_processors[dataset_name](x_t0, in_place=False)
-
-            xs[dataset_name] = x_in
-            x_t0s[dataset_name] = x_t0
 
         return (xs, x_t0s), grid_shard_sizes
 
@@ -1285,19 +1332,13 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
     ) -> dict[str, torch.Tensor]:
         """Compute the normalized model target for spatial downscaling.
 
-        Mirrors :meth:`AnemoiTransportTendModelEncProcDec.compute_tendency` but
-        splits the target channels between residual (for prognostic output
-        variables) and direct state (for diagnostic output variables) rather
-        than between tendency and diagnostic.
+        Prognostic channels become normalized residuals against the projected reference,
+        diagnostic channels normalized state.
         """
         assert set(y.keys()) == set(x_reference_denorm.keys()), "y and x_reference_denorm must share dataset keys."
 
         residuals: dict[str, torch.Tensor] = {}
         for dataset_name in y.keys():
-            indices = self.data_indices[dataset_name]
-            prog_model_idx = indices.model.output.prognostic
-            diag_model_idx = indices.model.output.diagnostic
-
             input_post_proc = input_post_processor[dataset_name] if input_post_processor is not None else None
             y_denorm = y[dataset_name]
             if input_post_proc is not None:
@@ -1314,24 +1355,14 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 reference_variable_name_to_column_index_by_target,
                 device=y_denorm.device,
             )
-
-            residual = y_denorm.clone()
-            # Prognostic channels: normalized residual against the reference source.
-            residual[..., prog_model_idx] = pre_processors_residual[dataset_name](
-                y_denorm[..., prog_model_idx]
-                - x_reference_denorm[dataset_name].index_select(-1, reference_prog_col_idx),
-                in_place=False,
-                data_index=indices.data.output.prognostic,
+            residuals[dataset_name] = normalise_delta(
+                y_denorm,
+                x_reference_denorm[dataset_name].index_select(-1, reference_prog_col_idx),
+                pre_processors_state[dataset_name],
+                pre_processors_residual[dataset_name],
+                self.data_indices[dataset_name],
                 skip_imputation=skip_imputation,
             )
-            # Diagnostic channels: kept as normalized state (no residual subtraction).
-            residual[..., diag_model_idx] = pre_processors_state[dataset_name](
-                y_denorm[..., diag_model_idx],
-                in_place=False,
-                data_index=indices.data.output.diagnostic,
-                skip_imputation=skip_imputation,
-            )
-            residuals[dataset_name] = residual
 
         return residuals
 
@@ -1433,6 +1464,22 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             columns[target_name] = reference_indices.model.input.name_to_index
         return references, columns
 
+    def _sampling_input_datasets(self, batch: dict[str, torch.Tensor]) -> list[str]:
+        """Read only ``inference_input_datasets``; the targets are sampled, so other entries are ignored."""
+        input_dataset_names = self.inference_input_datasets
+        missing = [name for name in input_dataset_names if name not in batch]
+        if missing:
+            msg = (
+                f"Missing input dataset(s) {missing} in the batch. The downscaler reads "
+                f"{input_dataset_names} and samples {self.target_datasets}."
+            )
+            raise ValueError(msg)
+
+        unused = [name for name in batch if name not in input_dataset_names]
+        if unused:
+            LOGGER.debug("Ignoring batch entries the model does not read: %s.", unused)
+        return input_dataset_names
+
     # ── sampling hooks ────────────────────────────────────────────────────────
 
     def _before_sampling(
@@ -1447,69 +1494,22 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
     ) -> tuple[SamplingData, DatasetShardSizes | None]:
         """Prepare the batch for sampling in the same order as training.
 
-        Steps, matching :meth:`BaseTrainingModule.on_after_batch_transfer` and
-        :meth:`AnemoiTransportTendModelEncProcDec._before_sampling`:
-
-        1. Add the ensemble dimension.
-        2. Shard grid-wise on the *source* grid.
-        3. Apply spatial pre-processors on the sharded raw values so ``in_lres``
-           is projected onto the target grid.
-        4. Apply per-dataset ``pre_processors`` (state normalization).
-        5. Build the denormalized reference of each target with
-           :meth:`reference_on_target_grid`, the same call training makes.
-
-        Only ``inference_input_datasets`` are read. The targets are sampled, so
-        ``batch`` need not carry them; any entry for one is ignored.
+        The inherited loop shards each input on its source grid, projects it (``in_lres``
+        onto the target grid) and normalizes it, matching
+        :meth:`BaseTrainingModule.on_after_batch_transfer`. On top of that, the
+        denormalized reference of each target is built with
+        :meth:`reference_on_target_grid`, the same call training makes.
         """
         del kwargs
 
-        xs: dict[str, torch.Tensor] = {}
-        grid_shard_sizes: DatasetShardSizes | None = None
-        if model_comm_group is not None:
-            grid_shard_sizes = {}
+        (xs,), grid_shard_sizes = super()._before_sampling(
+            batch,
+            pre_processors,
+            n_step_input,
+            model_comm_group,
+            spatial_pre_processors=spatial_pre_processors,
+        )
 
-        spatial_pre_processors = spatial_pre_processors or {}
-
-        input_dataset_names = self.inference_input_datasets
-        missing = [name for name in input_dataset_names if name not in batch]
-        if missing:
-            msg = (
-                f"Missing input dataset(s) {missing} in the batch. The downscaler reads "
-                f"{input_dataset_names} and samples {self.target_datasets}."
-            )
-            raise ValueError(msg)
-
-        unused = [name for name in batch if name not in input_dataset_names]
-        if unused:
-            LOGGER.debug("Ignoring batch entries the model does not read: %s.", unused)
-
-        for dataset_name in input_dataset_names:
-            # 1. (batch, time, grid, vars) → (batch, time, 1, grid, vars)
-            x = batch[dataset_name][:, 0:n_step_input, None, ...]
-
-            # 2. Shard on the source grid before projection.
-            source_shard_sizes = None
-            if model_comm_group is not None:
-                source_shard_sizes = get_shard_sizes(x, -2, model_comm_group=model_comm_group)
-                x = shard_tensor(x, -2, source_shard_sizes, model_comm_group)
-                grid_shard_sizes[dataset_name] = source_shard_sizes
-
-            # 3. Spatial projection on raw (un-normalized) values.
-            projector = spatial_pre_processors[dataset_name] if dataset_name in spatial_pre_processors else None
-            if projector is not None:
-                x, source_shard_sizes = projector(
-                    x,
-                    model_comm_group=model_comm_group,
-                    grid_shard_sizes=source_shard_sizes,
-                )
-                if grid_shard_sizes is not None:
-                    grid_shard_sizes[dataset_name] = source_shard_sizes
-
-            # 4. Normalize.
-            x = pre_processors[dataset_name](x, in_place=False)
-            xs[dataset_name] = x
-
-        # 5. Denormalize each target's projected reference, exactly as training does.
         assert (
             post_processors is not None
         ), "Downscaler _before_sampling needs post_processors to denormalize the projected reference."
@@ -1517,13 +1517,11 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             self.reference_on_target_grid(xs, post_processors)
         )
 
-        # 6. The targets never pass through the loop above, so their shard sizes
-        #    come from the graph. The projector splits its output grid the same
-        #    way, which is what keeps the fused inputs and the noised target on
-        #    matching shards.
+        # The decoder writes each target onto its anchor's nodes, so the target must be
+        # split across ranks exactly like the (projected) anchor.
         if grid_shard_sizes is not None:
             for target_name in self.target_datasets:
-                grid_shard_sizes[target_name] = self._target_grid_shard_sizes(target_name, model_comm_group)
+                grid_shard_sizes[target_name] = grid_shard_sizes[self._anchor_of_target(target_name)]
 
         return (
             xs,
@@ -1587,19 +1585,6 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 )
 
         return out
-
-    def _target_grid_shard_sizes(
-        self,
-        target_dataset_name: str,
-        model_comm_group: Optional[ProcessGroup],
-    ) -> ShardSizes:
-        """Split the target's graph node set the way every other grid tensor is split."""
-        if model_comm_group is None:
-            return None
-        return get_balanced_partition_sizes(
-            self.node_attributes.num_nodes[target_dataset_name],
-            dist.get_world_size(group=model_comm_group),
-        )
 
     def _target_sampling_source_specs(
         self,
