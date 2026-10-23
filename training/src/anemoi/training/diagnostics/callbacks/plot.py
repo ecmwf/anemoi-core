@@ -10,6 +10,7 @@
 
 import asyncio
 import copy
+import functools
 import logging
 import threading
 import traceback
@@ -68,7 +69,8 @@ _UNSET_MEMBERS: Any = _Unset()
 
 def _unwrap_plot_fn(plot_fn: Any) -> Any:
     """Return the underlying function of a (possibly functools.partial) plot_fn."""
-    while hasattr(plot_fn, "func"):
+    # isinstance, not hasattr(plot_fn, "func"): objects with dynamic attributes (e.g. mocks) would loop forever
+    while isinstance(plot_fn, functools.partial):
         plot_fn = plot_fn.func
     return plot_fn
 
