@@ -22,6 +22,9 @@ Use these settings in ``system.hardware``:
        # Write records in a background thread.
        # When a write is in progress, the next record is not written.
        cache_async_writes: false
+       # Largest size of the cache on each node, as a fraction of the
+       # total size of the disk.
+       cache_max_fraction: 0.9
        # Text to add to each hostname for connections between nodes.
        # Use the hostname of the high-speed network interface,
        # for example "-ab-gpil-ib". Null uses the hostname.
@@ -50,9 +53,12 @@ local cache or from the filesystem.
  Limitations
 *************
 
--  The cache stops writing new records when the disk is more than 80 %
-   full. This limit applies to all the files on the disk, not only the
-   cache. The cache does not remove old records.
+-  The size of the cache on each node is limited to
+   ``cache_max_fraction`` of the total size of the disk. All the
+   processes on the node use the same limit. When the cache gets to the
+   limit, or when the disk is full, the cache stops writing new records.
+   After this, the cache does not change until the end of the run. The
+   cache does not remove old records.
 
 -  The cache gives a benefit only when the filesystem is slow or has a
    high load. On a node with no other load, a read from the cache can

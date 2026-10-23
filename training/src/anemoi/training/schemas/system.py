@@ -39,6 +39,8 @@ class HardwareSchema(BaseModel):
     "Directory for the node-local dataset cache."
     cache_async_writes: bool = False
     "Write cache records in a background thread. When a write is in progress, the next record is not written."
+    cache_max_fraction: Annotated[float, Field(gt=0, le=1)] = 0.9
+    "Largest size of the cache on each node, as a fraction of the total size of its disk."
     hostname_suffix: str | None = None
     "Text to add to each hostname for cache connections between nodes, for example the high-speed network name."
 

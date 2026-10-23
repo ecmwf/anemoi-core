@@ -18,13 +18,16 @@ import numpy as np
 import pytest
 
 from anemoi.training.utils.dataset_cache import CacheClient
+from anemoi.training.utils.dataset_cache import CacheFullError
 from anemoi.training.utils.dataset_cache import CacheKey
 from anemoi.training.utils.dataset_cache import CacheServer
 from anemoi.training.utils.dataset_cache import DatasetCache
 from anemoi.training.utils.dataset_cache import DatasetCacheNamespace
 from anemoi.training.utils.dataset_cache import Endpoint
+from anemoi.training.utils.dataset_cache import NodeCacheBudget
 from anemoi.training.utils.dataset_cache import RemoteCacheMiss
 from anemoi.training.utils.dataset_cache import _is_capacity_error
+from anemoi.training.utils.dataset_cache import encode_cache_array
 from anemoi.training.utils.dataset_cache import save_cache_array
 
 # ---------------------------------------------------------------------------
@@ -170,6 +173,41 @@ class TestProcessZMQCacheServerClient:
         assert not running_server.process.is_alive()
 
 
+def make_budget(tmp_path: Path, limit_bytes: int) -> NodeCacheBudget:
+    budget = NodeCacheBudget(tmp_path / "usage", limit_bytes)
+    budget.reset()
+    return budget
+
+
+class TestNodeCacheBudget:
+    def test_reserve_and_release(self, tmp_path: Path) -> None:
+        budget = make_budget(tmp_path, limit_bytes=100)
+
+        assert budget.reserve(60)
+        assert not budget.reserve(41)  # would exceed the limit: nothing is reserved
+        assert budget.used() == 60
+        assert budget.reserve(40)
+        budget.release(30)
+        assert budget.used() == 70
+
+    def test_budget_is_shared_between_processes(self, tmp_path: Path) -> None:
+        budget = make_budget(tmp_path, limit_bytes=1000)
+
+        def reserve(count: int) -> None:
+            for _ in range(count):
+                budget.reserve(7)
+
+        context = multiprocessing.get_context("fork")
+        processes = [context.Process(target=reserve, args=(50,)) for _ in range(4)]
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join()
+
+        # 200 attempts of 7 bytes: no process may go past the limit, and no update may be lost
+        assert budget.used() == 1000 // 7 * 7
+
+
 class TestDatasetCacheNamespace:
     class FakeReader:
         def __init__(self, data):
@@ -205,18 +243,48 @@ class TestDatasetCacheNamespace:
         np.testing.assert_array_equal(namespace.local(1, 2), data[1, :, :, 2, :])
 
     def test_failed_write_removes_partial_entry(self, tmp_path, sample_data, monkeypatch):
-        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
+        budget = make_budget(tmp_path, limit_bytes=10**9)
+        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), budget)
 
-        def fail_save(target, value):
-            target.write(b"partial")
+        def fail_replace(_source: Path, _target: Path) -> None:
             raise OSError("Not enough free space to write array")
 
-        monkeypatch.setattr("anemoi.training.utils.dataset_cache.save_cache_array", fail_save)
-        with pytest.raises(OSError, match="Not enough free space"):
+        monkeypatch.setattr("anemoi.training.utils.dataset_cache.os.replace", fail_replace)
+        with pytest.raises(CacheFullError, match="Not enough free space"):
             namespace.store(0, 3, sample_data[3])
 
         entry, _ = namespace.paths(0, 3)
         assert not entry.exists()
+        assert not list(entry.parent.glob("*.tmp"))
+        assert budget.used() == 0  # the reserved space is released
+
+    def test_unrelated_write_error_is_not_cache_full(
+        self,
+        tmp_path: Path,
+        sample_data: np.ndarray,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
+
+        def fail_replace(_source: Path, _target: Path) -> None:
+            raise PermissionError(errno.EACCES, "Permission denied")
+
+        monkeypatch.setattr("anemoi.training.utils.dataset_cache.os.replace", fail_replace)
+        with pytest.raises(PermissionError):
+            namespace.store(0, 3, sample_data[3])
+
+    def test_store_stops_at_the_limit(self, tmp_path: Path, sample_data: np.ndarray) -> None:
+        record_bytes = len(encode_cache_array(sample_data[0]))
+        budget = make_budget(tmp_path, limit_bytes=2 * record_bytes)
+        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), budget)
+
+        assert namespace.store(0, 0, sample_data[0])
+        assert namespace.store(0, 1, sample_data[1])
+        with pytest.raises(CacheFullError, match="cache limit"):
+            namespace.store(0, 2, sample_data[2])
+
+        assert sorted(position for _, _, position in namespace.committed()) == [0, 1]
+        assert budget.used() == sum(path.stat().st_size for path in namespace.entries_path.rglob("*.npy.blosc"))
 
     def test_negative_position(self, tmp_path, sample_data):
         namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
@@ -405,6 +473,35 @@ def test_grid_shards_are_cached_separately(tmp_path, sample_data):
     assert missing == [0]
 
 
+def test_full_cache_stays_locked(tmp_path: Path, sample_data: np.ndarray, caplog: pytest.LogCaptureFixture) -> None:
+    record_bytes = len(encode_cache_array(sample_data[0]))
+    budget = make_budget(tmp_path, limit_bytes=2 * record_bytes)
+    namespace = DatasetCacheNamespace(
+        tmp_path,
+        "analysis:fingerprint",
+        TestDatasetCacheNamespace.FakeReader(sample_data),
+        budget,
+    )
+    cache = DatasetCache(object(), tmp_path)
+    cache.namespaces[namespace.dataset_id] = namespace
+    cache.node_id = 0
+
+    cache.store_records(namespace.dataset_id, 0, [0, 1, 2], sample_data[[0, 1, 2]])  # no exception
+    assert cache.cache_full.value
+    assert "Dataset cache on node 0 is full" in caplog.text
+
+    budget.release(record_bytes)  # space is free again, but the cache does not take more records
+    cache.store_records(namespace.dataset_id, 0, [3], sample_data[[3]])
+
+    assert sorted(position for _, _, position in namespace.committed()) == [0, 1]
+
+
+@pytest.mark.parametrize("max_fraction", [0, -0.1, 1.5])
+def test_max_fraction_must_be_a_fraction(tmp_path: Path, max_fraction: float) -> None:
+    with pytest.raises(ValueError, match="max_fraction"):
+        DatasetCache(object(), tmp_path, max_fraction=max_fraction)
+
+
 def test_async_writes_skip_work_while_writer_is_busy(tmp_path, sample_data, monkeypatch):
     namespace = DatasetCacheNamespace(
         tmp_path,
@@ -481,3 +578,34 @@ def test_global_view_reaches_persistent_dataloader_workers(tmp_path, sample_data
     cache._publish_view({CacheKey(namespace.dataset_id, 0, p): {1} for p in (3, 4)})
     assert list(loader) == [0]  # epoch 1: same worker process, served by node 1
     assert cache.cache_hits_remote.value == 2
+
+
+def test_setup_limits_the_cache_to_a_fraction_of_the_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    import torch.distributed as dist
+
+    class FakeDatamodule:
+        ds_train = SimpleNamespace(data_readers={})
+
+        def setup(self, stage: str | None = None) -> None:
+            pass
+
+        def teardown(self, stage: str | None = None) -> None:
+            pass
+
+    disk = SimpleNamespace(total=1000 * 10**9, used=0, free=1000 * 10**9)
+    monkeypatch.setattr("anemoi.training.utils.dataset_cache.shutil.disk_usage", lambda _path: disk)
+    dist.init_process_group("gloo", init_method=f"file://{tmp_path}/store", rank=0, world_size=1)
+    try:
+        cache = DatasetCache(FakeDatamodule(), tmp_path / "root", max_fraction=0.9)
+        (tmp_path / "root").mkdir()
+        cache.setup("fit")
+        try:
+            assert cache.budget.limit_bytes == 900 * 10**9
+            assert cache.budget.used() == 0
+            assert cache.budget.path.parent == cache.cache_path
+        finally:
+            cache.teardown("fit")
+    finally:
+        dist.destroy_process_group()

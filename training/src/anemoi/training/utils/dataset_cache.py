@@ -12,6 +12,7 @@
 import errno
 import fcntl
 import hashlib
+import io
 import json
 import logging
 import os
@@ -19,10 +20,12 @@ import pickle
 import shutil
 import socket
 import threading
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from multiprocessing import Value
 from pathlib import Path
+from typing import BinaryIO
 
 import numpy as np
 import pytorch_lightning as pl
@@ -55,10 +58,16 @@ def load_cache_array(path):
     return value
 
 
-def save_cache_array(target, value):
+def encode_cache_array(value: np.ndarray) -> bytes:
+    """Return an uncompressed .npy header followed by the blosc-compressed array data."""
     value = np.ascontiguousarray(value)
-    np.lib.format.write_array_header_1_0(target, np.lib.format.header_data_from_array_1_0(value))
-    target.write(_BLOSC.encode(value))
+    header = io.BytesIO()
+    np.lib.format.write_array_header_1_0(header, np.lib.format.header_data_from_array_1_0(value))
+    return header.getvalue() + _BLOSC.encode(value)
+
+
+def save_cache_array(target, value):
+    target.write(encode_cache_array(value))
 
 
 def read_cache_entry(entries_path, sequence, position, grid_id="all"):
@@ -72,12 +81,62 @@ def _is_capacity_error(error: OSError) -> bool:
     return error.errno in errnos or any(message in str(error).lower() for message in messages)
 
 
+class CacheFullError(OSError):
+    """The node cache has reached its size limit, or its disk is full."""
+
+
+class NodeCacheBudget:
+    """Size limit for the cache of one node, shared by all processes on the node.
+
+    The number of bytes in use is kept in a small file and changed under an flock, so every
+    rank and dataloader worker on the node reserves space from the same budget. Space is
+    reserved before a record is written, so concurrent writers cannot go over the limit.
+    """
+
+    def __init__(self, path: Path, limit_bytes: int):
+        self.path = Path(path)
+        self.limit_bytes = int(limit_bytes)
+
+    def reset(self) -> None:
+        self.path.write_bytes((0).to_bytes(8, "little"))
+
+    @contextmanager
+    def _locked(self) -> Iterator[BinaryIO]:
+        with self.path.open("r+b") as counter:
+            fcntl.flock(counter, fcntl.LOCK_EX)
+            try:
+                yield counter
+            finally:
+                fcntl.flock(counter, fcntl.LOCK_UN)
+
+    def used(self) -> int:
+        with self._locked() as counter:
+            return int.from_bytes(counter.read(8), "little")
+
+    def _add(self, nbytes: int, limit: bool) -> bool:
+        with self._locked() as counter:
+            used = int.from_bytes(counter.read(8), "little")
+            if limit and used + nbytes > self.limit_bytes:
+                return False
+            counter.seek(0)
+            counter.write(max(used + nbytes, 0).to_bytes(8, "little"))
+            return True
+
+    def reserve(self, nbytes: int) -> bool:
+        """Reserve ``nbytes``. Return False, and reserve nothing, if this would exceed the limit."""
+        return self._add(nbytes, limit=True)
+
+    def release(self, nbytes: int) -> None:
+        self._add(-nbytes, limit=False)
+
+
 class DatasetCacheNamespace:
     """Atomic file-per-record cache for one dataset reader."""
 
-    def __init__(self, root: Path, dataset_id: str, reader):
+    def __init__(self, root: Path, dataset_id: str, reader, budget: NodeCacheBudget | None = None):
         self.dataset_id = dataset_id
         self.reader = reader
+        self.budget = budget
         self.num_sequences = int(reader.num_sequences)
         self.sequence_lengths = [int(reader.sequence_length(index)) for index in range(self.num_sequences)]
         self.path = root / hashlib.sha256(dataset_id.encode()).hexdigest()[:20]
@@ -122,18 +181,29 @@ class DatasetCacheNamespace:
         with self.lock(lock):
             if entry.exists():
                 return False
+            payload = encode_cache_array(value)
+            if self.budget is not None and not self.budget.reserve(len(payload)):
+                msg = (
+                    f"cache limit of {self.budget.limit_bytes / 1e9:.1f} GB reached, "
+                    f"cannot add {len(payload) / 1e9:.2f} GB"
+                )
+                raise CacheFullError(msg)
             entry.parent.mkdir(parents=True, exist_ok=True)
             temporary = entry.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
             try:
                 with temporary.open("wb") as target:
-                    save_cache_array(target, value)
+                    target.write(payload)
                     if sync:
                         target.flush()
                         os.fsync(target.fileno())
                 os.replace(temporary, entry)
                 return True
-            except OSError:
+            except OSError as error:
                 temporary.unlink(missing_ok=True)
+                if self.budget is not None:
+                    self.budget.release(len(payload))
+                if _is_capacity_error(error):
+                    raise CacheFullError(str(error)) from error
                 raise
 
     def committed(self):
@@ -150,13 +220,20 @@ class DatasetCacheNamespace:
 class DatasetCache(pl.LightningDataModule):
     """Datamodule proxy coordinating one SSD cache per node."""
 
-    def __init__(self, ds, cache_root, hostname_suffix=None, proc_group=None, async_writes=False):
+    def __init__(
+        self, ds, cache_root, hostname_suffix=None, proc_group=None, async_writes=False, max_fraction: float = 0.9
+    ):
         super().__init__()
         self.ds = ds  # must be set before any attribute access can reach __getattr__
         self.cache_root = Path(cache_root)
         self.hostname_suffix = hostname_suffix or ""
         self.initial_proc_group = proc_group
         self.async_writes = async_writes
+        if not 0 < max_fraction <= 1:
+            msg = f"max_fraction must be in (0, 1], got {max_fraction}"
+            raise ValueError(msg)
+        self.max_fraction = max_fraction
+        self.budget = None  # set in setup(); None means no size limit
         self.initialized = False
         self.namespaces, self._locations, self._connections = {}, {}, {}
         self._datasets = set()
@@ -200,6 +277,7 @@ class DatasetCache(pl.LightningDataModule):
                 self.cache_path,
                 dataset_id,
                 reader,
+                budget=self.budget,
             )
             reader.set_cache(self, dataset_id)
         self._datasets.add(id(dataset))
@@ -235,9 +313,19 @@ class DatasetCache(pl.LightningDataModule):
         self.is_node_leader = self.global_rank == self._leaders[self.node_id]
         self.hostnames = [name + self.hostname_suffix for name in hosts]
         self.cache_path = self.cache_root / f"cache-{hashlib.sha256(host.encode()).hexdigest()[:12]}"
+        disk_bytes = shutil.disk_usage(self.cache_root).total
+        self.budget = NodeCacheBudget(self.cache_path / "usage", self.max_fraction * disk_bytes)
         if self.is_node_leader:
             shutil.rmtree(self.cache_path, ignore_errors=True)
             self.cache_path.mkdir(parents=True)
+            self.budget.reset()
+            LOGGER.info(
+                "Dataset cache on node %d is limited to %.1f GB (%.0f%% of %.1f GB)",
+                self.node_id,
+                self.budget.limit_bytes / 1e9,
+                100 * self.max_fraction,
+                disk_bytes / 1e9,
+            )
         dist.barrier(group=self.proc_group)
         self.initialized = True
         self._dataset(self.ds.ds_train)
@@ -363,14 +451,16 @@ class DatasetCache(pl.LightningDataModule):
         if self.cache_full.value:
             return
         namespace = self.namespaces[dataset_id]
-        for position, value in zip(positions, values):
-            namespace.store(sequence, position, value, grid_id, sync=sync)
-
-        # check if cache is full
-        total, used, free = shutil.disk_usage(self.cache_root)
-        if (used / total) > 0.8:
-            LOGGER.warning("Dataset cache is full on node %s", self.node_id)
-            self.cache_full.value = True
+        try:
+            for position, value in zip(positions, values):
+                namespace.store(sequence, position, value, grid_id, sync=sync)
+        except CacheFullError as error:
+            # the cache stays locked at its size: no records are added or removed after this
+            with self.cache_full.get_lock():
+                first = not self.cache_full.value
+                self.cache_full.value = True
+            if first:
+                LOGGER.warning("Dataset cache on node %s is full, no more records are cached: %s", self.node_id, error)
 
     def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
         namespace = self.namespaces[dataset_id]

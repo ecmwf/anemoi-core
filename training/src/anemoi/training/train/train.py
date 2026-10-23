@@ -38,6 +38,7 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
+from anemoi.training.diagnostics.callbacks.cache_sync import CacheSyncCallback
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -48,13 +49,12 @@ from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.compile import prepare_compilation
+from anemoi.training.utils.dataset_cache import DatasetCache
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.training.diagnostics.callbacks.cache_sync import CacheSyncCallback
-from anemoi.training.utils.dataset_cache import DatasetCache
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
@@ -725,6 +725,7 @@ class AnemoiTrainer(ABC):
                 cache_root=self.config.system.hardware.cache_dir,
                 hostname_suffix=getattr(self.config.system.hardware, "hostname_suffix", None),
                 async_writes=getattr(self.config.system.hardware, "cache_async_writes", False),
+                max_fraction=getattr(self.config.system.hardware, "cache_max_fraction", 0.9),
             )
             callbacks.append(CacheSyncCallback(cache=self.datamodule))
 
