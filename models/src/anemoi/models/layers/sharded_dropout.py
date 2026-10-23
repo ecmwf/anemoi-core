@@ -9,9 +9,8 @@
 
 """Refuse dropout when the model is sharded across GPUs."""
 
-import inspect
-
 from torch import nn
+from torch.distributed.distributed_c10d import ProcessGroup
 
 # Every dropout layer torch ships (all subclasses of the private _DropoutNd).
 _DROPOUT_MODULES = (
@@ -35,32 +34,30 @@ def _uses_dropout(module: nn.Module) -> bool:
     return False
 
 
-class ShardedDropoutGuard:
+def refuse_dropout_when_sharded(module: nn.Module, model_comm_group: ProcessGroup | None) -> None:
     """Refuse dropout when the model is sharded across GPUs.
 
     Ranks in a model group share a random seed, so dropout on sharded data would draw
-    correlated masks rather than independent ones. Only training is refused: dropout
-    does nothing in eval mode. Mixed into ``BaseProcessor`` and ``BaseMapper`` ahead of
-    ``nn.Module``: the check runs on every call, before ``forward``, so a subclass
-    cannot skip it, and it counts dropout added after construction (a LoRA adapter's,
-    for instance).
+    correlated masks rather than independent ones. Every processor and mapper
+    ``forward`` calls this first (a test checks that each one does). It counts dropout
+    layers and any ``dropout_p`` above zero, including dropout added after
+    construction, such as a LoRA adapter's. Only training is refused: dropout does
+    nothing in eval mode, so sharded inference keeps working.
 
-    It overrides ``__call__`` rather than registering a forward pre-hook. A hook is
-    stored on the module and pickled with it, which would tie every pickled inference
-    checkpoint to the hook's import path; a method on the class is not pickled.
+    Parameters
+    ----------
+    module : nn.Module
+        The processor or mapper about to run.
+    model_comm_group : ProcessGroup, optional
+        The model communication group; ``None`` or size 1 means not sharded.
+
+    Raises
+    ------
+    ValueError
+        If the module is training, the model is sharded, and the module uses dropout.
     """
-
-    def __call__(self, *args, **kwargs):
-        model_comm_group = kwargs.get("model_comm_group")
-        if model_comm_group is None and "model_comm_group" not in kwargs:
-            try:
-                bound = inspect.signature(self.forward).bind_partial(*args, **kwargs)
-            except TypeError:
-                bound = None
-            model_comm_group = bound.arguments.get("model_comm_group") if bound else None
-        # Dropout only acts in training mode, so sharded inference is never refused.
-        if self.training and model_comm_group is not None and model_comm_group.size() > 1 and _uses_dropout(self):
-            raise ValueError(
-                f"Dropout is not supported when the model is sharded across {model_comm_group.size()} GPUs"
-            )
-        return super().__call__(*args, **kwargs)
+    # The group is only asked for its size when there is dropout to refuse.
+    if not module.training or model_comm_group is None or not _uses_dropout(module):
+        return
+    if model_comm_group.size() > 1:
+        raise ValueError(f"Dropout is not supported when the model is sharded across {model_comm_group.size()} GPUs")

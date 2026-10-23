@@ -36,7 +36,7 @@ from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.models.layers.sharded_dropout import ShardedDropoutGuard
+from anemoi.models.layers.sharded_dropout import refuse_dropout_when_sharded
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -49,7 +49,7 @@ NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
 NUM_CHUNKS_INFERENCE_MAPPER = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER", NUM_CHUNKS_INFERENCE))
 
 
-class BaseMapper(ShardedDropoutGuard, nn.Module, ABC):
+class BaseMapper(nn.Module, ABC):
     """Base Mapper from source dimension to destination dimension.
 
     Subclasses must implement pre_process() and post_process() methods
@@ -455,6 +455,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
 
         kwargs_forward = {
             "x": x,
@@ -855,6 +856,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
         return maybe_checkpoint(
             self.mapper_forward,
             self.gradient_checkpointing,
@@ -1153,6 +1155,7 @@ class PointWiseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
         return maybe_checkpoint(
             self.mapper_forward,
             self.gradient_checkpointing,
@@ -1415,6 +1418,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
         return maybe_checkpoint(
             self.mapper_forward,
             self.gradient_checkpointing,

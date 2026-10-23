@@ -15,7 +15,9 @@ dropout comes from ``dropout_p`` or from a module added later (a LoRA adapter's
 dropout, for instance), and whatever a subclass's ``forward`` does.
 """
 
-import pickle
+import ast
+import inspect
+import textwrap
 from unittest.mock import MagicMock
 
 import pytest
@@ -24,13 +26,16 @@ from torch import nn
 
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.layers.mapper import BaseMapper
 from anemoi.models.layers.mapper import GNNForwardMapper
 from anemoi.models.layers.mapper import GraphTransformerForwardMapper
 from anemoi.models.layers.mapper import TransformerForwardMapper
+from anemoi.models.layers.processor import BaseProcessor
 from anemoi.models.layers.processor import GNNProcessor
 from anemoi.models.layers.processor import GraphTransformerProcessor
 from anemoi.models.layers.processor import PointWiseMLPProcessor
 from anemoi.models.layers.processor import TransformerProcessor
+from anemoi.models.layers.sharded_dropout import refuse_dropout_when_sharded
 from anemoi.models.layers.utils import load_layer_kernels
 
 CHANNELS, EDGE_DIM, NODES = 16, 3, 4
@@ -189,9 +194,17 @@ def gnn_mapper() -> nn.Module:
 
 
 def call_mapper(mapper: nn.Module, model_comm_group: object) -> object:
-    # The refusal happens before forward runs, so the inputs only need to bind.
     x = (torch.randn(NODES, 3), torch.randn(NODES, 4))
-    return mapper(x, batch_size=1, shard_info=BipartiteGraphShardInfo(), model_comm_group=model_comm_group)
+    edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])
+    edge_attr = torch.randn(edge_index.shape[1], EDGE_DIM)
+    return mapper(
+        x,
+        batch_size=1,
+        shard_info=BipartiteGraphShardInfo(),
+        edge_attr=edge_attr,
+        edge_index=edge_index,
+        model_comm_group=model_comm_group,
+    )
 
 
 def test_mapper_dropout_p_is_refused_when_sharded() -> None:
@@ -209,50 +222,6 @@ def test_mapper_added_dropout_module_is_refused_when_sharded(build) -> None:  # 
         call_mapper(with_injected_dropout(build()), sharded_group())
 
 
-class ProcessorThatSkipsEverything(TransformerProcessor):
-    """A subclass whose forward neither checks nor calls anything: still refused."""
-
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:  # noqa: ANN002, ANN003
-        del args, kwargs
-        return x
-
-
-def test_a_subclass_cannot_skip_the_refusal() -> None:
-    processor = ProcessorThatSkipsEverything(
-        num_layers=2,
-        num_channels=CHANNELS,
-        num_chunks=1,
-        num_heads=2,
-        mlp_hidden_ratio=2,
-        dropout_p=0.1,
-        attention_implementation="scaled_dot_product_attention",
-        qk_norm=True,
-        cpu_offload=False,
-        layer_kernels=_kernels(),
-    )
-    with pytest.raises(ValueError, match="Dropout is not supported when the model is sharded"):
-        processor(torch.randn(NODES, CHANNELS), 1, GraphShardInfo(nodes=[NODES]), model_comm_group=sharded_group())
-
-
-def test_dropout_is_allowed_in_eval_mode_when_sharded() -> None:
-    # Dropout does nothing in eval mode, so sharded inference of a model trained with
-    # dropout must not be refused.
-    processor = ProcessorThatSkipsEverything(
-        num_layers=2,
-        num_channels=CHANNELS,
-        num_chunks=1,
-        num_heads=2,
-        mlp_hidden_ratio=2,
-        dropout_p=0.1,
-        attention_implementation="scaled_dot_product_attention",
-        qk_norm=True,
-        cpu_offload=False,
-        layer_kernels=_kernels(),
-    ).eval()
-    x = torch.randn(NODES, CHANNELS)
-    assert processor(x, 1, GraphShardInfo(nodes=[NODES]), model_comm_group=sharded_group()) is x
-
-
 def test_a_positional_model_comm_group_is_found() -> None:
     with pytest.raises(ValueError, match="Dropout is not supported when the model is sharded"):
         transformer(dropout_p=0.1)(
@@ -260,12 +229,78 @@ def test_a_positional_model_comm_group_is_found() -> None:
         )
 
 
-def test_pickled_modules_carry_no_reference_to_the_refusal() -> None:
-    # Inference checkpoints pickle whole modules: nothing about the refusal may end up in
-    # the pickle, or renaming it would break every checkpoint written before.
+def test_the_check_refuses_only_sharded_training() -> None:
     processor = transformer(dropout_p=0.1)
-    data = pickle.dumps(processor)
-    assert b"refuse" not in data
-    assert b"Guard" not in data
     with pytest.raises(ValueError, match="Dropout is not supported when the model is sharded"):
-        forward(pickle.loads(data), sharded_group())
+        refuse_dropout_when_sharded(processor.train(), sharded_group())
+    # Dropout does nothing in eval mode, so sharded inference is not refused.
+    refuse_dropout_when_sharded(processor.eval(), sharded_group())
+    refuse_dropout_when_sharded(processor.train(), None)
+    refuse_dropout_when_sharded(transformer(dropout_p=0.0).train(), sharded_group())
+
+
+# --- every processor and mapper reaches the check -------------------------------------------
+
+
+def _is_super_forward(call: ast.Call) -> bool:
+    func = call.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "forward"
+        and isinstance(func.value, ast.Call)
+        and isinstance(func.value.func, ast.Name)
+        and func.value.func.id == "super"
+    )
+
+
+def _calls_the_check(call: ast.Call) -> bool:
+    func = call.func
+    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+    return name == "refuse_dropout_when_sharded"
+
+
+def forward_reaches_the_check(cls: type) -> bool:
+    """Follow ``forward`` and its ``super().forward`` calls until one calls the check."""
+    for owner in (c for c in cls.__mro__ if "forward" in c.__dict__):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(owner.__dict__["forward"])))
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        if any(_calls_the_check(call) for call in calls):
+            return True
+        if not any(_is_super_forward(call) for call in calls):
+            return False
+    return False
+
+
+def _concrete_subclasses(base: type) -> list[type]:
+    found, stack = [], [base]
+    while stack:
+        for subclass in stack.pop().__subclasses__():
+            stack.append(subclass)
+            if subclass.__module__.startswith("anemoi.models") and not inspect.isabstract(subclass):
+                found.append(subclass)
+    return sorted(set(found), key=lambda c: c.__qualname__)
+
+
+PROCESSORS_AND_MAPPERS = _concrete_subclasses(BaseProcessor) + _concrete_subclasses(BaseMapper)
+
+
+def test_the_sweep_finds_the_processors_and_mappers() -> None:
+    names = {cls.__name__ for cls in PROCESSORS_AND_MAPPERS}
+    assert {"TransformerProcessor", "GNNProcessor", "TransformerForwardMapper", "GNNBackwardMapper"} <= names
+
+
+@pytest.mark.parametrize("cls", PROCESSORS_AND_MAPPERS, ids=lambda cls: cls.__name__)
+def test_every_processor_and_mapper_forward_reaches_the_check(cls: type) -> None:
+    assert forward_reaches_the_check(cls), (
+        f"{cls.__name__}.forward never calls refuse_dropout_when_sharded (directly or through "
+        "super().forward). Call it first in forward, so sharded training with dropout is refused."
+    )
+
+
+def test_the_sweep_flags_a_forward_that_skips_the_check() -> None:
+    class SkipsTheCheck(TransformerProcessor):
+        def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:  # noqa: ANN002, ANN003
+            del args, kwargs
+            return x
+
+    assert not forward_reaches_the_check(SkipsTheCheck)
