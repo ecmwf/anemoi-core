@@ -13,10 +13,12 @@ from dataclasses import dataclass
 from dataclasses import field
 from datetime import timedelta
 
+import pytorch_lightning as pl
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from packaging.version import Version
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks import TQDMProgressBar
 
@@ -25,10 +27,11 @@ from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.plot import PlottingSettings
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
-from anemoi.training.diagnostics.callbacks.weight_averaging import _get_weight_averaging_callback
 from anemoi.training.utils.checkpoint import RegisterMigrations
 
 LOGGER = logging.getLogger(__name__)
+
+MIN_PL_VERSION = "2.6.0"
 
 
 def nestedget(config: DictConfig, key: str, default: object) -> object:
@@ -198,6 +201,63 @@ def _check_plotting_dependencies(diagnostics_cfg: DictConfig) -> None:
                 "Install it with: pip install anemoi-training[plotting]"
             )
             raise ImportError(msg) from err
+
+
+def _get_weight_averaging_callback(weight_averaging_config: DictConfig | None) -> list[Callback]:
+    """Get weight averaging callback from the config.
+
+    The optional implementation is loaded by Hydra only after checking the
+    configured callback's Lightning version requirement.
+
+    Example config (recommended):
+        weight_averaging:
+            _target_: anemoi.training.diagnostics.callbacks.weight_averaging.EMAWeightAveraging
+            decay: 0.999
+
+    Stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes can also be used.
+    Set ``use_buffers=False`` when the model contains non-floating-point buffers.
+
+    Parameters
+    ----------
+    weight_averaging_config : DictConfig | None
+        Weight averaging configuration (``config.training.weight_averaging``),
+        or ``None`` if not configured.
+
+    Returns
+    -------
+    list[Callback]
+        List containing the weight averaging callback, or empty list if not configured.
+
+    Raises
+    ------
+    RuntimeError
+        If weight averaging is configured with an unsupported Lightning version.
+    """
+    if weight_averaging_config is None:
+        LOGGER.debug("No weight averaging configured. Skipping.")
+        return []
+    if not isinstance(weight_averaging_config, dict | DictConfig):
+        LOGGER.warning(
+            "training.weight_averaging has unexpected type %s; expected a dict with '_target_'. Skipping.",
+            type(weight_averaging_config).__name__,
+        )
+        return []
+    if "_target_" not in weight_averaging_config:
+        LOGGER.warning("training.weight_averaging is set but has no '_target_' field. Skipping.")
+        return []
+
+    if Version(pl.__version__) < Version(MIN_PL_VERSION):
+        msg = (
+            f"Weight averaging callback {weight_averaging_config['_target_']!r} requires "
+            f"pytorch_lightning>={MIN_PL_VERSION}, but found {pl.__version__}. "
+            f"Please upgrade pytorch_lightning to use this callback."
+        )
+        raise RuntimeError(msg)
+
+    callback = instantiate(weight_averaging_config)
+    LOGGER.info("Loaded weight averaging callback: %s", weight_averaging_config["_target_"])
+
+    return [callback]
 
 
 def _get_progress_bar_callback(diagnostics_cfg: DictConfig) -> list[Callback]:
