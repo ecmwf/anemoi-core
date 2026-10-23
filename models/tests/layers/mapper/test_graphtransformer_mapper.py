@@ -409,11 +409,24 @@ def _test_graphtransformer_mapper_matches_unsharded_rank(
     keep_x_dst_sharded: bool,
     gradient_checkpointing: bool,
 ) -> None:
-    """Compare distributed layouts and gradients with an unsharded reference."""
+    """Compare distributed layouts and gradients with an unsharded reference.
+
+    Replicated source passthrough uses the full direct source loss on each
+    rank for backward, but only owned source terms enter the detached scalar
+    used to reconstruct the global loss.
+    """
     torch.set_num_threads(1)
     edge_attr, edge_index, src_splits, dst_splits = build_mapper_graph(world_size, device)
     src_start, src_stop = sum(src_splits[:rank]), sum(src_splits[: rank + 1])
     dst_start, dst_stop = sum(dst_splits[:rank]), sum(dst_splits[: rank + 1])
+    # Guard the graph properties that make this a communication/parallel-edge regression.
+    assert (edge_index[1].diff() >= 0).all(), "Mapper edges must be destination-sorted"
+    assert torch.equal(edge_index[:, 0], edge_index[:, 2]), "Missing parallel remote edge"
+    assert not torch.equal(edge_attr[0], edge_attr[2]), "Parallel edges need distinct features"
+    sources = edge_index[0, (edge_index[1] >= dst_start) & (edge_index[1] < dst_stop)]
+    owned = (sources >= src_start) & (sources < src_stop)
+    assert (~owned).any(), f"Missing remote source dependency for rank {rank}"
+    assert sources[owned].unique().numel() > 1, f"Insufficient owned source variation for rank {rank}"
     is_forward_mapper = mapper_kind == "forward"
     src_channels, dst_channels = (5, 3) if is_forward_mapper else (8, 5)
     generator = torch.Generator().manual_seed(53)
@@ -456,8 +469,8 @@ def _test_graphtransformer_mapper_matches_unsharded_rank(
     target, weights = mapper_loss_data(reference_output)
     loss_terms = weights * (reference_output - target).square() / weights.numel()
     global_loss = loss_terms.sum()
-    src_target = torch.linspace(-0.4, 0.6, x_src.numel(), device=device).reshape_as(x_src)
     if is_forward_mapper:
+        src_target = torch.linspace(-0.4, 0.6, x_src.numel(), device=device).reshape_as(x_src)
         torch.testing.assert_close(reference_result[0], reference_src_input)
         global_loss = global_loss + (reference_result[0] - src_target).square().sum() / x_src.numel()
 
@@ -499,7 +512,7 @@ def _test_graphtransformer_mapper_matches_unsharded_rank(
     owned_output = distributed_output if keep_x_dst_sharded else distributed_output[dst_start:dst_stop]
     local_loss = (weights[dst_start:dst_stop] * (owned_output - target[dst_start:dst_stop]).square()).sum()
     local_loss = local_loss / weights.numel()
-    comparison_loss = local_loss.detach().clone()
+    owned_loss_value = local_loss.detach().clone()
     if is_forward_mapper:
         # Replicated passthrough is a direct path without gradient communication.
         # Use its full source objective on each rank to obtain the full input gradient;
@@ -515,11 +528,11 @@ def _test_graphtransformer_mapper_matches_unsharded_rank(
         owned_source_loss = (
             source_terms if source_is_sharded else source_terms[src_start:src_stop]
         ).sum() / x_src.numel()
-        comparison_loss = comparison_loss + owned_source_loss.detach()
+        owned_loss_value = owned_loss_value + owned_source_loss.detach()
     local_loss.backward()
-    dist.all_reduce(comparison_loss, group=group)
+    dist.all_reduce(owned_loss_value, group=group)
     torch.testing.assert_close(
-        comparison_loss,
+        owned_loss_value,
         global_loss.detach(),
         **tolerances,
         msg=lambda details: f"global loss on rank {rank}\n{details}",
