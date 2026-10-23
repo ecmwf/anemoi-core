@@ -223,7 +223,14 @@ class AnemoiCheckpoint(ModelCheckpoint):
             inference_checkpoint_filepath = self._get_inference_checkpoint_filepath(lightning_checkpoint_filepath)
 
             clear_imputer_runtime_state(model)
-            torch.save(model, inference_checkpoint_filepath)
+            inference_model = model
+            if peft_record is not None:
+                # Inference checkpoints carry merged weights, so loading them needs no peft.
+                from anemoi.training.checkpoint.modifiers.peft import merged_copy_on_cpu
+
+                inference_model = merged_copy_on_cpu(model)
+                metadata["peft"] = {**peft_record, "merged": True}
+            torch.save(inference_model, inference_checkpoint_filepath)
 
             save_metadata(inference_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)
 

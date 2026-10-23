@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import enum
+import itertools
 import logging
 import re
 from collections.abc import Callable
@@ -138,13 +139,18 @@ class PeftModifierStage(ModelModifier):
         """
         model = context.model
         graph_model = self._graph_model(model)
-        if self._adapted_layers(graph_model):
-            self._raise(
-                "The model already carries PEFT adapters; adding a second set on top is not supported yet.",
-            )
+        # A model can hold one level of adapters. Adapters it already carries (a loaded
+        # PEFT checkpoint) are merged into the base weights first and kept as lineage.
+        lineage = list(getattr(graph_model, "_anemoi_peft_lineage", []))
+        previous = adapter_record(model)
+        if previous is not None:
+            merge_adapters(graph_model)
+            lineage.append({"adapters": previous["adapters"], "modules": previous["modules"]})
+            LOGGER.info("Merged the model's existing LoRA adapters into the base weights before adding new ones")
 
         targets = self._resolve_targets(graph_model, self.lora_config.target_modules)
         adapted = _inject_lora(graph_model, self.lora_config, targets)
+        graph_model._anemoi_peft_lineage = lineage
         self._apply_trainable_set(model, adapted.values())
 
         adapted_paths = [f"{_GRAPH_MODEL}.{name}" for name in targets]
@@ -163,6 +169,7 @@ class PeftModifierStage(ModelModifier):
             {
                 "type": "peft",
                 "adapter": "lora",
+                "merged_previous_adapters": previous is not None,
                 "adapted_modules": adapted_paths,
                 "trainable_modules": self.trainable_modules,
                 "trainable_params": n_trainable,
@@ -485,6 +492,8 @@ def restore_adapters(model: nn.Module, record: Mapping[str, Any]) -> None:
     for adapter in record["adapters"].values():
         adapted = _inject_lora(graph_model, _lora_config_from_record(adapter["config"], targets), targets)
 
+    graph_model._anemoi_peft_lineage = list(record.get("lineage", []))
+
     trainable = set(record.get("trainable", []))
     model.requires_grad_(False)
     for layer in adapted.values():
@@ -536,3 +545,59 @@ def restore_checkpoint_adapters(checkpoint: Mapping[str, Any], model: nn.Module 
         )
         raise CheckpointIncompatibleError(msg)
     LOGGER.debug("The model already holds the adapters the checkpoint records; nothing to restore")
+
+
+def merge_adapters(module: nn.Module) -> None:
+    """Merge every PEFT adapter in ``module`` into its base layer, in place.
+
+    Each adapted layer is replaced by its base layer carrying the merged weights, so
+    the state-dict keys are the plain model's again, and the ``peft_config`` that
+    ``inject_adapter_in_model`` leaves behind is dropped: nothing in ``module``
+    refers to ``peft`` afterwards.
+
+    Parameters
+    ----------
+    module : nn.Module
+        The module holding the adapters, e.g. the graph model or the model interface.
+    """
+    from peft.tuners.tuners_utils import BaseTunerLayer
+
+    for name, layer in list(module.named_modules()):
+        if name and isinstance(layer, BaseTunerLayer):
+            layer.merge()
+            parent, _, child = name.rpartition(".")
+            setattr(module.get_submodule(parent) if parent else module, child, layer.get_base_layer())
+    for submodule in module.modules():
+        submodule.__dict__.pop("peft_config", None)
+
+
+def merged_copy_on_cpu(model: nn.Module) -> nn.Module:
+    """Return a CPU copy of ``model`` with its adapters merged, leaving ``model`` as it is.
+
+    The copy is built on the CPU, so saving an inference checkpoint costs no extra
+    accelerator memory. Merging in place and unmerging afterwards is not an option:
+    the round trip is not exact in floating point, so the frozen base weights on the
+    saving rank would drift from the other ranks, and DDP never syncs frozen weights.
+
+    Parameters
+    ----------
+    model : nn.Module
+        The module to copy, e.g. the model interface the inference checkpoint pickles.
+
+    Returns
+    -------
+    nn.Module
+        The merged copy, free of any reference to ``peft``.
+    """
+    memo: dict[int, Any] = {}
+    for tensor in itertools.chain(model.parameters(), model.buffers()):
+        if id(tensor) not in memo:
+            cpu = tensor.detach().to("cpu", copy=True)
+            memo[id(tensor)] = (
+                nn.Parameter(cpu, requires_grad=tensor.requires_grad) if isinstance(tensor, nn.Parameter) else cpu
+            )
+    merged = copy.deepcopy(model, memo)
+    merge_adapters(merged)
+    for submodule in merged.modules():
+        submodule.__dict__.pop("_anemoi_peft_lineage", None)
+    return merged

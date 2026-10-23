@@ -227,10 +227,11 @@ def test_model_without_graph_model_raises() -> None:
         apply(PeftModifierStage(peft_config=lora()), model=nn.Linear(4, 4))
 
 
-def test_model_that_already_has_adapters_raises() -> None:
+def test_model_that_already_has_adapters_is_merged_first() -> None:
     model = apply(PeftModifierStage(peft_config=lora())).model
-    with pytest.raises(CheckpointConfigError, match="already"):
-        apply(PeftModifierStage(peft_config=lora()), model=model)
+    result = apply(PeftModifierStage(peft_config=lora(target_modules=["model.model.decoder.data"])), model=model)
+    assert adapted_paths(result.model) == ["model.model.decoder.data"]
+    assert result.metadata["modifiers_applied"][-1]["merged_previous_adapters"] is True
 
 
 # --- what trains ---------------------------------------------------------------------------
