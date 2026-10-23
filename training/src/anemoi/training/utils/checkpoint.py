@@ -122,6 +122,15 @@ def save_inference_checkpoint(
     inference_filepath = Path(save_path)
 
     clear_imputer_runtime_state(model)
+    from anemoi.training.checkpoint.modifiers.peft import has_adapters
+
+    if has_adapters(model):
+        # Inference checkpoints carry merged weights, so loading them needs no peft.
+        from anemoi.training.checkpoint.modifiers.peft import merged_copy_on_cpu
+
+        model = merged_copy_on_cpu(model)
+        if "peft" in metadata:
+            metadata = {**metadata, "peft": {**metadata["peft"], "merged": True}}
     torch.save(model, inference_filepath)
     save_metadata(inference_filepath, metadata, supporting_arrays=supporting_arrays)
     return inference_filepath

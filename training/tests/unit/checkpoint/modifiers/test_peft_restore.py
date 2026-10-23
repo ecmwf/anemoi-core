@@ -155,7 +155,10 @@ def hook_module() -> HookModule:
     module = HookModule.__new__(HookModule)
     nn.Module.__init__(module)
     module.model = Interface()
-    module.task = SimpleNamespace(load_training_runtime_state_dict=lambda _state: None)
+    module.task = SimpleNamespace(
+        load_training_runtime_state_dict=lambda _state: None,
+        training_runtime_state_dict=dict,
+    )
     module.config = SimpleNamespace(training=SimpleNamespace(seed=None))
     module._set_hparams({"metadata": {}})
     return module
@@ -288,7 +291,53 @@ class CallbackModule(BoringModel):
         self.model.supporting_arrays = {}
         self.model.graph_data = None
         self.model.model._graph_data = None
+        self.task = SimpleNamespace(training_runtime_state_dict=dict)
         self.save_hyperparameters()
+
+    def on_save_checkpoint(self, checkpoint: dict) -> None:
+        # The real training module's hook: it owns the adapter record.
+        BaseTrainingModule.on_save_checkpoint(self, checkpoint)
+
+
+def test_on_save_checkpoint_writes_the_record_without_touching_the_live_metadata() -> None:
+    module = with_lora(hook_module())
+    checkpoint = {"hyper_parameters": module.hparams}  # Lightning hands over the live hparams
+
+    BaseTrainingModule.on_save_checkpoint(module, checkpoint)
+
+    assert checkpoint["hyper_parameters"]["metadata"]["peft"]["modules"] == adapted_paths(module)
+    assert "peft" not in module.hparams["metadata"]
+
+
+def test_on_save_checkpoint_drops_a_stale_record_from_a_plain_model() -> None:
+    module = hook_module()
+    checkpoint = {"hyper_parameters": {"metadata": {"peft": {"modules": ["model.model.gone"]}}}}
+
+    BaseTrainingModule.on_save_checkpoint(module, checkpoint)
+
+    assert "peft" not in checkpoint["hyper_parameters"]["metadata"]
+
+
+def test_a_save_outside_the_checkpoint_callback_still_carries_the_record(tmp_path: Path) -> None:
+    module = CallbackModule({})
+    PeftModifierStage(
+        peft_config=lora(target_modules=["model.model.decoder.data"]),
+        trainable_modules=["layer"],
+    ).process(
+        CheckpointContext(model=module),
+    )
+    trainer = Trainer(
+        default_root_dir=tmp_path,
+        accelerator="cpu",
+        max_steps=1,
+        logger=False,
+        enable_checkpointing=False,
+    )
+    trainer.fit(module)
+    trainer.save_checkpoint(tmp_path / "direct.ckpt")
+
+    saved = torch.load(tmp_path / "direct.ckpt", map_location="cpu", weights_only=False)
+    assert saved["hyper_parameters"]["metadata"]["peft"]["modules"] == ["model.model.decoder.data"]
 
 
 def test_checkpoint_callback_writes_the_record(tmp_path: Path) -> None:

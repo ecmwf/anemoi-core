@@ -188,15 +188,11 @@ class AnemoiCheckpoint(ModelCheckpoint):
                 "elapsed_time": time.time() - self.start,
             }
 
-            # The adapters the model holds right now, so any later load can rebuild them
-            # (anemoi.training.checkpoint.modifiers.peft.restore_checkpoint_adapters).
+            # The training checkpoint's adapter record is written by the training module's
+            # on_save_checkpoint; the inference copy below needs it to say "merged".
             from anemoi.training.checkpoint.modifiers.peft import adapter_record
 
             peft_record = adapter_record(trainer.lightning_module)
-            if peft_record is None:
-                trainer.lightning_module._hparams["metadata"].pop("peft", None)
-            else:
-                trainer.lightning_module._hparams["metadata"]["peft"] = peft_record
 
             Path(lightning_checkpoint_filepath).parent.mkdir(parents=True, exist_ok=True)
 

@@ -601,3 +601,56 @@ def merged_copy_on_cpu(model: nn.Module) -> nn.Module:
     for submodule in merged.modules():
         submodule.__dict__.pop("_anemoi_peft_lineage", None)
     return merged
+
+
+def has_adapters(module: nn.Module) -> bool:
+    """Whether any part of ``module`` holds PEFT adapters, checked without importing ``peft``.
+
+    ``inject_adapter_in_model`` leaves ``peft_config`` on the module it adapted and
+    :func:`merge_adapters` removes it, so its presence marks unmerged adapters.
+
+    Parameters
+    ----------
+    module : nn.Module
+        Any module, e.g. the training module or the model interface.
+
+    Returns
+    -------
+    bool
+        ``True`` when unmerged adapters are present.
+    """
+    return any("peft_config" in submodule.__dict__ for submodule in module.modules())
+
+
+def write_adapter_record(checkpoint: dict[str, Any], model: nn.Module) -> None:
+    """Record the adapters ``model`` holds in ``checkpoint["hyper_parameters"]["metadata"]``.
+
+    Called by ``BaseTrainingModule.on_save_checkpoint``, so every Lightning save
+    carries the record, whichever callback or call triggered it. The record is
+    derived from the live model (see :func:`adapter_record`); a model without
+    adapters drops any stale record. Lightning hands the hook the live
+    hyper-parameters, so the containers are copied rather than changed in place.
+
+    Parameters
+    ----------
+    checkpoint : dict
+        The checkpoint dict Lightning is about to write.
+    model : nn.Module
+        The training module.
+    """
+    hyper_parameters = checkpoint.get("hyper_parameters")
+    if hyper_parameters is None:
+        return
+    record = adapter_record(model)
+    metadata = hyper_parameters.get("metadata") or {}
+    if record is None and _RECORD_KEY not in metadata:
+        return
+
+    metadata = dict(metadata)
+    if record is None:
+        metadata.pop(_RECORD_KEY, None)
+    else:
+        metadata[_RECORD_KEY] = record
+    hyper_parameters = copy.copy(hyper_parameters)
+    hyper_parameters["metadata"] = metadata
+    checkpoint["hyper_parameters"] = hyper_parameters
