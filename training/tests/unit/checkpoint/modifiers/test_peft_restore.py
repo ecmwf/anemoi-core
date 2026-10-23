@@ -28,6 +28,7 @@ from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
 from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
+from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
 from anemoi.training.checkpoint.modifiers.peft import PeftModifierStage
 from anemoi.training.checkpoint.modifiers.peft import adapter_record
@@ -224,6 +225,23 @@ def test_restoring_without_peft_raises_with_install_hint() -> None:
         pytest.raises(CheckpointConfigError, match=r"anemoi-training\[peft\]"),
     ):
         apply_checkpoint_corrections(checkpoint, TrainingModule(), NO_CONFIG)
+
+
+def test_transfer_learning_drops_a_mismatched_adapted_layer_whole(tmp_path: Path) -> None:
+    # A narrower decoder (e.g. fewer output variables): base_layer and lora_B change shape,
+    # lora_A does not. Loading lora_A alone would leave a stale half-adapter on a fresh layer.
+    source = with_lora(target_modules=["model.model.decoder.data"])
+    path = tmp_path / "lora.ckpt"
+    torch.save(save(source), path)
+    target = TrainingModule()
+    target.model.model.decoder["data"] = nn.Linear(8, 5)
+
+    loader = TransferLearningLoader(skip_mismatched=True)
+    result = CheckpointPipeline(stages=[LocalSource(path=str(path)), loader]).execute(CheckpointContext(model=target))
+
+    decoder_keys = {key for key in source.state_dict() if key.startswith("model.model.decoder.data.")}
+    assert decoder_keys <= set(result.metadata["skipped_params"])
+    assert not decoder_keys & set(result.metadata["transferred_params"])
 
 
 # --- the continuation chain -----------------------------------------------------------------

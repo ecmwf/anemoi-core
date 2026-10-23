@@ -64,3 +64,25 @@ def test_filter_state_dict_maps_each_skipped_key_to_its_reason() -> None:
     assert "shared.weight" in filtered
     assert skipped["missing_key"] == "Key not in target"
     assert skipped["mismatch_key"].startswith("Shape mismatch:")
+
+
+def test_filter_state_dict_keeps_an_adapted_layers_keys_together() -> None:
+    # The layer got narrower: base_layer and lora_B change shape, lora_A does not.
+    source = {
+        "head.base_layer.weight": torch.zeros(4, 8),
+        "head.base_layer.bias": torch.zeros(4),
+        "head.lora_A.default.weight": torch.zeros(2, 8),
+        "head.lora_B.default.weight": torch.zeros(4, 2),
+        "body.weight": torch.zeros(8, 8),
+    }
+    target = {
+        "head.base_layer.weight": torch.zeros(5, 8),
+        "head.base_layer.bias": torch.zeros(5),
+        "head.lora_A.default.weight": torch.zeros(2, 8),
+        "head.lora_B.default.weight": torch.zeros(5, 2),
+        "body.weight": torch.zeros(8, 8),
+    }
+    filtered, skipped = filter_state_dict(source, target)
+    assert set(filtered) == {"body.weight"}
+    assert "partly incompatible" in skipped["head.lora_A.default.weight"]
+    assert "Shape mismatch" in skipped["head.lora_B.default.weight"]

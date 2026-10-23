@@ -15,6 +15,7 @@ no pipeline wiring — just pure functions on state dicts.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import torch
@@ -59,4 +60,26 @@ def filter_state_dict(
 
         filtered[key] = value
 
+    # A PEFT-adapted layer at path P saves P.base_layer.*, P.lora_A.* and P.lora_B.*.
+    # Transferring part of that family (lora_A often keeps its shape when the layer's
+    # output width changes) would leave a half-adapted layer, so it goes together.
+    for layer, keys in _adapted_layer_keys(source).items():
+        if any(key in skipped for key in keys):
+            for key in keys:
+                if filtered.pop(key, None) is not None:
+                    skipped[key] = f"Adapted layer {layer} is partly incompatible, so none of it is transferred"
+
     return filtered, skipped
+
+
+_ADAPTED_KEY = re.compile(r"^(?P<layer>.+)\.(?:base_layer|lora_A|lora_B)\.")
+
+
+def _adapted_layer_keys(state_dict: dict[str, Any]) -> dict[str, list[str]]:
+    """Group the keys of PEFT-adapted layers by the path of the layer they belong to."""
+    layers: dict[str, list[str]] = {}
+    for key in state_dict:
+        match = _ADAPTED_KEY.match(key)
+        if match:
+            layers.setdefault(match.group("layer"), []).append(key)
+    return layers
