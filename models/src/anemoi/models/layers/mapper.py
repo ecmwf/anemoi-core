@@ -1291,7 +1291,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
-        attention_implementation: str = "flash_attention",
+        attention_implementation: str = "scaled_dot_product_attention",
         softcap: Optional[float] = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
@@ -1328,7 +1328,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
             Implementation of feed-forward blocks in mapper layers.
         attention_implementation: str
             A predefined string which selects which underlying attention
-            implementation, by default "flash_attention"
+            implementation, by default "scaled_dot_product_attention"
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default 0
         window_size: int, optional
@@ -1573,7 +1573,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
         qk_norm: bool = False,
         dropout_p: float = 0.0,
         mlp_implementation: MLPImplementation = "mlp",
-        attention_implementation: str = "flash_attention",
+        attention_implementation: str = "scaled_dot_product_attention",
         softcap: float = None,
         cpu_offload: bool = False,
         window_size: Optional[int] = None,
@@ -1607,7 +1607,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
             Implementation of feed-forward blocks in mapper layers.
         attention_implementation: str
             A predefined string which selects which underlying attention
-            implementation, by default "flash_attention"
+            implementation, by default "scaled_dot_product_attention"
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default 0
         window_size: int, optional
@@ -1690,7 +1690,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         qk_norm: bool = False,
         dropout_p: float = 0.0,
         mlp_implementation: MLPImplementation = "mlp",
-        attention_implementation: str = "flash_attention",
+        attention_implementation: str = "scaled_dot_product_attention",
         softcap: float = None,
         cpu_offload: bool = False,
         window_size: Optional[int] = None,
@@ -1724,7 +1724,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             Implementation of feed-forward blocks in mapper layers.
         attention_implementation: str
             A predefined string which selects which underlying attention
-            implementation, by default "flash_attention"
+            implementation, by default "scaled_dot_product_attention"
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default 0
         window_size: int, optional

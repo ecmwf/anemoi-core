@@ -188,16 +188,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         Parameters
         ----------
-        x : torch.Tensor
-            Input of one dataset, shape ``(batch, time, ensemble, grid, vars)``.
+        x : Tensor
+            Raw input for this dataset, shaped ``(batch, time, ensemble, grid, vars)``.
         batch_size : int
-            Batch size.
-        grid_shard_sizes : DatasetShardSizes, optional
-            Per-dataset shard sizes for the grid dimension, or None if the grid is not sharded.
-        model_comm_group : ProcessGroup, optional
-            Model communication group.
-        dataset_name : str, optional
-            Name of the dataset; required.
+            Number of samples in the batch, used to repeat the node attributes.
+        grid_shard_sizes : DatasetShardSizes or None
+            Grid shard sizes for every dataset. ``None`` means no dataset is sharded.
+        model_comm_group : ProcessGroup or None, optional
+            Group of devices that share the model when the grid is sharded.
+        dataset_name : str or None, optional
+            Name of the dataset to assemble. Required.
 
         Returns
         -------
@@ -247,17 +247,18 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         Parameters
         ----------
         x_input_data : Tensor
-            Input of the dataset.
-        x_encoded_data : Tensor, optional
-            Encoder input features of the dataset, or None if the dataset has no encoder.
+            Raw input for this dataset, shaped ``(batch, time, ensemble, grid, vars)``.
+        x_encoded_data : Tensor or None
+            Data-node output of this dataset's encoder, or ``None`` when the dataset has
+            no encoder.
         batch_size : int
-            Batch size.
-        grid_shard_sizes : DatasetShardSizes, optional
-            Per-dataset shard sizes for the grid dimension, or None if the grid is not sharded.
-        model_comm_group : ProcessGroup, optional
-            Model communication group.
-        dataset_name : str, optional
-            Name of the dataset; required.
+            Number of samples in the batch.
+        grid_shard_sizes : DatasetShardSizes or None, optional
+            Grid shard sizes for every dataset. ``None`` means no dataset is sharded.
+        model_comm_group : ProcessGroup or None, optional
+            Group of devices that share the model when the grid is sharded.
+        dataset_name : str or None, optional
+            Name of the dataset to assemble. Required.
 
         Returns
         -------
@@ -361,7 +362,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
         **kwargs
-            Further keyword arguments, not used by this model.
+            Additional model-specific arguments.
 
         Returns
         -------

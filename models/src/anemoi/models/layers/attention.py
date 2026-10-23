@@ -42,12 +42,33 @@ LOGGER = logging.getLogger(__name__)
 ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND", "")
 
 
+class AttentionWrapper(nn.Module):
+    """Base class of the attention backends.
+
+    Each backend lists in ``unsupported`` the options of MultiHeadSelfAttention it cannot honour,
+    named as in the model config. MultiHeadSelfAttention checks them once, when it sets up the
+    backend, so a config asking for one fails when the model is built rather than at the first step.
+    """
+
+    unsupported: frozenset[str] = frozenset()
+
+    def check_supported(self, **options: bool) -> None:
+        """Raises if any of the options that are switched on is one this backend cannot honour."""
+        requested = sorted(name for name, used in options.items() if used and name in self.unsupported)
+        if requested:
+            raise NotImplementedError(
+                f"{type(self).__name__} does not support: {', '.join(requested)}. "
+                "Please switch to a different attention_implementation, or disable these options."
+            )
+
+
 class MultiHeadSelfAttention(nn.Module):
     """Multi Head Self Attention Pytorch Layer
 
-    allows for three different attention implementations:
+    allows for four different attention implementations:
     - scaled dot product attention, see https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
     - flash attention, see https://github.com/Dao-AILab/flash-attention
+    - Triton attention, the flash attention algorithm written in Triton, see :mod:`anemoi.models.triton.attention`
     - neighbourhood attention on a global grid, see :mod:`anemoi.models.layers.neighbourhood_attention`
 
     The config parameter "model.processor.attention_implementation" is used to control which attention implementation is used.
@@ -63,6 +84,11 @@ class MultiHeadSelfAttention(nn.Module):
         the full requirements.
         You have to install flash attention yourself. If you are running on an x86 system, there are prebuilt
         wheels available on the GitHub repo. On an aarch64 system, you have to build flash attention from source.
+
+    "triton_attention"
+        The flash attention algorithm written in Triton, for GPUs where flash attention is not installed.
+        It supports sliding windows but not dropout or softcap, and only self attention or cross attention
+        between sequences of the same length.
 
     "neighbourhood"
         Each query attends only to the keys around it on a registered grid family, such as octahedral
@@ -82,7 +108,7 @@ class MultiHeadSelfAttention(nn.Module):
         is_causal: bool = False,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
-        attention_implementation: str = "flash_attention",
+        attention_implementation: str = "scaled_dot_product_attention",
         softcap: Optional[float] = None,
         neighbourhood: Optional[GridNeighbourhood | IcosahedralGridNeighbourhood] = None,
         rotary: Optional[SphericalRotaryEmbedding] = None,
@@ -113,7 +139,7 @@ class MultiHeadSelfAttention(nn.Module):
             dropout probability, by default 0.0
         attention_implementation: str
             A predefined string which selects which underlying attention
-            implementation, by default "flash_attention"
+            implementation, by default "scaled_dot_product_attention"
         softcap : float, optional
             Anything > 0 activates softcapping attention, by default None
         neighbourhood : GridNeighbourhood or IcosahedralGridNeighbourhood, optional
@@ -161,6 +187,7 @@ class MultiHeadSelfAttention(nn.Module):
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
             "neighbourhood": NeighbourhoodAttentionWrapper,
+            "triton_attention": TritonAttentionWrapper,
         }
 
         # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
@@ -185,6 +212,7 @@ class MultiHeadSelfAttention(nn.Module):
             self.attention = neighbourhood_attention_module(self.neighbourhood)
         else:
             self.attention = attn_funcs[self.attention_implementation]()
+            self.attention.check_supported(dropout_p=self.dropout_p > 0, softcap=bool(self.softcap))
 
     def attention_computation(
         self,
@@ -337,10 +365,12 @@ class MultiHeadSelfAttention(nn.Module):
         return self.attend_band(self.lin_q(queries), self.lin_k(x), self.lin_v(x), band)
 
 
-class SDPAAttentionWrapper(nn.Module):
+class SDPAAttentionWrapper(AttentionWrapper):
     """Wrapper for Pytorch scaled dot product attention
     To use this attention implementation: model.processor.attention_implementation='scaled_dot_product_attention'
     """
+
+    unsupported = frozenset({"softcap"})
 
     def __init__(self):
         super().__init__()
@@ -402,10 +432,6 @@ class SDPAAttentionWrapper(nn.Module):
         dropout_p=0.0,
         softcap=None,
     ):
-        if softcap is not None and softcap > 0:
-            raise NotImplementedError(
-                "Softcap not supported by Pytorchs SDPA. please switch to flash attention or disable softcap."
-            )
         if window_size is not None and self.attn_mask is None:
             # build the attention mask for sliding window attention. We build the mask once and reuse it,
             # since it is the same for every forward pass (assuming the sequence length does not change).
@@ -429,10 +455,11 @@ class SDPAAttentionWrapper(nn.Module):
         return out
 
 
-class FlashAttentionWrapper(nn.Module):
+class FlashAttentionWrapper(AttentionWrapper):
     """Wrapper for Flash attention.
 
     Either flash attn v2, v3 (optimised for hoppers and newer) or v4, based on what is installed.
+    Only flash attention v2 supports dropout; v4 also has no softcap.
 
     """
 
@@ -440,6 +467,11 @@ class FlashAttentionWrapper(nn.Module):
         super().__init__()
 
         self.attention = self._import_flash_attn()
+
+        if self.use_flash_attn_v4:
+            self.unsupported = frozenset({"dropout_p", "softcap"})
+        elif self.use_flash_attn_v3:
+            self.unsupported = frozenset({"dropout_p"})
 
     def _import_flash_attn(self) -> tuple:
         """imports either flash attention v2, v3 or v4, based on what is installed. prioritising v4, then v3, then v2. if none are installed, raises an error.
@@ -544,6 +576,54 @@ class FlashAttentionWrapper(nn.Module):
         return out
 
 
+class TritonAttentionWrapper(AttentionWrapper):
+    """Wrapper for Anemoi Triton attention. An implementation of the flash attention algorithm, intended to be a portable alternative when flash attention is not available"""
+
+    unsupported = frozenset({"dropout_p", "softcap"})
+
+    def __init__(self):
+        super().__init__()
+
+        # Helper function to check if triton is available
+        # Prevents strange errors from importing triton functions on unsupported systems
+        from anemoi.models.triton.utils import is_triton_available
+
+        if not is_triton_available():
+            raise ImportError(
+                "Triton is not supported on your system. Either it is not installed or no GPUs are available"
+            )
+
+        from anemoi.models.triton.attention import TritonAttention
+
+        self.attention = TritonAttention
+
+    def forward(
+        self,
+        query,
+        key,
+        value,
+        batch_size: int,
+        causal: bool = False,
+        window_size: int = None,
+        dropout_p: float = 0.0,
+        softcap=None,
+    ):
+
+        if query.shape[-2] != key.shape[-2]:
+            # Cross attention between grids of different sizes (e.g. transformer mappers)
+            raise NotImplementedError(
+                "Cross attention between sequences of different lengths is not yet implemented in the Triton-Attention "
+                f"backend (query length {query.shape[-2]}, key/value length {key.shape[-2]}).\n"
+                "Please use a different attention backend, or create a ticket on the anemoi-core repository"
+            )
+
+        softmax_scale = 1 / math.sqrt(query.size(-1))
+
+        out = self.attention.apply(query, key, value, causal, window_size, softmax_scale).to(query.dtype)
+
+        return out
+
+
 class MultiHeadCrossAttention(MultiHeadSelfAttention):
     """Multi Head Cross Attention Pytorch Layer."""
 
@@ -582,3 +662,59 @@ class MultiHeadCrossAttention(MultiHeadSelfAttention):
             Attention output of the band's query points, shape ``(batch, band query points, embed_dim)``.
         """
         return self.attend_band(self.lin_q(x[1]), self.lin_k(x[0]), self.lin_v(x[0]), band)
+
+
+class PointwiseMultiHeadCrossAttention(nn.Module):
+    """Attend over source tokens independently at each hidden node."""
+
+    def __init__(
+        self,
+        num_heads: int,
+        embed_dim: int,
+        layer_kernels: DotDict,
+        attn_channels: Optional[int] = None,
+        qkv_bias: bool = False,
+        qk_norm: bool = False,
+        dropout_p: float = 0.0,
+    ) -> None:
+        super().__init__()
+        self.attn_channels = embed_dim if attn_channels is None else attn_channels
+        if self.attn_channels % num_heads != 0:
+            raise ValueError(
+                f"attn_channels ({self.attn_channels}) must be divisible by number of heads ({num_heads}).",
+            )
+
+        self.num_heads = num_heads
+        self.head_dim = self.attn_channels // num_heads
+        self.dropout_p = dropout_p
+        self.qk_norm = qk_norm
+
+        linear = layer_kernels.Linear
+        self.lin_q = linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.lin_k = linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.lin_v = linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.projection = linear(self.attn_channels, embed_dim, bias=True)
+
+        if qk_norm:
+            self.q_norm = layer_kernels.QueryNorm(self.head_dim)
+            self.k_norm = layer_kernels.KeyNorm(self.head_dim)
+
+    def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
+        """Apply cross-attention over source tokens at each hidden node."""
+        query = einops.rearrange(self.lin_q(query), "grid (heads vars) -> grid heads vars", heads=self.num_heads)
+        key, value = (
+            einops.rearrange(tensor, "grid sources (heads vars) -> grid heads sources vars", heads=self.num_heads)
+            for tensor in (self.lin_k(key), self.lin_v(value))
+        )
+
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
+
+        # Score each source against the node's query: (g,h,s,v) @ (g,h,v,1) -> (g,h,s)
+        scores = (key @ query.unsqueeze(-1)).squeeze(-1) / math.sqrt(self.head_dim)
+        # Turn the scores into weights over the sources that sum to 1 at each node and head.
+        weights = nn.functional.dropout(scores.softmax(dim=-1), p=self.dropout_p, training=self.training)
+        # Weighted average of the source values: (g,h,1,s) @ (g,h,s,v) -> (g,h,v)
+        output = (weights.unsqueeze(-2) @ value).squeeze(-2)
+        return self.projection(einops.rearrange(output, "grid heads vars -> grid (heads vars)"))

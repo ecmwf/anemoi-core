@@ -22,6 +22,7 @@ from pydantic import model_validator
 from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
 from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
 from anemoi.models.schemas.models import ModelSchema
@@ -195,6 +196,62 @@ def _find_deprecated_target(data: Any, deprecated: dict[str, str]) -> tuple[str,
     return None
 
 
+# Removed config KEYS (by dotted path). Unlike _DEPRECATED_TARGETS (which keys on
+# _target_ values), these fire on the PRESENCE of the key — even when set to null —
+# because the field is gone from the schema and a leftover entry is a migration signal.
+_DEPRECATED_KEYS: dict[str, str] = {
+    "training.run_id": (
+        "training.run_id has been removed. To resume a run, set training.checkpoint.source to "
+        "{_target_: anemoi.training.checkpoint.sources.run.RunIdSource, run_id: <id>, fork: false} "
+        "(config group: training/checkpoint/source=run +training.checkpoint.source.run_id=<id>)."
+    ),
+    "training.fork_run_id": (
+        "training.fork_run_id has been removed. To fork a new run from an existing run, set "
+        "training.checkpoint.source to {_target_: anemoi.training.checkpoint.sources.run.RunIdSource, "
+        "run_id: <id>, fork: true}."
+    ),
+    "system.input.warm_start": (
+        "system.input.warm_start has been removed. To load an explicit checkpoint file, set "
+        "training.checkpoint.source to {_target_: anemoi.training.checkpoint.sources.local.LocalSource, "
+        "path: <path>}."
+    ),
+    "training.load_weights_only": (
+        "training.load_weights_only has been removed. Set training.checkpoint.source to the run or file to "
+        "load ({_target_: anemoi.training.checkpoint.sources.run.RunIdSource, run_id: <id>} or "
+        "{_target_: anemoi.training.checkpoint.sources.local.LocalSource, path: <path>}) and "
+        "training.checkpoint.loading to "
+        "{_target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader}."
+    ),
+    "training.transfer_learning": (
+        "training.transfer_learning has been removed. Set training.checkpoint.source to the checkpoint to "
+        "load and training.checkpoint.loading to "
+        "{_target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader, skip_mismatched: true}."
+    ),
+    "training.submodules_to_freeze": (
+        "training.submodules_to_freeze has been removed. Set training.checkpoint.modifiers to a list of "
+        "modifier stages, e.g. [{_target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage, "
+        "submodules_to_freeze: [model.model.<submodule>, ...]}]. Paths start at the LightningModule, so "
+        "prefix the old names with model.model. to reach the same modules the removed key addressed: the "
+        "graph model that owns encoder/processor/decoder, two attribute hops below the LightningModule."
+    ),
+}
+
+
+def _find_deprecated_key(data: Any, deprecated: dict[str, str]) -> tuple[str, str] | None:
+    """Find a removed config key by dotted path; fires on key PRESENCE (any value)."""
+    for path, hint in deprecated.items():
+        node = data
+        for part in path.split("."):
+            if hasattr(node, "keys") and part in node:
+                node = node[part]
+            else:
+                node = None
+                break
+        else:
+            return path, hint
+    return None
+
+
 class SchemaCommonMixin:
     """Shared logic for schema objects."""
 
@@ -211,6 +268,16 @@ class SchemaCommonMixin:
             target, hint = result
             msg = f"'{target}' is deprecated and has been removed. {hint}"
             raise ValueError(msg)
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
+    def _check_deprecated_keys(cls, values: Any) -> Any:
+        """Raise before validation if a removed config key is present (any value)."""
+        result = _find_deprecated_key(values, _DEPRECATED_KEYS)
+        if result:
+            _, hint = result
+            raise ValueError(hint)
         return values
 
     def model_post_init(self, _: Any) -> None:
@@ -278,12 +345,18 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     @model_validator(mode="after")
     def check_bounding_not_used_with_data_extractor_zero(self) -> Self:
         """Check that bounding is not used with zero data extractor."""
+        bounding = self.model.bounding
+        # A plain list of boundings belongs to the default dataset, as in the model.
+        if isinstance(bounding, dict) and "datasets" in bounding:
+            boundings = bounding["datasets"]
+        else:
+            boundings = {DEFAULT_DATASET_NAME: bounding}
         for decoder_name, decoder in self.model.decoders.items():
             mapper = decoder.mapper
             dataset_names = decoder.target_datasets
             if isinstance(mapper, GraphTransformerDecoderSchema) and mapper.initialise_data_extractor_zero:
                 for dataset_name in dataset_names:
-                    if self.model.bounding[dataset_name]:
+                    if boundings.get(dataset_name):
                         error = "bounding_conflict_with_data_extractor_zero"
                         msg = (
                             f"Boundings for dataset '{dataset_name}' cannot be used with zero initialized weights"
