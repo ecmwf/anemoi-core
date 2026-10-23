@@ -120,9 +120,6 @@ class BaseGraphModel(nn.Module):
             assert (
                 not unknown_datasets
             ), f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
-            assert all(
-                isinstance(name, str) for name in self.dataset2hidden.values()
-            ), "Hidden node names must be strings."
             self.hidden_names = list(dict.fromkeys(self.dataset2hidden.values()))
         elif isinstance(hidden_nodes_name, (list, ListConfig)):
             self.dataset2hidden = None

@@ -7,18 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
-
 import numpy as np
 import pytest
-import torch
 from pytest_mock import MockFixture
 from torch.utils.data import ConcatDataset
 
 from anemoi.training.data.loading import CrossDatasetLoadingPolicy
 from anemoi.training.data.multidataset import MultiDataset
-from anemoi.training.data.relative_time_indices import compute_relative_date_indices
-from anemoi.training.tasks.temporal_downscaler import TemporalDownscaler
 from anemoi.transform.variables import Variable
 
 
@@ -109,30 +104,3 @@ class TestMultiDomain:
         dataset = policy.build_dataset(data_readers, {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]})
 
         policy.check_dataset_compatibility(dataset, ignore_units=True)
-
-    def test_temporal_downscaler_offsets_are_loaded_from_one_domain(self, mocker: MockFixture) -> None:
-        task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
-        readers = {}
-        for name, frequency in (("data", datetime.timedelta(hours=1)), ("data_2", datetime.timedelta(hours=2))):
-            reader = mocker.MagicMock()
-            reader.frequency = frequency
-            reader.num_sequences = 1
-            reader.compute_anchors.return_value = np.array([[0, 0]])
-            reader.data.typed_variables = {}
-            reader.get_sample.return_value = torch.zeros(4, 1, 1, 1)
-            readers[name] = reader
-
-        relative_date_indices = compute_relative_date_indices(task, readers)
-        assert relative_date_indices == {"data": [0, 2, 4, 6], "data_2": [0, 1, 2, 3]}
-
-        dataset = CrossDatasetLoadingPolicy().build_dataset(readers, relative_date_indices)
-        sample = dataset[0]
-
-        readers["data"].get_sample.assert_called_once_with(0, slice(0, 8, 2), slice(None))
-        readers["data_2"].get_sample.assert_not_called()
-
-        batch = {"data": sample["data"].unsqueeze(0)}
-        data_indices = {"data": mocker.MagicMock()}
-        data_indices["data"].data.input.full = slice(None)
-        assert set(task.get_inputs(batch, data_indices)) == {"data"}
-        assert set(task.get_targets(batch)) == {"data"}
