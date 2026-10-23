@@ -16,6 +16,7 @@ import numpy as np
 import trimesh
 from sklearn.neighbors import BallTree
 
+from anemoi.graphs.generate.icosahedral_diamonds import diamond_ordering
 from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.generate.transforms import cartesian_to_latlon_rad
 from anemoi.graphs.generate.utils import get_coordinates_ordering
@@ -24,7 +25,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def create_tri_nodes(
-    resolution: int, area_mask_builder: AreaMaskBuilder | None = None
+    resolution: int, area_mask_builder: AreaMaskBuilder | None = None, ordering: str = "latlon"
 ) -> tuple[nx.DiGraph, np.ndarray, list[int]]:
     """Creates a global mesh from a refined icosahedron.
 
@@ -36,19 +37,32 @@ def create_tri_nodes(
         Level of mesh resolution to consider.
     area_mask_builder : AreaMaskBuilder
         AreaMaskBuilder with the cloud of points to limit the mesh area, by default None.
+    ordering : str
+        Order of the nodes: "latlon" sorts them by latitude and longitude; "diamonds" stores them
+        diamond by diamond, see :mod:`anemoi.graphs.generate.icosahedral_diamonds`. "diamonds"
+        needs the whole globe, so it does not go with an area mask.
 
     Returns
     -------
     graph : networkx.Graph
-        The specified graph (only nodes) sorted by latitude and longitude.
+        The specified graph (only nodes) in the requested order.
     coords_rad : np.ndarray
         The node coordinates (not ordered) in radians.
     node_ordering : list[int]
-        Order of the node coordinates to be sorted by latitude and longitude.
+        Order of the node coordinates that puts them in the requested order.
     """
     coords_rad = get_latlon_coords_icosphere(resolution)
 
-    node_ordering = get_coordinates_ordering(coords_rad)
+    if ordering == "latlon":
+        node_ordering = get_coordinates_ordering(coords_rad)
+    elif ordering == "diamonds":
+        if area_mask_builder is not None:
+            raise ValueError("The 'diamonds' ordering needs the whole globe and does not go with an area mask.")
+        base = trimesh.creation.icosahedron()
+        sphere = trimesh.creation.icosphere(subdivisions=resolution, radius=1.0)
+        node_ordering = diamond_ordering(sphere.vertices, base.vertices, base.faces)
+    else:
+        raise ValueError(f"Unknown node ordering '{ordering}'; use 'latlon' or 'diamonds'.")
 
     if area_mask_builder is not None:
         area_mask = area_mask_builder.get_mask(coords_rad)

@@ -7,10 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import numpy as np
 import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.generate.icosahedral_diamonds import IcosahedralDiamonds
 from anemoi.graphs.nodes import TriNodes
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
@@ -41,3 +43,21 @@ def test_update_graph():
     assert "_nx_graph" in graph["test_nodes"]
     assert "_node_ordering" in graph["test_nodes"]
     assert len(graph["test_nodes"]["_node_ordering"]) == graph["test_nodes"].num_nodes
+
+
+def test_diamond_ordering():
+    """With ordering "diamonds", nodes neighbouring on the diamond lattice are neighbours on the sphere."""
+    node_builder = TriNodes(3, "test_nodes", ordering="diamonds")
+    coords = node_builder.get_coordinates().numpy().astype(np.float64)
+    lat, lon = coords[:, 0], coords[:, 1]
+    xyz = np.stack([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)], axis=1)
+
+    edges = np.concatenate([IcosahedralDiamonds(3).triangles()[:, pair] for pair in ([0, 1], [1, 2], [2, 0])])
+    lengths = np.arccos(np.clip(np.einsum("ij,ij->i", xyz[edges[:, 0]], xyz[edges[:, 1]]), -1, 1))
+    assert lengths.max() < 1.5 * lengths.min()
+    assert np.allclose(xyz[0], -xyz[-1], atol=1e-6)
+
+
+def test_unknown_ordering():
+    with pytest.raises(ValueError, match="Unknown node ordering"):
+        TriNodes(2, "test_nodes", ordering="random")
