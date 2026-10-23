@@ -178,6 +178,7 @@ class _ProcessorGraph:
 def _build_processor_graph(world_size: int, num_channels: int, device: torch.device) -> _ProcessorGraph:
     """Build full processor inputs for uneven ownership with remote and parallel edges.
 
+    Node features, edge attributes and edge indices are allocated on ``device``.
     The final node is isolated. Returned sizes describe intended ownership;
     this function does not shard the graph or communicate.
     """
