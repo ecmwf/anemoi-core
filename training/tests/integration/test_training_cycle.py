@@ -416,7 +416,7 @@ def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, l
 
     cfg = deepcopy(cfg)
     cfg.model.model.hidden_nodes_name = {"data": "hidden_1"}
-    with pytest.raises(ValueError, match="Hierarchical models do not support per-dataset hidden node mappings"):
+    with pytest.raises(ValueError, match="do not support per-dataset hidden node mappings"):
         BaseSchema(**cfg)
 
 
@@ -751,7 +751,7 @@ def test_config_validation_edm_transport(edm_transport_config: tuple[DictConfig,
 
     cfg = deepcopy(cfg)
     cfg.model.model.hidden_nodes_name = {"data": "hidden"}
-    with pytest.raises(ValueError, match="Transport models do not support per-dataset hidden node mappings"):
+    with pytest.raises(ValueError, match="do not support per-dataset hidden node mappings"):
         BaseSchema(**cfg)
 
 

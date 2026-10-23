@@ -248,6 +248,20 @@ class BaseModelSchema(PydanticBaseModel):
                     data[field] = OmegaConf.create({str(k): v for k, v in data[field].items()})
         return data
 
+    @model_validator(mode="after")
+    def validate_single_hidden_mesh(self) -> "BaseModelSchema":
+        single_hidden_mesh_models = {
+            DefinedModels.ANEMOI_MODEL_HIER_ENC_PROC_DEC,
+            DefinedModels.ANEMOI_MODEL_HIER_ENC_PROC_DEC_SHORT,
+            DefinedModels.ANEMOI_TRANSPORT_MODEL_ENC_PROC_DEC,
+            DefinedModels.ANEMOI_TRANSPORT_MODEL_ENC_PROC_DEC_SHORT,
+            DefinedModels.ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC,
+            DefinedModels.ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC_SHORT,
+        }
+        if self.model.target_ in single_hidden_mesh_models and isinstance(self.model.hidden_nodes_name, dict):
+            raise ValueError("Hierarchical and transport models do not support per-dataset hidden node mappings.")
+        return self
+
 
 class NoOpNoiseInjectorSchema(BaseModel):
     """Schema for NoOpNoiseInjector - passes input through unchanged."""
@@ -314,12 +328,6 @@ class TransportModelSchema(BaseModelSchema):
     "Transport model schema."
 
     @model_validator(mode="after")
-    def validate_single_hidden_mesh_for_transport(self) -> "TransportModelSchema":
-        if isinstance(self.model.hidden_nodes_name, dict):
-            raise ValueError("Transport models do not support per-dataset hidden node mappings.")
-        return self
-
-    @model_validator(mode="after")
     def validate_no_bounding_for_transport(self) -> "TransportModelSchema":
         if self.bounding:
             if "datasets" in self.bounding:
@@ -371,12 +379,6 @@ class HierarchicalModelSchema(BaseModelSchema):
         discriminator="target_",
     )
     "Mapper used to downscale from a higher level to a lower level in the hierarchy."
-
-    @model_validator(mode="after")
-    def validate_no_per_dataset_hidden_nodes(self) -> "HierarchicalModelSchema":
-        if isinstance(self.model.hidden_nodes_name, dict):
-            raise ValueError("Hierarchical models do not support per-dataset hidden node mappings.")
-        return self
 
     @model_validator(mode="before")
     @classmethod
