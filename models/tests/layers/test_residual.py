@@ -267,6 +267,25 @@ def test_spectral_ornstein_skip_truncate_variables():
     assert out.shape == (2, 1, nlat * nlon, 3)
 
 
+@pytest.mark.parametrize("truncate", [False, True])
+def test_spectral_ornstein_leaves_input_unchanged(truncate):
+    graph, nlat, nlon = _make_regular_graph(nlat=8)
+    data_indices = _make_data_indices(3)
+    conn = SpectralOrnsteinConnection(
+        lmax=2,
+        grid="regular",
+        truncate=truncate,
+        graph=graph,
+        data_indices=data_indices,
+        dataset_name="data",
+    )
+    # The encoders read x again after asking for the residual, so it has to come back untouched.
+    x = torch.randn(2, 3, 1, nlat * nlon, 3)
+    x_before = x.clone()
+    conn.forward(x)
+    assert torch.equal(x, x_before)
+
+
 def test_spectral_ornstein_no_truncation_has_no_filter():
     graph, nlat, nlon = _make_regular_graph(nlat=8)
     data_indices = _make_data_indices(3)
@@ -282,13 +301,15 @@ def test_spectral_ornstein_no_truncation_has_no_filter():
     assert not hasattr(conn, "x_fsht")
 
 
-def test_spectral_ornstein_truncation_has_filter():
+@pytest.mark.parametrize("anti_aliasing", [False, True])
+def test_spectral_ornstein_truncation_has_filter(anti_aliasing):
     graph, nlat, nlon = _make_regular_graph(nlat=8)
     data_indices = _make_data_indices(3)
     conn = SpectralOrnsteinConnection(
         lmax=2,
         grid="regular",
         truncate=True,
+        anti_aliasing=anti_aliasing,
         graph=graph,
         data_indices=data_indices,
         dataset_name="data",
@@ -296,3 +317,10 @@ def test_spectral_ornstein_truncation_has_filter():
     assert hasattr(conn, "filter")
     assert hasattr(conn, "x_fsht")
     assert hasattr(conn, "x_isht")
+
+    assert hasattr(conn, "walias") == anti_aliasing
+
+    x = torch.randn(2, 3, 1, nlat * nlon, 3)
+    out = conn.forward(x)
+    out.sum().backward()
+    assert all(p.grad is not None for p in conn.parameters())
