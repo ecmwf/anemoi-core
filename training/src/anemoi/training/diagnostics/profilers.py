@@ -355,8 +355,12 @@ class BenchmarkProfiler(Profiler):
                 return handler_fn
 
             self._trace_handler = trace_handler
-            global_rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else int(
-                os.environ.get("RANK", os.environ.get("SLURM_PROCID", "0")),
+            global_rank = (
+                dist.get_rank()
+                if dist.is_available() and dist.is_initialized()
+                else int(
+                    os.environ.get("RANK", os.environ.get("SLURM_PROCID", "0")),
+                )
             )
             self._memory_profiler_enabled = global_rank == 0
         self.time_rows_dict = None  # updated if we create a memory profile report
@@ -371,7 +375,9 @@ class BenchmarkProfiler(Profiler):
 
         from pytorch_lightning.profilers.pytorch import _KINETO_AVAILABLE
 
-        assert _KINETO_AVAILABLE, "Kineto is not available. Please ensure Kineto is available to use the memory profiler"
+        assert (
+            _KINETO_AVAILABLE
+        ), "Kineto is not available. Please ensure Kineto is available to use the memory profiler"
 
         if isinstance(self.memory_profiler, PyTorchProfiler):
             self.memory_profiler._delete_profilers()
@@ -551,8 +557,9 @@ class BenchmarkProfiler(Profiler):
         # if training on less then 100 iterations, skip 50% of the iterations to avoid warmup effects
         # on the throughput calculation
         warmup_iterations = 100
-        if self.config.dataloader.limit_batches.get("training", 0) < warmup_iterations:
-            warmup_iterations = int(self.config.dataloader.limit_batches.get("training", 0) * 0.5)
+        limit_batches = self.config.dataloader.limit_batches.get("training", 0)
+        if limit_batches is not None and limit_batches < warmup_iterations:
+            warmup_iterations = int(limit_batches * 0.5)
         training_rates_array = np.array(progressbar.training_rates)
         training_throughput = training_rates_array[warmup_iterations:].mean()
         speed_metrics["training_avg_throughput"] = training_throughput
