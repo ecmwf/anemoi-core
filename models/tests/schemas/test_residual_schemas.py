@@ -10,9 +10,17 @@
 import pytest
 from pydantic import ValidationError
 
+from anemoi.models.schemas.residual import NoSkipConnectionSchema
 from anemoi.models.schemas.residual import TruncatedConnectionSchema
 from anemoi.models.schemas.residual import TruncationConfigDiskSchema
 from anemoi.models.schemas.residual import TruncationConfigOnTheFlySchema
+
+
+def test_no_skip_connection_ignores_merged_step() -> None:
+    """Overriding only _target_ in Hydra keeps the default `step`; it must be accepted and dropped."""
+    schema = NoSkipConnectionSchema(**{"_target_": "anemoi.models.layers.residual.NoSkipConnection", "step": -1})
+
+    assert schema.model_dump(by_alias=True) == {"_target_": "anemoi.models.layers.residual.NoSkipConnection"}
 
 
 def test_truncation_config_disk_valid() -> None:

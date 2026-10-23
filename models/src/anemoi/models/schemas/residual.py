@@ -29,6 +29,14 @@ class SkipConnectionSchema(BaseModel):
     )
 
 
+class NoSkipConnectionSchema(BaseModel):
+    """Schema for the no-op residual, which adds nothing to the output."""
+
+    target_: Literal["anemoi.models.layers.residual.NoSkipConnection"] = Field(..., alias="_target_")
+    # Hydra merges `step` from the default SkipConnection config when _target_ is overridden; ignore it.
+    step: int = Field(-1, exclude=True)
+
+
 class TruncationConfigDiskSchema(BaseModel):
     """File-based truncation config: projection matrices loaded from .npz files."""
 
@@ -144,6 +152,7 @@ class SpectralOrnsteinConnectionSchema(BaseModel):
 
 ResidualConnectionSchema = Annotated[
     SkipConnectionSchema
+    | NoSkipConnectionSchema
     | TruncatedConnectionSchema
     | ScalarOrnsteinConnectionSchema
     | SpectralOrnsteinConnectionSchema,
