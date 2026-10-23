@@ -213,6 +213,52 @@ def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig,
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_multidomain(
+    multidomain_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
+    cfg, urls = multidomain_config
+    for url in urls:
+        get_test_archive(url)
+
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    model = trainer.model.model.model
+    assert len(model.encoder) == 1
+    assert len(model.decoder) == 1
+    assert model.dataset2hidden == {
+        "data": "hidden",
+        "data_2": "hidden_2",
+    }
+    assert trainer.graph_data["data"].num_nodes != trainer.graph_data["data_2"].num_nodes
+    assert trainer.graph_data["hidden"].num_nodes != trainer.graph_data["hidden_2"].num_nodes
+    assert trainer.model.trainer.global_step == 4
+
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multidomain_ensemble(
+    multidomain_ensemble_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = multidomain_ensemble_config
+    for url in urls:
+        get_test_archive(url)
+
+    AnemoiTrainer(cfg).train()
+
+
+def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, list[str]]) -> None:
+    cfg, _ = multidomain_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_training_cycle_lam(
     lam_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,
@@ -367,6 +413,11 @@ def test_training_cycle_hierarchical(
 def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = hierarchical_config
     BaseSchema(**cfg)
+
+    cfg = deepcopy(cfg)
+    cfg.model.model.hidden_nodes_name = {"data": "hidden_1"}
+    with pytest.raises(ValueError, match="do not support per-dataset hidden node mappings"):
+        BaseSchema(**cfg)
 
 
 @skip_if_offline
@@ -697,6 +748,11 @@ def test_training_cycle_edm_transport(
 def test_config_validation_edm_transport(edm_transport_config: tuple[DictConfig, str]) -> None:
     cfg, _ = edm_transport_config
     BaseSchema(**cfg)
+
+    cfg = deepcopy(cfg)
+    cfg.model.model.hidden_nodes_name = {"data": "hidden"}
+    with pytest.raises(ValueError, match="do not support per-dataset hidden node mappings"):
+        BaseSchema(**cfg)
 
 
 def test_config_validation_stochastic_interpolant(stochastic_interpolant_config: tuple[DictConfig, str]) -> None:
