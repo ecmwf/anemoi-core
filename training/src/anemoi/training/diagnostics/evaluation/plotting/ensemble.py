@@ -40,6 +40,7 @@ def plot_ensemble_sample(
     cmap: Colormap | None = None,
     error_cmap: Colormap | None = None,
     data_crs: object | None = None,
+    marker_size: float = 1,
 ) -> None:
     """Use this when plotting ensembles.
 
@@ -75,6 +76,9 @@ def plot_ensemble_sample(
         Colormap for the error plot
     data_crs : object, optional
         Cartopy CRS describing the coordinate system of lon/lat, by default None
+    marker_size : float, optional
+        Scatter marker area in points squared, by default 1. Sparse observation panels
+        use a larger value so scattered points stay visible.
 
     Returns
     -------
@@ -108,6 +112,7 @@ def plot_ensemble_sample(
         title=f"{vname} target",
         datashader=datashader,
         data_crs=data_crs,
+        marker_size=marker_size,
     )
     single_plot(
         fig,
@@ -120,6 +125,7 @@ def plot_ensemble_sample(
         title=f"{vname} pred mean",
         datashader=datashader,
         data_crs=data_crs,
+        marker_size=marker_size,
     )
     single_plot(
         fig,
@@ -132,6 +138,7 @@ def plot_ensemble_sample(
         title=f"{vname} ens mean err",
         datashader=datashader,
         data_crs=data_crs,
+        marker_size=marker_size,
     )
     single_plot(
         fig,
@@ -142,6 +149,7 @@ def plot_ensemble_sample(
         title=f"{vname} ens sd",
         datashader=datashader,
         data_crs=data_crs,
+        marker_size=marker_size,
     )
 
     for i_ens in range(nens):
@@ -156,6 +164,7 @@ def plot_ensemble_sample(
             title=f"{vname}_{i_ens + 1} - mean",
             datashader=datashader,
             data_crs=data_crs,
+            marker_size=marker_size,
         )
 
 
@@ -169,6 +178,8 @@ def plot_predicted_ensemble(
     precip_and_related_fields: list | None = None,
     colormaps: dict[str, Colormap] | None = None,
     projection_kind: str = "equirectangular",
+    sparse: bool = False,
+    output_latlons: np.ndarray | None = None,
 ) -> Figure:
     """Plots data for one ensemble member.
 
@@ -192,12 +203,25 @@ def plot_predicted_ensemble(
         Dictionary of colormaps, by default None
     projection_kind : str, optional
         Map projection kind, by default "equirectangular"
+    sparse : bool, optional
+        Whether this is a sparse / scattered observation dataset, by default False.
+        Sparse panels are drawn at ``output_latlons`` with larger scatter markers.
+    output_latlons : np.ndarray, optional
+        Latitudes and longitudes of the target observations. Required when
+        ``sparse=True``, ignored otherwise.
 
     Returns
     -------
     Figure
         The figure object handle.
     """
+    if sparse:
+        assert output_latlons is not None, "output_latlons must be provided when sparse=True"
+        # Every ensemble panel (target, mean, error, spread, per-member) shows a field
+        # defined at the target observation locations, so they all use those coordinates.
+        # There is no input panel here, which is the only thing ``latlons`` describes.
+        latlons = output_latlons
+
     nens = y_pred.shape[0] if len(y_pred.shape) == 3 else 1
 
     # 4 fixed panels per variable row (target, pred mean, ens mean err, ens sd),
@@ -243,6 +267,7 @@ def plot_predicted_ensemble(
             cmap=cmap,
             error_cmap=error_cmap,
             data_crs=data_crs,
+            marker_size=2 if sparse else 1,
         )
 
     return fig

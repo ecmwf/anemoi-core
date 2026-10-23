@@ -29,10 +29,6 @@ datasets:
       y_intercept: 0.2
       slope: 0.001
 
-    # mask NaNs with zeros in the loss function
-    nan_mask_weights:
-      _target_: anemoi.training.losses.scalers.NaNMaskScaler
-
     # tendency scalers
     # scale the prognostic losses by the stdev of the variable tendencies (e.g. the 6-hourly differences of the data)
     # useful if including slow vs fast evolving variables in the training (e.g. Land/Ocean vs Atmosphere)

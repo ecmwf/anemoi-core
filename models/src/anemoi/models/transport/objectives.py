@@ -10,18 +10,30 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Optional
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.data import Batch
 from anemoi.models.samplers import transport_samplers
 from anemoi.models.transport.schedules import SIGMA_SCHEDULES
 from anemoi.models.transport.schedules import TIME_SCHEDULES
 
+if TYPE_CHECKING:
+    from anemoi.models.data.sources import BaseTemplate
+
 LOGGER = logging.getLogger(__name__)
+
+
+def _multiply(data: torch.Tensor, factor: torch.Tensor) -> torch.Tensor:
+    return data * factor
+
+
+def _add(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+    return left + right
 
 
 def _get_inference_defaults_section(model: Any, name: str) -> dict:
@@ -77,25 +89,25 @@ class TransportModelObjective:
     def forward(
         self,
         model: Any,
-        x: dict[str, torch.Tensor],
-        conditioned_target: dict[str, torch.Tensor],
+        x: Batch,
+        conditioned_target: Batch,
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs: Any,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         raise NotImplementedError
 
     def sample(
         self,
         model: Any,
-        x: dict[str, torch.Tensor],
+        x: Batch,
+        *,
+        target_template: dict[str, BaseTemplate],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         raise NotImplementedError
 
 
@@ -105,41 +117,52 @@ class EDMDiffusionModelObjective(TransportModelObjective):
     def forward(
         self,
         model: Any,
-        x: dict[str, torch.Tensor],
-        y_noised: dict[str, torch.Tensor],
+        x: Batch,
+        y_noised: Batch,
         sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs: Any,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(model, sigma, model.edm.sigma_data)
+        scaled_noised = y_noised.with_sources(
+            {name: noised.map_with_condition(_multiply, c_in[name]) for name, noised in y_noised.items()},
+        )
         pred = model._forward_transport_network(
             x,
-            {key: c_in[key] * y_noised[key] for key in y_noised.keys()},
+            scaled_noised,
             c_noise,
             model_comm_group=model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
             **kwargs,
         )
-        return {key: c_skip[key] * y_noised[key] + c_out[key] * pred[key] for key in y_noised.keys()}
+        return y_noised.with_sources(
+            {
+                name: noised.map_with_condition(_multiply, c_skip[name]).zip_map_data(
+                    _add,
+                    pred[name].map_with_condition(_multiply, c_out[name]),
+                )
+                for name, noised in y_noised.items()
+            },
+        )
 
     def sample(
         self,
         model: Any,
-        x: dict[str, torch.Tensor],
+        x: Batch,
+        *,
+        target_template: dict[str, BaseTemplate],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
+        target_forcing: Optional[Batch] = None,
         **kwargs,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         """Sample from an EDM diffusion model."""
-        x_device = next(iter(x.values())).device
+        x_device = x.device
 
         source = model.build_sampling_source(
             x,
+            target_template=target_template,
             model_comm_group=model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
         )
         sigma_schedule = _build_inference_schedule(
             model,
@@ -148,9 +171,8 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             schedule_params,
             x_device,
         )
-        y_init = {
-            dataset_name: source[dataset_name].to(dtype=sigma_schedule.dtype) * sigma_schedule[0] for dataset_name in x
-        }
+        # The source is already described in model-output space, like the sampled target.
+        y_batch = source.map_data(lambda data: data.to(dtype=sigma_schedule.dtype) * sigma_schedule[0])
 
         sampler_instance = _build_inference_sampler(
             model,
@@ -161,28 +183,26 @@ class EDMDiffusionModelObjective(TransportModelObjective):
         )
 
         def denoising_fn(
-            x_arg: dict[str, torch.Tensor],
-            y_arg: dict[str, torch.Tensor],
+            x_arg: Batch,
+            y_arg: Batch,
             sigma_arg: dict[str, torch.Tensor],
             comm_arg: Optional[ProcessGroup] = None,
-            shard_sizes_arg: DatasetShardSizes | None = None,
-        ) -> dict[str, torch.Tensor]:
+        ) -> Batch:
             return self.forward(
                 model,
                 x_arg,
                 y_arg,
                 sigma_arg,
                 model_comm_group=comm_arg,
-                grid_shard_sizes=shard_sizes_arg,
+                target_forcing=target_forcing,
             )
 
         return sampler_instance.sample(
             x,
-            y_init,
+            y_batch,
             sigma_schedule,
             denoising_fn,
             model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
         )
 
     @staticmethod
@@ -225,40 +245,40 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
     def forward(
         self,
         model: Any,
-        x: dict[str, torch.Tensor],
-        interpolant_state: dict[str, torch.Tensor],
+        x: Batch,
+        interpolant_state: Batch,
         time_level: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs: Any,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         return model._forward_transport_network(
             x,
             interpolant_state,
             time_level,
             model_comm_group=model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
             **kwargs,
         )
 
     def sample(
         self,
         model: Any,
-        x: dict[str, torch.Tensor],
+        x: Batch,
+        *,
+        target_template: dict[str, BaseTemplate],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
+        target_forcing: Optional[Batch] = None,
         **kwargs,
-    ) -> dict[str, torch.Tensor]:
-        x_device = next(iter(x.values())).device
+    ) -> Batch:
+        x_device = x.device
 
-        source = model.build_sampling_source(
+        # The source is already described in model-output space, like the sampled target.
+        y_init = model.build_sampling_source(
             x,
+            target_template=target_template,
             model_comm_group=model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
         )
-        y_init = source
 
         time_schedule = _build_inference_schedule(
             model,
@@ -269,19 +289,18 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         )
 
         def transport_fn(
-            x_arg: dict[str, torch.Tensor],
-            y_arg: dict[str, torch.Tensor],
+            x_arg: Batch,
+            y_arg: Batch,
             time_arg: dict[str, torch.Tensor],
             comm_arg: Optional[ProcessGroup] = None,
-            shard_sizes_arg: DatasetShardSizes | None = None,
-        ) -> dict[str, torch.Tensor]:
+        ) -> Batch:
             return self.forward(
                 model,
                 x_arg,
                 y_arg,
                 time_arg,
                 model_comm_group=comm_arg,
-                grid_shard_sizes=shard_sizes_arg,
+                target_forcing=target_forcing,
             )
 
         sampler_instance = _build_inference_sampler(
@@ -297,7 +316,6 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
             time_schedule,
             transport_fn,
             model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
         )
 
 

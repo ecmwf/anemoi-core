@@ -121,7 +121,6 @@ def save_inference_checkpoint(
     """
     inference_filepath = Path(save_path)
 
-    clear_imputer_runtime_state(model)
     torch.save(model, inference_filepath)
     save_metadata(inference_filepath, metadata, supporting_arrays=supporting_arrays)
     return inference_filepath

@@ -91,11 +91,10 @@ def test_distributed_sampler_kwargs_split_by_sample_group(
 def test_process_dataloader_passes_reader_group_info(mocker: MockFixture) -> None:
     """The dataset learns which part of the grid this rank reads."""
     strategy = DDPGroupStrategy(num_gpus_per_model=4, read_group_size=2)
-    strategy.shard_sizes = {"data": [5, 5]}
     _place_strategy(mocker, strategy, global_rank=7, world_size=8)
     dataloader = SimpleNamespace(dataset=mocker.Mock())
 
     assert strategy.process_dataloader(dataloader) is dataloader
 
     # Global rank 7 is rank 3 of its model group, which is rank 1 of its reader group.
-    dataloader.dataset.set_reader_group_info.assert_called_once_with(1, {"data": [5, 5]})
+    dataloader.dataset.set_reader_group_info.assert_called_once_with(1, 2)

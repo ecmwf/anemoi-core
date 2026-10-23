@@ -74,5 +74,4 @@ datasets:
       #   config:
       #     default: "none"
       #     0: []
-      # When using the imputer, consider including the nan_mask_weights scaler in the
-      # training loss to ensure imputed grid points are not considered in the loss computation
+      # Set ignore_nans: true on losses whose targets may contain missing values.

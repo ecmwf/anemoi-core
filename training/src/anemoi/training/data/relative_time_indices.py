@@ -7,14 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from typing import TYPE_CHECKING
 
 from anemoi.training.tasks.base import BaseTask
 from anemoi.utils.dates import frequency_to_string
 
+if TYPE_CHECKING:
+    from anemoi.training.data.readers import DataReader
+
 
 def compute_relative_date_indices(
     task: BaseTask,
-    data_readers: dict,
+    data_readers: dict[str, "DataReader"],
     **kwargs,
 ) -> dict[str, list[int]]:
     """Compute relative date indices for each dataset based on task offsets."""

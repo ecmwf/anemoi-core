@@ -22,6 +22,7 @@ from .masks import GridsMask
 from .masks import LimitedAreaMask
 from .masks import NonmissingAnemoiDatasetVariable
 from .masks import NonzeroAnemoiDatasetVariable
+from .timedeltas import Timedeltas
 
 __all__ = [
     "GridsMask",
@@ -39,4 +40,5 @@ __all__ = [
     "CosineLatWeightedAttribute",
     "IsolatitudeAreaWeights",
     "AnemoiDatasetVariableWeights",
+    "Timedeltas",
 ]
