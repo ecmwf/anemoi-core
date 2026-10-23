@@ -22,7 +22,9 @@ OTHER_KEY = "model.model.processor.proc.0.weight"
 
 def _checkpoint(hidden_nodes_name: object, provider_prefix: str = PROVIDER) -> dict:
     return {
-        "hyper_parameters": {"config": OmegaConf.create({"model": {"hidden_nodes_name": hidden_nodes_name}})},
+        "hyper_parameters": {
+            "config": OmegaConf.create({"model": {"model": {"hidden_nodes_name": hidden_nodes_name}}}),
+        },
         "state_dict": {
             f"{provider_prefix}.trainable.trainable": torch.ones(3),
             f"{provider_prefix}.trainable_layout_version": torch.tensor(1),
