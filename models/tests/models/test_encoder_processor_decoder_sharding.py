@@ -213,7 +213,12 @@ def _test_graphconv_model_matches_unsharded_rank(
     global_loss = local_loss.detach().clone()
     if input_is_sharded:
         dist.all_reduce(global_loss, group=group)
-    torch.testing.assert_close(global_loss, reference_loss.detach(), **output_tolerances)
+    torch.testing.assert_close(
+        global_loss,
+        reference_loss.detach(),
+        **output_tolerances,
+        msg=lambda details: f"global loss on rank {rank}\n{details}",
+    )
     assert reference_input.grad is not None, "Missing reference input gradient"
     assert distributed_input.grad is not None, "Missing distributed input gradient"
     torch.testing.assert_close(
