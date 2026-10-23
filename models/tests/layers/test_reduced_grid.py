@@ -47,18 +47,36 @@ def exact_matching(pos, n, shift, other_n, other_shift):
     return math.floor((pos + Fraction(shift, 2)) * Fraction(other_n, n) - Fraction(other_shift, 2) + Fraction(1, 2))
 
 
-def window(grid: ReducedGrid, row: int, pos: int, kernel_size: tuple[int, int]) -> list[int]:
-    """Point indices seen by one query, worked out directly from the definition."""
+def reached_over_the_pole(num_rows: int, row: int, other: int, radius: int) -> bool:
+    """Whether the way from ``row`` over the nearer pole to ``other`` is at most ``radius`` row spacings.
+
+    The rows next to the poles are half a spacing from them.
+    """
+    over_north = (row + 0.5) + (other + 0.5)
+    over_south = (num_rows - row - 0.5) + (num_rows - other - 0.5)
+    return min(over_north, over_south) <= radius
+
+
+def key_row_window(query_grid, key_grid, row, pos, centre_row, kernel_size) -> list[int]:
+    """Key indices seen by one query whose window is centred on key row ``centre_row``."""
     kernel_h, kernel_w = kernel_size
-    starts = grid.row_starts.tolist()
-    first_row = min(max(row - kernel_h // 2, 0), grid.num_rows - kernel_h)
-    n = grid.row_lengths[row]
+    radius = kernel_h // 2
+    n = query_grid.row_lengths[row]
+    starts = key_grid.row_starts.tolist()
     keys = set()
-    for other in range(first_row, first_row + kernel_h):
-        other_n = grid.row_lengths[other]
-        centre = exact_matching(pos, n, grid.shifts[row], other_n, grid.shifts[other])
+    for other in range(max(centre_row - radius, 0), min(centre_row + radius, key_grid.num_rows - 1) + 1):
+        other_n = key_grid.row_lengths[other]
+        if reached_over_the_pole(key_grid.num_rows, centre_row, other, radius):
+            keys |= set(range(starts[other], starts[other] + other_n))
+            continue
+        centre = exact_matching(pos, n, query_grid.shifts[row], other_n, key_grid.shifts[other])
         keys |= {starts[other] + (centre + o) % other_n for o in range(-(kernel_w // 2), kernel_w // 2 + 1)}
     return sorted(keys)
+
+
+def window(grid: ReducedGrid, row: int, pos: int, kernel_size: tuple[int, int]) -> list[int]:
+    """Point indices seen by one query, worked out directly from the definition."""
+    return key_row_window(grid, grid, row, pos, row, kernel_size)
 
 
 def reference_attention(query, key, value, grid, kernel_size):
@@ -106,7 +124,8 @@ def test_mask_matches_the_definition():
     mask = attention._mask_on(torch.device("cpu"))
     rows, positions = grid.rows_and_positions
 
-    assert (mask.sum(dim=1) == KERNEL_SIZE[0] * KERNEL_SIZE[1]).all()
+    away_from_poles = (rows >= KERNEL_SIZE[0] // 2) & (rows < grid.num_rows - KERNEL_SIZE[0] // 2)
+    assert (mask.sum(dim=1)[away_from_poles] == KERNEL_SIZE[0] * KERNEL_SIZE[1]).all()
     for i in range(grid.num_points):
         expected = torch.zeros(grid.num_points, dtype=torch.bool)
         expected[window(grid, int(rows[i]), int(positions[i]), KERNEL_SIZE)] = True
@@ -119,6 +138,42 @@ def test_window_wraps_round_the_globe():
     start, n = int(grid.row_starts[4]), grid.row_lengths[4]
     # The first point of a row sees the last points of the same row.
     assert mask[start, start + n - 1] and mask[start, start + n - KERNEL_SIZE[1] // 2]
+
+
+def test_window_reaches_over_the_pole():
+    grid, kernel_size = ReducedGrid.octahedral(16), (7, 13)
+    mask = self_attention(grid, kernel_size, backend="sdpa")._mask_on(torch.device("cpu"))
+    starts = grid.row_starts.tolist()
+    # The first point sees rows 0-3: rows 0-2 also over the pole, so whole, and 13 points of row 3.
+    assert mask[0].sum() == 20 + 24 + 28 + 13
+    assert mask[0, starts[0] : starts[3]].all() and not mask[0, starts[4] :].any()
+    # The same at the south pole.
+    assert mask[-1].sum() == 20 + 24 + 28 + 13
+    assert mask[-1, starts[-4] :].all() and not mask[-1, : starts[-5]].any()
+    # A point of row 1 reaches rows 0 and 1 over the pole, but only part of row 2.
+    assert mask[starts[1], starts[0] : starts[2]].all() and not mask[starts[1], starts[2] : starts[3]].all()
+
+
+def test_every_point_near_a_query_is_attended():
+    """Every point within three row spacings of a query is in its window, next to the poles too."""
+    grid, kernel_size = ReducedGrid.octahedral(24), (7, 13)
+    mask = self_attention(grid, kernel_size, backend="sdpa")._mask_on(torch.device("cpu"))
+    lat, lon = grid.coords[:, 0], grid.coords[:, 1]
+    cos_angle = torch.sin(lat)[:, None] * torch.sin(lat)[None, :] + torch.cos(lat)[:, None] * torch.cos(lat)[
+        None, :
+    ] * torch.cos(lon[:, None] - lon[None, :])
+    row_spacing = math.pi / (2 * grid.num_rows)
+    near = torch.arccos(cos_angle.clamp(-1, 1)) < 3 * row_spacing
+    assert not (near & ~mask).any()
+
+
+def test_rows_of_a_grid_count_the_rows_beyond_them():
+    grid = ReducedGrid.octahedral(8)
+    assert grid.rows_beyond == (0, 0)
+    band = grid.rows(3, 10)
+    assert band.rows_beyond == (3, 6)
+    assert band.rows(1, 4).rows_beyond == (4, 9)
+    assert band.rows(1, 4).row_lengths == grid.rows(4, 7).row_lengths
 
 
 @pytest.mark.parametrize("backend", ["sdpa", "flex"])
@@ -136,8 +191,8 @@ def test_backends_match_reference(backend, kernel_size):
 def test_window_wider_than_short_rows_takes_their_whole_ring():
     grid, kernel_size = ReducedGrid.octahedral(8), (5, 27)
     mask = self_attention(grid, kernel_size, backend="sdpa")._mask_on(torch.device("cpu"))
-    # A point of the first row sees rows 0-4 of 20, 24, 28, 32 and 36 points: the two shortest whole.
-    assert mask[0].sum() == 20 + 24 + 27 + 27 + 27
+    # A point of the first row sees rows 0-2 of 20, 24 and 28 points: the two shortest whole.
+    assert mask[0].sum() == 20 + 24 + 27
     rows, positions = grid.rows_and_positions
     for i in range(grid.num_points):
         expected = torch.zeros(grid.num_points, dtype=torch.bool)
@@ -147,18 +202,9 @@ def test_window_wider_than_short_rows_takes_their_whole_ring():
 
 def cross_window(query_grid, key_grid, row, pos, kernel_size):
     """Key indices seen by one query of another grid, worked out directly from the definition."""
-    kernel_h, kernel_w = kernel_size
     lat = query_grid.row_latitudes[row]
     nearest = min(range(key_grid.num_rows), key=lambda r: abs(key_grid.row_latitudes[r] - lat))
-    first_row = min(max(nearest - kernel_h // 2, 0), key_grid.num_rows - kernel_h)
-    n = query_grid.row_lengths[row]
-    starts = key_grid.row_starts.tolist()
-    keys = set()
-    for other in range(first_row, first_row + kernel_h):
-        other_n = key_grid.row_lengths[other]
-        centre = exact_matching(pos, n, query_grid.shifts[row], other_n, key_grid.shifts[other])
-        keys |= {starts[other] + (centre + o) % other_n for o in range(-(kernel_w // 2), kernel_w // 2 + 1)}
-    return sorted(keys)
+    return key_row_window(query_grid, key_grid, row, pos, nearest, kernel_size)
 
 
 def reference_cross_attention(query, key, value, query_grid, key_grid, kernel_size):

@@ -10,8 +10,9 @@
 """Neighbourhood attention on global grids, with a registry of the grids that have kernels.
 
 Each query attends only to the keys around it on the sphere: ``kernel_size[0]`` latitude rows
-around its own and, in each row, the ``kernel_size[1]`` points nearest in longitude, going round
-the globe (see :class:`anemoi.models.layers.reduced_grid.ReducedGridCrossNeighbourhoodMask`).
+centred on its own and, in each row, the ``kernel_size[1]`` points nearest in longitude, going round
+the globe, with whole rings of the rows it reaches over a pole (see
+:class:`anemoi.models.layers.reduced_grid.ReducedGridCrossNeighbourhoodMask`).
 Queries and keys may sit on the same grid (self attention, as in the processor) or on two grids
 of the same family (cross attention, as in the encoder and decoder).
 
@@ -487,21 +488,19 @@ class NeighbourhoodBand:
     attention: nn.Module
 
 
-def window_start_rows(neighbourhood: GridNeighbourhood) -> Tensor:
-    """The first key row of each query row's window, kept inside the key grid as the attention rule does."""
+def centre_rows(neighbourhood: GridNeighbourhood) -> Tensor:
+    """The key row each query row's window is centred on: its own row for self attention, else the nearest in latitude."""
     query_grid, key_grid = neighbourhood.query_grid, neighbourhood.key_grid
-    kernel_h = neighbourhood.kernel_size[0]
     if neighbourhood.is_self_attention:
-        row_map = torch.arange(query_grid.num_rows, device=query_grid.row_starts.device)
-    else:
-        row_map = query_grid.nearest_rows(key_grid)
-    return (row_map - kernel_h // 2).clamp(0, key_grid.num_rows - kernel_h)
+        return torch.arange(query_grid.num_rows, device=query_grid.row_starts.device)
+    return query_grid.nearest_rows(key_grid)
 
 
 def key_rows_reached(neighbourhood: GridNeighbourhood, first_row: int, end_row: int) -> tuple[int, int]:
     """The key rows ``(first, end)`` that the query rows ``first_row`` to ``end_row - 1`` attend to."""
-    window_start = window_start_rows(neighbourhood)[first_row:end_row]
-    return int(window_start.min()), int(window_start.max()) + neighbourhood.kernel_size[0]
+    centre = centre_rows(neighbourhood)[first_row:end_row]
+    radius = neighbourhood.kernel_size[0] // 2
+    return max(int(centre.min()) - radius, 0), min(int(centre.max()) + radius + 1, neighbourhood.key_grid.num_rows)
 
 
 def rows_holding(grid: ReducedGrid, points: slice) -> tuple[int, int]:

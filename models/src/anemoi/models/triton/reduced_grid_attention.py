@@ -10,10 +10,12 @@
 """Triton kernels for neighbourhood attention on reduced grids such as octahedral O48, O96, ...
 
 The grid is a set of latitude rows of different lengths, stored row by row (see
-:class:`anemoi.models.layers.reduced_grid.ReducedGrid`). Each query attends to ``kernel_h`` rows
-around its own row and, in each of them, to the ``kernel_w`` points nearest in longitude (see
+:class:`anemoi.models.layers.reduced_grid.ReducedGrid`). Each query attends to the rows at most
+``kernel_h // 2`` rows from its own (fewer next to the poles) and, in each of them, to the
+``kernel_w`` points nearest in longitude (see
 :class:`anemoi.models.layers.reduced_grid.ReducedGridNeighbourhoodMask`). Longitudes wrap around;
-a row shorter than the window contributes its whole ring, each point once.
+a row shorter than the window, or one the query also reaches over a pole, contributes its whole
+ring, each point once.
 
 The kernels follow the same flash attention scheme as the regular-grid kernels in
 :mod:`anemoi.models.triton.neighbourhood_attention`. Each program takes a tile of ``TILE_H``
@@ -199,18 +201,15 @@ def _matching_shifted(j, n, other_n, shift, other_shift):
 
 
 @triton.jit
-def _row_window_start(r, KERNEL_H: tl.constexpr, NUM_ROWS: tl.constexpr):
-    """First row of the rows seen from row ``r``, shifted to stay inside the grid."""
-    return tl.minimum(tl.maximum(r - KERNEL_H // 2, 0), NUM_ROWS - KERNEL_H)
+def _over_the_pole(centre_row, row, NUM_ROWS: tl.constexpr, beyond_north, beyond_south, RADIUS_H: tl.constexpr):
+    """Whether ``row`` can be reached from ``centre_row`` over a pole; such a row contributes its whole ring.
 
-
-@triton.jit
-def _rows_seeing(r, KERNEL_H: tl.constexpr, NUM_ROWS: tl.constexpr):
-    """First and last row of the queries whose row window includes row ``r``."""
-    RADIUS: tl.constexpr = KERNEL_H // 2
-    lo = tl.where(r - KERNEL_H + 1 <= 0, 0, r - RADIUS)
-    hi = tl.where(r >= NUM_ROWS - KERNEL_H, NUM_ROWS - 1, tl.minimum(r + RADIUS, NUM_ROWS - 1))
-    return lo, hi
+    See :func:`anemoi.models.layers.reduced_grid.over_the_pole`; ``beyond_north`` and ``beyond_south``
+    are the grid's ``rows_beyond``.
+    """
+    from_north = 2 * beyond_north + centre_row + row
+    from_south = 2 * (beyond_south + NUM_ROWS - 1) - centre_row - row
+    return (from_north < RADIUS_H) | (from_south < RADIUS_H)
 
 
 @triton.jit
@@ -255,6 +254,8 @@ def _key_rows(
     hi_h,
     lengths_h,
     shift_h,
+    beyond_north,
+    beyond_south,
     NUM_ROWS: tl.constexpr,
     KERNEL_H: tl.constexpr,
     KERNEL_W: tl.constexpr,
@@ -264,10 +265,11 @@ def _key_rows(
     SHIFTED: tl.constexpr,
 ):
     """The key rows a query tile reaches, with their shifts, the stretch of keys needed in each, and blocks per row."""
+    RADIUS_H: tl.constexpr = KERNEL_H // 2
     RADIUS_W: tl.constexpr = KERNEL_W // 2
     last_row = tl.minimum(first_row + TILE_H, NUM_ROWS) - 1
-    k_first_row = _row_window_start(first_row, KERNEL_H, NUM_ROWS)
-    num_k_rows = _row_window_start(last_row, KERNEL_H, NUM_ROWS) + KERNEL_H - k_first_row
+    k_first_row = tl.maximum(first_row - RADIUS_H, 0)
+    num_k_rows = tl.minimum(last_row + RADIUS_H, NUM_ROWS - 1) + 1 - k_first_row
     idx, valid, k_starts, k_lengths = _rows_info(ROW_START, k_first_row, num_k_rows, KEY_ROWS)
 
     nonempty = hi_h > lo_h
@@ -284,6 +286,12 @@ def _key_rows(
         k_shifts = idx * 0
         firsts = _matching(lo_h[None, :], n[None, :], k_lengths[:, None]) - RADIUS_W
         lasts = _matching(hi_h[None, :] - 1, n[None, :], k_lengths[:, None]) + RADIUS_W
+    tile_rows = first_row + tl.arange(0, TILE_H)
+    over = _over_the_pole(
+        tile_rows[None, :], (k_first_row + idx)[:, None], NUM_ROWS, beyond_north, beyond_south, RADIUS_H
+    )
+    firsts = tl.where(over, 0, firsts)
+    lasts = tl.where(over, k_lengths[:, None] - 1, lasts)
     first, length = _union(firsts, lasts, nonempty, k_lengths)
     blocks = tl.max(tl.where(valid, tl.cdiv(length, BLOCK_ITER), 0))
     return k_first_row, num_k_rows, idx, k_starts, k_lengths, k_shifts, first, length, blocks
@@ -304,6 +312,8 @@ def _rg_fwd(
     TILE_OFFSETS,
     sm_scale,
     heads,
+    beyond_north,  # rows of the whole grid north of the first row and south of the last row
+    beyond_south,
     stride_qb,  # strides of Q over batch, head and point; each point's head_dim values are contiguous
     stride_qh,
     stride_qn,
@@ -325,12 +335,13 @@ def _rg_fwd(
     SHIFTED: tl.constexpr,  # rows are shifted by half spacings (HEALPix); False compiles the shift handling away
     WIDE: tl.constexpr,  # point offsets need 64 bits
     KEY_ROWS: tl.constexpr,  # KERNEL_H + largest TILE_H - 1, rounded up to a power of 2
-    QUERY_ROWS: tl.constexpr,  # 2 * KERNEL_H + largest TILE_H - 2, rounded up to a power of 2
+    QUERY_ROWS: tl.constexpr,  # the same, for the query rows that see a tile of keys
     TILE_H: tl.constexpr,
     TILE_W: tl.constexpr,
     BLOCK_ITER: tl.constexpr,
 ):
     """Each program computes the output of one tile of queries, for one batch entry and head."""
+    RADIUS_H: tl.constexpr = KERNEL_H // 2
     RADIUS_W: tl.constexpr = KERNEL_W // 2
     bh = tl.program_id(1).to(tl.int64)
     q_base = _base(bh, heads, stride_qb, stride_qh)
@@ -344,7 +355,6 @@ def _rg_fwd(
         ROW_START, first_row, band, NUM_ROWS, TILE_H, TILE_W
     )
     q = tl.load(Q + q_base + _rows(q_tok, stride_qn, WIDE)[:, None] + d[None, :], mask=q_valid[:, None], other=0.0)
-    q_window = _row_window_start(q_rows, KERNEL_H, NUM_ROWS)
     if SHIFTED:
         tile_rows = first_row + tl.arange(0, TILE_H)
         shift_h = tl.load(ROW_SHIFT + tile_rows, mask=tile_rows < NUM_ROWS, other=0)
@@ -367,6 +377,8 @@ def _rg_fwd(
         hi_h,
         lengths_h,
         shift_h,
+        beyond_north,
+        beyond_south,
         NUM_ROWS,
         KERNEL_H,
         KERNEL_W,
@@ -390,12 +402,13 @@ def _rg_fwd(
         k = tl.load(K + k_base + _rows(k_tok, stride_kn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
         v = tl.load(V + v_base + _rows(k_tok, stride_vn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
 
-        row_seen = (k_row >= q_window) & (k_row < q_window + KERNEL_H)
+        row_seen = tl.abs(k_row - q_rows) <= RADIUS_H
         if SHIFTED:
             centre = _matching_shifted(q_pos, q_n, other_n, q_shift, _pick(k_shifts, idx, i))
         else:
             centre = _matching(q_pos, q_n, other_n)
         keep = _near_in_row(k_pos[None, :], centre[:, None], other_n, RADIUS_W)
+        keep = keep | _over_the_pole(q_rows, k_row, NUM_ROWS, beyond_north, beyond_south, RADIUS_H)[:, None]
         keep = keep & row_seen[:, None] & k_valid[None, :]
         qk = tl.where(keep, tl.dot(q, tl.trans(k), input_precision=DOT_PRECISION), _MASKED)
 
@@ -439,6 +452,8 @@ def _rg_bwd_dq(
     TILE_OFFSETS,
     sm_scale,
     heads,
+    beyond_north,  # rows of the whole grid north of the first row and south of the last row
+    beyond_south,
     stride_qb,
     stride_qh,
     stride_qn,
@@ -469,6 +484,7 @@ def _rg_bwd_dq(
     BLOCK_ITER: tl.constexpr,
 ):
     """Each program computes dQ for one tile of queries, visiting the same keys as the forward pass."""
+    RADIUS_H: tl.constexpr = KERNEL_H // 2
     RADIUS_W: tl.constexpr = KERNEL_W // 2
     bh = tl.program_id(1).to(tl.int64)
     q_base = _base(bh, heads, stride_qb, stride_qh)
@@ -490,7 +506,6 @@ def _rg_bwd_dq(
     tl.store(DELTA + bh * NUM_POINTS + q_tok, delta, mask=q_valid)
     m = tl.load(M + bh * NUM_POINTS + q_tok, mask=q_valid, other=0.0)
     inv_l = tl.load(INV_L + bh * NUM_POINTS + q_tok, mask=q_valid, other=0.0)
-    q_window = _row_window_start(q_rows, KERNEL_H, NUM_ROWS)
     if SHIFTED:
         tile_rows = first_row + tl.arange(0, TILE_H)
         shift_h = tl.load(ROW_SHIFT + tile_rows, mask=tile_rows < NUM_ROWS, other=0)
@@ -520,6 +535,8 @@ def _rg_bwd_dq(
         hi_h,
         lengths_h,
         shift_h,
+        beyond_north,
+        beyond_south,
         NUM_ROWS,
         KERNEL_H,
         KERNEL_W,
@@ -551,12 +568,13 @@ def _rg_bwd_dq(
         k = tl.load(K + k_base + _rows(k_tok, stride_kn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
         v = tl.load(V + v_base + _rows(k_tok, stride_vn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
 
-        row_seen = (k_row >= q_window) & (k_row < q_window + KERNEL_H)
+        row_seen = tl.abs(k_row - q_rows) <= RADIUS_H
         if SHIFTED:
             centre = _matching_shifted(q_pos, q_n, other_n, q_shift, _pick(k_shifts, idx, i))
         else:
             centre = _matching(q_pos, q_n, other_n)
         keep = _near_in_row(k_pos[None, :], centre[:, None], other_n, RADIUS_W)
+        keep = keep | _over_the_pole(q_rows, k_row, NUM_ROWS, beyond_north, beyond_south, RADIUS_H)[:, None]
         keep = keep & row_seen[:, None] & k_valid[None, :] & q_valid[:, None]
         qk = tl.where(keep, tl.dot(q, tl.trans(k), input_precision=DOT_PRECISION), _MASKED)
         p = tl.math.exp2((qk - m[:, None]) * qk_scale) * inv_l[:, None]
@@ -596,6 +614,8 @@ def _rg_bwd_dkdv(
     TILE_OFFSETS,
     sm_scale,
     heads,
+    beyond_north,  # rows of the whole grid north of the first row and south of the last row
+    beyond_south,
     stride_qb,
     stride_qh,
     stride_qn,
@@ -626,6 +646,7 @@ def _rg_bwd_dkdv(
     BLOCK_ITER: tl.constexpr,
 ):
     """Each program computes dK and dV for one tile of keys, visiting every query whose window reaches it."""
+    RADIUS_H: tl.constexpr = KERNEL_H // 2
     RADIUS_W: tl.constexpr = KERNEL_W // 2
     bh = tl.program_id(1).to(tl.int64)
     q_base = _base(bh, heads, stride_qb, stride_qh)
@@ -653,14 +674,14 @@ def _rg_bwd_dkdv(
 
     # The query rows are looked up once, with the stretch of queries in each that may see the tile.
     last_row = tl.minimum(first_row + TILE_H, NUM_ROWS) - 1
-    q_first_row, _ = _rows_seeing(first_row, KERNEL_H, NUM_ROWS)
-    _, q_last_row = _rows_seeing(last_row, KERNEL_H, NUM_ROWS)
-    num_q_rows = q_last_row - q_first_row + 1
+    q_first_row = tl.maximum(first_row - RADIUS_H, 0)
+    num_q_rows = tl.minimum(last_row + RADIUS_H, NUM_ROWS - 1) + 1 - q_first_row
     idx, row_valid, q_starts, q_lengths = _rows_info(ROW_START, q_first_row, num_q_rows, QUERY_ROWS)
     # In each query row, the queries whose matching position in a tile row lies within RADIUS_W of the
     # tile's points there. The matching position only grows along a row, so inverting it gives one
-    # stretch per tile row; only the tile rows inside the query row's window count. Two turns are
-    # added so the divisions work on positive numbers.
+    # stretch per tile row; only the tile rows inside the query row's window count, and a query row
+    # that reaches a tile row over the pole is taken whole. Two turns are added so the divisions work
+    # on positive numbers.
     nonempty = hi_h > lo_h
     n_k = tl.maximum(lengths_h, 1)
     if SHIFTED:
@@ -673,16 +694,13 @@ def _rg_bwd_dkdv(
     q_offset = two_n_k[None, :] - 1 - q_shifts[:, None] * n_k[None, :]
     firsts_h = (low[None, :] * q_lengths[:, None] + q_offset) // two_n_k[None, :]
     lasts_h = (high[None, :] * q_lengths[:, None] + q_offset) // two_n_k[None, :] - 1
-    q_windows = _row_window_start(q_first_row + idx, KERNEL_H, NUM_ROWS)
+    q_rows_v = q_first_row + idx
     tile_rows = first_row + tl.arange(0, TILE_H)
-    sees = (
-        nonempty[None, :]
-        & (tile_rows[None, :] >= q_windows[:, None])
-        & (tile_rows[None, :] < q_windows[:, None] + KERNEL_H)
-    )
+    sees = nonempty[None, :] & (tl.abs(tile_rows[None, :] - q_rows_v[:, None]) <= RADIUS_H)
+    over = sees & _over_the_pole(q_rows_v[:, None], tile_rows[None, :], NUM_ROWS, beyond_north, beyond_south, RADIUS_H)
     lowest = tl.min(tl.where(sees, firsts_h, _FAR), axis=1) - 2 * q_lengths
     highest = tl.max(tl.where(sees, lasts_h, -_FAR), axis=1) - 2 * q_lengths
-    whole = highest - lowest + 1 >= q_lengths
+    whole = (highest - lowest + 1 >= q_lengths) | (tl.max(over.to(tl.int32), axis=1) > 0)
     firsts = tl.where(whole, 0, lowest)
     lengths = tl.maximum(tl.where(whole, q_lengths, highest - lowest + 1), 0)
 
@@ -715,8 +733,7 @@ def _rg_bwd_dkdv(
         delta = tl.load(DELTA + bh * NUM_POINTS + q_tok, mask=q_valid, other=0.0)
         lam = tl.load(LAM + bh * NUM_POINTS + q_tok, mask=q_valid, other=0.0)
 
-        q_window = _row_window_start(q_row, KERNEL_H, NUM_ROWS)
-        row_seen = (k_rows >= q_window) & (k_rows < q_window + KERNEL_H)
+        row_seen = tl.abs(k_rows - q_row) <= RADIUS_H
         # Matching position of each query in each tile row, repeated for the points of that row.
         if SHIFTED:
             centre_h = _matching_shifted(q_pos[None, :], n, n_k[:, None], _pick(q_shifts, idx, i), shift_h[:, None])
@@ -726,6 +743,7 @@ def _rg_bwd_dkdv(
             tl.broadcast_to(centre_h[:, None, :], (TILE_H, TILE_W, BLOCK_ITER)), (TILE_H * TILE_W, BLOCK_ITER)
         )
         keep = _near_in_row(k_pos[:, None], centre, k_n[:, None], RADIUS_W)
+        keep = keep | _over_the_pole(q_row, k_rows, NUM_ROWS, beyond_north, beyond_south, RADIUS_H)[:, None]
         keep = keep & row_seen[:, None] & q_valid[None, :] & k_valid[:, None]
         # Scores laid out keys x queries.
         qk_t = tl.where(keep, tl.dot(k, tl.trans(q), input_precision=DOT_PRECISION), _MASKED)
@@ -812,7 +830,6 @@ class ReducedGridAttentionTriton(torch.autograd.Function):
         assert (
             head_dim >= 16 and head_dim & (head_dim - 1) == 0
         ), f"head_dim must be a power of 2 >= 16, got {head_dim}."
-        assert kernel_size[0] <= len(row_lengths), "kernel_size[0] must not exceed the number of rows."
 
         q, k, v = (_rows_readable(t) for t in (q, k, v))
         o = _point_major(batch, heads, num_points, head_dim, q)
@@ -828,13 +845,25 @@ class ReducedGridAttentionTriton(torch.autograd.Function):
             DOT_PRECISION=_dot_precision(q.dtype),
             SHIFTED=grid.is_shifted,
             KEY_ROWS=triton.next_power_of_2(kernel_size[0] + _MAX_TILE_H - 1),
-            QUERY_ROWS=triton.next_power_of_2(2 * kernel_size[0] + _MAX_TILE_H - 2),
+            QUERY_ROWS=triton.next_power_of_2(kernel_size[0] + _MAX_TILE_H - 1),
         )
         tables = (row_starts, _shift_table(grid.shifts, q.device), *_packed_tiles(tuple(row_lengths), q.device))
         strides = (*_strides(q), *_strides(k), *_strides(v), *_strides(o))
 
         _rg_fwd[_launch_grid(tiles, batch * heads)](
-            q, k, v, o, m, inv_l, *tables, sm_scale, heads, *strides, WIDE=_needs_wide(q, k, v, o), **sizes
+            q,
+            k,
+            v,
+            o,
+            m,
+            inv_l,
+            *tables,
+            sm_scale,
+            heads,
+            *grid.rows_beyond,
+            *strides,
+            WIDE=_needs_wide(q, k, v, o),
+            **sizes,
         )
         ctx.save_for_backward(q, k, v, o, m, inv_l)
         ctx.grid = grid
@@ -877,6 +906,7 @@ class ReducedGridAttentionTriton(torch.autograd.Function):
             *tables,
             ctx.sm_scale,
             heads,
+            *ctx.grid.rows_beyond,
             *inputs,
             *_strides(dq),
             WIDE=wide,
@@ -896,6 +926,7 @@ class ReducedGridAttentionTriton(torch.autograd.Function):
             *tables,
             ctx.sm_scale,
             heads,
+            *ctx.grid.rows_beyond,
             *inputs,
             *_strides(dk),
             WIDE=wide,

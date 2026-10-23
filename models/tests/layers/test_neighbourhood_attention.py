@@ -130,7 +130,9 @@ def test_cross_attention_logs_how_queries_and_keys_are_connected(caplog):
         check_every_key_attended(query_grid, key_grid, (5, 5))
     assert f"from {key_grid.num_points} key points ({key_grid.num_rows} rows)" in caplog.text
     assert f"to {query_grid.num_points} queries ({query_grid.num_rows} rows)" in caplog.text
-    assert "each query reads 25 to 25 keys, 25.0 on average" in caplog.text
+    # Queries of the first and last rows are matched to the second key row from the pole and also
+    # reach the whole 20-point ring next to it: 20 + 3 * 5 keys.
+    assert "each query reads 25 to 35 keys, 26.9 on average" in caplog.text
     assert "each key point is read by" in caplog.text
 
 

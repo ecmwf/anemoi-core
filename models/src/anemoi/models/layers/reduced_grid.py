@@ -35,12 +35,18 @@ class ReducedGrid:
     no shifts; HEALPix grids in ring ordering shift some of their rings.
 
     ``row_latitudes`` (degrees) are needed only to match the rows of two grids, as cross
-    attention does; grids are equal when their row lengths and shifts are.
+    attention does; grids are equal when their row lengths, shifts and ``rows_beyond`` are.
+
+    ``rows_beyond`` counts the rows of the whole grid that lie north of the first row and south of
+    the last row. It is ``(0, 0)`` for a whole grid, whose first and last rows are the ones next to
+    the poles, and larger for a part of a grid such as a band of rows (see :meth:`rows`). It tells
+    the attention rule how far each row is from the poles.
     """
 
     row_lengths: tuple[int, ...]
     row_latitudes: tuple[float, ...] | None = field(default=None, compare=False)
     row_shifts: tuple[int, ...] | None = None
+    rows_beyond: tuple[int, int] = (0, 0)
 
     @classmethod
     def octahedral(cls, n: int) -> ReducedGrid:
@@ -191,10 +197,12 @@ class ReducedGrid:
 
     def rows(self, start: int, stop: int) -> ReducedGrid:
         """The grid made of rows ``start`` to ``stop - 1`` of this grid, with their latitudes and shifts."""
+        north, south = self.rows_beyond
         return ReducedGrid(
             self.row_lengths[start:stop],
             None if self.row_latitudes is None else self.row_latitudes[start:stop],
             None if self.row_shifts is None else self.row_shifts[start:stop],
+            (north + start, south + self.num_rows - stop),
         )
 
     def nearest_rows(self, other: ReducedGrid) -> Tensor:
@@ -215,14 +223,32 @@ def matching_position(position, length, other_length, shift=0, other_shift=0):
     return ((2 * position + shift) * other_length - other_shift * length + length) // (2 * length)
 
 
+def over_the_pole(centre_row, row, num_rows: int, rows_beyond: tuple[int, int], radius: int):
+    """Whether ``row`` lies within ``radius`` rows of ``centre_row`` going over the nearer pole.
+
+    Both are rows of a grid of ``num_rows`` rows with ``rows_beyond`` rows of the whole grid beyond
+    its edges (see :class:`ReducedGrid`). The rows next to a pole are about half a row spacing from
+    it, so going over the pole from a row ``a`` rows from it to a row ``b`` rows from it covers about
+    ``a + b + 1`` row spacings; the row is in reach when that is at most ``radius``. Every point of
+    such a row then lies within reach, wherever it is on its ring.
+    Works on integers and integer tensors alike.
+    """
+    north, south = rows_beyond
+    from_north = 2 * north + centre_row + row
+    from_south = 2 * (south + num_rows - 1) - centre_row - row
+    return (from_north < radius) | (from_south < radius)
+
+
 class ReducedGridCrossNeighbourhoodMask:
     """Rule deciding which keys of one reduced grid a query of another reduced grid may attend to.
 
-    A query first finds the row of the key grid nearest to its own latitude. It then attends to
-    ``kernel_size[0]`` key rows around that row (shifted to stay inside the key grid, as in
-    NATTEN) and, in each of them, to the points within ``kernel_size[1] // 2`` of the nearest
-    longitude (:func:`matching_position`), going round the globe. A key row shorter than
-    ``kernel_size[1]`` contributes its whole ring, each point once.
+    A query first finds the row of the key grid nearest to its own latitude, its centre row. It
+    attends to the key rows at most ``kernel_size[0] // 2`` rows from the centre row (fewer next to
+    the poles, where the grid ends) and, in each of them, to the points within
+    ``kernel_size[1] // 2`` of the nearest longitude (:func:`matching_position`), going round the
+    globe. A key row contributes its whole ring, each point once, when it is not longer than
+    ``kernel_size[1]``, or when it can also be reached over the pole (:func:`over_the_pole`): a
+    query next to a pole then sees the points just across it.
     Instances are called with the ``mask_mod`` signature used by flex attention.
     """
 
@@ -236,10 +262,9 @@ class ReducedGridCrossNeighbourhoodMask:
         kernel_h, kernel_w = kernel_size
         if kernel_h % 2 == 0 or kernel_w % 2 == 0 or kernel_h <= 0 or kernel_w <= 0:
             raise ValueError(f"kernel_size entries must be positive and odd, got {kernel_size}.")
-        if kernel_h > key_grid.num_rows:
-            raise ValueError(f"kernel_size[0]={kernel_h} is larger than the number of key rows ({key_grid.num_rows}).")
         self.kernel_size = (kernel_h, kernel_w)
-        self.start_max = key_grid.num_rows - kernel_h
+        self.num_k_rows = key_grid.num_rows
+        self.rows_beyond = key_grid.rows_beyond
         self.row_map = query_grid.nearest_rows(key_grid) if row_map is None else row_map
         self.q_rows, self.q_positions = query_grid.rows_and_positions
         self.q_lengths = torch.tensor(query_grid.row_lengths)
@@ -265,11 +290,17 @@ class ReducedGridCrossNeighbourhoodMask:
             setattr(moved, name, getattr(self, name).to(device))
         return moved
 
+    def _whole_ring(self, centre_row, k_row, k_length):
+        """Whether key row ``k_row`` contributes its whole ring to queries centred on ``centre_row``."""
+        kernel_h, kernel_w = self.kernel_size
+        short = kernel_w // 2 >= k_length // 2
+        return short | over_the_pole(centre_row, k_row, self.num_k_rows, self.rows_beyond, kernel_h // 2)
+
     def __call__(self, b, h, q_idx, kv_idx):
         kernel_h, kernel_w = self.kernel_size
         q_row, k_row = self.q_rows[q_idx], self.k_rows[kv_idx]
-        start = (self.row_map[q_row] - kernel_h // 2).clamp(0, self.start_max)
-        in_rows = (k_row >= start) & (k_row < start + kernel_h)
+        centre_row = self.row_map[q_row]
+        in_rows = (k_row - centre_row).abs() <= kernel_h // 2
 
         k_length = self.k_lengths[k_row]
         centre = matching_position(
@@ -277,20 +308,27 @@ class ReducedGridCrossNeighbourhoodMask:
         )
         offset = torch.remainder(self.k_positions[kv_idx] - centre, k_length)
         in_cols = torch.minimum(offset, k_length - offset) <= kernel_w // 2
+        in_cols = in_cols | over_the_pole(centre_row, k_row, self.num_k_rows, self.rows_beyond, kernel_h // 2)
         return in_rows & in_cols
+
+    def _key_rows(self, centre_rows: Tensor) -> tuple[Tensor, Tensor]:
+        """The ``kernel_size[0]`` rows around each centre row, kept inside the grid, and which of them it has."""
+        radius = self.kernel_size[0] // 2
+        k_rows = centre_rows[..., None] + torch.arange(-radius, radius + 1)
+        inside = (k_rows >= 0) & (k_rows < self.num_k_rows)
+        return k_rows.clamp(0, self.num_k_rows - 1), inside
 
     def keys_per_query(self) -> Tensor:
         """How many keys each query attends to, in query grid order.
 
-        ``kernel_size[0] * kernel_size[1]``, except that a key row not longer than ``kernel_size[1]``
-        adds its whole ring, which can be fewer points.
+        ``kernel_size[1]`` per key row, except that a row that contributes its whole ring adds its
+        length, and that next to the poles the grid has fewer rows than ``kernel_size[0]``.
         """
-        kernel_h, kernel_w = self.kernel_size
-        starts = (self.row_map - kernel_h // 2).clamp(0, self.start_max)
-        k_rows = starts[:, None] + torch.arange(kernel_h)[None, :]
+        kernel_w = self.kernel_size[1]
+        k_rows, inside = self._key_rows(self.row_map)
         k_length = self.k_lengths[k_rows]
-        per_row = torch.where(kernel_w // 2 >= k_length // 2, k_length, kernel_w)
-        return torch.repeat_interleave(per_row.sum(1), self.q_lengths)
+        per_row = torch.where(self._whole_ring(self.row_map[:, None], k_rows, k_length), k_length, kernel_w)
+        return torch.repeat_interleave((per_row * inside).sum(1), self.q_lengths)
 
     def times_attended(self) -> Tensor:
         """How many queries attend to each key point, in key grid order.
@@ -298,16 +336,17 @@ class ReducedGridCrossNeighbourhoodMask:
         Gives the same numbers as summing the mask over all queries, without building it: the
         queries of one row share their key rows, and in each key row a query covers one run of
         ``kernel_size[1]`` neighbouring points, going round the globe, or the whole row when the row
-        is not longer than that. Each run adds one at its first point and takes one away after its
-        last point; a running total over the key points then gives the counts.
+        contributes its whole ring. Each run adds one at its first point and takes one away after
+        its last point; a running total over the key points then gives the counts.
         """
-        kernel_h, kernel_w = self.kernel_size
+        kernel_w = self.kernel_size[1]
         half_w = kernel_w // 2
         k_starts = torch.cat([torch.zeros(1, dtype=torch.long), self.k_lengths.cumsum(0)])
         changes = torch.zeros(int(k_starts[-1]) + 1, dtype=torch.long)
         for q_row in range(len(self.q_lengths)):
-            start = int((self.row_map[q_row] - kernel_h // 2).clamp(0, self.start_max))
-            k_rows = torch.arange(start, start + kernel_h)[:, None]
+            centre_row = self.row_map[q_row]
+            k_rows, inside = self._key_rows(centre_row)
+            k_rows = k_rows[inside][:, None]
             k_length = self.k_lengths[k_rows]
             row_start = k_starts[k_rows]
             q_length = self.q_lengths[q_row]
@@ -315,7 +354,7 @@ class ReducedGridCrossNeighbourhoodMask:
                 torch.arange(int(q_length))[None, :], q_length, k_length, self.q_shifts[q_row], self.k_shifts[k_rows]
             )
             # A run starts at `first` and ends just before `first + kernel_w`, wrapping past the row's end.
-            whole_row = half_w >= k_length // 2
+            whole_row = self._whole_ring(centre_row, k_rows, k_length)
             first = torch.where(whole_row, 0, torch.remainder(centre - half_w, k_length))
             end = torch.where(whole_row, k_length, first + kernel_w)
             end_in_row = torch.minimum(end, k_length)
@@ -336,10 +375,11 @@ class ReducedGridNeighbourhoodMask(ReducedGridCrossNeighbourhoodMask):
     """Rule deciding which keys a query may attend to on a :class:`ReducedGrid`.
 
     The cross-grid rule with the same grid on both sides, each row matched to itself: a query
-    attends to ``kernel_size[0]`` rows around its own row (shifted to stay inside the grid near the
-    poles) and, in each, to the points within ``kernel_size[1] // 2`` of the nearest longitude.
-    Every query sees ``kernel_size[0] * kernel_size[1]`` keys, except that a row shorter than
-    ``kernel_size[1]`` contributes its whole ring, each point once.
+    attends to the rows at most ``kernel_size[0] // 2`` rows from its own (fewer next to the poles)
+    and, in each, to the points within ``kernel_size[1] // 2`` of the nearest longitude. Every query
+    away from the poles sees ``kernel_size[0] * kernel_size[1]`` keys; a row shorter than
+    ``kernel_size[1]``, or one that can also be reached over the pole, contributes its whole ring,
+    each point once.
     """
 
     def __init__(self, grid: ReducedGrid, kernel_size: tuple[int, int]) -> None:

@@ -12,7 +12,8 @@
 Queries live on one reduced grid and keys and values on another (see
 :class:`anemoi.models.layers.reduced_grid.ReducedGridCrossNeighbourhoodMask` for the rule). Each
 query row is matched to the key row nearest in latitude through a small table, and the window's
-key rows start from there; the longitude matching is the same as for self attention.
+key rows are centred there; the longitude matching and the whole rings of rows reached over a pole
+are the same as for self attention.
 
 The kernels are those of :mod:`anemoi.models.triton.reduced_grid_attention` with the query and key
 grids kept apart, and they reuse its helpers and tile tables. Query tiles (forward and dQ) are
@@ -40,6 +41,7 @@ from anemoi.models.triton.reduced_grid_attention import _matching
 from anemoi.models.triton.reduced_grid_attention import _matching_shifted
 from anemoi.models.triton.reduced_grid_attention import _near_in_row
 from anemoi.models.triton.reduced_grid_attention import _needs_wide
+from anemoi.models.triton.reduced_grid_attention import _over_the_pole
 from anemoi.models.triton.reduced_grid_attention import _packed_tiles
 from anemoi.models.triton.reduced_grid_attention import _pick
 from anemoi.models.triton.reduced_grid_attention import _point_major
@@ -74,8 +76,8 @@ _AUTOTUNE_KEY = [
 def _cross_tables(query_grid: ReducedGrid, key_grid: ReducedGrid, kernel_h: int, device: torch.device) -> dict:
     """Row tables linking the two grids, and the sizes of the per-tile row vectors.
 
-    ``window_start[r]`` is the first key row seen from query row ``r``; ``see_first[k]`` and
-    ``see_last[k]`` are the first and last query rows whose window includes key row ``k``
+    ``centre_row[r]`` is the key row the window of query row ``r`` is centred on; ``see_first[k]``
+    and ``see_last[k]`` are the first and last query rows whose window includes key row ``k``
     (``see_first > see_last`` when there are none).
 
     The tables are kept for each pair of grids. Grids compare equal on their row lengths and
@@ -96,16 +98,21 @@ def _cross_tables_for(
     device: torch.device,
 ) -> dict:
     num_q_rows, num_k_rows = query_grid.num_rows, key_grid.num_rows
-    start = (query_grid.nearest_rows(key_grid) - kernel_h // 2).clamp(0, num_k_rows - kernel_h)
+    radius = kernel_h // 2
+    centre = query_grid.nearest_rows(key_grid)
     key_rows = torch.arange(num_k_rows)
-    sees = (key_rows[None, :] >= start[:, None]) & (key_rows[None, :] < start[:, None] + kernel_h)
+    sees = (key_rows[None, :] - centre[:, None]).abs() <= radius
     has = sees.any(dim=0)
     first = torch.where(has, sees.int().argmax(dim=0), num_q_rows)
     last = torch.where(has, num_q_rows - 1 - sees.flip(0).int().argmax(dim=0), -1)
 
-    # Most key rows a query tile reaches, and most query rows that see a key tile.
+    # Most key rows a query tile reaches, and most query rows that see a key tile. The centre rows
+    # only grow from north to south.
     widest_keys = max(
-        int(start[min(r + _MAX_TILE_H - 1, num_q_rows - 1)] - start[r]) + kernel_h for r in range(num_q_rows)
+        min(int(centre[min(r + _MAX_TILE_H - 1, num_q_rows - 1)]) + radius, num_k_rows - 1)
+        - max(int(centre[r]) - radius, 0)
+        + 1
+        for r in range(num_q_rows)
     )
     widest_queries = 1
     for k in range(num_k_rows):
@@ -118,7 +125,7 @@ def _cross_tables_for(
         return t.to(dtype=torch.int32, device=device)
 
     return dict(
-        window_start=on_device(start),
+        centre_row=on_device(centre),
         see_first=on_device(first),
         see_last=on_device(last),
         KEY_ROWS=triton.next_power_of_2(widest_keys),
@@ -137,14 +144,17 @@ def _wrap_twice(pos, n):
 def _query_tile_keys(
     K_ROW_START,
     K_ROW_SHIFT,
-    WINDOW_START,
+    CENTRE_ROW,
     first_row,
     lo_h,
     hi_h,
     lengths_h,
     shift_h,
+    beyond_north,
+    beyond_south,
     SHIFTED: tl.constexpr,
     Q_ROWS: tl.constexpr,
+    K_ROWS: tl.constexpr,
     KERNEL_H: tl.constexpr,
     KERNEL_W: tl.constexpr,
     TILE_H: tl.constexpr,
@@ -152,14 +162,15 @@ def _query_tile_keys(
     KEY_ROWS: tl.constexpr,
     BLOCK_ITER: tl.constexpr,
 ):
-    """First key row seen by each query of a tile, and the key rows the tile reaches with their shifts and stretches."""
+    """Centre row of each query of a tile, and the key rows the tile reaches with their shifts and stretches."""
+    RADIUS_H: tl.constexpr = KERNEL_H // 2
     RADIUS_W: tl.constexpr = KERNEL_W // 2
     rows_h = first_row + tl.arange(0, TILE_H)
     valid_h = rows_h < Q_ROWS
-    window_h = tl.load(WINDOW_START + rows_h, mask=valid_h, other=0)
-    q_window = _spread(window_h, TILE_H, TILE_W)
-    k_first_row = tl.min(tl.where(valid_h, window_h, _FAR))
-    num_k_rows = tl.max(tl.where(valid_h, window_h, -_FAR)) + KERNEL_H - k_first_row
+    centre_h = tl.load(CENTRE_ROW + rows_h, mask=valid_h, other=0)
+    q_centre = _spread(centre_h, TILE_H, TILE_W)
+    k_first_row = tl.maximum(tl.min(tl.where(valid_h, centre_h, _FAR)) - RADIUS_H, 0)
+    num_k_rows = tl.minimum(tl.max(tl.where(valid_h, centre_h, -_FAR)) + RADIUS_H, K_ROWS - 1) + 1 - k_first_row
     idx, valid, k_starts, k_lengths = _rows_info(K_ROW_START, k_first_row, num_k_rows, KEY_ROWS)
 
     nonempty = hi_h > lo_h
@@ -176,9 +187,12 @@ def _query_tile_keys(
         k_shifts = idx * 0
         firsts = _matching(lo_h[None, :], n[None, :], k_lengths[:, None]) - RADIUS_W
         lasts = _matching(hi_h[None, :] - 1, n[None, :], k_lengths[:, None]) + RADIUS_W
+    over = _over_the_pole(centre_h[None, :], (k_first_row + idx)[:, None], K_ROWS, beyond_north, beyond_south, RADIUS_H)
+    firsts = tl.where(over, 0, firsts)
+    lasts = tl.where(over, k_lengths[:, None] - 1, lasts)
     first, length = _union(firsts, lasts, nonempty, k_lengths)
     blocks = tl.max(tl.where(valid, tl.cdiv(length, BLOCK_ITER), 0))
-    return q_window, k_first_row, num_k_rows, idx, k_starts, k_lengths, k_shifts, first, length, blocks
+    return q_centre, k_first_row, num_k_rows, idx, k_starts, k_lengths, k_shifts, first, length, blocks
 
 
 @triton.autotune(configs=_configs(), key=_AUTOTUNE_KEY)
@@ -194,7 +208,7 @@ def _xg_fwd(
     K_ROW_START,
     Q_ROW_SHIFT,
     K_ROW_SHIFT,
-    WINDOW_START,
+    CENTRE_ROW,
     SEE_FIRST,
     SEE_LAST,
     QTILES,
@@ -203,6 +217,8 @@ def _xg_fwd(
     KTILE_OFFSETS,
     sm_scale,
     heads,
+    beyond_north,  # rows of the whole key grid north of its first row and south of its last row
+    beyond_south,
     stride_qb,  # strides of Q over batch, head and point; each point's head_dim values are contiguous
     stride_qh,
     stride_qn,
@@ -232,6 +248,7 @@ def _xg_fwd(
     BLOCK_ITER: tl.constexpr,
 ):
     """Each program computes the output of one tile of queries, for one batch entry and head."""
+    RADIUS_H: tl.constexpr = KERNEL_H // 2
     RADIUS_W: tl.constexpr = KERNEL_W // 2
     bh = tl.program_id(1).to(tl.int64)
     q_base = _base(bh, heads, stride_qb, stride_qh)
@@ -257,17 +274,20 @@ def _xg_fwd(
     l_i = tl.zeros([TILE_H * TILE_W], dtype=tl.float32)
     acc = tl.zeros([TILE_H * TILE_W, HEAD_DIM], dtype=tl.float32)
 
-    q_window, k_first_row, num_k_rows, idx, k_starts, k_lengths, k_shifts, firsts, lengths, blocks = _query_tile_keys(
+    q_centre, k_first_row, num_k_rows, idx, k_starts, k_lengths, k_shifts, firsts, lengths, blocks = _query_tile_keys(
         K_ROW_START,
         K_ROW_SHIFT,
-        WINDOW_START,
+        CENTRE_ROW,
         first_row,
         lo_h,
         hi_h,
         lengths_h,
         shift_h,
+        beyond_north,
+        beyond_south,
         SHIFTED,
         Q_ROWS,
+        K_ROWS,
         KERNEL_H,
         KERNEL_W,
         TILE_H,
@@ -290,12 +310,13 @@ def _xg_fwd(
         k = tl.load(K + k_base + _rows(k_tok, stride_kn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
         v = tl.load(V + v_base + _rows(k_tok, stride_vn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
 
-        row_seen = (k_row >= q_window) & (k_row < q_window + KERNEL_H)
+        row_seen = tl.abs(k_row - q_centre) <= RADIUS_H
         if SHIFTED:
             centre = _matching_shifted(q_pos, q_n, other_n, q_shift, _pick(k_shifts, idx, i))
         else:
             centre = _matching(q_pos, q_n, other_n)
         keep = _near_in_row(k_pos[None, :], centre[:, None], other_n, RADIUS_W)
+        keep = keep | _over_the_pole(q_centre, k_row, K_ROWS, beyond_north, beyond_south, RADIUS_H)[:, None]
         keep = keep & row_seen[:, None] & k_valid[None, :]
         qk = tl.where(keep, tl.dot(q, tl.trans(k), input_precision=DOT_PRECISION), _MASKED)
 
@@ -332,7 +353,7 @@ def _xg_bwd_dq(
     K_ROW_START,
     Q_ROW_SHIFT,
     K_ROW_SHIFT,
-    WINDOW_START,
+    CENTRE_ROW,
     SEE_FIRST,
     SEE_LAST,
     QTILES,
@@ -341,6 +362,8 @@ def _xg_bwd_dq(
     KTILE_OFFSETS,
     sm_scale,
     heads,
+    beyond_north,  # rows of the whole key grid north of its first row and south of its last row
+    beyond_south,
     stride_qb,
     stride_qh,
     stride_qn,
@@ -373,6 +396,7 @@ def _xg_bwd_dq(
     BLOCK_ITER: tl.constexpr,
 ):
     """Each program computes dQ for one tile of queries, visiting the same keys as the forward pass."""
+    RADIUS_H: tl.constexpr = KERNEL_H // 2
     RADIUS_W: tl.constexpr = KERNEL_W // 2
     bh = tl.program_id(1).to(tl.int64)
     q_base = _base(bh, heads, stride_qb, stride_qh)
@@ -415,17 +439,20 @@ def _xg_bwd_dq(
     ds_sums = tl.zeros([TILE_H * TILE_W, BLOCK_ITER], dtype=tl.float32)
     p_sums = tl.zeros([TILE_H * TILE_W, BLOCK_ITER], dtype=tl.float32)
 
-    q_window, k_first_row, num_k_rows, idx, k_starts, k_lengths, k_shifts, firsts, lengths, blocks = _query_tile_keys(
+    q_centre, k_first_row, num_k_rows, idx, k_starts, k_lengths, k_shifts, firsts, lengths, blocks = _query_tile_keys(
         K_ROW_START,
         K_ROW_SHIFT,
-        WINDOW_START,
+        CENTRE_ROW,
         first_row,
         lo_h,
         hi_h,
         lengths_h,
         shift_h,
+        beyond_north,
+        beyond_south,
         SHIFTED,
         Q_ROWS,
+        K_ROWS,
         KERNEL_H,
         KERNEL_W,
         TILE_H,
@@ -456,12 +483,13 @@ def _xg_bwd_dq(
         k = tl.load(K + k_base + _rows(k_tok, stride_kn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
         v = tl.load(V + v_base + _rows(k_tok, stride_vn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
 
-        row_seen = (k_row >= q_window) & (k_row < q_window + KERNEL_H)
+        row_seen = tl.abs(k_row - q_centre) <= RADIUS_H
         if SHIFTED:
             centre = _matching_shifted(q_pos, q_n, other_n, q_shift, _pick(k_shifts, idx, i))
         else:
             centre = _matching(q_pos, q_n, other_n)
         keep = _near_in_row(k_pos[None, :], centre[:, None], other_n, RADIUS_W)
+        keep = keep | _over_the_pole(q_centre, k_row, K_ROWS, beyond_north, beyond_south, RADIUS_H)[:, None]
         keep = keep & row_seen[:, None] & k_valid[None, :] & q_valid[:, None]
         qk = tl.where(keep, tl.dot(q, tl.trans(k), input_precision=DOT_PRECISION), _MASKED)
         p = tl.math.exp2((qk - m[:, None]) * qk_scale) * inv_l[:, None]
@@ -499,7 +527,7 @@ def _xg_bwd_dkdv(
     K_ROW_START,
     Q_ROW_SHIFT,
     K_ROW_SHIFT,
-    WINDOW_START,
+    CENTRE_ROW,
     SEE_FIRST,
     SEE_LAST,
     QTILES,
@@ -508,6 +536,8 @@ def _xg_bwd_dkdv(
     KTILE_OFFSETS,
     sm_scale,
     heads,
+    beyond_north,  # rows of the whole key grid north of its first row and south of its last row
+    beyond_south,
     stride_qb,
     stride_qh,
     stride_qn,
@@ -540,6 +570,7 @@ def _xg_bwd_dkdv(
     BLOCK_ITER: tl.constexpr,
 ):
     """Each program computes dK and dV for one tile of keys, visiting every query whose window reaches it."""
+    RADIUS_H: tl.constexpr = KERNEL_H // 2
     RADIUS_W: tl.constexpr = KERNEL_W // 2
     bh = tl.program_id(1).to(tl.int64)
     q_base = _base(bh, heads, stride_qb, stride_qh)
@@ -565,7 +596,7 @@ def _xg_bwd_dkdv(
     dk = tl.zeros([TILE_H * TILE_W, HEAD_DIM], dtype=tl.float32)
     dv = tl.zeros([TILE_H * TILE_W, HEAD_DIM], dtype=tl.float32)
 
-    # Query rows whose windows reach the tile's key rows, looked up once with their window starts.
+    # Query rows whose windows reach the tile's key rows, looked up once with their centre rows.
     rows_h = first_row + tl.arange(0, TILE_H)
     valid_h = rows_h < K_ROWS
     see_first = tl.load(SEE_FIRST + rows_h, mask=valid_h, other=_FAR)
@@ -574,12 +605,13 @@ def _xg_bwd_dkdv(
     num_q_rows = tl.maximum(tl.max(tl.where(seen, see_last, -1)) - tl.min(tl.where(seen, see_first, _FAR)) + 1, 0)
     q_first_row = tl.where(num_q_rows > 0, tl.min(tl.where(seen, see_first, _FAR)), 0)
     idx, row_valid, q_starts, q_lengths = _rows_info(Q_ROW_START, q_first_row, num_q_rows, QUERY_ROWS)
-    q_windows = tl.load(WINDOW_START + q_first_row + idx, mask=row_valid, other=0)
+    q_centres = tl.load(CENTRE_ROW + q_first_row + idx, mask=row_valid, other=0)
 
     # In each query row, the queries whose matching position in a tile row lies within RADIUS_W of the
     # tile's points there. The matching position only grows along a row, so inverting it gives one
-    # stretch per tile row; only the tile rows inside the query row's window count. Two turns are
-    # added so the divisions work on positive numbers.
+    # stretch per tile row; only the tile rows inside the query row's window count, and a query row
+    # that reaches a tile row over the pole is taken whole. Two turns are added so the divisions work
+    # on positive numbers.
     nonempty = hi_h > lo_h
     n_k = tl.maximum(lengths_h, 1)
     if SHIFTED:
@@ -593,14 +625,11 @@ def _xg_bwd_dkdv(
     firsts_h = (low[None, :] * q_lengths[:, None] + q_offset) // two_n_k[None, :]
     lasts_h = (high[None, :] * q_lengths[:, None] + q_offset) // two_n_k[None, :] - 1
     tile_rows = first_row + tl.arange(0, TILE_H)
-    sees = (
-        nonempty[None, :]
-        & (tile_rows[None, :] >= q_windows[:, None])
-        & (tile_rows[None, :] < q_windows[:, None] + KERNEL_H)
-    )
+    sees = nonempty[None, :] & (tl.abs(tile_rows[None, :] - q_centres[:, None]) <= RADIUS_H)
+    over = sees & _over_the_pole(q_centres[:, None], tile_rows[None, :], K_ROWS, beyond_north, beyond_south, RADIUS_H)
     lowest = tl.min(tl.where(sees, firsts_h, _FAR), axis=1) - 2 * q_lengths
     highest = tl.max(tl.where(sees, lasts_h, -_FAR), axis=1) - 2 * q_lengths
-    whole = highest - lowest + 1 >= q_lengths
+    whole = (highest - lowest + 1 >= q_lengths) | (tl.max(over.to(tl.int32), axis=1) > 0)
     firsts = tl.where(whole, 0, lowest)
     lengths = tl.maximum(tl.where(whole, q_lengths, highest - lowest + 1), 0)
 
@@ -617,7 +646,7 @@ def _xg_bwd_dkdv(
         block = it - _pick(ends - row_blocks, idx, i)
         q_row_start = _pick(q_starts, idx, i)
         n = _pick(q_lengths, idx, i)
-        q_window = _pick(q_windows, idx, i)
+        q_centre = _pick(q_centres, idx, i)
         first = _pick(firsts, idx, i)
         length = _pick(lengths, idx, i)
         t = block * BLOCK_ITER + offs
@@ -633,7 +662,7 @@ def _xg_bwd_dkdv(
         delta = tl.load(DELTA + bh * Q_POINTS + q_tok, mask=q_valid, other=0.0)
         lam = tl.load(LAM + bh * Q_POINTS + q_tok, mask=q_valid, other=0.0)
 
-        row_seen = (k_rows >= q_window) & (k_rows < q_window + KERNEL_H)
+        row_seen = tl.abs(k_rows - q_centre) <= RADIUS_H
         # Matching position of each query in each tile row, repeated for the points of that row.
         if SHIFTED:
             centre_h = _matching_shifted(q_pos[None, :], n, n_k[:, None], _pick(q_shifts, idx, i), shift_h[:, None])
@@ -643,6 +672,7 @@ def _xg_bwd_dkdv(
             tl.broadcast_to(centre_h[:, None, :], (TILE_H, TILE_W, BLOCK_ITER)), (TILE_H * TILE_W, BLOCK_ITER)
         )
         keep = _near_in_row(k_pos[:, None], centre, k_n[:, None], RADIUS_W)
+        keep = keep | _over_the_pole(q_centre, k_rows, K_ROWS, beyond_north, beyond_south, RADIUS_H)[:, None]
         keep = keep & row_seen[:, None] & q_valid[None, :] & k_valid[:, None]
         # Scores laid out keys x queries.
         qk_t = tl.where(keep, tl.dot(k, tl.trans(q), input_precision=DOT_PRECISION), _MASKED)
@@ -684,7 +714,6 @@ class ReducedGridCrossAttentionTriton(torch.autograd.Function):
         assert (
             head_dim >= 16 and head_dim & (head_dim - 1) == 0
         ), f"head_dim must be a power of 2 >= 16, got {head_dim}."
-        assert kernel_size[0] <= key_grid.num_rows, "kernel_size[0] must not exceed the number of key rows."
 
         q, k, v = (_rows_readable(t) for t in (q, k, v))
         o = _point_major(batch, heads, q_points, head_dim, q)
@@ -698,7 +727,7 @@ class ReducedGridCrossAttentionTriton(torch.autograd.Function):
             k_row_starts,
             _shift_table(query_grid.shifts, q.device),
             _shift_table(key_grid.shifts, q.device),
-            cross["window_start"],
+            cross["centre_row"],
             cross["see_first"],
             cross["see_last"],
             *_packed_tiles(query_grid.row_lengths, q.device),
@@ -720,7 +749,19 @@ class ReducedGridCrossAttentionTriton(torch.autograd.Function):
 
         strides = (*_strides(q), *_strides(k), *_strides(v), *_strides(o))
         _xg_fwd[_launch_grid(q_tiles, batch * heads)](
-            q, k, v, o, m, inv_l, *tables, sm_scale, heads, *strides, WIDE=_needs_wide(q, k, v, o), **sizes
+            q,
+            k,
+            v,
+            o,
+            m,
+            inv_l,
+            *tables,
+            sm_scale,
+            heads,
+            *key_grid.rows_beyond,
+            *strides,
+            WIDE=_needs_wide(q, k, v, o),
+            **sizes,
         )
         ctx.save_for_backward(q, k, v, o, m, inv_l)
         ctx.grids = (query_grid, key_grid)
@@ -757,6 +798,7 @@ class ReducedGridCrossAttentionTriton(torch.autograd.Function):
             *ctx.tables,
             ctx.sm_scale,
             heads,
+            *ctx.grids[1].rows_beyond,
             *inputs,
             *_strides(dq),
             WIDE=wide,
@@ -776,6 +818,7 @@ class ReducedGridCrossAttentionTriton(torch.autograd.Function):
             *ctx.tables,
             ctx.sm_scale,
             heads,
+            *ctx.grids[1].rows_beyond,
             *inputs,
             *_strides(dk),
             WIDE=wide,
