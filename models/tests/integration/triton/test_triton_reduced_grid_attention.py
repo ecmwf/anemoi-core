@@ -203,16 +203,29 @@ def test_triton_on_o96_matches_brute_force():
         ]
     )
 
-    first_row = (rows[points] - kernel_size[0] // 2).clamp(0, grid.num_rows - kernel_size[0])
-    key_rows = first_row[:, None] + torch.arange(kernel_size[0], device="cuda")  # (points, rows)
+    # Rows within kernel_size[0] // 2 of the query's row; rows 0-2 from a pole and the query's own row
+    # 0-2 from it, together less than 3, are reached over the pole and taken whole.
+    radius = kernel_size[0] // 2
+    key_rows = rows[points, None] + torch.arange(-radius, radius + 1, device="cuda")  # (points, rows)
+    in_grid = (key_rows >= 0) & (key_rows < grid.num_rows)
+    key_rows = key_rows.clamp(0, grid.num_rows - 1)
+    from_pole = torch.minimum(key_rows, grid.num_rows - 1 - key_rows)
+    own_from_pole = torch.minimum(rows[points], grid.num_rows - 1 - rows[points])[:, None]
+    same_pole = (key_rows < grid.num_rows // 2) == (rows[points, None] < grid.num_rows // 2)
+    whole = same_pole & (from_pole + own_from_pole < radius)
+    widest = max(kernel_size[1], max(grid.row_lengths[:radius]))
+    offsets = torch.arange(widest, device="cuda")
     centre = matching_position(positions[points, None], lengths[rows[points], None], lengths[key_rows])
-    offsets = torch.arange(-(kernel_size[1] // 2), kernel_size[1] // 2 + 1, device="cuda")
-    key_pos = torch.remainder(centre[..., None] + offsets, lengths[key_rows][..., None])
+    first = torch.where(whole, 0, centre - kernel_size[1] // 2)
+    key_pos = torch.remainder(first[..., None] + offsets, lengths[key_rows][..., None])
+    used = in_grid[..., None] & (offsets < torch.where(whole, lengths[key_rows], kernel_size[1])[..., None])
     keys = (starts[key_rows][..., None] + key_pos).reshape(len(points), -1)  # (points, window)
+    used = used.reshape(len(points), -1)
 
     qp = q[0][:, points].float()
     kp, vp = k[0][:, keys].float(), v[0][:, keys].float()
     scores = torch.einsum("hpd,hpwd->hpw", qp, kp) * 64**-0.5
+    scores = scores.masked_fill(~used, float("-inf"))
     expected = torch.einsum("hpw,hpwd->hpd", scores.softmax(-1), vp)
     got = out[0][:, points].float()
     torch.testing.assert_close(got / expected.abs().max(), expected / expected.abs().max(), rtol=2e-2, atol=2e-2)
