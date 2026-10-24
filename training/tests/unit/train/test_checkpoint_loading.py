@@ -30,6 +30,7 @@ from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils import seeding
+from anemoi.training.utils.hyperparameters import INIT_HYPERPARAMETERS
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
@@ -908,16 +909,26 @@ def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pyte
     import anemoi.training.train.train as train_module
 
     sentinel = torch.nn.Linear(2, 2)
-    monkeypatch.setattr(train_module, "instantiate_with_runtime_kwargs", lambda *_args, **_kwargs: sentinel)
+    module_kwargs: dict = {}
+
+    def fake_instantiate(_cfg: object, **kwargs: object) -> torch.nn.Module:
+        module_kwargs.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(train_module, "instantiate_with_runtime_kwargs", fake_instantiate)
 
     cfg = OmegaConf.create({"training": {"method": {"_target_": "unused"}}})
+    data_readers = {"data": SimpleNamespace(data_type="gridded"), "obs": SimpleNamespace(data_type="tabular")}
     trainer = SimpleNamespace(
         config=cfg,
         task=object(),
-        data_indices={"data": DummyIndex()},
-        graph_data=object(),
+        data_indices={"data": DummyIndex(), "obs": DummyIndex()},
         metadata={},
-        datamodule=SimpleNamespace(statistics={}, statistics_tendencies={}),
+        datamodule=SimpleNamespace(
+            statistics={},
+            statistics_tendencies={},
+            ds_train=SimpleNamespace(data_readers=data_readers),
+        ),
         supporting_arrays=object(),
     )
     with warnings.catch_warnings():
@@ -928,6 +939,9 @@ def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pyte
     # SimpleNamespace has no real ``_load_via_checkpoint_pipeline``, so taking it
     # would raise), and ``simplefilter("error")`` proves silence.
     assert result is sentinel
+    # The module gets exactly its ``__init__`` arguments, the data types taken from the data readers.
+    assert set(module_kwargs) == INIT_HYPERPARAMETERS
+    assert module_kwargs["data_types"] == {"data": "gridded", "obs": "tabular"}
 
 
 _LOADERS = "anemoi.training.checkpoint.loading.strategies"
