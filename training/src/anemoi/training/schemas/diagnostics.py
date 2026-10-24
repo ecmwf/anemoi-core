@@ -373,9 +373,8 @@ class CheckpointSchema(BaseModel):
         unknown = sorted(set(names) - INIT_HYPERPARAMETERS)
         if unknown:
             excludable = sorted(OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION)
-            msg = (
-                f"Unknown hyperparameters {unknown} in exclude_hyperparameters. "
-                + (f"Choose from {excludable}." if excludable else "No hyperparameter can be excluded at present.")
+            msg = f"Unknown hyperparameters {unknown} in exclude_hyperparameters. " + (
+                f"Choose from {excludable}." if excludable else "No hyperparameter can be excluded at present."
             )
             raise ValueError(msg)
 
