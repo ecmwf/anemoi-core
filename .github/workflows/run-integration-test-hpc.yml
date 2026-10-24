@@ -15,6 +15,13 @@ on:
       sbatch_options:
         required: true
         type: string
+      coverage:
+        # Only set by callers that measure coverage: makes the Codecov token
+        # available to pytest_cmd as CODECOV_TOKEN. Leave false for timing or
+        # accuracy tests, which must not be traced.
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   run:
@@ -41,6 +48,11 @@ jobs:
             # propagate to the sbatch job); secrets and vars are valid inside this template.
             export MLFLOW_TEST_URL=${{ vars.MLFLOW_TEST_URL }}
             export DATASET_ROOT_PATH=${{ secrets.DATASET_ROOT_PATH }}
+            # Codecov token (only when the caller asks for coverage; empty otherwise).
+            # Tracing is off while the token is written, so it never reaches the log.
+            set +x
+            export CODECOV_TOKEN="${{ inputs.coverage && secrets.CODECOV_UPLOAD_TOKEN || '' }}"
+            set -x
             ${{ inputs.pytest_cmd }}
             deactivate
           sbatch_options: ${{ inputs.sbatch_options }}

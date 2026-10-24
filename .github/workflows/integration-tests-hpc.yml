@@ -127,7 +127,18 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_training_cycle' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: python3 -m pytest -v training/tests/integration/ --ignore=training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL; python3 -m pytest -v models/tests/integration/ --slow; python3 -m pytest -v graphs/tests/integration/
+      # Measures coverage (flag nightly-gpu). Each suite still runs and its exit code is kept (rc),
+      # the finish script always runs, and the job fails if any suite failed.
+      pytest_cmd: >-
+        export COVERAGE_FILE="$PWD/.coverage";
+        rm -f "$COVERAGE_FILE" "$COVERAGE_FILE".*;
+        rc=0;
+        python3 -m pytest -v training/tests/integration/ --ignore=training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL --cov=anemoi.training --cov-config=.coveragerc --cov-append --cov-report= || rc=$?;
+        python3 -m pytest -v models/tests/integration/ --slow --cov=anemoi.models --cov-config=.coveragerc --cov-append --cov-report= || rc=$?;
+        python3 -m pytest -v graphs/tests/integration/ --cov=anemoi.graphs --cov-config=.coveragerc --cov-append --cov-report= || rc=$?;
+        bash .github/scripts/coverage-finish.sh --upload --flag nightly-gpu --sha "$(git rev-parse HEAD)" || true;
+        exit $rc
+      coverage: true
       timeout_minutes: 120
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_training_cycle

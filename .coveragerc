@@ -1,0 +1,22 @@
+# Coverage configuration shared by the pull-request CI (GitHub) and the HPC test runs.
+# Always run pytest from the repository root with --cov-config=.coveragerc.
+# Report only: nothing here (or in the workflows) may fail a build on a coverage value.
+
+[run]
+# Store paths relative to the repository root, so data from runs in different clone locations can be combined.
+relative_files = true
+branch = true
+# One data file per process; merge them with `coverage combine`.
+parallel = true
+# Also measure code running in worker processes (e.g. torch mp.spawn, forked workers, subprocesses).
+# `concurrency = multiprocessing` also counts workers, but its workers ignore the --cov source filter,
+# so test files and other packages leak into the data; `patch = subprocess` keeps the filter.
+patch = subprocess
+# torch_geometric writes generated `*_propagate_*.py` modules to the temp directory; they are not repository code.
+omit = *_propagate_*.py
+
+[report]
+omit = *_propagate_*.py
+exclude_also =
+    if TYPE_CHECKING:
+    raise NotImplementedError
