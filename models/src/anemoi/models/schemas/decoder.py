@@ -14,6 +14,7 @@ from typing import Union
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
+from pydantic import PositiveInt
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
@@ -93,3 +94,20 @@ class PointWiseBackwardMapperSchema(PointWiseMapperComponent):
     "Hidden dimension of the Point-wise decoder. Default to 512."
     initialise_data_extractor_zero: bool = Field(default=False)
     "Initialise the data extractor with zeros. Default to False."
+
+
+class SparseProjectionBackwardMapperSchema(PointWiseMapperComponent):
+    target_: Literal["anemoi.models.layers.mapper.SparseProjectionBackwardMapper"] = Field(..., alias="_target_")
+    "Sparse projection decoder object from anemoi.models.layers.mapper."
+    num_channels: NonNegativeInt = Field(example=512)
+    "Hidden dimension of the sparse projection decoder. Default to 512."
+    sub_graph_edge_attributes: list[str] = Field(..., min_length=1, max_length=1, example=["gauss_weight"])
+    "Single edge attribute used as projection weight."
+    initialise_data_extractor_zero: bool = Field(default=False)
+    "Initialise the data extractor with zeros. Default to False."
+    row_normalize: bool = Field(default=True)
+    "Normalize the projection weights so that each destination node sums to 1. Default to True."
+    num_chunks: PositiveInt = Field(default=1)
+    "Number of chunks used in the sparse projection matmul. Default to 1."
+    autocast: bool = Field(default=False)
+    "Use automatic mixed precision in the sparse projection. Default to False."

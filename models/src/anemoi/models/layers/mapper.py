@@ -24,18 +24,23 @@ from torch_geometric.typing import PairTensor
 
 from anemoi.models.distributed.graph import ensure_sharded
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.graph import sync_tensor
 from anemoi.models.distributed.khop_edges import GraphPartition
 from anemoi.models.distributed.khop_edges import build_graph_partition
 from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.khop_edges import shard_graph_to_local
+from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -1264,6 +1269,310 @@ class PointWiseBackwardMapper(PointWiseMapper):
 
     def post_process(self, x_dst):
         return self.node_data_extractor(x_dst)
+
+
+class SparseProjectionMapper(BaseMapper, ABC):
+    """Base for Sparse projection Mapper from hidden -> data or data -> hidden.
+
+    Maps the source nodes onto the destination nodes with a fixed (non-trainable) sparse
+    projection built from the mapper edges. The only trainable layers are the point-wise
+    embeddings applied in ``pre_process`` (on the source nodes) and ``post_process`` (on the
+    destination nodes), which subclasses place on the side with fewer channels. The
+    destination node features are not used.
+
+    The projection weights are taken from the single edge attribute supplied by the graph
+    provider (``sub_graph_edge_attributes``, e.g. ``["gauss_weight"]``).
+    """
+
+    def __init__(
+        self,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        num_channels: int,
+        edge_dim: int,
+        row_normalize: bool = True,
+        num_chunks: int = 1,
+        autocast: bool = False,
+        cpu_offload: bool = False,
+        gradient_checkpointing: bool = True,
+        layer_kernels: dict | None = None,
+    ):
+        """Initialize SparseProjectionMapper.
+
+        Parameters
+        ----------
+        in_channels_src : int
+            Input channels of the source node
+        in_channels_dst : int
+            Input channels of the destination node (unused)
+        num_channels : int
+            Hidden dimension
+        edge_dim : int
+            Edge feature dimension, must be 1 (the projection weight)
+        row_normalize : bool, optional
+            Normalize the projection weights so that each destination node sums to 1, by default True
+        num_chunks : int, optional
+            Number of chunks used in the sparse projection matmul, by default 1
+        autocast : bool, optional
+            Use automatic mixed precision in the sparse projection, by default False
+        cpu_offload : bool, optional
+            Whether to offload processing to CPU, by default False
+        gradient_checkpointing : bool, optional
+            Whether to use gradient checkpointing, by default True
+        layer_kernels : dict, optional
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+        """
+        assert edge_dim == 1, (
+            f"{self.__class__.__name__} needs exactly one edge attribute as projection weight "
+            f"(set sub_graph_edge_attributes to a single attribute and trainable_size to 0), got edge_dim={edge_dim}."
+        )
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=num_channels,
+            cpu_offload=cpu_offload,
+            gradient_checkpointing=gradient_checkpointing,
+            layer_kernels=layer_kernels,
+        )
+        self.row_normalize = row_normalize
+        self.projector = SparseProjector(autocast=autocast, num_chunks=num_chunks)
+
+    def _build_projection_matrix(
+        self,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        num_src: int,
+        dst_offset: int,
+        num_dst: int,
+        dtype: torch.dtype,
+    ) -> Tensor:
+        """Build the CSR projection matrix ``[num_dst, num_src]`` from dst-sorted edges of the local dst shard."""
+        weights = edge_attr[:, 0].to(dtype)
+        dst = edge_index[1] - dst_offset
+
+        if self.row_normalize:
+            row_sums = torch.zeros(num_dst, dtype=weights.dtype, device=weights.device).index_add_(0, dst, weights)
+            weights = weights / row_sums[dst].clamp_min(torch.finfo(weights.dtype).tiny)
+
+        crow_indices = torch.zeros(num_dst + 1, dtype=torch.long, device=dst.device)
+        crow_indices[1:] = torch.cumsum(torch.bincount(dst, minlength=num_dst), dim=0)
+
+        return torch.sparse_csr_tensor(crow_indices, edge_index[0], weights, size=(num_dst, num_src))
+
+    def mapper_forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_info: BipartiteGraphShardInfo,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        model_comm_group: Optional[ProcessGroup] = None,
+        keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
+    ) -> Tensor:
+        x_src, x_dst = x
+
+        # Ensure src is sharded; dst features are not used, only its shard sizes
+        x_src, shard_sizes_src = ensure_sharded(x_src, 0, shard_info.src_nodes, model_comm_group)
+        shard_sizes_dst = (
+            shard_info.dst_nodes if shard_info.dst_is_sharded() else get_shard_sizes(x_dst, 0, model_comm_group)
+        )
+        num_src, num_dst = sum(shard_sizes_src), sum(shard_sizes_dst)
+
+        if not shard_info.edges_are_sharded():
+            # Edges not pre-sharded, keep the edges of the local dst nodes
+            edge_attr, edge_index, _ = shard_edges_1hop(
+                edge_attr,
+                edge_index,
+                num_src,
+                num_dst,
+                model_comm_group,
+                edges_are_dst_sorted=edges_are_dst_sorted,
+            )
+        if not edges_are_dst_sorted:
+            edge_index, perm = sort_edge_index_by_dst(edge_index, max_value=num_dst)
+            edge_attr = edge_attr[perm]
+
+        x_src = self.pre_process((x_src, x_dst))
+
+        rank = model_comm_group.rank() if model_is_distributed(model_comm_group) else 0
+        projection_matrix = self._build_projection_matrix(
+            edge_attr,
+            edge_index,
+            num_src=num_src,
+            dst_offset=sum(shard_sizes_dst[:rank]),
+            num_dst=shard_sizes_dst[rank],
+            dtype=x_src.dtype,
+        )
+
+        x_src = sync_tensor(x_src, 0, shard_sizes_src, model_comm_group)  # full src grid
+        x_dst = self.projector(x_src, projection_matrix)
+        x_dst = self.post_process(x_dst)
+
+        if not keep_x_dst_sharded:
+            x_dst = gather_tensor(x_dst, 0, shard_sizes_dst, model_comm_group)
+
+        return x_dst
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_info: BipartiteGraphShardInfo,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        model_comm_group: Optional[ProcessGroup] = None,
+        keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
+        **kwargs,
+    ) -> Tensor:
+        return maybe_checkpoint(
+            self.mapper_forward,
+            self.gradient_checkpointing,
+            x=x,
+            batch_size=batch_size,
+            shard_info=shard_info,
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            model_comm_group=model_comm_group,
+            keep_x_dst_sharded=keep_x_dst_sharded,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
+
+
+class SparseProjectionForwardMapper(SparseProjectionMapper):
+    """Sparse projection Mapper from data -> hidden.
+
+    Downsamples the source nodes onto the destination nodes, followed by a single linear
+    layer into the hidden space. Both operations are linear, so the projection is applied
+    before the embedding: this is equivalent to embedding first when the projection rows sum
+    to one (``row_normalize=True``), and much cheaper since ``in_channels_src`` is usually
+    smaller than the hidden dimension.
+    """
+
+    def __init__(
+        self,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        num_channels: int,
+        edge_dim: int,
+        row_normalize: bool = True,
+        num_chunks: int = 1,
+        autocast: bool = False,
+        cpu_offload: bool = False,
+        gradient_checkpointing: bool = True,
+        layer_kernels: dict | None = None,
+        **kwargs,
+    ):
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            num_channels=num_channels,
+            edge_dim=edge_dim,
+            row_normalize=row_normalize,
+            num_chunks=num_chunks,
+            autocast=autocast,
+            cpu_offload=cpu_offload,
+            gradient_checkpointing=gradient_checkpointing,
+            layer_kernels=layer_kernels,
+        )
+        self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
+
+    def pre_process(self, x):
+        x_src, x_dst = x
+        return x_src
+
+    def post_process(self, x_dst):
+        return self.emb_nodes_src(x_dst)
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_info: BipartiteGraphShardInfo,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        model_comm_group: Optional[ProcessGroup] = None,
+        keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
+        **kwargs,
+    ) -> PairTensor:
+        x_dst = super().forward(
+            x,
+            batch_size,
+            shard_info,
+            edge_attr,
+            edge_index,
+            model_comm_group,
+            keep_x_dst_sharded,
+            edges_are_dst_sorted,
+            **kwargs,
+        )
+        return x[0], x_dst
+
+
+class SparseProjectionBackwardMapper(SparseProjectionMapper):
+    """Sparse projection Mapper from hidden -> data.
+
+    Extracts the output channels on the source nodes with a LayerNorm and a single linear
+    layer, then upsamples them onto the destination nodes. Extracting before projecting is
+    equivalent to projecting the linear part afterwards when the projection rows sum to one
+    (``row_normalize=True``), and much cheaper since ``out_channels_dst`` is usually smaller
+    than the hidden dimension and the destination grid is the larger one.
+    """
+
+    def __init__(
+        self,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        num_channels: int,
+        out_channels_dst: int,
+        edge_dim: int,
+        initialise_data_extractor_zero: bool = False,
+        row_normalize: bool = True,
+        num_chunks: int = 1,
+        autocast: bool = False,
+        cpu_offload: bool = False,
+        gradient_checkpointing: bool = True,
+        layer_kernels: dict | None = None,
+        **kwargs,
+    ):
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            num_channels=num_channels,
+            edge_dim=edge_dim,
+            row_normalize=row_normalize,
+            num_chunks=num_chunks,
+            autocast=autocast,
+            cpu_offload=cpu_offload,
+            gradient_checkpointing=gradient_checkpointing,
+            layer_kernels=layer_kernels,
+        )
+        self.out_channels_dst = out_channels_dst
+
+        LayerNorm = self.layer_factory.LayerNorm
+        Linear = self.layer_factory.Linear
+        self.node_data_extractor = nn.Sequential(
+            LayerNorm(normalized_shape=self.in_channels_src),
+            Linear(self.in_channels_src, self.out_channels_dst),
+        )
+        if initialise_data_extractor_zero:
+            for module in self.node_data_extractor.modules():
+                if isinstance(module, nn.Linear):
+                    nn.init.constant_(module.weight, 0.0)
+                    if module.bias is not None:
+                        nn.init.constant_(module.bias, 0.0)
+
+    def pre_process(self, x):
+        x_src, x_dst = x
+        return self.node_data_extractor(x_src)
+
+    def post_process(self, x_dst):
+        return x_dst
 
 
 class TransformerBaseMapper(BaseMapper, ABC):

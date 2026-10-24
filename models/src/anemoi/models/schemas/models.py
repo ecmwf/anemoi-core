@@ -36,10 +36,12 @@ from .bounding import BoundingSchema
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
 from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
+from .decoder import SparseProjectionBackwardMapperSchema  # noqa: TC001
 from .decoder import TransformerDecoderSchema  # noqa: TC001
 from .encoder import GNNEncoderSchema  # noqa: TC001
 from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
 from .encoder import PointWiseForwardMapperSchema  # noqa: TC001
+from .encoder import SparseProjectionForwardMapperSchema  # noqa: TC001
 from .encoder import TransformerEncoderSchema  # noqa: TC001
 from .processor import ADRProcessorSchema  # noqa: TC001
 from .processor import FlowersProcessorSchema  # noqa: TC001
@@ -171,6 +173,7 @@ class EncodersSchema(BaseModel):
         GraphTransformerEncoderSchema,
         TransformerEncoderSchema,
         PointWiseForwardMapperSchema,
+        SparseProjectionForwardMapperSchema,
     ] = Field(
         ...,
         discriminator="target_",
@@ -191,6 +194,7 @@ class DecodersSchema(BaseModel):
         GraphTransformerDecoderSchema,
         TransformerDecoderSchema,
         PointWiseBackwardMapperSchema,
+        SparseProjectionBackwardMapperSchema,
     ] = Field(
         ...,
         discriminator="target_",
@@ -352,6 +356,7 @@ class HierarchicalModelSchema(BaseModelSchema):
         GraphTransformerEncoderSchema,
         TransformerEncoderSchema,
         PointWiseForwardMapperSchema,
+        SparseProjectionForwardMapperSchema,
     ] = Field(
         ...,
         discriminator="target_",
@@ -362,6 +367,7 @@ class HierarchicalModelSchema(BaseModelSchema):
         GraphTransformerDecoderSchema,
         TransformerDecoderSchema,
         PointWiseBackwardMapperSchema,
+        SparseProjectionBackwardMapperSchema,
     ] = Field(
         ...,
         discriminator="target_",
