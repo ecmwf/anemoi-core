@@ -47,8 +47,8 @@ implement a new one by overriding the :meth:`_step` method.
 
 -  ``config``: A structured configuration (usually a dataclass) defining
    model architecture and training settings.
--  ``graph_data``: A :class:`~torch_geometric.data.HeteroData` object
-   with static node and edge features.
+-  ``data_types``: The kind of data of each dataset (``"gridded"`` or
+   ``"tabular"``). The model builds its graph from the config.
 -  ``statistics`` / ``statistics_tendencies``: Mean and std dev for
    normalization of variables.
 -  ``data_indices``: Index mappings between variable names and tensor
