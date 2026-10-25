@@ -531,3 +531,26 @@ def test_enc_proc_dec_passes_decoder_forcing_to_boundings(sp_statistics: dict) -
     )
     with pytest.raises(RuntimeError, match="decoder"):
         AnemoiModelEncProcDec._assemble_output(fake, x_flat, x_skip, batch, ens, torch.float32, "data")
+
+
+def test_humidity_levels_integrates_dry_above(statistics: dict) -> None:
+    # q only at 1000/850: the 850-500 layer uses T at 500 with q = 0 there, and q_500 is never read.
+    n2i = {k: v for k, v in NAME_TO_INDEX.items() if k != "q_500"}
+    layer = _layer(statistics, humidity_levels=[1000, 850], name_to_index=n2i)
+    full = _layer(statistics)
+    t = {1000: 285.0, 850: 275.0, 500: 255.0}
+    phys = {f"t_{lvl}": torch.tensor(v) for lvl, v in t.items()}
+    phys |= {"q_1000": torch.tensor(8e-3), "q_850": torch.tensor(5e-3), "q_500": torch.tensor(0.0)}
+    phys["z_1000"] = torch.tensor(300.0)
+    x = _make_x(statistics, phys, (3,))
+    torch.testing.assert_close(layer(x.clone()), full(x.clone()), rtol=0, atol=1e-6)
+    x[..., NAME_TO_INDEX["q_500"]] = 5.0  # ignored
+    torch.testing.assert_close(
+        layer(x.clone())[..., layer.data_index], full(_make_x(statistics, phys, (3,)))[..., full.data_index]
+    )
+    assert "q_500" not in layer.normalizer_methods
+    with pytest.raises(ValueError, match="humidity_levels"):
+        _layer(statistics, humidity_levels=[1000, 700])
+    with pytest.raises(ValueError, match="humidity_levels"):
+        _layer(statistics, humidity_levels=[])
+    assert "q_position" not in layer.state_dict()

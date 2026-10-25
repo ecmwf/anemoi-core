@@ -231,6 +231,8 @@ class HydrostaticGeopotentialSchema(BaseModel):
     geopotential_prefix: str = "z"
     temperature_prefix: str = "t"
     humidity_prefix: str = "q"
+    humidity_levels: Optional[list[PositiveInt]] = None
+    "Levels that read q (default all); the others are integrated dry (stratospheric levels without humidity data)."
     geopotential_units: Literal["m2/s2", "m"] = "m2/s2"
     msl_anchor: Optional[str] = None
     "Mean-sea-level pressure variable to diagnose the anchor from; None keeps z_<levels[0]> as a free anchor."
@@ -254,6 +256,10 @@ class HydrostaticGeopotentialSchema(BaseModel):
         assert all(
             a > b for a, b in zip(self.levels[:-1], self.levels[1:])
         ), f"levels must be strictly decreasing, got {self.levels}"
+        if self.humidity_levels is not None:
+            assert self.humidity_levels and set(self.humidity_levels) <= set(
+                self.levels
+            ), f"humidity_levels must be a non-empty subset of levels, got {self.humidity_levels}"
         prefixes = (self.geopotential_prefix, self.temperature_prefix, self.humidity_prefix)
         assert self.msl_anchor is None or self.sp_anchor is None, "msl_anchor and sp_anchor are exclusive"
         if self.msl_anchor is not None:

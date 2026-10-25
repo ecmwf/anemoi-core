@@ -494,6 +494,7 @@ class HydrostaticGeopotential(BaseBounding):
         geopotential_prefix: str = "z",
         temperature_prefix: str = "t",
         humidity_prefix: str = "q",
+        humidity_levels: Optional[list[int]] = None,
         geopotential_units: str = "m2/s2",
         msl_anchor: Optional[str] = None,
         msl_units: str = "Pa",
@@ -522,6 +523,10 @@ class HydrostaticGeopotential(BaseBounding):
             Normalisation method per prefix, e.g. ``{"z": "min-max", "t": "mean-std", "q": "mean-std"}``.
         geopotential_prefix, temperature_prefix, humidity_prefix : str
             Variable-name prefixes of the ladder.
+        humidity_levels : list[int], optional
+            Ladder levels that read ``q``; the others are integrated dry (``T_v = T``). Defaults to
+            every level. Meant for stratospheric levels without humidity data, where ``q`` ~ 3e-6
+            changes ``T_v`` by under 0.001%.
         geopotential_units : {"m2/s2", "m"}
             Units of the ``z`` variables (geopotential or geopotential height).
         msl_anchor : str, optional
@@ -587,6 +592,10 @@ class HydrostaticGeopotential(BaseBounding):
         self.statistics = statistics
         self.name_to_index_stats = name_to_index_stats
         self.levels = levels
+        humidity_levels = levels if humidity_levels is None else [int(level) for level in humidity_levels]
+        if not humidity_levels or set(humidity_levels) - set(levels):
+            raise ValueError(f"humidity_levels must be a non-empty subset of levels {levels}, got {humidity_levels}")
+        humidity_levels = [level for level in levels if level in humidity_levels]
         self.geopotential_units = geopotential_units
         self.check_finite = check_finite
         self.virtual_temp_coeff = VIRTUAL_TEMP_COEFF
@@ -602,7 +611,7 @@ class HydrostaticGeopotential(BaseBounding):
         self.first_derived = 0 if (msl_anchor is not None or sp_anchor is not None) else 1
 
         names = {
-            key: [f"{prefix}_{level}" for level in levels]
+            key: [f"{prefix}_{level}" for level in (humidity_levels if key == "q" else levels)]
             for key, prefix in prefixes.items()
             if key not in ("msl", "sp")
         }
@@ -645,6 +654,12 @@ class HydrostaticGeopotential(BaseBounding):
                 raise ValueError(f"HydrostaticGeopotential: degenerate statistics for {group}")
             self.register_buffer(f"{key}_mul", mul_t, persistent=True)
             self.register_buffer(f"{key}_add", torch.tensor(add, dtype=torch.float32), persistent=True)
+        self.register_buffer(
+            "q_position",
+            torch.tensor([levels.index(level) for level in humidity_levels], dtype=torch.long),
+            persistent=False,  # derived from config; keeps older checkpoints loadable
+        )
+        self.n_levels = len(levels)
         p = torch.tensor(levels, dtype=torch.float64)
         self.register_buffer("layer_factor", (R_D * torch.log(p[:-1] / p[1:])).to(torch.float32), persistent=True)
         self.data_index = self.z_index[self.first_derived :]
@@ -719,7 +734,11 @@ class HydrostaticGeopotential(BaseBounding):
     def integrate(self, x: torch.Tensor, decoder_forcing: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Return the hydrostatically integrated geopotential (m^2 s^-2) at every ladder level, ``(..., L)``."""
         t = self._physical(x, "t")
-        q = self._physical(x, "q").clamp_min(0.0)
+        q_read = self._physical(x, "q").clamp_min(0.0)
+        if q_read.shape[-1] == self.n_levels:
+            q = q_read
+        else:  # dry above the humidity levels
+            q = q_read.new_zeros((*q_read.shape[:-1], self.n_levels)).index_copy(-1, self.q_position, q_read)
         tv = t * (1.0 + self.virtual_temp_coeff * q)
         if self.sp_anchor is not None:
             dphi = 0.5 * (tv[..., :-1] + tv[..., 1:]) * self.layer_factor
