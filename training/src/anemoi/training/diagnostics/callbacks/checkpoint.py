@@ -15,7 +15,6 @@ from pathlib import Path
 
 import pytorch_lightning as pl
 import torch
-import torchinfo
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 from pytorch_lightning.utilities.types import STEP_OUTPUT
@@ -67,14 +66,6 @@ class AnemoiCheckpoint(ModelCheckpoint):
             "model": model.__class__.__name__,
             "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
             "total_parameters": sum(p.numel() for p in model.parameters()),
-            "summary": repr(
-                torchinfo.summary(
-                    model,
-                    depth=50,
-                    verbose=0,
-                    row_settings=["var_names"],
-                ),
-            ),
         }
 
         return self._model_metadata
