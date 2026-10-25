@@ -168,6 +168,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         ensemble_size: int,
         dtype: torch.dtype,
         dataset_name: str,
+        decoder_forcing: Optional[torch.Tensor] = None,
     ):
         x_out = (
             einops.rearrange(
@@ -191,7 +192,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
-            x_out = bounding(x_out)
+            if getattr(bounding, "requires_decoder_forcing", False):
+                # (batch, time, ensemble, grid, channels), aligned with x_out
+                x_out = bounding(x_out, decoder_forcing=decoder_forcing)
+            else:
+                x_out = bounding(x_out)
         return x_out
 
     def _assert_valid_sharding(
@@ -372,8 +377,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
             x_dst = x_data_latent_dict[dataset_name]
+            dataset_decoder_forcing = None
             if decoder_forcings is not None and dataset_name in decoder_forcings:
                 df = decoder_forcings[dataset_name]
+                dataset_decoder_forcing = df
                 assert (
                     df.shape[1] == self.n_step_output
                 ), f"decoder_forcings time dim ({df.shape[1]}) must match n_step_output ({self.n_step_output})."
@@ -398,7 +405,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
-                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype, dataset_name
+                x_out,
+                x_skip_dict[dataset_name],
+                batch_size,
+                ensemble_size,
+                x[dataset_name].dtype,
+                dataset_name,
+                decoder_forcing=dataset_decoder_forcing,
             )
 
         return x_out_dict

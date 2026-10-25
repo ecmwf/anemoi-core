@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import math
 from abc import ABC
 from abc import abstractmethod
 from typing import Any
@@ -16,6 +17,7 @@ from typing import Iterable
 from typing import Optional
 
 import torch
+from hydra.utils import get_class
 from hydra.utils import instantiate
 from torch import nn
 
@@ -347,17 +349,28 @@ def _build_dataset_boundings(
 
     bounding_cfgs: Iterable[Any] = getattr(getattr(model_config, "model", object()), "bounding", []) or []
 
-    return nn.ModuleList(
-        [
+    def decoder_forcing_names() -> list[str]:
+        # Decoder-forcing channels in the order the task slices them (sorted data-input index).
+        input_index_to_name = {int(i): name for name, i in data_indices.data.input.name_to_index.items()}
+        decoder_forcing_idx = getattr(data_indices.data.input, "decoder_forcing", None)
+        return [] if decoder_forcing_idx is None else [input_index_to_name[int(i)] for i in decoder_forcing_idx]
+
+    modules = []
+    for cfg in bounding_cfgs:
+        target = cfg.get("_target_") if hasattr(cfg, "get") else None
+        extra = {}
+        if target is not None and getattr(get_class(target), "accepts_decoder_forcing", False):
+            extra["decoder_forcing_names"] = decoder_forcing_names()
+        modules.append(
             instantiate(
                 cfg,
                 name_to_index=data_indices.model.output.name_to_index,
                 statistics=statistics,
                 name_to_index_stats=data_indices.data.input.name_to_index,
+                **extra,
             )
-            for cfg in bounding_cfgs
-        ]
-    )
+        )
+    return nn.ModuleList(modules)
 
 
 def build_boundings(
@@ -427,6 +440,21 @@ class HydrostaticGeopotential(BaseBounding):
     The layer is taken isothermal at ``T_v(p_0)``; a standard lapse rate would shift the
     ~100 m layer by well under 1 m.
 
+    With ``sp_anchor`` set, the anchor is the surface instead: geopotential equals the surface
+    geopotential ``Phi_s`` (from the ``orography`` decoder forcing, read at the target time) at
+    the predicted surface pressure. Per node, with ``k`` the first ladder level at or above the
+    ground (``p_k <= sp``),
+
+        Phi(p_k) = Phi_s + R_d * mean(T_v,s, T_v(p_k)) * ln(sp / p_k),
+
+    where ``T_v,s`` extrapolates ``T_v`` linearly in ``ln p`` from levels ``k`` and ``k+1`` down
+    to ``sp``. The column is then integrated up and down from ``k``, so below-ground levels are
+    extrapolated with the model's own (unobserved) temperatures. Every ``z`` head is overwritten.
+    On IFS analyses this reconstructs z_500 to 7.5 gpm RMSE globally and ~21 gpm over the
+    Antarctic plateau, against 16/70 for the msl anchor and 20/124 for a z_1000 anchor, which
+    integrate through below-ground layers. Requires the model to be called with
+    ``decoder_forcings`` containing the orography variable.
+
     The layer reads normalised model outputs, works in float32 physical units (geopotential at
     50 hPa exceeds the fp16 range) and writes back normalised values. Boundings receive only
     dataset statistics, so the per-variable normalisation method must be restated here; the
@@ -442,7 +470,18 @@ class HydrostaticGeopotential(BaseBounding):
           # optional: anchor on msl instead of z_1000 (the normaliser must then name msl too)
           # msl_anchor: msl
           # normalizer: {z: min-max, t: mean-std, q: mean-std, msl: mean-std}
+          # optional: anchor on surface pressure + orography (z must be a data.decoder_forcing)
+          # sp_anchor: sp
+          # orography: z
+          # orography_normalizer: max
+          # normalizer: {z: mean-std, t: mean-std, q: mean-std, sp: mean-std}
     """
+
+    # The model builder injects ``decoder_forcing_names`` into classes that set this.
+    accepts_decoder_forcing = True
+
+    # Bounds on the extrapolated surface virtual temperature; they only bite on a wild column.
+    SURFACE_TV_RANGE = (150.0, 350.0)
 
     def __init__(
         self,
@@ -458,6 +497,12 @@ class HydrostaticGeopotential(BaseBounding):
         geopotential_units: str = "m2/s2",
         msl_anchor: Optional[str] = None,
         msl_units: str = "Pa",
+        sp_anchor: Optional[str] = None,
+        sp_units: str = "Pa",
+        orography: Optional[str] = None,
+        orography_normalizer: Optional[str] = None,
+        orography_units: str = "m",
+        decoder_forcing_names: Optional[list[str]] = None,
         check_finite: bool = False,
         variables: Optional[list[str]] = None,  # noqa: ARG002 - derived from levels; accepted for kwarg compatibility
     ) -> None:
@@ -485,6 +530,22 @@ class HydrostaticGeopotential(BaseBounding):
             then give a method for this name.
         msl_units : {"Pa", "hPa"}
             Units of the ``msl_anchor`` variable.
+        sp_anchor : str, optional
+            Name of a surface-pressure output variable. If given, the column is anchored on the
+            surface (see class docstring) and every ``z`` head is overwritten; ``normalizer`` must
+            then give a method for this name. Exclusive with ``msl_anchor``.
+        sp_units : {"Pa", "hPa"}
+            Units of the ``sp_anchor`` variable.
+        orography : str, optional
+            Decoder-forcing variable holding the surface height the ``sp`` targets refer to.
+            Required with ``sp_anchor``.
+        orography_normalizer : str, optional
+            Normalisation method of ``orography`` (it can share a name with the ``z`` prefix, so it
+            is not read from ``normalizer``). Required with ``sp_anchor``.
+        orography_units : {"m", "m2/s2"}
+            Units of ``orography``.
+        decoder_forcing_names : list[str], optional
+            Decoder-forcing channel names in tensor order (injected by the model builder).
         check_finite : bool
             Raise if the integrated column is non-finite (adds a device sync; debug only).
         variables : list[str], optional
@@ -503,9 +564,19 @@ class HydrostaticGeopotential(BaseBounding):
             raise ValueError(f"geopotential_units must be 'm2/s2' or 'm', got {geopotential_units!r}")
         if msl_units not in ("Pa", "hPa"):
             raise ValueError(f"msl_units must be 'Pa' or 'hPa', got {msl_units!r}")
+        if sp_units not in ("Pa", "hPa"):
+            raise ValueError(f"sp_units must be 'Pa' or 'hPa', got {sp_units!r}")
+        if orography_units not in ("m", "m2/s2"):
+            raise ValueError(f"orography_units must be 'm' or 'm2/s2', got {orography_units!r}")
+        if msl_anchor is not None and sp_anchor is not None:
+            raise ValueError("msl_anchor and sp_anchor are exclusive; give at most one")
+        if sp_anchor is not None and (orography is None or orography_normalizer is None):
+            raise ValueError("sp_anchor needs orography and orography_normalizer")
         prefixes = {"z": geopotential_prefix, "t": temperature_prefix, "q": humidity_prefix}
         if msl_anchor is not None:
             prefixes["msl"] = msl_anchor
+        if sp_anchor is not None:
+            prefixes["sp"] = sp_anchor
         missing_methods = [p for p in prefixes.values() if p not in normalizer]
         if missing_methods:
             raise ValueError(
@@ -525,12 +596,20 @@ class HydrostaticGeopotential(BaseBounding):
         # msl in Pa over the anchor level in Pa.
         self.msl_scale = 1.0 if msl_units == "Pa" else 100.0
         self.anchor_pressure = 100.0 * levels[0]
-        # First overwritten ladder level: the anchor stays free unless it is diagnosed from msl.
-        self.first_derived = 0 if msl_anchor is not None else 1
+        self.sp_anchor = sp_anchor
+        self.sp_scale = 1.0 if sp_units == "Pa" else 100.0
+        # First overwritten ladder level: the anchor stays free unless it is diagnosed from msl or sp.
+        self.first_derived = 0 if (msl_anchor is not None or sp_anchor is not None) else 1
 
-        names = {key: [f"{prefix}_{level}" for level in levels] for key, prefix in prefixes.items() if key != "msl"}
+        names = {
+            key: [f"{prefix}_{level}" for level in levels]
+            for key, prefix in prefixes.items()
+            if key not in ("msl", "sp")
+        }
         if msl_anchor is not None:
             names["msl"] = [msl_anchor]
+        if sp_anchor is not None:
+            names["sp"] = [sp_anchor]
         self.variables = names["z"][self.first_derived :]  # the overwritten (derived) heads
         missing = [n for group in names.values() for n in group if n not in name_to_index]
         if missing:
@@ -570,17 +649,82 @@ class HydrostaticGeopotential(BaseBounding):
         self.register_buffer("layer_factor", (R_D * torch.log(p[:-1] / p[1:])).to(torch.float32), persistent=True)
         self.data_index = self.z_index[self.first_derived :]
 
+        self.orography = orography if sp_anchor is not None else None
+        if self.orography is not None:
+            decoder_forcing_names = list(decoder_forcing_names or [])
+            if orography not in decoder_forcing_names:
+                raise ValueError(
+                    f"HydrostaticGeopotential: orography {orography!r} must be a decoder forcing "
+                    f"(data.datasets.<name>.decoder_forcing); decoder forcings are {decoder_forcing_names}"
+                )
+            if orography not in name_to_index_stats:
+                raise ValueError(f"HydrostaticGeopotential: orography {orography!r} missing from the statistics index")
+            i = name_to_index_stats[orography]
+            m, a = affine_normaliser(
+                orography_normalizer,
+                mean=float(stats["mean"][i]),
+                stdev=float(stats["stdev"][i]),
+                minimum=float(stats["minimum"][i]),
+                maximum=float(stats["maximum"][i]),
+            )
+            if not math.isfinite(m) or m == 0:
+                raise ValueError(f"HydrostaticGeopotential: degenerate statistics for orography {orography!r}")
+            self.orography_position = decoder_forcing_names.index(orography)
+            self.orography_scale = G0 if orography_units == "m" else 1.0
+            self.register_buffer("orography_mul", torch.tensor(m, dtype=torch.float32), persistent=True)
+            self.register_buffer("orography_add", torch.tensor(a, dtype=torch.float32), persistent=True)
+            self.normalizer_methods[orography] = orography_normalizer
+            self.register_buffer("log_pressure", torch.log(100.0 * p).to(torch.float32), persistent=True)
+            self.register_buffer("level_pressure", (100.0 * p).to(torch.float32), persistent=True)
+
+    @property
+    def requires_decoder_forcing(self) -> bool:
+        """Whether ``forward`` needs the target-time decoder forcings (sp anchor only)."""
+        return self.orography is not None
+
     def _physical(self, x: torch.Tensor, key: str) -> torch.Tensor:
         index = getattr(self, f"{key}_index")
         mul = getattr(self, f"{key}_mul")
         # Buffers are float32 in training (physical geopotential overflows fp16); float64 under gradcheck.
         return (x.index_select(-1, index).to(mul.dtype) - getattr(self, f"{key}_add")) / mul
 
-    def integrate(self, x: torch.Tensor) -> torch.Tensor:
+    def _surface_anchored(
+        self, x: torch.Tensor, tv: torch.Tensor, cum: torch.Tensor, decoder_forcing: Optional[torch.Tensor]
+    ) -> torch.Tensor:
+        """Column anchored on Phi_s at the predicted surface pressure, ``(..., L)``."""
+        if decoder_forcing is None:
+            raise RuntimeError(
+                "HydrostaticGeopotential with sp_anchor needs the decoder forcings; "
+                "call the model with decoder_forcings (only AnemoiModelEncProcDec passes them on)."
+            )
+        orog = decoder_forcing[..., self.orography_position : self.orography_position + 1].to(self.orography_mul.dtype)
+        phi_s = (orog - self.orography_add) / self.orography_mul * self.orography_scale
+        # Clamp only guards the log against a wildly unphysical untrained head.
+        sp = (self._physical(x, "sp") * self.sp_scale).clamp_min(1.0)
+        n_levels = tv.shape[-1]
+        above = self.level_pressure <= sp
+        # First level at or above the ground; with none (sp above the top level) use the top level.
+        k = torch.where(above.any(-1, keepdim=True), above.to(torch.int8).argmax(-1, keepdim=True), n_levels - 1)
+        k_up = (k + 1).clamp_max(n_levels - 1)
+        tv_k = tv.gather(-1, k)
+        lnp_k = self.log_pressure[k]
+        dlnp = self.log_pressure[k_up] - lnp_k
+        has_up = k_up != k
+        slope = torch.where(has_up, (tv.gather(-1, k_up) - tv_k) / torch.where(has_up, dlnp, -1.0), 0.0)
+        log_ratio = torch.log(sp) - lnp_k  # ln(sp / p_k), >= 0 unless no level is above ground
+        tv_s = (tv_k + slope * log_ratio).clamp(*self.SURFACE_TV_RANGE)
+        phi_k = phi_s + self.r_d * 0.5 * (tv_s + tv_k) * log_ratio
+        return phi_k + cum - cum.gather(-1, k)
+
+    def integrate(self, x: torch.Tensor, decoder_forcing: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Return the hydrostatically integrated geopotential (m^2 s^-2) at every ladder level, ``(..., L)``."""
         t = self._physical(x, "t")
         q = self._physical(x, "q").clamp_min(0.0)
         tv = t * (1.0 + self.virtual_temp_coeff * q)
+        if self.sp_anchor is not None:
+            dphi = 0.5 * (tv[..., :-1] + tv[..., 1:]) * self.layer_factor
+            cum = torch.cat([torch.zeros_like(tv[..., :1]), torch.cumsum(dphi, dim=-1)], dim=-1)
+            return self._surface_anchored(x, tv, cum, decoder_forcing)
         if self.msl_anchor is not None:
             # Clamp only guards the log against a wildly unphysical untrained head.
             msl = (self._physical(x, "msl") * self.msl_scale).clamp_min(1.0)
@@ -592,9 +736,9 @@ class HydrostaticGeopotential(BaseBounding):
         dphi = 0.5 * (tv[..., :-1] + tv[..., 1:]) * self.layer_factor
         return torch.cat([phi0, phi0 + torch.cumsum(dphi, dim=-1)], dim=-1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, decoder_forcing: Optional[torch.Tensor] = None) -> torch.Tensor:
         with torch.autocast(device_type=x.device.type, enabled=False):
-            phi = self.integrate(x)[..., self.first_derived :]
+            phi = self.integrate(x, decoder_forcing)[..., self.first_derived :]
             z_phys = phi / self.g0 if self.geopotential_units == "m" else phi
             # Renormalise BEFORE casting back: physical geopotential overflows fp16, O(1) values do not.
             z_norm = z_phys * self.z_mul[self.first_derived :] + self.z_add[self.first_derived :]

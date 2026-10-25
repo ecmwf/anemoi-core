@@ -307,3 +307,227 @@ def test_msl_anchor_contract(statistics: dict) -> None:
     n2i = {k: v for k, v in NAME_TO_INDEX.items() if k != "msl"}
     with pytest.raises(ValueError, match="msl"):
         _layer(statistics, msl_anchor="msl", normalizer=NORMALIZER_MSL, name_to_index=n2i)
+
+
+# ----------------------------------------------------------------------------- sp anchor
+# The orography forcing is deliberately named "z", like the geopotential prefix (the latw configs
+# rename synop_z to z), so the separate orography_normalizer is exercised.
+SP_NAME_TO_INDEX = NAME_TO_INDEX | {"sp": len(NAME_TO_INDEX)}
+SP_STATS_NAMES = NAMES + ["sp", "z", "lsm"]
+SP_NAME_TO_INDEX_STATS = {n: i for i, n in enumerate(reversed(SP_STATS_NAMES))}
+DECODER_FORCING_NAMES = ["lsm", "z"]  # tensor order; orography is the second channel
+NORMALIZER_SP = NORMALIZER | {"sp": "mean-std"}
+OROG_MAX = 6000.0
+
+
+@pytest.fixture
+def sp_statistics(statistics: dict) -> dict:
+    n = len(SP_STATS_NAMES)
+    out = {k: np.zeros(n) for k in statistics}
+    out["stdev"][:] = 1.0
+    out["maximum"][:] = 1.0
+    for name, i in SP_NAME_TO_INDEX_STATS.items():
+        if name in NAME_TO_INDEX_STATS:
+            for k in out:
+                out[k][i] = statistics[k][NAME_TO_INDEX_STATS[name]]
+        elif name == "sp":
+            out["mean"][i], out["stdev"][i] = 96000.0, 9000.0
+        elif name == "z":
+            out["maximum"][i] = OROG_MAX
+    return out
+
+
+def _sp_layer(sp_statistics: dict, **kwargs) -> HydrostaticGeopotential:
+    defaults = {
+        "levels": LEVELS,
+        "name_to_index": SP_NAME_TO_INDEX,
+        "statistics": sp_statistics,
+        "name_to_index_stats": SP_NAME_TO_INDEX_STATS,
+        "normalizer": NORMALIZER_SP,
+        "sp_anchor": "sp",
+        "orography": "z",
+        "orography_normalizer": "max",
+        "decoder_forcing_names": DECODER_FORCING_NAMES,
+    }
+    defaults.update(kwargs)
+    return HydrostaticGeopotential(**defaults)
+
+
+def _sp_affine(stats: dict, name: str) -> tuple[float, float]:
+    i = SP_NAME_TO_INDEX_STATS[name]
+    if name.startswith("z_"):
+        span = stats["maximum"][i] - stats["minimum"][i]
+        return 1.0 / span, -stats["minimum"][i] / span
+    return 1.0 / stats["stdev"][i], -stats["mean"][i] / stats["stdev"][i]
+
+
+def _sp_inputs(stats: dict, phys: dict, orog_m: torch.Tensor, shape: tuple) -> tuple[torch.Tensor, torch.Tensor]:
+    x = torch.full((*shape, len(SP_NAME_TO_INDEX)), 0.3, dtype=torch.float64)
+    for name, idx in SP_NAME_TO_INDEX.items():
+        if name in phys:
+            mul, add = _sp_affine(stats, name)
+            x[..., idx] = phys[name] * mul + add
+    df = torch.full((*shape, len(DECODER_FORCING_NAMES)), 0.7, dtype=torch.float64)
+    df[..., DECODER_FORCING_NAMES.index("z")] = orog_m / OROG_MAX
+    return x.float(), df.float()
+
+
+def _sp_read(stats: dict, x: torch.Tensor, name: str) -> torch.Tensor:
+    mul, add = _sp_affine(stats, name)
+    return (x[..., SP_NAME_TO_INDEX[name]].double() - add) / mul
+
+
+def test_sp_anchor_isothermal_column_matches_closed_form(sp_statistics: dict) -> None:
+    # Isothermal dry column: Phi(p) = Phi_s + R_d T ln(sp / p) at every level, above or below ground.
+    layer = _sp_layer(sp_statistics)
+    t = 250.0
+    sp = torch.tensor([101000.0, 92000.0, 70000.0, 40000.0], dtype=torch.float64)  # k = 0, 1, 2, none
+    orog = torch.tensor([0.0, 800.0, 3000.0, 7000.0], dtype=torch.float64)
+    phys = _isothermal_dry(t) | {"sp": sp} | {f"z_{lvl}": torch.tensor(-1.0) for lvl in LEVELS}
+    x, df = _sp_inputs(sp_statistics, phys, orog, (4,))
+    out = layer(x.clone(), decoder_forcing=df)
+    for lvl in LEVELS:
+        expected = orog * G0 + R_D * t * torch.log(sp / (100.0 * lvl))
+        torch.testing.assert_close(_sp_read(sp_statistics, out, f"z_{lvl}"), expected, rtol=1e-5, atol=1.0)
+    assert layer.variables == ["z_1000", "z_850", "z_500"]
+    torch.testing.assert_close(out[..., SP_NAME_TO_INDEX["sp"]], x[..., SP_NAME_TO_INDEX["sp"]])
+
+
+def test_sp_anchor_exact_for_tv_linear_in_log_p(sp_statistics: dict) -> None:
+    # Tv = a + b ln p is integrated exactly by the trapezoid and extrapolated exactly to sp.
+    layer = _sp_layer(sp_statistics)
+    a, b = -120.0, 34.0  # Tv(1000 hPa) ~ 271 K, Tv(500 hPa) ~ 248 K
+    phys = {f"t_{lvl}": torch.tensor(a + b * math.log(100.0 * lvl)) for lvl in LEVELS}
+    phys |= {f"q_{lvl}": torch.tensor(0.0) for lvl in LEVELS}
+    # First above-ground level 1000 and 850 hPa; both have a level above to extrapolate from.
+    sp = torch.tensor([99500.0, 90000.0], dtype=torch.float64)
+    orog = torch.tensor([120.0, 1000.0], dtype=torch.float64)
+    x, df = _sp_inputs(sp_statistics, phys | {"sp": sp}, orog, (2,))
+    out = layer(x.clone(), decoder_forcing=df)
+    for lvl in LEVELS:
+        lp, ls = math.log(100.0 * lvl), torch.log(sp)
+        expected = orog * G0 + R_D * (a * (ls - lp) + 0.5 * b * (ls**2 - lp**2))
+        torch.testing.assert_close(_sp_read(sp_statistics, out, f"z_{lvl}"), expected, rtol=1e-5, atol=1.0)
+
+
+def test_sp_anchor_gradients(sp_statistics: dict) -> None:
+    layer = _sp_layer(sp_statistics)
+    leaf = torch.randn(1, 6, len(SP_NAME_TO_INDEX), requires_grad=True)
+    _, df = _sp_inputs(sp_statistics, {}, torch.full((1, 6), 500.0, dtype=torch.float64), (1, 6))
+    layer(leaf.clone(), decoder_forcing=df)[..., SP_NAME_TO_INDEX["z_500"]].sum().backward()
+    g = leaf.grad[0]
+    for name in ("sp", "t_1000", "t_850", "t_500", "q_500"):
+        assert g[:, SP_NAME_TO_INDEX[name]].abs().sum() > 0, name
+    for name in ("z_1000", "z_850", "z_500", "msl", "other"):
+        assert g[:, SP_NAME_TO_INDEX[name]].abs().sum() == 0, name
+
+
+def test_sp_anchor_gradcheck_float64(sp_statistics: dict) -> None:
+    layer = _sp_layer(sp_statistics).double()
+    phys = {f"t_{lvl}": torch.tensor(270.0 - 0.02 * (1000 - lvl)) for lvl in LEVELS}
+    phys |= {f"q_{lvl}": torch.tensor(2e-3) for lvl in LEVELS}
+    sp = torch.tensor([99000.0, 80000.0, 60000.0], dtype=torch.float64)  # k = 0, 1, 2
+    x, df = _sp_inputs(sp_statistics, phys | {"sp": sp}, torch.tensor([50.0, 1900.0, 4000.0]), (3,))
+    x, df = x.double(), df.double()
+    for name in ("sp", "t_1000", "t_850", "t_500", "q_850"):
+        idx = SP_NAME_TO_INDEX[name]
+
+        def fn(v: torch.Tensor, idx: int = idx) -> torch.Tensor:
+            y = x.clone()
+            y[:, idx] = v
+            return layer.integrate(y, df)
+
+        assert torch.autograd.gradcheck(
+            fn, (x[:, idx].clone().requires_grad_(True),), eps=1e-6, atol=1e-3, rtol=1e-4
+        ), name
+
+
+def test_sp_anchor_contract(sp_statistics: dict) -> None:
+    layer = _sp_layer(sp_statistics)
+    assert layer.requires_decoder_forcing
+    assert layer.normalizer_methods["z"] == "max" and layer.normalizer_methods["sp"] == "mean-std"
+    assert layer.normalizer_methods["z_500"] == "min-max"
+    with pytest.raises(RuntimeError, match="decoder"):
+        layer(torch.randn(2, len(SP_NAME_TO_INDEX)))
+    with pytest.raises(ValueError, match="decoder forcing"):
+        _sp_layer(sp_statistics, decoder_forcing_names=["lsm"])
+    with pytest.raises(ValueError, match="exclusive"):
+        _sp_layer(sp_statistics, msl_anchor="msl", normalizer=NORMALIZER_SP | {"msl": "mean-std"})
+    with pytest.raises(ValueError, match="orography"):
+        _sp_layer(sp_statistics, orography_normalizer=None)
+    with pytest.raises(ValueError, match="sp"):
+        _sp_layer(sp_statistics, normalizer=NORMALIZER)
+    assert not _layer(statistics=_plain_stats(sp_statistics)).requires_decoder_forcing
+
+
+def _plain_stats(sp_statistics: dict) -> dict:
+    """Map the sp fixture back onto the plain statistics index."""
+    out = {k: np.zeros(len(NAMES)) for k in sp_statistics}
+    for name, i in NAME_TO_INDEX_STATS.items():
+        for k in out:
+            out[k][i] = sp_statistics[k][SP_NAME_TO_INDEX_STATS[name]]
+    return out
+
+
+def test_builder_injects_decoder_forcing_names(sp_statistics: dict) -> None:
+    from types import SimpleNamespace
+
+    from anemoi.models.layers.bounding import _build_dataset_boundings
+
+    model_config = SimpleNamespace(
+        model=SimpleNamespace(
+            bounding=[
+                {"_target_": "anemoi.models.layers.bounding.ReluBounding", "variables": ["q_500"]},
+                {
+                    "_target_": "anemoi.models.layers.bounding.HydrostaticGeopotential",
+                    "levels": LEVELS,
+                    "normalizer": NORMALIZER_SP,
+                    "sp_anchor": "sp",
+                    "orography": "z",
+                    "orography_normalizer": "max",
+                },
+            ]
+        )
+    )
+    # decoder_forcing holds data-input indices; channels follow sorted index order.
+    df_idx = torch.tensor(sorted(SP_NAME_TO_INDEX_STATS[n] for n in ("z", "lsm")), dtype=torch.int)
+    data_indices = SimpleNamespace(
+        model=SimpleNamespace(output=SimpleNamespace(name_to_index=SP_NAME_TO_INDEX)),
+        data=SimpleNamespace(input=SimpleNamespace(name_to_index=SP_NAME_TO_INDEX_STATS, decoder_forcing=df_idx)),
+    )
+    relu, hydro = _build_dataset_boundings(model_config, data_indices, sp_statistics)
+    expected_order = sorted(("z", "lsm"), key=SP_NAME_TO_INDEX_STATS.get)
+    assert hydro.orography_position == expected_order.index("z")
+    assert not getattr(relu, "requires_decoder_forcing", False)
+
+
+def test_enc_proc_dec_passes_decoder_forcing_to_boundings(sp_statistics: dict) -> None:
+    from types import SimpleNamespace
+
+    from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
+
+    layer = _sp_layer(sp_statistics)
+    batch, time, ens, grid = 1, 1, 1, 4
+    phys = _isothermal_dry(250.0) | {"sp": torch.full((batch, time, ens, grid), 85000.0, dtype=torch.float64)}
+    x, df = _sp_inputs(sp_statistics, phys, torch.full((batch, time, ens, grid), 1500.0), (batch, time, ens, grid))
+    n_vars = x.shape[-1]
+    fake = SimpleNamespace(
+        n_step_output=time,
+        boundings={"data": [layer]},
+        _internal_output_idx={"data": []},
+        _internal_input_idx={"data": []},
+    )
+    x_flat = x.reshape(batch * ens * grid, time * n_vars)
+    x_skip = torch.zeros(batch, time, ens, grid, 1)
+    out = AnemoiModelEncProcDec._assemble_output(
+        fake, x_flat, x_skip, batch, ens, torch.float32, "data", decoder_forcing=df
+    )
+    expected = 1500.0 * G0 + R_D * 250.0 * math.log(85000.0 / 50000.0)
+    torch.testing.assert_close(
+        _sp_read(sp_statistics, out, "z_500"),
+        torch.full((batch, time, ens, grid), expected, dtype=torch.float64),
+        rtol=1e-5,
+        atol=1.0,
+    )
+    with pytest.raises(RuntimeError, match="decoder"):
+        AnemoiModelEncProcDec._assemble_output(fake, x_flat, x_skip, batch, ens, torch.float32, "data")
