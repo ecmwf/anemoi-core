@@ -151,6 +151,26 @@ def test_norm_parameters_cache_is_statistics_aware(input_normalizer) -> None:
     torch.testing.assert_close(other_add, expected_add)
 
 
+def test_norm_parameters_are_rounded_once_from_float64() -> None:
+    """The parameters are computed from the float64 statistics and rounded to float32 once.
+
+    Rounding the statistics to float32 first changes the last bit of many parameters.
+    """
+    rng = np.random.default_rng(0)
+    n = 100
+    statistics = {"mean": rng.uniform(-300.0, 300.0, n), "stdev": rng.uniform(1e-3, 50.0, n)}
+    name_to_index = {f"v{i}": i for i in range(n)}
+    normalizer = InputNormalizer(config=DictConfig({"default": "mean-std"}))
+
+    mul, add = normalizer.get_norm_parameters(statistics, name_to_index, torch.device("cpu"))
+
+    assert mul.dtype == add.dtype == torch.float32
+    expected_mul = torch.from_numpy((1.0 / statistics["stdev"]).astype(np.float32))
+    expected_add = torch.from_numpy((-statistics["mean"] / statistics["stdev"]).astype(np.float32))
+    assert torch.equal(mul, expected_mul)
+    assert torch.equal(add, expected_add)
+
+
 def test_normalizer_not_inplace(input_normalizer, make_view, base_payload) -> None:
     view = make_view(base_payload)
     original = view_data_2d(view).clone()

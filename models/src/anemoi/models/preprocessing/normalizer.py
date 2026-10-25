@@ -96,7 +96,9 @@ class InputNormalizer(BasePreprocessor):
         missing = required - statistics.keys()
         if missing:
             raise ValueError(f"Normalization requires statistics: {sorted(missing)}")
-        values = {key: torch.as_tensor(statistics[key], dtype=torch.float32, device=device) for key in required}
+        # Computed in float64 and rounded once to float32 at the end: rounding the statistics first
+        # changes the last bit of many parameters.
+        values = {key: torch.as_tensor(statistics[key], dtype=torch.float64, device=device) for key in required}
         for key, value in values.items():
             if value.ndim != 1 or value.shape[0] != len(name_to_index):
                 raise ValueError(f"Statistic {key!r} must contain one value per variable.")
@@ -114,8 +116,8 @@ class InputNormalizer(BasePreprocessor):
             stats_index[name_to_index[name]] = name_to_index[source]
         values = {key: value[stats_index] for key, value in values.items()}
 
-        norm_mul = torch.ones(len(name_to_index), dtype=torch.float32, device=device)
-        norm_add = torch.zeros(len(name_to_index), dtype=torch.float32, device=device)
+        norm_mul = torch.ones(len(name_to_index), dtype=torch.float64, device=device)
+        norm_add = torch.zeros(len(name_to_index), dtype=torch.float64, device=device)
         eps = 1e-8
 
         for name, i in name_to_index.items():
@@ -154,7 +156,7 @@ class InputNormalizer(BasePreprocessor):
             else:
                 raise ValueError(f"Unknown normalisation method for {name}: {method}")
 
-        return norm_mul, norm_add
+        return norm_mul.to(torch.float32), norm_add.to(torch.float32)
 
     def reset_cache(self) -> None:
         """Clear the cached normalization parameters.
