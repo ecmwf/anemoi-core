@@ -149,7 +149,7 @@ def _check_subgrid_resolved(loss_config: dict) -> None:
 
 
 # Future import breaks other type hints TODO Harrison Cook
-def get_loss_function(
+def get_loss_function(  # noqa: C901
     config: DictConfig,
     scalers: dict[str, TENSOR_SPEC] | None = None,
     data_indices: IndexCollection | None = None,
@@ -217,12 +217,25 @@ def get_loss_function(
             **kwargs,
         )
 
-        return instantiate(
+        # Put the variable filter outside the multiscale wrapper. Then the wrapper smooths only
+        # the selected variables, not the full target (e.g. DATA_FULL with forcings).
+        # The scalers are already filtered and attached to the shared inner loss.
+        variable_mapper = per_scale_loss if isinstance(per_scale_loss, LossVariableMapper) else None
+        if variable_mapper is not None:
+            per_scale_loss = variable_mapper.loss
+
+        multiscale_loss = instantiate(
             loss_config,
             per_scale_loss=per_scale_loss,
             **kwargs,
             **_graph_data_kwargs(target_cls, graph_data, data_node_name),
         )
+        if variable_mapper is None:
+            return multiscale_loss
+
+        variable_mapper.loss = multiscale_loss
+        variable_mapper.supports_sharding = multiscale_loss.supports_sharding
+        return variable_mapper
 
     if target in WRAPPED_LOSSES:
         return _build_wrapped_loss(loss_config, scalers_to_include, scalers, data_indices)
