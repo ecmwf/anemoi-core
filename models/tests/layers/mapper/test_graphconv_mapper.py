@@ -27,7 +27,7 @@ from anemoi.models.layers.mapper import GNNForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 from tests.distributed._distributed_runner import _run_distributed_test
-from tests.distributed._graph_fixtures import build_mapper_graph
+from tests.distributed._graph_fixtures import build_mapper_graph_inputs
 from tests.distributed._graph_fixtures import mapper_loss_data
 
 
@@ -352,7 +352,7 @@ def _test_gnn_mapper_matches_unsharded_rank(
     """Compare mapper outputs and the derivatives of one globally normalized loss."""
     # Limit CPU thread oversubscription across spawned workers.
     torch.set_num_threads(1)
-    edge_attr, edge_index, src_splits, dst_splits = build_mapper_graph(world_size, device)
+    edge_attr, edge_index, src_splits, dst_splits = build_mapper_graph_inputs(world_size, device)
     # Check the fixture properties on which this communication regression relies.
     assert (edge_index[1].diff() >= 0).all(), "Mapper edges must be destination-sorted"
     assert torch.equal(edge_index[:, 0], edge_index[:, 2]), "Missing parallel remote edge"

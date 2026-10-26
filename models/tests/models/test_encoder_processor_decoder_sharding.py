@@ -29,7 +29,6 @@ from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from tests.distributed._distributed_runner import _run_distributed_test
@@ -112,12 +111,12 @@ def _test_graphconv_model_matches_unsharded_rank(
 ) -> None:
     """Compare normal model orchestration with one globally normalized reference objective."""
     torch.set_num_threads(1)
-    graph, data_splits = build_model_graph(world_size)
+    graph, node_shard_sizes = build_model_graph(world_size)
+    data_splits = node_shard_sizes["data"]
     # Ensure each relation exercises a remote read on this rank.
-    hidden_splits = get_shard_sizes(graph["hidden"].x, 0, group)
     for src_name, dst_name in (("data", "hidden"), ("hidden", "hidden"), ("hidden", "data")):
-        src_splits = data_splits if src_name == "data" else hidden_splits
-        dst_splits = data_splits if dst_name == "data" else hidden_splits
+        src_splits = node_shard_sizes[src_name]
+        dst_splits = node_shard_sizes[dst_name]
         relation = (src_name, "to", dst_name)
         edge_index = graph[relation].edge_index
         assert (edge_index[1].diff() >= 0).all(), f"{relation} must be destination-sorted"
