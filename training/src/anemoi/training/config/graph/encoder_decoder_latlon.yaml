@@ -50,5 +50,8 @@ attributes:
     edge_dirs:
       _target_: anemoi.graphs.edges.attributes.EdgeDirection
       norm: unit-std
+    gauss_weight:
+      _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+      norm: l2
 
 post_processors: []
