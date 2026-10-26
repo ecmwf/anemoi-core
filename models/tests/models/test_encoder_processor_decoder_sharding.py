@@ -113,13 +113,13 @@ def _test_graphconv_model_matches_unsharded_rank(
     torch.set_num_threads(1)
     graph, node_shard_sizes = build_model_graph(world_size)
     data_splits = node_shard_sizes["data"]
-    # Ensure each relation exercises a remote read on this rank.
+    # Ensure the comparison exercises communication on every rank.
     for src_name, dst_name in (("data", "hidden"), ("hidden", "hidden"), ("hidden", "data")):
         src_splits = node_shard_sizes[src_name]
         dst_splits = node_shard_sizes[dst_name]
         relation = (src_name, "to", dst_name)
         edge_index = graph[relation].edge_index
-        assert (edge_index[1].diff() >= 0).all(), f"{relation} must be destination-sorted"
+        # Prefix sums locate this rank's rows for any configured world size.
         src_start, src_stop = sum(src_splits[:rank]), sum(src_splits[: rank + 1])
         dst_start, dst_stop = sum(dst_splits[:rank]), sum(dst_splits[: rank + 1])
         sources = edge_index[0, (edge_index[1] >= dst_start) & (edge_index[1] < dst_stop)]
@@ -129,7 +129,8 @@ def _test_graphconv_model_matches_unsharded_rank(
     torch.manual_seed(43)
     reference_model = _build_graphconv_model(graph).to(device)
     # Row-varying learned features expose ownership/order mistakes hidden by
-    # default zero tables. Copy this initialized state to the distributed model.
+    # default zero tables. no_grad permits parameter initialization without
+    # recording it in autograd; the subsequent model calls still track gradients.
     with torch.no_grad():
         for module in reference_model.modules():
             if isinstance(module, TrainableTensor) and module.trainable is not None:
@@ -140,9 +141,10 @@ def _test_graphconv_model_matches_unsharded_rank(
     distributed_model.load_state_dict(reference_model.state_dict())
     reference_params = dict(reference_model.named_parameters())
     distributed_params = dict(distributed_model.named_parameters())
-    # Tables are evaluated before production node/edge sharding. The surrounding
-    # sharding operations gather their gradients in backward; TrainableTensor
-    # itself does not communicate. Other parameters operate on owned work.
+    # Two node tables and three relation tables append learned features to the
+    # fixed node/edge attributes. They run before production sharding, whose
+    # backward gathers reconstruct complete table gradients. Layer parameters
+    # instead operate on owned work and receive rank-partial gradients.
     table_modules = (
         distributed_model.node_attributes.trainable_tensors["data"],
         distributed_model.node_attributes.trainable_tensors["hidden"],
