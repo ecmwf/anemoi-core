@@ -15,8 +15,8 @@ from typing import Optional
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
 from torch import nn
-from torch.utils.checkpoint import checkpoint
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch.utils.checkpoint import checkpoint
 
 from anemoi.utils.config import DotDict
 
@@ -141,6 +141,7 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
         else:
             layer_kernels[name] = kernel_entry
     return layer_kernels
+
 
 # Every dropout layer torch ships (all subclasses of the private _DropoutNd).
 _DROPOUT_MODULES = (

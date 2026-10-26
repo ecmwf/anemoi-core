@@ -35,8 +35,8 @@ from anemoi.models.layers.processor import GNNProcessor
 from anemoi.models.layers.processor import GraphTransformerProcessor
 from anemoi.models.layers.processor import PointWiseMLPProcessor
 from anemoi.models.layers.processor import TransformerProcessor
-from anemoi.models.layers.utils import refuse_dropout_when_sharded
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.models.layers.utils import refuse_dropout_when_sharded
 
 CHANNELS, EDGE_DIM, NODES = 16, 3, 4
 

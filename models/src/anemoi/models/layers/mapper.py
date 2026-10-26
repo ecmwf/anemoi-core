@@ -36,10 +36,10 @@ from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.models.layers.utils import refuse_dropout_when_sharded
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
+from anemoi.models.layers.utils import refuse_dropout_when_sharded
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
