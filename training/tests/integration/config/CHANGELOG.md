@@ -10,6 +10,13 @@ or to the accuracy test configuration (`accuracy_testing/`).
 A candidate reference can be checked first by dispatching the HPC integration workflow
 with `accuracy_reference_id` set to its run ID, before committing it.
 
+### 2026-10-26 - richer batch ([#1435](https://github.com/ecmwf/anemoi-core/pull/1435))
+
+- Reference run: `0723d5a7fb6f402baa73956774e6f582`
+- Reason: sin/cos computed on the GPU in every forward pass (e.g. latlobs\_to\_sincos, encoder\_processor\_decoder.py:380).
+  Previously they were computed once on CPU during init. CPU and CUDA versions differ in the last bit for about 35% of values,
+  even from identical inputs.
+
 ### 2026-10-16 — exact resume and per-batch seeding ([#1433](https://github.com/ecmwf/anemoi-core/pull/1433))
 
 - Reference run: `8e284859bf914877a406407b589862e6`
