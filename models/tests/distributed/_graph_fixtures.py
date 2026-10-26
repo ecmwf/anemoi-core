@@ -19,7 +19,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 
-def build_mapper_graph(
+def build_mapper_graph_inputs(
     world_size: int, device: torch.device
 ) -> tuple[torch.Tensor, torch.Tensor, list[int], list[int]]:
     """Build a full bipartite graph designed for the returned shard sizes.
@@ -56,15 +56,16 @@ def build_mapper_graph(
     return edge_attr, edge_index, src_splits, dst_splits
 
 
-def build_model_graph(world_size: int) -> tuple[HeteroData, list[int]]:
+def build_model_graph(world_size: int) -> tuple[HeteroData, dict[str, list[int]]]:
     """Build a full input/hidden graph for encoder-processor-decoder comparisons.
 
     The input/output node set is named "data". Intended data partitions have
     sizes [4, 3, ...]; hidden partitions have sizes [3, 2, ...]. Each destination
     has an owned and a next-partition source in every relation. Coordinates and
     edge attributes are seeded synthetic values, independent of connectivity.
-    Returns the global CPU graph and intended data shard sizes. Hidden sizes
-    are calculated by the model from its hidden-node tensor.
+    Returns the global CPU graph and intended node shard sizes keyed by
+    "data" and "hidden". The model still prepares its internal hidden layout
+    normally; the returned sizes describe the test's expected ownership.
     """
     data_splits = [4] + [3] * (world_size - 1)
     hidden_splits = [3] + [2] * (world_size - 1)
@@ -98,7 +99,7 @@ def build_model_graph(world_size: int) -> tuple[HeteroData, list[int]]:
         relation = (src_name, "to", dst_name)
         graph[relation].edge_index = torch.tensor(edges, dtype=torch.long).T.contiguous()
         graph[relation].edge_attr = torch.randn(len(edges), 3, generator=generator)
-    return graph, data_splits
+    return graph, {"data": data_splits, "hidden": hidden_splits}
 
 
 def mapper_loss_data(output: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
