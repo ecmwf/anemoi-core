@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -33,6 +32,9 @@ from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
+from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
+from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
@@ -47,6 +49,9 @@ from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import build_output_masks
+from anemoi.training.utils.resolve_config import is_container
+from anemoi.training.utils.resolve_config import is_mapping
+from anemoi.training.utils.resolve_config import is_sequence
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import choose_base_seed
 from anemoi.training.utils.seeding import derive_seed
@@ -54,14 +59,10 @@ from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.seeding import seed_random_generators
 from anemoi.training.utils.seeding import set_base_seed
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
-
-_chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
-_trainable_edge_perm_fix_migration = importlib.import_module(
-    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix",
-).migrate
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
@@ -72,6 +73,28 @@ if TYPE_CHECKING:
     from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
+
+
+# helpers for building the loss config
+def resolve_subgrid_node(node: object, output_mask: object, dataset_name: str) -> None:
+    """Recursively replace ``subgrid: output_mask`` placeholders with the mask tuple."""
+    if is_mapping(node):
+        for k, v in node.items():
+            if is_container(v) and not isinstance(v, str):
+                resolve_subgrid_node(v, output_mask, dataset_name)
+            elif (k, v) == ("subgrid", "output_mask"):
+                node[k] = output_mask.as_tuple()
+                LOGGER.info("Resolved subgrid for dataset '%s' to output_mask as tuple: %s", dataset_name, node[k])
+    elif is_sequence(node) and not isinstance(node, str):
+        for item in node:
+            resolve_subgrid_node(item, output_mask, dataset_name)
+
+
+def resolve_subgrid(config: Mapping, output_mask: Mapping) -> None:
+    """Resolve ``subgrid: output_mask`` placeholders for every dataset in ``config``."""
+    for dataset_name, dataset_config in config.items():
+        if dataset_config is not None:
+            resolve_subgrid_node(dataset_config, output_mask[dataset_name], dataset_name)
 
 
 class BaseTrainingModule(pl.LightningModule, ABC):
@@ -225,7 +248,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.data_indices = data_indices
 
-        self.save_hyperparameters()
+        self.save_hyperparameters(
+            ignore=list(config.diagnostics.checkpoint.exclude_hyperparameters),
+        )
 
         self.statistics_tendencies = statistics_tendencies
 
@@ -239,8 +264,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.metrics = torch.nn.ModuleDict()
 
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
-        loss_configs = get_multiple_datasets_config(config.training.training_loss)
-        self._resolve_subgrid(loss_configs)
+        loss_configs = self._build_loss_configs()
 
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
@@ -455,71 +479,40 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             **kwargs,
         )
 
-    def _update_checkpoint_state_dict_for_load(self, checkpoint: dict[str, Any]) -> None:
-        update_cfg = self.config.training.update_ds_stats_on_ckpt_load
-        update_states = update_cfg.states
-        update_tendencies = update_cfg.tendencies
-        state_dict = checkpoint.get("state_dict")
-        if not isinstance(state_dict, dict) or not (update_states or update_tendencies):
-            return
-
-        processor_prefixes: tuple[str, ...] = ()
-        if update_states:
-            processor_prefixes += ("model.pre_processors.", "model.post_processors.")
-        if update_tendencies:
-            processor_prefixes += (
-                "model.pre_processors_tendencies.",
-                "model.post_processors_tendencies.",
-            )
-
-        if not processor_prefixes:
-            return
-        for key in list(state_dict.keys()):
-            if key.startswith(processor_prefixes):
-                del state_dict[key]
-
-        model_state_dict = self.model.state_dict()
-        processor_prefixes += tuple(f"model.{k}" for k in model_state_dict if "model_output_idx" in k)
-        for key, value in model_state_dict.items():
-            full_key = f"model.{key}"
-            if full_key.startswith(processor_prefixes):
-                state_dict[full_key] = value
-
     def on_save_checkpoint(self, checkpoint: dict) -> None:
         checkpoint["task_state"] = self.task.training_runtime_state_dict()
 
-    def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
-        # Apply migrations to handle state_dict key changes from older checkpoints.
-        # These are idempotent: already-migrated checkpoints are unaffected.
-        _trainable_edge_perm_fix_migration(checkpoint, model=self)
-        self._update_checkpoint_state_dict_for_load(checkpoint)
+    def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        # The task's training runtime state (e.g. rollout step) is resume state the
+        # checkpoint pipeline does not apply, so restore it here.
+        self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
 
-        self._ckpt_model_name_to_index = {
-            dataset_name: data_indices.name_to_index
-            for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
-        }
+        # A resume is loaded once, by Trainer.fit(ckpt_path=), which calls this hook
+        # on the dict it is about to load: this is the only place the corrections can
+        # run for it (the pipeline resolves the file and loads nothing). Lightning
+        # holds a reference to this dict, so a replacement (a migration may return a
+        # new object) is written back in place rather than rebound.
+        trainer = getattr(self, "_trainer", None)
+        corrected = apply_checkpoint_corrections(checkpoint, self, self.config)
+        if corrected is not checkpoint:
+            checkpoint.clear()
+            checkpoint.update(corrected)
 
-        if not self.config.training.load_weights_only:
-            # Checkpoint conversion loads the module without creating a Trainer; only a
-            # training run that continues from the checkpoint takes over its seed.
-            trainer = getattr(self, "_trainer", None)
-            if trainer is not None:
-                self._restore_base_seed(checkpoint)
-            self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
+        # Checkpoint conversion loads the module without creating a Trainer; only a
+        # training run that continues from the checkpoint takes over its seed.
+        if trainer is not None:
+            self._restore_base_seed(checkpoint)
 
-            # Anemoi constructs the task and datasets from the config before Lightning
-            # restores their checkpoint state. Now that the checkpoint rollout is restored,
-            # update any constructed datasets so workers load the required input and target
-            # time steps. Checkpoint conversion creates no datamodule either, so only
-            # synchronize if a datamodule is attached.
-            if trainer is not None and trainer.datamodule is not None:
-                trainer.datamodule.sync_dataset_state()
+        # Anemoi constructs the task and datasets from the config before Lightning
+        # restores their checkpoint state. Now that the checkpoint rollout is restored,
+        # update any constructed datasets so workers load the required input and target
+        # time steps. Checkpoint conversion creates no datamodule either, so only
+        # synchronize if a datamodule is attached.
+        if trainer is not None and trainer.datamodule is not None:
+            trainer.datamodule.sync_dataset_state()
 
-        # Extract variables_metadata for unit compatibility check
-        self._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(
-            checkpoint,
-            self._ckpt_model_name_to_index,
-        )
+        preserve_anemoi_metadata(self, checkpoint)
+        extract_checkpoint_variables_metadata(self, checkpoint)
 
     def _restore_base_seed(self, checkpoint: dict) -> None:
         """Continue with the checkpoint's base seed, unless ``training.seed`` sets one.
@@ -1180,8 +1173,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 metric_step_name = f"{metric_name}_metric/{dataset_name}/{mkey}{suffix}"
                 if metric.has_scaler_for_dim(TensorDim.VARIABLE):
                     exception_msg = (
-                        "Validation metrics cannot be scaled over the variable dimension"
-                        " in the post processed space."
+                        "Validation metrics cannot be scaled over the variable dimension in the post processed space."
                     )
                     raise ValueError(exception_msg)
 
@@ -1434,14 +1426,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             self.logger.log_hyperparams(hyper_params)
 
-    def _resolve_subgrid(self, config: dict) -> None:
-        def per_dataset_resolve(per_dataset_config: dict, dataset_name: str) -> None:
-            for k, v in per_dataset_config.items():
-                if isinstance(v, dict):
-                    per_dataset_resolve(v, dataset_name)
-                elif (k, v) == ("subgrid", "output_mask"):
-                    per_dataset_config[k] = self.output_mask[dataset_name].as_tuple()
-
-        for dataset_name, dataset_config in config.items():
-            if dataset_config is not None:
-                per_dataset_resolve(dataset_config, dataset_name)
+    def _build_loss_configs(self) -> dict:
+        """Fetch the per-dataset training-loss configs and resolve pre-defined entries."""
+        loss_configs = get_multiple_datasets_config(self.config.training.training_loss)
+        resolve_subgrid(loss_configs, self.output_mask)
+        return loss_configs

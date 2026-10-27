@@ -62,7 +62,7 @@ SYNC_TAG = "sync.offline_run_id"
 TERMINAL_STATUSES = ("FINISHED", "FAILED", "KILLED")
 MAX_LINEAGE_DEPTH = 10
 #: Params read by ``rewrite_lineage``; a run is synced only once they are written.
-LINEAGE_PARAMS = frozenset({"config.training.fork_run_id", "metadata.run_id"})
+LINEAGE_PARAMS = frozenset({"metadata.run_id"})
 
 
 def _read_tree(root: Path) -> dict[str, str]:

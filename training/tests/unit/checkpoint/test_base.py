@@ -17,6 +17,7 @@ import torch.nn as nn
 from omegaconf import DictConfig
 
 from anemoi.training.checkpoint import CheckpointContext
+from anemoi.training.checkpoint import CheckpointError
 from anemoi.training.checkpoint import PipelineStage
 
 
@@ -41,15 +42,12 @@ class TestCheckpointContext:
         assert context.checkpoint_path is None
         assert context.checkpoint_data is None
         assert context.model is None
-        assert context.optimizer is None
-        assert context.scheduler is None
         assert context.metadata == {}
         assert context.config is None
 
     def test_context_initialization_with_values(self, tmp_path: Path) -> None:
         """Test context initialization with values."""
         model = SimpleModel()
-        optimizer = torch.optim.Adam(model.parameters())
         config = DictConfig({"key": "value"})
         checkpoint_path = tmp_path / "checkpoint.pt"
 
@@ -57,7 +55,6 @@ class TestCheckpointContext:
             checkpoint_path=checkpoint_path,
             checkpoint_data={"epoch": 10},
             model=model,
-            optimizer=optimizer,
             metadata={"training": True},
             config=config,
         )
@@ -65,7 +62,6 @@ class TestCheckpointContext:
         assert context.checkpoint_path == checkpoint_path
         assert context.checkpoint_data == {"epoch": 10}
         assert context.model == model
-        assert context.optimizer == optimizer
         assert context.metadata == {"training": True}
         assert context.config == config
 
@@ -140,6 +136,30 @@ class TestCheckpointContext:
         context.metadata["new_key"] = "new_value"
         assert context.metadata["new_key"] == "new_value"
 
+    def test_validate_for_stage_names_the_missing_fields(self) -> None:
+        """A stage's required fields that are unset, or empty checkpoint data, are named in the error."""
+        with pytest.raises(CheckpointError) as exc_info:
+            CheckpointContext().validate_for_stage("LoadingStage", ["model", "checkpoint_data"])
+        message = str(exc_info.value)
+        assert "LoadingStage" in message
+        assert "'model'" in message
+        assert "'checkpoint_data'" in message
+
+        # Empty checkpoint data counts as missing; a set model is not reported.
+        with pytest.raises(CheckpointError) as exc_info:
+            CheckpointContext(model=SimpleModel(), checkpoint_data={}).validate_for_stage(
+                "LoadingStage",
+                ["model", "checkpoint_data"],
+            )
+        message = str(exc_info.value)
+        assert "'checkpoint_data'" in message
+        assert "'model'" not in message
+
+    def test_validate_for_stage_accepts_a_populated_context(self) -> None:
+        context = CheckpointContext(model=SimpleModel(), checkpoint_data={"state_dict": {}})
+
+        context.validate_for_stage("LoadingStage", ["model", "checkpoint_data"])
+
 
 class TestPipelineStage:
     """Test PipelineStage abstract base class."""
@@ -151,28 +171,26 @@ class TestPipelineStage:
 
         assert "Can't instantiate abstract class" in str(exc_info.value)
 
-    @pytest.mark.asyncio
-    async def test_concrete_implementation(self) -> None:
+    def test_concrete_implementation(self) -> None:
         """Test concrete implementation of PipelineStage."""
 
         class ConcreteStage(PipelineStage):
-            async def process(self, context: CheckpointContext) -> CheckpointContext:
+            def process(self, context: CheckpointContext) -> CheckpointContext:
                 context.update_metadata(processed=True)
                 return context
 
         stage = ConcreteStage()
         context = CheckpointContext()
 
-        result = await stage.process(context)
+        result = stage.process(context)
 
         assert result.metadata["processed"] is True
 
-    @pytest.mark.asyncio
-    async def test_stage_callable(self) -> None:
+    def test_stage_callable(self) -> None:
         """Test that stage can be called directly."""
 
         class CallableStage(PipelineStage):
-            async def process(self, context: CheckpointContext) -> CheckpointContext:
+            def process(self, context: CheckpointContext) -> CheckpointContext:
                 context.update_metadata(called=True)
                 return context
 
@@ -180,7 +198,7 @@ class TestPipelineStage:
         context = CheckpointContext()
 
         # Call using __call__
-        result = await stage(context)
+        result = stage(context)
 
         assert result.metadata["called"] is True
 
@@ -188,7 +206,7 @@ class TestPipelineStage:
         """Test stage string representation."""
 
         class MyCustomStage(PipelineStage):
-            async def process(self, context: CheckpointContext) -> CheckpointContext:
+            def process(self, context: CheckpointContext) -> CheckpointContext:
                 return context
 
         stage = MyCustomStage()
@@ -196,27 +214,25 @@ class TestPipelineStage:
 
         assert repr_str == "MyCustomStage()"
 
-    @pytest.mark.asyncio
-    async def test_stage_error_propagation(self) -> None:
+    def test_stage_error_propagation(self) -> None:
         """Test that errors are propagated from process method."""
         error_msg = "Test error"
 
         class ErrorStage(PipelineStage):
-            async def process(self, context: CheckpointContext) -> CheckpointContext:  # noqa: ARG002
+            def process(self, context: CheckpointContext) -> CheckpointContext:  # noqa: ARG002
                 raise ValueError(error_msg)
 
         stage = ErrorStage()
         context = CheckpointContext()
 
         with pytest.raises(ValueError, match=error_msg):
-            await stage.process(context)
+            stage.process(context)
 
-    @pytest.mark.asyncio
-    async def test_stage_modifies_context(self) -> None:
+    def test_stage_modifies_context(self) -> None:
         """Test that stages can modify context in place."""
 
         class ModifyingStage(PipelineStage):
-            async def process(self, context: CheckpointContext) -> CheckpointContext:
+            def process(self, context: CheckpointContext) -> CheckpointContext:
                 # Modify in place
                 context.metadata["modified"] = True
                 # Also add new fields
@@ -226,7 +242,7 @@ class TestPipelineStage:
         stage = ModifyingStage()
         context = CheckpointContext()
 
-        result = await stage.process(context)
+        result = stage.process(context)
 
         # Check both return value and original context
         assert result.metadata["modified"] is True

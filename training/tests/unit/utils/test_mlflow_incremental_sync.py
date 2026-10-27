@@ -189,7 +189,7 @@ def write_run(
     }
     path.mkdir(parents=True, exist_ok=True)
     (path / "meta.yaml").write_text(yaml.safe_dump(meta))
-    base_params = {"config.training.run_id": run_id, "config.training.fork_run_id": "None", "metadata.run_id": run_id}
+    base_params = {"config.training.run_id": run_id, "metadata.run_id": run_id}
     if not with_params:
         base_params = {}
     for kind, values in (("params", base_params | (params or {})), ("tags", tags or {})):
@@ -351,12 +351,7 @@ def test_resumed_run_syncs_its_parent_first(store: Path, server: FakeServer) -> 
 
 def test_forked_run_points_at_its_source(store: Path, server: FakeServer) -> None:
     write_run(store, PARENT)
-    write_run(
-        store,
-        FORK,
-        params={"config.training.fork_run_id": PARENT},
-        tags={"forkedRun": "True", "forkedRunId": PARENT},
-    )
+    write_run(store, FORK, tags={"forkedRun": "True", "forkedRunId": PARENT})
     sync = make_sync(store, server)
     fork = sync.sync(FORK)
     source = sync.find_run(PARENT)

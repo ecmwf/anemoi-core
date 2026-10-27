@@ -206,7 +206,7 @@ def rewrite_lineage(
         tags[tag_dest] = tags[tag_key]  # keep the source run id
         tags[tag_key] = dst_related_run_id  # point at the destination run id
 
-    if (params["config.training.fork_run_id"] == "None") and (params["metadata.run_id"] == src_run_id):
+    if "forkedRun" not in tags and params["metadata.run_id"] == src_run_id:
         params = update_run_id(
             params,
             "run_id",
