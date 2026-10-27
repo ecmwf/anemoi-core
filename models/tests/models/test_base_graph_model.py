@@ -9,6 +9,7 @@
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
@@ -204,6 +205,66 @@ def _make_minimal_model():
         n_step_output=1,
         graph_data=_make_graph(),
     )
+
+
+def _route_hidden_nodes(hidden_nodes_name, dataset_names=("a", "b")) -> SimpleNamespace:
+    """Run the hidden-node routing on a bare namespace, without building a model."""
+    model = SimpleNamespace(dataset_names=list(dataset_names), _graph_name_hidden=hidden_nodes_name)
+    BaseGraphModel._build_hidden_node_routing(model)
+    return model
+
+
+def test_hidden_node_routing_string_applies_to_all_datasets() -> None:
+    model = _route_hidden_nodes("hidden")
+
+    assert model.dataset2hidden == {"a": "hidden", "b": "hidden"}
+    assert model.hidden_names == ["hidden"]
+
+
+@pytest.mark.parametrize("as_omegaconf", [False, True])
+def test_hidden_node_routing_mapping_keeps_order_and_deduplicates(as_omegaconf) -> None:
+    mapping = {"a": "hidden_1", "b": "hidden_2", "c": "hidden_1"}
+    model = _route_hidden_nodes(OmegaConf.create(mapping) if as_omegaconf else mapping, ("a", "b", "c"))
+
+    assert model.dataset2hidden == mapping
+    assert model.hidden_names == ["hidden_1", "hidden_2"]
+
+
+def test_hidden_node_routing_list_is_hierarchical() -> None:
+    model = _route_hidden_nodes(["hidden_1", "hidden_2"])
+
+    assert model.dataset2hidden is None
+    assert model.hidden_names == ["hidden_1", "hidden_2"]
+
+
+def test_hidden_node_routing_rejects_mapping_missing_a_dataset() -> None:
+    with pytest.raises(AssertionError, match=r"missing for datasets \['b'\]"):
+        _route_hidden_nodes({"a": "hidden"})
+
+
+def test_hidden_node_routing_rejects_mapping_with_unknown_dataset() -> None:
+    with pytest.raises(AssertionError, match=r"unknown datasets \['c'\]"):
+        _route_hidden_nodes({"a": "hidden", "b": "hidden", "c": "hidden"})
+
+
+def test_hidden_node_routing_rejects_unsupported_type() -> None:
+    with pytest.raises(TypeError, match="Hidden nodes name must be"):
+        _route_hidden_nodes(3)
+
+
+def test_active_hidden_name_for_datasets_sharing_a_mesh() -> None:
+    model = _route_hidden_nodes({"a": "hidden_1", "b": "hidden_2", "c": "hidden_1"}, ("a", "b", "c"))
+
+    assert BaseGraphModel._get_active_hidden_name(model, ["a"]) == "hidden_1"
+    assert BaseGraphModel._get_active_hidden_name(model, ["a", "c"]) == "hidden_1"
+    assert BaseGraphModel._get_active_hidden_name(model, ["b"]) == "hidden_2"
+
+
+def test_active_hidden_name_rejects_batch_mixing_meshes() -> None:
+    model = _route_hidden_nodes({"a": "hidden_1", "b": "hidden_2"})
+
+    with pytest.raises(ValueError, match="same hidden mesh"):
+        BaseGraphModel._get_active_hidden_name(model, ["a", "b"])
 
 
 def _identity_pre_processor():
