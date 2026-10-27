@@ -16,13 +16,14 @@ from .builders.from_healpix import HEALPixNodes
 from .builders.from_healpix import LimitedAreaHEALPixNodes
 from .builders.from_icon import ICONCellGridNodes
 from .builders.from_icon import ICONMultiMeshNodes
+from .builders.from_rectilinear import LimitedAreaRectilinearNodes
+from .builders.from_rectilinear import RectilinearNodes
 from .builders.from_reduced_gaussian import ReducedGaussianGridNodes
 from .builders.from_refined_icosahedron import HexNodes
 from .builders.from_refined_icosahedron import LimitedAreaHexNodes
 from .builders.from_refined_icosahedron import LimitedAreaTriNodes
 from .builders.from_refined_icosahedron import StretchedTriNodes
 from .builders.from_refined_icosahedron import TriNodes
-from .builders.from_regular_latlon import RegularLatLonNodes
 from .builders.from_vectors import LatLonNodes
 
 __all__ = [
@@ -36,8 +37,9 @@ __all__ = [
     "LimitedAreaNPZFileNodes",
     "LimitedAreaTriNodes",
     "LimitedAreaHexNodes",
+    "LimitedAreaRectilinearNodes",
     "ReducedGaussianGridNodes",
-    "RegularLatLonNodes",
+    "RectilinearNodes",
     "StretchedTriNodes",
     "ICONMultiMeshNodes",
     "ICONCellGridNodes",

@@ -157,7 +157,7 @@ class AreaMaskBuilder:
         """Euclidean chord length threshold equivalent to margin_radius_km."""
         return float(2 * np.sin(self.margin_radius_km / (2 * EARTH_RADIUS)))
 
-    def _get_reference_coords(self, graph: HeteroData) -> torch.Tensor:
+    def get_reference_coords(self, graph: HeteroData) -> torch.Tensor:
         """Retrieve coordinates from the reference nodes.
 
         Parameters
@@ -206,7 +206,7 @@ class AreaMaskBuilder:
         if self.mask_attr_name is not None:
             reference_mask_str += f"[{self.mask_attr_name}]"
 
-        coords_rad = self._get_reference_coords(graph)
+        coords_rad = self.get_reference_coords(graph)
         LOGGER.info(
             "Fitting %s (%s) with %d reference nodes from %s.",
             self.__class__.__name__,

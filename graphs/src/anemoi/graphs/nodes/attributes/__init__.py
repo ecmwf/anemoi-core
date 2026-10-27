@@ -17,6 +17,7 @@ from .area_weights import UniformWeights
 from .boolean_op import BooleanAndMask
 from .boolean_op import BooleanNot
 from .boolean_op import BooleanOrMask
+from .layout import RectilinearLayoutIndex
 from .masks import CutOutMask
 from .masks import GridsMask
 from .masks import LimitedAreaMask
@@ -39,4 +40,5 @@ __all__ = [
     "CosineLatWeightedAttribute",
     "IsolatitudeAreaWeights",
     "AnemoiDatasetVariableWeights",
+    "RectilinearLayoutIndex",
 ]

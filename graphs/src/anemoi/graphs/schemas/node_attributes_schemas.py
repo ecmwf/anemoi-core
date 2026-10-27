@@ -73,6 +73,11 @@ class NonmissingAnemoiDatasetVariableSchema(BaseModel):
     "The anemoi-datasets variable to use."
 
 
+class RectilinearLayoutIndexSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.attributes.RectilinearLayoutIndex"] = Field(..., alias="_target_")
+    "Row and column of each node in its rectilinear grid, from anemoi.graphs.nodes.attributes."
+
+
 SingleAttributeSchema = (
     PlanarAreaWeightSchema
     | MaskedPlanarAreaWeightsSchema
@@ -80,6 +85,7 @@ SingleAttributeSchema = (
     | CutOutMaskSchema
     | GridsMaskSchema
     | NonmissingAnemoiDatasetVariableSchema
+    | RectilinearLayoutIndexSchema
 )
 
 

@@ -72,11 +72,30 @@ class ReducedGaussianGridNodeSchema(BaseModel):
     "Reduced gaussian grid."
 
 
-class RegularLatLonNodeSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.RegularLatLonNodes"] = Field(..., alias="_target_")
-    "Nodes at the cell centres of a regular latitude-longitude grid, from anemoi.graphs.nodes."
-    resolution: PositiveFloat
-    "Grid spacing in degrees. 180 / resolution must be a whole number."
+class RectilinearNodeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.RectilinearNodes"] = Field(..., alias="_target_")
+    "Nodes on a global regular latitude-longitude grid, from anemoi.graphs.nodes."
+    resolution: PositiveFloat | list[PositiveFloat] = Field(examples=[1.0, [0.25, 0.25]])
+    "Grid spacing in degrees, or [dlat, dlon]. 180 / dlat and 360 / dlon must be whole numbers."
+    include_poles: bool = False
+    "Whether the first and last rows sit on the poles. Defaults to False, with the nodes at the cell centres."
+
+
+class LimitedAreaRectilinearNodeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.LimitedAreaRectilinearNodes"] = Field(..., alias="_target_")
+    "Nodes on a regular grid in a rotated latitude-longitude frame around an area of interest, from anemoi.graphs.nodes."
+    resolution: PositiveFloat | list[PositiveFloat] = Field(examples=[0.25, [0.25, 0.25]])
+    "Grid spacing in degrees in the rotated frame, or [dlat, dlon]."
+    reference_node_name: str
+    "Name of the reference nodes in the graph to consider for the Area Mask."
+    mask_attr_name: Optional[str] = None
+    "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
+    margin_radius_km: PositiveFloat = Field(example=100.0)
+    "Margin around the reference nodes covered by the grid, in kilometers. Defaults to 100 km."
+    crop_to_margin: bool = False
+    "Whether to leave out the grid points farther than margin_radius_km from every reference node. Defaults to False."
+    rotation: float = 0.0
+    "Anticlockwise angle of the grid axes about the centre of the reference nodes, in degrees. Defaults to 0."
 
 
 class ICONMeshNodeSchema(BaseModel):
@@ -165,7 +184,8 @@ NodeBuilderSchemas = Annotated[
     | ICONMeshNodeSchema
     | LimitedAreaNPZFileNodesSchema
     | ReducedGaussianGridNodeSchema
-    | RegularLatLonNodeSchema
+    | RectilinearNodeSchema
+    | LimitedAreaRectilinearNodeSchema
     | IcosahedralandHealPixNodeSchema
     | HealPixNodeSchema
     | LimitedAreaIcosahedralandHealPixNodeSchema
