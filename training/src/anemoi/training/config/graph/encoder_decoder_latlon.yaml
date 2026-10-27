@@ -12,9 +12,9 @@ nodes:
   hidden:
     node_builder:
       _target_: anemoi.graphs.nodes.RectilinearNodes
-      resolution: 1.0 # degrees; 180 / resolution must be a whole number
+      resolution: 1.0 # degrees
     attributes:
-      layout_index: # row and column of each node, read by the processor (layout_node_attribute_name)
+      layout_index:
         _target_: anemoi.graphs.nodes.attributes.RectilinearLayoutIndex
 
 
