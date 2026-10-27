@@ -41,10 +41,10 @@ from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
+from anemoi.models.layers.layout import LatLonLayout
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.mlp import build_feedforward_layer
-from anemoi.models.layers.semi_lagrangian import LatLonLayout
 from anemoi.models.layers.semi_lagrangian import SemiLagrangianWarp
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.triton.utils import edge_index_to_csc

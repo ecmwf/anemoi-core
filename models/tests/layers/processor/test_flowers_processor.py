@@ -18,8 +18,8 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import FlowersProcessorBlock
+from anemoi.models.layers.layout import latlon_cell_centres
 from anemoi.models.layers.processor import FlowersProcessor
-from anemoi.models.layers.semi_lagrangian import latlon_cell_centres
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 

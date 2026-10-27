@@ -37,9 +37,8 @@ from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
+from anemoi.models.layers.layout import latlon_grid_layout
 from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.models.layers.semi_lagrangian import EARTH_ROTATION_RATE
-from anemoi.models.layers.semi_lagrangian import latlon_grid_layout
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -47,6 +46,9 @@ from anemoi.utils.config import DotDict
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
+
+# Rotation rate of the Earth in radians per second.
+EARTH_ROTATION_RATE = 7.29212e-5
 
 
 class NoOpProcessor(nn.Module):
@@ -333,15 +335,10 @@ class TransformerProcessor(BaseProcessor):
 class ADRProcessor(BaseProcessor):
     """Advection-diffusion-reaction processor on a regular latitude-longitude hidden grid (PARADIS).
 
-    The hidden nodes must be the cell centres of a regular latitude-longitude grid, with rows from
-    north to south and longitudes running east from zero, as built by
-    ``anemoi.graphs.nodes.RectilinearNodes``. The grid size and the row and column of each node
-    are read from the hidden nodes' layout attribute, built with
-    ``anemoi.graphs.nodes.attributes.RectilinearLayoutIndex``.
-
     Each layer runs an advection, a diffusion and a reaction step, each built from its own config
-    (see ``anemoi.models.layers.adr``); a step set to None is left out. The layers split one model
-    time step into equal sub-steps.
+    (see ``anemoi.models.layers.adr``). A step set to None is left out.
+
+    The layers split one model time step into equal sub-steps.
     """
 
     def __init__(
@@ -414,12 +411,6 @@ class ADRProcessor(BaseProcessor):
             diffusion=diffusion,
             reaction=reaction,
         )
-        steps = {"advection": advection, "diffusion": diffusion, "reaction": reaction}
-        active = ", ".join(name for name, cfg in steps.items() if cfg is not None) or "none"
-        LOGGER.info(
-            f"{self.__class__.__name__}: built with {num_layers} layers, {num_channels} channels, steps: {active}, {time_step} time step."
-        )
-
         self.offload_layers(cpu_offload)
 
     def forward(

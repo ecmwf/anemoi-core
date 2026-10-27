@@ -11,16 +11,16 @@ import pytest
 import torch
 
 from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.layers.adr.layers import LowRankBias
+from anemoi.models.layers.adr.advection import SemiLagrangianAdvection
 from anemoi.models.layers.block import ADRProcessorBlock
 from anemoi.models.layers.block import FlowersProcessorBlock
-from anemoi.models.layers.semi_lagrangian import LatLonLayout
-from anemoi.models.layers.semi_lagrangian import LowRankBias
-from anemoi.models.layers.semi_lagrangian import SemiLagrangianAdvection
+from anemoi.models.layers.geocyclic import geocyclic_pad
+from anemoi.models.layers.layout import LatLonLayout
+from anemoi.models.layers.layout import latlon_cell_centres
+from anemoi.models.layers.layout import latlon_grid_layout
 from anemoi.models.layers.semi_lagrangian import SemiLagrangianLayer
 from anemoi.models.layers.semi_lagrangian import SemiLagrangianWarp
-from anemoi.models.layers.semi_lagrangian import geocyclic_pad
-from anemoi.models.layers.semi_lagrangian import latlon_cell_centres
-from anemoi.models.layers.semi_lagrangian import latlon_grid_layout
 from anemoi.models.layers.utils import load_layer_kernels
 
 

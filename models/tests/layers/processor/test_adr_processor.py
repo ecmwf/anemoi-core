@@ -21,8 +21,8 @@ from anemoi.models.layers.adr import Diffusion
 from anemoi.models.layers.adr import NeuralSemiLagrangian
 from anemoi.models.layers.adr import Reaction
 from anemoi.models.layers.block import ADRProcessorBlock
+from anemoi.models.layers.layout import latlon_cell_centres
 from anemoi.models.layers.processor import ADRProcessor
-from anemoi.models.layers.semi_lagrangian import latlon_cell_centres
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
