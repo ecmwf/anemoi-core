@@ -36,6 +36,7 @@ from anemoi.models.layers.noise_modulation import climatological_spread_statisti
 from anemoi.models.layers.noise_modulation import resolve_prefixed_variables
 from anemoi.models.layers.noise_modulation import strip_level
 from anemoi.models.layers.sparse_projector import SparseProjector
+from anemoi.models.layers.spectral_helpers import legendre_gauss_weights
 from anemoi.models.layers.spectral_helpers import quadrature_weights
 from anemoi.models.layers.spectral_transforms import SphericalSpectralFilter
 from anemoi.models.layers.spherical_noise import EARTH_RADIUS_KM
@@ -960,6 +961,346 @@ class NoiseConditioning(BaseNoiseInjector):
         noise = checkpoint(self.noise_mlp, noise, use_reentrant=False)
 
         LOGGER.debug("Noise noise.shape = %s, noise.norm: %.9e", noise.shape, torch.linalg.norm(noise))
+
+        return x, noise
+
+
+class ScaleScheduledNoiseConditioning(NoiseConditioning):
+    r"""Noise conditioning with spatially coherent noise whose scales follow a lead-time schedule.
+
+    The same mechanism as :class:`NoiseConditioning` -- per hidden node, ``noise_channels_dim``
+    noise values go through the same MLP and condition the processor's ``ConditionalLayerNorm``
+    -- but the noise is not white. Each channel is an independent random field on the sphere,
+
+    .. math::
+
+        \eta_c(t) = \sigma \sum_k \sqrt{w_k(t)}\, \xi_{c,k}(t),
+
+    a sum of FourCastNet 3 diffusion fields :math:`\xi_{c,k}`, one per length scale :math:`L_k`
+    (spectrum :math:`e^{-kT_k\,l(l+1)}`, :math:`kT_k = \tfrac12 (L_k / a)^2`). Each
+    :math:`\xi_{c,k}` is its own Ornstein-Uhlenbeck process in time, with memory
+    :math:`\phi_k = e^{-\Delta t / \tau_k}` per rollout step, and the share :math:`w_k(t)` of the
+    variance at each scale is a table of lead times, interpolated linearly in between and held
+    after its last entry. The lead time is ``fcstep * timestep_hours``.
+
+    Every :math:`\xi_{c,k}` is made isotropic (FourCastNet 3's own draw gives the zonal, m = 0
+    coefficients half the variance of the others) and scaled to unit variance, and the shares
+    of a lead time sum to one. So every hidden node gets :math:`N(0, \sigma^2)` noise in every
+    channel at every lead time, as :class:`NoiseConditioning` gives it: only the spatial and
+    temporal structure of the noise differ.
+
+    The fields are drawn on a regular Gaussian grid of ``grid_nlat`` latitudes and each hidden
+    node takes the value of its nearest grid point, so the node's marginal is the grid point's.
+    Member streams are seeded as :class:`SphericalInputNoise` seeds them, from the global
+    member index, so a realisation does not depend on how members are spread over devices.
+
+    The model passes the rollout step, the member layout and the seed (see
+    :attr:`uses_rollout_state`). Without them every call starts a new rollout.
+
+    Parameters
+    ----------
+    noise_std : int
+        Standard deviation of the noise at every node, as for :class:`NoiseConditioning`.
+    noise_channels_dim : int
+        Number of noise channels, i.e. independent fields, as for :class:`NoiseConditioning`.
+    noise_mlp_hidden_dim : int
+        Hidden width of the noise MLP, as for :class:`NoiseConditioning`.
+    layer_kernels : DotDict
+        Layer kernels of the noise MLP, as for :class:`NoiseConditioning`.
+    schedule : dict
+        ``length_scales_km`` (FourCastNet 3 correlation lengths; the variance of a scale sits
+        near wavelength :math:`2\pi L`), ``decorrelation_hours`` (one per scale),
+        ``lead_hours`` (increasing, from 0) and ``shares`` (one row per lead time, one share per
+        scale, in any unit; each row is normalised to sum to one).
+    timestep_hours : float
+        Hours per rollout step.
+    grid_nlat : int
+        Latitudes of the Gaussian grid the fields are drawn on (``2 * grid_nlat`` longitudes).
+    lmax : int
+        Spherical harmonic degrees drawn, ``l = 0 .. lmax - 1``.
+    hidden_nodes_name : str
+        Name of the processor's nodes in ``graph_data``.
+    centered : bool
+        Antithetic pairing of ensemble members, as in :class:`SphericalInputNoise`.
+    graph_data : HeteroData, optional
+        The model graph, for the coordinates of the hidden nodes. Required.
+    noise_matrix : str, optional
+        Not supported: the noise is drawn directly on the hidden nodes.
+    noise_edges_name : tuple[str, str, str], optional
+        Not supported, as ``noise_matrix``.
+    **kwargs
+        Passed on to :class:`NoiseConditioning`.
+    """
+
+    # The ensemble model passes fcstep, the member layout and the seed to injectors that set this.
+    uses_rollout_state = True
+    # Keeps this stream apart from the input noise's, which uses the same base seed.
+    SEED_OFFSET = 1_000_003
+
+    def __init__(
+        self,
+        *,
+        noise_std: int,
+        noise_channels_dim: int,
+        noise_mlp_hidden_dim: int,
+        layer_kernels: DotDict,
+        schedule: dict,
+        timestep_hours: float = 6.0,
+        grid_nlat: int = 256,
+        lmax: int = 128,
+        hidden_nodes_name: str = "hidden",
+        centered: bool = False,
+        graph_data: Optional[HeteroData] = None,
+        noise_matrix: Optional[str] = None,
+        noise_edges_name: Optional[tuple[str, str, str]] = None,
+        **kwargs,
+    ) -> None:
+        if noise_matrix is not None or noise_edges_name is not None:
+            raise ValueError(
+                f"{type(self).__name__} draws its noise on the hidden nodes; noise_matrix and noise_edges_name "
+                "are not supported."
+            )
+        super().__init__(
+            noise_std=noise_std,
+            noise_channels_dim=noise_channels_dim,
+            noise_mlp_hidden_dim=noise_mlp_hidden_dim,
+            layer_kernels=layer_kernels,
+            graph_data=graph_data,
+            **kwargs,
+        )
+        if graph_data is None or hidden_nodes_name not in graph_data.node_types:
+            raise ValueError(f"{type(self).__name__} needs graph_data with the '{hidden_nodes_name}' nodes.")
+
+        schedule = dict(_to_container(schedule))
+        self.length_scales_km, self.decorrelation_hours, self.lead_hours, self.shares = self._parse_schedule(schedule)
+        self.timestep_hours = float(timestep_hours)
+        self.centered = centered
+        n_scales = len(self.length_scales_km)
+
+        # One diffusion field per (channel, scale), channel-major: field c * n_scales + k is scale k of channel c.
+        self._noise_params = {
+            "type": "diffusion",
+            "sigma": 1.0,
+            "kT": [kT_from_length_scale(length) for length in self.length_scales_km] * self.noise_channels,
+            "lambd": [self.timestep_hours / tau for tau in self.decorrelation_hours] * self.noise_channels,
+        }
+        self._transform = build_inverse_sht(int(grid_nlat), lmax=int(lmax))
+        _, self.lmax, self.num_grid_points = self._transform
+        self.grid_nlat = int(grid_nlat)
+
+        coords = graph_data[hidden_nodes_name].x
+        self.register_buffer(
+            "hidden_grid_index",
+            self._nearest_grid_points(coords[:, 0].double(), coords[:, 1].double(), self.grid_nlat),
+            persistent=False,
+        )
+        self.num_hidden_nodes = coords.shape[0]
+
+        self.noise: Optional[DiffusionNoiseS2] = None
+        self._layout = None
+        self._unit_variance: Optional[Tensor] = None
+        self._autoregressive_seen = False
+
+        LOGGER.info(
+            "%s: %d channels x %d scales %s km, decorrelation %s h, %d lead times to %s h; drawn on a %d-latitude "
+            "Gaussian grid, lmax=%d, for %d hidden nodes",
+            type(self).__name__,
+            self.noise_channels,
+            n_scales,
+            self.length_scales_km,
+            self.decorrelation_hours,
+            len(self.lead_hours),
+            self.lead_hours[-1],
+            self.grid_nlat,
+            self.lmax,
+            self.num_hidden_nodes,
+        )
+
+    @staticmethod
+    def _parse_schedule(schedule: dict) -> tuple[list[float], list[float], list[float], list[list[float]]]:
+        """The schedule's lists, checked against each other."""
+        expected = {"length_scales_km", "decorrelation_hours", "lead_hours", "shares"}
+        if set(schedule) != expected:
+            raise ValueError(f"noise schedule needs exactly the keys {sorted(expected)}, got {sorted(schedule)}.")
+        lengths = [float(value) for value in schedule["length_scales_km"]]
+        taus = [float(value) for value in schedule["decorrelation_hours"]]
+        leads = [float(value) for value in schedule["lead_hours"]]
+        shares = [[float(value) for value in row] for row in schedule["shares"]]
+
+        if not lengths or len(taus) != len(lengths):
+            raise ValueError("noise schedule: give one decorrelation_hours per length scale.")
+        if any(value <= 0 for value in lengths + taus):
+            raise ValueError("noise schedule: length scales and decorrelation times must be positive.")
+        if not leads or leads[0] != 0 or any(b <= a for a, b in zip(leads, leads[1:])):
+            raise ValueError("noise schedule: lead_hours must start at 0 and increase.")
+        if len(shares) != len(leads) or any(len(row) != len(lengths) for row in shares):
+            raise ValueError("noise schedule: shares needs one row per lead time and one share per length scale.")
+        if any(value < 0 for row in shares for value in row) or any(sum(row) <= 0 for row in shares):
+            raise ValueError("noise schedule: shares must be non-negative, with some share in every row.")
+        return lengths, taus, leads, [[value / sum(row) for value in row] for row in shares]
+
+    @staticmethod
+    def _nearest_grid_points(lat: Tensor, lon: Tensor, nlat: int) -> Tensor:
+        """Index of the nearest point of the regular Gaussian grid to every (lat, lon), in radians.
+
+        The grid is the inverse transform's: Gaussian latitudes from the North Pole down, and
+        ``2 * nlat`` longitudes from 0 on every ring. The nearest point is one of the four
+        around the node: the nearest longitudes of the two rings that bracket its latitude.
+        """
+        nodes, _ = legendre_gauss_weights(nlat)
+        colatitude = torch.flip(torch.from_numpy(nodes.copy()).double().acos(), dims=[0])  # as the transform's rings
+        ring_lat = math.pi / 2 - colatitude
+        nlon = 2 * nlat
+        lon = torch.remainder(lon, 2 * math.pi)
+
+        south = torch.searchsorted(-ring_lat, -lat).clamp(0, nlat - 1)  # first ring at or south of the node
+        rings = torch.stack([(south - 1).clamp(0, nlat - 1), south], dim=-1)
+        west = torch.floor(lon / (2 * math.pi / nlon)).long()
+        columns = torch.stack([west % nlon, (west + 1) % nlon], dim=-1)
+        rings, columns = rings[:, :, None].expand(-1, 2, 2), columns[:, None, :].expand(-1, 2, 2)
+
+        cand_lat, cand_lon = ring_lat[rings], columns.double() * (2 * math.pi / nlon)
+        cosine = torch.sin(lat)[:, None, None] * torch.sin(cand_lat) + torch.cos(lat)[:, None, None] * torch.cos(
+            cand_lat
+        ) * torch.cos(lon[:, None, None] - cand_lon)
+        best = cosine.reshape(len(lat), 4).argmax(dim=-1)
+        return (rings.reshape(len(lat), 4) * nlon + columns.reshape(len(lat), 4)).gather(1, best[:, None])[:, 0]
+
+    def shares_at(self, fcstep: int) -> Tensor:
+        """Each scale's share of the variance at rollout step ``fcstep``, shape ``(n_scales,)``."""
+        lead = fcstep * self.timestep_hours
+        leads = self.lead_hours
+        if lead >= leads[-1]:
+            return torch.tensor(self.shares[-1], dtype=torch.float64)
+        upper = next(i for i, value in enumerate(leads) if value > lead)
+        fraction = (lead - leads[upper - 1]) / (leads[upper] - leads[upper - 1])
+        below = torch.tensor(self.shares[upper - 1], dtype=torch.float64)
+        above = torch.tensor(self.shares[upper], dtype=torch.float64)
+        shares = (1 - fraction) * below + fraction * above
+        return shares / shares.sum()
+
+    def _build_noise(self, *, batch_size: int, ensemble_size: int, layout: tuple, device: torch.device) -> None:
+        """The per-member diffusion fields, and the factor that gives each unit pointwise variance."""
+        _, member_offset, num_members_total, group_id, base_seed = layout
+        seeds, reflects = noise_seeds_reflects(
+            ensemble_size,
+            centered=self.centered,
+            member_offset=member_offset,
+            num_members_total=num_members_total,
+            group_id=group_id,
+            base_seed=base_seed,
+            seed_offset=self.SEED_OFFSET,
+        )
+        self.noise = build_noise(
+            self._noise_params,
+            transform=self._transform,
+            batch_size=batch_size,
+            ensemble_size=ensemble_size,
+            num_channels=self.noise_channels * len(self.length_scales_km),
+            num_time_steps=1,
+            seeds=seeds,
+            reflects=reflects,
+        ).to(device)
+
+        # Stationary variance of each real coefficient part, per field and degree, and the
+        # pointwise variance it gives: with the m = 0 coefficients doubled in variance (see
+        # sample_noise) the sum over m is the same at every latitude (addition theorem).
+        sigma_l = self.noise.sigma_l.reshape(self.noise.num_channels, self.lmax).double()
+        phi = self.noise.phi.reshape(self.noise.num_channels).double()
+        coefficient_variance = sigma_l**2 / (1 - phi[:, None] ** 2)
+        pct = self.noise.isht._isht.pct.double()  # (m, l, ring)
+        weights = torch.full((pct.shape[0], 1, 1), 4.0, dtype=torch.float64, device=pct.device)
+        weights[0] = 2.0  # m = 0: real part only (irfft), at twice the variance; m > 0: 2 Re(.) -> 4
+        ring_variance = coefficient_variance.to(pct.device) @ (weights * pct**2).sum(dim=0)  # (fields, rings)
+        self._unit_variance = ring_variance.mean(dim=1).rsqrt().float().to(device)
+
+    def sample_noise(
+        self,
+        *,
+        fcstep: int,
+        batch_size: int,
+        ensemble_size: int,
+        device: torch.device,
+        member_offset: int = 0,
+        num_members_total: Optional[int] = None,
+        group_id: int = 0,
+        seed: Optional[int] = None,
+    ) -> Tensor:
+        """Advance the fields to ``fcstep`` and return the noise, shape ``(batch, ensemble, hidden, channels)``.
+
+        ``fcstep == 0`` starts a new rollout from the stationary distribution; later steps take
+        one autoregressive step of every field.
+        """
+        base_seed, seed_source = SphericalInputNoise._resolve_base_seed(seed)
+        layout = (ensemble_size, member_offset, num_members_total, group_id, base_seed)
+        if self.noise is None or layout != self._layout:
+            self._build_noise(batch_size=batch_size, ensemble_size=ensemble_size, layout=layout, device=device)
+            if self._layout is None:
+                LOGGER.info("%s: noise base seed %d, from %s.", type(self).__name__, base_seed, seed_source)
+            self._layout = layout
+        if fcstep > 0 and not self._autoregressive_seen:
+            self._autoregressive_seen = True
+            LOGGER.info(
+                "%s: first autoregressive step (fcstep=%d), scale shares %s",
+                type(self).__name__,
+                fcstep,
+                [round(value, 3) for value in self.shares_at(fcstep).tolist()],
+            )
+        self.noise.update(replace_state=(fcstep == 0), batch_size=batch_size)
+
+        n_scales = len(self.length_scales_km)
+        amplitude = self._unit_variance.reshape(self.noise_channels, n_scales) * self.shares_at(fcstep).sqrt().to(
+            device=device, dtype=torch.float32
+        )
+        with torch.no_grad(), torch.autocast(device_type=device.type, enabled=False):
+            state = self.noise.state[:, :, 0]  # (batch, ensemble, fields, l, m, re/im)
+            coefficients = torch.complex(state[..., 0], state[..., 1])
+            coefficients = coefficients.reshape(
+                batch_size, ensemble_size, self.noise_channels, n_scales, *state.shape[3:5]
+            )
+            # Mix the scales in spectral space (the transform is linear), and double the m = 0 variance.
+            mixed = torch.einsum("beckLM,ck->becLM", coefficients, amplitude.to(coefficients.dtype))
+            mixed[..., 0] = mixed[..., 0] * math.sqrt(2.0)
+            field = self.noise.isht(mixed)  # (batch, ensemble, channels, grid points)
+            noise = field[..., self.hidden_grid_index] * self.noise_std
+        return noise.transpose(-1, -2)
+
+    def forward(
+        self,
+        x: Tensor,
+        batch_size: int,
+        ensemble_size: int,
+        grid_size: int,
+        grid_shard_sizes: ShardSizes,
+        noise_dtype: torch.dtype = torch.float32,
+        model_comm_group: Optional[ProcessGroup] = None,
+        *,
+        fcstep: int = 0,
+        member_offset: int = 0,
+        num_members_total: Optional[int] = None,
+        group_id: int = 0,
+        seed: Optional[int] = None,
+    ) -> tuple[Tensor, Tensor]:
+        if grid_size != self.num_hidden_nodes:
+            raise ValueError(
+                f"{type(self).__name__}: the model has {grid_size} hidden nodes, the graph {self.num_hidden_nodes}."
+            )
+        noise = self.sample_noise(
+            fcstep=fcstep,
+            batch_size=batch_size,
+            ensemble_size=ensemble_size,
+            device=x.device,
+            member_offset=member_offset,
+            num_members_total=num_members_total,
+            group_id=group_id,
+            seed=seed,
+        ).to(noise_dtype)
+
+        noise = einops.rearrange(noise, "batch ensemble grid vars -> (batch ensemble grid) vars")  # shape of x
+        noise_shard_sizes = get_shard_sizes(noise, 0, model_comm_group)
+        noise = shard_tensor(noise, 0, noise_shard_sizes, model_comm_group)  # sharded grid dim, full channels
+
+        noise = checkpoint(self.noise_mlp, noise, use_reentrant=False)
 
         return x, noise
 

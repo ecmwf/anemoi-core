@@ -129,6 +129,29 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             sparse_projector_num_chunks=model_config.get("sparse_projector", {}).get("num_chunks", 1),
         )
 
+    def _noise_injector_kwargs(
+        self,
+        *,
+        fcstep: int,
+        ensemble_member_offset: int,
+        ensemble_members_total: Optional[int],
+        ensemble_group_id: int,
+        input_noise_seed: Optional[int],
+    ) -> dict:
+        """The rollout step, member layout and seed, for noise injectors that set ``uses_rollout_state``.
+
+        Other injectors are called as before, with none of them.
+        """
+        if not getattr(self.noise_injector, "uses_rollout_state", False):
+            return {}
+        return {
+            "fcstep": fcstep,
+            "member_offset": ensemble_member_offset,
+            "num_members_total": ensemble_members_total,
+            "group_id": ensemble_group_id,
+            "seed": input_noise_seed,
+        }
+
     def _check_dropped_input_datasets(self, dropped: set[str]) -> None:
         not_first_step_only = dropped - set(self.first_step_only_datasets)
         if not_first_step_only:
@@ -352,6 +375,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             )
             input_noise = self.input_noise.sample()
 
+        rollout_step = fcstep  # unclamped, for a latent noise that follows the rollout
+
         # Datasets whose encoder runs only at the first step (first_step_only) are left out afterwards, so
         # information that exists at the initial time only never enters a later step, whatever the input holds.
         first_step = fcstep == 0
@@ -429,6 +454,13 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             grid_shard_sizes=shard_sizes_hidden,
             model_comm_group=model_comm_group,
+            **self._noise_injector_kwargs(
+                fcstep=rollout_step,
+                ensemble_member_offset=ensemble_member_offset,
+                ensemble_members_total=ensemble_members_total,
+                ensemble_group_id=ensemble_group_id,
+                input_noise_seed=input_noise_seed,
+            ),
         )
 
         (
