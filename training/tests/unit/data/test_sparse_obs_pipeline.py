@@ -49,6 +49,21 @@ def test_make_anemoi_reader(monkeypatch: pytest.MonkeyPatch) -> None:
     assert sample.statistics is dataset.statistics
 
 
+def test_get_sample_coordinates_are_rounded_once() -> None:
+    """Radians are converted from the float64 degrees, as for gridded data.
+
+    Rounding the degrees to float32 first changes the last bit of some radians.
+    """
+    payload = _make_obs_payload(n=3, v=1, n_times=1)
+    payload.latitudes = np.array([12.3456789, -45.6789012, 67.8901234])
+    payload.longitudes = np.array([123.456789, 234.567890, 345.678901])
+
+    sample = _make_obs_reader(payload).get_sample(0, slice(0, 1))
+
+    expected = torch.deg2rad(torch.from_numpy(np.stack([payload.latitudes, payload.longitudes], axis=-1)))
+    assert torch.equal(sample.coordinates, expected.to(torch.float32))
+
+
 def test_batch_collate_and_to() -> None:
     """Test that we can collate a batch of two observation samples and move it to the GPU."""
     reader = _make_obs_reader(_make_obs_payload())

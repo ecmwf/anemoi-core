@@ -95,7 +95,9 @@ def resolve_subgrid_node(node: object, output_mask: object, dataset_name: str) -
 def resolve_subgrid(config: Mapping, output_mask: Mapping) -> None:
     """Resolve ``subgrid: output_mask`` placeholders for every dataset in ``config``."""
     for dataset_name, dataset_config in config.items():
-        if dataset_config is not None:
+        # Loss configs may name datasets the model does not have (e.g. a default ``data`` entry
+        # merged into a multi-dataset config); no loss is built for those, so skip them.
+        if dataset_config is not None and dataset_name in output_mask:
             resolve_subgrid_node(dataset_config, output_mask[dataset_name], dataset_name)
 
 

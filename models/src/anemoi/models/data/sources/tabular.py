@@ -354,10 +354,12 @@ class TabularSource(Source):
                 f"Sample {i} of both views must have the same shape apart from the ensemble axis; "
                 f"got {tuple(pred_sample.shape)} and {tuple(target_sample.shape)}."
             )
-            assert torch.equal(self.coordinates[i], other.coordinates[i]), (
-                f"Sample {i} of both views must have the same coordinates; "
-                f"got {self.coordinates[i]} and {other.coordinates[i]}."
-            )
+            # torch.equal returns a data-dependent Python bool, which breaks fullgraph compilation of the loss
+            if not torch.compiler.is_compiling():
+                assert torch.equal(self.coordinates[i], other.coordinates[i]), (
+                    f"Sample {i} of both views must have the same coordinates; "
+                    f"got {self.coordinates[i]} and {other.coordinates[i]}."
+                )
             sample_kwargs = kwargs | {name: values[i] for name, values in per_sample_kwargs.items()}
             losses.append(
                 func(

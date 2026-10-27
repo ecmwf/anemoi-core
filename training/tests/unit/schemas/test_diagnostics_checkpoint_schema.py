@@ -76,3 +76,19 @@ def test_resume_error_comes_before_conversion_error() -> None:
 def test_excluding_unknown_hyperparameter_raises() -> None:
     with pytest.raises(ValidationError, match="graph_dat"):
         CheckpointSchema(exclude_hyperparameters=["graph_dat"])
+
+
+def test_excluding_graph_data_raises() -> None:
+    # The graph is no longer a hyperparameter: the model builds it from the config.
+    with pytest.raises(ValidationError, match="graph_data"):
+        CheckpointSchema(exclude_hyperparameters=["graph_data"])
+
+
+@pytest.mark.parametrize("name", sorted(OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION))
+def test_excluding_optional_conversion_hyperparameter_warns(name: str, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        schema = CheckpointSchema(exclude_hyperparameters=[name])
+    assert schema.exclude_hyperparameters == [name]
+    assert "checkpoint inference" in caplog.text
+    assert name in caplog.text
+    assert OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION[name] in caplog.text

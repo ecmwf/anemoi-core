@@ -18,6 +18,7 @@ from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.graphs.edges.attributes import Timedeltas
 from anemoi.models.layers.graph_provider import DynamicGraphProvider
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.graph_provider import StaticGraphProvider
 
 
 def test_projection_graph_provider_preserves_row_normalized_weights() -> None:
@@ -380,3 +381,22 @@ def test_dynamic_graph_provider_keeps_coordinate_attributes_working() -> None:
     )
 
     assert torch.allclose(edge_attr, expected)
+
+
+@pytest.mark.parametrize("trainable_size", [0, 2])
+def test_static_graph_provider_expands_edge_attr_with_batch(trainable_size: int) -> None:
+    graph = HeteroData()
+    graph.edge_index = torch.tensor([[0, 1, 2, 0], [1, 0, 1, 0]], dtype=torch.long)
+    graph.edge_attr = torch.tensor([[0.0], [1.0], [2.0], [3.0]], dtype=torch.float32)
+    provider = StaticGraphProvider(
+        graph=graph, edge_attributes=["edge_attr"], src_size=3, dst_size=2, trainable_size=trainable_size
+    )
+    batch_size = 3
+
+    edge_attr, edge_index, _ = provider.get_edges(batch_size=batch_size, shard_edges=False, act_checkpoint=False)
+
+    num_edges = graph.edge_index.shape[1]
+    assert edge_index.shape == (2, batch_size * num_edges)
+    assert edge_attr.shape == (batch_size * num_edges, provider.edge_dim)
+    # Every sample sees the same (dst-sorted) static attributes.
+    torch.testing.assert_close(edge_attr[:, :1], provider.edge_attr.repeat(batch_size, 1))

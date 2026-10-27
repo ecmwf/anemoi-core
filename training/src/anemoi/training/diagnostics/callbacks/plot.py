@@ -10,13 +10,13 @@
 
 import asyncio
 import copy
+import functools
 import logging
 import threading
 import traceback
 from abc import ABC
 from abc import abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -69,7 +69,8 @@ _UNSET_MEMBERS: Any = _Unset()
 
 def _unwrap_plot_fn(plot_fn: Any) -> Any:
     """Return the underlying function of a (possibly functools.partial) plot_fn."""
-    while isinstance(plot_fn, partial):
+    # isinstance, not hasattr(plot_fn, "func"): objects with dynamic attributes (e.g. mocks) would loop forever
+    while isinstance(plot_fn, functools.partial):
         plot_fn = plot_fn.func
     return plot_fn
 

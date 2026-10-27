@@ -216,7 +216,10 @@ class GriddedSource(Source):
         if self.layout != other.layout:
             raise ValueError(f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}.")
 
-        assert torch.equal(self.coordinates, other.coordinates), "Both views must have the same coordinates."
+        # torch.equal returns a data-dependent Python bool, which breaks fullgraph compilation of the loss
+        if not torch.compiler.is_compiling():
+            assert torch.equal(self.coordinates, other.coordinates), "Both views must have the same coordinates."
+
         return func(
             self.data,
             other.data,

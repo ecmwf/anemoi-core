@@ -58,6 +58,18 @@ def test_gridded_converts_layout_and_degrees():
     torch.testing.assert_close(sample.coordinates[:, 1], torch.deg2rad(torch.tensor(LONS)))
 
 
+@pytest.mark.parametrize("build", [_gridded, _tabular])
+def test_degrees_are_converted_in_float64_and_rounded_once(build):
+    # Rounding the degrees to float32 before the conversion changes the last bit of some radians.
+    lats = torch.tensor([12.3456789, -45.6789012, 67.8901234], dtype=torch.float64)
+    lons = torch.tensor([123.456789, 234.567890, 345.678901], dtype=torch.float64)
+    sample = build(latitudes=lats.numpy(), longitudes=lons.numpy())
+    coordinates = sample.coordinates[0] if isinstance(sample.coordinates, list) else sample.coordinates
+    assert coordinates.dtype == torch.float32
+    assert torch.equal(coordinates[:, 0], torch.deg2rad(lats).to(torch.float32))
+    assert torch.equal(coordinates[:, 1], torch.deg2rad(lons).to(torch.float32))
+
+
 def test_tabular_converts_boundaries_and_timedeltas():
     sample = _tabular()
     assert isinstance(sample, TabularSample)

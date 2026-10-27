@@ -53,12 +53,12 @@ class GriddedDataReader(BaseAnemoiReader):
     @cached_property
     def latitudes(self) -> np.ndarray:
         """Return per-grid-point latitudes in **degrees**, as stored by ``anemoi.datasets``."""
-        return np.asarray(self.data.latitudes, dtype=np.float32)
+        return np.asarray(self.data.latitudes, dtype=np.float64)
 
     @cached_property
     def longitudes(self) -> np.ndarray:
         """Return per-grid-point longitudes in **degrees**, as stored by ``anemoi.datasets``."""
-        return np.asarray(self.data.longitudes, dtype=np.float32)
+        return np.asarray(self.data.longitudes, dtype=np.float64)
 
     @cached_property
     def cutout_mask(self) -> np.ndarray:

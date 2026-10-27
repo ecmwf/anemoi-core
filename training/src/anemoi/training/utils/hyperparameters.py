@@ -13,15 +13,16 @@ The hyperparameters are the ``__init__`` arguments of ``BaseTrainingModule``. Th
 checkpoint with ``diagnostics.checkpoint.exclude_hyperparameters``.
 """
 
-# All ``__init__`` arguments of ``BaseTrainingModule``
+# All ``__init__`` arguments of ``BaseTrainingModule``. ``task`` is never stored (it holds runtime objects);
+# it is rebuilt from ``config.task`` when a checkpoint is loaded.
 INIT_HYPERPARAMETERS = frozenset(
     {
         "config",
         "task",
-        "data_types",
         "statistics",
         "statistics_tendencies",
         "data_indices",
+        "data_types",
         "metadata",
         "supporting_arrays",
     },
@@ -31,8 +32,9 @@ INIT_HYPERPARAMETERS = frozenset(
 HYPERPARAMETERS_FOR_RESUME = frozenset({"config", "data_indices", "metadata"})
 
 # Hyperparameters that ``anemoi-training checkpoint inference`` can do without, mapped to the option
-# of the command with which they have to be supplied instead
-OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION = {}
+# of the command with which they have to be supplied instead. None at present: the graph is not a
+# hyperparameter, the model builds it from the config (``--graph`` overrides the config instead).
+OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION: dict[str, str] = {}
 # Hyperparameters required for ``anemoi-training checkpoint inference``
 REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION = INIT_HYPERPARAMETERS - set(
     OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION,
