@@ -1,0 +1,23 @@
+# Exemptions from the check-ci-approval pre-commit hook of ecmwf/ci-infrastructure.
+# An entry here is a claim that the job never executes pull request code.
+# Re-check that claim whenever one of these jobs gains a checkout step.
+
+exempt:
+  # Checks the pull request title; no checkout.
+  - workflow: pr-conventional-commit.yml
+    jobs: [main]
+  # actions/labeler reads only the changed file names; no checkout.
+  - workflow: pr-label-file-based.yml
+    jobs: [labeler]
+  # Posts a commit status from the event's labels; no checkout.
+  - workflow: pr-label-expensive-tests.yml
+    jobs: [gate]
+  # Under pull_request_target, actions/checkout without a ref takes the base
+  # branch; the job only diffs it and edits the description with the docs links.
+  - workflow: readthedocs-pr-update.yml
+    jobs: [documentation]
+  # The HPC jobs clone ecmwf/anemoi-core at the pull request's branch name, so
+  # they never run a fork's code; they only run on the run-expensive-tests label.
+  # To be replaced by hpc-submit legs of ci.yml, behind its ci-approval gate.
+  - workflow: integration-tests-hpc.yml
+  - workflow: run-integration-test-hpc.yml

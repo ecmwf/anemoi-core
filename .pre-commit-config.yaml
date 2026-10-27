@@ -86,6 +86,12 @@ repos:
     - --check-protected  # Check protected methods
     - --check-class      # Check class docstrings
     - --disable=SIG101,SIG102,SIG305     # Disable empty docstrings
+- repo: https://github.com/ecmwf/ci-infrastructure
+  rev: cc8151ca9315b95862d0c2db7b5dc7f7063877c2
+  hooks:
+  - id: check-ci-approval
+  - id: check-ci-result
 ci:
+  autofix_prs: false
   autoupdate_schedule: monthly
   autoupdate_commit_msg: "chore(deps): pre-commit.ci autoupdate"
