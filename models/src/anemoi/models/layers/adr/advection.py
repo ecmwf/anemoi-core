@@ -28,17 +28,16 @@ LOGGER = logging.getLogger(__name__)
 class SemiLagrangianAdvection(SemiLagrangianLayer):
     """Neural semi-Lagrangian advection, as in PARADIS (Pereira et al., arXiv:2601.21151).
 
-    A spatial mixer projects the latent state down to the transported channels. A velocity network
-    (layer norm, linear layer, learned bias field, activation, spatial mixer) predicts one
-    velocity per head from the latent state. The transported channels are moved along their
-    velocities and projected back up to the full latent state, which is returned.
+    - A spatial mixer projects the latent state down to the transported channels. 
+    - A velocity network (norm -> linear -> bias -> activation) predicts one velocity per head. 
+    - The transported channels are moved along their velocities and projected back.
 
     Velocities are scaled by ``time_step``, the length of one layer's step in units of the inverse
     of the Earth's rotation rate, to give the angles travelled. By default they are given in each
-    point's local east and north directions, as in the paper. These turn round across a pole, so
-    the stencils that predict them see reversed directions in the rows padded in from the other
-    side of a pole. ``cartesian_displacement`` predicts 3D velocities instead (see
-    ``SemiLagrangianLayer``).
+    point's local east and north directions.
+    
+    These turn round across a pole, so the stencils that predict them see reversed directions in
+    the rows padded in from the other side of a pole.
 
     Each head has its own velocity and moves ``advection_channels // num_heads`` channels.
     """

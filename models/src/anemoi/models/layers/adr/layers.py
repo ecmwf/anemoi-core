@@ -7,13 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Steps of the advection-diffusion-reaction block (PARADIS, arXiv:2601.21151).
-
-Each step is built from its own config by ``ADRProcessorBlock``, which passes in the grid:
-``num_channels``, ``nlat``, ``nlon``, ``grid_index`` and ``layer_kernels``, and ``time_step`` for
-the advection step. A step returns the increment that the block adds to the state.
-"""
-
 import logging
 
 import torch
