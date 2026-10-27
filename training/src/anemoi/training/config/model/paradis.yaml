@@ -25,23 +25,14 @@ layer_kernels:
 
 processor:
   # Advection-diffusion-reaction processor from PARADIS (arXiv:2601.21151). The hidden nodes
-  # must be a regular latitude-longitude grid built with anemoi.graphs.nodes.RegularLatLonNodes
-  # (see graph/encoder_decoder_latlon.yaml); the grid size is read from the graph.
+  # must be a regular latitude-longitude grid built with anemoi.graphs.nodes.RectilinearNodes
+  # with a RectilinearLayoutIndex node attribute (see graph/encoder_decoder_latlon.yaml).
   _target_: anemoi.models.layers.processor.ADRProcessor
+  layout_node_attribute_name: layout_index # hidden node attribute with the row and column of each node
   num_channels: ${model.num_channels}
   num_layers: 16
   num_chunks: 4
   timestep: ${task.timestep} # the layers split one model time step into equal sub-steps
-  advection_channels: 768
-  num_heads: null # number of velocity fields; null gives one per advected channel
-  velocity_hidden_dim: 384
-  reaction_hidden_dim: 896
-  reaction_num_layers: 4
-  kernel_size: 5
-  interpolation: bicubic # bicubic or bilinear
-  bias_rank: 128
-  bias_base_maps: 8
-  cartesian_displacement: False # True: 3D velocities, which do not turn round across the poles
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels:
@@ -51,6 +42,32 @@ processor:
       _target_: torch.nn.Linear
     Activation:
       _target_: torch.nn.SiLU
+  # Each layer runs the steps below in order; set a step to null to leave it out.
+  advection:
+    _target_: anemoi.models.layers.adr.NeuralSemiLagrangian
+    advection_channels: 768
+    num_heads: null # number of velocity fields; null gives one per advected channel
+    velocity_hidden_dim: 384
+    kernel_size: 5
+    interpolation: bicubic # bicubic or bilinear
+    bias_rank: 128
+    bias_base_maps: 8
+    cartesian_displacement: False # True: 3D velocities, which do not turn round across the poles
+  diffusion:
+    _target_: anemoi.models.layers.adr.Diffusion
+    kernel_size: 5
+    layer_norm: True
+    low_rank_bias: True
+    bias_rank: 128
+    bias_base_maps: 8
+  reaction:
+    _target_: anemoi.models.layers.adr.Reaction
+    hidden_dim: 896
+    num_layers: 4
+    layer_norm: True
+    low_rank_bias: True # learned bias field after the first layer
+    bias_rank: 128
+    bias_base_maps: 8
 
 encoders:
   "0":

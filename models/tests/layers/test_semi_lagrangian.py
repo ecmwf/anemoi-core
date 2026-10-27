@@ -182,19 +182,27 @@ def test_blocks_do_not_depend_on_node_order(kind):
     def build(grid_index):
         torch.manual_seed(0)
         if kind == "adr":
+            bias_kwargs = {"bias_rank": 4, "bias_base_maps": 2}
             return ADRProcessorBlock(
                 num_channels=channels,
-                advection_channels=8,
-                num_heads=4,
-                velocity_hidden_dim=8,
-                reaction_hidden_dim=16,
-                reaction_num_layers=2,
                 nlat=nlat,
                 nlon=nlon,
                 time_step=0.2,
                 layer_kernels=load_layer_kernels(),
-                bias_rank=4,
-                bias_base_maps=2,
+                advection={
+                    "_target_": "anemoi.models.layers.adr.NeuralSemiLagrangian",
+                    "advection_channels": 8,
+                    "num_heads": 4,
+                    "velocity_hidden_dim": 8,
+                    **bias_kwargs,
+                },
+                diffusion={"_target_": "anemoi.models.layers.adr.Diffusion", **bias_kwargs},
+                reaction={
+                    "_target_": "anemoi.models.layers.adr.Reaction",
+                    "hidden_dim": 16,
+                    "num_layers": 2,
+                    **bias_kwargs,
+                },
                 grid_index=grid_index,
             )
         return FlowersProcessorBlock(
@@ -317,25 +325,23 @@ def test_adr_block_matches_paper_parameter_counts():
     """
     block = ADRProcessorBlock(
         num_channels=1024,
-        advection_channels=768,
-        num_heads=768,
-        velocity_hidden_dim=384,
-        reaction_hidden_dim=896,
-        reaction_num_layers=4,
         nlat=361,
         nlon=720,
         time_step=0.2,
         layer_kernels=load_layer_kernels(),
+        advection={"_target_": "anemoi.models.layers.adr.NeuralSemiLagrangian"},
+        diffusion={"_target_": "anemoi.models.layers.adr.Diffusion"},
+        reaction={"_target_": "anemoi.models.layers.adr.Reaction"},
     )
 
     def count(*modules):
         return sum(p.numel() for m in modules for p in m.parameters())
 
-    adv = block.advection
+    adv = block.advection.transport
     velocity = count(adv.velocity_norm, adv.velocity_in, adv.velocity_bias, adv.velocity_out)
-    advection = count(adv.down, adv.up) + block.advection_share.numel()
-    diffusion = count(block.layer_norm_diffusion, block.diffusion, block.diffusion_bias)
-    reaction = count(block.layer_norm_reaction, block.reaction, block.reaction_bias)
+    advection = count(adv.down, adv.up) + block.advection.share.numel()
+    diffusion = count(block.diffusion)
+    reaction = count(block.reaction)
 
     assert velocity == 9_112_576 // 8
     assert advection == 12_810_240 // 8

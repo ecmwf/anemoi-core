@@ -25,9 +25,10 @@ layer_kernels:
 
 processor:
   # Processor of FLOWERS warp blocks (arXiv:2603.04430), stacked at a single resolution. The hidden
-  # nodes must be a regular latitude-longitude grid built with anemoi.graphs.nodes.RegularLatLonNodes
-  # (see graph/encoder_decoder_latlon.yaml); the grid size is read from the graph.
+  # nodes must be a regular latitude-longitude grid built with anemoi.graphs.nodes.RectilinearNodes
+  # with a RectilinearLayoutIndex node attribute (see graph/encoder_decoder_latlon.yaml).
   _target_: anemoi.models.layers.processor.FlowersProcessor
+  layout_node_attribute_name: layout_index # hidden node attribute with the row and column of each node
   num_channels: ${model.num_channels}
   num_layers: 16
   num_chunks: 4

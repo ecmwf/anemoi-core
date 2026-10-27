@@ -31,6 +31,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric.data.storage import NodeStorage
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range

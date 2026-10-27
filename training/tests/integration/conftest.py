@@ -165,9 +165,9 @@ def build_global_config(
             "model=paradis",
             "graph=encoder_decoder_latlon",
             "graph.nodes.hidden.node_builder.resolution=4.0",
-            "model.processor.advection_channels=8",
-            "model.processor.velocity_hidden_dim=8",
-            "model.processor.reaction_hidden_dim=16",
+            "model.processor.advection.advection_channels=8",
+            "model.processor.advection.velocity_hidden_dim=8",
+            "model.processor.reaction.hidden_dim=16",
             "model.compile=[]",
         ],
         [

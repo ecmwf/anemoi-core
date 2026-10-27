@@ -42,23 +42,26 @@ def _build_block(
             layer_kernels=load_layer_kernels(),
             cartesian_displacement=cartesian,
         ).to(device)
+    bias_kwargs = {"bias_rank": 4, "bias_base_maps": 2}
     block = ADRProcessorBlock(
         num_channels=16,
-        advection_channels=12,
-        num_heads=num_heads,
-        velocity_hidden_dim=10,
-        reaction_hidden_dim=24,
-        reaction_num_layers=3,
         nlat=nlat,
         nlon=nlon,
         time_step=0.2,
         layer_kernels=load_layer_kernels(),
-        bias_rank=4,
-        bias_base_maps=2,
-        cartesian_displacement=cartesian,
+        advection={
+            "_target_": "anemoi.models.layers.adr.NeuralSemiLagrangian",
+            "advection_channels": 12,
+            "num_heads": num_heads,
+            "velocity_hidden_dim": 10,
+            "cartesian_displacement": cartesian,
+            **bias_kwargs,
+        },
+        diffusion={"_target_": "anemoi.models.layers.adr.Diffusion", **bias_kwargs},
+        reaction={"_target_": "anemoi.models.layers.adr.Reaction", "hidden_dim": 24, "num_layers": 3, **bias_kwargs},
     ).to(device)
     # The bias fields start close to zero; give them values so that every path is tested.
-    for bias in (block.advection.velocity_bias, block.diffusion_bias, block.reaction_bias):
+    for bias in (block.advection.transport.velocity_bias, block.diffusion.bias, block.reaction.bias):
         for p in (bias.coefficients, bias.lat_profiles, bias.lon_profiles):
             torch.nn.init.normal_(p)
     return block

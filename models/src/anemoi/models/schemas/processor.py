@@ -19,6 +19,8 @@ from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import model_validator
 
+from anemoi.utils.schemas import BaseModel
+
 from .common_components import GNNModelComponent
 from .common_components import PointWiseModelComponent
 from .common_components import TransformerModelComponent
@@ -116,6 +118,59 @@ class TransformerProcessorSchema(TransformerModelComponent):
         return self
 
 
+class NeuralSemiLagrangianSchema(BaseModel):
+    target_: Literal["anemoi.models.layers.adr.NeuralSemiLagrangian"] = Field(..., alias="_target_")
+    "Advection step: neural semi-Lagrangian advection with a learned share per channel."
+    advection_channels: PositiveInt = Field(default=768)
+    "Number of channels moved by the advection step."
+    num_heads: Union[PositiveInt, None] = Field(default=None)
+    "Number of velocity fields. Default: one per moved channel."
+    velocity_hidden_dim: PositiveInt = Field(default=384)
+    "Hidden dimension of the velocity network."
+    kernel_size: PositiveInt = Field(default=5)
+    "Size of the square stencils of the spatial mixers, must be odd."
+    interpolation: Literal["bicubic", "bilinear"] = Field(default="bicubic")
+    "Interpolation used to read values at departure points."
+    bias_rank: PositiveInt = Field(default=128)
+    "Number of latitude-longitude profile pairs in the learned bias field."
+    bias_base_maps: PositiveInt = Field(default=8)
+    "Number of base maps the learned bias field is mixed from."
+    cartesian_displacement: bool = Field(default=False)
+    "Predict velocities as 3D vectors instead of local east and north components."
+
+
+class DiffusionSchema(BaseModel):
+    target_: Literal["anemoi.models.layers.adr.Diffusion"] = Field(..., alias="_target_")
+    "Diffusion step: layer norm, a stencil per channel, a channel mix and a learned bias field."
+    kernel_size: PositiveInt = Field(default=5)
+    "Size of the square stencil, must be odd."
+    layer_norm: bool = Field(default=True)
+    "Apply a layer norm before the stencil."
+    low_rank_bias: bool = Field(default=True)
+    "Add a learned bias field after the channel mix."
+    bias_rank: PositiveInt = Field(default=128)
+    "Number of latitude-longitude profile pairs in the learned bias field."
+    bias_base_maps: PositiveInt = Field(default=8)
+    "Number of base maps the learned bias field is mixed from."
+
+
+class ReactionSchema(BaseModel):
+    target_: Literal["anemoi.models.layers.adr.Reaction"] = Field(..., alias="_target_")
+    "Reaction step: layer norm and a pointwise MLP with a learned bias field after its first layer."
+    hidden_dim: PositiveInt = Field(default=896)
+    "Hidden dimension of the MLP."
+    num_layers: int = Field(default=4, ge=2)
+    "Number of linear layers in the MLP, at least 2."
+    layer_norm: bool = Field(default=True)
+    "Apply a layer norm before the MLP."
+    low_rank_bias: bool = Field(default=True)
+    "Add a learned bias field after the first layer of the MLP."
+    bias_rank: PositiveInt = Field(default=128)
+    "Number of latitude-longitude profile pairs in the learned bias field."
+    bias_base_maps: PositiveInt = Field(default=8)
+    "Number of base maps the learned bias field is mixed from."
+
+
 class ADRProcessorSchema(PointWiseModelComponent):
     target_: Literal["anemoi.models.layers.processor.ADRProcessor"] = Field(..., alias="_target_")
     "Advection-diffusion-reaction processor on a regular latitude-longitude hidden grid (PARADIS). The grid layout is read from the hidden nodes."
@@ -127,26 +182,12 @@ class ADRProcessorSchema(PointWiseModelComponent):
     "Number of advection-diffusion-reaction layers."
     timestep: str = Field(example="6h")
     "Model time step. Sets how far the learned velocities move the state."
-    advection_channels: PositiveInt = Field(default=768)
-    "Number of channels moved by the advection step."
-    num_heads: Union[PositiveInt, None] = Field(default=None)
-    "Number of velocity fields. Default: one per moved channel."
-    velocity_hidden_dim: PositiveInt = Field(default=384)
-    "Hidden dimension of the velocity network."
-    reaction_hidden_dim: PositiveInt = Field(default=896)
-    "Hidden dimension of the reaction MLP."
-    reaction_num_layers: PositiveInt = Field(default=4)
-    "Number of linear layers in the reaction MLP, at least 2."
-    kernel_size: PositiveInt = Field(default=5)
-    "Size of the square stencils of the spatial mixers, must be odd."
-    interpolation: Literal["bicubic", "bilinear"] = Field(default="bicubic")
-    "Interpolation used to read values at departure points."
-    bias_rank: PositiveInt = Field(default=128)
-    "Number of latitude-longitude profile pairs in each learned bias field."
-    bias_base_maps: PositiveInt = Field(default=8)
-    "Number of base maps each learned bias field is mixed from."
-    cartesian_displacement: bool = Field(default=False)
-    "Predict velocities as 3D vectors instead of local east and north components."
+    advection: Union[NeuralSemiLagrangianSchema, None]
+    "Advection step of each layer. None leaves it out."
+    diffusion: Union[DiffusionSchema, None]
+    "Diffusion step of each layer. None leaves it out."
+    reaction: Union[ReactionSchema, None]
+    "Reaction step of each layer. None leaves it out."
 
 
 class FlowersProcessorSchema(PointWiseModelComponent):

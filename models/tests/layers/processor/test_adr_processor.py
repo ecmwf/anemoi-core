@@ -17,11 +17,40 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.layers.adr import Diffusion
+from anemoi.models.layers.adr import NeuralSemiLagrangian
+from anemoi.models.layers.adr import Reaction
 from anemoi.models.layers.block import ADRProcessorBlock
 from anemoi.models.layers.processor import ADRProcessor
 from anemoi.models.layers.semi_lagrangian import latlon_cell_centres
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
+
+
+def _advection(**kwargs) -> dict:
+    return {
+        "_target_": "anemoi.models.layers.adr.NeuralSemiLagrangian",
+        "advection_channels": 16,
+        "velocity_hidden_dim": 12,
+        "bias_rank": 4,
+        "bias_base_maps": 2,
+        **kwargs,
+    }
+
+
+def _diffusion(**kwargs) -> dict:
+    return {"_target_": "anemoi.models.layers.adr.Diffusion", "bias_rank": 4, "bias_base_maps": 2, **kwargs}
+
+
+def _reaction(**kwargs) -> dict:
+    return {
+        "_target_": "anemoi.models.layers.adr.Reaction",
+        "hidden_dim": 24,
+        "num_layers": 4,
+        "bias_rank": 4,
+        "bias_base_maps": 2,
+        **kwargs,
+    }
 
 
 @dataclass
@@ -34,16 +63,9 @@ class ADRProcessorConfig:
     nlat: int = 8
     nlon: int = 16
     timestep: str = "6h"
-    advection_channels: int = 16
-    num_heads: Optional[int] = None
-    velocity_hidden_dim: int = 12
-    reaction_hidden_dim: int = 24
-    reaction_num_layers: int = 4
-    kernel_size: int = 5
-    interpolation: str = "bicubic"
-    bias_rank: int = 4
-    bias_base_maps: int = 2
-    cartesian_displacement: bool = False
+    advection: Optional[dict] = field(default_factory=_advection)
+    diffusion: Optional[dict] = field(default_factory=_diffusion)
+    reaction: Optional[dict] = field(default_factory=_reaction)
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
 
@@ -84,10 +106,15 @@ def test_adr_processor_init(adr_processor, adr_processor_init):
         assert isinstance(block, ADRProcessorBlock)
         # The grid size comes from the hidden nodes' layout.
         assert (block.nlat, block.nlon) == (adr_processor_init.nlat, adr_processor_init.nlon)
+        assert isinstance(block.advection, NeuralSemiLagrangian)
+        assert isinstance(block.diffusion, Diffusion)
+        assert isinstance(block.reaction, Reaction)
         # By default every moved channel has its own velocity field.
-        assert block.advection.num_heads == adr_processor_init.advection_channels
+        assert block.advection.transport.num_heads == adr_processor_init.advection["advection_channels"]
         # The layers split one 6 hour step, with velocities in units of 1 / Earth's rotation rate.
-        assert block.advection.time_step == pytest.approx(6 * 3600 * 7.29212e-5 / adr_processor_init.num_layers)
+        assert block.advection.transport.time_step == pytest.approx(
+            6 * 3600 * 7.29212e-5 / adr_processor_init.num_layers
+        )
 
 
 @pytest.mark.parametrize("batch_size", [1, 2])
@@ -98,9 +125,10 @@ def test_adr_processor_init(adr_processor, adr_processor_init):
 def test_adr_processor_forward_backward(
     adr_processor_init, batch_size, interpolation, kernel_size, cartesian_displacement
 ):
-    adr_processor_init.interpolation = interpolation
-    adr_processor_init.kernel_size = kernel_size
-    adr_processor_init.cartesian_displacement = cartesian_displacement
+    adr_processor_init.advection = _advection(
+        interpolation=interpolation, kernel_size=kernel_size, cartesian_displacement=cartesian_displacement
+    )
+    adr_processor_init.diffusion = _diffusion(kernel_size=kernel_size)
     processor = _build(adr_processor_init)
 
     grid = adr_processor_init.nlat * adr_processor_init.nlon
@@ -129,3 +157,40 @@ def test_adr_processor_batch_members_are_independent(adr_processor_init):
     both = processor(x, batch_size=2, shard_info=GraphShardInfo(nodes=[2 * grid]))
     second = processor(x[grid:], batch_size=1, shard_info=GraphShardInfo(nodes=[grid]))
     torch.testing.assert_close(both[grid:], second, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize(
+    "dropped", [("advection",), ("diffusion",), ("reaction",), ("advection", "diffusion", "reaction")]
+)
+def test_adr_processor_steps_can_be_left_out(adr_processor_init, dropped):
+    for name in dropped:
+        setattr(adr_processor_init, name, None)
+    processor = _build(adr_processor_init)
+
+    for block in processor.proc:
+        for name in ("advection", "diffusion", "reaction"):
+            assert (getattr(block, name) is None) == (name in dropped)
+
+    grid = adr_processor_init.nlat * adr_processor_init.nlon
+    x = torch.rand(grid, adr_processor_init.num_channels)
+    output = processor(x, batch_size=1, shard_info=GraphShardInfo(nodes=[grid]))
+    assert output.shape == x.shape
+    if len(dropped) == 3:
+        assert not list(processor.parameters())
+        torch.testing.assert_close(output, x)
+
+
+@pytest.mark.parametrize("step", ["diffusion", "reaction"])
+def test_adr_step_parts_can_be_switched_off(adr_processor_init, step):
+    make = _diffusion if step == "diffusion" else _reaction
+    full = getattr(_build(adr_processor_init).proc[0], step)
+    setattr(adr_processor_init, step, make(layer_norm=False, low_rank_bias=False))
+    bare = getattr(_build(adr_processor_init).proc[0], step)
+
+    assert full.layer_norm is not None and full.bias is not None
+    assert bare.layer_norm is None and bare.bias is None
+
+    def count(module):
+        return sum(p.numel() for p in module.parameters())
+
+    assert count(bare) == count(full) - count(full.layer_norm) - count(full.bias)

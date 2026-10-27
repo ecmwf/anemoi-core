@@ -17,6 +17,8 @@ from typing import Union
 
 import einops
 import torch
+from hydra.utils import instantiate
+from omegaconf import DictConfig
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -43,11 +45,7 @@ from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.mlp import build_feedforward_layer
 from anemoi.models.layers.semi_lagrangian import LatLonLayout
-from anemoi.models.layers.semi_lagrangian import LowRankBias
-from anemoi.models.layers.semi_lagrangian import SemiLagrangianAdvection
 from anemoi.models.layers.semi_lagrangian import SemiLagrangianWarp
-from anemoi.models.layers.semi_lagrangian import SpatialMixer
-from anemoi.models.layers.semi_lagrangian import init_branch
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
@@ -201,14 +199,15 @@ class TransformerProcessorBlock(BaseBlock):
 class ADRProcessorBlock(BaseBlock):
     """Advection-diffusion-reaction block on a regular latitude-longitude grid, as in PARADIS.
 
-    Three steps, one after the other:
+    Three steps, one after the other, each adding its output to the state:
 
-    - advection: the state moves towards its advected version by a learned share per channel,
-      ``x + sigmoid(a) * (advect(x) - x)``;
-    - diffusion: a layer norm, a stencil per channel, a channel mix and a learned bias field, added
-      to the state;
-    - reaction: a layer norm and a pointwise MLP with a learned bias field after its first layer,
-      added to the state.
+    - advection, e.g. ``anemoi.models.layers.adr.NeuralSemiLagrangian``;
+    - diffusion, e.g. ``anemoi.models.layers.adr.Diffusion``;
+    - reaction, e.g. ``anemoi.models.layers.adr.Reaction``.
+
+    Each step is given as a config with a ``_target_``, built with the grid passed in
+    (``num_channels``, ``nlat``, ``nlon``, ``grid_index``, ``layer_kernels``, and ``time_step`` for
+    the advection step). A step set to None is left out.
 
     Unlike the paper, the reaction step does not receive separately encoded static fields
     (orography, land-sea mask, ...); static information reaches the processor only through the
@@ -219,67 +218,31 @@ class ADRProcessorBlock(BaseBlock):
         self,
         *,
         num_channels: int,
-        advection_channels: int,
-        num_heads: int,
-        velocity_hidden_dim: int,
-        reaction_hidden_dim: int,
-        reaction_num_layers: int,
         nlat: int,
         nlon: int,
         time_step: float,
         layer_kernels: DotDict,
-        kernel_size: int = 5,
-        interpolation: str = "bicubic",
-        bias_rank: int = 128,
-        bias_base_maps: int = 8,
-        cartesian_displacement: bool = False,
+        advection: Optional[DictConfig],
+        diffusion: Optional[DictConfig],
+        reaction: Optional[DictConfig],
         grid_index: Optional[Tensor] = None,
     ):
         super().__init__()
-        if reaction_num_layers < 2:
-            raise ValueError(f"reaction_num_layers must be at least 2, got {reaction_num_layers}.")
         self.nlat = nlat
         self.nlon = nlon
         # Flat grid position of each node, when the nodes are not stored row by row.
         self.register_buffer("grid_index", grid_index, persistent=False)
-        bias_kwargs = {
+        grid_kwargs = {
+            "num_channels": num_channels,
             "nlat": nlat,
             "nlon": nlon,
+            "grid_index": grid_index,
             "layer_kernels": layer_kernels,
-            "rank": bias_rank,
-            "num_base_maps": bias_base_maps,
         }
 
-        self.advection = SemiLagrangianAdvection(
-            num_channels=num_channels,
-            advection_channels=advection_channels,
-            num_heads=num_heads,
-            velocity_hidden_dim=velocity_hidden_dim,
-            nlat=nlat,
-            nlon=nlon,
-            time_step=time_step,
-            layer_kernels=layer_kernels,
-            kernel_size=kernel_size,
-            interpolation=interpolation,
-            bias_rank=bias_rank,
-            bias_base_maps=bias_base_maps,
-            cartesian_displacement=cartesian_displacement,
-            grid_index=grid_index,
-        )
-        # Passed through a sigmoid: each channel starts by taking about a quarter of its advected value.
-        self.advection_share = nn.Parameter(torch.full((num_channels,), -1.0))
-
-        self.layer_norm_diffusion = layer_kernels.LayerNorm(normalized_shape=num_channels)
-        self.diffusion = SpatialMixer(num_channels, num_channels, layer_kernels, kernel_size)
-        self.diffusion_bias = LowRankBias(num_channels, **bias_kwargs)
-        init_branch(self.diffusion.stencil.conv, self.diffusion.mix)
-
-        self.layer_norm_reaction = layer_kernels.LayerNorm(normalized_shape=num_channels)
-        dims = [num_channels] + [reaction_hidden_dim] * (reaction_num_layers - 1) + [num_channels]
-        self.reaction = nn.ModuleList(layer_kernels.Linear(dims[i], dims[i + 1]) for i in range(reaction_num_layers))
-        self.reaction_bias = LowRankBias(reaction_hidden_dim, **bias_kwargs)
-        self.reaction_activation = layer_kernels.Activation()
-        init_branch(*self.reaction)
+        self.advection = instantiate(advection, **grid_kwargs, time_step=time_step) if advection is not None else None
+        self.diffusion = instantiate(diffusion, **grid_kwargs) if diffusion is not None else None
+        self.reaction = instantiate(reaction, **grid_kwargs) if reaction is not None else None
 
     def forward(
         self,
@@ -294,20 +257,9 @@ class ADRProcessorBlock(BaseBlock):
             self.nlat, self.nlon, batch_size, shard_info.nodes, model_comm_group, grid_index=self.grid_index
         )
 
-        # In case we have conditionings we pass these to the layer norm
-        cond_kwargs = {"cond": cond} if cond is not None else {}
-
-        share = torch.sigmoid(self.advection_share).to(x.dtype)
-        x = x + share * (self.advection(x, layout, cond) - x)
-
-        diffusion = self.diffusion(self.layer_norm_diffusion(x, **cond_kwargs), layout)
-        x = x + self.diffusion_bias(diffusion, layout)
-
-        reaction = self.reaction[0](self.layer_norm_reaction(x, **cond_kwargs))
-        reaction = self.reaction_bias(reaction, layout)
-        for layer in self.reaction[1:]:
-            reaction = layer(self.reaction_activation(reaction))
-        x = x + reaction
+        for step in (self.advection, self.diffusion, self.reaction):
+            if step is not None:
+                x = x + step(x, layout, cond)
         return (x,)
 
 

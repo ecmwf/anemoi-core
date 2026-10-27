@@ -11,8 +11,11 @@ nodes:
   # Hidden nodes: regular latitude-longitude grid at cell centres, as needed by the ADR processor
   hidden:
     node_builder:
-      _target_: anemoi.graphs.nodes.RegularLatLonNodes
+      _target_: anemoi.graphs.nodes.RectilinearNodes
       resolution: 1.0 # degrees; 180 / resolution must be a whole number
+    attributes:
+      layout_index: # row and column of each node, read by the processor (layout_node_attribute_name)
+        _target_: anemoi.graphs.nodes.attributes.RectilinearLayoutIndex
 
 
 edges:

@@ -12,6 +12,7 @@ import logging
 from abc import ABC
 from typing import Optional
 
+from omegaconf import DictConfig
 from torch import Tensor
 from torch import nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
@@ -338,7 +339,9 @@ class ADRProcessor(BaseProcessor):
     are read from the hidden nodes' layout attribute, built with
     ``anemoi.graphs.nodes.attributes.RectilinearLayoutIndex``.
 
-    The layers split one model time step into equal sub-steps.
+    Each layer runs an advection, a diffusion and a reaction step, each built from its own config
+    (see ``anemoi.models.layers.adr``); a step set to None is left out. The layers split one model
+    time step into equal sub-steps.
     """
 
     def __init__(
@@ -350,16 +353,9 @@ class ADRProcessor(BaseProcessor):
         hidden_nodes: NodeStorage,
         layout_node_attribute_name: str,
         timestep: str,
-        advection_channels: int = 768,
-        num_heads: Optional[int] = None,
-        velocity_hidden_dim: int = 384,
-        reaction_hidden_dim: int = 896,
-        reaction_num_layers: int = 4,
-        kernel_size: int = 5,
-        interpolation: str = "bicubic",
-        bias_rank: int = 128,
-        bias_base_maps: int = 8,
-        cartesian_displacement: bool = False,
+        advection: Optional[DictConfig],
+        diffusion: Optional[DictConfig],
+        reaction: Optional[DictConfig],
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -380,28 +376,15 @@ class ADRProcessor(BaseProcessor):
             Name of the hidden node attribute with the row and column of each node in the grid
         timestep : str
             Model time step, e.g. "6h". Sets how far the learned velocities move the state.
-        advection_channels : int
-            Number of channels moved by the advection step
-        num_heads : int, optional
-            Number of velocity fields; each moves advection_channels // num_heads channels.
-            By default every moved channel has its own velocity field.
-        velocity_hidden_dim : int
-            Hidden dimension of the velocity network
-        reaction_hidden_dim : int
-            Hidden dimension of the reaction MLP
-        reaction_num_layers : int
-            Number of linear layers in the reaction MLP, at least 2
-        kernel_size : int
-            Size of the square stencils of the spatial mixers, must be odd
-        interpolation : str
-            "bicubic" or "bilinear", by default "bicubic"
-        bias_rank : int
-            Number of latitude-longitude profile pairs in each learned bias field
-        bias_base_maps : int
-            Number of base maps each learned bias field is mixed from
-        cartesian_displacement : bool
-            Predict velocities as 3D vectors instead of local east and north components (the
-            paper's choice, default). 3D vectors do not turn round across the poles.
+        advection : DictConfig, optional
+            Config of the advection step, e.g. ``anemoi.models.layers.adr.NeuralSemiLagrangian``.
+            None leaves the step out.
+        diffusion : DictConfig, optional
+            Config of the diffusion step, e.g. ``anemoi.models.layers.adr.Diffusion``.
+            None leaves the step out.
+        reaction : DictConfig, optional
+            Config of the reaction step, e.g. ``anemoi.models.layers.adr.Reaction``.
+            None leaves the step out.
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -417,35 +400,24 @@ class ADRProcessor(BaseProcessor):
             **kwargs,
         )
 
-        if num_heads is None:
-            LOGGER.info(
-                f"{self.__class__.__name__}: num_heads not specified, using {advection_channels} (advection channels)"
-            )
-            num_heads = advection_channels
-
         nlat, nlon, grid_index = latlon_grid_layout(hidden_nodes, layout_node_attribute_name)
         time_step = frequency_to_seconds(timestep) * EARTH_ROTATION_RATE / num_layers
         self.build_layers(
             ADRProcessorBlock,
             num_channels=num_channels,
-            advection_channels=advection_channels,
-            num_heads=num_heads,
-            velocity_hidden_dim=velocity_hidden_dim,
-            reaction_hidden_dim=reaction_hidden_dim,
-            reaction_num_layers=reaction_num_layers,
             nlat=nlat,
             nlon=nlon,
             grid_index=grid_index,
             time_step=time_step,
             layer_kernels=self.layer_factory,
-            kernel_size=kernel_size,
-            interpolation=interpolation,
-            bias_rank=bias_rank,
-            bias_base_maps=bias_base_maps,
-            cartesian_displacement=cartesian_displacement,
+            advection=advection,
+            diffusion=diffusion,
+            reaction=reaction,
         )
+        steps = {"advection": advection, "diffusion": diffusion, "reaction": reaction}
+        active = ", ".join(name for name, cfg in steps.items() if cfg is not None) or "none"
         LOGGER.info(
-            f"{self.__class__.__name__}: built with {num_layers} layers, {num_channels} channels, {num_heads} velocity fields, {time_step} time step."
+            f"{self.__class__.__name__}: built with {num_layers} layers, {num_channels} channels, steps: {active}, {time_step} time step."
         )
 
         self.offload_layers(cpu_offload)
