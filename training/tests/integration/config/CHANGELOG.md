@@ -12,7 +12,7 @@ with `accuracy_reference_id` set to its run ID, before committing it.
 
 ### 2026-10-26 - richer batch ([#1435](https://github.com/ecmwf/anemoi-core/pull/1435))
 
-- Reference run: `0723d5a7fb6f402baa73956774e6f582`
+- Reference run: `92c0ba2d85114d00bff1dd0f7d37bb11`
 - Reason: sin/cos computed on the GPU in every forward pass (e.g. latlobs\_to\_sincos, encoder\_processor\_decoder.py:380).
   Previously they were computed once on CPU during init. CPU and CUDA versions differ in the last bit for about 35% of values,
   even from identical inputs.
@@ -57,7 +57,7 @@ Changes to the benchmark tests (`test_benchmark.py`) and their configurations (`
 ### 2026-10-26 - richer batch ([#1435](https://github.com/ecmwf/anemoi-core/pull/1435))
 
 - Commit: 985d7c8d1e0a1ba3238f267dd567cfd6af269d5e
-- Benchmark changed: No
+- Benchmark changed: Yes
 - Performance change: Memory usage increased for ensemble models.
 - Reason: Switching from `ignore_nans: False` to `ignore_nans: True` requires the nans to be masked. This masking creates full-size copies of the preds and targets in two places.
   Improving this is future work and tracked under [this issue](https://github.com/ecmwf/anemoi-core/issues/1502).
