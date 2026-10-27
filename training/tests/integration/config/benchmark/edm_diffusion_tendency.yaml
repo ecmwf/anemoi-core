@@ -21,6 +21,7 @@ dataloader:
         start: 2020-12-31
 
 model:
+  compile: []
   num_channels: 512
 
 graph:
