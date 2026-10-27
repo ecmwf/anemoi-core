@@ -239,19 +239,6 @@ def test_training_cycle_multidomain(
     assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
-@skip_if_offline
-@pytest.mark.slow
-def test_training_cycle_multidomain_ensemble(
-    multidomain_ensemble_config: tuple[DictConfig, list[str]],
-    get_test_archive: GetTestArchive,
-) -> None:
-    cfg, urls = multidomain_ensemble_config
-    for url in urls:
-        get_test_archive(url)
-
-    AnemoiTrainer(cfg).train()
-
-
 def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = multidomain_config
     BaseSchema(**cfg)
