@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, reopened, synchronize]
+  schedule:
+    - cron: "9 2 * * 0" # at 9:02 on sunday
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ARTIFACT_POLL_INTERVAL: '30'
+  ARTIFACT_WAIT_TIMEOUT: ${{ vars.ARTIFACT_WAIT_TIMEOUT || '1800' }}
+  ARTIFACT_S3_ENDPOINT: ${{ secrets.ARTIFACT_S3_ENDPOINT }}
+  ARTIFACT_S3_BUCKET: ${{ secrets.ARTIFACT_S3_BUCKET }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+permissions:
+  contents: read
+
+jobs:
+  ci-approval:
+    runs-on: ubuntu-slim
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: ecmwf/ci-infrastructure/actions/require-ci-approval@main
+
+  pre-commit:
+    needs: ci-approval
+    runs-on: ubuntu-slim
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+      SKIP: no-commit-to-branch
+    steps:
+      - uses: ecmwf/ci-infrastructure/actions/checkout-under-test@main
+      - uses: ecmwf/ci-infrastructure/actions/pre-commit@main
+
+  resolve:
+    needs: ci-approval
+    runs-on: arc-runner-normal
+    container:
+      image: eccr.ecmwf.int/public-ci-images/ubuntu24.04-base:latest
+    outputs:
+      # resolve-deps declares matrix-<kind> outputs only for some kinds; json holds them all.
+      test-matrix: ${{ toJSON(fromJSON(steps.r.outputs.json).test) }}
+    steps:
+      - name: Announce image
+        uses: ecmwf/ci-infrastructure/actions/announce-image@main
+      - id: mint
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.CI_PERMISSIONS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CI_PERMISSIONS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+      - uses: ecmwf/ci-infrastructure/actions/checkout-under-test@main
+      - id: r
+        uses: ecmwf/ci-infrastructure/actions/resolve-deps@main
+        with:
+          matrix: test
+          token: ${{ steps.mint.outputs.token }}
+          client-id: ${{ secrets.CI_PERMISSIONS_APP_CLIENT_ID }}
+          app-private-key: ${{ secrets.CI_PERMISSIONS_APP_PRIVATE_KEY }}
+
+  test:
+    needs: [ci-approval, resolve]
+    name: test (${{ matrix._resolved['job-name'] }})
+    runs-on: ${{ matrix['runs-on'] }}
+    container:
+      image: ${{ matrix.container || '' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve.outputs.test-matrix) }}
+    steps:
+      - name: Announce image
+        uses: ecmwf/ci-infrastructure/actions/announce-image@main
+      - id: mint
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.CI_PERMISSIONS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CI_PERMISSIONS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+      - uses: ecmwf/ci-infrastructure/actions/checkout-under-test@main
+        with:
+          # The version comes from the git tags (setuptools-scm).
+          fetch-depth: 0
+
+      - name: Fetch resolved deps
+        id: deps
+        uses: ecmwf/ci-infrastructure/actions/fetch-deps@main
+        with:
+          deps-json: ${{ toJSON(matrix._resolved.deps) }}
+          token: ${{ steps.mint.outputs.token }}
+
+      - name: Build and test the wheels
+        id: build
+        uses: ecmwf/ci-infrastructure/actions/run-job-script@main
+        with:
+          job-script: ${{ matrix.job-script }}
+          matrix-leg: ${{ toJSON(matrix) }}
+          package: anemoi-core
+          cmake-prefix-path: ${{ steps.deps.outputs.cmake-prefix-path }}
+
+      # One artifact per package, as the generated workflows publish them.
+      - name: Publish anemoi-graphs
+        uses: ecmwf/ci-infrastructure/actions/publish-artifact@main
+        with:
+          install-path: ${{ steps.build.outputs.install-root }}/anemoi-graphs
+          artifact-name: ${{ matrix._resolved.packages['anemoi-graphs']['own-artifact-name'] }}
+
+      - name: Publish anemoi-models
+        uses: ecmwf/ci-infrastructure/actions/publish-artifact@main
+        with:
+          install-path: ${{ steps.build.outputs.install-root }}/anemoi-models
+          artifact-name: ${{ matrix._resolved.packages['anemoi-models']['own-artifact-name'] }}
+
+      - name: Publish anemoi-training
+        uses: ecmwf/ci-infrastructure/actions/publish-artifact@main
+        with:
+          install-path: ${{ steps.build.outputs.install-root }}/anemoi-training
+          artifact-name: ${{ matrix._resolved.packages['anemoi-training']['own-artifact-name'] }}
+
+      - name: Print dependency table
+        if: always()
+        uses: ecmwf/ci-infrastructure/actions/print-dep-table@main
+        with:
+          resolved: ${{ toJSON(matrix._resolved) }}
+
+  ci-result:
+    name: collect results
+    if: always()
+    needs: [ci-approval, pre-commit, resolve, test]
+    runs-on: ubuntu-slim
+    permissions:
+      statuses: write
+    steps:
+      - uses: ecmwf/ci-infrastructure/actions/ci-result@main
+        with:
+          needs: ${{ toJSON(needs) }}

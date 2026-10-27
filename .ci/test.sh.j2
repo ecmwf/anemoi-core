@@ -1,0 +1,44 @@
+{% extends "ci-infrastructure/python-runner.sh.j2" %}
+{# The three packages live in subdirectories (anemoi-graphs in graphs/, ...):
+   build a wheel of each into $CI_INSTALL_ROOT/<package>/wheels, the artifact a
+   consumer installs, install them together with the deps' wheels, and test each. #}
+
+{% block build %}
+# A version from git (setuptools-scm) needs the tags, which a shallow checkout lacks.
+git_src=(git -c safe.directory="$CI_SOURCE_DIR" -C "$CI_SOURCE_DIR")
+if [ "$("${git_src[@]}" rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+  "${git_src[@]}" fetch --quiet --unshallow --tags ||
+    echo "::warning::could not unshallow $CI_SOURCE_DIR; a version derived from git tags may be wrong"
+fi
+{% for p in ci_packages %}
+rm -rf "$CI_INSTALL_ROOT/{{ p }}/wheels"
+uv build --wheel --out-dir "$CI_INSTALL_ROOT/{{ p }}/wheels" "$CI_SOURCE_DIR/{{ p | replace('anemoi-', '') }}"
+{% endfor %}
+{% endblock %}
+
+{% block install %}
+dep_wheels=()
+IFS=';:' read -ra dep_prefixes <<<"${CMAKE_PREFIX_PATH:-}"
+for prefix in ${dep_prefixes[@]+"${dep_prefixes[@]}"}; do
+  for whl in "$prefix"/wheels/*.whl; do
+    if [ -e "$whl" ]; then dep_wheels+=("$whl"); fi
+  done
+done
+own_wheels=()
+{% for p in ci_packages %}
+own_wheels+=("$(ls "$CI_INSTALL_ROOT/{{ p }}/wheels"/*.whl){{ ('[' ~ extras ~ ']') if extras | default('') else '' }}")
+{% endfor %}
+# CPU torch: the runners have no GPU, and the CUDA wheels are several GB.
+# One resolve, so the deps' wheels win over the same packages from the index.
+uv pip install --torch-backend cpu "torch=={{ torch_version }}" ${dep_wheels[@]+"${dep_wheels[@]}"} "${own_wheels[@]}" pytest
+{% endblock %}
+
+{% block test %}
+cd "$CI_SOURCE_DIR"
+# Every package's tests run, even after another failed.
+status=0
+{% for p in ci_packages %}
+python -m pytest {{ p | replace('anemoi-', '') }} {{ pytest_args | default("") }} || status=1
+{% endfor %}
+exit "$status"
+{% endblock %}
