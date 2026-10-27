@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import pytest
 import torch
 from torch.utils.data import ConcatDataset
 from torch.utils.data import TensorDataset
@@ -81,6 +82,28 @@ def test_cross_dataset_sampler_resumes_at_each_batch_boundary() -> None:
         iterator = iter(sampler)
         consumed = [next(iterator) for _ in range(stop_after)]
         resumed = make_sampler((6, 4), batch_size=2)
+        resumed.load_state_dict(sampler.state_dict())
+
+        assert consumed + list(resumed) == expected
+
+
+@pytest.mark.parametrize("num_replicas", [1, 2])
+def test_cross_dataset_sampler_resumes_at_each_batch_boundary_after_first_epoch(num_replicas: int) -> None:
+    def build(*, finish_first_epoch: bool = False) -> CrossDatasetBatchSampler:
+        sampler = make_sampler((12, 8), num_replicas=num_replicas, batch_size=2)
+        if finish_first_epoch:
+            # leaves every domain sampler at its end-of-epoch position
+            list(sampler)
+        sampler.set_epoch(1)
+        return sampler
+
+    expected = list(build())
+
+    for stop_after in range(len(expected) + 1):
+        sampler = build(finish_first_epoch=True)
+        iterator = iter(sampler)
+        consumed = [next(iterator) for _ in range(stop_after)]
+        resumed = build()
         resumed.load_state_dict(sampler.state_dict())
 
         assert consumed + list(resumed) == expected

@@ -9,6 +9,7 @@
 
 from abc import ABC
 from abc import abstractmethod
+from collections import Counter
 from collections.abc import Iterator
 
 import numpy as np
@@ -293,15 +294,21 @@ class CrossDatasetBatchSampler(Sampler[list[int]]):
         return [-(-len(sampler) // self.batch_size) for sampler in self._domain_samplers]
 
     def __iter__(self) -> Iterator[list[int]]:
-        domain_batches = [
-            iter(BatchSampler(sampler, batch_size=self.batch_size, drop_last=False))
-            for sampler in self._domain_samplers
-        ]
         # Resume position from load_state_dict applies to the first iteration only; an iteration
         # abandoned part-way (like in sanity validation) must not leak its position into the next one.
         self._batches_yielded = self._next_batches_yielded
         self._next_batches_yielded = 0
-        for domain_index in self._domain_order()[self._batches_yielded :]:
+        domain_order = self._domain_order()
+        # The domain samplers only reset their own position when first iterated, so a domain not yet
+        # visited in this epoch would report the previous epoch's. Derive each position from the batch count.
+        consumed = Counter(domain_order[: self._batches_yielded])
+        for domain_index, sampler in enumerate(self._domain_samplers):
+            sampler.next_yielded = min(consumed[domain_index] * self.batch_size, len(sampler))
+        domain_batches = [
+            iter(BatchSampler(sampler, batch_size=self.batch_size, drop_last=False))
+            for sampler in self._domain_samplers
+        ]
+        for domain_index in domain_order[self._batches_yielded :]:
             local_batch = next(domain_batches[domain_index])
             self._batches_yielded += 1
             offset = self._domain_offsets[domain_index]
