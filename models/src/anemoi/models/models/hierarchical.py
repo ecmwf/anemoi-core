@@ -29,6 +29,7 @@ from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import BaseGraphProvider
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import AnemoiModelEncProcDec
+from anemoi.models.models.base import _hidden_node_names
 from anemoi.models.models.encoder_processor_decoder import _edges_or_none
 from anemoi.models.models.encoder_processor_decoder import latlons_to_sincos
 from anemoi.models.utils.config import COORDS_DIM
@@ -54,7 +55,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
     @property
     def _hidden_names(self) -> list[str]:
         """Names of the hidden levels, from the first (connected to the datasets) to the last."""
-        return self._as_hidden_node_names(self._graph_name_hidden)
+        return _hidden_node_names(self._graph_name_hidden)
 
     def _build_graph_provider(
         self,

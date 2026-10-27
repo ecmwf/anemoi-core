@@ -214,9 +214,12 @@ class CrossDatasetLoadingPolicy(DataLoadingPolicy):
         )
 
     def check_dataset_compatibility(self, dataset: CrossDataset, **options: object) -> None:
+        # Readers without variable metadata (e.g. tabular) have nothing to compare.
         check_datasets_variables_compatibility(
             {
-                name: {var: Variable.from_dict(var, data) for var, data in metadata["variables_metadata"].items()}
+                name: {
+                    var: Variable.from_dict(var, data) for var, data in metadata.get("variables_metadata", {}).items()
+                }
                 for name, metadata in dataset.metadata.items()
             },
             **options,

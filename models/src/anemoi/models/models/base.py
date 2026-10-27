@@ -263,7 +263,7 @@ class BaseGraphModel(nn.Module):
         del dynamic_node_config
 
     def _hidden_coordinates(self, hidden_name: str | None = None) -> torch.Tensor:
-        hidden_name = self._graph_name_hidden if hidden_name is None else hidden_name
+        hidden_name = self.hidden_names[0] if hidden_name is None else hidden_name
         return self._graph_data[hidden_name].x
 
     def _build_hidden_node_routing(self) -> None:
@@ -454,20 +454,6 @@ class BaseGraphModel(nn.Module):
     def _calculate_output_dim(self, dataset_name: str) -> int:
         """Calculate the decoder output dimension for a given dataset."""
         return time_steps_per_node(self, dataset_name, self.n_step_output) * self.num_output_channels[dataset_name]
-
-    @staticmethod
-    def _as_hidden_node_names(
-        hidden_nodes_name: str | list[str] | ListConfig,
-    ) -> list[str]:
-        if isinstance(hidden_nodes_name, str):
-            return [hidden_nodes_name]
-
-        if isinstance(hidden_nodes_name, (list, ListConfig)):
-            return list(hidden_nodes_name)
-
-        raise TypeError(
-            f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}",
-        )
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
