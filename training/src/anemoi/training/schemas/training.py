@@ -273,6 +273,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     spectral_crps = "anemoi.training.losses.SpectralCRPSLoss"
     power_spectrum = "anemoi.training.losses.PowerSpectrumLoss"
     spectral_amse = "anemoi.training.losses.SpectralAMSELoss"
+    regional_wavelet = "anemoi.training.losses.RegionalWaveletLoss"
 
 
 class CheckVariablesCompatibilitySchema(BaseModel):
@@ -309,6 +310,35 @@ class BaseLossSchema(BaseModel):
         default_factory=CheckVariablesCompatibilitySchema,
     )
     "Options forwarded to ``Variable.check_compatibility`` when checking predicted vs. target variable units."
+
+
+class WaveletTransformSchema(BaseModel):
+    """Backend configuration for a regional DTCWT."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    backend: Literal["pytorch_wavelets", "triton"] = "pytorch_wavelets"
+    biort: str = "near_sym_b"
+    qshift: str = "qshift_b"
+    backend_kwargs: dict[str, Any] = Field(default_factory=dict)
+
+
+class RegionalWaveletLossSchema(BaseLossSchema):
+    """Regional wavelet AMSE with internally pooled spatial scalers."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    target_: Literal["anemoi.training.losses.RegionalWaveletLoss"] = Field(..., alias="_target_")
+    scalers: list[str] = Field(default_factory=list)
+    grid_shape: tuple[Annotated[int, Field(ge=2)], Annotated[int, Field(ge=2)]]
+    J: PositiveInt | None = None
+    transform: WaveletTransformSchema = Field(default_factory=WaveletTransformSchema)
+    scale_weights: list[NonNegativeFloat] | None = None
+    eps: float = Field(default=1e-8, gt=0, allow_inf_nan=False)
+    subgrid: tuple[NonNegativeInt, int | None] | Literal["output_mask"] | None = None
+    separate_pred_target_xfm: bool | None = None
+    separate_pred_target_xfm_threshold: PositiveInt = 1_000_000
+    xfm_batch_chunk_size: PositiveInt | None = None
 
 
 class CRPSSchema(BaseLossSchema):
@@ -439,7 +469,7 @@ class TimeAggregateLossWrapperSchema(BaseModel):
     target_: Literal["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"] = Field(..., alias="_target_")
     time_aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
     "Time aggregation operations to apply over the time dimension before computing the loss."
-    loss_fn: BaseLossSchema | CRPSSchema
+    loss_fn: RegionalWaveletLossSchema | BaseLossSchema | CRPSSchema
     "Inner loss function applied to each time-aggregated output."
     scalers: list[str] | None = None
     "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
@@ -473,6 +503,7 @@ class MultiScaleLossSchema(BaseModel):
         | GraphVariogramScoreLossSchema
         | GraphEdgeCRPSLossSchema
         | GraphEdgeEnergyScoreLossSchema
+        | RegionalWaveletLossSchema
         | BaseLossSchema
     )
     weights: list[float]
@@ -620,6 +651,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.SpectralCRPSLoss": "spectral",
     "anemoi.training.losses.PowerSpectrumLoss": "spectral",
     "anemoi.training.losses.SpectralAMSELoss": "spectral",
+    "anemoi.training.losses.RegionalWaveletLoss": "wavelet",
     "anemoi.training.losses.HuberLoss": "huber",
     "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
 }
@@ -654,6 +686,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
             | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
+            | Annotated[RegionalWaveletLossSchema, Tag("wavelet")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
             Discriminator(_loss_discriminator),
@@ -714,6 +747,7 @@ LossSchemas = Annotated[
     | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
     | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
+    | Annotated[RegionalWaveletLossSchema, Tag("wavelet")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),

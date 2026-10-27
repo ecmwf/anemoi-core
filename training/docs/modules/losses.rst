@@ -535,6 +535,147 @@ Graph scores can be selected through ``model.compile``:
 
 Only classes present in the configured loss need to be listed.
 
+*******************************
+Regional wavelet loss
+*******************************
+
+``RegionalWaveletLoss`` compares regional fields using a dual-tree complex
+wavelet transform (DTCWT). It adds AMSE over six oriented high-pass subbands at
+each level to MSE of the real low-pass residual. Unlike spherical spectral
+AMSE, the coefficients retain spatial information and form a pyramid of
+different-sized grids.
+
+Install the reference backend with ``pip install 'anemoi-training[wavelet]'``.
+Both backend imports are optional until a wavelet transform is constructed.
+The experimental ``triton`` backend requires a separately installed
+``triton-dtcwt`` package and a supported CUDA/ROCm device. It is not currently
+published on PyPI, so there is deliberately no non-installable Triton extra.
+The reference backend uses ``pytorch-wavelets>=1.3``; no FastNet-specific fork
+is required by the scoring kernel's compilation boundary.
+The extra includes ``setuptools<81`` because the published reference backend
+still imports the legacy ``pkg_resources`` API.
+
+Example regional configuration (under the appropriate dataset):
+
+.. code-block:: yaml
+
+   _target_: anemoi.training.losses.RegionalWaveletLoss
+   grid_shape: [808, 621]
+   subgrid: output_mask  # optional; a resolved contiguous slice of the input grid
+   J: 6                 # optional; otherwise max(1, floor(log2(min(H,W))) - 3)
+   transform:
+     backend: pytorch_wavelets
+     biort: near_sym_b
+     qshift: qshift_b
+   scale_weights: [1, 1, 1, 1, 1, 1]
+   ignore_nans: true
+   xfm_batch_chunk_size: 20
+   scalers: [regional_node_weights, general_variable, time_steps]
+
+Inputs use ``[batch,time,ensemble,grid,variable]`` layout; targets can have a
+singleton ensemble dimension or omit it. The selected grid must contain exactly
+``H*W`` points in row-major order. ``subgrid`` accepts ``[start,end]``, with a
+null end extending to the last point. ``output_mask`` reuses the trainer's
+contiguous-mask resolution; arbitrary scattered extraction and sparse projection
+are not supported.
+
+Weights and missing values
+=========================
+
+GRID-bearing scalers, including mixed ``(BATCH,GRID,VARIABLE)`` masks, are
+consumed inside the wavelet calculation. Their product is an absolute weight
+map ``w``. For each field, ``total_spatial_weight`` (``m = sum(w)``) is retained,
+and ``relative_spatial_weights`` (``r = H*W*w/m``) are pooled to each coefficient
+grid and renormalized to unit mean. All-zero maps instead give zero contribution
+and zero gradients.
+
+The high-pass term always uses band-summed AMSE: power and cross terms are
+weighted and summed spatially for each orientation before AMSE is evaluated.
+Low-pass MSE uses its own pooled weights. The combined score is divided by
+``H*W`` and multiplied by ``m``. Consequently:
+
+* With no spatial scaler, implicit uniform weights ``1/(H*W)`` recover the
+  original unweighted normalization.
+* Uniform unit-sum node weights give the same result. Scaling weights by a
+  constant scales the final loss by that constant, including regional totals
+  such as 0.33.
+* Weights are not renormalized after subgrid selection. Use unit-sum node weights
+  for means, not unnormalized all-ones weights, which specify a sum.
+* Mask scalers multiply the node weights; they do not supply a second independent
+  normalization. Variable/time scalers without GRID are applied once afterwards.
+* ``without_scalers`` and ``scaler_indices`` work with spatial as well as ordinary
+  scalers. Runtime mask updates are used on every call.
+
+Zero-weight inputs are set to zero before transformation. ``ignore_nans=True``
+also excludes nonfinite prediction/target pairs, pools their validity through
+the pyramid, and divides by the finite input fraction. All-invalid samples have
+zero contribution. When false, nonfinite values at positively weighted points
+propagate. Spatial scaler values themselves must be finite and nonnegative.
+Their products and total weights must also remain finite in float32.
+
+This is a pooled coefficient-weighting convention, not a transform of
+sqrt-weighted fields or an exact wavelet-support exclusion mask. Also, epsilon
+regularization can give a small nonzero AMSE for identical nonzero inputs.
+
+Migration from FastNet
+=====================
+
+Only the regional loss is included. Backend/filter options now belong under
+``transform``. Use configured spatial scalers instead of ``area_weighting`` and
+``cell_areas``. Previously, FastNet's forward excluded GRID-bearing scalers;
+they now affect both high- and low-pass terms, so existing weights/masks may
+intentionally change results. The legacy no-scaler formulation is preserved.
+
+Compilation and distribution
+============================
+
+There is a single loss class, usable eagerly or through normal Anemoi compilation:
+
+.. code-block:: yaml
+
+   model:
+     compile:
+       - module: anemoi.training.losses.RegionalWaveletLoss
+         options:
+           dynamic: false
+           fullgraph: true
+
+The compiled unit is the tensor scoring kernel on real coefficients. The DTCWT
+backend, input validation, scaler alignment and distributed collectives remain
+eager; this does not claim fullgraph compilation of ``pytorch_wavelets`` itself.
+Transform implementations use symmetric boundaries. Triton currently supports
+``near_sym_b``/``qshift_b``; tuning belongs in ``transform.backend_kwargs``, for
+example ``compute_dtype: float32``. Autograd through predictions is always enabled
+when the calling context requires it, while targets are detached.
+
+Grid-sharded inputs are transposed to variable shards with complete grids before
+selection and transformation. Only the small per-variable scores are gathered
+back. ``separate_pred_target_xfm`` and ``xfm_batch_chunk_size`` control working
+memory use; separate transforms are selected automatically above one million
+selected grid points. Field gathering, FP32 input conversion, spatial-weight
+products and masking are performed one chunk at a time after subgrid selection.
+Spatial scalers retain their compact broadcast shapes, and implicit uniform
+weights do not require full-grid absolute or relative weight tensors. Band statistics
+are reduced immediately rather than keeping spatial power and cross maps
+alive together.
+
+Chunking bounds these forward preparation and transform working buffers, but
+autograd can still retain coefficients across all chunks until backward. This
+loss does not apply activation checkpointing.
+
+The loss can also be combined with grid-point losses, with separate scalers:
+
+.. code-block:: yaml
+
+   _target_: anemoi.training.losses.combined.CombinedLoss
+   loss_weights: [1.0, 0.1]
+   losses:
+     - _target_: anemoi.training.losses.MSELoss
+       scalers: [regional_node_weights, general_variable, time_steps]
+     - _target_: anemoi.training.losses.RegionalWaveletLoss
+       grid_shape: [808, 621]
+       scalers: [regional_node_weights, general_variable, time_steps]
+
 ************************
 Spectral loss functions
 ************************
