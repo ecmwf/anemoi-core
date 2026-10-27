@@ -8,7 +8,7 @@ repos:
     stages: [pre-commit]
     language: python
     entry: jupyter nbconvert --ClearOutputPreprocessor.enabled=True --inplace
-    additional_dependencies: [jupyter]
+    additional_dependencies: [nbconvert]
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v6.0.0
   hooks:

@@ -34,7 +34,8 @@ jobs:
 
   pre-commit:
     needs: ci-approval
-    runs-on: ubuntu-slim
+    # ubuntu-slim has one CPU: installing the hook environments on a cache miss took up to 11 min.
+    runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
       SKIP: no-commit-to-branch
