@@ -417,25 +417,35 @@ class ADRProcessor(BaseProcessor):
             **kwargs,
         )
 
+        if num_heads is None:
+            LOGGER.info(
+                f"{self.__class__.__name__}: num_heads not specified, using {advection_channels} (advection channels)"
+            )
+            num_heads = advection_channels
+
         nlat, nlon, grid_index = latlon_grid_layout(hidden_nodes, layout_node_attribute_name)
+        time_step = frequency_to_seconds(timestep) * EARTH_ROTATION_RATE / num_layers
         self.build_layers(
             ADRProcessorBlock,
             num_channels=num_channels,
             advection_channels=advection_channels,
-            num_heads=num_heads if num_heads is not None else advection_channels,
+            num_heads=num_heads,
             velocity_hidden_dim=velocity_hidden_dim,
             reaction_hidden_dim=reaction_hidden_dim,
             reaction_num_layers=reaction_num_layers,
             nlat=nlat,
             nlon=nlon,
             grid_index=grid_index,
-            time_step=frequency_to_seconds(timestep) * EARTH_ROTATION_RATE / num_layers,
+            time_step=time_step,
             layer_kernels=self.layer_factory,
             kernel_size=kernel_size,
             interpolation=interpolation,
             bias_rank=bias_rank,
             bias_base_maps=bias_base_maps,
             cartesian_displacement=cartesian_displacement,
+        )
+        LOGGER.info(
+            f"{self.__class__.__name__}: built with {num_layers} layers, {num_channels} channels, {num_heads} velocity fields, {time_step} time step."
         )
 
         self.offload_layers(cpu_offload)

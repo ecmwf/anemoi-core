@@ -22,7 +22,6 @@ the whole globe, so for those steps the state is exchanged so that each GPU hold
 for a subset of channels, and exchanged back afterwards.
 """
 
-from collections.abc import Mapping
 from typing import Optional
 
 import einops
@@ -61,7 +60,7 @@ def latlon_cell_centres(nlat: int, nlon: int) -> tuple[Tensor, Tensor]:
     return lat.reshape(-1), lon.reshape(-1)
 
 
-def latlon_grid_layout(hidden_nodes: Mapping, layout_node_attribute_name: str) -> tuple[int, int, Optional[Tensor]]:
+def latlon_grid_layout(hidden_nodes: NodeStorage, layout_node_attribute_name: str) -> tuple[int, int, Optional[Tensor]]:
     """Size of the hidden grid and the grid point of each node, read from the hidden nodes of the graph.
 
     hidden_nodes holds the node coordinates ``x`` (latitude and longitude in radians), the node
