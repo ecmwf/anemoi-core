@@ -273,7 +273,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     spectral_crps = "anemoi.training.losses.SpectralCRPSLoss"
     power_spectrum = "anemoi.training.losses.PowerSpectrumLoss"
     spectral_amse = "anemoi.training.losses.SpectralAMSELoss"
-    regional_wavelet = "anemoi.training.losses.RegionalWaveletLoss"
+    wavelet_amse = "anemoi.training.losses.WaveletAMSELoss"
 
 
 class CheckVariablesCompatibilitySchema(BaseModel):
@@ -312,8 +312,92 @@ class BaseLossSchema(BaseModel):
     "Options forwarded to ``Variable.check_compatibility`` when checking predicted vs. target variable units."
 
 
+class SpectralProjectionConfigSchema(BaseModel):
+    """Configuration for sparse projection applied before the spectral transform.
+
+    Exactly one mode must be configured:
+
+    - **File mode**: provide ``matrix_path``.
+    - **Edge mode**: provide ``edges_name``.
+    - **Target-grid mode**: provide ``num_nearest_neighbours`` and ``sigma``
+      together with either ``grid`` or ``node_builder``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # --- file mode ---
+    matrix_path: str | None = None
+
+    # --- edge mode ---
+    edges_name: tuple[str, str, str] | None = None
+
+    # --- target-grid mode ---
+    num_nearest_neighbours: int | None = None
+    sigma: float | None = None
+    grid: str | None = None
+    node_builder: dict | None = None
+    target_node_name: str = "target_grid"
+
+    # --- shared (edge and target-grid modes) ---
+    edge_weight_attribute: str | None = None
+    src_node_weight_attribute: str | None = None
+    row_normalize: bool = False
+
+    @model_validator(mode="after")
+    def check_mode(self) -> Self:
+        has_matrix = self.matrix_path is not None
+        has_edges = self.edges_name is not None
+        has_target_grid = self.num_nearest_neighbours is not None
+
+        if has_matrix and has_edges:
+            msg = "projection_config: 'matrix_path' and 'edges_name' are mutually exclusive"
+            raise ValueError(msg)
+        if has_matrix and has_target_grid:
+            msg = "projection_config: 'matrix_path' and target-grid keys are mutually exclusive"
+            raise ValueError(msg)
+        if has_edges and has_target_grid:
+            msg = "projection_config: 'edges_name' and target-grid keys are mutually exclusive"
+            raise ValueError(msg)
+        if not (has_matrix or has_edges or has_target_grid):
+            msg = "projection_config must specify 'matrix_path', 'edges_name', or target-grid keys"
+            raise ValueError(msg)
+        if has_target_grid and self.sigma is None:
+            msg = "projection_config: target-grid mode requires 'sigma'"
+            raise ValueError(msg)
+        if has_target_grid and self.grid is None and self.node_builder is None:
+            msg = "projection_config: target-grid mode requires 'grid' or 'node_builder'"
+            raise ValueError(msg)
+        return self
+
+
+class WaveletProjectionConfigSchema(SpectralProjectionConfigSchema):
+    """Reuse projection modes with constant-preserving wavelet defaults."""
+
+    row_normalize: bool = True
+    num_nearest_neighbours: Annotated[int, Field(gt=0, strict=True)] | None = None
+    sigma: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def check_wavelet_mode(self) -> Self:
+        """Reject conflicting or unused target-grid options."""
+        if self.node_builder is not None and self.grid is not None:
+            msg = "projection_config: 'grid' and 'node_builder' are mutually exclusive"
+            raise ValueError(msg)
+        if (self.matrix_path is not None or self.edges_name is not None) and any(
+            value is not None for value in (self.sigma, self.grid, self.node_builder)
+        ):
+            msg = "projection_config: file/edge and target-grid options are mutually exclusive"
+            raise ValueError(msg)
+        if self.matrix_path is not None and (
+            self.edge_weight_attribute is not None or self.src_node_weight_attribute is not None
+        ):
+            msg = "projection_config: weight attributes are not supported in matrix-file mode"
+            raise ValueError(msg)
+        return self
+
+
 class WaveletTransformSchema(BaseModel):
-    """Backend configuration for a regional DTCWT."""
+    """Backend configuration for a two-dimensional DTCWT."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -323,22 +407,34 @@ class WaveletTransformSchema(BaseModel):
     backend_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
-class RegionalWaveletLossSchema(BaseLossSchema):
-    """Regional wavelet AMSE with internally pooled spatial scalers."""
+class WaveletAMSELossSchema(BaseLossSchema):
+    """2D DTCWT AMSE with optional projection and no missing values or area weights."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    target_: Literal["anemoi.training.losses.RegionalWaveletLoss"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.training.losses.WaveletAMSELoss"] = Field(..., alias="_target_")
     scalers: list[str] = Field(default_factory=list)
     grid_shape: tuple[Annotated[int, Field(ge=2)], Annotated[int, Field(ge=2)]]
     J: PositiveInt | None = None
     transform: WaveletTransformSchema = Field(default_factory=WaveletTransformSchema)
-    scale_weights: list[NonNegativeFloat] | None = None
+    scale_weights: list[Annotated[float, Field(ge=0, allow_inf_nan=False)]] | None = None
     eps: float = Field(default=1e-8, gt=0, allow_inf_nan=False)
     subgrid: tuple[NonNegativeInt, int | None] | Literal["output_mask"] | None = None
-    separate_pred_target_xfm: bool | None = None
-    separate_pred_target_xfm_threshold: PositiveInt = 1_000_000
-    xfm_batch_chunk_size: PositiveInt | None = None
+    projection_config: WaveletProjectionConfigSchema | None = None
+    transform_prediction_and_target_separately: bool | None = None
+    separate_transform_gridpoint_threshold: PositiveInt = 1_000_000
+    transform_field_chunk_size: PositiveInt | None = None
+
+    @model_validator(mode="after")
+    def check_projection_options(self) -> Self:
+        """Validate subgrid and projection options."""
+        if isinstance(self.subgrid, tuple) and self.subgrid[1] is not None and self.subgrid[1] <= self.subgrid[0]:
+            msg = "subgrid end must be greater than its start"
+            raise ValueError(msg)
+        if self.projection_config is not None and self.subgrid is not None:
+            msg = "Wavelet projection requires subgrid=None"
+            raise ValueError(msg)
+        return self
 
 
 class CRPSSchema(BaseLossSchema):
@@ -469,7 +565,7 @@ class TimeAggregateLossWrapperSchema(BaseModel):
     target_: Literal["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"] = Field(..., alias="_target_")
     time_aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
     "Time aggregation operations to apply over the time dimension before computing the loss."
-    loss_fn: RegionalWaveletLossSchema | BaseLossSchema | CRPSSchema
+    loss_fn: WaveletAMSELossSchema | BaseLossSchema | CRPSSchema
     "Inner loss function applied to each time-aggregated output."
     scalers: list[str] | None = None
     "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
@@ -503,7 +599,7 @@ class MultiScaleLossSchema(BaseModel):
         | GraphVariogramScoreLossSchema
         | GraphEdgeCRPSLossSchema
         | GraphEdgeEnergyScoreLossSchema
-        | RegionalWaveletLossSchema
+        | WaveletAMSELossSchema
         | BaseLossSchema
     )
     weights: list[float]
@@ -550,64 +646,6 @@ class HuberLossSchema(BaseLossSchema):
     "Threshold for Huber loss."
 
 
-class SpectralProjectionConfigSchema(BaseModel):
-    """Configuration for sparse projection applied before the spectral transform.
-
-    Exactly one mode must be configured:
-
-    - **File mode**: provide ``matrix_path``.
-    - **Edge mode**: provide ``edges_name``.
-    - **Target-grid mode**: provide ``num_nearest_neighbours`` and ``sigma``
-      together with either ``grid`` or ``node_builder``.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    # --- file mode ---
-    matrix_path: str | None = None
-
-    # --- edge mode ---
-    edges_name: tuple[str, str, str] | None = None
-
-    # --- target-grid mode ---
-    num_nearest_neighbours: int | None = None
-    sigma: float | None = None
-    grid: str | None = None
-    node_builder: dict | None = None
-    target_node_name: str = "target_grid"
-
-    # --- shared (edge and target-grid modes) ---
-    edge_weight_attribute: str | None = None
-    src_node_weight_attribute: str | None = None
-    row_normalize: bool = False
-
-    @model_validator(mode="after")
-    def check_mode(self) -> Self:
-        has_matrix = self.matrix_path is not None
-        has_edges = self.edges_name is not None
-        has_target_grid = self.num_nearest_neighbours is not None
-
-        if has_matrix and has_edges:
-            msg = "projection_config: 'matrix_path' and 'edges_name' are mutually exclusive"
-            raise ValueError(msg)
-        if has_matrix and has_target_grid:
-            msg = "projection_config: 'matrix_path' and target-grid keys are mutually exclusive"
-            raise ValueError(msg)
-        if has_edges and has_target_grid:
-            msg = "projection_config: 'edges_name' and target-grid keys are mutually exclusive"
-            raise ValueError(msg)
-        if not (has_matrix or has_edges or has_target_grid):
-            msg = "projection_config must specify 'matrix_path', 'edges_name', or target-grid keys"
-            raise ValueError(msg)
-        if has_target_grid and self.sigma is None:
-            msg = "projection_config: target-grid mode requires 'sigma'"
-            raise ValueError(msg)
-        if has_target_grid and self.grid is None and self.node_builder is None:
-            msg = "projection_config: target-grid mode requires 'grid' or 'node_builder'"
-            raise ValueError(msg)
-        return self
-
-
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
@@ -651,7 +689,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.SpectralCRPSLoss": "spectral",
     "anemoi.training.losses.PowerSpectrumLoss": "spectral",
     "anemoi.training.losses.SpectralAMSELoss": "spectral",
-    "anemoi.training.losses.RegionalWaveletLoss": "wavelet",
+    "anemoi.training.losses.WaveletAMSELoss": "wavelet",
     "anemoi.training.losses.HuberLoss": "huber",
     "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
 }
@@ -686,7 +724,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
             | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
-            | Annotated[RegionalWaveletLossSchema, Tag("wavelet")]
+            | Annotated[WaveletAMSELossSchema, Tag("wavelet")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
             Discriminator(_loss_discriminator),
@@ -747,7 +785,7 @@ LossSchemas = Annotated[
     | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
     | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
-    | Annotated[RegionalWaveletLossSchema, Tag("wavelet")]
+    | Annotated[WaveletAMSELossSchema, Tag("wavelet")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),

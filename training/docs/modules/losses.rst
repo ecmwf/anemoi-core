@@ -536,14 +536,18 @@ Graph scores can be selected through ``model.compile``:
 Only classes present in the configured loss need to be listed.
 
 *******************************
-Regional wavelet loss
+Wavelet AMSE loss
 *******************************
 
-``RegionalWaveletLoss`` compares regional fields using a dual-tree complex
-wavelet transform (DTCWT). It adds AMSE over six oriented high-pass subbands at
+``WaveletAMSELoss`` compares fields using a two-dimensional dual-tree complex
+wavelet transform (DTCWT). It adds band-summed AMSE over six oriented high-pass subbands at
 each level to MSE of the real low-pass residual. Unlike spherical spectral
 AMSE, the coefficients retain spatial information and form a pyramid of
 different-sized grids.
+
+The transform operates on a structured 2D grid with symmetric boundaries.
+Optional interpolation allows other source grids, but does not make the
+transform spherical or introduce periodic global boundary handling.
 
 Install the reference backend with ``pip install 'anemoi-training[wavelet]'``.
 Both backend imports are optional until a wavelet transform is constructed.
@@ -559,7 +563,7 @@ Example regional configuration (under the appropriate dataset):
 
 .. code-block:: yaml
 
-   _target_: anemoi.training.losses.RegionalWaveletLoss
+   _target_: anemoi.training.losses.WaveletAMSELoss
    grid_shape: [808, 621]
    subgrid: output_mask  # optional; a resolved contiguous slice of the input grid
    J: 6                 # optional; otherwise max(1, floor(log2(min(H,W))) - 3)
@@ -568,63 +572,130 @@ Example regional configuration (under the appropriate dataset):
      biort: near_sym_b
      qshift: qshift_b
    scale_weights: [1, 1, 1, 1, 1, 1]
-   ignore_nans: true
-   xfm_batch_chunk_size: 20
-   scalers: [regional_node_weights, general_variable, time_steps]
+   ignore_nans: false
+   transform_field_chunk_size: 20
+   scalers: [general_variable, time_steps]
 
 Inputs use ``[batch,time,ensemble,grid,variable]`` layout; targets can have a
 singleton ensemble dimension or omit it. The selected grid must contain exactly
 ``H*W`` points in row-major order. ``subgrid`` accepts ``[start,end]``, with a
 null end extending to the last point. ``output_mask`` reuses the trainer's
 contiguous-mask resolution; arbitrary scattered extraction and sparse projection
-are not supported.
+are not part of this subgrid selection. For a different source grid, use the
+optional projection described below.
 
-Weights and missing values
-=========================
+Area weights and all GRID-bearing scalers, including spatial masks, are not
+supported. The score uses uniform spatial weighting on the selected grid;
+``target_grid_weights`` is not a valid loss option and is rejected by the
+configuration schema.
+Non-spatial scalers such as variable and time weights are applied once after
+wavelet scoring. Their updates, ``without_scalers`` selection and
+``scaler_indices`` remain available.
 
-GRID-bearing scalers, including mixed ``(BATCH,GRID,VARIABLE)`` masks, are
-consumed inside the wavelet calculation. Their product is an absolute weight
-map ``w``. For each field, ``total_spatial_weight`` (``m = sum(w)``) is retained,
-and ``relative_spatial_weights`` (``r = H*W*w/m``) are pooled to each coefficient
-grid and renormalized to unit mean. All-zero maps instead give zero contribution
-and zero gradients.
+With ``ignore_nans: false`` (the default), NaNs and infinities propagate
+through the transform and may make the loss nonfinite. With
+``ignore_nans: true``, locations where either prediction or target is NaN are
+excluded. NaN validity is propagated through the DTCWT filter support, and
+affected coefficients are omitted and each scale is normalized over its valid
+coefficients. Infinities are not masked. This mask propagation adds a
+transform pass, but is only performed when ``ignore_nans`` is enabled.
+Epsilon regularization can give a small nonzero AMSE for identical nonzero
+inputs.
 
-The high-pass term always uses band-summed AMSE: power and cross terms are
-weighted and summed spatially for each orientation before AMSE is evaluated.
-Low-pass MSE uses its own pooled weights. The combined score is divided by
-``H*W`` and multiplied by ``m``. Consequently:
+Projecting onto a rectangular target grid
+========================================
 
-* With no spatial scaler, implicit uniform weights ``1/(H*W)`` recover the
-  original unweighted normalization.
-* Uniform unit-sum node weights give the same result. Scaling weights by a
-  constant scales the final loss by that constant, including regional totals
-  such as 0.33.
-* Weights are not renormalized after subgrid selection. Use unit-sum node weights
-  for means, not unnormalized all-ones weights, which specify a sum.
-* Mask scalers multiply the node weights; they do not supply a second independent
-  normalization. Variable/time scalers without GRID are applied once afterwards.
-* ``without_scalers`` and ``scaler_indices`` work with spatial as well as ordinary
-  scalers. Runtime mask updates are used on every call.
+Set ``projection_config`` to interpolate arbitrary source nodes before the
+DTCWT. ``grid_shape`` then describes the **target** grid, not the source grid.
+The existing ``ProjectionGraphProvider`` constructs one fixed sparse matrix at
+initialization; ``SparseProjector`` applies it differentiably to field values on
+every forward pass. Neighbours are not rebuilt every step, and gradients flow
+through prediction values, not the fixed coordinates or interpolation weights.
 
-Zero-weight inputs are set to zero before transformation. ``ignore_nans=True``
-also excludes nonfinite prediction/target pairs, pools their validity through
-the pyramid, and divides by the finite input fraction. All-invalid samples have
-zero contribution. When false, nonfinite values at positively weighted points
-propagate. Spatial scaler values themselves must be finite and nonnegative.
-Their products and total weights must also remain finite in float32.
+For example, provide a rectangular target through an existing node builder:
 
-This is a pooled coefficient-weighting convention, not a transform of
-sqrt-weighted fields or an exact wavelet-support exclusion mask. Also, epsilon
-regularization can give a small nonzero AMSE for identical nonzero inputs.
+.. code-block:: yaml
+
+   _target_: anemoi.training.losses.WaveletAMSELoss
+   grid_shape: [240, 320]
+   J: 4
+   projection_config:
+     target_node_name: wavelet_grid
+     node_builder:
+       _target_: anemoi.graphs.nodes.NPZFileNodes
+       npz_file: /path/to/rectangular-target.npz
+       lat_key: latitudes
+       lon_key: longitudes
+     num_nearest_neighbours: 4
+     sigma: 0.02  # illustrative Gaussian bandwidth; choose for your domain
+     row_normalize: true
+   ignore_nans: false
+   transform_field_chunk_size: 20
+   scalers: [general_variable, time_steps]
+
+The latitude/longitude arrays in this example must be **paired, flattened
+vectors** of length ``240*320``, ordered row by row. ``LatLonNodes`` can likewise
+accept paired coordinate lists in degrees; it does not mesh two independent
+coordinate axes. The caller must supply a meaningful logical rectangular grid:
+matching the point count does not establish the geometry or ordering. Nodes
+are not automatically sorted. The provider's ``grid`` shortcut creates a
+reduced Gaussian grid, which is not generally suitable as a rectangular target.
+
+The normal training loss factory supplies the model graph and dataset node
+name. Direct Python callers must pass ``graph_data`` and, when needed,
+``data_node_name`` for graph-backed modes. Besides the configured target builder,
+the existing provider supports:
+
+* **Existing edges:** ``edges_name: [data, to, wavelet_grid]`` and optionally
+  ``edge_weight_attribute`` / ``src_node_weight_attribute``. The matrix has one
+  row per destination node and one column per source node.
+* **Saved matrix:** ``matrix_path: /path/to/projection.npz``, a SciPy sparse
+  matrix with shape ``[H*W, source_nodes]``. This mode needs no model graph.
+
+These are mutually exclusive modes. Matrix columns must match the complete
+input-node ordering exactly. Configured target-grid mode uses Gaussian-weighted
+KNN; one neighbour gives nearest-neighbour interpolation. Other supplied edge
+weights or matrices can encode different rules.
+
+Wavelet projection defaults to ``row_normalize: true``, independently of
+spectral-loss defaults. Weights must be finite and nonnegative **before**
+normalization, and every destination row must have positive support. With
+normalization disabled, row sums must already equal one (``rtol=1e-5``,
+``atol=1e-6``). Invalid rows raise an error instead of being filled with zeros.
+Normalized rows preserve constants; this is **not** a guarantee of
+area-conservative interpolation. KNN also finds distant neighbours outside
+geographic coverage: row support alone is not a coverage or extrapolation check.
+Choose target extent, resolution, neighbour count and bandwidth deliberately.
+Interpolation smooths fields and changes which spatial scales the loss measures.
+
+Area weights, ``target_grid_weights`` and all GRID-bearing scalers are
+unsupported and raise an actionable error. This applies to both source and
+target grids, including spatial masks; excluding a scaler with
+``without_scalers`` does not enable GRID-bearing scalers. Non-spatial
+variable/time scalers still apply once after scoring.
+
+For this first version, projection cannot be combined with ``subgrid`` /
+``subgrid: output_mask``. Nonfinite source prediction or target values are not
+checked and may propagate through interpolation and make the loss nonfinite.
+Missing-value interpolation and source-mask remapping are not implemented.
+The configured destination defines the regional footprint. An input already
+restricted to a node subset can use a matrix explicitly built for that input
+ordering, but the loss does not infer a column subset.
+
+Projection runs in float32 inside the existing field chunks, before reshaping
+to ``[chunk,1,H,W]``; the entire batch is not projected at once. Distributed
+scoring retains complete target grids on variable shards and gathers only the
+final scores.
 
 Migration from FastNet
 =====================
 
-Only the regional loss is included. Backend/filter options now belong under
-``transform``. Use configured spatial scalers instead of ``area_weighting`` and
-``cell_areas``. Previously, FastNet's forward excluded GRID-bearing scalers;
-they now affect both high- and low-pass terms, so existing weights/masks may
-intentionally change results. The legacy no-scaler formulation is preserved.
+Only the 2D DTCWT AMSE formulation is included, not FastNet's global wavelet
+losses or wrappers. Backend/filter options now belong under
+``transform``. Area weighting and GRID-bearing scalers are not supported;
+remove ``area_weighting``, ``cell_areas`` or spatial mask scalers from the
+wavelet loss configuration. They are rejected rather than silently ignored.
+Non-spatial variable/time scalers remain supported.
 
 Compilation and distribution
 ============================
@@ -635,7 +706,7 @@ There is a single loss class, usable eagerly or through normal Anemoi compilatio
 
    model:
      compile:
-       - module: anemoi.training.losses.RegionalWaveletLoss
+       - module: anemoi.training.losses.WaveletAMSELoss
          options:
            dynamic: false
            fullgraph: true
@@ -650,9 +721,11 @@ when the calling context requires it, while targets are detached.
 
 Grid-sharded inputs are transposed to variable shards with complete grids before
 selection and transformation. Only the small per-variable scores are gathered
-back. ``separate_pred_target_xfm`` and ``xfm_batch_chunk_size`` control working
-memory use; separate transforms are selected automatically above one million
-selected grid points. Field gathering, FP32 input conversion, spatial-weight
+back. ``transform_prediction_and_target_separately`` and
+``transform_field_chunk_size`` control working memory use; separate transforms
+are selected automatically above one million selected grid points by default.
+Set ``separate_transform_gridpoint_threshold`` to change that threshold. Field
+gathering, FP32 input conversion, spatial-weight
 products and masking are performed one chunk at a time after subgrid selection.
 Spatial scalers retain their compact broadcast shapes, and implicit uniform
 weights do not require full-grid absolute or relative weight tensors. Band statistics
@@ -672,7 +745,7 @@ The loss can also be combined with grid-point losses, with separate scalers:
    losses:
      - _target_: anemoi.training.losses.MSELoss
        scalers: [regional_node_weights, general_variable, time_steps]
-     - _target_: anemoi.training.losses.RegionalWaveletLoss
+     - _target_: anemoi.training.losses.WaveletAMSELoss
        grid_shape: [808, 621]
        scalers: [regional_node_weights, general_variable, time_steps]
 
