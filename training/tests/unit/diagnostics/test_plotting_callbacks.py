@@ -451,6 +451,33 @@ def test_plot_sample_uses_auxiliary_output_from_validation_output():
     assert plotted_output.plot_kwargs == {}
 
 
+def test_per_batch_plot_skips_datasets_missing_from_batch():
+    """A domain-homogeneous batch only plots the configured datasets it contains."""
+    callback = PlotSample(
+        sample_idx=0,
+        parameters=["a", "b"],
+        accumulation_levels_plot=[0.5],
+        dataset_names=["data", "data_2"],
+    )
+
+    batch_size, n_ens, nlatlon, nvar = 2, 1, 20, 2
+    pl_module = _make_pl_module_forecaster(validation_rollout=1, nlatlon=nlatlon)
+    pl_module.allgather_batch = lambda tensor, _grid_shard_sizes: tensor
+    # Like the module, only know the shard sizes of the datasets in the batch.
+    pl_module.grid_shard_sizes = {"data_2": None}
+    pl_module.model.post_processors = {"data": _IdentityProcessor(), "data_2": _IdentityProcessor()}
+
+    batch = {"data_2": torch.randn(batch_size, 3, n_ens, nlatlon, nvar)}
+    output = _step_output([{"data_2": torch.zeros(batch_size, 1, n_ens, nlatlon, nvar)}])
+    trainer = MagicMock()
+    trainer.current_epoch = 0
+
+    callback.plot = MagicMock()
+    callback.on_validation_batch_end(trainer, pl_module, output, batch, batch_idx=0)
+
+    assert callback.plot.call_args.args[2] == ["data_2"]
+
+
 def test_process_time_interpolator_output_shapes():
     """BasePlotAdditionalMetrics.process: time-interpolator task yields expected shapes."""
     callback = PlotSample(
