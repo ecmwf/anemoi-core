@@ -16,6 +16,7 @@ from torch import Tensor
 from torch import nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric.data.storage import NodeStorage
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
@@ -37,7 +38,7 @@ from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.semi_lagrangian import EARTH_ROTATION_RATE
-from anemoi.models.layers.semi_lagrangian import latlon_grid_shape
+from anemoi.models.layers.semi_lagrangian import latlon_grid_layout
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -331,9 +332,11 @@ class TransformerProcessor(BaseProcessor):
 class ADRProcessor(BaseProcessor):
     """Advection-diffusion-reaction processor on a regular latitude-longitude hidden grid (PARADIS).
 
-    The hidden nodes must be the cell centres of a regular latitude-longitude grid, stored row by
-    row from north to south, with longitudes running east from zero, as built by
-    ``anemoi.graphs.nodes.RegularLatLonNodes``. The grid size is read from the node coordinates.
+    The hidden nodes must be the cell centres of a regular latitude-longitude grid, with rows from
+    north to south and longitudes running east from zero, as built by
+    ``anemoi.graphs.nodes.RectilinearNodes``. The grid size and the row and column of each node
+    are read from the hidden nodes' layout attribute, built with
+    ``anemoi.graphs.nodes.attributes.RectilinearLayoutIndex``.
 
     The layers split one model time step into equal sub-steps.
     """
@@ -344,7 +347,8 @@ class ADRProcessor(BaseProcessor):
         num_layers: int,
         num_channels: int,
         num_chunks: int,
-        node_coordinates: Tensor,
+        hidden_nodes: NodeStorage,
+        layout_node_attribute_name: str,
         timestep: str,
         advection_channels: int = 768,
         num_heads: Optional[int] = None,
@@ -370,8 +374,10 @@ class ADRProcessor(BaseProcessor):
             Number of channels
         num_chunks: int
             Number of chunks in processor
-        node_coordinates : Tensor
-            Latitude and longitude of the hidden nodes in radians, shape (num_nodes, 2)
+        hidden_nodes : NodeStorage
+            The hidden nodes of the graph, with their coordinates and layout attribute
+        layout_node_attribute_name : str
+            Name of the hidden node attribute with the row and column of each node in the grid
         timestep : str
             Model time step, e.g. "6h". Sets how far the learned velocities move the state.
         advection_channels : int
@@ -411,7 +417,7 @@ class ADRProcessor(BaseProcessor):
             **kwargs,
         )
 
-        nlat, nlon = latlon_grid_shape(node_coordinates)
+        nlat, nlon, grid_index = latlon_grid_layout(hidden_nodes, layout_node_attribute_name)
         self.build_layers(
             ADRProcessorBlock,
             num_channels=num_channels,
@@ -422,6 +428,7 @@ class ADRProcessor(BaseProcessor):
             reaction_num_layers=reaction_num_layers,
             nlat=nlat,
             nlon=nlon,
+            grid_index=grid_index,
             time_step=frequency_to_seconds(timestep) * EARTH_ROTATION_RATE / num_layers,
             layer_kernels=self.layer_factory,
             kernel_size=kernel_size,
@@ -453,9 +460,10 @@ class FlowersProcessor(BaseProcessor):
     """Processor of FLOWERS warp blocks on a regular latitude-longitude hidden grid.
 
     The blocks are stacked at a single resolution. The hidden nodes must be the cell centres of a
-    regular latitude-longitude grid, stored row by row from north to south, with longitudes
-    running east from zero, as built by ``anemoi.graphs.nodes.RegularLatLonNodes``. The grid
-    size is read from the node coordinates.
+    regular latitude-longitude grid, with rows from north to south and longitudes running east
+    from zero, as built by ``anemoi.graphs.nodes.RectilinearNodes``. The grid size and the row
+    and column of each node are read from the hidden nodes' layout attribute, built with
+    ``anemoi.graphs.nodes.attributes.RectilinearLayoutIndex``.
     """
 
     def __init__(
@@ -464,7 +472,8 @@ class FlowersProcessor(BaseProcessor):
         num_layers: int,
         num_channels: int,
         num_chunks: int,
-        node_coordinates: Tensor,
+        hidden_nodes: NodeStorage,
+        layout_node_attribute_name: str,
         num_heads: Optional[int] = None,
         mlp_hidden_ratio: float = 4.0,
         mlp_implementation: MLPImplementation = "mlp",
@@ -485,8 +494,10 @@ class FlowersProcessor(BaseProcessor):
             Number of channels
         num_chunks: int
             Number of chunks in processor
-        node_coordinates : Tensor
-            Latitude and longitude of the hidden nodes in radians, shape (num_nodes, 2)
+        hidden_nodes : NodeStorage
+            The hidden nodes of the graph, with their coordinates and layout attribute
+        layout_node_attribute_name : str
+            Name of the hidden node attribute with the row and column of each node in the grid
         num_heads : int, optional
             Number of displacement fields per block; each moves num_channels // num_heads
             channels. By default 4 channels per head, as in FLOWERS.
@@ -517,7 +528,7 @@ class FlowersProcessor(BaseProcessor):
             **kwargs,
         )
 
-        nlat, nlon = latlon_grid_shape(node_coordinates)
+        nlat, nlon, grid_index = latlon_grid_layout(hidden_nodes, layout_node_attribute_name)
         self.build_layers(
             FlowersProcessorBlock,
             num_channels=num_channels,
@@ -525,6 +536,7 @@ class FlowersProcessor(BaseProcessor):
             num_heads=num_heads if num_heads is not None else num_channels // 4,
             nlat=nlat,
             nlon=nlon,
+            grid_index=grid_index,
             layer_kernels=self.layer_factory,
             block_style=block_style,
             interpolation=interpolation,

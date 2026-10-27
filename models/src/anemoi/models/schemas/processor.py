@@ -118,7 +118,9 @@ class TransformerProcessorSchema(TransformerModelComponent):
 
 class ADRProcessorSchema(PointWiseModelComponent):
     target_: Literal["anemoi.models.layers.processor.ADRProcessor"] = Field(..., alias="_target_")
-    "Advection-diffusion-reaction processor on a regular latitude-longitude hidden grid (PARADIS). The grid size is read from the hidden graph."
+    "Advection-diffusion-reaction processor on a regular latitude-longitude hidden grid (PARADIS). The grid layout is read from the hidden nodes."
+    layout_node_attribute_name: str = Field(example="layout_index")
+    "Name of the hidden node attribute with the row and column of each node, built with RectilinearLayoutIndex."
     num_channels: NonNegativeInt = Field(example=1024)
     "Number of channels in the processor."
     num_layers: NonNegativeInt = Field(example=16)
@@ -149,7 +151,9 @@ class ADRProcessorSchema(PointWiseModelComponent):
 
 class FlowersProcessorSchema(PointWiseModelComponent):
     target_: Literal["anemoi.models.layers.processor.FlowersProcessor"] = Field(..., alias="_target_")
-    "Processor of FLOWERS warp blocks on a regular latitude-longitude hidden grid. The grid size is read from the hidden graph."
+    "Processor of FLOWERS warp blocks on a regular latitude-longitude hidden grid. The grid layout is read from the hidden nodes."
+    layout_node_attribute_name: str = Field(example="layout_index")
+    "Name of the hidden node attribute with the row and column of each node, built with RectilinearLayoutIndex."
     num_channels: NonNegativeInt = Field(example=512)
     "Number of channels in the processor."
     num_layers: NonNegativeInt = Field(example=8)

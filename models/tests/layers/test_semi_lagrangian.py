@@ -10,7 +10,9 @@
 import pytest
 import torch
 
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import ADRProcessorBlock
+from anemoi.models.layers.block import FlowersProcessorBlock
 from anemoi.models.layers.semi_lagrangian import LatLonLayout
 from anemoi.models.layers.semi_lagrangian import LowRankBias
 from anemoi.models.layers.semi_lagrangian import SemiLagrangianAdvection
@@ -18,7 +20,7 @@ from anemoi.models.layers.semi_lagrangian import SemiLagrangianLayer
 from anemoi.models.layers.semi_lagrangian import SemiLagrangianWarp
 from anemoi.models.layers.semi_lagrangian import geocyclic_pad
 from anemoi.models.layers.semi_lagrangian import latlon_cell_centres
-from anemoi.models.layers.semi_lagrangian import latlon_grid_shape
+from anemoi.models.layers.semi_lagrangian import latlon_grid_layout
 from anemoi.models.layers.utils import load_layer_kernels
 
 
@@ -65,47 +67,86 @@ def test_geocyclic_pad_continues_across_poles(pad):
     torch.testing.assert_close(geocyclic_pad(field, pad), expected)
 
 
-def _node_coordinates(nlat: int, nlon: int) -> torch.Tensor:
-    """Coordinates as a graph stores them: float32 radians, latitude first."""
+def _hidden_nodes(nlat: int, nlon: int, order: torch.Tensor | None = None) -> dict:
+    """Hidden nodes as a graph stores them, with nodes stored in the given grid order (row by row by default).
+
+    Coordinates are float32 radians, latitude first, with the row and column of each node in
+    "layout_index" and the grid size in "_layout_shape".
+    """
     lat, lon = latlon_cell_centres(nlat, nlon)
-    return torch.stack([lat, lon], dim=-1).float()
+    order = torch.arange(nlat * nlon) if order is None else order
+    return {
+        "x": torch.stack([lat, lon], dim=-1).float()[order],
+        "layout_index": torch.stack([order // nlon, order % nlon], dim=-1),
+        "_layout_shape": [nlat, nlon],
+    }
+
+
+def _shuffled(nlat: int, nlon: int) -> torch.Tensor:
+    return torch.randperm(nlat * nlon, generator=torch.Generator().manual_seed(0))
 
 
 @pytest.mark.parametrize(("nlat", "nlon"), [(180, 360), (90, 180), (6, 12)])
-def test_grid_shape_from_node_coordinates(nlat, nlon):
-    assert latlon_grid_shape(_node_coordinates(nlat, nlon)) == (nlat, nlon)
+def test_grid_layout_row_by_row(nlat, nlon):
+    assert latlon_grid_layout(_hidden_nodes(nlat, nlon), "layout_index") == (nlat, nlon, None)
 
 
-def test_grid_shape_accepts_longitudes_from_minus_180():
-    coords = _node_coordinates(6, 12)
-    coords[:, 1] = torch.remainder(coords[:, 1] + torch.pi, 2 * torch.pi) - torch.pi
-    assert latlon_grid_shape(coords) == (6, 12)
+def test_grid_layout_accepts_longitudes_from_minus_180():
+    nodes = _hidden_nodes(6, 12)
+    nodes["x"][:, 1] = torch.remainder(nodes["x"][:, 1] + torch.pi, 2 * torch.pi) - torch.pi
+    assert latlon_grid_layout(nodes, "layout_index") == (6, 12, None)
 
 
-def _reversed_rows(coords: torch.Tensor) -> torch.Tensor:
-    return coords.view(6, 12, 2).flip(0).reshape(-1, 2)
+def test_grid_layout_of_shuffled_nodes():
+    order = _shuffled(6, 12)
+    nlat, nlon, grid_index = latlon_grid_layout(_hidden_nodes(6, 12, order), "layout_index")
+    assert (nlat, nlon) == (6, 12)
+    torch.testing.assert_close(grid_index, order)
 
 
-def _with_poles(coords: torch.Tensor) -> torch.Tensor:
+def _without_attribute(nodes: dict) -> dict:
+    del nodes["layout_index"]
+    return nodes
+
+
+def _reversed_rows(nodes: dict) -> dict:
+    nodes["x"] = nodes["x"].view(6, 12, 2).flip(0).reshape(-1, 2)
+    return nodes
+
+
+def _with_poles(nodes: dict) -> dict:
     lat = torch.linspace(torch.pi / 2, -torch.pi / 2, 7)
     lon = torch.arange(12) * torch.pi / 6
-    return torch.stack(torch.meshgrid(lat, lon, indexing="ij"), dim=-1).reshape(-1, 2)
+    nodes["x"] = torch.stack(torch.meshgrid(lat, lon, indexing="ij"), dim=-1).reshape(-1, 2)
+    nodes["layout_index"] = torch.stack(torch.meshgrid(torch.arange(7), torch.arange(12), indexing="ij"), -1).view(
+        -1, 2
+    )
+    nodes["_layout_shape"] = [7, 12]
+    return nodes
+
+
+def _incomplete(nodes: dict) -> dict:
+    return {"x": nodes["x"][:-1], "layout_index": nodes["layout_index"][:-1], "_layout_shape": [6, 12]}
+
+
+def _repeated_grid_point(nodes: dict) -> dict:
+    nodes["layout_index"][1] = nodes["layout_index"][0]
+    return nodes
 
 
 @pytest.mark.parametrize(
-    "make_wrong_grid",
+    "make_wrong_nodes",
     [
+        pytest.param(_without_attribute, id="no-layout-attribute"),
         pytest.param(_reversed_rows, id="south-to-north"),
-        pytest.param(
-            lambda c: c[torch.randperm(c.shape[0], generator=torch.Generator().manual_seed(0))], id="shuffled"
-        ),
         pytest.param(_with_poles, id="points-on-the-poles"),
-        pytest.param(lambda c: c[:-1], id="incomplete"),
+        pytest.param(_incomplete, id="incomplete"),
+        pytest.param(_repeated_grid_point, id="repeated-grid-point"),
     ],
 )
-def test_grid_shape_rejects_other_grids(make_wrong_grid):
-    with pytest.raises(ValueError, match="RegularLatLonNodes"):
-        latlon_grid_shape(make_wrong_grid(_node_coordinates(6, 12)))
+def test_grid_layout_rejects_other_grids(make_wrong_nodes):
+    with pytest.raises(ValueError, match="RectilinearNodes"):
+        latlon_grid_layout(make_wrong_nodes(_hidden_nodes(6, 12)), "layout_index")
 
 
 def test_layout_round_trip_single_process():
@@ -117,6 +158,66 @@ def test_layout_round_trip_single_process():
     # Node n of batch b sits at row n // nlon and column n % nlon.
     torch.testing.assert_close(globe[1, 2, :, 3, 5], x[nlat * nlon + 3 * nlon + 5, 2])
     torch.testing.assert_close(layout.from_globe(globe, groups), x)
+
+
+def test_layout_round_trip_with_grid_index():
+    nlat, nlon, batch_size, groups = 4, 8, 2, 3
+    order = _shuffled(nlat, nlon)
+    layout = LatLonLayout(nlat, nlon, batch_size, [batch_size * nlat * nlon], grid_index=order)
+    x = torch.randn(batch_size * nlat * nlon, groups, 5)
+    globe = layout.to_globe(x)
+    # Node n of batch b sits at the grid point order[n].
+    node = 7
+    row, col = divmod(order[node].item(), nlon)
+    torch.testing.assert_close(globe[1, 2, :, row, col], x[nlat * nlon + node, 2])
+    torch.testing.assert_close(layout.from_globe(globe, groups), x)
+
+
+@pytest.mark.parametrize("kind", ["adr", "flowers"])
+def test_blocks_do_not_depend_on_node_order(kind):
+    """A block on shuffled nodes gives the same values, node by node, as on nodes stored row by row."""
+    nlat, nlon, channels = 8, 16, 16
+    order = _shuffled(nlat, nlon)
+
+    def build(grid_index):
+        torch.manual_seed(0)
+        if kind == "adr":
+            return ADRProcessorBlock(
+                num_channels=channels,
+                advection_channels=8,
+                num_heads=4,
+                velocity_hidden_dim=8,
+                reaction_hidden_dim=16,
+                reaction_num_layers=2,
+                nlat=nlat,
+                nlon=nlon,
+                time_step=0.2,
+                layer_kernels=load_layer_kernels(),
+                bias_rank=4,
+                bias_base_maps=2,
+                grid_index=grid_index,
+            )
+        return FlowersProcessorBlock(
+            num_channels=channels,
+            hidden_dim=32,
+            num_heads=4,
+            nlat=nlat,
+            nlon=nlon,
+            layer_kernels=load_layer_kernels(),
+            grid_index=grid_index,
+        )
+
+    row_by_row, shuffled = build(None), build(order)
+    # Give the advection a visible effect: start from random rather than near-zero weights.
+    with torch.no_grad():
+        for parameter in row_by_row.parameters():
+            parameter.copy_(torch.randn_like(parameter) * 0.3)
+    shuffled.load_state_dict(row_by_row.state_dict())
+
+    x = torch.randn(nlat * nlon, channels)
+    expected = row_by_row(x, GraphShardInfo(nodes=[nlat * nlon]), 1)[0]
+    out = shuffled(x[order], GraphShardInfo(nodes=[nlat * nlon]), 1)[0]
+    torch.testing.assert_close(out, expected[order], atol=1e-5, rtol=1e-5)
 
 
 def test_layout_rejects_wrong_grid_size():

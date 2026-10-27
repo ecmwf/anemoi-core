@@ -233,12 +233,15 @@ class ADRProcessorBlock(BaseBlock):
         bias_rank: int = 128,
         bias_base_maps: int = 8,
         cartesian_displacement: bool = False,
+        grid_index: Optional[Tensor] = None,
     ):
         super().__init__()
         if reaction_num_layers < 2:
             raise ValueError(f"reaction_num_layers must be at least 2, got {reaction_num_layers}.")
         self.nlat = nlat
         self.nlon = nlon
+        # Flat grid position of each node, when the nodes are not stored row by row.
+        self.register_buffer("grid_index", grid_index, persistent=False)
         bias_kwargs = {
             "nlat": nlat,
             "nlon": nlon,
@@ -261,6 +264,7 @@ class ADRProcessorBlock(BaseBlock):
             bias_rank=bias_rank,
             bias_base_maps=bias_base_maps,
             cartesian_displacement=cartesian_displacement,
+            grid_index=grid_index,
         )
         # Passed through a sigmoid: each channel starts by taking about a quarter of its advected value.
         self.advection_share = nn.Parameter(torch.full((num_channels,), -1.0))
@@ -286,7 +290,9 @@ class ADRProcessorBlock(BaseBlock):
         cond: Optional[Tensor] = None,
         **layer_kwargs,
     ) -> tuple[Tensor]:
-        layout = LatLonLayout(self.nlat, self.nlon, batch_size, shard_info.nodes, model_comm_group)
+        layout = LatLonLayout(
+            self.nlat, self.nlon, batch_size, shard_info.nodes, model_comm_group, grid_index=self.grid_index
+        )
 
         # In case we have conditionings we pass these to the layer norm
         cond_kwargs = {"cond": cond} if cond is not None else {}
@@ -331,12 +337,15 @@ class FlowersProcessorBlock(BaseBlock):
         interpolation: str = "bilinear",
         mlp_implementation: MLPImplementation = "mlp",
         cartesian_displacement: bool = False,
+        grid_index: Optional[Tensor] = None,
     ):
         super().__init__()
         if block_style not in ("pre_norm", "flowers"):
             raise ValueError(f"block_style must be 'pre_norm' or 'flowers', got {block_style}.")
         self.nlat = nlat
         self.nlon = nlon
+        # Flat grid position of each node, when the nodes are not stored row by row.
+        self.register_buffer("grid_index", grid_index, persistent=False)
         self.block_style = block_style
 
         self.warp = SemiLagrangianWarp(
@@ -348,6 +357,7 @@ class FlowersProcessorBlock(BaseBlock):
             layer_kernels=layer_kernels,
             interpolation=interpolation,
             cartesian_displacement=cartesian_displacement,
+            grid_index=grid_index,
         )
 
         if block_style == "pre_norm":
@@ -376,7 +386,9 @@ class FlowersProcessorBlock(BaseBlock):
         cond: Optional[Tensor] = None,
         **layer_kwargs,
     ) -> tuple[Tensor]:
-        layout = LatLonLayout(self.nlat, self.nlon, batch_size, shard_info.nodes, model_comm_group)
+        layout = LatLonLayout(
+            self.nlat, self.nlon, batch_size, shard_info.nodes, model_comm_group, grid_index=self.grid_index
+        )
 
         # In case we have conditionings we pass these to the layer norm
         cond_kwargs = {"cond": cond} if cond is not None else {}

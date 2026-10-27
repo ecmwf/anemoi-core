@@ -14,6 +14,7 @@ from typing import Optional
 
 import pytest
 import torch
+from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import ADRProcessorBlock
@@ -25,7 +26,7 @@ from anemoi.utils.config import DotDict
 
 @dataclass
 class ADRProcessorConfig:
-    """Processor settings; nlat and nlon describe the hidden grid whose node coordinates are passed in."""
+    """Processor settings; nlat and nlon describe the hidden grid whose nodes are passed in."""
 
     num_layers: int = 4
     num_channels: int = 32
@@ -52,8 +53,15 @@ class ADRProcessorConfig:
 
 def _build(cfg: ADRProcessorConfig) -> ADRProcessor:
     kwargs = asdict(cfg)
-    lat, lon = latlon_cell_centres(kwargs.pop("nlat"), kwargs.pop("nlon"))
-    return ADRProcessor(**kwargs, node_coordinates=torch.stack([lat, lon], dim=-1).float())
+    nlat, nlon = kwargs.pop("nlat"), kwargs.pop("nlon")
+    lat, lon = latlon_cell_centres(nlat, nlon)
+    graph = HeteroData()
+    graph["hidden"].x = torch.stack([lat, lon], dim=-1).float()
+    graph["hidden"]["layout_index"] = torch.stack(
+        torch.meshgrid(torch.arange(nlat), torch.arange(nlon), indexing="ij"), dim=-1
+    ).view(-1, 2)
+    graph["hidden"]["_layout_shape"] = [nlat, nlon]
+    return ADRProcessor(**kwargs, hidden_nodes=graph["hidden"], layout_node_attribute_name="layout_index")
 
 
 @pytest.fixture
@@ -74,7 +82,7 @@ def test_adr_processor_init(adr_processor, adr_processor_init):
     assert len(adr_processor.proc) == adr_processor_init.num_layers
     for block in adr_processor.proc:
         assert isinstance(block, ADRProcessorBlock)
-        # The grid size comes from the node coordinates.
+        # The grid size comes from the hidden nodes' layout.
         assert (block.nlat, block.nlon) == (adr_processor_init.nlat, adr_processor_init.nlon)
         # By default every moved channel has its own velocity field.
         assert block.advection.num_heads == adr_processor_init.advection_channels

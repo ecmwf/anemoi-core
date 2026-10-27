@@ -14,6 +14,7 @@ from typing import Optional
 
 import pytest
 import torch
+from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import FlowersProcessorBlock
@@ -25,7 +26,7 @@ from anemoi.utils.config import DotDict
 
 @dataclass
 class FlowersProcessorConfig:
-    """Processor settings; nlat and nlon describe the hidden grid whose node coordinates are passed in."""
+    """Processor settings; nlat and nlon describe the hidden grid whose nodes are passed in."""
 
     num_layers: int = 4
     num_channels: int = 32
@@ -46,8 +47,15 @@ class FlowersProcessorConfig:
 
 def _build(cfg: FlowersProcessorConfig) -> FlowersProcessor:
     kwargs = asdict(cfg)
-    lat, lon = latlon_cell_centres(kwargs.pop("nlat"), kwargs.pop("nlon"))
-    return FlowersProcessor(**kwargs, node_coordinates=torch.stack([lat, lon], dim=-1).float())
+    nlat, nlon = kwargs.pop("nlat"), kwargs.pop("nlon")
+    lat, lon = latlon_cell_centres(nlat, nlon)
+    graph = HeteroData()
+    graph["hidden"].x = torch.stack([lat, lon], dim=-1).float()
+    graph["hidden"]["layout_index"] = torch.stack(
+        torch.meshgrid(torch.arange(nlat), torch.arange(nlon), indexing="ij"), dim=-1
+    ).view(-1, 2)
+    graph["hidden"]["_layout_shape"] = [nlat, nlon]
+    return FlowersProcessor(**kwargs, hidden_nodes=graph["hidden"], layout_node_attribute_name="layout_index")
 
 
 @pytest.fixture

@@ -11,8 +11,10 @@
 
 The hidden grid has ``nlat x nlon`` points at cell centres. Latitudes run from north to south,
 ``90 - (i + 0.5) * 180 / nlat`` degrees, and longitudes run east from zero, ``j * 360 / nlon``
-degrees. Nodes are stored row by row, so node ``n`` sits in row ``n // nlon`` and column
-``n % nlon``. No point lies on a pole.
+degrees. No point lies on a pole. The hidden nodes carry their row and column in a node
+attribute (``anemoi.graphs.nodes.attributes.RectilinearLayoutIndex``). Nodes are usually stored
+row by row, so node ``n`` sits in row ``n // nlon`` and column ``n % nlon``; any other order is
+mapped onto the grid with the layout attribute.
 
 Across GPUs the processor state is split by grid point: each GPU holds every channel for one
 contiguous block of nodes. Steps that look at other points (interpolation, stencils) need
@@ -20,6 +22,7 @@ the whole globe, so for those steps the state is exchanged so that each GPU hold
 for a subset of channels, and exchanged back afterwards.
 """
 
+from collections.abc import Mapping
 from typing import Optional
 
 import einops
@@ -58,31 +61,57 @@ def latlon_cell_centres(nlat: int, nlon: int) -> tuple[Tensor, Tensor]:
     return lat.reshape(-1), lon.reshape(-1)
 
 
-def latlon_grid_shape(node_coordinates: Tensor) -> tuple[int, int]:
-    """Number of latitudes and longitudes of the hidden grid, read from its node coordinates.
+def latlon_grid_layout(hidden_nodes: Mapping, layout_node_attribute_name: str) -> tuple[int, int, Optional[Tensor]]:
+    """Size of the hidden grid and the grid point of each node, read from the hidden nodes of the graph.
 
-    node_coordinates has shape (num_nodes, 2) and holds latitude and longitude in radians, as
-    stored in the graph. The nodes must be the cell centres of a regular grid in the order
-    described at the top of this module; ``anemoi.graphs.nodes.RegularLatLonNodes`` builds such
-    a grid. Raises a ValueError for any other grid.
+    hidden_nodes holds the node coordinates ``x`` (latitude and longitude in radians), the node
+    attribute ``layout_node_attribute_name`` with the row and column of each node, of shape
+    (num_nodes, 2), and the grid size ``_layout_shape``.
+    ``anemoi.graphs.nodes.RectilinearNodes``, without ``include_poles``, with a
+    ``anemoi.graphs.nodes.attributes.RectilinearLayoutIndex`` attribute builds such nodes. Every
+    grid point must be a node, at the cell centre described at the top of this module.
+
+    Returns the number of latitudes, the number of longitudes, and the flat grid position
+    ``row * nlon + col`` of each node, or None when the nodes are stored row by row.
+    Raises a ValueError for any other grid.
     """
-    coords = node_coordinates.detach().to(device="cpu", dtype=torch.float64)
-    num_nodes = coords.shape[0]
-    nlat = int(torch.unique(coords[:, 0].round(decimals=6)).numel())
-    nlon = num_nodes // nlat
+    if layout_node_attribute_name not in hidden_nodes or "_layout_shape" not in hidden_nodes:
+        raise ValueError(
+            f'The hidden nodes have no layout attribute "{layout_node_attribute_name}" or no grid size '
+            '"_layout_shape". Build the hidden nodes with anemoi.graphs.nodes.RectilinearNodes and add a '
+            f'"{layout_node_attribute_name}" attribute built with anemoi.graphs.nodes.attributes.RectilinearLayoutIndex.'
+        )
 
-    if nlat * nlon == num_nodes:
-        lat, lon = latlon_cell_centres(nlat, nlon)
-        lat_error = (coords[:, 0] - lat).abs().max()
-        lon_error = (torch.remainder(coords[:, 1] - lon + torch.pi, 2 * torch.pi) - torch.pi).abs().max()
-        if lat_error < 1e-5 and lon_error < 1e-5:
-            return nlat, nlon
+    nlat, nlon = (int(size) for size in hidden_nodes["_layout_shape"])
+    index = hidden_nodes[layout_node_attribute_name].detach().to(device="cpu", dtype=torch.long)
+    coords = hidden_nodes["x"].detach().to(device="cpu", dtype=torch.float64)
+    if index.shape != (nlat * nlon, 2) or coords.shape[0] != nlat * nlon:
+        raise ValueError(
+            f"The hidden grid has {nlat} x {nlon} points, but there are {coords.shape[0]} hidden nodes. "
+            "Every grid point must be a node: build the hidden nodes with anemoi.graphs.nodes.RectilinearNodes."
+        )
 
-    raise ValueError(
-        "The hidden nodes are not a regular latitude-longitude grid at cell centres, stored row by row "
-        "from north to south with longitudes running east from zero. Build the hidden nodes with "
-        "anemoi.graphs.nodes.RegularLatLonNodes."
-    )
+    grid_index = index[:, 0] * nlon + index[:, 1]
+    outside = (index < 0).any(dim=1) | (index[:, 0] >= nlat) | (index[:, 1] >= nlon)
+    if outside.any() or torch.bincount(grid_index.clamp(0, nlat * nlon - 1), minlength=nlat * nlon).ne(1).any():
+        raise ValueError(
+            f'The layout attribute "{layout_node_attribute_name}" does not give each grid point exactly one node. '
+            "Build it with anemoi.graphs.nodes.attributes.RectilinearLayoutIndex on anemoi.graphs.nodes.RectilinearNodes."
+        )
+
+    lat, lon = latlon_cell_centres(nlat, nlon)
+    lat_error = (coords[:, 0] - lat[grid_index]).abs().max()
+    lon_error = (torch.remainder(coords[:, 1] - lon[grid_index] + torch.pi, 2 * torch.pi) - torch.pi).abs().max()
+    if lat_error >= 1e-5 or lon_error >= 1e-5:
+        raise ValueError(
+            "The hidden nodes are not at the cell centres of a regular latitude-longitude grid, with rows "
+            "from north to south and longitudes running east from zero. Build the hidden nodes with "
+            "anemoi.graphs.nodes.RectilinearNodes, without include_poles."
+        )
+
+    if torch.equal(grid_index, torch.arange(nlat * nlon)):
+        return nlat, nlon, None
+    return nlat, nlon, grid_index
 
 
 def geocyclic_pad(x: Tensor, pad: int) -> Tensor:
@@ -113,6 +142,9 @@ class LatLonLayout:
     shape (batch, local groups, k, nlat, nlon): the whole globe for some of the groups. The groups
     are the unit of the split, so channels that belong together (for instance the channels moved
     by one velocity field) always land on the same GPU.
+
+    ``grid_index`` gives the flat grid position ``row * nlon + col`` of each node, when the nodes
+    are not stored row by row.
     """
 
     def __init__(
@@ -122,9 +154,11 @@ class LatLonLayout:
         batch_size: int,
         grid_shard_sizes: ShardSizes,
         model_comm_group: Optional[ProcessGroup] = None,
+        grid_index: Optional[Tensor] = None,
     ) -> None:
         self.nlat = nlat
         self.nlon = nlon
+        self.grid_index = grid_index
         self.batch_size = batch_size
         self.model_comm_group = model_comm_group
         self.comm_size, self.rank = _comm_size_and_rank(model_comm_group)
@@ -168,11 +202,15 @@ class LatLonLayout:
         x = all_to_all_transpose(
             x, 2, self.group_shard_sizes(num_groups), 1, self.grid_shard_sizes, self.model_comm_group
         )
+        if self.grid_index is not None:
+            x = x.new_zeros(x.shape).index_copy(1, self.grid_index, x)
         return einops.rearrange(x, "b (h w) g k -> b g k h w", h=self.nlat, w=self.nlon)
 
     def from_globe(self, x: Tensor, num_groups: int) -> Tensor:
         """(batch, local groups, k, nlat, nlon) -> (batch * local nodes, groups, k)."""
         x = einops.rearrange(x, "b g k h w -> b (h w) g k")
+        if self.grid_index is not None:
+            x = x.index_select(1, self.grid_index)
         x = all_to_all_transpose(
             x, 1, self.grid_shard_sizes, 2, self.group_shard_sizes(num_groups), self.model_comm_group
         )
@@ -254,7 +292,12 @@ class LowRankBias(nn.Module):
         """Add the field to x, of shape (batch * local nodes, channels)."""
         base_maps = torch.einsum("ck,ki,kj->ijc", self.coefficients, self.lat_profiles, self.lon_profiles)
         start, end = layout.local_nodes
-        field = self.projection(base_maps.reshape(-1, base_maps.shape[-1])[start:end])
+        base_maps = base_maps.reshape(-1, base_maps.shape[-1])
+        if layout.grid_index is None:
+            base_maps = base_maps[start:end]
+        else:
+            base_maps = base_maps.index_select(0, layout.grid_index[start:end])
+        field = self.projection(base_maps)
         return (x.view(layout.batch_size, end - start, -1) + field).view(x.shape)
 
 
@@ -276,6 +319,9 @@ class SemiLagrangianLayer(nn.Module):
     The departure points are worked out and the interpolation is done in at least float32, also under
     mixed precision: in bfloat16 a position on a 720-point circle can be off by most of a grid cell.
 
+    ``grid_index`` gives the flat grid position ``row * nlon + col`` of each node, when the nodes
+    are not stored row by row (see ``latlon_grid_layout``).
+
     Subclasses decide what is moved and how the displacements are predicted, and call ``sample``.
     """
 
@@ -287,6 +333,7 @@ class SemiLagrangianLayer(nn.Module):
         num_heads: int,
         interpolation: str = "bicubic",
         cartesian_displacement: bool = False,
+        grid_index: Optional[Tensor] = None,
     ) -> None:
         super().__init__()
         if nlon % 2 != 0:
@@ -305,6 +352,8 @@ class SemiLagrangianLayer(nn.Module):
         self.displacement_dim = 3 if cartesian_displacement else 2
 
         lat, lon = latlon_cell_centres(nlat, nlon)
+        if grid_index is not None:
+            lat, lon = lat[grid_index], lon[grid_index]
         self.register_buffer("arrival_lat", lat.float(), persistent=False)
         self.register_buffer("arrival_lon", lon.float(), persistent=False)
         if cartesian_displacement:
@@ -375,7 +424,7 @@ class SemiLagrangianLayer(nn.Module):
             The displacement vectors, with shape (batch * local nodes, heads, displacement_dim).
         layout : LatLonLayout
             The layout object describing the latitude-longitude grid.
-        
+
         Returns
         -------
         torch.Tensor
@@ -432,6 +481,7 @@ class SemiLagrangianAdvection(SemiLagrangianLayer):
         bias_rank: int = 128,
         bias_base_maps: int = 8,
         cartesian_displacement: bool = False,
+        grid_index: Optional[Tensor] = None,
     ) -> None:
         super().__init__(
             nlat=nlat,
@@ -439,6 +489,7 @@ class SemiLagrangianAdvection(SemiLagrangianLayer):
             num_heads=num_heads,
             interpolation=interpolation,
             cartesian_displacement=cartesian_displacement,
+            grid_index=grid_index,
         )
         if advection_channels % num_heads != 0:
             raise ValueError(f"advection_channels ({advection_channels}) must be divisible by num_heads ({num_heads}).")
@@ -496,6 +547,7 @@ class SemiLagrangianWarp(SemiLagrangianLayer):
         layer_kernels: DotDict,
         interpolation: str = "bilinear",
         cartesian_displacement: bool = False,
+        grid_index: Optional[Tensor] = None,
     ) -> None:
         super().__init__(
             nlat=nlat,
@@ -503,6 +555,7 @@ class SemiLagrangianWarp(SemiLagrangianLayer):
             num_heads=num_heads,
             interpolation=interpolation,
             cartesian_displacement=cartesian_displacement,
+            grid_index=grid_index,
         )
         if out_channels % num_heads != 0:
             raise ValueError(f"out_channels ({out_channels}) must be divisible by num_heads ({num_heads}).")
