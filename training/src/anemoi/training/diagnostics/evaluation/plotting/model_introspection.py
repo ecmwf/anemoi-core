@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 __all__ = [
     "extract_graph_inputs",
     "extract_loss_inputs",
+    "extract_node_coordinates",
     "extract_spatial_inputs",
     "unwrap_anemoi_model",
 ]
@@ -49,19 +50,30 @@ def unwrap_anemoi_model(pl_module: pl.LightningModule) -> Any:
     return pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
 
 
-def extract_graph_inputs(pl_module: pl.LightningModule, dataset_name: str) -> dict[str, Any]:
+def extract_node_coordinates(pl_module: pl.LightningModule) -> dict[str, torch.Tensor]:
+    """Return the (lat, lon) in radians of each graph node set, with longitudes wrapped to (-pi, pi].
+
+    Call this function on the main thread. The checkpoint callback sets the raw graph to ``None``
+    on the main thread while it saves a checkpoint, so a read from the asynchronous plot thread can fail.
+    """
+    graph = unwrap_anemoi_model(pl_module)._graph_data
+    return {name: torch.atan2(torch.sin(graph[name].x), torch.cos(graph[name].x)) for name in graph.node_types}
+
+
+def extract_graph_inputs(
+    pl_module: pl.LightningModule,
+    dataset_name: str,
+    node_coordinates: dict[str, torch.Tensor],
+) -> dict[str, Any]:
     """Return kwargs for a ``GraphFeaturePlot`` ``plot_fn``.
 
     Keys: ``dataset_name``, ``node_attributes``, ``node_trainable_tensors``,
     ``edge_trainable_modules``, ``node_coordinates``. ``edge_trainable_modules`` is empty for
-    hierarchical models (they carry no trainable edge parameters). ``node_coordinates`` holds
-    each graph node set's (lat, lon) in radians, with longitudes wrapped to (-pi, pi].
+    hierarchical models (they carry no trainable edge parameters). ``node_coordinates`` is the
+    output of :func:`extract_node_coordinates`. The function does not read the raw graph, thus
+    the asynchronous plot thread can call it safely.
     """
     model = unwrap_anemoi_model(pl_module)
-    graph = model._graph_data
-    node_coordinates = {
-        name: torch.atan2(torch.sin(graph[name].x), torch.cos(graph[name].x)) for name in graph.node_types
-    }
     return {
         "dataset_name": dataset_name,
         "node_attributes": model.node_attributes,

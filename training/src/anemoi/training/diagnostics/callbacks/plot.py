@@ -39,6 +39,7 @@ from anemoi.training.diagnostics.evaluation.plotting.graph import graph_plot_fn 
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as _default_loss_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_graph_inputs
 from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_loss_inputs
+from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_node_coordinates
 from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_spatial_inputs
 from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn
 from anemoi.training.diagnostics.evaluation.plotting.protocols import GraphPlotFn
@@ -1218,6 +1219,13 @@ class GraphFeaturePlot(BasePerEpochPlotCallback):
         self.q_extreme_limit = q_extreme_limit
         self.plot_fn = plot_fn if plot_fn is not None else _default_graph_plot_fn
         validate_plot_fn(self.plot_fn, GraphPlotFn, "GraphFeaturePlot")
+        self._node_coordinates: dict[str, torch.Tensor] | None = None
+
+    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        super().on_fit_start(trainer, pl_module)
+        # The graph is static. Read it here on the main thread, because the asynchronous
+        # plot thread can see it as None while the checkpoint callback saves a checkpoint.
+        self._node_coordinates = extract_node_coordinates(pl_module)
 
     def _plot(
         self,
@@ -1228,7 +1236,7 @@ class GraphFeaturePlot(BasePerEpochPlotCallback):
     ) -> None:
         _ = epoch
         for dataset_name in dataset_names:
-            graph_inputs = extract_graph_inputs(pl_module, dataset_name)
+            graph_inputs = extract_graph_inputs(pl_module, dataset_name, self._node_coordinates)
             for fig, tag in self.plot_fn(
                 **graph_inputs,
                 q_extreme_limit=self.q_extreme_limit,
