@@ -75,17 +75,17 @@ def latlon_grid_layout(hidden_nodes: NodeStorage, layout_node_attribute_name: st
     ``row * nlon + col`` of each node, or None when the nodes are stored row by row.
     Raises a ValueError for any other grid.
     """
-    if layout_node_attribute_name not in hidden_nodes or "_layout_shape" not in hidden_nodes:
+    if layout_node_attribute_name not in hidden_nodes:
         raise ValueError(
-            f'The hidden nodes have no layout attribute "{layout_node_attribute_name}" or no grid size '
-            '"_layout_shape". Build the hidden nodes with anemoi.graphs.nodes.RectilinearNodes and add a '
-            f'"{layout_node_attribute_name}" attribute built with anemoi.graphs.nodes.attributes.RectilinearLayoutIndex.'
+            f'The hidden nodes have no layout attribute "{layout_node_attribute_name}". Build the hidden nodes with'
+            f' anemoi.graphs.nodes.RectilinearNodes and add a "{layout_node_attribute_name}" attribute built with '
+            f'anemoi.graphs.nodes.attributes.RectilinearLayoutIndex.'
         )
 
-    nlat, nlon = (int(size) for size in hidden_nodes["_layout_shape"])
     index = hidden_nodes[layout_node_attribute_name].detach().to(device="cpu", dtype=torch.long)
     coords = hidden_nodes["x"].detach().to(device="cpu", dtype=torch.float64)
-    if index.shape != (nlat * nlon, 2) or coords.shape[0] != nlat * nlon:
+    nlat, nlon = index.max(0).values + 1
+    if index.shape != (nlat * nlon, 2):
         raise ValueError(
             f"The hidden grid has {nlat} x {nlon} points, but there are {coords.shape[0]} hidden nodes. "
             "Every grid point must be a node: build the hidden nodes with anemoi.graphs.nodes.RectilinearNodes."
@@ -111,6 +111,7 @@ def latlon_grid_layout(hidden_nodes: NodeStorage, layout_node_attribute_name: st
 
     if torch.equal(grid_index, torch.arange(nlat * nlon)):
         return nlat, nlon, None
+
     return nlat, nlon, grid_index
 
 
