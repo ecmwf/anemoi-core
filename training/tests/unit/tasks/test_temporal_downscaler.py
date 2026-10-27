@@ -9,6 +9,12 @@
 
 import datetime
 
+import numpy as np
+from pytest_mock import MockFixture
+
+from anemoi.training.data.loading import CrossDatasetLoadingPolicy
+from anemoi.training.data.relative_time_indices import compute_relative_date_indices
+from anemoi.training.data.usable_indices import ReaderAnchors
 from anemoi.training.tasks import TemporalDownscaler
 
 
@@ -80,3 +86,29 @@ def test_temporal_downscaler_input_offsets_are_boundary_pair() -> None:
     """Input offsets are always [0h, input_timestep] regardless of output settings."""
     task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
     assert task._input_offsets == [datetime.timedelta(0), datetime.timedelta(hours=6)]
+
+
+def test_temporal_downscaler_offsets_are_loaded_from_one_domain(mocker: MockFixture) -> None:
+    task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
+    readers = {}
+    for name, frequency in (("data", datetime.timedelta(hours=1)), ("data_2", datetime.timedelta(hours=2))):
+        reader = mocker.MagicMock()
+        reader.frequency = frequency
+        reader.sampling = None
+        reader.valid_anchors.return_value = ReaderAnchors(
+            np.array([0], dtype="datetime64[s]"),
+            np.array([0]),
+            np.array([0]),
+        )
+        reader.measure_from_reference.side_effect = lambda sample, *_args: sample
+        readers[name] = reader
+
+    relative_date_indices = compute_relative_date_indices(task, readers)
+    assert relative_date_indices == {"data": [0, 2, 4, 6], "data_2": [0, 1, 2, 3]}
+
+    dataset = CrossDatasetLoadingPolicy().build_dataset(readers, relative_date_indices)
+    sample = dataset[0]
+
+    assert set(sample) == {"data"}
+    readers["data"].get_sample.assert_called_once_with(0, slice(0, 8, 2))
+    readers["data_2"].get_sample.assert_not_called()

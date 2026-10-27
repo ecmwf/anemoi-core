@@ -25,7 +25,73 @@ from anemoi.training.utils.time_indices import offset_time_indices
 LOGGER = logging.getLogger(__name__)
 
 
-class MultiDataset(Dataset):
+class DataReaderCollection:
+    """Dataset-level metadata collected from ``self.data_readers``, shared by multi-reader datasets."""
+
+    data_readers: dict[str, DataReader]
+
+    def _collect(self, attr_name: str) -> dict:
+        """Helper method to collect attributes from all data readers."""
+        return {name: getattr(dataset, attr_name) for name, dataset in self.data_readers.items()}
+
+    @cached_property
+    def statistics(self) -> dict[str, dict]:
+        """Return combined statistics from all data readers."""
+        return self._collect("statistics")
+
+    @cached_property
+    def metadata(self) -> dict[str, dict]:
+        """Return combined metadata from all data readers."""
+        return self._collect("metadata")
+
+    @cached_property
+    def supporting_arrays(self) -> dict[str, dict]:
+        """Return combined supporting arrays from all data readers."""
+        return self._collect("supporting_arrays")
+
+    @cached_property
+    def variables(self) -> dict[str, list[str]]:
+        """Return combined variables from all data readers."""
+        return self._collect("variables")
+
+    @cached_property
+    def name_to_index(self) -> dict[str, dict]:
+        """Return combined name_to_index mapping from all data readers."""
+        return self._collect("name_to_index")
+
+    @cached_property
+    def resolution(self) -> dict[str, str]:
+        """Return combined resolution from all data readers."""
+        return self._collect("resolution")
+
+    @cached_property
+    def frequency(self) -> datetime.timedelta:
+        """Return combined frequency from all data readers."""
+        freqs = self._collect("frequency")
+        freq_ref = None
+        for name, freq in freqs.items():
+            if freq_ref is None:
+                freq_ref = freq
+            assert freq == freq_ref, f"Data reader '{name}' has different frequency than other data readers"
+        return freq_ref
+
+    def set_reader_group_info(self, reader_group_rank: int, reader_group_size: int) -> None:
+        """Set the reader group information, called by the DDP strategies.
+
+        Each rank in a reader group reads its own part of the data.
+
+        Parameters
+        ----------
+        reader_group_rank : int
+            Reader group rank.
+        reader_group_size : int
+            Reader group size.
+        """
+        for reader in self.data_readers.values():
+            reader.set_reader_group_info(reader_group_rank, reader_group_size)
+
+
+class MultiDataset(DataReaderCollection, Dataset):
     """Multi-dataset wrapper that returns synchronized samples from multiple data readers.
 
     Each index refers to one valid anchor shared by all data readers. The
@@ -90,66 +156,6 @@ class MultiDataset(Dataset):
     def __len__(self) -> int:
         """Number of valid samples."""
         return len(self.anchors)
-
-    def _collect(self, attr_name: str) -> dict:
-        """Helper method to collect attributes from all data readers."""
-        return {name: getattr(dataset, attr_name) for name, dataset in self.data_readers.items()}
-
-    @cached_property
-    def statistics(self) -> dict[str, dict]:
-        """Return combined statistics from all data readers."""
-        return self._collect("statistics")
-
-    @cached_property
-    def metadata(self) -> dict[str, dict]:
-        """Return combined metadata from all data readers."""
-        return self._collect("metadata")
-
-    @cached_property
-    def supporting_arrays(self) -> dict[str, dict]:
-        """Return combined supporting arrays from all data readers."""
-        return self._collect("supporting_arrays")
-
-    @cached_property
-    def variables(self) -> dict[str, list[str]]:
-        """Return combined variables from all data readers."""
-        return self._collect("variables")
-
-    @cached_property
-    def name_to_index(self) -> dict[str, dict]:
-        """Return combined name_to_index mapping from all data readers."""
-        return self._collect("name_to_index")
-
-    @cached_property
-    def resolution(self) -> dict[str, str]:
-        """Return combined resolution from all data readers."""
-        return self._collect("resolution")
-
-    @cached_property
-    def frequency(self) -> datetime.timedelta:
-        """Return combined frequency from all data readers."""
-        freqs = self._collect("frequency")
-        freq_ref = None
-        for name, freq in freqs.items():
-            if freq_ref is None:
-                freq_ref = freq
-            assert freq == freq_ref, f"Data reader '{name}' has different frequency than other data readers"
-        return freq_ref
-
-    def set_reader_group_info(self, reader_group_rank: int, reader_group_size: int) -> None:
-        """Set the reader group information, called by the DDP strategies.
-
-        Each rank in a reader group reads its own part of the data.
-
-        Parameters
-        ----------
-        reader_group_rank : int
-            Reader group rank.
-        reader_group_size : int
-            Reader group size.
-        """
-        for reader in self.data_readers.values():
-            reader.set_reader_group_info(reader_group_rank, reader_group_size)
 
     def get_sample(self, index: int) -> dict[str, BaseSample]:
         """Return per-dataset samples for ``index``.
