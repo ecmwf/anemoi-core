@@ -95,7 +95,7 @@ class TestMultiDomain:
 
     @pytest.mark.parametrize(
         "name_to_index",
-        [{"2t": 0, "10u": 1}, {"10u": 0, "2t": 1}, {"10u": 0}],
+        [{"2t": 0, "10u": 1}, {"2t": 0, "tp": 1, "10u": 2}, {"10u": 0}],
         ids=["order", "order_of_shared_variables", "missing_variable"],
     )
     def test_check_datasets_variables_order(self, data_readers: dict, name_to_index: dict) -> None:
