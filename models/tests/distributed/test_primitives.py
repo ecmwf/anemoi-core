@@ -31,6 +31,8 @@ from anemoi.models.distributed.primitives import _alltoall_transpose
 from anemoi.models.distributed.primitives import _alltoallwrapper
 from anemoi.models.distributed.primitives import _expand_sharded_tensor
 from anemoi.models.distributed.primitives import _gather
+from anemoi.models.distributed.primitives import _halo_exchange
+from anemoi.models.distributed.primitives import _halo_exchange_bwd
 from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
 
@@ -863,4 +865,272 @@ def test_alltoallwrapper_supports_custom_message_sizes(
         backend=distributed_backend,
         world_size=distributed_world_size,
         message_sizes=message_sizes,
+    )
+
+
+def _test_halo_exchange_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    shard_sizes: tuple[int, ...],
+    send_rows: dict[tuple[int, int], tuple[int, ...]],
+    feature_shape: tuple[int, ...],
+    noncontiguous: bool = False,
+    atol: float = GLOBAL_DEFAULT_ATOL,
+    rtol: float = GLOBAL_DEFAULT_RTOL,
+) -> None:
+    send_indices = []
+    for dst_rank in range(world_size):
+        rows = send_rows.get((rank, dst_rank), ())
+        send_indices.append(torch.tensor(rows, dtype=torch.long, device=device))
+    recv_counts = [len(send_rows.get((src_rank, rank), ())) for src_rank in range(world_size)]
+
+    shape = (sum(shard_sizes), *feature_shape)
+    full = torch.arange(
+        torch.Size(shape).numel(),
+        dtype=torch.float32,
+        device=device,
+    ).reshape(shape)
+    features_by_rank = torch.split(full, shard_sizes, dim=0)
+
+    # Local rows first, then the rows received from each src_rank, in rank order.
+    received = []
+    for src_rank in range(world_size):
+        rows = list(send_rows.get((src_rank, rank), ()))  # list: a tuple index is multi-dim
+        received.append(features_by_rank[src_rank][rows])
+    expected = torch.cat([features_by_rank[rank], *received])
+
+    x = features_by_rank[rank]
+    if noncontiguous:
+        x = torch.stack([x, x], dim=-1)[..., 0]
+        assert not x.is_contiguous()
+    x_before = x.clone()
+
+    actual = _halo_exchange(x, send_indices, recv_counts, group)
+
+    assert actual.size() == expected.size()
+    assert actual.dtype == expected.dtype
+    assert actual.device == expected.device
+    torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+    torch.testing.assert_close(x, x_before, atol=0, rtol=0)
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    ("shard_sizes", "send_rows"),
+    [
+        pytest.param((3, 2), {(0, 1): (2, 0), (1, 0): (1,)}, id="two-rank-asymmetric"),
+        # Rank 0 sends different, equal-sized rows to ranks 1 and 2; row 2 goes to both.
+        pytest.param(
+            (4, 3, 5),
+            {(0, 1): (0, 2), (0, 2): (1, 2), (1, 0): (2,), (2, 0): (4, 0, 3), (2, 1): (1,)},
+            id="three-rank-irregular",
+        ),
+        pytest.param((3, 2, 2), {(0, 1): (1,), (1, 0): (0, 1)}, id="isolated-rank"),
+        pytest.param((3, 0, 2), {(0, 2): (0, 1), (2, 0): (1,)}, id="empty-shard"),
+        pytest.param((3, 2), {}, id="no-halos"),
+        pytest.param((0, 0), {}, id="empty-world"),
+    ],
+)
+def test_halo_exchange_appends_peer_rows(
+    shard_sizes: tuple[int, ...],
+    send_rows: dict[tuple[int, int], tuple[int, ...]],
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    """Append the rows received from each src_rank, in rank order, to the local rows.
+
+    ``shard_sizes`` holds each rank's input node count, excluding halo rows.
+    ``send_rows[(src_rank, dst_rank)]`` lists the local rows src_rank sends to dst_rank;
+    missing entries mean no rows are sent.
+    """
+    if distributed_world_size < len(shard_sizes):
+        pytest.skip(f"Schedule requires at least {len(shard_sizes)} ranks.")
+    if distributed_backend == "gloo" and torch_version_less_than(2, 6):
+        pytest.skip("Gloo halo exchange requires torch >= 2.6.")
+    # Ranks beyond the schedule own no rows and exchange nothing.
+    shard_sizes += (0,) * (distributed_world_size - len(shard_sizes))
+    _run_distributed_test(
+        _test_halo_exchange_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shard_sizes=shard_sizes,
+        send_rows=send_rows,
+        feature_shape=(3,),
+    )
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    ("feature_shape", "noncontiguous"),
+    [
+        pytest.param((), False, id="scalar"),
+        pytest.param((3,), False, id="vector"),
+        pytest.param((2, 3), False, id="multi-axis"),
+        pytest.param((), True, id="noncontiguous-scalar"),
+        pytest.param((2, 3), True, id="noncontiguous-multi-axis"),
+    ],
+)
+def test_halo_exchange_supports_feature_shapes(
+    feature_shape: tuple[int, ...],
+    noncontiguous: bool,
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    """Exchange ``(num_rows, *feature_shape)`` features, including non-contiguous input."""
+    if distributed_backend == "gloo" and torch_version_less_than(2, 6):
+        pytest.skip("Gloo halo exchange requires torch >= 2.6.")
+    # Each rank sends its last and first rows, in that order, to the next rank.
+    world_size = distributed_world_size
+    num_rows = 3
+    rows = (num_rows - 1, 0)
+    send_rows = {(src_rank, (src_rank + 1) % world_size): rows for src_rank in range(world_size)}
+    _run_distributed_test(
+        _test_halo_exchange_rank,
+        backend=distributed_backend,
+        world_size=world_size,
+        shard_sizes=(num_rows,) * world_size,
+        send_rows=send_rows,
+        feature_shape=feature_shape,
+        noncontiguous=noncontiguous,
+    )
+
+
+def _test_halo_exchange_bwd_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    shard_sizes: tuple[int, ...],
+    send_rows: dict[tuple[int, int], tuple[int, ...]],
+    feature_shape: tuple[int, ...],
+    noncontiguous: bool = False,
+    atol: float = GLOBAL_DEFAULT_ATOL,
+    rtol: float = GLOBAL_DEFAULT_RTOL,
+) -> None:
+    send_indices = []
+    for dst_rank in range(world_size):
+        rows = send_rows.get((rank, dst_rank), ())
+        send_indices.append(torch.tensor(rows, dtype=torch.long, device=device))
+    # recv_counts_by_rank[dst_rank][src_rank]: number of rows dst_rank receives from src_rank.
+    recv_counts_by_rank = [
+        [len(send_rows.get((src_rank, dst_rank), ())) for src_rank in range(world_size)]
+        for dst_rank in range(world_size)
+    ]
+    recv_counts = recv_counts_by_rank[rank]
+    num_local_nodes = shard_sizes[rank]
+
+    # Each rank's grad_output covers its local rows followed by the halo rows it receives.
+    output_sizes = [size + sum(counts) for size, counts in zip(shard_sizes, recv_counts_by_rank)]
+    shape = (sum(output_sizes), *feature_shape)
+    full = torch.arange(
+        torch.Size(shape).numel(),
+        dtype=torch.float32,
+        device=device,
+    ).reshape(shape)
+    grad_outputs_by_rank = torch.split(full, output_sizes, dim=0)
+
+    # Local gradient, plus the gradient each dst_rank holds for the rows this rank sent it.
+    expected = grad_outputs_by_rank[rank][:num_local_nodes].clone()
+    for dst_rank in range(world_size):
+        dst_halo_grads = grad_outputs_by_rank[dst_rank][shard_sizes[dst_rank] :]
+        grad_from_dst = torch.split(dst_halo_grads, recv_counts_by_rank[dst_rank], dim=0)[rank]
+        expected.index_add_(0, send_indices[dst_rank], grad_from_dst)
+
+    grad_output = grad_outputs_by_rank[rank]
+    if noncontiguous:
+        grad_output = torch.stack([grad_output, grad_output], dim=-1)[..., 0]
+        assert not grad_output.is_contiguous()
+    grad_output_before = grad_output.clone()
+
+    actual = _halo_exchange_bwd(grad_output, send_indices, recv_counts, num_local_nodes, group)
+
+    assert actual.size() == expected.size()
+    assert actual.dtype == expected.dtype
+    assert actual.device == expected.device
+    torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+    torch.testing.assert_close(grad_output, grad_output_before, atol=0, rtol=0)
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    ("shard_sizes", "send_rows"),
+    [
+        pytest.param((3, 2), {(0, 1): (2, 0), (1, 0): (1,)}, id="two-rank-asymmetric"),
+        # Rank 0 sends different, equal-sized rows to ranks 1 and 2; row 2 goes to both.
+        pytest.param(
+            (4, 3, 5),
+            {(0, 1): (0, 2), (0, 2): (1, 2), (1, 0): (2,), (2, 0): (4, 0, 3), (2, 1): (1,)},
+            id="three-rank-irregular",
+        ),
+        pytest.param((3, 2, 2), {(0, 1): (1,), (1, 0): (0, 1)}, id="isolated-rank"),
+        pytest.param((3, 0, 2), {(0, 2): (0, 1), (2, 0): (1,)}, id="empty-shard"),
+        pytest.param((3, 2), {}, id="no-halos"),
+        pytest.param((0, 0), {}, id="empty-world"),
+    ],
+)
+def test_halo_exchange_bwd_accumulates_peer_grads(
+    shard_sizes: tuple[int, ...],
+    send_rows: dict[tuple[int, int], tuple[int, ...]],
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    """Add the gradient of every halo copy of a local row to that row's local gradient.
+
+    ``shard_sizes`` holds each rank's input node count, excluding halo rows.
+    ``send_rows[(src_rank, dst_rank)]`` lists the local rows src_rank sends to dst_rank;
+    missing entries mean no rows are sent.
+    """
+    if distributed_world_size < len(shard_sizes):
+        pytest.skip(f"Schedule requires at least {len(shard_sizes)} ranks.")
+    if distributed_backend == "gloo" and torch_version_less_than(2, 6):
+        pytest.skip("Gloo halo exchange requires torch >= 2.6.")
+    # Ranks beyond the schedule own no rows and exchange nothing.
+    shard_sizes += (0,) * (distributed_world_size - len(shard_sizes))
+    _run_distributed_test(
+        _test_halo_exchange_bwd_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shard_sizes=shard_sizes,
+        send_rows=send_rows,
+        feature_shape=(3,),
+    )
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    ("feature_shape", "noncontiguous"),
+    [
+        pytest.param((), False, id="scalar"),
+        pytest.param((3,), False, id="vector"),
+        pytest.param((2, 3), False, id="multi-axis"),
+        pytest.param((), True, id="noncontiguous-scalar"),
+        pytest.param((2, 3), True, id="noncontiguous-multi-axis"),
+    ],
+)
+def test_halo_exchange_bwd_supports_feature_shapes(
+    feature_shape: tuple[int, ...],
+    noncontiguous: bool,
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    """Accumulate ``(num_rows, *feature_shape)`` gradients, including non-contiguous input."""
+    if distributed_backend == "gloo" and torch_version_less_than(2, 6):
+        pytest.skip("Gloo halo exchange requires torch >= 2.6.")
+    # Each rank sends its last and first rows, in that order, to the next rank.
+    world_size = distributed_world_size
+    num_rows = 3
+    rows = (num_rows - 1, 0)
+    send_rows = {(src_rank, (src_rank + 1) % world_size): rows for src_rank in range(world_size)}
+    _run_distributed_test(
+        _test_halo_exchange_bwd_rank,
+        backend=distributed_backend,
+        world_size=world_size,
+        shard_sizes=(num_rows,) * world_size,
+        send_rows=send_rows,
+        feature_shape=feature_shape,
+        noncontiguous=noncontiguous,
     )

@@ -540,6 +540,16 @@ def halo_exchange(input_: Tensor, halo_info, mgroup: ProcessGroup) -> Tensor:
     Tensor
         ``(num_local_src_nodes + num_halo_nodes, ...)`` — local + halo features.
     """
+    if model_is_distributed(mgroup):
+        group_size = mgroup.size()
+        if len(halo_info.send_indices) != group_size:
+            raise ValueError(
+                f"halo_info.send_indices must contain {group_size} entries, but got {len(halo_info.send_indices)}"
+            )
+        if len(halo_info.recv_counts) != group_size:
+            raise ValueError(
+                f"halo_info.recv_counts must contain {group_size} entries, but got {len(halo_info.recv_counts)}"
+            )
     return _HaloExchangeParallelSection.apply(input_, halo_info, mgroup)
 
 
