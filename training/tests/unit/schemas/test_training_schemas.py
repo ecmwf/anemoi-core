@@ -11,6 +11,8 @@ import pytest
 from pydantic import ValidationError
 
 from anemoi.training.schemas.training import BaseDDPStrategySchema
+from anemoi.training.schemas.training import BaseTrainingSchema
+from anemoi.training.schemas.training import CheckpointPipelineSchema
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
@@ -54,6 +56,35 @@ def test_ddp_strategy_schema_defaults_to_local_synchronization() -> None:
 def test_update_ds_stats_on_ckpt_load_refreshes_residual_statistics_by_default() -> None:
     """Like tendencies, the residual statistics configured for the current run win over the checkpoint's."""
     assert UpdateDsStatsOnCkptLoadSchema().residuals is True
+
+
+def _ddp_strategy(**kwargs: bool) -> BaseDDPStrategySchema:
+    return BaseDDPStrategySchema(
+        _target_="anemoi.training.distributed.strategy.DDPGroupStrategy",
+        num_gpus_per_model=1,
+        read_group_size=1,
+        **kwargs,
+    )
+
+
+def test_ddp_strategy_schema_defaults_to_static_graph() -> None:
+    schema = _ddp_strategy()
+
+    assert schema.static_graph is True
+    assert schema.find_unused_parameters is False
+
+
+def test_static_graph_rejected_with_gradient_accumulation() -> None:
+    training = BaseTrainingSchema.model_construct(accum_grad_batches=2, strategy=_ddp_strategy())
+
+    with pytest.raises(ValueError, match="static_graph must be false"):
+        training.check_static_graph_without_accumulation()
+
+
+def test_gradient_accumulation_allowed_without_static_graph() -> None:
+    training = BaseTrainingSchema.model_construct(accum_grad_batches=2, strategy=_ddp_strategy(static_graph=False))
+
+    assert training.check_static_graph_without_accumulation() is training
 
 
 def test_time_aggregate_loss_config_valid() -> None:
@@ -254,3 +285,35 @@ def test_combined_loss_with_multiscale_mixed_mode_rejected() -> None:
 def test_transport_rejects_residual_prediction_with_stochastic_interpolant() -> None:
     with pytest.raises(ValidationError, match="only supports objective='edm_diffusion'"):
         TransportTrainingConfigSchema(prediction_mode="residual", objective="stochastic_interpolant")
+
+
+def test_checkpoint_pipeline_schema_valid() -> None:
+    """source/loading/modifiers validate and expose the _target_ alias + extra kwargs."""
+    schema = CheckpointPipelineSchema(
+        source={"_target_": "anemoi.training.checkpoint.sources.local.LocalSource", "path": "/ckpt.pt"},
+        loading={"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader", "strict": False},
+        modifiers=[{"_target_": "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"}],
+    )
+    assert schema.source.target_.endswith("LocalSource")
+    assert schema.loading.strict is False
+    assert schema.modifiers[0].target_.endswith("FreezingModifierStage")
+
+
+def test_checkpoint_pipeline_schema_all_none() -> None:
+    """An empty checkpoint block is valid (a fresh run with no pipeline)."""
+    schema = CheckpointPipelineSchema()
+    assert schema.source is None
+    assert schema.loading is None
+    assert schema.modifiers is None
+
+
+def test_checkpoint_pipeline_schema_source_requires_target() -> None:
+    """A source block without _target_ is rejected."""
+    with pytest.raises(ValidationError):
+        CheckpointPipelineSchema(source={"path": "/ckpt.pt"})
+
+
+def test_checkpoint_pipeline_schema_loading_requires_target() -> None:
+    """A loading block without _target_ is rejected."""
+    with pytest.raises(ValidationError):
+        CheckpointPipelineSchema(loading={"strict": True})

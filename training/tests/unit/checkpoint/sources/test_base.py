@@ -11,6 +11,7 @@
 
 import pytest
 
+from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.base import PipelineStage
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 
@@ -20,6 +21,40 @@ def test_checkpoint_source_extends_pipeline_stage() -> None:
     assert issubclass(CheckpointSource, PipelineStage)
 
 
+class _ProcessOnlySource(CheckpointSource):
+    """A source written against the old contract: ``process`` only, no ``resolve``."""
+
+    def process(self, context: CheckpointContext) -> CheckpointContext:
+        return context
+
+
+def test_resolve_is_not_required_for_process_only_sources_but_names_them_on_resume() -> None:
+    """A ``process``-only source still works for pipeline loads; a resume needs ``resolve``.
+
+    The error names the class so the author knows what to implement.
+    """
+    source = _ProcessOnlySource()
+    context = CheckpointContext()
+
+    assert source.process(context) is context
+    with pytest.raises(NotImplementedError, match=r"_ProcessOnlySource.*resolve"):
+        source.resolve(context)
+
+
+def test_supports_resume_only_for_sources_that_implement_resolve() -> None:
+    """A resume hands Lightning a local file, so it needs a source that overrides ``resolve``."""
+    from anemoi.training.checkpoint.sources.http import HTTPSource
+    from anemoi.training.checkpoint.sources.local import LocalSource
+    from anemoi.training.checkpoint.sources.run import RunIdSource
+    from anemoi.training.checkpoint.sources.s3 import S3Source
+
+    assert LocalSource.supports_resume()
+    assert RunIdSource.supports_resume()
+    assert not HTTPSource.supports_resume()
+    assert not S3Source.supports_resume()
+    assert not _ProcessOnlySource.supports_resume()
+
+
 def test_checkpoint_source_is_abstract() -> None:
     """Cannot instantiate CheckpointSource directly."""
     with pytest.raises(TypeError):
@@ -27,8 +62,6 @@ def test_checkpoint_source_is_abstract() -> None:
 
 
 def test_checkpoint_source_requires_process() -> None:
-    """Subclasses must implement async process(context) -> context."""
-    import inspect
-
+    """Subclasses must implement process(context) -> context."""
     method = CheckpointSource.process
-    assert inspect.iscoroutinefunction(method) or hasattr(method, "__isabstractmethod__")
+    assert hasattr(method, "__isabstractmethod__")

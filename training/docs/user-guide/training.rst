@@ -92,55 +92,74 @@ it does not guarantee exact reproducibility across hardware, software
 versions, or distributed executions because floating-point numerics and
 parallel reductions can still differ slightly.
 
--  Set ``ANEMOI_BASE_SEED`` explicitly if you want a fixed base seed for
-   a run.
--  If ``ANEMOI_BASE_SEED`` is not set, Anemoi Training uses
-   ``SLURM_JOB_ID`` when running inside a SLURM job.
--  If neither value is available, Anemoi Training falls back to ``42``.
+-  Set ``training.seed`` if you want a fixed base seed for a run, for
+   example with ``anemoi-training train training.seed=42``.
+-  If ``training.seed`` is ``null`` (the default), a run that continues
+   from a checkpoint takes the base seed stored in the checkpoint, and a
+   new run draws a random base seed. In distributed training all ranks
+   use the seed drawn on rank 0.
 
 Anemoi Training derives unsigned 32-bit runtime seeds from the selected base seed
-for the trainer, model communication groups, and data-loading epochs. Both
-the base seed and the derived trainer seed are stored in the checkpoint
-metadata (as ``base_seed`` and ``seed``); the derived trainer seed is also
-logged during training. To reuse the same seed derivation after a restart, set
-``ANEMOI_BASE_SEED`` to the stored ``base_seed``.
+for the trainer, model communication groups, the data shuffle, and every training
+batch. Both the base seed and the derived trainer seed are stored in the checkpoint
+metadata (as ``base_seed`` and ``seed``); the derived trainer seed is also logged
+during training.
 
-``persistent_workers`` controls whether dataloader worker processes remain alive
-between epochs. It defaults to ``true`` to avoid starting new workers every epoch
-during standard training.
+Resuming a run
+==============
 
-The dataloader epoch is also stored in training checkpoints. When
-``dataloader.persistent_workers`` is ``false``, workers are restarted every
-epoch. Restarting from a checkpoint saved at the end of an epoch with the same
-base seed, data, dataloader configuration, and distributed configuration then
-produces the same shuffle as uninterrupted training.
+A run resumed from a checkpoint loads the same batches and draws the same random
+numbers as a run that was never interrupted. This holds for checkpoints saved at the
+end of an epoch and in the middle of one, provided the resumed job uses the same base
+seed, data, dataloader configuration, and distributed configuration. A checkpoint
+saved on exactly the last training batch of an epoch is the exception: PyTorch
+Lightning resumes it into an empty epoch.
 
-Anemoi automatically sets ``persistent_workers`` to ``false`` when the rollout
-changes between epochs (``rollout.epoch_increment > 0``), so that new workers
-receive the updated rollout.
+-  **Base seed.** With ``training.seed: null`` a resumed or forked run takes the
+   ``base_seed`` stored in the checkpoint. A seed set in ``training.seed`` is used
+   as given; if it differs from the checkpoint's, Anemoi Training logs a warning and
+   the run does not continue exactly: the rest of the interrupted epoch repeats some
+   samples and skips others, and every step draws different random numbers. This is
+   useful, for example, to try different randomness after a loss spike while keeping
+   the optimiser state. A run that loads only the weights (a
+   ``training.checkpoint.loading`` strategy such as ``WeightsOnlyLoader``) is a new
+   run and does not use the checkpoint's seed. Checkpoints from
+   versions that did not store a base seed resume with the run's own seed, and
+   Anemoi Training logs a warning that the run does not continue exactly.
+-  **Data order.** The training shuffle depends only on the base seed and the
+   epoch. The dataloader counts the samples it has handed out, and this count is
+   stored in the checkpoint, so a resumed run continues with the next batch. This
+   works with and without ``dataloader.persistent_workers``. The resumed run must
+   use the same ``dataloader.num_workers.training``: the stored dataloader position
+   depends on the number of workers, and a resumed run with a different number
+   stops with an error when it starts loading data.
+-  **Model randomness.** The random number generators are seeded at the start of
+   every training batch from the base seed, the model communication group, the
+   epoch, and the batch number. Random numbers used by stochastic parts of the model,
+   such as noise injection or diffusion noise, therefore do not depend on what was
+   drawn before the batch, and no generator state needs to be stored.
 
-The workers' random number generator state is not stored in checkpoints.
-Consequently, when ``persistent_workers`` is ``true``, a restarted job does not
-continue the same shuffle sequence as an uninterrupted run, even when it uses the
-same base seed.
+When the rollout changes between epochs (``rollout.epoch_increment > 0``), the
+number of samples changes with it, and the dataloaders are rebuilt every epoch.
 
-With ``persistent_workers`` set to ``true``, repeating a training run split
-across multiple jobs produces the same shuffle sequence if the jobs restart from
-checkpoints saved at the end of the same epochs and use the same base seed, data,
-dataloader configuration, and distributed configuration. However, this sequence
-differs from running the same number of epochs in one uninterrupted job.
+The same data and random numbers do not guarantee bitwise identical results. Two
+things can prevent this:
 
-Anemoi does not store a dataloader's position within an epoch. A checkpoint
-written during an epoch therefore cannot resume the exact data sequence at the
-next batch and may repeat or skip samples. Use checkpoints saved at the end of an
-epoch and set ``persistent_workers`` to ``false`` when the data sequence must match
-uninterrupted training.
+-  Some GPU kernels add up results, such as gradients, in an order that can change
+   between runs.
+-  With several GPUs, the gradients of all GPUs are summed in an order that can
+   change between runs, for example when a run is resumed. Setting
+   ``training.strategy.static_graph: false`` and
+   ``training.strategy.find_unused_parameters: true`` keeps this order fixed, so a
+   resumed run continues bitwise identically if the GPU kernels are reproducible.
+   These settings may make training slower.
 
-The same data shuffling does not necessarily make the complete training run
-exactly reproducible. The random number generators used by stochastic parts of
-the model are seeded at job startup, but their current state is not stored in
-checkpoints. In addition, some GPU kernels used by the model may also produce
-results that are not bitwise identical between runs.
+Metrics that PyTorch Lightning averages over an epoch, such as the epoch value of
+the training loss, can differ for the epoch in which a run was resumed: Lightning
+does not store their running means in the checkpoint, so these values only cover
+the steps after the resume. Validation metrics logged for every batch are logged at
+Lightning's count of validation batches in the current job, which starts again at
+zero after a resume, so their values appear shifted.
 
 Step 5: Execute Training
 ========================
@@ -163,8 +182,6 @@ Make sure you have a GPU available and simply call:
 .. code:: bash
 
    anemoi-training train
-
-.. _restart target:
 
 **************
  Data Routing
@@ -247,19 +264,17 @@ The dataloader config exposes configuration options of the underlying pytorch da
       validation: 2
       test: 2
 
-   persistent_workers: true
+   persistent_workers: false
    multiprocessing_context: None
 
 
-``persistent_workers`` defaults to ``true`` to avoid the worker startup cost
-between epochs. When the rollout changes between epochs, Anemoi automatically
-sets it to ``false`` so that new workers receive the updated rollout state. For a
-fixed rollout (``rollout.epoch_increment == 0``), set it to ``false`` explicitly
-if a run restarted from a checkpoint saved at the end of an epoch must reproduce
-the uninterrupted data shuffle. This requires the base seed and the data,
-dataloader, and distributed configurations to remain unchanged. With persistent
-workers, their random number generator state cannot be restored after restarting
-a job.
+``persistent_workers`` keeps the dataloader workers alive between epochs
+instead of starting new ones every epoch, which saves the worker startup time.
+It defaults to ``false``. The setting does not change the data or the random
+numbers of a run, and a resumed run continues the data order of the
+interrupted run either way, see `Resuming a run`_. When the rollout changes
+between epochs, the dataloaders are rebuilt every epoch and start new workers
+regardless of this setting.
 
 Determining the optimal number of workers depends on your system and training setup. More dataloader processes can increase your filesystem bandwidth, at the cost of higher CPU memory usage. Higher source resolutions and larger batch sizes increase the memory required per worker. When the available CPU memory is not sufficient for the requested number of workers, your training run will crash. One can use the `anemoi dataloader benchmark`_ to quickly test different setups and determine the optimal configuration for your training setup.
 
@@ -523,6 +538,8 @@ learning rate. The default (see
 ``config/training/optimization/lr_scheduler/cosine_scheduler.yaml``)
 uses a warmup period of 1000 steps.
 
+.. _restart target:
+
 **************************
  Restarting a training run
 **************************
@@ -532,40 +549,92 @@ i.e. because the training has exceeded the time limit on an HPC system
 or because the user wants to fine-tune the model from a specific point
 in the training.
 
-This can be done by setting ``config.training.run_id`` in the config
-file to be the *run_id* of the run that is being restarted. In this case
-the new checkpoints will go in the same folder as the old checkpoints.
-If the user does not want this then they can instead set
-``config.training.fork_run_id`` in the config file to the *run_id* of
-the run that is being restarted. In this case the old run will be
-unaffected and the new checkpoints will go in to a new folder with a new
-run_id. The user might want to do this if they want to start multiple
-new runs from 1 old run.
+This is done by setting ``training.checkpoint.source`` to a ``RunIdSource``
+with the *run_id* of the run to restart. ``RunIdSource`` resolves that id to
+``<system.output.checkpoints.root>/<run_id>/last.ckpt`` on the filesystem —
+it reads the run's checkpoint directory directly and does not fetch anything
+from MLflow. ``fork`` defaults to ``false`` (resume), so it can be omitted; a
+resume keeps the new checkpoints in the same folder as the old ones:
 
-The above will restart the model training from where the old run
-finished training. It's also possible to restart the model training from
-a specific checkpoint. This can either be a checkpoint from the same run
-or a checkpoint from a different run that you have run in the past or
-that you using for transfer learning. To do this, set
-``config.system.input.warm_start`` to be the path to the checkpoint they
-want to restart from.
+.. code:: yaml
 
-The above can be adapted depending on the use case and taking advantage
-of hydra, you can also reuse ``config.training.run_id`` or
-``config.training.fork_run_id`` to define the path to the checkpoint.
+   training:
+     checkpoint:
+       source:
+         _target_: anemoi.training.checkpoint.sources.run.RunIdSource
+         run_id: <run_id>
+         # fork: false   # optional; false is the default (resume), set true to fork
 
-Anemoi does not store the dataloader's position within an epoch. When restarting
-from a checkpoint written during an epoch, use ``training.max_steps`` to
-prescribe the total number of optimization steps instead of relying on
-``max_epochs`` as a measure of how much data was processed. The standard training
-configurations already use a finite ``max_steps`` with ``max_epochs: null``. This
-keeps the number of optimizer steps fixed.
+With no ``loading`` block the run *resumes*: PyTorch Lightning loads the
+checkpoint — weights, optimizer and training progress — at ``trainer.fit()``.
+Add ``training/checkpoint/loading=weights_only`` (or another strategy) to start
+fresh training state from those weights instead.
 
-When the data sequence must match uninterrupted training, use a checkpoint saved
-at the end of an epoch and set ``dataloader.persistent_workers`` to ``false``.
-Anemoi sets it to ``false`` automatically when the rollout changes between
-epochs; for a fixed rollout, set it explicitly. Disabling persistent workers adds
-worker startup costs at the beginning of every epoch.
+With ``fork: true`` the old run is unaffected and the new checkpoints go to a
+new folder with a fresh run_id — useful for starting multiple new runs from a
+single old run. The same can be selected on the command line with the Hydra
+group ``training/checkpoint/source=run +training.checkpoint.source.run_id=<run_id>``.
+
+To restart from a specific checkpoint *file* instead of a run's ``last.ckpt`` —
+e.g. a checkpoint from a different run, or one used for transfer learning — use
+a ``LocalSource`` with an explicit ``path``:
+
+.. code:: yaml
+
+   training:
+     checkpoint:
+       source:
+         _target_: anemoi.training.checkpoint.sources.local.LocalSource
+         path: /path/to/checkpoint.ckpt
+
+A run that restarts from a checkpoint with its full training state, that is
+without ``training.checkpoint.loading`` or with ``WarmStartLoader``, continues
+where the checkpoint was saved, also in the middle of an epoch. It trains on the
+same batches and draws the same random numbers as a run that was never
+interrupted; `Resuming a run`_ lists the conditions.
+
+**************************************
+ Training checkpoint hyperparameters
+**************************************
+
+A training checkpoint stores the arguments used to build the training
+module (the Lightning *hyperparameters*), so that it can be restored
+without re-creating them: the config, the data indices, the metadata,
+the dataset statistics, the supporting arrays and the graph. The graph
+is by far the largest of these and can make up a significant part of the
+checkpoint size.
+
+The graph can be left out of the training checkpoints with
+``config.diagnostics.checkpoint.exclude_hyperparameters``:
+
+.. code:: yaml
+
+   diagnostics:
+     checkpoint:
+       exclude_hyperparameters: [graph_data]
+
+The default is an empty list, which stores everything. ``graph_data`` is
+the only hyperparameter that is currently allowed to be excluded.
+Dataset statistics, including ``residual_statistics`` for residual downscalers,
+must be retained so that inference conversion can rebuild the normalisers.
+
+Resuming training, loading the weights, and transfer learning do not
+need the graph in the checkpoint, as the graph is rebuilt or loaded from
+the training config (``config.system.input.graph``) when the run (re)starts.
+Excluding ``graph_data`` therefore does not affect them.
+
+The graph does matter for converting a training checkpoint into an
+inference checkpoint with ``anemoi-training checkpoint inference``, which
+rebuilds the model from the stored hyperparameters. A training checkpoint without
+the graph can still be converted to an inference checkpoint if the graph
+is supplied separately, via the ``--graph`` argument:
+
+.. code:: bash
+
+   anemoi-training checkpoint inference \
+       --input last.ckpt \
+       --output inference-last.ckpt \
+       --graph graph.pt
 
 *********
  Rollout
@@ -603,9 +672,9 @@ up until ``rollout.maximum``.
       maximum: 12
 
 This two stage approach requires the model training to be restarted
-after stage one, see :ref:`restart target` below. The user should make
-sure to set ``config.training.run_id`` equal to the run-id of the first
-stage of training.
+after stage one, see :ref:`restart target` below. The user should
+configure ``training.checkpoint.source`` as a ``RunIdSource`` with the
+``run_id`` of the first stage of training (and ``fork: false`` to resume it).
 
 Note, for many purposes, it may make sense for the rollout stage (stage
 two) to be performed at the minimum learning rate throughout and for the
@@ -621,23 +690,21 @@ Every Forecaster checkpoint stores the task rollout state: the current
 applies when the rollout step is 1 or the rollout is fixed. The dataloader epoch
 is also stored.
 
-When using rollout training with ``rollout.epoch_increment > 0``, extra
-care is required when restarting an interrupted run.
+A run restarted from a checkpoint, saved at the end of an epoch or within one,
+continues with the rollout and data order of the uninterrupted run, provided
+that you:
 
-As described under `Restarting a training run`_, only checkpoints saved at the
-end of an epoch can reproduce the uninterrupted data sequence.
-
-The recommended restart recipe is:
-
-1. Restart from a checkpoint saved at the end of an epoch.
-2. Keep ``rollout.start``, ``epoch_increment``, and ``maximum``
+1. Keep ``rollout.start``, ``epoch_increment``, and ``maximum``
    **unchanged** in your configuration.
-3. Use non-persistent dataloader workers. Anemoi applies this automatically
-   when ``rollout.epoch_increment > 0``.
-4. Reuse the original ``ANEMOI_BASE_SEED``, dataloader configuration, and
-   distributed configuration.
-5. Ensure that ``training.run_id`` is set to the run ID of the interrupted
-   job.
+2. Leave ``training.seed`` at ``null`` or at the original seed, and reuse the
+   dataloader configuration and distributed configuration.
+3. Configure ``training.checkpoint.source`` as a ``RunIdSource`` with the
+   ``run_id`` of the interrupted job (and ``fork: false`` to resume it).
+
+The rollout and the dataloader epoch advance only after an epoch has trained on
+all of its batches. A checkpoint saved within an epoch, for example when training
+stops at ``training.max_steps`` or a time limit, therefore resumes with the
+rollout and data order of that epoch.
 
 By default, Anemoi saves each epoch checkpoint after validation. At that point,
 the rollout and dataloader epoch have not yet advanced. When training resumes,
@@ -649,10 +716,6 @@ run. That checkpoint stores the advanced dataloader epoch and records which
 epoch last increased the rollout. Lightning may run the hook again on resume.
 The saved record prevents the rollout from increasing twice.
 
-With ``persistent_workers`` set to ``false``, the first resumed epoch uses the
-same rollout length and shuffled data order that the uninterrupted run would have
-used.
-
 .. note::
 
    Fully resuming a training run restores the optimiser and scheduler state,
@@ -660,9 +723,11 @@ used.
    ``rollout.step`` overrides ``rollout.start`` from the current configuration.
    Resetting the rollout step while restoring optimiser and scheduler state is
    not currently supported. To start from ``rollout.start`` in the current
-   configuration, set ``training.load_weights_only: true``; this restores the
-   model weights but initializes new optimiser and scheduler state from the
-   current configuration.
+   configuration, load the checkpoint with the ``WeightsOnlyLoader`` instead
+   (``training/checkpoint/loading=weights_only``); this restores the model
+   weights but initialises new optimiser and scheduler state from the current
+   configuration. The legacy ``training.load_weights_only`` key is rejected
+   at config validation.
 
 *******************
  Transfer Learning
@@ -673,22 +738,44 @@ trained checkpoint. This is particularly useful when the new task is
 related to the old one, enabling faster convergence and often improving
 model performance.
 
-To enable transfer learning, set the config.training.transfer_learning
-flag to True in the configuration file.
+To configure transfer learning through the config, use the
+``training.checkpoint`` pipeline. Select the ``transfer_learning`` loading
+strategy via its Hydra group:
+
+.. code:: bash
+
+   anemoi-training train training/checkpoint/loading=transfer_learning
+
+or configure it inline under ``training.checkpoint.loading``:
 
 .. code:: yaml
 
    training:
-      # start the training from a checkpoint of a previous run
-      fork_run_id: ...
-      load_weights_only: True
-      transfer_learning: True
+      checkpoint:
+        # the checkpoint to transfer-learn from (a run, or a LocalSource path)
+        source:
+          _target_: anemoi.training.checkpoint.sources.run.RunIdSource
+          run_id: <run_id>
+          fork: true
+        loading:
+          _target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader
+          skip_mismatched: true
 
-When this flag is active and a checkpoint path is specified in
-``config.system.input.warm_start`` or ``self.last_checkpoint``, the system loads
-the pre-trained weights using the `transfer_learning_loading()` function.
-This approach ensures only compatible weights are loaded and mismatched
-layers are handled appropriately.
+The ``TransferLearningLoader`` filters key and shape mismatches so that only
+compatible weights are loaded and mismatched layers are handled
+appropriately. Set ``skip_mismatched: false`` to raise
+``CheckpointIncompatibleError`` instead of skipping mismatched weights.
+
+.. note::
+
+   The legacy keys ``training.transfer_learning`` and
+   ``training.load_weights_only`` have been **removed**. They are rejected at
+   config validation with an error naming the replacement: set
+   ``training.checkpoint.source`` to the run or file to load and
+   ``training.checkpoint.loading`` to a ``WeightsOnlyLoader`` (or a
+   ``TransferLearningLoader`` with ``skip_mismatched: true``), as shown above.
+   The removed run-lineage keys ``training.run_id`` / ``training.fork_run_id``
+   are likewise expressed as a ``RunIdSource`` under ``training.checkpoint.source``.
 
 For example, transfer learning might be used to adapt a weather
 forecasting model trained on one geographic region to another region
@@ -754,11 +841,16 @@ model are excluded from training. This is useful when certain parts of
 the model have been sufficiently trained or should remain unchanged for
 the current task.
 
-To specify which submodules to freeze, use the
-``config.training.submodules_to_freeze`` field in the configuration. List
-the names of submodules to be frozen. During model initialization, these
-submodules will have their parameters frozen, ensuring they are not
-updated during training.
+To freeze submodules through the config, use the ``training.checkpoint``
+pipeline, which applies freezing as a modifier stage after the model weights
+have been loaded. Select the ``freezing`` modifier group via Hydra:
+
+.. code:: bash
+
+   anemoi-training train training/checkpoint/modifiers=freezing
+
+or configure it inline as a list under ``training.checkpoint.modifiers``,
+listing the dot-paths of the submodules to freeze.
 
 For example, if you have a pre-trained model on a 'global' dataset and
 want to train a new decoder with the previous model's parameters frozen,
@@ -769,14 +861,44 @@ decoder.
 .. code:: yaml
 
    training:
-      # start the training from a checkpoint of a previous run
-      fork_run_id: ...
-      load_weights_only: True
+      checkpoint:
+        # the checkpoint to start from (a run, or a LocalSource path)
+        source:
+          _target_: anemoi.training.checkpoint.sources.run.RunIdSource
+          run_id: <run_id>
+          fork: true
+        loading:
+          _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+        modifiers:
+          - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
+            submodules_to_freeze:
+               - model.model.encoder.global
+               - model.model.processor
+               - model.model.decoder.global
+            strict: false
 
-      submodules_to_freeze:
-         - encoder.global
-         - processor
-         - decoder.global
+.. important::
+
+   The ``model.model.`` prefix is required to reach these modules. Paths are
+   resolved with ``torch.nn.Module.get_submodule`` from the LightningModule the
+   pipeline passes around, and ``model.model`` is the graph model that owns
+   ``encoder`` / ``processor`` / ``decoder``, two attribute hops below it.
+   Without the prefix nothing resolves.
+
+   ``encoder`` and ``decoder`` are ``ModuleDict`` s keyed by the **names you
+   give them** under ``model.encoders`` and ``model.decoders`` in the model
+   config, so ``model.model.encoder.global`` above assumes an encoder named
+   ``global``. The shipped ``graphtransformer.yaml`` names its single encoder
+   and decoder ``"0"``, giving ``model.model.encoder.0`` and
+   ``model.model.decoder.0``; the multi-dataset presets
+   use ``global`` and ``regional``. Use the keys of your own model config.
+
+.. note::
+
+   The legacy key ``training.submodules_to_freeze`` has been **removed**. It is
+   rejected at config validation with an error naming the replacement: set
+   ``training.checkpoint.modifiers`` to a list with a ``FreezingModifierStage``,
+   as shown above.
 
 Freezing can be particularly beneficial in scenarios such as fine-tuning
 when only specific components (e.g., the encoder, the decoder) need to

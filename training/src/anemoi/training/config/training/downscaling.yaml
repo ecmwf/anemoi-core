@@ -42,10 +42,6 @@ training_loss:
       scalers: ['general_variable', 'nan_mask_weights', 'node_weights']
       ignore_nans: True
 
-run_id: null
-fork_run_id: null
-transfer_learning: False
-load_weights_only: False
 update_ds_stats_on_ckpt_load:
   states: False
   tendencies: True
@@ -101,5 +97,3 @@ metrics:
   datasets:
     out_hres:
       - 2t
-
-submodules_to_freeze: []

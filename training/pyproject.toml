@@ -45,17 +45,18 @@ dependencies = [
   "numpy",
   "nvidia-ml-py>=13.580.82",
   "pydantic>=2.9",
-  "pytorch-lightning>=2.1",
+  "pytorch-lightning>=2.2",
   "timm>=0.9.2",
-  "torch>=2.6,<2.11",
+  "torch>=2.6,<2.12",
   "torch-geometric>=2.3.1",
+  "torchdata>=0.11",
   "torchinfo>=1.8",
   "torchvision>=0.18",
   "tqdm>=4.65",
   "zarr>=2.14.2",
 ]
 # Optional extras: pip install anemoi-training[azure,tests], etc.
-optional-dependencies.all = [ "anemoi-training[remote]" ]
+optional-dependencies.all = []
 optional-dependencies.azure = [ "azure-ai-ml", "azure-identity", "azureml-mlflow>=1.6", "strenum" ]
 optional-dependencies.dev = [
   "anemoi-training[all,docs,tests]",
@@ -83,19 +84,15 @@ optional-dependencies.profile = [
   "rich>=13.6",
   "tabulate>=0.9",
 ]
-optional-dependencies.remote = [
-  "aiohttp>=3.8",
-]
 optional-dependencies.s3 = [
   "anemoi-utils[s3]>=0.5.7",
 ]
 optional-dependencies.tests = [
-  "anemoi-graphs[tri]",                                     # required to load the gnn checkpoint as part of the tests
-  "anemoi-models[spectral]",                                # required to test the DCT2D spectral loss
-  "anemoi-training[azure,mlflow,plotting,remote,s3,wandb]", # AzureMlflowLogger / remote checkpoints / S3Source / plotting integration
+  "anemoi-graphs[tri]",                              # required to load the gnn checkpoint as part of the tests
+  "anemoi-models[spectral]",                         # required to test the DCT2D spectral loss
+  "anemoi-training[azure,mlflow,plotting,s3,wandb]", # AzureMlflowLogger / S3Source / plotting integration
   "hypothesis>=6.11",
   "pytest>=8",
-  "pytest-asyncio>=0.23",                                   # required for async checkpoint tests
   "pytest-mock>=3",
   "pytest-skip-slow>=0.0.5",
   "sshfs",
@@ -108,12 +105,12 @@ urls.Documentation = "https://anemoi-training.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-training/"
 urls.Issues = "https://github.com/ecmwf/anemoi-training/issues"
 urls.Repository = "https://github.com/ecmwf/anemoi-training/"
-scripts.".anemoi-training-evaluate" = "anemoi.training.commands.evaluate:main"
+scripts._anemoi-training-evaluate = "anemoi.training.commands.evaluate:main"
 # command for interactive DDP (not supposed to be used directly)
-# the dot is intentional, so it doesn't trigger autocomplete
+# the underscore is intentional, so it doesn't trigger autocomplete
 # Files need to be named profiler due to A005 Module `profile` is shadowing a Python builtin module
-scripts.".anemoi-training-profile" = "anemoi.training.commands.profiler:main"
-scripts.".anemoi-training-train" = "anemoi.training.commands.train:main"
+scripts._anemoi-training-profile = "anemoi.training.commands.profiler:main"
+scripts._anemoi-training-train = "anemoi.training.commands.train:main"
 # Add subcommand in the `commands` directory
 scripts.anemoi-training = "anemoi.training.__main__:main"
 
