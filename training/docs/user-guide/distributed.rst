@@ -295,7 +295,7 @@ gradients of all GPUs are summed in the same order in every step, so a
 resumed run continues bitwise identically. ``static_graph: true`` with
 ``find_unused_parameters: false`` tells DDP that the same parameters are
 trained in every step, which can make training of large models faster
-(about 6% for a 1B parameter model), but gives up this reproducibility.
+(about 6% for a 1B parameter model), but gives up this exact reproducibility.
 ``static_graph`` must be ``false`` when
 ``config.training.accum_grad_batches`` is larger than 1.
 
