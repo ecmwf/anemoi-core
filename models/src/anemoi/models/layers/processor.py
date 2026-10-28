@@ -37,6 +37,7 @@ from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
+from anemoi.models.layers.utils import refuse_dropout_when_sharded
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -100,8 +101,6 @@ class BaseProcessor(nn.Module, ABC):
 
         self.layer_factory = load_layer_kernels(layer_kernels)
 
-        self._has_dropout = kwargs.get("dropout_p", 0.0) > 0 if "dropout_p" in kwargs else False
-
         assert (
             num_layers % num_chunks == 0
         ), f"Number of processor layers ({num_layers}) has to be divisible by the number of processor chunks ({num_chunks})."
@@ -144,11 +143,7 @@ class BaseProcessor(nn.Module, ABC):
 
     def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
         """Example forward pass."""
-
-        if (model_comm_group := kwargs.get("model_comm_group", None)) is not None:
-            assert (
-                model_comm_group.size() == 1 or not self._has_dropout
-            ), f"Dropout is not supported when model is sharded across {model_comm_group.size()} GPUs"
+        refuse_dropout_when_sharded(self, kwargs.get("model_comm_group"))
 
         x = self.run_layers((x,), *args, **kwargs)
         return x
@@ -198,6 +193,7 @@ class PointWiseMLPProcessor(BaseProcessor):
         *args,
         **kwargs,
     ) -> Tensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
         if model_comm_group:
             assert (
                 model_comm_group.size() == 1 or batch_size == 1
@@ -313,6 +309,7 @@ class TransformerProcessor(BaseProcessor):
         *args,
         **kwargs,
     ) -> Tensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
         if model_comm_group:
             assert (
                 model_comm_group.size() == 1 or batch_size == 1
@@ -444,6 +441,7 @@ class GNNProcessor(BaseProcessor):
         Tensor
             Processed node features.
         """
+        refuse_dropout_when_sharded(self, model_comm_group)
         if not shard_info.edges_are_sharded():
             # Edges not pre-sharded, do 1-hop sorting and sharding here
             target_nodes = sum(shard_info.nodes)
@@ -656,6 +654,7 @@ class GraphTransformerProcessor(BaseProcessor):
         Tensor
             Processed node features.
         """
+        refuse_dropout_when_sharded(self, model_comm_group)
         size = sum(shard_info.nodes) if shard_info.nodes_are_sharded() else x.size(0)
         edge_attr, edge_index = ensure_edges_are_dst_sorted(
             edge_attr,
