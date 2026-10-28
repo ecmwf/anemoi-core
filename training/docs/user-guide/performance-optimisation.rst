@@ -409,6 +409,28 @@ be difficult to debug.
 
 .. _compilation documentation: https://anemoi.readthedocs.io/projects/training/en/latest/user-guide/models.html#compilation
 
+Disable reproducible gradient synchronisation
+=============================================
+
+By default, ``training.strategy.static_graph`` is ``false`` and
+``training.strategy.find_unused_parameters`` is ``true``. With these
+settings, the gradients of all GPUs are summed in the same order in
+every step, so a resumed run continues bitwise identically. For large
+models, telling DDP that the same parameters are trained in every step
+can make training faster, at the cost of this reproducibility. In a
+benchmark of a 1B parameter model, this gave a 6% speedup, while smaller
+models showed no difference.
+
+.. code:: yaml
+
+   training:
+     strategy:
+       static_graph: True
+       find_unused_parameters: False
+
+``static_graph`` must stay ``false`` when
+``training.accum_grad_batches`` is larger than 1.
+
 Performance Profiling
 =====================
 
