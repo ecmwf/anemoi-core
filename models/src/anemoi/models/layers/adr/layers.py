@@ -29,6 +29,7 @@ from torch import nn
 
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
+from anemoi.models.layers.edge_stencil import EdgeDepthwiseConv
 from anemoi.models.layers.geocyclic import GeocyclicDepthwiseConv
 from anemoi.models.layers.layout import GraphLayout
 from anemoi.models.layers.layout import LatLonLayout
@@ -74,11 +75,15 @@ class GraphSpatialMixer(nn.Module):
 
     The graph block takes the place of the stencil of ``LatLonSpatialMixer``:
 
+    - ``"edge_conv"``: an ``EdgeDepthwiseConv``, one learned weight per edge and channel. The
+      closest analogue of the stencil on a grid, and by far the cheapest of the three;
     - ``"transformer"``: a ``GraphTransformerProcessorBlock``, attention over the edges;
     - ``"gnn"``: a ``GraphConvProcessorBlock``, message passing over the edges.
 
-    Both keep the number of channels and add their output to their input. ``block_kwargs`` go to the
-    block, e.g. ``graph_attention_backend`` or ``qk_norm`` for the transformer.
+    All keep the number of channels; the transformer and the GNN also add their output to their
+    input and bring their own MLP and layer norms. ``block_kwargs`` go to the block, e.g.
+    ``graph_attention_backend`` or ``qk_norm`` for the transformer. Only the transformer passes the
+    conditioning on to its layer norms; the other two ignore it, as the mixers on a grid do.
     """
 
     def __init__(
@@ -87,13 +92,15 @@ class GraphSpatialMixer(nn.Module):
         out_channels: int,
         edge_dim: int,
         layer_kernels: DotDict,
-        block: str = "transformer",
+        block: str = "edge_conv",
         num_heads: int = 16,
         mlp_hidden_ratio: float = 1.0,
         **block_kwargs,
     ) -> None:
         super().__init__()
-        if block == "transformer":
+        if block == "edge_conv":
+            self.block = EdgeDepthwiseConv(in_channels, edge_dim, layer_kernels, **block_kwargs)
+        elif block == "transformer":
             self.block = GraphTransformerProcessorBlock(
                 in_channels=in_channels,
                 hidden_dim=compute_mlp_hidden_dim(in_channels, mlp_hidden_ratio),
@@ -115,11 +122,13 @@ class GraphSpatialMixer(nn.Module):
                 **block_kwargs,
             )
         else:
-            raise ValueError(f"block must be 'transformer' or 'gnn', got {block}.")
+            raise ValueError(f"block must be 'edge_conv', 'transformer' or 'gnn', got {block}.")
         self.block_type = block
         self.mix = layer_kernels.Linear(in_channels, out_channels)
 
     def forward(self, x: Tensor, layout: GraphLayout, cond: Optional[Tensor] = None) -> Tensor:
+        if self.block_type == "edge_conv":
+            return self.mix(self.block(x, layout))
         if self.block_type == "transformer":
             x, _ = self.block(
                 x,
@@ -137,7 +146,9 @@ class GraphSpatialMixer(nn.Module):
         return self.mix(x)
 
     def branch_layers(self) -> tuple[nn.Module, ...]:
-        """Layers that ``init_branch`` initialises; the graph block keeps its own initialisation."""
+        """Layers that ``init_branch`` initialises; the transformer and GNN blocks keep their own."""
+        if self.block_type == "edge_conv":
+            return (self.block.weight, self.mix)
         return (self.mix,)
 
 
@@ -167,9 +178,7 @@ class LatLonLowRankBias(nn.Module):
     def forward(self, x: Tensor, layout: LatLonLayout) -> Tensor:
         """Add the field to x, of shape (batch, local rows, nlon, channels)."""
         start, end = layout.local_rows
-        base_maps = torch.einsum(
-            "ck,ki,kj->ijc", self.coefficients, self.lat_profiles[:, start:end], self.lon_profiles
-        )
+        base_maps = torch.einsum("ck,ki,kj->ijc", self.coefficients, self.lat_profiles[:, start:end], self.lon_profiles)
         return x + self.projection(base_maps)
 
 

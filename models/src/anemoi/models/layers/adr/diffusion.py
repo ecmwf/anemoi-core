@@ -110,9 +110,9 @@ class LatLonDiffusion(Diffusion):
 class GraphDiffusion(Diffusion):
     """Diffusion step on the nodes of a graph: a graph block over the hidden-to-hidden edges and a channel mix.
 
-    ``mixer_block`` is ``"transformer"`` or ``"gnn"`` (see ``GraphSpatialMixer``), and
-    ``mixer_kwargs`` go to the graph block (e.g. ``num_heads``, ``mlp_hidden_ratio``,
-    ``graph_attention_backend``).
+    ``mixer_block`` is ``"edge_conv"``, ``"transformer"`` or ``"gnn"`` (see
+    ``GraphSpatialMixer``), and ``mixer_kwargs`` go to the block (e.g. ``num_heads``,
+    ``mlp_hidden_ratio``, ``graph_attention_backend``).
     """
 
     def __init__(
@@ -121,7 +121,7 @@ class GraphDiffusion(Diffusion):
         num_channels: int,
         edge_dim: int,
         layer_kernels: DotDict,
-        mixer_block: str = "transformer",
+        mixer_block: str = "edge_conv",
         mixer_kwargs: Optional[dict] = None,
         layer_norm: bool = True,
         low_rank_bias: bool = True,

@@ -111,7 +111,7 @@ def test_adr_processor_init(adr_processor, adr_processor_init):
         assert isinstance(block.diffusion, LatLonDiffusion)
         assert isinstance(block.reaction, LatLonReaction)
         # By default every moved channel has its own velocity field.
-        assert block.advection.transport.num_heads == adr_processor_init.advection["advection_channels"]
+        assert block.advection.transport.num_velocity_fields == adr_processor_init.advection["advection_channels"]
         # The layers split one 6 hour step, with velocities in units of 1 / Earth's rotation rate.
         assert block.advection.transport.time_step == pytest.approx(
             6 * 3600 * 7.29212e-5 / adr_processor_init.num_layers

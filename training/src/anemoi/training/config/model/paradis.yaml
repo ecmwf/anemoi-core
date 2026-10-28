@@ -46,7 +46,7 @@ processor:
   advection:
     _target_: anemoi.models.layers.adr.LatLonAdvection
     advection_channels: 768
-    num_heads: null # number of velocity fields; null gives one per advected channel
+    num_velocity_fields: null # null gives one velocity field per advected channel
     velocity_hidden_dim: 384
     kernel_size: 5
     interpolation: bicubic # bicubic or bilinear

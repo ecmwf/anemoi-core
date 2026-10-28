@@ -60,13 +60,18 @@ def _build_block(
         advection={
             "_target_": "anemoi.models.layers.adr.LatLonAdvection",
             "advection_channels": 12,
-            "num_heads": num_heads,
+            "num_velocity_fields": num_heads,
             "velocity_hidden_dim": 10,
             "cartesian_displacement": cartesian,
             **bias_kwargs,
         },
         diffusion={"_target_": "anemoi.models.layers.adr.LatLonDiffusion", **bias_kwargs},
-        reaction={"_target_": "anemoi.models.layers.adr.LatLonReaction", "hidden_dim": 24, "num_layers": 3, **bias_kwargs},
+        reaction={
+            "_target_": "anemoi.models.layers.adr.LatLonReaction",
+            "hidden_dim": 24,
+            "num_layers": 3,
+            **bias_kwargs,
+        },
     ).to(device)
     # The bias fields start close to zero; give them values so that every path is tested.
     for bias in (block.advection.transport.velocity_bias, block.diffusion.bias, block.reaction.bias):
@@ -171,14 +176,19 @@ def _graph_processor_rank(rank, world_size, device, group, block, cartesian, dty
         advection={
             "_target_": "anemoi.models.layers.adr.GraphAdvection",
             "advection_channels": 12,
-            "num_heads": 6,
+            "num_velocity_fields": 6,
             "velocity_hidden_dim": 10,
             "cartesian_displacement": cartesian,
             **mixer,
             **bias_kwargs,
         },
         diffusion={"_target_": "anemoi.models.layers.adr.GraphDiffusion", **mixer, **bias_kwargs},
-        reaction={"_target_": "anemoi.models.layers.adr.GraphReaction", "hidden_dim": 24, "num_layers": 3, **bias_kwargs},
+        reaction={
+            "_target_": "anemoi.models.layers.adr.GraphReaction",
+            "hidden_dim": 24,
+            "num_layers": 3,
+            **bias_kwargs,
+        },
         layer_kernels=load_layer_kernels(instance=False),
     ).to(device, dtype)
     # The bias fields start close to zero; give them values so that every path is tested.
@@ -186,9 +196,9 @@ def _graph_processor_rank(rank, world_size, device, group, block, cartesian, dty
         for name, p in processor.named_parameters():
             if "_profiles" in name or "coefficients" in name:
                 p.normal_()
-    # The GNN block all-gathers its input, and the backward of that all-reduces the gradient in
-    # float32 (anemoi.models.distributed.primitives._reduce), so its gradients agree only to
-    # float32 precision.
+    # The GNN block and the edge stencil all-gather their input, and the backward of that
+    # all-reduces the gradient in float32 (anemoi.models.distributed.primitives._reduce), so their
+    # gradients agree only to float32 precision. The transformer exchanges a halo instead.
     exact = dtype == torch.float64 and block == "transformer"
     atol, rtol = (1e-11, 1e-9) if exact else (1e-5, 1e-5)
     grad_atol, grad_rtol = (1e-10, 1e-9) if exact else (1e-4, 1e-4)
@@ -228,7 +238,7 @@ def _graph_processor_rank(rank, world_size, device, group, block, cartesian, dty
 
 
 @pytest.mark.distributed
-@pytest.mark.parametrize("block", ["transformer", "gnn"])
+@pytest.mark.parametrize("block", ["edge_conv", "transformer", "gnn"])
 @pytest.mark.parametrize("cartesian", [False, True], ids=["local-displacement", "cartesian-displacement"])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64], ids=["float32", "float64"])
 def test_graph_processor_matches_single_gpu(block, cartesian, dtype, distributed_backend, distributed_world_size):

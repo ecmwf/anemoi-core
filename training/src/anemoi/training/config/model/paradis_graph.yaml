@@ -27,7 +27,8 @@ processor:
   # Advection-diffusion-reaction processor from PARADIS (arXiv:2601.21151) on the nodes of the
   # hidden graph, for any hidden mesh (e.g. graph/multi_scale.yaml). The spatial mixers are graph
   # blocks over the hidden-to-hidden edges, and the advection reads each value at its departure
-  # point from the nearest nodes. For a regular latitude-longitude hidden grid see paradis.yaml.
+  # point from the nearest nodes with a brute-force neighbour search.
+  # For a regular latitude-longitude hidden grid see paradis.yaml.
   _target_: anemoi.models.layers.processor.GraphADRProcessor
   trainable_size: ${model.edge_trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
@@ -48,13 +49,12 @@ processor:
   advection:
     _target_: anemoi.models.layers.adr.GraphAdvection
     advection_channels: 768
-    num_heads: 64 # number of velocity fields; null gives one per advected channel (slow with the brute-force neighbour search)
+    num_velocity_fields: 64 # null gives one per advected channel, which is slow with the brute-force neighbour search
     velocity_hidden_dim: 384
-    mixer_block: transformer # transformer or gnn
-    mixer_kwargs:
-      num_heads: 16
-      mlp_hidden_ratio: 1
-      graph_attention_backend: "triton" # Options: "triton", "pyg"
+    # edge_conv is the analogue of the stencil of the grid processor: one learned weight per edge
+    # and channel. transformer and gnn put a whole graph block in its place, which is far heavier.
+    mixer_block: edge_conv # Options: "edge_conv", "transformer", "gnn"
+    mixer_kwargs: {} # settings of the transformer or gnn block, e.g. num_heads, mlp_hidden_ratio
     num_neighbours: 4 # nearest nodes a value is read from at its departure point
     smoothing: 0.01
     bias_rank: 128
@@ -64,11 +64,8 @@ processor:
     cartesian_displacement: False # True: 3D velocities, which do not turn round across the poles
   diffusion:
     _target_: anemoi.models.layers.adr.GraphDiffusion
-    mixer_block: transformer
-    mixer_kwargs:
-      num_heads: 16
-      mlp_hidden_ratio: 1
-      graph_attention_backend: "triton"
+    mixer_block: edge_conv # Options: "edge_conv", "transformer", "gnn"
+    mixer_kwargs: {}
     layer_norm: True
     low_rank_bias: True
     bias_rank: 128

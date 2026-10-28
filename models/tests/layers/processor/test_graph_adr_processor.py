@@ -23,6 +23,7 @@ from anemoi.models.layers.adr.layers import GraphSpatialMixer
 from anemoi.models.layers.block import ADRProcessorBlock
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
+from anemoi.models.layers.edge_stencil import EdgeDepthwiseConv
 from anemoi.models.layers.processor import GraphADRProcessor
 from anemoi.models.layers.semi_lagrangian import GraphSemiLagrangianLayer
 from anemoi.models.layers.utils import load_layer_kernels
@@ -41,14 +42,14 @@ BIAS_KWARGS = {"bias_rank": 4, "bias_base_maps": 2, "bias_lat_degree": 4, "bias_
 def _mixer(block: str) -> dict:
     if block == "transformer":
         return {"mixer_block": "transformer", "mixer_kwargs": {"num_heads": 2, "graph_attention_backend": "pyg"}}
-    return {"mixer_block": "gnn"}
+    return {"mixer_block": block}
 
 
 def _advection(block: str = "transformer", **kwargs) -> dict:
     return {
         "_target_": "anemoi.models.layers.adr.GraphAdvection",
         "advection_channels": 8,
-        "num_heads": 4,
+        "num_velocity_fields": 4,
         "velocity_hidden_dim": 8,
         **_mixer(block),
         **BIAS_KWARGS,
@@ -61,7 +62,13 @@ def _diffusion(block: str = "transformer", **kwargs) -> dict:
 
 
 def _reaction(**kwargs) -> dict:
-    return {"_target_": "anemoi.models.layers.adr.GraphReaction", "hidden_dim": 24, "num_layers": 3, **BIAS_KWARGS, **kwargs}
+    return {
+        "_target_": "anemoi.models.layers.adr.GraphReaction",
+        "hidden_dim": 24,
+        "num_layers": 3,
+        **BIAS_KWARGS,
+        **kwargs,
+    }
 
 
 @dataclass
@@ -106,12 +113,16 @@ def graph_adr_processor_init():
     return GraphADRProcessorConfig()
 
 
-@pytest.mark.parametrize("block", ["transformer", "gnn"])
+@pytest.mark.parametrize("block", ["edge_conv", "transformer", "gnn"])
 def test_graph_adr_processor_init(graph_adr_processor_init, block):
     graph_adr_processor_init.advection = _advection(block)
     graph_adr_processor_init.diffusion = _diffusion(block)
     processor = _build(graph_adr_processor_init)
-    block_class = GraphTransformerProcessorBlock if block == "transformer" else GraphConvProcessorBlock
+    block_class = {
+        "edge_conv": EdgeDepthwiseConv,
+        "transformer": GraphTransformerProcessorBlock,
+        "gnn": GraphConvProcessorBlock,
+    }[block]
 
     assert len(processor.proc) == graph_adr_processor_init.num_layers
     assert processor.node_lat.shape == processor.node_lon.shape == (NUM_NODES,)
@@ -130,7 +141,7 @@ def test_graph_adr_processor_init(graph_adr_processor_init, block):
 
 
 @pytest.mark.parametrize("batch_size", [1, 2])
-@pytest.mark.parametrize("block", ["transformer", "gnn"])
+@pytest.mark.parametrize("block", ["edge_conv", "transformer", "gnn"])
 @pytest.mark.parametrize("cartesian_displacement", [False, True])
 def test_graph_adr_processor_forward_backward(graph_adr_processor_init, batch_size, block, cartesian_displacement):
     graph_adr_processor_init.advection = _advection(block, cartesian_displacement=cartesian_displacement)
@@ -158,7 +169,7 @@ def test_graph_adr_processor_batch_members_are_independent(graph_adr_processor_i
     torch.testing.assert_close(both[NUM_NODES:], second, atol=1e-4, rtol=1e-4)
 
 
-@pytest.mark.parametrize("block", ["transformer", "gnn"])
+@pytest.mark.parametrize("block", ["edge_conv", "transformer", "gnn"])
 def test_graph_adr_processor_does_not_depend_on_node_order(graph_adr_processor_init, block):
     """The same mesh with its nodes stored in another order gives the same values, node by node."""
     graph_adr_processor_init.advection = _advection(block)

@@ -123,7 +123,7 @@ class LatLonAdvectionSchema(BaseModel):
     "Advection step: neural semi-Lagrangian advection with a learned share per channel."
     advection_channels: PositiveInt = Field(default=768)
     "Number of channels moved by the advection step."
-    num_heads: Union[PositiveInt, None] = Field(default=None)
+    num_velocity_fields: Union[PositiveInt, None] = Field(default=None)
     "Number of velocity fields. Default: one per moved channel."
     velocity_hidden_dim: PositiveInt = Field(default=384)
     "Hidden dimension of the velocity network."
@@ -202,10 +202,10 @@ class _GraphBiasFields(BaseModel):
 
 
 class _GraphMixerFields(BaseModel):
-    mixer_block: Literal["transformer", "gnn"] = Field(default="transformer")
-    "Graph block of the spatial mixers: a graph transformer or a GNN block over the hidden-to-hidden edges."
+    mixer_block: Literal["edge_conv", "transformer", "gnn"] = Field(default="edge_conv")
+    "Graph block of the spatial mixers over the hidden-to-hidden edges: one weight per edge and channel (edge_conv, the analogue of the stencil on a grid), a graph transformer, or a GNN block."
     mixer_kwargs: dict[str, Any] = Field(default_factory=dict)
-    "Settings of the graph block, e.g. num_heads, mlp_hidden_ratio, graph_attention_backend."
+    "Settings of the graph block, e.g. num_heads and mlp_hidden_ratio. Not used by edge_conv."
 
 
 class GraphAdvectionSchema(_GraphMixerFields, _GraphBiasFields):
@@ -213,7 +213,7 @@ class GraphAdvectionSchema(_GraphMixerFields, _GraphBiasFields):
     "Advection step on the nodes of a graph: neural semi-Lagrangian advection with a learned share per channel."
     advection_channels: PositiveInt = Field(default=768)
     "Number of channels moved by the advection step."
-    num_heads: Union[PositiveInt, None] = Field(default=None)
+    num_velocity_fields: Union[PositiveInt, None] = Field(default=None)
     "Number of velocity fields. Default: one per moved channel."
     velocity_hidden_dim: PositiveInt = Field(default=384)
     "Hidden dimension of the velocity network."

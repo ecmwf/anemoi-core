@@ -210,12 +210,17 @@ def test_processors_do_not_depend_on_node_order(kind):
             advection={
                 "_target_": "anemoi.models.layers.adr.LatLonAdvection",
                 "advection_channels": 8,
-                "num_heads": 4,
+                "num_velocity_fields": 4,
                 "velocity_hidden_dim": 8,
                 **bias_kwargs,
             },
             diffusion={"_target_": "anemoi.models.layers.adr.LatLonDiffusion", **bias_kwargs},
-            reaction={"_target_": "anemoi.models.layers.adr.LatLonReaction", "hidden_dim": 16, "num_layers": 2, **bias_kwargs},
+            reaction={
+                "_target_": "anemoi.models.layers.adr.LatLonReaction",
+                "hidden_dim": 16,
+                "num_layers": 2,
+                **bias_kwargs,
+            },
         )
 
     row_by_row, shuffled = build(None), build(order)
@@ -308,7 +313,7 @@ def test_semi_lagrangian_advection_without_velocity_projects_down_and_up():
     advection = LatLonAdvection(
         num_channels=16,
         advection_channels=8,
-        num_heads=8,
+        num_velocity_fields=8,
         velocity_hidden_dim=12,
         nlat=nlat,
         nlon=nlon,
@@ -470,7 +475,7 @@ def test_layers_predict_one_displacement_per_head(cartesian_displacement):
     advection = LatLonAdvection(
         num_channels=16,
         advection_channels=8,
-        num_heads=4,
+        num_velocity_fields=4,
         velocity_hidden_dim=12,
         nlat=8,
         nlon=16,

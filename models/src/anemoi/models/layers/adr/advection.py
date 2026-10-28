@@ -38,7 +38,7 @@ class SemiLagrangianAdvection(nn.Module):
 
     - A spatial mixer projects the latent state down to the transported channels.
     - A velocity network (norm -> linear -> bias -> activation -> spatial mixer) predicts one
-      velocity per head.
+      velocity per velocity field.
     - The transported channels are moved along their velocities by the sampler and projected back.
 
     Velocities are scaled by ``time_step``, the length of one layer's step in units of the inverse
@@ -46,7 +46,7 @@ class SemiLagrangianAdvection(nn.Module):
     point's local east and north directions. These turn round across a pole, so the mixers that
     predict them see reversed directions on the other side of a pole.
 
-    Each head has its own velocity and moves ``advection_channels // num_heads`` channels.
+    Each velocity field moves ``advection_channels // num_velocity_fields`` channels.
 
     The geometry comes in through the sampler (``SemiLagrangianLayer`` on a latitude-longitude
     grid, ``GraphSemiLagrangianLayer`` on a graph) and through ``mixer(in_channels, out_channels)``
@@ -58,7 +58,7 @@ class SemiLagrangianAdvection(nn.Module):
         *,
         num_channels: int,
         advection_channels: int,
-        num_heads: int,
+        num_velocity_fields: int,
         velocity_hidden_dim: int,
         time_step: float,
         layer_kernels: DotDict,
@@ -67,9 +67,12 @@ class SemiLagrangianAdvection(nn.Module):
         bias: Callable[[int], nn.Module],
     ) -> None:
         super().__init__()
-        if advection_channels % num_heads != 0:
-            raise ValueError(f"advection_channels ({advection_channels}) must be divisible by num_heads ({num_heads}).")
-        self.num_heads = num_heads
+        if advection_channels % num_velocity_fields != 0:
+            raise ValueError(
+                f"advection_channels ({advection_channels}) must be divisible by "
+                f"num_velocity_fields ({num_velocity_fields})."
+            )
+        self.num_velocity_fields = num_velocity_fields
         self.advection_channels = advection_channels
         self.time_step = time_step
         self.sampler = sampler
@@ -82,7 +85,7 @@ class SemiLagrangianAdvection(nn.Module):
         self.velocity_in = layer_kernels.Linear(num_channels, velocity_hidden_dim)
         self.velocity_bias = bias(velocity_hidden_dim)
         self.velocity_activation = layer_kernels.Activation()
-        self.velocity_out = mixer(velocity_hidden_dim, self.displacement_dim * num_heads)
+        self.velocity_out = mixer(velocity_hidden_dim, self.displacement_dim * num_velocity_fields)
 
         init_branch(*self.down.branch_layers())
         init_branch(self.up)
@@ -93,9 +96,11 @@ class SemiLagrangianAdvection(nn.Module):
 
         velocity = self.velocity_in(self.velocity_norm(x, **cond_kwargs))
         velocity = self.velocity_activation(self.velocity_bias(velocity, layout))
-        velocity = self.velocity_out(velocity, layout, cond).unflatten(-1, (self.num_heads, self.displacement_dim))
+        velocity = self.velocity_out(velocity, layout, cond).unflatten(
+            -1, (self.num_velocity_fields, self.displacement_dim)
+        )
 
-        transported = self.down(x, layout, cond).unflatten(-1, (self.num_heads, -1))
+        transported = self.down(x, layout, cond).unflatten(-1, (self.num_velocity_fields, -1))
         moved = self.sampler.sample(transported, _at_least_float32(velocity) * self.time_step, layout)
         return self.up(moved.flatten(-2))
 
@@ -126,11 +131,14 @@ class Advection(nn.Module):
         return share * (self.transport(x, layout, cond) - x)
 
 
-def _default_num_heads(cls: type, num_heads: Optional[int], advection_channels: int) -> int:
-    if num_heads is None:
-        LOGGER.debug(f"{cls.__name__}: num_heads not specified, using {advection_channels} (advection channels)")
+def _default_velocity_fields(cls: type, num_velocity_fields: Optional[int], advection_channels: int) -> int:
+    if num_velocity_fields is None:
+        LOGGER.debug(
+            f"{cls.__name__}: num_velocity_fields not specified, using {advection_channels}, "
+            "one velocity field per advected channel"
+        )
         return advection_channels
-    return num_heads
+    return num_velocity_fields
 
 
 class LatLonAdvection(Advection):
@@ -149,7 +157,7 @@ class LatLonAdvection(Advection):
         time_step: float,
         layer_kernels: DotDict,
         advection_channels: int = 768,
-        num_heads: Optional[int] = None,
+        num_velocity_fields: Optional[int] = None,
         velocity_hidden_dim: int = 384,
         kernel_size: int = 5,
         interpolation: str = "bicubic",
@@ -157,18 +165,18 @@ class LatLonAdvection(Advection):
         bias_base_maps: int = 8,
         cartesian_displacement: bool = False,
     ) -> None:
-        num_heads = _default_num_heads(self.__class__, num_heads, advection_channels)
+        num_velocity_fields = _default_velocity_fields(self.__class__, num_velocity_fields, advection_channels)
         transport = SemiLagrangianAdvection(
             num_channels=num_channels,
             advection_channels=advection_channels,
-            num_heads=num_heads,
+            num_velocity_fields=num_velocity_fields,
             velocity_hidden_dim=velocity_hidden_dim,
             time_step=time_step,
             layer_kernels=layer_kernels,
             sampler=SemiLagrangianLayer(
                 nlat=nlat,
                 nlon=nlon,
-                num_heads=num_heads,
+                num_heads=num_velocity_fields,
                 interpolation=interpolation,
                 cartesian_displacement=cartesian_displacement,
             ),
@@ -183,10 +191,14 @@ class LatLonAdvection(Advection):
 class GraphAdvection(Advection):
     """Advection step on the nodes of a graph.
 
-    The spatial mixers are graph blocks over the hidden-to-hidden edges and a channel mix (see
-    ``GraphSpatialMixer``; ``mixer_block`` and ``mixer_kwargs`` configure the block), and the
-    values are read at the departure points from their nearest nodes
-    (``GraphSemiLagrangianLayer``, with ``num_neighbours`` and ``smoothing``).
+    The spatial mixers are a block over the hidden-to-hidden edges and a channel mix (see
+    ``GraphSpatialMixer``; ``mixer_block`` chooses ``"edge_conv"``, ``"transformer"`` or
+    ``"gnn"``, and ``mixer_kwargs`` go to the block), and the values are read at the departure
+    points from their nearest nodes (``GraphSemiLagrangianLayer``, with ``num_neighbours`` and
+    ``smoothing``).
+
+    The number of neighbour searches is ``batch * num_velocity_fields * nodes``, so a velocity
+    field per advected channel, as on a grid, is slow with the brute-force search.
     """
 
     def __init__(
@@ -197,9 +209,9 @@ class GraphAdvection(Advection):
         time_step: float,
         layer_kernels: DotDict,
         advection_channels: int = 768,
-        num_heads: Optional[int] = None,
+        num_velocity_fields: Optional[int] = None,
         velocity_hidden_dim: int = 384,
-        mixer_block: str = "transformer",
+        mixer_block: str = "edge_conv",
         mixer_kwargs: Optional[dict] = None,
         num_neighbours: int = 4,
         smoothing: float = 0.01,
@@ -209,17 +221,17 @@ class GraphAdvection(Advection):
         bias_lon_wavenumber: int = 32,
         cartesian_displacement: bool = False,
     ) -> None:
-        num_heads = _default_num_heads(self.__class__, num_heads, advection_channels)
+        num_velocity_fields = _default_velocity_fields(self.__class__, num_velocity_fields, advection_channels)
         mixer_kwargs = dict(mixer_kwargs or {})
         transport = SemiLagrangianAdvection(
             num_channels=num_channels,
             advection_channels=advection_channels,
-            num_heads=num_heads,
+            num_velocity_fields=num_velocity_fields,
             velocity_hidden_dim=velocity_hidden_dim,
             time_step=time_step,
             layer_kernels=layer_kernels,
             sampler=GraphSemiLagrangianLayer(
-                num_heads=num_heads,
+                num_heads=num_velocity_fields,
                 num_neighbours=num_neighbours,
                 smoothing=smoothing,
                 cartesian_displacement=cartesian_displacement,
