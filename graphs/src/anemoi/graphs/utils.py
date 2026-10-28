@@ -87,13 +87,18 @@ def get_distributed_device() -> torch.device:
     if not torch.cuda.is_available():
         return torch.device("cpu")
 
-    local_rank = int(os.environ.get("SLURM_LOCALID", "0"))
+    # SLURM sets SLURM_LOCALID; torchrun, AzureML and other launchers set LOCAL_RANK. Without either, every rank would
+    # pick cuda:0 and, through set_device below, switch the current device of ranks on other GPUs to cuda:0 (breaking
+    # kernels that launch on the current device, such as Triton's).
+    local_rank_variable = "SLURM_LOCALID" if "SLURM_LOCALID" in os.environ else "LOCAL_RANK"
+    local_rank = int(os.environ.get(local_rank_variable, "0"))
 
     device_count = torch.cuda.device_count()
     if local_rank >= device_count:
         LOGGER.warning(
-            "SLURM_LOCALID=%d but only %d CUDA device(s) are visible; building the graph on "
+            "%s=%d but only %d CUDA device(s) are visible; building the graph on "
             "cuda:%d. Check that the number of tasks per node matches the number of GPUs.",
+            local_rank_variable,
             local_rank,
             device_count,
             local_rank % device_count,

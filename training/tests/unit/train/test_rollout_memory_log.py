@@ -10,6 +10,7 @@
 """The opt-in GPU memory log through a rollout (ANEMOI_LOG_ROLLOUT_MEMORY)."""
 
 import logging
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
@@ -74,10 +75,31 @@ def test_a_line_reports_the_rank_the_label_and_the_memory_in_gib(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level(logging.INFO, logger=ensemble.LOGGER.name):
-        _log_rollout_memory(1, "training, 12 steps | step 3 after forward")
+        _log_rollout_memory(1, "training, 12 steps | step 3 after forward", torch.device("cuda", 1))
 
     (message,) = [record.getMessage() for record in caplog.records]
     assert message == (
         "rollout memory | rank 1 | training, 12 steps | step 3 after forward | allocated 10.00 GiB | "
         "peak allocated 12.00 GiB | reserved 14.00 GiB | device 80.00 GiB"
     )
+
+
+def test_a_line_reads_the_given_device_not_the_current_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    queried: list[object] = []
+
+    def record(value: int) -> Callable[[object], int]:
+        def counter(device: object = None) -> int:
+            queried.append(device)
+            return value
+
+        return counter
+
+    monkeypatch.setattr(torch.cuda, "memory_allocated", record(GIB))
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", record(GIB))
+    monkeypatch.setattr(torch.cuda, "memory_reserved", record(GIB))
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda _device: SimpleNamespace(total_memory=80 * GIB))
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)
+
+    _log_rollout_memory(1, "validation, 12 steps | step 1 after loss", torch.device("cuda", 1))
+
+    assert queried == [torch.device("cuda", 1)] * 3

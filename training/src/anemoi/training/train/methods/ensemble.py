@@ -62,18 +62,22 @@ def _claim_rollout_memory_log(mode: str, n_steps: int) -> bool:
     return True
 
 
-def _log_rollout_memory(rank: int, label: str) -> None:
-    """One line: this GPU's allocated, peak allocated (since the batch started) and reserved memory, in GiB."""
+def _log_rollout_memory(rank: int, label: str, device: torch.device) -> None:
+    """One line: the GPU's allocated, peak allocated (since the batch started) and reserved memory, in GiB.
+
+    It reads ``device`` (the model's GPU), not the current CUDA device, so the numbers stay right if something has
+    switched the current device.
+    """
     gib = 2**30
     LOGGER.info(
         "rollout memory | rank %d | %s | allocated %.2f GiB | peak allocated %.2f GiB"
         " | reserved %.2f GiB | device %.2f GiB",
         rank,
         label,
-        torch.cuda.memory_allocated() / gib,
-        torch.cuda.max_memory_allocated() / gib,
-        torch.cuda.memory_reserved() / gib,
-        torch.cuda.get_device_properties(torch.cuda.current_device()).total_memory / gib,
+        torch.cuda.memory_allocated(device) / gib,
+        torch.cuda.max_memory_allocated(device) / gib,
+        torch.cuda.memory_reserved(device) / gib,
+        torch.cuda.get_device_properties(device).total_memory / gib,
     )
 
 
@@ -387,12 +391,12 @@ class EnsembleTraining(BaseTrainingModule):
         )
         rank = getattr(self, "global_rank", 0)
         if log_memory:
-            torch.cuda.reset_peak_memory_stats()
-            _log_rollout_memory(rank, f"{mode}, {len(task_steps)} steps | start of batch")
+            torch.cuda.reset_peak_memory_stats(self.device)
+            _log_rollout_memory(rank, f"{mode}, {len(task_steps)} steps | start of batch", self.device)
         for i, task_step_kwargs in enumerate(task_steps):
             y_pred = self(x, dropped_input_datasets=dropped, **task_step_kwargs)
             if log_memory:
-                _log_rollout_memory(rank, f"{mode}, {len(task_steps)} steps | step {i + 1} after forward")
+                _log_rollout_memory(rank, f"{mode}, {len(task_steps)} steps | step {i + 1} after forward", self.device)
 
             y = self.task.get_targets(batch, **task_step_kwargs)
 
@@ -423,7 +427,7 @@ class EnsembleTraining(BaseTrainingModule):
             step_metrics.append(metrics_next)
             y_preds.append(y_preds_next)
             if log_memory:
-                _log_rollout_memory(rank, f"{mode}, {len(task_steps)} steps | step {i + 1} after loss")
+                _log_rollout_memory(rank, f"{mode}, {len(task_steps)} steps | step {i + 1} after loss", self.device)
 
         return self._combine_loss_and_metrics(step_losses, step_metrics, y_preds)
 
@@ -432,7 +436,7 @@ class EnsembleTraining(BaseTrainingModule):
         super().on_after_backward()
         label = getattr(self, "_memory_log_training_label", None)
         if label is not None:
-            _log_rollout_memory(getattr(self, "global_rank", 0), f"{label} | after backward")
+            _log_rollout_memory(getattr(self, "global_rank", 0), f"{label} | after backward", self.device)
 
     def on_train_batch_end(self, outputs: object, batch: object, batch_idx: int) -> None:
         """Log the memory at the end of a logged batch: its peak then includes the optimiser step, if one ran."""
@@ -440,4 +444,4 @@ class EnsembleTraining(BaseTrainingModule):
         label = getattr(self, "_memory_log_training_label", None)
         if label is not None:
             self._memory_log_training_label = None
-            _log_rollout_memory(getattr(self, "global_rank", 0), f"{label} | end of batch")
+            _log_rollout_memory(getattr(self, "global_rank", 0), f"{label} | end of batch", self.device)

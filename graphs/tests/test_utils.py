@@ -122,6 +122,41 @@ def test_get_distributed_device_gpu(monkeypatch):
     assert get_distributed_device() == torch.device("cuda:2")
 
 
+def test_get_distributed_device_uses_local_rank_without_slurm(monkeypatch):
+    """Outside SLURM (torchrun, AzureML), the rank's GPU comes from LOCAL_RANK, and it becomes the current device."""
+    set_devices = []
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    monkeypatch.setattr(torch.cuda, "set_device", set_devices.append)
+    monkeypatch.delenv("SLURM_LOCALID", raising=False)
+
+    monkeypatch.setenv("LOCAL_RANK", "1")
+    assert get_distributed_device() == torch.device("cuda:1")
+    assert set_devices == [1]
+
+
+def test_get_distributed_device_prefers_slurm_localid(monkeypatch):
+    """Under SLURM, SLURM_LOCALID decides, as before."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 4)
+    monkeypatch.setattr(torch.cuda, "set_device", lambda x: None)
+
+    monkeypatch.setenv("SLURM_LOCALID", "3")
+    monkeypatch.setenv("LOCAL_RANK", "1")
+    assert get_distributed_device() == torch.device("cuda:3")
+
+
+def test_get_distributed_device_defaults_to_the_first_gpu(monkeypatch):
+    """With neither variable (a single process), it is cuda:0."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    monkeypatch.setattr(torch.cuda, "set_device", lambda x: None)
+    monkeypatch.delenv("SLURM_LOCALID", raising=False)
+    monkeypatch.delenv("LOCAL_RANK", raising=False)
+
+    assert get_distributed_device() == torch.device("cuda:0")
+
+
 def test_get_distributed_device_cpu(monkeypatch):
     """Test that get_distributed_device returns the CPU device when CUDA is not available."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
