@@ -15,9 +15,18 @@ from sklearn.neighbors import NearestNeighbors
 from torch_geometric.nn import knn
 
 from anemoi.graphs.edges.builders.euclidean.base import BaseDistanceEdgeBuilders
+from anemoi.graphs.edges.builders.euclidean.lookup_knn import lookup_knn
+from anemoi.graphs.utils import cuda_device_of
 from anemoi.graphs.utils import intersect_edges
 
 LOGGER = logging.getLogger(__name__)
+
+KNN_BACKENDS = ("brute_force", "lookup")
+
+
+def _node_set_key(name: str, mask_attr_name: str | None) -> str:
+    """Cache key of a searched node set for the lookup backend: its name, and its mask if one is applied."""
+    return name if mask_attr_name is None else f"{name}[{mask_attr_name}]"
 
 
 class BaseKNNEdges(BaseDistanceEdgeBuilders):
@@ -30,15 +39,19 @@ class BaseKNNEdges(BaseDistanceEdgeBuilders):
         num_nearest_neighbours: int,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
+        backend: str = "brute_force",
     ) -> None:
         super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
         assert isinstance(num_nearest_neighbours, int), "Number of nearest neighbours must be an integer."
         assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive."
+        assert backend in KNN_BACKENDS, f"KNN backend must be one of {KNN_BACKENDS}, got {backend!r}."
         self.num_nearest_neighbours = num_nearest_neighbours
+        self.backend = backend
 
         LOGGER.info(
-            "Using KNN-Edges (with %d nearest neighbours) between %s and %s.",
+            "Using KNN-Edges (with %d nearest neighbours, %s backend) between %s and %s.",
             self.num_nearest_neighbours,
+            self.backend,
             self.source_name,
             self.target_name,
         )
@@ -74,6 +87,30 @@ class BaseKNNEdges(BaseDistanceEdgeBuilders):
             The computed edge index.
         """
         edge_index = knn(source_coords, target_coords, k=num_nearest_neighbours)
+        if not skip_flip:
+            edge_index = torch.flip(edge_index, [0])
+        return edge_index
+
+    def _compute_edge_index_lookup(
+        self,
+        source_coords: torch.Tensor,
+        target_coords: torch.Tensor,
+        num_nearest_neighbours: int,
+        skip_flip: bool = False,
+    ) -> torch.Tensor | None:
+        """Compute the edge index with the lookup-table search (exact) if selected, else None (brute force).
+
+        See ``anemoi.graphs.edges.builders.euclidean.lookup_knn``. ``source_coords`` is the searched node set: the
+        source nodes for KNNEdges, the target nodes for ReversedKNNEdges (which swaps them and sets ``skip_flip``).
+        """
+        if self.backend != "lookup":
+            return None
+        if skip_flip:
+            searched = _node_set_key(self.target_name, self.target_mask_attr_name)
+        else:
+            searched = _node_set_key(self.source_name, self.source_mask_attr_name)
+        with cuda_device_of(source_coords.device):
+            edge_index = lookup_knn(source_coords, target_coords, num_nearest_neighbours, name=searched)
         if not skip_flip:
             edge_index = torch.flip(edge_index, [0])
         return edge_index
@@ -124,6 +161,11 @@ class KNNEdges(BaseKNNEdges):
         The name of the source mask attribute to filter edge connections.
     target_mask_attr_name : str | None
         The name of the target mask attribute to filter edge connections.
+    backend : str
+        Nearest-neighbour search: "brute_force" (default; pyg-lib if installed, else scikit-learn) or "lookup"
+        (exact lookup-table search, see anemoi.graphs.edges.builders.euclidean.lookup_knn; for node sets covering
+        the globe, fast when there are many queries per searched node or the same node set is searched repeatedly;
+        regional node sets raise an error).
 
     Methods
     -------
@@ -153,6 +195,11 @@ class ReversedKNNEdges(KNNEdges):
         The name of the source mask attribute to filter edge connections.
     target_mask_attr_name : str | None
         The name of the target mask attribute to filter edge connections.
+    backend : str
+        Nearest-neighbour search: "brute_force" (default; pyg-lib if installed, else scikit-learn) or "lookup"
+        (exact lookup-table search, see anemoi.graphs.edges.builders.euclidean.lookup_knn; for node sets covering
+        the globe, fast when there are many queries per searched node or the same node set is searched repeatedly;
+        regional node sets raise an error).
 
     Methods
     -------
@@ -202,6 +249,11 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         The name of the source mask attribute to filter edge connections.
     target_mask_attr_name : str | None
         The name of the target mask attribute to filter edge connections.
+    backend : str
+        Nearest-neighbour search: "brute_force" (default; pyg-lib if installed, else scikit-learn) or "lookup"
+        (exact lookup-table search, see anemoi.graphs.edges.builders.euclidean.lookup_knn; for node sets covering
+        the globe, fast when there are many queries per searched node or the same node set is searched repeatedly;
+        regional node sets raise an error).
 
     Methods
     -------
@@ -221,6 +273,7 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         reversed_num_nearest_neighbours: int | None = None,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
+        backend: str = "brute_force",
     ) -> None:
         super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
         assert isinstance(num_nearest_neighbours, int), "Number of nearest neighbours must be an integer."
@@ -233,8 +286,10 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         ), "Reversed number of nearest neighbours must be an integer."
         assert reversed_num_nearest_neighbours > 0, "Reversed number of nearest neighbours must be positive."
 
+        assert backend in KNN_BACKENDS, f"KNN backend must be one of {KNN_BACKENDS}, got {backend!r}."
         self.num_nearest_neighbours = num_nearest_neighbours
         self.reversed_num_nearest_neighbours = reversed_num_nearest_neighbours
+        self.backend = backend
 
         LOGGER.info(
             "Using MutualKNN-Edges (forward k=%d, reversed k=%d) between %s and %s.",
@@ -257,7 +312,9 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         target_coords: torch.Tensor,
         num_nearest_neighbours: int,
         reversed_num_nearest_neighbours: int,
+        skip_flip: bool = False,
     ) -> torch.Tensor:
+        # skip_flip is passed by the base class for the reversed builders; mutual edges are already (source, target)
         # Forward: for each target node, its nearest source nodes.
         # knn(x=source, y=target) -> rows (target_idx, source_idx); flip -> (source, target).
         forward = torch.flip(knn(source_coords, target_coords, k=num_nearest_neighbours), [0])
@@ -265,6 +322,24 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         # knn(x=target, y=source) -> rows (source_idx, target_idx); already (source, target).
         reversed_ = knn(target_coords, source_coords, k=reversed_num_nearest_neighbours)
         return intersect_edges(forward, reversed_)
+
+    def _compute_edge_index_lookup(
+        self,
+        source_coords: torch.Tensor,
+        target_coords: torch.Tensor,
+        num_nearest_neighbours: int,
+        reversed_num_nearest_neighbours: int,
+        **_kwargs,
+    ) -> torch.Tensor | None:
+        """Mutual edges from the lookup-table search if selected, else None (brute force)."""
+        if self.backend != "lookup":
+            return None
+        source_key = _node_set_key(self.source_name, self.source_mask_attr_name)
+        target_key = _node_set_key(self.target_name, self.target_mask_attr_name)
+        with cuda_device_of(source_coords.device):
+            forward = lookup_knn(source_coords, target_coords, num_nearest_neighbours, name=source_key)
+            reversed_ = lookup_knn(target_coords, source_coords, reversed_num_nearest_neighbours, name=target_key)
+        return intersect_edges(torch.flip(forward, [0]), reversed_)
 
     def _compute_adj_matrix_sklearn(
         self,

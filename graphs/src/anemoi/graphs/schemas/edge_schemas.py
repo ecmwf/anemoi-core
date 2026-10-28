@@ -30,6 +30,8 @@ class KNNEdgeSchema(BaseModel):
     "Mask to apply to source nodes of the edges. Default to None."
     target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to target nodes of the edges. Default to None."
+    backend: Literal["brute_force", "lookup"] = Field(default="brute_force")
+    "Search backend: brute_force (pyg-lib or scikit-learn) or lookup (exact lookup table). Default to brute_force."
 
 
 class MutualKNNEdgeSchema(BaseModel):
@@ -43,6 +45,8 @@ class MutualKNNEdgeSchema(BaseModel):
     "Mask to apply to source nodes of the edges. Default to None."
     target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to target nodes of the edges. Default to None."
+    backend: Literal["brute_force", "lookup"] = Field(default="brute_force")
+    "Search backend: brute_force (pyg-lib or scikit-learn) or lookup (exact lookup table). Default to brute_force."
 
 
 class CutoffEdgeSchema(BaseModel):
