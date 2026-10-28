@@ -98,3 +98,46 @@ produces only the genuine boundary edges:
           reversed_num_nearest_neighbours: 2
           source_mask_attr_name: global_data_mask
           target_mask_attr_name: regional_hidden_mask
+
+#######################
+ Lookup-table search
+#######################
+
+By default the nearest neighbours are found with a brute-force search
+(pyg-lib if installed, scikit-learn otherwise). ``KNNEdges``,
+``ReversedKNNEdges`` and ``MutualKNNEdges`` accept ``backend: lookup``
+to search through a lookup table instead:
+
+.. code:: yaml
+
+   edges:
+     -  source_name: hidden
+        target_name: data
+        edge_builders:
+        - _target_: anemoi.graphs.edges.KNNEdges
+          num_nearest_neighbours: 3
+          backend: lookup
+
+The table is built once per searched node set and cached, on a
+latitude/longitude grid with a second grid rotated by 90 degrees for
+latitudes above 45 degrees. Each cell stores every node within
+:math:`d_k + 2r` of its centre, where :math:`d_k` is the distance from
+the centre to its k-th nearest node and :math:`r` the largest distance
+from the centre to a point of the cell. By the triangle inequality this
+contains the k nearest nodes of any point in the cell, so the result is
+exact (ties may be broken differently). Each query then reads its
+cell's handful of candidates, in a Triton kernel on CUDA.
+
+The cell size is half the node spacing, measured from the nodes
+themselves, so no grid-specific formula is needed. The table is meant
+for global, roughly uniform node sets (O-, N- and icosahedral grids,
+HEALPix, ...); for other node sets the search falls back to brute force
+with a warning.
+
+Building the table is itself a brute-force search from every cell
+centre, with a few cells per searched node, so its cost grows with the
+square of the number of searched nodes. It pays off when there are many
+more queries than searched nodes (for example millions of data or
+observation points against a hidden mesh) or when the same node set is
+searched repeatedly. A build expected to take more than about 30
+seconds is announced with a warning.

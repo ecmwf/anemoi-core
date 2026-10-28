@@ -37,6 +37,12 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         self, source_coords: torch.Tensor, target_coords: torch.Tensor, skip_flip: bool = False, **kwargs
     ) -> torch.Tensor: ...
 
+    def _compute_edge_index_lookup(
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor, skip_flip: bool = False, **kwargs
+    ) -> torch.Tensor | None:
+        """Edge index from the lookup backend, or None to use the brute-force backends (pyg-lib, scikit-learn)."""
+        return None
+
     @abstractmethod
     def _compute_adj_matrix_sklearn(
         self, source_coords: torch.Tensor, target_coords: torch.Tensor, **kwargs
@@ -71,6 +77,10 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         # short-circuit to an empty (2, 0) edge index
         if source_coords.shape[0] == 0 or target_coords.shape[0] == 0:
             return torch.empty((2, 0), dtype=torch.long, device=source_coords.device)
+
+        edge_index = self._compute_edge_index_lookup(source_coords, target_coords, skip_flip=skip_flip, **kwargs)
+        if edge_index is not None:
+            return edge_index
 
         if is_pyg_lib_available():
             # pyg-lib's kernels install no device guard of their own; see cuda_device_of.
