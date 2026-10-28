@@ -7,12 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from copy import deepcopy
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
 
 import pytest
 import torch
+import torch.distributed as dist
 from torch import nn
 from torch_geometric.data import HeteroData
 
@@ -23,6 +25,9 @@ from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.models.layers.mapper import GraphTransformerForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
+from tests.distributed._distributed_runner import _run_distributed_test
+from tests.distributed._graph_fixtures import build_mapper_graph
+from tests.distributed._graph_fixtures import mapper_loss_data
 
 
 class ConcreteGraphTransformerBaseMapper(GraphTransformerBaseMapper):
@@ -391,3 +396,213 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
         assert torch.allclose(
             out_heads, out_edges, atol=1e-4
         ), f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies"
+
+
+def _test_graphtransformer_mapper_matches_unsharded_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    mapper_kind: str,
+    source_is_sharded: bool,
+    keep_x_dst_sharded: bool,
+    gradient_checkpointing: bool,
+) -> None:
+    """Compare distributed layouts and gradients with an unsharded reference.
+
+    Replicated source passthrough uses the full direct source loss on each
+    rank for backward, but only owned source terms enter the detached scalar
+    used to reconstruct the global loss.
+    """
+    torch.set_num_threads(1)
+    edge_attr, edge_index, src_splits, dst_splits = build_mapper_graph(world_size, device)
+    src_start, src_stop = sum(src_splits[:rank]), sum(src_splits[: rank + 1])
+    dst_start, dst_stop = sum(dst_splits[:rank]), sum(dst_splits[: rank + 1])
+    # Guard the graph properties that make this a communication/parallel-edge regression.
+    assert (edge_index[1].diff() >= 0).all(), "Mapper edges must be destination-sorted"
+    assert torch.equal(edge_index[:, 0], edge_index[:, 2]), "Missing parallel remote edge"
+    assert not torch.equal(edge_attr[0], edge_attr[2]), "Parallel edges need distinct features"
+    sources = edge_index[0, (edge_index[1] >= dst_start) & (edge_index[1] < dst_stop)]
+    owned = (sources >= src_start) & (sources < src_stop)
+    assert (~owned).any(), f"Missing remote source dependency for rank {rank}"
+    assert sources[owned].unique().numel() > 1, f"Insufficient owned source variation for rank {rank}"
+    is_forward_mapper = mapper_kind == "forward"
+    src_channels, dst_channels = (5, 3) if is_forward_mapper else (8, 5)
+    generator = torch.Generator().manual_seed(53)
+    x_src = torch.randn(sum(src_splits), src_channels, generator=generator).to(device)
+    x_dst = torch.randn(sum(dst_splits), dst_channels, generator=generator).to(device)
+    torch.manual_seed(59)
+    mapper_cls = GraphTransformerForwardMapper if is_forward_mapper else GraphTransformerBackwardMapper
+    reference = mapper_cls(
+        in_channels_src=src_channels,
+        in_channels_dst=dst_channels,
+        num_channels=8,
+        out_channels_dst=None if is_forward_mapper else 2,
+        num_chunks=1,
+        num_heads=2,
+        mlp_hidden_ratio=2,
+        edge_dim=edge_attr.size(1),
+        qk_norm=True,
+        gradient_checkpointing=False,
+        shard_strategy="edges",
+        graph_attention_backend="pyg",
+        layer_kernels=load_layer_kernels(instance=False),
+    ).to(device)
+    subject = deepcopy(reference)
+    # Check recomputation against an uncheckpointed reference.
+    subject.gradient_checkpointing = gradient_checkpointing
+    reference_params = dict(reference.named_parameters())
+    subject_params = dict(subject.named_parameters())
+    reference_src_input = x_src.clone().requires_grad_(True)
+    reference_dst_input = x_dst.clone().requires_grad_(True)
+    reference_edge_input = edge_attr.clone().requires_grad_(True)
+    reference_result = reference(
+        (reference_src_input, reference_dst_input),
+        1,
+        BipartiteGraphShardInfo(src_nodes=[sum(src_splits)], dst_nodes=[sum(dst_splits)]),
+        reference_edge_input,
+        edge_index,
+        keep_x_dst_sharded=True,
+    )
+    reference_output = reference_result[1] if is_forward_mapper else reference_result
+    target, weights = mapper_loss_data(reference_output)
+    loss_terms = weights * (reference_output - target).square() / weights.numel()
+    global_loss = loss_terms.sum()
+    if is_forward_mapper:
+        src_target = torch.linspace(-0.4, 0.6, x_src.numel(), device=device).reshape_as(x_src)
+        torch.testing.assert_close(reference_result[0], reference_src_input)
+        global_loss = global_loss + (reference_result[0] - src_target).square().sum() / x_src.numel()
+
+    # Require detectable remote attention sensitivity, independently of the source passthrough loss.
+    remote_loss = loss_terms[:dst_start].sum() + loss_terms[dst_stop:].sum()
+    remote_gradient = torch.autograd.grad(remote_loss, reference_src_input, retain_graph=True)[0]
+    global_loss.backward()
+    tolerances = {"rtol": 1e-4, "atol": 1e-5}
+    gradient_tolerances = {"rtol": 1e-4, "atol": 1e-7}
+    assert reference_src_input.grad is not None, "Missing reference source-input gradient"
+    allowed_error = gradient_tolerances["atol"] + gradient_tolerances["rtol"] * (
+        reference_src_input.grad[src_start:src_stop].abs()
+    )
+    assert (
+        remote_gradient[src_start:src_stop].abs() > 10 * allowed_error
+    ).any(), f"Remote attention source gradients are too small to test communication on rank {rank}"
+
+    distributed_src_input = (x_src[src_start:src_stop] if source_is_sharded else x_src).clone().requires_grad_(True)
+    local_dst_input = x_dst[dst_start:dst_stop].clone().requires_grad_(True)
+    full_edge_input = edge_attr.clone().requires_grad_(True)
+    distributed_result = subject(
+        (distributed_src_input, local_dst_input),
+        1,
+        BipartiteGraphShardInfo(src_nodes=src_splits if source_is_sharded else None, dst_nodes=dst_splits),
+        full_edge_input,
+        edge_index,
+        model_comm_group=group,
+        keep_x_dst_sharded=keep_x_dst_sharded,
+    )
+    distributed_output = distributed_result[1] if is_forward_mapper else distributed_result
+    # Callable messages add rank/parameter context without replacing numerical diagnostics.
+    torch.testing.assert_close(
+        distributed_output,
+        reference_output[dst_start:dst_stop] if keep_x_dst_sharded else reference_output,
+        **tolerances,
+        msg=lambda details: f"destination output on rank {rank}\n{details}",
+    )
+    # Gather backward splits by owner: use owned destination terms in either output layout.
+    owned_output = distributed_output if keep_x_dst_sharded else distributed_output[dst_start:dst_stop]
+    local_loss = (weights[dst_start:dst_stop] * (owned_output - target[dst_start:dst_stop]).square()).sum()
+    local_loss = local_loss / weights.numel()
+    owned_loss_value = local_loss.detach().clone()
+    if is_forward_mapper:
+        # Replicated passthrough is a direct path without gradient communication.
+        # Use its full source objective on each rank to obtain the full input gradient;
+        # only its owned terms enter the scalar loss comparison below.
+        expected_source = reference_result[0][src_start:src_stop] if source_is_sharded else reference_result[0]
+        distributed_source_target = src_target[src_start:src_stop] if source_is_sharded else src_target
+        torch.testing.assert_close(
+            distributed_result[0], expected_source, msg=lambda details: f"source output on rank {rank}\n{details}"
+        )
+        source_terms = (distributed_result[0] - distributed_source_target).square()
+        source_loss = source_terms.sum() / x_src.numel()
+        local_loss = local_loss + source_loss
+        owned_source_loss = (
+            source_terms if source_is_sharded else source_terms[src_start:src_stop]
+        ).sum() / x_src.numel()
+        owned_loss_value = owned_loss_value + owned_source_loss.detach()
+    local_loss.backward()
+    dist.all_reduce(owned_loss_value, group=group)
+    torch.testing.assert_close(
+        owned_loss_value,
+        global_loss.detach(),
+        **tolerances,
+        msg=lambda details: f"global loss on rank {rank}\n{details}",
+    )
+
+    # Production edge sharding gathers the full edge-input gradient in backward.
+    for name, actual, expected, rows in (
+        (
+            "source input",
+            distributed_src_input,
+            reference_src_input,
+            slice(src_start, src_stop) if source_is_sharded else slice(None),
+        ),
+        ("destination input", local_dst_input, reference_dst_input, slice(dst_start, dst_stop)),
+        ("edge input", full_edge_input, reference_edge_input, slice(None)),
+    ):
+        assert actual.grad is not None, f"Missing distributed {name} gradient on rank {rank}"
+        assert expected.grad is not None, f"Missing reference {name} gradient"
+        torch.testing.assert_close(
+            actual.grad,
+            expected.grad[rows],
+            **gradient_tolerances,
+            msg=lambda details, name=name: f"{name} gradient on rank {rank}\n{details}",
+        )
+    for name, param in subject_params.items():
+        assert param.grad is not None, f"Missing distributed gradient of {name}"
+        reference_gradient = reference_params[name].grad
+        assert reference_gradient is not None, f"Missing reference gradient of {name}"
+        # Projections and attention/MLP layers operate on rank-local subgraphs.
+        gradient = param.grad.detach().clone()
+        dist.all_reduce(gradient, group=group)
+        torch.testing.assert_close(
+            gradient,
+            reference_gradient,
+            **gradient_tolerances,
+            msg=lambda details, name=name: f"gradient of {name} on rank {rank}\n{details}",
+        )
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize("mapper_kind", ["forward", "backward"], ids=["forward-mapper", "backward-mapper"])
+@pytest.mark.parametrize("keep_x_dst_sharded", [True, False], ids=["sharded-destinations", "gathered-destinations"])
+@pytest.mark.parametrize(
+    ("source_is_sharded", "gradient_checkpointing"),
+    [
+        pytest.param(True, False, id="sharded-source"),
+        pytest.param(False, False, id="replicated-source"),
+        pytest.param(False, True, id="replicated-source-checkpointed"),
+    ],
+)
+def test_graphtransformer_mapper_matches_unsharded(
+    distributed_backend: str,
+    distributed_world_size: int,
+    mapper_kind: str,
+    source_is_sharded: bool,
+    keep_x_dst_sharded: bool,
+    gradient_checkpointing: bool,
+) -> None:
+    """PyG edge sharding preserves layouts and gradients, including checkpoint recomputation.
+
+    Gathered destination losses use owned terms. Replicated source passthrough
+    requires a full direct source loss on each rank for its complete input
+    derivative; only owned source terms enter the summed loss comparison.
+    """
+    _run_distributed_test(
+        _test_graphtransformer_mapper_matches_unsharded_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        mapper_kind=mapper_kind,
+        source_is_sharded=source_is_sharded,
+        keep_x_dst_sharded=keep_x_dst_sharded,
+        gradient_checkpointing=gradient_checkpointing,
+    )
