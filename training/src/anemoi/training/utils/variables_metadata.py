@@ -20,6 +20,22 @@ LOG = logging.getLogger(__name__)
 GROUP_SPEC = str | list[str] | bool
 
 
+def check_datasets_variables_order(datasets_name_to_index: dict[str, dict[str, int]]) -> None:
+    """Check that all datasets have the same variables in the same order."""
+    orders = {
+        name: sorted(name_to_index, key=name_to_index.__getitem__)
+        for name, name_to_index in datasets_name_to_index.items()
+    }
+    (reference_name, reference), *others = orders.items()
+    for dataset_name, order in others:
+        if order != reference:
+            msg = (
+                f"Datasets '{reference_name}' and '{dataset_name}' must have the same variables in the same order, "
+                f"got {reference} and {order}."
+            )
+            raise ValueError(msg)
+
+
 def check_datasets_variables_compatibility(
     datasets_variables: dict[str, dict[str, Variable]],
     **options: object,

@@ -26,6 +26,7 @@ from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.variables_metadata import check_datasets_variables_compatibility
+from anemoi.training.utils.variables_metadata import check_datasets_variables_order
 
 
 class DataLoadingPolicy(ABC):
@@ -242,6 +243,7 @@ class CrossDatasetLoadingPolicy(DataLoadingPolicy):
         )
 
     def check_dataset_compatibility(self, dataset: CrossDataset, **options: object) -> None:
+        check_datasets_variables_order(dataset.name_to_index)
         check_datasets_variables_compatibility(
             {name: data.typed_variables for name, data in dataset.data.items()},
             **options,

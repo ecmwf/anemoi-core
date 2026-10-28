@@ -113,6 +113,7 @@ The model must then name the hidden mesh of each dataset under ``model.model.hid
 The following constraints apply:
 
 - Hierarchical models do not support per-dataset hidden meshes.
+- All datasets must have the same variables in the same order, because the shared encoder and decoder weights are tied to the variable position.
 - Hidden node and edge feature dimensions must match across the hidden meshes, because the weights are shared.
 - Trainable node and edge parameters must be set to 0, because the active graph-specific parameters would change between batches.
 

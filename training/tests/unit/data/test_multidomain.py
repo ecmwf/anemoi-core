@@ -33,6 +33,7 @@ class TestMultiDomain:
         mock_dataset_a.num_sequences = 1
         mock_dataset_a.metadata = {"variables_metadata": {"10u": {"units": "m/s"}}}
         mock_dataset_a.data.typed_variables = {"10u": Variable.from_dict("10u", {"units": "m/s"})}
+        mock_dataset_a.name_to_index = {"10u": 0}
         mock_dataset_a.compute_anchors.return_value = np.array(
             [[0, 0], *[[0, index] for index in range(11, 24)]],
         )
@@ -43,6 +44,7 @@ class TestMultiDomain:
         mock_dataset_b.num_sequences = 1
         mock_dataset_b.metadata = {"variables_metadata": {"10u": {"units": "m/s"}}}
         mock_dataset_b.data.typed_variables = {"10u": Variable.from_dict("10u", {"units": "m/s"})}
+        mock_dataset_b.name_to_index = {"10u": 0}
         mock_dataset_b.compute_anchors.return_value = np.array([[0, 0], [0, 1], [0, 2], [0, 3]])
         return {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
 
@@ -90,6 +92,20 @@ class TestMultiDomain:
                 data_readers,
                 {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]},
             )
+
+    @pytest.mark.parametrize(
+        "name_to_index",
+        [{"2t": 0, "10u": 1}, {"10u": 0, "2t": 1}, {"10u": 0}],
+        ids=["order", "order_of_shared_variables", "missing_variable"],
+    )
+    def test_check_datasets_variables_order(self, data_readers: dict, name_to_index: dict) -> None:
+        data_readers["dataset_a"].name_to_index = {"10u": 0, "2t": 1}
+        data_readers["dataset_b"].name_to_index = name_to_index
+        policy = CrossDatasetLoadingPolicy()
+        dataset = policy.build_dataset(data_readers, {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]})
+
+        with pytest.raises(ValueError, match="same variables in the same order"):
+            policy.check_dataset_compatibility(dataset)
 
     def test_check_datasets_units(self, data_readers: dict) -> None:
         data_readers["dataset_b"].data.typed_variables = {
