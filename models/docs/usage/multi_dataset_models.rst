@@ -146,7 +146,7 @@ The following rules apply to the mapping form:
   ``CrossDatasetLoadingPolicy``, which keeps every batch to one domain).
 - All hidden meshes must have the same node attribute dimension, because the
   processor weights are shared.
-- Hierarchical and transport models do not support the mapping.
+- Hierarchical models do not support the mapping.
 
 The processor graph provider of flat models holds one entry per hidden mesh, so the hidden
 mesh names appear in the model ``state_dict`` (and therefore in checkpoints), in

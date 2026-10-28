@@ -62,6 +62,15 @@ def test_cross_dataset_sampler_repeats_for_same_seed_and_epoch() -> None:
     assert list(first) == list(second)
 
 
+def test_cross_dataset_sampler_shuffles_equal_sized_domains_differently() -> None:
+    batches = list(make_sampler((16, 16)))
+    first_domain = [index for batch in batches for index in batch if index < 16]
+    second_domain = [index - 16 for batch in batches for index in batch if index >= 16]
+
+    assert sorted(first_domain) == sorted(second_domain) == list(range(16))
+    assert first_domain != second_domain
+
+
 def test_cross_dataset_sampler_batches_are_domain_homogeneous() -> None:
     batches = make_sampler((8, 5), batch_size=3)
 

@@ -16,6 +16,7 @@ from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 import anemoi.models.models.base as base_model_module
+from anemoi.models.models import AnemoiModelEncProcDecHierarchical
 from anemoi.models.models.base import BaseGraphModel
 
 
@@ -31,6 +32,10 @@ class DummyGraphModel(BaseGraphModel):
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError
+
+
+class DummyHierarchicalGraphModel(DummyGraphModel):
+    _build_hidden_node_routing = AnemoiModelEncProcDecHierarchical._build_hidden_node_routing
 
 
 class _IndexGroup(SimpleNamespace):
@@ -119,7 +124,7 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
     assert "data" in model.residual
 
 
-def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
+def test_hierarchical_routing_accepts_omegaconf_hidden_node_lists() -> None:
     model_config = OmegaConf.create(
         {
             "num_channels": 8,
@@ -152,7 +157,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
         },
     )
 
-    model = DummyGraphModel(
+    model = DummyHierarchicalGraphModel(
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
@@ -161,7 +166,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
         graph_data=_make_hierarchical_graph(),
     )
 
-    assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
+    assert model.hidden_levels == ["hidden_1", "hidden_2", "hidden_3"]
     assert model.node_attributes.num_nodes["hidden_3"] == 1
 
 
@@ -207,10 +212,10 @@ def _make_minimal_model():
     )
 
 
-def _route_hidden_nodes(hidden_nodes_name, dataset_names=("a", "b")) -> SimpleNamespace:
+def _route_hidden_nodes(hidden_nodes_name, dataset_names=("a", "b"), model_class=BaseGraphModel) -> SimpleNamespace:
     """Run the hidden-node routing on a bare namespace, without building a model."""
-    model = SimpleNamespace(dataset_names=list(dataset_names), _graph_name_hidden=hidden_nodes_name)
-    BaseGraphModel._build_hidden_node_routing(model)
+    model = SimpleNamespace(dataset_names=list(dataset_names))
+    model_class._build_hidden_node_routing(model, hidden_nodes_name)
     return model
 
 
@@ -230,11 +235,17 @@ def test_hidden_node_routing_mapping_keeps_order_and_deduplicates(as_omegaconf) 
     assert model.hidden_names == ["hidden_1", "hidden_2"]
 
 
-def test_hidden_node_routing_list_is_hierarchical() -> None:
-    model = _route_hidden_nodes(["hidden_1", "hidden_2"])
+@pytest.mark.parametrize("as_omegaconf", [False, True])
+def test_hierarchical_routing_encodes_every_dataset_into_the_first_level(as_omegaconf) -> None:
+    levels = ["hidden_1", "hidden_2"]
+    model = _route_hidden_nodes(
+        OmegaConf.create(levels) if as_omegaconf else levels,
+        model_class=AnemoiModelEncProcDecHierarchical,
+    )
 
-    assert model.dataset2hidden is None
-    assert model.hidden_names == ["hidden_1", "hidden_2"]
+    assert model.hidden_levels == levels
+    assert model.dataset2hidden == {"a": "hidden_1", "b": "hidden_1"}
+    assert model.hidden_names == levels
 
 
 def test_hidden_node_routing_rejects_mapping_missing_a_dataset() -> None:

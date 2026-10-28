@@ -15,7 +15,6 @@ from typing import Optional
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-from omegaconf import ListConfig
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -70,8 +69,7 @@ class BaseGraphModel(nn.Module):
         self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
-        self._graph_name_hidden = model_config.model.hidden_nodes_name
-        self._build_hidden_node_routing()
+        self._build_hidden_node_routing(model_config.model.hidden_nodes_name)
 
         self.latent_skip = model_config.model.latent_skip
 
@@ -106,28 +104,24 @@ class BaseGraphModel(nn.Module):
             statistics=self.statistics,
         )
 
-    def _build_hidden_node_routing(self) -> None:
-        """Build and validate the dataset routing for hidden nodes."""
-        hidden_nodes_name = self._graph_name_hidden
+    def _build_hidden_node_routing(self, hidden_nodes_name: str | dict[str, str] | DictConfig) -> None:
+        """Determine which hidden mesh each dataset is encoded into."""
         if isinstance(hidden_nodes_name, str):
             hidden_nodes_name = dict.fromkeys(self.dataset_names, hidden_nodes_name)
 
-        if isinstance(hidden_nodes_name, (dict, DictConfig)):
-            self.dataset2hidden = dict(hidden_nodes_name)
-            missing_datasets = set(self.dataset_names) - set(self.dataset2hidden)
-            unknown_datasets = set(self.dataset2hidden) - set(self.dataset_names)
-            assert not missing_datasets, f"Hidden node names are missing for datasets {sorted(missing_datasets)}."
-            assert (
-                not unknown_datasets
-            ), f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
-            self.hidden_names = list(dict.fromkeys(self.dataset2hidden.values()))
-        elif isinstance(hidden_nodes_name, (list, ListConfig)):
-            self.dataset2hidden = None
-            self.hidden_names = list(hidden_nodes_name)
-        else:
+        if not isinstance(hidden_nodes_name, (dict, DictConfig)):
             raise TypeError(
-                f"Hidden nodes name must be a string, a list of strings, or a dataset mapping, got {type(hidden_nodes_name)}",
+                f"Hidden nodes name must be a string or a dataset mapping, got {type(hidden_nodes_name)}",
             )
+
+        self.dataset2hidden = dict(hidden_nodes_name)
+        missing_datasets = set(self.dataset_names) - set(self.dataset2hidden)
+        unknown_datasets = set(self.dataset2hidden) - set(self.dataset_names)
+        assert not missing_datasets, f"Hidden node names are missing for datasets {sorted(missing_datasets)}."
+        assert (
+            not unknown_datasets
+        ), f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
+        self.hidden_names = list(dict.fromkeys(self.dataset2hidden.values()))
 
     def _build_encoder_routing(self, encoders_config: DotDict) -> None:
         """Builds the dataset routing for encoders."""
@@ -171,13 +165,6 @@ class BaseGraphModel(nn.Module):
         assert all(
             d in self.target_datasets for d in self.dataset2decoder.keys()
         ), f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
-
-        shared_modules = any(len(datasets) > 1 for datasets in self.encoder2datasets.values()) or any(
-            len(datasets) > 1 for datasets in self.decoder2datasets.values()
-        )
-        assert (
-            not shared_modules or self.dataset2hidden is not None
-        ), "Datasets sharing an encoder or decoder must be fused through one hidden node set."
 
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
             if fusing_strategy not in ("not_supported"):
@@ -243,16 +230,14 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
-        if self.dataset2hidden is not None:
-            hidden_dims = {
-                hidden_name: self.node_attributes.attr_ndims[hidden_name] for hidden_name in self.hidden_names
-            }
-            assert (
-                len(set(hidden_dims.values())) == 1
-            ), f"All hidden meshes must have the same node attribute dimension, got {hidden_dims}."
-            return next(iter(hidden_dims.values()))
-
-        return self.node_attributes.attr_ndims[self.hidden_names[0]]
+        hidden_dims = {
+            hidden_name: self.node_attributes.attr_ndims[hidden_name]
+            for hidden_name in dict.fromkeys(self.dataset2hidden.values())
+        }
+        assert (
+            len(set(hidden_dims.values())) == 1
+        ), f"All hidden meshes must have the same node attribute dimension, got {hidden_dims}."
+        return next(iter(hidden_dims.values()))
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         """Calculate the decoder target input dimension for a given dataset.

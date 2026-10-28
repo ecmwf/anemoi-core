@@ -243,6 +243,10 @@ def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, lis
     cfg, _ = multidomain_config
     BaseSchema(**cfg)
 
+    cfg.model.model.hidden_nodes_name = ["hidden", "hidden_2"]
+    with pytest.raises(ValueError, match="Only hierarchical models take a list of hidden node names"):
+        BaseSchema(**cfg)
+
 
 @skip_if_offline
 @pytest.mark.slow
@@ -401,10 +405,10 @@ def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, l
     cfg, _ = hierarchical_config
     BaseSchema(**cfg)
 
-    cfg = deepcopy(cfg)
-    cfg.model.model.hidden_nodes_name = {"data": "hidden_1"}
-    with pytest.raises(ValueError, match="do not support per-dataset hidden node mappings"):
-        BaseSchema(**cfg)
+    for hidden_nodes_name in ({"data": "hidden_1"}, "hidden_1", []):
+        cfg.model.model.hidden_nodes_name = hidden_nodes_name
+        with pytest.raises(ValueError, match="need a non-empty list of hidden node names"):
+            BaseSchema(**cfg)
 
 
 @skip_if_offline
@@ -735,11 +739,6 @@ def test_training_cycle_edm_transport(
 def test_config_validation_edm_transport(edm_transport_config: tuple[DictConfig, str]) -> None:
     cfg, _ = edm_transport_config
     BaseSchema(**cfg)
-
-    cfg = deepcopy(cfg)
-    cfg.model.model.hidden_nodes_name = {"data": "hidden"}
-    with pytest.raises(ValueError, match="do not support per-dataset hidden node mappings"):
-        BaseSchema(**cfg)
 
 
 def test_config_validation_stochastic_interpolant(stochastic_interpolant_config: tuple[DictConfig, str]) -> None:

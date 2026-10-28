@@ -34,7 +34,7 @@ The animation below shows datasets passing through the shared encoder–decoder 
    :width: 400px
    :align: center
 
-Multi-domain models can be trained using deterministic objectives or probabilistic objectives such as the Continuous Ranked Probability Score (CRPS). Support for diffusion-based training is planned for a future release.
+Multi-domain models can be trained using deterministic objectives, probabilistic objectives such as the Continuous Ranked Probability Score (CRPS), or transport objectives such as EDM diffusion.
 
 Dataset Configuration
 *********************
@@ -112,7 +112,7 @@ The model must then name the hidden mesh of each dataset under ``model.model.hid
 
 The following constraints apply:
 
-- Only flat encoder-processor-decoder models support per-dataset hidden meshes. Hierarchical and transport models do not.
+- Hierarchical models do not support per-dataset hidden meshes.
 - Hidden node and edge feature dimensions must match across the hidden meshes, because the weights are shared.
 - Trainable node and edge parameters must be set to 0, because the active graph-specific parameters would change between batches.
 
