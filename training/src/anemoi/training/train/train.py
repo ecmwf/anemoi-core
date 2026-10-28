@@ -45,6 +45,7 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
+from anemoi.training.utils.checkpoint import load_graph_from_checkpoint
 from anemoi.training.utils.compile import prepare_compilation
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -195,6 +196,28 @@ class AnemoiTrainer(ABC):
         return list(get_multiple_datasets_config(self.config.dataloader.training).keys())
 
     @cached_property
+    def _resume_checkpoint_file(self) -> Path | None:
+        """The checkpoint a resume or warm start continues from, resolved before the model is built.
+
+        :attr:`last_checkpoint` cannot be used for this: it is read back from the
+        checkpoint pipeline, which runs while the model, and so the graph, is built.
+        Returns ``None`` when the run does not resume through Lightning, including
+        weights-only and transfer-learning loads.
+        """
+        from anemoi.training.checkpoint.base import CheckpointContext
+        from anemoi.training.checkpoint.builder import build_resume_source
+
+        source = build_resume_source(
+            self.config,
+            parent_run_server2server=getattr(self, "parent_run_server2server", None),
+            fork_run_server2server=getattr(self, "fork_run_server2server", None),
+            load_checkpoint=self.start_from_checkpoint,
+        )
+        if source is None or not source.supports_resume():
+            return None
+        return source.resolve(CheckpointContext(config=self.config))
+
+    @cached_property
     def graph_data(self) -> HeteroData:
         """Graph data built or loaded for the current trainer config."""
         dataset_names = self._dataset_names
@@ -266,6 +289,18 @@ class AnemoiTrainer(ABC):
             graph = load_graph_from_file(save_path)
             validate_loaded_graph(graph, required)
             return graph
+
+        # Resuming or warm starting: reuse the graph the checkpoint was trained with, since
+        # rebuilding it is not guaranteed to reproduce the same node ordering.
+        resume_checkpoint = None if overwrite else self._resume_checkpoint_file
+        if resume_checkpoint is not None:
+            graph = load_graph_from_checkpoint(resume_checkpoint)
+            if graph is not None:
+                LOGGER.info("Reusing graph stored in checkpoint %s", resume_checkpoint)
+                fused = uses_fused_dataset_graph(graph_cfg, dataset_names)
+                required = dataset_names if fused else [DEFAULT_DATASET_NAME]
+                validate_loaded_graph(graph, required)
+                return graph
 
         return GraphCreator(graph_config).create(save_path=save_path, overwrite=overwrite)
 
