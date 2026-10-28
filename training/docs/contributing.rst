@@ -330,7 +330,83 @@ To add a new use case, follow these steps:
    configurations or are out-of-date with configuration changes in the
    templates.
 
+**************************
+ Measuring test coverage
+**************************
 
+Coverage is measured with ``pytest-cov``. It is installed with the
+``tests`` extra of each package, and is configured in the ``.coveragerc``
+file at the top level of anemoi-core. Coverage is for information only:
+it never makes a PR fail.
+
+Locally
+=======
+
+From the top-level directory of anemoi-core, run the tests of the
+packages you want to measure. ``--cov-append`` adds each run to the same
+``.coverage`` file:
+
+.. code:: bash
+
+   pytest ./training --cov=anemoi.training --cov-config=.coveragerc --cov-append --cov-report=
+   pytest ./graphs --cov=anemoi.graphs --cov-config=.coveragerc --cov-append --cov-report=
+   pytest ./models --cov=anemoi.models --cov-config=.coveragerc --cov-append --cov-report=
+
+Then print the summary:
+
+.. code:: bash
+
+   coverage report --rcfile=.coveragerc
+
+To also write ``coverage.xml`` and an HTML report, run
+``.github/scripts/coverage-finish.sh``, or create just the HTML report
+with:
+
+.. code:: bash
+
+   coverage html --rcfile=.coveragerc
+
+and open ``htmlcov/index.html`` in a browser.
+
+To measure one package only, run just its ``pytest`` line. Delete the
+``.coverage`` file first, or drop ``--cov-append``, to start from a fresh
+number.
+
+To see the coverage of the lines you changed, write ``coverage.xml``,
+install ``diff-cover`` and compare against ``main``:
+
+.. code:: bash
+
+   coverage xml --rcfile=.coveragerc -o coverage.xml
+   pip install diff-cover
+   diff-cover coverage.xml --compare-branch=origin/main
+
+In CI
+=====
+
+Coverage is sent to `Codecov <https://about.codecov.io/>`_ with one flag
+per kind of run:
+
+-  ``pr-cpu``: the CPU tests of ``anemoi-training``, ``anemoi-models``
+   and ``anemoi-graphs`` in the pull request workflow.
+
+-  ``nightly-gpu``: the integration tests for training, models and
+   graphs, run on GPU in the nightly HPC job. The benchmark and accuracy
+   tests are not included.
+
+-  ``distributed``: the distributed tests, which are started by hand.
+
+Code that only runs on GPU is covered by the ``nightly-gpu`` flag, not by
+``pr-cpu``. Codecov carries the GPU results forward to later commits, so
+its combined view of a commit includes the most recent GPU runs. This
+needs the Codecov token to be enabled for the repository and a first
+upload of each flag on ``main``; until then only ``pr-cpu`` results
+appear.
+
+The GitHub job summary of a pull request and its changed-lines table
+(from ``diff-cover``) show CPU results only. The combined CPU and GPU
+view is in Codecov. The pull request job also attaches a
+``coverage-report`` artifact with the XML and HTML reports.
 
 ****************
 Accuracy testing

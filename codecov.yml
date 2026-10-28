@@ -1,0 +1,42 @@
+# Codecov configuration. Report only: no status may fail a pull request.
+#
+# One flag per kind of test run, all uploaded with `.github/scripts/coverage-finish.sh --upload`:
+#   pr-cpu       CPU tests of the pull-request workflow (python 3.12) and pushes to main
+#   nightly-gpu  training/models/graphs integration tests on the HPC (nightly workflow)
+#   distributed  models distributed tests on the HPC (manual workflow)
+# The two HPC flags do not run on every commit, so their last result is carried forward.
+
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+flag_management:
+  default_rules:
+    carryforward: false
+  individual_flags:
+    - name: pr-cpu
+      paths:
+        - graphs/src/
+        - models/src/
+        - training/src/
+    - name: nightly-gpu
+      carryforward: true
+      paths:
+        - graphs/src/
+        - models/src/
+        - training/src/
+    - name: distributed
+      carryforward: true
+      paths:
+        - graphs/src/
+        - models/src/
+        - training/src/
+
+comment:
+  layout: "condensed_header, condensed_files, condensed_footer"
+  show_carryforward_flags: true

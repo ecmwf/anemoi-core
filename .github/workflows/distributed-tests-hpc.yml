@@ -24,13 +24,26 @@ jobs:
             python3 -m pip install "pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
             pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
 
+            # Codecov token: tracing is off while it is written, so it never reaches the log.
+            set +x
+            export CODECOV_TOKEN="${{ secrets.CODECOV_UPLOAD_TOKEN }}"
+            set -x
+
+            export COVERAGE_FILE="$PWD/.coverage"
+            rm -f "$COVERAGE_FILE" "$COVERAGE_FILE".*
+            rc=0
             python3 -m pytest -q models/tests/distributed \
               --distributed \
               --distributed-backend=all \
-              --distributed-world-size=4
+              --distributed-world-size=4 \
+              --cov=anemoi.models --cov-config=.coveragerc --cov-append --cov-report= || rc=$?
+
+            # Report and upload coverage (always exits 0), before the clone is removed.
+            bash .github/scripts/coverage-finish.sh --upload --flag distributed --sha "$(git rev-parse HEAD)" || true
 
             deactivate
             rm -rf $REPO_NAME
+            exit $rc
           sbatch_options: |
             #SBATCH --job-name=anemoi_core_distributed_pytest
             #SBATCH --nodes=1

@@ -31,6 +31,7 @@ jobs:
           - platform: "ubuntu-latest"
             python-version: "3.12"
             torch-version: "2.8.*"
+            coverage: true # only this leg measures test coverage (report only, never fails the job)
           - platform: "ubuntu-latest"
             python-version: "3.13"
             torch-version: "2.*"
@@ -65,16 +66,60 @@ jobs:
         uses: pavelzw/pytest-action@v2
         with:
           report-title: "Test report Anemoi Training (python ${{ matrix.python-version }}, torch ${{ matrix.torch-version }} on ${{ matrix.platform }})"
-          custom-pytest: pytest ./training
+          custom-pytest: pytest ./training${{ matrix.coverage && ' --cov=anemoi.training --cov-config=.coveragerc --cov-append --cov-report=' || '' }}
 
       - name: Run pytest for graphs package
         uses: pavelzw/pytest-action@v2
         with:
           report-title: "Test report Anemoi Graphs (python ${{ matrix.python-version }}, torch ${{ matrix.torch-version }} on ${{ matrix.platform }})"
-          custom-pytest: pytest ./graphs
+          custom-pytest: pytest ./graphs${{ matrix.coverage && ' --cov=anemoi.graphs --cov-config=.coveragerc --cov-append --cov-report=' || '' }}
 
       - name: Run pytest for models package
         uses: pavelzw/pytest-action@v2
         with:
           report-title: "Test report Anemoi Models (python ${{ matrix.python-version }}, torch ${{ matrix.torch-version }} on ${{ matrix.platform }})"
-          custom-pytest: pytest ./models
+          custom-pytest: pytest ./models${{ matrix.coverage && ' --cov=anemoi.models --cov-config=.coveragerc --cov-append --cov-report=' || '' }}
+
+      # Coverage-only steps (python 3.12 leg). Report only: none of them may fail the job,
+      # and they still run when a test failed so that the report is available.
+      - name: Install diff-cover
+        if: ${{ !cancelled() && matrix.coverage }}
+        continue-on-error: true
+        run: uv pip install diff-cover
+
+      - name: Coverage report, job summary and Codecov upload
+        if: ${{ !cancelled() && matrix.coverage }}
+        continue-on-error: true
+        env:
+          # Empty on pull requests from forks: the upload is then skipped by the script.
+          CODECOV_TOKEN: ${{ secrets.CODECOV_UPLOAD_TOKEN }}
+          COVERAGE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          bash .github/scripts/coverage-finish.sh \
+            --upload --flag pr-cpu --sha "$COVERAGE_SHA" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Coverage of the changed lines
+        if: ${{ !cancelled() && matrix.coverage && github.event_name == 'pull_request' }}
+        continue-on-error: true
+        run: |
+          diff-cover coverage.xml --compare-branch=origin/${{ github.base_ref }} --format markdown:diff-cover.md
+          if [ -f diff-cover.md ]; then
+            {
+              echo "## Coverage of the changed lines"
+              echo
+              cat diff-cover.md
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload coverage report
+        if: ${{ !cancelled() && matrix.coverage }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+            diff-cover.md
+          if-no-files-found: ignore

@@ -91,8 +91,10 @@ optional-dependencies.tests = [
   "anemoi-graphs[tri]",                              # required to load the gnn checkpoint as part of the tests
   "anemoi-models[spectral]",                         # required to test the DCT2D spectral loss
   "anemoi-training[azure,mlflow,plotting,s3,wandb]", # AzureMlflowLogger / S3Source / plotting integration
+  "coverage>=7.10",
   "hypothesis>=6.11",
   "pytest>=8",
+  "pytest-cov>=7",
   "pytest-mock>=3",
   "pytest-skip-slow>=0.0.5",
   "sshfs",

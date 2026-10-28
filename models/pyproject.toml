@@ -64,8 +64,10 @@ optional-dependencies.migrations = [
 optional-dependencies.spectral = [ "anemoi-transform>=0.1.2", "torch-dct>=0.1.6" ]
 optional-dependencies.tests = [
   "anemoi-models[spectral]",
+  "coverage>=7.10",
   "hypothesis>=6.11",
   "pytest>=8",
+  "pytest-cov>=7",
   "pytest-mock>=3",
   "pytest-skip-slow>=0.0.5"
 ]
