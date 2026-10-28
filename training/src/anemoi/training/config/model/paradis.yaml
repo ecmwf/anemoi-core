@@ -24,11 +24,18 @@ layer_kernels:
     bias: False
 
 processor:
-  # Advection-diffusion-reaction processor from PARADIS (arXiv:2601.21151). The hidden nodes
-  # must be a regular latitude-longitude grid built with anemoi.graphs.nodes.RectilinearNodes
-  # with a RectilinearLayoutIndex node attribute (see graph/encoder_decoder_latlon.yaml).
+  # Advection-diffusion-reaction processor from PARADIS (arXiv:2601.21151) on a regular
+  # latitude-longitude hidden grid, built with anemoi.graphs.nodes.RectilinearNodes with a
+  # RectilinearLayoutIndex node attribute (see graph/encoder_decoder_latlon.yaml).
+  # For any other hidden mesh, see paradis_graph.yaml.
   _target_: anemoi.models.layers.processor.ADRProcessor
-  layout_node_attribute_name: layout_index # hidden node attribute with the row and column of each node
+  geometry:
+    _target_: anemoi.models.layers.geometry.RegularLatLonGeometry
+    layout_node_attribute_name: layout_index # hidden node attribute with the row and column of each node
+    kernel_size: 5 # size of the square stencils of the spatial mixers, must be odd
+    interpolation: bicubic # bicubic or bilinear, used to read values at departure points
+    bias_rank: 128
+    bias_base_maps: 8
   num_channels: ${model.num_channels}
   num_layers: 16
   num_chunks: 4
@@ -43,31 +50,23 @@ processor:
     Activation:
       _target_: torch.nn.SiLU
   # Each layer runs the steps below in order; set a step to null to leave it out.
+  # The steps are the same on any geometry: the geometry above decides what their spatial parts are.
   advection:
-    _target_: anemoi.models.layers.adr.LatLonAdvection
+    _target_: anemoi.models.layers.adr.Advection
     advection_channels: 768
     num_velocity_fields: null # null gives one velocity field per advected channel
     velocity_hidden_dim: 384
-    kernel_size: 5
-    interpolation: bicubic # bicubic or bilinear
-    bias_rank: 128
-    bias_base_maps: 8
     cartesian_displacement: False # True: 3D velocities, which do not turn round across the poles
   diffusion:
-    _target_: anemoi.models.layers.adr.LatLonDiffusion
-    kernel_size: 5
+    _target_: anemoi.models.layers.adr.Diffusion
     layer_norm: True
     low_rank_bias: True
-    bias_rank: 128
-    bias_base_maps: 8
   reaction:
-    _target_: anemoi.models.layers.adr.LatLonReaction
+    _target_: anemoi.models.layers.adr.Reaction
     hidden_dim: 896
     num_layers: 4
     layer_norm: True
     low_rank_bias: True # learned bias field after the first layer
-    bias_rank: 128
-    bias_base_maps: 8
 
 encoders:
   "0":

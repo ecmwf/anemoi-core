@@ -11,17 +11,16 @@ import pytest
 import torch
 
 from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.layers.adr import LatLonAdvection
-from anemoi.models.layers.adr.layers import LatLonLowRankBias
+from anemoi.models.layers.adr import Advection
 from anemoi.models.layers.block import ADRProcessorBlock
 from anemoi.models.layers.geocyclic import geocyclic_pad
+from anemoi.models.layers.geometry import RegularLatLonGeometry
 from anemoi.models.layers.layout import LatLonLayout
 from anemoi.models.layers.layout import latlon_cell_centres
 from anemoi.models.layers.layout import latlon_grid_layout
 from anemoi.models.layers.processor import ADRProcessor
 from anemoi.models.layers.processor import FlowersProcessor
-from anemoi.models.layers.semi_lagrangian import SemiLagrangianLayer
-from anemoi.models.layers.semi_lagrangian import SemiLagrangianWarp
+from anemoi.models.layers.semi_lagrangian import GridSampler
 from anemoi.models.layers.utils import load_layer_kernels
 
 
@@ -35,8 +34,15 @@ def _smooth_field(points: torch.Tensor) -> torch.Tensor:
     return x + 0.5 * y * z + 0.3 * z**2 - 0.2 * x * y
 
 
-def _layout(nlat: int, nlon: int, batch_size: int = 1) -> LatLonLayout:
-    return LatLonLayout(nlat, nlon, batch_size, [batch_size * nlat * nlon])
+def _geometry(nlat: int, nlon: int, order: torch.Tensor | None = None, **kwargs) -> RegularLatLonGeometry:
+    return RegularLatLonGeometry(
+        hidden_nodes=_hidden_nodes(nlat, nlon, order), layout_node_attribute_name="layout_index", **kwargs
+    )
+
+
+def _layout(nlat: int, nlon: int, batch_size: int = 1, order: torch.Tensor | None = None) -> LatLonLayout:
+    shard_info = GraphShardInfo(nodes=[batch_size * nlat * nlon])
+    return _geometry(nlat, nlon, order).bind(None, batch_size, shard_info)
 
 
 def _on_grid(x: torch.Tensor, nlat: int, nlon: int) -> torch.Tensor:
@@ -159,30 +165,30 @@ def test_layout_round_trip_single_process():
     nlat, nlon, batch_size, channels = 4, 8, 2, 6
     layout = _layout(nlat, nlon, batch_size)
     x = torch.randn(batch_size * nlat * nlon, channels)
-    grid = layout.to_grid(x)
+    grid = layout.to_state(x)
     assert grid.shape == (batch_size, nlat, nlon, channels)
     # Node n of batch b sits at row n // nlon and column n % nlon.
     torch.testing.assert_close(grid[1, 3, 5], x[nlat * nlon + 3 * nlon + 5])
-    torch.testing.assert_close(layout.from_grid(grid), x)
+    torch.testing.assert_close(layout.from_state(grid), x)
 
     groups = grid.view(batch_size, nlat, nlon, 3, 2)
-    globe = layout.to_globe(groups)
+    globe = layout.to_field(groups)
     assert globe.shape == (batch_size, 3, 2, nlat, nlon)
     torch.testing.assert_close(globe[1, 2, :, 3, 5], groups[1, 3, 5, 2])
-    torch.testing.assert_close(layout.from_globe(globe, 3), groups)
+    torch.testing.assert_close(layout.from_field(globe, 3), groups)
 
 
 def test_layout_round_trip_with_grid_index():
     nlat, nlon, batch_size, channels = 4, 8, 2, 6
     order = _shuffled(nlat, nlon)
-    layout = LatLonLayout(nlat, nlon, batch_size, [batch_size * nlat * nlon], grid_index=order)
+    layout = _layout(nlat, nlon, batch_size, order)
     x = torch.randn(batch_size * nlat * nlon, channels)
-    grid = layout.to_grid(x)
+    grid = layout.to_state(x)
     # Node n of batch b sits at the grid point order[n].
     node = 7
     row, col = divmod(order[node].item(), nlon)
     torch.testing.assert_close(grid[1, row, col], x[nlat * nlon + node])
-    torch.testing.assert_close(layout.from_grid(grid), x)
+    torch.testing.assert_close(layout.from_state(grid), x)
 
 
 @pytest.mark.parametrize("kind", ["adr", "flowers"])
@@ -198,7 +204,12 @@ def test_processors_do_not_depend_on_node_order(kind):
             "num_channels": channels,
             "num_chunks": 1,
             "hidden_nodes": _hidden_nodes(nlat, nlon, order),
-            "layout_node_attribute_name": "layout_index",
+            "geometry": {
+                "_target_": "anemoi.models.layers.geometry.RegularLatLonGeometry",
+                "layout_node_attribute_name": "layout_index",
+                "bias_rank": 4,
+                "bias_base_maps": 2,
+            },
             "layer_kernels": load_layer_kernels(instance=False),
         }
         if kind == "flowers":
@@ -208,15 +219,15 @@ def test_processors_do_not_depend_on_node_order(kind):
             **common,
             timestep="6h",
             advection={
-                "_target_": "anemoi.models.layers.adr.LatLonAdvection",
+                "_target_": "anemoi.models.layers.adr.Advection",
                 "advection_channels": 8,
                 "num_velocity_fields": 4,
                 "velocity_hidden_dim": 8,
                 **bias_kwargs,
             },
-            diffusion={"_target_": "anemoi.models.layers.adr.LatLonDiffusion", **bias_kwargs},
+            diffusion={"_target_": "anemoi.models.layers.adr.Diffusion", **bias_kwargs},
             reaction={
-                "_target_": "anemoi.models.layers.adr.LatLonReaction",
+                "_target_": "anemoi.models.layers.adr.Reaction",
                 "hidden_dim": 16,
                 "num_layers": 2,
                 **bias_kwargs,
@@ -239,13 +250,13 @@ def test_processors_do_not_depend_on_node_order(kind):
 
 def test_layout_rejects_wrong_grid_size():
     with pytest.raises(ValueError, match="hidden graph has 32"):
-        LatLonLayout(4, 8, 1, [31])
+        _geometry(4, 8).bind(None, 1, GraphShardInfo(nodes=[31]))
 
 
 @pytest.mark.parametrize("interpolation", ["bilinear", "bicubic"])
 def test_zero_displacement_is_identity(interpolation):
     nlat, nlon, heads = 10, 20, 3
-    layer = SemiLagrangianLayer(nlat=nlat, nlon=nlon, num_heads=heads, interpolation=interpolation)
+    layer = GridSampler(num_heads=heads, interpolation=interpolation)
     values = torch.randn(1, nlat, nlon, heads, 4)
     moved = layer.sample(values, torch.zeros(1, nlat, nlon, heads, 2), _layout(nlat, nlon))
     torch.testing.assert_close(moved, values, atol=1e-4, rtol=0)
@@ -270,7 +281,7 @@ def test_sampling_reads_from_departure_points(interpolation):
     """
     torch.manual_seed(0)
     nlat, nlon, heads = 90, 180, 4
-    layer = SemiLagrangianLayer(nlat=nlat, nlon=nlon, num_heads=heads, interpolation=interpolation)
+    layer = GridSampler(num_heads=heads, interpolation=interpolation)
 
     lat, lon = latlon_cell_centres(nlat, nlon)
     position = _unit_vectors(lat, lon)[:, None, :]
@@ -293,7 +304,7 @@ def test_sampling_reads_from_departure_points(interpolation):
 def test_sampling_across_the_north_pole():
     """A point next to the north pole, moving south, reads from the far side of the pole."""
     nlat, nlon = 30, 60
-    layer = SemiLagrangianLayer(nlat=nlat, nlon=nlon, num_heads=1)
+    layer = GridSampler(num_heads=1)
     lat, lon = latlon_cell_centres(nlat, nlon)
     values = _smooth_field(_unit_vectors(lat, lon)).float().view(-1, 1, 1)
 
@@ -310,17 +321,14 @@ def test_sampling_across_the_north_pole():
 
 def test_semi_lagrangian_advection_without_velocity_projects_down_and_up():
     nlat, nlon = 8, 16
-    advection = LatLonAdvection(
+    advection = Advection(
         num_channels=16,
         advection_channels=8,
         num_velocity_fields=8,
         velocity_hidden_dim=12,
-        nlat=nlat,
-        nlon=nlon,
         time_step=0.2,
         layer_kernels=load_layer_kernels(),
-        bias_rank=4,
-        bias_base_maps=2,
+        geometry=_geometry(nlat, nlon, bias_rank=4, bias_base_maps=2),
     ).transport
     torch.nn.init.zeros_(advection.velocity_out.mix.weight)
     layout = _layout(nlat, nlon)
@@ -336,12 +344,12 @@ def test_adr_block_matches_paper_parameter_counts():
     """
     block = ADRProcessorBlock(
         num_channels=1024,
-        geometry={"nlat": 361, "nlon": 720},
+        geometry=_geometry(361, 720),
         time_step=0.2,
         layer_kernels=load_layer_kernels(),
-        advection={"_target_": "anemoi.models.layers.adr.LatLonAdvection"},
-        diffusion={"_target_": "anemoi.models.layers.adr.LatLonDiffusion"},
-        reaction={"_target_": "anemoi.models.layers.adr.LatLonReaction"},
+        advection={"_target_": "anemoi.models.layers.adr.Advection"},
+        diffusion={"_target_": "anemoi.models.layers.adr.Diffusion"},
+        reaction={"_target_": "anemoi.models.layers.adr.Reaction"},
     )
 
     def count(*modules):
@@ -362,7 +370,7 @@ def test_adr_block_matches_paper_parameter_counts():
 
 def test_low_rank_bias_adds_a_field_shared_over_the_batch():
     nlat, nlon, channels = 4, 8, 6
-    bias = LatLonLowRankBias(channels, nlat, nlon, load_layer_kernels(), rank=3, num_base_maps=2)
+    bias = _geometry(nlat, nlon, bias_rank=3, bias_base_maps=2).position_bias(channels, load_layer_kernels())
     x = torch.zeros(2, nlat, nlon, channels)
     out = bias(x, _layout(nlat, nlon, batch_size=2))
     assert out.shape == x.shape
@@ -372,14 +380,12 @@ def test_low_rank_bias_adds_a_field_shared_over_the_batch():
 
 def test_rejects_odd_number_of_longitudes():
     with pytest.raises(ValueError, match="nlon must be even"):
-        SemiLagrangianLayer(nlat=4, nlon=9, num_heads=1)
+        _geometry(4, 9)
 
 
 def test_warp_without_displacement_returns_the_values():
     nlat, nlon = 8, 16
-    warp = SemiLagrangianWarp(
-        in_channels=12, out_channels=8, num_heads=2, nlat=nlat, nlon=nlon, layer_kernels=load_layer_kernels()
-    )
+    warp = _geometry(nlat, nlon).warp(in_channels=12, out_channels=8, num_heads=2, layer_kernels=load_layer_kernels())
     torch.nn.init.zeros_(warp.flow[-1].weight)
     torch.nn.init.zeros_(warp.flow[-1].bias)
     layout = _layout(nlat, nlon)
@@ -389,9 +395,7 @@ def test_warp_without_displacement_returns_the_values():
 
 def test_warp_rejects_heads_that_do_not_divide_channels():
     with pytest.raises(ValueError, match="divisible"):
-        SemiLagrangianWarp(
-            in_channels=8, out_channels=10, num_heads=4, nlat=4, nlon=8, layer_kernels=load_layer_kernels()
-        )
+        _geometry(4, 8).warp(in_channels=8, out_channels=10, num_heads=4, layer_kernels=load_layer_kernels())
 
 
 @pytest.mark.parametrize("interpolation", ["bilinear", "bicubic"])
@@ -402,9 +406,7 @@ def test_cartesian_displacement_follows_great_circles(interpolation):
     """
     torch.manual_seed(0)
     nlat, nlon, heads = 90, 180, 4
-    layer = SemiLagrangianLayer(
-        nlat=nlat, nlon=nlon, num_heads=heads, interpolation=interpolation, cartesian_displacement=True
-    )
+    layer = GridSampler(num_heads=heads, interpolation=interpolation, cartesian_displacement=True)
     lat, lon = latlon_cell_centres(nlat, nlon)
     position = _unit_vectors(lat, lon)[:, None, :]
     values = _smooth_field(position).expand(-1, heads).unsqueeze(-1).float().contiguous()
@@ -426,8 +428,8 @@ def test_cartesian_displacement_follows_great_circles(interpolation):
 def test_cartesian_and_local_displacements_agree_along_one_direction(component):
     """Moving purely east or purely north gives the same departure point in both forms."""
     nlat, nlon = 30, 60
-    local = SemiLagrangianLayer(nlat=nlat, nlon=nlon, num_heads=1)
-    cartesian = SemiLagrangianLayer(nlat=nlat, nlon=nlon, num_heads=1, cartesian_displacement=True)
+    local = GridSampler(num_heads=1)
+    cartesian = GridSampler(num_heads=1, cartesian_displacement=True)
     lat, lon = latlon_cell_centres(nlat, nlon)
     east_dir, north_dir = _local_directions(lat, lon)
 
@@ -454,7 +456,7 @@ def test_cartesian_and_local_displacements_agree_along_one_direction(component):
 
 def test_cartesian_displacement_across_the_north_pole():
     nlat, nlon = 30, 60
-    layer = SemiLagrangianLayer(nlat=nlat, nlon=nlon, num_heads=1, cartesian_displacement=True)
+    layer = GridSampler(num_heads=1, cartesian_displacement=True)
     lat, lon = latlon_cell_centres(nlat, nlon)
     values = _smooth_field(_unit_vectors(lat, lon)).float().view(-1, 1, 1)
     _, north_dir = _local_directions(lat, lon)
@@ -472,25 +474,21 @@ def test_cartesian_displacement_across_the_north_pole():
 @pytest.mark.parametrize("cartesian_displacement", [False, True])
 def test_layers_predict_one_displacement_per_head(cartesian_displacement):
     kernels = load_layer_kernels()
-    advection = LatLonAdvection(
+    geometry = _geometry(8, 16, bias_rank=4, bias_base_maps=2)
+    advection = Advection(
         num_channels=16,
         advection_channels=8,
         num_velocity_fields=4,
         velocity_hidden_dim=12,
-        nlat=8,
-        nlon=16,
         time_step=0.2,
         layer_kernels=kernels,
-        bias_rank=4,
-        bias_base_maps=2,
+        geometry=geometry,
         cartesian_displacement=cartesian_displacement,
     ).transport
-    warp = SemiLagrangianWarp(
+    warp = geometry.warp(
         in_channels=16,
         out_channels=8,
         num_heads=4,
-        nlat=8,
-        nlon=16,
         layer_kernels=kernels,
         cartesian_displacement=cartesian_displacement,
     )

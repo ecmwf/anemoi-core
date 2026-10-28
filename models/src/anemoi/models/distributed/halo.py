@@ -7,18 +7,27 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 from dataclasses import dataclass
+from typing import Optional
 
 import torch
 import torch.distributed as dist
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.khop_edges import ANEMOI_DEBUG_SHARDING
 from anemoi.models.distributed.khop_edges import GraphPartition
+from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.utils import model_is_distributed
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -238,3 +247,58 @@ def build_halo_info(
         recv_counts=tuple(nodes.size(0) for nodes in recv_nodes_by_rank),
         edge_index_local=edge_index_local,
     )
+
+
+class HaloInfoCache:
+    """Builds the halo exchange plan of an edge-sharded graph, once for all the layers that share it.
+
+    Used by anything that runs ``GraphTransformerProcessorBlock`` with ``shard_strategy="edges"``:
+    the graph transformer processor, and the mesh geometry of the semi-Lagrangian processors. The
+    owner sets ``shard_strategy``, ``_cached_halo_info`` and ``_cached_halo_cache_specs``.
+    """
+
+    def _get_or_build_cached_halo_info(
+        self,
+        x: Tensor,
+        edge_index: Adj,
+        shard_info: GraphShardInfo,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup],
+    ) -> Optional[HaloInfo]:
+        """Return one halo plan shared by all the layers.
+
+        The plan is kept for as long as the shard sizes stay the same, so the graph must not
+        change between calls.
+        """
+        if self.shard_strategy != "edges" or not model_is_distributed(model_comm_group):
+            return None
+
+        if batch_size != 1:
+            raise ValueError(
+                f"{type(self).__name__} halo exchange requires batch_size=1 when model sharding is enabled."
+            )
+        if not shard_info.nodes_are_sharded():
+            raise ValueError(
+                f"{type(self).__name__} halo exchange requires sharded nodes when model sharding is enabled."
+            )
+        assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
+
+        specs = cache_specs(shard_info, model_comm_group)
+        if self._cached_halo_info is not None and self._cached_halo_cache_specs == specs:
+            return self._cached_halo_info
+
+        LOGGER.info(f"Building halo info for {type(self).__name__} with shard strategy 'edges'")
+
+        bipartite_shard_info = BipartiteGraphShardInfo(
+            src_nodes=shard_info.nodes,
+            dst_nodes=shard_info.nodes,
+            edges=shard_info.edges,
+        )
+        partition = build_graph_partition_from_shard_info(edge_index, (x, x), bipartite_shard_info, model_comm_group)
+        halo_info = build_halo_info(
+            partition, edge_index, model_comm_group, shard_info.edges, debug=ANEMOI_DEBUG_SHARDING
+        )
+
+        self._cached_halo_info = halo_info
+        self._cached_halo_cache_specs = specs
+        return halo_info

@@ -45,7 +45,7 @@ class GeocyclicDepthwiseConv(nn.Module):
         # Each GPU applies the stencil to the whole globe for its share of the channels, using
         # its share of the stencil weights.
         start, end = layout.local_groups(self.num_channels)
-        y = layout.to_globe(x.unsqueeze(-1))
+        y = layout.to_field(x.unsqueeze(-1))
         y = geocyclic_pad(y.flatten(1, 2), self.pad)
         y = F.conv2d(y, self.conv.weight[start:end], groups=end - start)
-        return layout.from_globe(y.unsqueeze(2), self.num_channels).squeeze(-1)
+        return layout.from_field(y.unsqueeze(2), self.num_channels).squeeze(-1)

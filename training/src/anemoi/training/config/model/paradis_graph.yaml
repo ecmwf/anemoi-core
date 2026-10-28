@@ -25,11 +25,23 @@ layer_kernels:
 
 processor:
   # Advection-diffusion-reaction processor from PARADIS (arXiv:2601.21151) on the nodes of the
-  # hidden graph, for any hidden mesh (e.g. graph/multi_scale.yaml). The spatial mixers are graph
-  # blocks over the hidden-to-hidden edges, and the advection reads each value at its departure
-  # point from the nearest nodes with a brute-force neighbour search.
-  # For a regular latitude-longitude hidden grid see paradis.yaml.
-  _target_: anemoi.models.layers.processor.GraphADRProcessor
+  # hidden graph, for any hidden mesh (e.g. graph/multi_scale.yaml). The spatial mixers run over
+  # the hidden-to-hidden edges, and the advection reads each value at its departure point from the
+  # nearest nodes with a brute-force neighbour search.
+  # For a regular latitude-longitude hidden grid, see paradis.yaml.
+  _target_: anemoi.models.layers.processor.ADRProcessor
+  geometry:
+    _target_: anemoi.models.layers.geometry.MeshGeometry
+    # edge_conv is the analogue of the stencil of the grid geometry: one learned weight per edge
+    # and channel. transformer and gnn put a whole graph block in its place, which is far heavier.
+    mixer_block: edge_conv # Options: "edge_conv", "transformer", "gnn"
+    mixer_kwargs: {} # settings of the transformer or gnn block, e.g. num_heads, mlp_hidden_ratio
+    num_neighbours: 4 # nearest nodes a value is read from at its departure point
+    smoothing: 0.01 # sharpness of the interpolation weights at a node, relative to the node spacing
+    bias_rank: 128
+    bias_base_maps: 8
+    bias_lat_degree: 32
+    bias_lon_wavenumber: 32
   trainable_size: ${model.edge_trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_channels: ${model.num_channels}
@@ -46,42 +58,23 @@ processor:
     Activation:
       _target_: torch.nn.SiLU
   # Each layer runs the steps below in order; set a step to null to leave it out.
+  # The steps are the same on any geometry: the geometry above decides what their spatial parts are.
   advection:
-    _target_: anemoi.models.layers.adr.GraphAdvection
+    _target_: anemoi.models.layers.adr.Advection
     advection_channels: 768
     num_velocity_fields: 64 # null gives one per advected channel, which is slow with the brute-force neighbour search
     velocity_hidden_dim: 384
-    # edge_conv is the analogue of the stencil of the grid processor: one learned weight per edge
-    # and channel. transformer and gnn put a whole graph block in its place, which is far heavier.
-    mixer_block: edge_conv # Options: "edge_conv", "transformer", "gnn"
-    mixer_kwargs: {} # settings of the transformer or gnn block, e.g. num_heads, mlp_hidden_ratio
-    num_neighbours: 4 # nearest nodes a value is read from at its departure point
-    smoothing: 0.01
-    bias_rank: 128
-    bias_base_maps: 8
-    bias_lat_degree: 32
-    bias_lon_wavenumber: 32
     cartesian_displacement: False # True: 3D velocities, which do not turn round across the poles
   diffusion:
-    _target_: anemoi.models.layers.adr.GraphDiffusion
-    mixer_block: edge_conv # Options: "edge_conv", "transformer", "gnn"
-    mixer_kwargs: {}
+    _target_: anemoi.models.layers.adr.Diffusion
     layer_norm: True
     low_rank_bias: True
-    bias_rank: 128
-    bias_base_maps: 8
-    bias_lat_degree: 32
-    bias_lon_wavenumber: 32
   reaction:
-    _target_: anemoi.models.layers.adr.GraphReaction
+    _target_: anemoi.models.layers.adr.Reaction
     hidden_dim: 896
     num_layers: 4
     layer_norm: True
     low_rank_bias: True # learned bias field after the first layer
-    bias_rank: 128
-    bias_base_maps: 8
-    bias_lat_degree: 32
-    bias_lon_wavenumber: 32
 
 encoders:
   "0":

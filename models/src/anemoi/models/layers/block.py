@@ -41,12 +41,10 @@ from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
-from anemoi.models.layers.layout import GraphLayout
-from anemoi.models.layers.layout import LatLonLayout
+from anemoi.models.layers.layout import Layout
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.mlp import build_feedforward_layer
-from anemoi.models.layers.semi_lagrangian import SemiLagrangianWarp
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
@@ -202,18 +200,16 @@ class ADRProcessorBlock(BaseBlock):
 
     Three steps, one after the other, each adding its output to the state:
 
-    - advection, e.g. ``anemoi.models.layers.adr.LatLonAdvection`` or ``GraphAdvection``;
-    - diffusion, e.g. ``anemoi.models.layers.adr.LatLonDiffusion`` or ``GraphDiffusion``;
-    - reaction, e.g. ``anemoi.models.layers.adr.LatLonReaction`` or ``GraphReaction``.
+    - advection, ``anemoi.models.layers.adr.Advection``;
+    - diffusion, ``anemoi.models.layers.adr.Diffusion``;
+    - reaction, ``anemoi.models.layers.adr.Reaction``.
 
     Each step is given as a config with a ``_target_``, built with ``num_channels``,
-    ``layer_kernels``, the processor's ``geometry`` (``nlat`` and ``nlon`` for a
-    latitude-longitude grid, ``edge_dim`` for a graph), and ``time_step`` for the advection step.
-    A step set to None is left out.
+    ``layer_kernels``, the processor's ``geometry``, and ``time_step`` for the advection step. A
+    step set to None is left out. The geometry decides what the spatial parts of the steps are, so
+    the same block runs on a regular latitude-longitude grid and on a mesh.
 
-    The block works on the state as the processor lays it out: (batch, local rows, nlon, channels)
-    with a ``LatLonLayout``, or (batch * local nodes, channels) with a ``GraphLayout``. It is
-    given that layout.
+    The block works on the state as the geometry lays it out, and is given that layout.
 
     Unlike the paper, the reaction step does not receive separately encoded static fields
     (orography, land-sea mask, ...); static information reaches the processor only through the
@@ -226,13 +222,13 @@ class ADRProcessorBlock(BaseBlock):
         num_channels: int,
         time_step: float,
         layer_kernels: DotDict,
+        geometry,
         advection: Optional[DictConfig],
         diffusion: Optional[DictConfig],
         reaction: Optional[DictConfig],
-        geometry: Optional[dict] = None,
     ):
         super().__init__()
-        step_kwargs = {"num_channels": num_channels, "layer_kernels": layer_kernels, **(geometry or {})}
+        step_kwargs = {"num_channels": num_channels, "layer_kernels": layer_kernels, "geometry": geometry}
 
         self.advection = instantiate(advection, **step_kwargs, time_step=time_step) if advection is not None else None
         self.diffusion = instantiate(diffusion, **step_kwargs) if diffusion is not None else None
@@ -246,7 +242,7 @@ class ADRProcessorBlock(BaseBlock):
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
         *,
-        layout: Union[LatLonLayout, GraphLayout],
+        layout: Layout,
         **layer_kwargs,
     ) -> tuple[Tensor]:
         for step in (self.advection, self.diffusion, self.reaction):
@@ -267,8 +263,8 @@ class FlowersProcessorBlock(BaseBlock):
       channels at each point is used instead, so that the block works when the grid is split
       across GPUs.
 
-    The block works on the state put on the grid by the processor, of shape
-    (batch, local rows, nlon, channels), and is given the processor's ``LatLonLayout``.
+    The warp comes from the processor's geometry, which also lays out the state and gives the
+    block its layout.
     """
 
     def __init__(
@@ -277,29 +273,22 @@ class FlowersProcessorBlock(BaseBlock):
         num_channels: int,
         hidden_dim: int,
         num_heads: int,
-        nlat: int,
-        nlon: int,
         layer_kernels: DotDict,
+        geometry,
         block_style: str = "pre_norm",
-        interpolation: str = "bilinear",
         mlp_implementation: MLPImplementation = "mlp",
         cartesian_displacement: bool = False,
     ):
         super().__init__()
         if block_style not in ("pre_norm", "flowers"):
             raise ValueError(f"block_style must be 'pre_norm' or 'flowers', got {block_style}.")
-        self.nlat = nlat
-        self.nlon = nlon
         self.block_style = block_style
 
-        self.warp = SemiLagrangianWarp(
+        self.warp = geometry.warp(
             in_channels=num_channels,
             out_channels=num_channels,
             num_heads=num_heads,
-            nlat=nlat,
-            nlon=nlon,
             layer_kernels=layer_kernels,
-            interpolation=interpolation,
             cartesian_displacement=cartesian_displacement,
         )
 
@@ -328,7 +317,7 @@ class FlowersProcessorBlock(BaseBlock):
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
         *,
-        layout: LatLonLayout,
+        layout: Layout,
         **layer_kwargs,
     ) -> tuple[Tensor]:
         # In case we have conditionings we pass these to the layer norm

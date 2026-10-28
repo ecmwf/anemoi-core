@@ -104,9 +104,20 @@ def _comm_size_and_rank(model_comm_group: Optional[ProcessGroup]) -> tuple[int, 
     return torch.distributed.get_world_size(group=model_comm_group), torch.distributed.get_rank(group=model_comm_group)
 
 
-class _SplitLayout:
-    """Shared by the layouts: the GPUs of one model, the node split the model hands over, and the
-    split by channel group used by steps that need the whole field.
+class Layout:
+    """How one forward pass of a semi-Lagrangian processor is laid out over the GPUs of the model.
+
+    A geometry builds one of these per forward (``LatentGeometry.bind``) and every block of the
+    processor is given it. It holds what changes from call to call -- the batch size, the node
+    split the model hands over, the communication group, and on a graph the prepared edges -- and
+    reads everything static from its geometry.
+
+    ``to_state`` puts the tensor the model passes in, of shape (batch * local nodes, channels),
+    into the form the blocks work on, and ``from_state`` puts it back. Steps that look at other
+    points need the whole field, so ``to_field`` and ``from_field`` switch a tensor between being
+    split by node and being split by channel group. The groups are the unit of that split, so
+    channels that belong together, for instance the channels moved by one velocity field, always
+    land on the same GPU.
 
     The model splits the batch and the nodes together, so the node shard sizes describe a single
     globe only for a batch of one. Without splitting, every GPU holds the whole batch.
@@ -114,11 +125,12 @@ class _SplitLayout:
 
     def __init__(
         self,
-        num_nodes: int,
+        geometry,
         batch_size: int,
         grid_shard_sizes: ShardSizes,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> None:
+        self.geometry = geometry
         self.batch_size = batch_size
         self.model_comm_group = model_comm_group
         self.comm_size, self.rank = _comm_size_and_rank(model_comm_group)
@@ -130,11 +142,16 @@ class _SplitLayout:
         else:
             self.node_shard_sizes = [sum(grid_shard_sizes) // batch_size]
 
-        if sum(self.node_shard_sizes) != num_nodes:
+        if sum(self.node_shard_sizes) != geometry.num_nodes:
             raise ValueError(
                 f"The processor is given {sum(self.node_shard_sizes)} hidden nodes, but its hidden graph has "
-                f"{num_nodes}."
+                f"{geometry.num_nodes}."
             )
+
+    @property
+    def size(self) -> int:
+        """Number of rows of the state over all GPUs, batch members included."""
+        return self.batch_size * self.geometry.num_nodes
 
     @property
     def local_nodes(self) -> tuple[int, int]:
@@ -154,48 +171,63 @@ class _SplitLayout:
         return get_partition_range(self.group_shard_sizes(num_groups), self.rank)
 
 
-class LatLonLayout(_SplitLayout):
-    """Puts the processor state on the latitude-longitude grid, and switches it between two splits across GPUs.
+class LatLonLayout(Layout):
+    """A forward pass on a regular latitude-longitude grid, with the state laid out as a 2D field.
 
-    The model passes the processor a flat tensor of shape (batch * local nodes, channels), split by
-    node, with the nodes in graph order. ``to_grid`` turns it into a tensor of shape
-    (batch, local rows, nlon, channels): each GPU holds a band of whole latitude rows, with every
-    channel. ``from_grid`` turns it back. The processor does this once, on the way in and on the way
-    out, and every layer works on the grid.
+    ``to_state`` turns the model's node tensor into one of shape (batch, local rows, nlon,
+    channels): each GPU holds a band of whole latitude rows, with every channel. The processor
+    does this once, on the way in and on the way out, and every layer works on the grid.
 
-    Steps that look at other points (stencils, interpolation) need the whole globe. ``to_globe``
-    switches a tensor of shape (batch, local rows, nlon, groups, k) to one of shape
-    (batch, local groups, k, nlat, nlon): the whole globe for some of the groups. The groups are the
-    unit of that split, so channels that belong together (for instance the channels moved by one
-    velocity field) always land on the same GPU. ``from_globe`` switches back.
-
-    ``grid_index`` gives the flat grid position ``row * nlon + col`` of each node, when the nodes
-    are not stored row by row.
+    ``to_field`` switches a tensor of shape (batch, local rows, nlon, groups, k) to one of shape
+    (batch, local groups, k, nlat, nlon): the whole globe for some of the groups.
     """
 
     def __init__(
         self,
-        nlat: int,
-        nlon: int,
+        geometry,
         batch_size: int,
         grid_shard_sizes: ShardSizes,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_index: Optional[torch.Tensor] = None,
     ) -> None:
-        super().__init__(nlat * nlon, batch_size, grid_shard_sizes, model_comm_group)
-        self.nlat = nlat
-        self.nlon = nlon
-        self.grid_index = grid_index
-        if nlat < self.comm_size:
-            raise ValueError(f"Cannot split {nlat} latitude rows over {self.comm_size} GPUs.")
-        self.row_shard_sizes = get_balanced_partition_sizes(nlat, self.comm_size)
+        super().__init__(geometry, batch_size, grid_shard_sizes, model_comm_group)
+        if geometry.nlat < self.comm_size:
+            raise ValueError(f"Cannot split {geometry.nlat} latitude rows over {self.comm_size} GPUs.")
+        self.row_shard_sizes = get_balanced_partition_sizes(geometry.nlat, self.comm_size)
+
+    @property
+    def nlat(self) -> int:
+        return self.geometry.nlat
+
+    @property
+    def nlon(self) -> int:
+        return self.geometry.nlon
+
+    @property
+    def grid_index(self) -> Optional[torch.Tensor]:
+        """Flat grid position ``row * nlon + col`` of each node, or None when stored row by row."""
+        return self.geometry.grid_index
+
+    @property
+    def lat(self) -> torch.Tensor:
+        """Latitude in radians of every grid point, of shape (nlat, nlon)."""
+        return self.geometry.lat
+
+    @property
+    def lon(self) -> torch.Tensor:
+        """Longitude in radians of every grid point, of shape (nlat, nlon)."""
+        return self.geometry.lon
+
+    @property
+    def position(self) -> torch.Tensor:
+        """3D unit vector of every grid point, of shape (nlat, nlon, 3)."""
+        return self.geometry.position
 
     @property
     def local_rows(self) -> tuple[int, int]:
         """Range [start, end) of the latitude rows held by this GPU on the grid."""
         return get_partition_range(self.row_shard_sizes, self.rank)
 
-    def to_grid(self, x: torch.Tensor) -> torch.Tensor:
+    def to_state(self, x: torch.Tensor) -> torch.Tensor:
         """(batch * local nodes, channels) -> (batch, local rows, nlon, channels).
 
         The nodes are first gathered into whole globes for a share of the channels, put in grid
@@ -212,7 +244,7 @@ class LatLonLayout(_SplitLayout):
         x = all_to_all_transpose(x, 1, band_sizes, 2, channel_shard_sizes, self.model_comm_group)
         return x.view(self.batch_size, -1, self.nlon, num_channels)
 
-    def from_grid(self, x: torch.Tensor) -> torch.Tensor:
+    def from_state(self, x: torch.Tensor) -> torch.Tensor:
         """(batch, local rows, nlon, channels) -> (batch * local nodes, channels)."""
         num_channels = x.shape[-1]
         channel_shard_sizes = self.group_shard_sizes(num_channels)
@@ -224,7 +256,7 @@ class LatLonLayout(_SplitLayout):
         x = all_to_all_transpose(x, 1, self.node_shard_sizes, 2, channel_shard_sizes, self.model_comm_group)
         return x.reshape(-1, num_channels)
 
-    def to_globe(self, x: torch.Tensor) -> torch.Tensor:
+    def to_field(self, x: torch.Tensor) -> torch.Tensor:
         """(batch, local rows, nlon, groups, k) -> (batch, local groups, k, nlat, nlon)."""
         num_groups = x.shape[3]
         x = all_to_all_transpose(
@@ -232,7 +264,7 @@ class LatLonLayout(_SplitLayout):
         )
         return einops.rearrange(x, "b h w g k -> b g k h w")
 
-    def from_globe(self, x: torch.Tensor, num_groups: int) -> torch.Tensor:
+    def from_field(self, x: torch.Tensor, num_groups: int) -> torch.Tensor:
         """(batch, local groups, k, nlat, nlon) -> (batch, local rows, nlon, groups, k)."""
         x = einops.rearrange(x, "b g k h w -> b h w g k")
         return all_to_all_transpose(
@@ -240,62 +272,62 @@ class LatLonLayout(_SplitLayout):
         )
 
 
-class GraphLayout(_SplitLayout):
-    """The processor state on the nodes of the hidden graph, and the graph that the steps read.
+class GraphLayout(Layout):
+    """A forward pass on the nodes of the hidden graph, with the state left as the model passes it.
 
-    The state keeps the shape the model passes in, (batch * local nodes, channels), with the nodes
-    in graph order: each GPU holds every channel for one contiguous block of nodes. Graph blocks
-    read the hidden-to-hidden edges, which the processor prepares once per forward (sorted by
-    destination node, split across GPUs, and with the halo exchange plan of the graph
-    transformer).
+    ``to_state`` and ``from_state`` do nothing: the state keeps the shape
+    (batch * local nodes, channels), with the nodes in graph order, and each GPU holds every
+    channel for one contiguous block of nodes. The mixers read ``edge_attr`` and ``edge_index``,
+    the hidden-to-hidden edges that the geometry prepares once per forward: sorted by destination
+    node, split across GPUs, and with the halo exchange plan of the graph transformer.
 
-    The semi-Lagrangian step needs the whole field. ``to_field`` switches a tensor of shape
-    (batch * local nodes, groups, k) to one of shape (batch, local groups, k, nodes): every node for
-    some of the groups. ``from_field`` switches back.
-
-    ``lat`` and ``lon`` hold the latitude and longitude in radians of every node, in graph order.
-    ``position`` gives the same nodes as 3D unit vectors, derived once per forward. ``spacing`` is
-    a typical distance between neighbouring nodes, as a chord of the unit sphere.
+    ``to_field`` switches a tensor of shape (batch * local nodes, groups, k) to one of shape
+    (batch, local groups, k, nodes): every node for some of the groups.
     """
 
     def __init__(
         self,
-        *,
-        lat: torch.Tensor,
-        lon: torch.Tensor,
-        spacing: float,
+        geometry,
         batch_size: int,
         shard_info: GraphShardInfo,
-        edge_attr: torch.Tensor,
-        edge_index: Adj,
+        edge_attr: Optional[torch.Tensor] = None,
+        edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         halo_info: Optional[HaloInfo] = None,
     ) -> None:
-        super().__init__(lat.shape[0], batch_size, shard_info.nodes, model_comm_group)
-        self.lat = lat
-        self.lon = lon
-        self.spacing = spacing
+        super().__init__(geometry, batch_size, shard_info.nodes, model_comm_group)
         self.shard_info = shard_info
         self.edge_attr = edge_attr
         self.edge_index = edge_index
         self.halo_info = halo_info
-        self._position: Optional[torch.Tensor] = None
 
     @property
-    def size(self) -> int:
-        """Number of rows of the state over all GPUs; the attention size of the graph blocks."""
-        return self.batch_size * self.lat.shape[0]
+    def lat(self) -> torch.Tensor:
+        """Latitude in radians of every node, in graph order."""
+        return self.geometry.lat
+
+    @property
+    def lon(self) -> torch.Tensor:
+        """Longitude in radians of every node, in graph order."""
+        return self.geometry.lon
 
     @property
     def position(self) -> torch.Tensor:
-        """3D unit vectors of the nodes, in graph order, derived from ``lat`` and ``lon``.
+        """3D unit vector of every node, in graph order."""
+        return self.geometry.position
 
-        Latitude and longitude are the stored form: they are exact at the poles, where recovering
-        the longitude from a unit vector is ill-conditioned.
-        """
-        if self._position is None:
-            self._position = latlon_to_unit_vector(self.lat, self.lon)
-        return self._position
+    @property
+    def spacing(self) -> float:
+        """A typical distance between neighbouring nodes, as a chord of the unit sphere."""
+        return self.geometry.spacing
+
+    def to_state(self, x: torch.Tensor) -> torch.Tensor:
+        """The state stays on the nodes, so this does nothing."""
+        return x
+
+    def from_state(self, x: torch.Tensor) -> torch.Tensor:
+        """The state stays on the nodes, so this does nothing."""
+        return x
 
     def to_field(self, x: torch.Tensor) -> torch.Tensor:
         """(batch * local nodes, groups, k) -> (batch, local groups, k, nodes)."""

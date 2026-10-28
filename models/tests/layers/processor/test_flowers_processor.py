@@ -33,10 +33,16 @@ class FlowersProcessorConfig:
     num_chunks: int = 2
     nlat: int = 8
     nlon: int = 16
+    geometry: dict = field(
+        default_factory=lambda: {
+            "_target_": "anemoi.models.layers.geometry.RegularLatLonGeometry",
+            "layout_node_attribute_name": "layout_index",
+            "interpolation": "bilinear",
+        }
+    )
     num_heads: Optional[int] = None
     mlp_hidden_ratio: float = 2.0
     block_style: str = "pre_norm"
-    interpolation: str = "bilinear"
     cartesian_displacement: bool = False
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
@@ -55,7 +61,7 @@ def _build(cfg: FlowersProcessorConfig) -> FlowersProcessor:
         torch.meshgrid(torch.arange(nlat), torch.arange(nlon), indexing="ij"), dim=-1
     ).view(-1, 2)
     graph["hidden"]["_layout_shape"] = [nlat, nlon]
-    return FlowersProcessor(**kwargs, hidden_nodes=graph["hidden"], layout_node_attribute_name="layout_index")
+    return FlowersProcessor(**kwargs, hidden_nodes=graph["hidden"])
 
 
 @pytest.fixture
@@ -66,9 +72,15 @@ def flowers_processor_init():
 def test_flowers_processor_init(flowers_processor_init):
     processor = _build(flowers_processor_init)
     assert len(processor.proc) == flowers_processor_init.num_layers
+    # The grid size comes from the hidden nodes' layout, read once by the shared geometry.
+    assert (processor.geometry.nlat, processor.geometry.nlon) == (
+        flowers_processor_init.nlat,
+        flowers_processor_init.nlon,
+    )
     for block in processor.proc:
         assert isinstance(block, FlowersProcessorBlock)
-        assert (block.nlat, block.nlon) == (flowers_processor_init.nlat, flowers_processor_init.nlon)
+        # Every block shares the one geometry, so nothing geometric is duplicated per layer.
+        assert block.warp.sampler.interpolation == flowers_processor_init.geometry["interpolation"]
         # By default each head moves 4 channels, as in FLOWERS.
         assert block.warp.num_heads == flowers_processor_init.num_channels // 4
 
@@ -82,7 +94,7 @@ def test_flowers_processor_forward_backward(
     flowers_processor_init, batch_size, block_style, interpolation, cartesian_displacement
 ):
     flowers_processor_init.block_style = block_style
-    flowers_processor_init.interpolation = interpolation
+    flowers_processor_init.geometry = dict(flowers_processor_init.geometry, interpolation=interpolation)
     flowers_processor_init.cartesian_displacement = cartesian_displacement
     processor = _build(flowers_processor_init)
 

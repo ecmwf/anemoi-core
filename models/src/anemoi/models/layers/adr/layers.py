@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Spatial parts of the ADR steps, one per geometry.
+"""Spatial parts of the ADR steps, one pair per geometry.
 
 Each geometry has a spatial mixer, which looks at the neighbours of each point and mixes the
 channels, and a low-rank bias, a learned field over the globe:
@@ -17,7 +17,8 @@ channels, and a low-rank bias, a learned field over the globe:
 - on the nodes of a graph (``GraphLayout``): ``GraphSpatialMixer`` and ``GraphLowRankBias``, on
   tensors of shape (batch * local nodes, channels).
 
-Mixers are called as ``mixer(x, layout, cond)`` and biases as ``bias(x, layout)``.
+The steps never build these themselves: ``anemoi.models.layers.geometry`` picks the pair that fits
+its nodes. Mixers are called as ``mixer(x, layout, cond)`` and biases as ``bias(x, layout)``.
 """
 
 import logging

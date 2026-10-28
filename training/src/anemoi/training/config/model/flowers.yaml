@@ -24,11 +24,15 @@ layer_kernels:
     bias: False
 
 processor:
-  # Processor of FLOWERS warp blocks (arXiv:2603.04430), stacked at a single resolution. The hidden
-  # nodes must be a regular latitude-longitude grid built with anemoi.graphs.nodes.RectilinearNodes
-  # with a RectilinearLayoutIndex node attribute (see graph/encoder_decoder_latlon.yaml).
+  # Processor of FLOWERS warp blocks (arXiv:2603.04430), stacked at a single resolution. The
+  # geometry says what the hidden nodes are; on a regular latitude-longitude grid they must be
+  # built with anemoi.graphs.nodes.RectilinearNodes with a RectilinearLayoutIndex node attribute
+  # (see graph/encoder_decoder_latlon.yaml).
   _target_: anemoi.models.layers.processor.FlowersProcessor
-  layout_node_attribute_name: layout_index # hidden node attribute with the row and column of each node
+  geometry:
+    _target_: anemoi.models.layers.geometry.RegularLatLonGeometry
+    layout_node_attribute_name: layout_index # hidden node attribute with the row and column of each node
+    interpolation: bilinear # bilinear or bicubic, used to read values at departure points
   num_channels: ${model.num_channels}
   num_layers: 16
   num_chunks: 4
@@ -36,7 +40,6 @@ processor:
   mlp_hidden_ratio: 4
   mlp_implementation: mlp
   block_style: pre_norm # pre_norm (residual warp + MLP) or flowers (original FLOWERS block)
-  interpolation: bilinear # bilinear or bicubic
   cartesian_displacement: False # True: 3D displacements, which do not turn round across the poles
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True

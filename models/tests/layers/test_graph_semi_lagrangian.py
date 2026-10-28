@@ -13,17 +13,19 @@ import pytest
 import torch
 
 from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.layers.adr.layers import GraphLowRankBias
 from anemoi.models.layers.adr.layers import GraphSpatialMixer
 from anemoi.models.layers.edge_stencil import EdgeDepthwiseConv
+from anemoi.models.layers.geometry import MeshGeometry
 from anemoi.models.layers.layout import GraphLayout
-from anemoi.models.layers.semi_lagrangian import GraphSemiLagrangianLayer
+from anemoi.models.layers.semi_lagrangian import KNNSampler
 from anemoi.models.layers.semi_lagrangian import departure_from_local_angles
 from anemoi.models.layers.semi_lagrangian import knn_on_sphere
 from anemoi.models.layers.semi_lagrangian import latlon_to_unit_vector
 from anemoi.models.layers.semi_lagrangian import typical_node_spacing
 from anemoi.models.layers.utils import load_layer_kernels
+from tests.layers.graph_mesh import expand_edges
 from tests.layers.graph_mesh import fibonacci_nodes
+from tests.layers.graph_mesh import hidden_nodes
 from tests.layers.graph_mesh import knn_edges
 
 
@@ -33,21 +35,18 @@ def _smooth_field(points: torch.Tensor) -> torch.Tensor:
     return x + 0.5 * y * z + 0.3 * z**2 - 0.2 * x * y
 
 
-def _layout(
-    lat: torch.Tensor,
-    lon: torch.Tensor,
-    batch_size: int = 1,
-    edges: tuple[torch.Tensor, torch.Tensor] = (None, None),
-) -> GraphLayout:
-    """Layout on one GPU, by default of the nodes alone, without edges."""
-    position = latlon_to_unit_vector(lat, lon).float()
-    edge_attr, edge_index = edges
-    return GraphLayout(
-        lat=lat.float(),
-        lon=lon.float(),
-        spacing=typical_node_spacing(position),
-        batch_size=batch_size,
-        shard_info=GraphShardInfo(nodes=[batch_size * lat.shape[0]]),
+def _geometry(lat: torch.Tensor, lon: torch.Tensor, **kwargs) -> MeshGeometry:
+    return MeshGeometry(hidden_nodes=hidden_nodes(lat, lon), edge_dim=4, **kwargs)
+
+
+def _layout(lat: torch.Tensor, lon: torch.Tensor, batch_size: int = 1, **kwargs) -> GraphLayout:
+    """Layout on one GPU, with edges from the three nearest nodes."""
+    num_nodes = lat.shape[0]
+    edge_attr, edge_index = expand_edges(*knn_edges(lat, lon, 3), num_nodes, batch_size)
+    return _geometry(lat, lon, **kwargs).bind(
+        torch.zeros(batch_size * num_nodes, 1),
+        batch_size,
+        GraphShardInfo(nodes=[batch_size * num_nodes]),
         edge_attr=edge_attr,
         edge_index=edge_index,
     )
@@ -83,7 +82,7 @@ def test_layout_round_trip_single_process():
 def test_zero_displacement_is_identity(cartesian_displacement):
     lat, lon = fibonacci_nodes(500)
     heads = 3
-    layer = GraphSemiLagrangianLayer(num_heads=heads, cartesian_displacement=cartesian_displacement)
+    layer = KNNSampler(num_heads=heads, cartesian_displacement=cartesian_displacement)
     values = torch.randn(2 * 500, heads, 4)
     displacement = torch.zeros(2 * 500, heads, layer.displacement_dim)
     moved = layer.sample(values, displacement, _layout(lat, lon, batch_size=2))
@@ -101,7 +100,7 @@ def test_sampling_reads_from_departure_points():
     torch.manual_seed(0)
     lat, lon = fibonacci_nodes(2000)
     heads = 3
-    layer = GraphSemiLagrangianLayer(num_heads=heads)
+    layer = KNNSampler(num_heads=heads)
     position = latlon_to_unit_vector(lat, lon)
     values = _smooth_field(position)[:, None, None].expand(-1, heads, 1).float().contiguous()
 
@@ -117,8 +116,8 @@ def test_sampling_reads_from_departure_points():
 @pytest.mark.parametrize("component", ["east", "north"])
 def test_cartesian_and_local_displacements_agree_along_one_direction(component):
     lat, lon = fibonacci_nodes(300)
-    local = GraphSemiLagrangianLayer(num_heads=1)
-    cartesian = GraphSemiLagrangianLayer(num_heads=1, cartesian_displacement=True)
+    local = KNNSampler(num_heads=1)
+    cartesian = KNNSampler(num_heads=1, cartesian_displacement=True)
     east_dir = torch.stack([-lon.sin(), lon.cos(), torch.zeros_like(lon)], dim=-1)
     north_dir = torch.stack([-lat.sin() * lon.cos(), -lat.sin() * lon.sin(), lat.cos()], dim=-1)
 
@@ -139,7 +138,7 @@ def test_cartesian_and_local_displacements_agree_along_one_direction(component):
 def test_gradient_reaches_the_displacements():
     torch.manual_seed(0)
     lat, lon = fibonacci_nodes(300)
-    layer = GraphSemiLagrangianLayer(num_heads=2)
+    layer = KNNSampler(num_heads=2)
     values = _smooth_field(latlon_to_unit_vector(lat, lon))[:, None, None].expand(-1, 2, 1).float().contiguous()
     displacement = ((torch.rand(300, 2, 2) * 2 - 1) * 0.2).requires_grad_()
     layer.sample(values, displacement, _layout(lat, lon)).sum().backward()
@@ -152,7 +151,8 @@ def test_graph_low_rank_bias_is_shared_over_the_batch_and_single_valued_at_the_p
     # Two points on each pole at different longitudes, and two elsewhere.
     lat = torch.tensor([math.pi / 2, math.pi / 2, -math.pi / 2, -math.pi / 2, 0.3, -0.7], dtype=torch.float64)
     lon = torch.tensor([0.0, 2.0, 1.0, 4.0, 1.5, 3.0], dtype=torch.float64)
-    bias = GraphLowRankBias(5, load_layer_kernels(), rank=3, num_base_maps=2, lat_degree=4, lon_wavenumber=3)
+    geometry = _geometry(lat, lon, bias_rank=3, bias_base_maps=2, bias_lat_degree=4, bias_lon_wavenumber=3)
+    bias = geometry.position_bias(5, load_layer_kernels())
     with torch.no_grad():
         for parameter in (bias.coefficients, bias.lat_profiles, bias.lon_profiles):
             parameter.normal_()
@@ -175,7 +175,8 @@ def test_edge_depthwise_conv_is_the_weighted_mean_of_the_neighbours():
     num_nodes, num_neighbours, channels = 40, 3, 5
     lat, lon = fibonacci_nodes(num_nodes)
     edge_attr, edge_index = knn_edges(lat, lon, num_neighbours)
-    layout = _layout(lat, lon, edges=(edge_attr, edge_index))
+    layout = _layout(lat, lon)
+    edge_attr, edge_index = layout.edge_attr, layout.edge_index
 
     stencil = EdgeDepthwiseConv(channels, edge_attr.shape[1], load_layer_kernels())
     torch.nn.init.normal_(stencil.weight.weight)
@@ -194,7 +195,7 @@ def test_edge_depthwise_conv_keeps_the_channels_apart():
     """Changing one channel of the input changes only that channel of the output."""
     torch.manual_seed(0)
     lat, lon = fibonacci_nodes(40)
-    layout = _layout(lat, lon, edges=knn_edges(lat, lon, 3))
+    layout = _layout(lat, lon)
     stencil = EdgeDepthwiseConv(5, 4, load_layer_kernels())
     torch.nn.init.normal_(stencil.weight.weight)
 

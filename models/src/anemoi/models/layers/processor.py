@@ -12,7 +12,7 @@ import logging
 from abc import ABC
 from typing import Optional
 
-import torch
+from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch import Tensor
 from torch import nn
@@ -22,28 +22,17 @@ from torch_geometric.data.storage import NodeStorage
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.halo import HaloInfo
-from anemoi.models.distributed.halo import build_halo_info
-from anemoi.models.distributed.halo import cache_specs as halo_cache_specs
-from anemoi.models.distributed.khop_edges import ANEMOI_DEBUG_SHARDING
-from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
+from anemoi.models.distributed.halo import HaloInfoCache
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.block import ADRProcessorBlock
 from anemoi.models.layers.block import FlowersProcessorBlock
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
-from anemoi.models.layers.layout import GraphLayout
-from anemoi.models.layers.layout import LatLonLayout
-from anemoi.models.layers.layout import latlon_grid_layout
-from anemoi.models.layers.layout import latlon_to_unit_vector
 from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.models.layers.semi_lagrangian import typical_node_spacing
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -337,44 +326,73 @@ class TransformerProcessor(BaseProcessor):
         return x
 
 
-def run_on_latlon_grid(
-    processor: BaseProcessor,
-    x: Tensor,
-    batch_size: int,
-    shard_info: GraphShardInfo,
-    model_comm_group: Optional[ProcessGroup] = None,
-    cond: Optional[Tensor] = None,
-    **kwargs,
-) -> Tensor:
-    """Run the layers of a latitude-longitude processor on the grid.
+class SemiLagrangianProcessor(BaseProcessor):
+    """Shared parts of the processors that run on a ``LatentGeometry``.
 
-    x, and cond if given, go from graph nodes, of shape (batch * local nodes, channels), to the
-    grid, of shape (batch, local rows, nlon, channels), and x comes back to graph nodes at the end.
+    The geometry is built once from the graph and shared by every block, so the node coordinates
+    are held once rather than once per layer. Each forward binds it to the batch, and on a mesh to
+    the hidden-to-hidden edges, which gives the layout the blocks work in; the state is put into
+    that layout on the way in and taken back out on the way out.
     """
-    layout = LatLonLayout(
-        processor.nlat, processor.nlon, batch_size, shard_info.nodes, model_comm_group, processor.grid_index
-    )
-    if cond is not None:
-        kwargs["cond"] = layout.to_grid(cond)
 
-    (x,) = processor.run_layers(
-        (layout.to_grid(x),), shard_info, batch_size, model_comm_group=model_comm_group, layout=layout, **kwargs
-    )
-    return layout.from_grid(x)
+    def __init__(
+        self,
+        *,
+        geometry: DictConfig,
+        hidden_nodes: NodeStorage,
+        edge_dim: Optional[int] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.geometry = instantiate(geometry, hidden_nodes=hidden_nodes, edge_dim=edge_dim)
+
+    def forward(
+        self,
+        x: Tensor,
+        batch_size: int,
+        shard_info: GraphShardInfo,
+        edge_attr: Optional[Tensor] = None,
+        edge_index: Optional[Adj] = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        edges_are_dst_sorted: bool = True,
+        cond: Optional[Tensor] = None,
+        *args,
+        **kwargs,
+    ) -> Tensor:
+        """Run the layers on the geometry.
+
+        x has shape (batch * local nodes, channels), as the model hands it over, and comes back
+        the same way. The edges are only used by a mesh geometry; ``edges_are_dst_sorted`` says
+        whether they already are ordered by destination node.
+        """
+        layout = self.geometry.bind(
+            x,
+            batch_size,
+            shard_info,
+            model_comm_group,
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
+        if cond is not None:
+            kwargs["cond"] = layout.to_state(cond)
+        (x,) = self.run_layers(
+            (layout.to_state(x),), shard_info, batch_size, model_comm_group=model_comm_group, layout=layout, **kwargs
+        )
+        return layout.from_state(x)
 
 
-class ADRProcessor(BaseProcessor):
-    """Advection-diffusion-reaction processor on a regular latitude-longitude hidden grid (PARADIS).
+class ADRProcessor(SemiLagrangianProcessor):
+    """Advection-diffusion-reaction processor (PARADIS), on any hidden nodes.
 
     Each layer runs an advection, a diffusion and a reaction step, each built from its own config
-    (see ``anemoi.models.layers.adr``). A step set to None is left out.
+    (see ``anemoi.models.layers.adr``). A step set to None is left out, and the layers split one
+    model time step into equal sub-steps.
 
-    The layers split one model time step into equal sub-steps.
-
-    The processor puts the hidden nodes on the grid once, as a tensor of shape
-    (batch, local rows, nlon, channels), and every step works on that grid; across GPUs each GPU
-    holds a band of latitude rows (see ``LatLonLayout``). The nodes go back to graph order on the
-    way out.
+    The ``geometry`` config decides what the hidden nodes are and what the spatial parts of the
+    steps look like: ``RegularLatLonGeometry`` for a regular latitude-longitude grid, as in the
+    paper, or ``MeshGeometry`` for any other mesh, which mixes neighbours over the
+    hidden-to-hidden edges of the graph. The steps themselves are the same either way.
     """
 
     def __init__(
@@ -383,12 +401,13 @@ class ADRProcessor(BaseProcessor):
         num_layers: int,
         num_channels: int,
         num_chunks: int,
+        geometry: DictConfig,
         hidden_nodes: NodeStorage,
-        layout_node_attribute_name: str,
         timestep: str,
         advection: Optional[DictConfig],
         diffusion: Optional[DictConfig],
         reaction: Optional[DictConfig],
+        edge_dim: Optional[int] = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -403,21 +422,25 @@ class ADRProcessor(BaseProcessor):
             Number of channels
         num_chunks: int
             Number of chunks in processor
+        geometry : DictConfig
+            Config of the hidden nodes, e.g.
+            ``anemoi.models.layers.geometry.RegularLatLonGeometry``. It is given the hidden nodes
+            of the graph and the dimension of the hidden-to-hidden edges.
         hidden_nodes : NodeStorage
-            The hidden nodes of the graph, with their coordinates and layout attribute
-        layout_node_attribute_name : str
-            Name of the hidden node attribute with the row and column of each node in the grid
+            The hidden nodes of the graph, with their coordinates and any layout attribute
         timestep : str
             Model time step, e.g. "6h". Sets how far the learned velocities move the state.
         advection : DictConfig, optional
-            Config of the advection step, e.g. ``anemoi.models.layers.adr.LatLonAdvection``.
+            Config of the advection step, e.g. ``anemoi.models.layers.adr.Advection``.
             None leaves the step out.
         diffusion : DictConfig, optional
-            Config of the diffusion step, e.g. ``anemoi.models.layers.adr.LatLonDiffusion``.
+            Config of the diffusion step, e.g. ``anemoi.models.layers.adr.Diffusion``.
             None leaves the step out.
         reaction : DictConfig, optional
-            Config of the reaction step, e.g. ``anemoi.models.layers.adr.LatLonReaction``.
+            Config of the reaction step, e.g. ``anemoi.models.layers.adr.Reaction``.
             None leaves the step out.
+        edge_dim : int, optional
+            Number of features of the hidden-to-hidden edges, used by a mesh geometry
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -425,6 +448,9 @@ class ADRProcessor(BaseProcessor):
             Defined in config/models/<model>.yaml
         """
         super().__init__(
+            geometry=geometry,
+            hidden_nodes=hidden_nodes,
+            edge_dim=edge_dim,
             num_layers=num_layers,
             num_channels=num_channels,
             num_chunks=num_chunks,
@@ -433,14 +459,11 @@ class ADRProcessor(BaseProcessor):
             **kwargs,
         )
 
-        self.nlat, self.nlon, grid_index = latlon_grid_layout(hidden_nodes, layout_node_attribute_name)
-        # Flat grid position of each node, when the nodes are not stored row by row.
-        self.register_buffer("grid_index", grid_index, persistent=False)
         time_step = frequency_to_seconds(timestep) * EARTH_ROTATION_RATE / num_layers
         self.build_layers(
             ADRProcessorBlock,
             num_channels=num_channels,
-            geometry={"nlat": self.nlat, "nlon": self.nlon},
+            geometry=self.geometry,
             time_step=time_step,
             layer_kernels=self.layer_factory,
             advection=advection,
@@ -449,30 +472,12 @@ class ADRProcessor(BaseProcessor):
         )
         self.offload_layers(cpu_offload)
 
-    def forward(
-        self,
-        x: Tensor,
-        batch_size: int,
-        shard_info: GraphShardInfo,
-        edge_attr: Optional[Tensor] = None,
-        edge_index: Optional[Adj] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
-        *args,
-        **kwargs,
-    ) -> Tensor:
-        return run_on_latlon_grid(self, x, batch_size, shard_info, model_comm_group, **kwargs)
 
+class FlowersProcessor(SemiLagrangianProcessor):
+    """Processor of FLOWERS warp blocks, stacked at a single resolution, on any hidden nodes.
 
-class FlowersProcessor(BaseProcessor):
-    """Processor of FLOWERS warp blocks on a regular latitude-longitude hidden grid.
-
-    The blocks are stacked at a single resolution. The hidden nodes must be the cell centres of a
-    regular latitude-longitude grid, with rows from north to south and longitudes running east
-    from zero, as built by ``anemoi.graphs.nodes.RectilinearNodes``. The grid size and the row
-    and column of each node are read from the hidden nodes' layout attribute, built with
-    ``anemoi.graphs.nodes.attributes.RectilinearLayoutIndex``.
-
-    As in ``ADRProcessor``, the hidden nodes are put on the grid once and the blocks work on it.
+    As in ``ADRProcessor``, the ``geometry`` config decides what the hidden nodes are and how a
+    value is read at a departure point.
     """
 
     def __init__(
@@ -481,14 +486,14 @@ class FlowersProcessor(BaseProcessor):
         num_layers: int,
         num_channels: int,
         num_chunks: int,
+        geometry: DictConfig,
         hidden_nodes: NodeStorage,
-        layout_node_attribute_name: str,
         num_heads: Optional[int] = None,
         mlp_hidden_ratio: float = 4.0,
         mlp_implementation: MLPImplementation = "mlp",
         block_style: str = "pre_norm",
-        interpolation: str = "bilinear",
         cartesian_displacement: bool = False,
+        edge_dim: Optional[int] = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -503,10 +508,11 @@ class FlowersProcessor(BaseProcessor):
             Number of channels
         num_chunks: int
             Number of chunks in processor
+        geometry : DictConfig
+            Config of the hidden nodes, e.g.
+            ``anemoi.models.layers.geometry.RegularLatLonGeometry``
         hidden_nodes : NodeStorage
-            The hidden nodes of the graph, with their coordinates and layout attribute
-        layout_node_attribute_name : str
-            Name of the hidden node attribute with the row and column of each node in the grid
+            The hidden nodes of the graph, with their coordinates and any layout attribute
         num_heads : int, optional
             Number of displacement fields per block; each moves num_channels // num_heads
             channels. By default 4 channels per head, as in FLOWERS.
@@ -517,11 +523,11 @@ class FlowersProcessor(BaseProcessor):
         block_style : str
             "pre_norm" (residual warp and MLP, each after a layer norm) or "flowers" (the
             original FLOWERS block)
-        interpolation : str
-            "bilinear" or "bicubic", by default "bilinear" as in FLOWERS
         cartesian_displacement : bool
             Predict displacements as 3D vectors instead of local east and north angles (default).
             3D vectors do not turn round across the poles.
+        edge_dim : int, optional
+            Number of features of the hidden-to-hidden edges, used by a mesh geometry
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -529,6 +535,9 @@ class FlowersProcessor(BaseProcessor):
             Defined in config/models/<model>.yaml
         """
         super().__init__(
+            geometry=geometry,
+            hidden_nodes=hidden_nodes,
+            edge_dim=edge_dim,
             num_layers=num_layers,
             num_channels=num_channels,
             num_chunks=num_chunks,
@@ -537,37 +546,19 @@ class FlowersProcessor(BaseProcessor):
             **kwargs,
         )
 
-        self.nlat, self.nlon, grid_index = latlon_grid_layout(hidden_nodes, layout_node_attribute_name)
-        # Flat grid position of each node, when the nodes are not stored row by row.
-        self.register_buffer("grid_index", grid_index, persistent=False)
         self.build_layers(
             FlowersProcessorBlock,
             num_channels=num_channels,
             hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
             num_heads=num_heads if num_heads is not None else num_channels // 4,
-            nlat=self.nlat,
-            nlon=self.nlon,
+            geometry=self.geometry,
             layer_kernels=self.layer_factory,
             block_style=block_style,
-            interpolation=interpolation,
             mlp_implementation=mlp_implementation,
             cartesian_displacement=cartesian_displacement,
         )
 
         self.offload_layers(cpu_offload)
-
-    def forward(
-        self,
-        x: Tensor,
-        batch_size: int,
-        shard_info: GraphShardInfo,
-        edge_attr: Optional[Tensor] = None,
-        edge_index: Optional[Adj] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
-        *args,
-        **kwargs,
-    ) -> Tensor:
-        return run_on_latlon_grid(self, x, batch_size, shard_info, model_comm_group, **kwargs)
 
 
 class GNNProcessor(BaseProcessor):
@@ -709,70 +700,7 @@ class GNNProcessor(BaseProcessor):
         return x
 
 
-class _HaloInfoCache:
-    """Builds the halo exchange plan of the edge-sharded graph transformer, once for all layers.
-
-    Used by processors that run ``GraphTransformerProcessorBlock`` with ``shard_strategy="edges"``.
-    The processor sets ``shard_strategy``, ``_cached_halo_info`` and ``_cached_halo_cache_specs``.
-    """
-
-    def _get_or_build_cached_halo_info(
-        self,
-        x: Tensor,
-        edge_index: Adj,
-        shard_info: GraphShardInfo,
-        batch_size: int,
-        model_comm_group: Optional[ProcessGroup],
-    ) -> Optional[HaloInfo]:
-        """Return one halo plan shared by all processor layers.
-
-        The plan is kept for as long as the shard sizes stay the same, so the
-        processor graph must not change between calls.
-        """
-        if self.shard_strategy != "edges" or not model_is_distributed(model_comm_group):
-            return None
-
-        if batch_size != 1:
-            raise ValueError(
-                "GraphTransformerProcessor halo exchange requires batch_size=1 when model sharding is enabled."
-            )
-        if not shard_info.nodes_are_sharded():
-            raise ValueError(
-                "GraphTransformerProcessor halo exchange requires sharded nodes when model sharding is enabled."
-            )
-        assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
-
-        cache_specs = halo_cache_specs(shard_info, model_comm_group)
-        if self._cached_halo_info is not None and self._cached_halo_cache_specs == cache_specs:
-            return self._cached_halo_info
-
-        LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
-
-        bipartite_shard_info = BipartiteGraphShardInfo(
-            src_nodes=shard_info.nodes,
-            dst_nodes=shard_info.nodes,
-            edges=shard_info.edges,
-        )
-        partition = build_graph_partition_from_shard_info(
-            edge_index,
-            (x, x),
-            bipartite_shard_info,
-            model_comm_group,
-        )
-        halo_info = build_halo_info(
-            partition,
-            edge_index,
-            model_comm_group,
-            shard_info.edges,
-            debug=ANEMOI_DEBUG_SHARDING,
-        )
-
-        self._cached_halo_info = halo_info
-        self._cached_halo_cache_specs = cache_specs
-        return halo_info
-
-
-class GraphTransformerProcessor(BaseProcessor, _HaloInfoCache):
+class GraphTransformerProcessor(BaseProcessor, HaloInfoCache):
     """Processor."""
 
     def __init__(
@@ -952,148 +880,4 @@ class GraphTransformerProcessor(BaseProcessor, _HaloInfoCache):
             **kwargs,
         )
 
-        return x
-
-
-class GraphADRProcessor(BaseProcessor, _HaloInfoCache):
-    """Advection-diffusion-reaction processor on the nodes of the hidden graph.
-
-    The graph counterpart of ``ADRProcessor``, for any set of hidden nodes (for instance a HEALPix,
-    icosahedral or reduced Gaussian mesh). The state stays on the nodes, as the model passes it in,
-    split by node across GPUs. Each layer runs an advection, a diffusion and a reaction step
-    (``anemoi.models.layers.adr.GraphAdvection``, ``GraphDiffusion``, ``GraphReaction``); a step
-    set to None is left out, and the layers split one model time step into equal sub-steps.
-
-    The steps mix neighbouring nodes with graph blocks over the hidden-to-hidden edges. The
-    processor sorts and splits the edges, and builds the halo exchange plan of the graph
-    transformer, once per forward (see ``GraphLayout``). The advection step reads each value at
-    its departure point from the nearest nodes.
-    """
-
-    def __init__(
-        self,
-        *,
-        num_layers: int,
-        num_channels: int,
-        num_chunks: int,
-        hidden_nodes: NodeStorage,
-        edge_dim: int,
-        timestep: str,
-        advection: Optional[DictConfig],
-        diffusion: Optional[DictConfig],
-        reaction: Optional[DictConfig],
-        cpu_offload: bool = False,
-        layer_kernels: DotDict,
-        **kwargs,
-    ) -> None:
-        """Initialize GraphADRProcessor.
-
-        Parameters
-        ----------
-        num_layers : int
-            Number of layers
-        num_channels : int
-            Number of channels
-        num_chunks: int
-            Number of chunks in processor
-        hidden_nodes : NodeStorage
-            The hidden nodes of the graph, with their coordinates ``x`` (latitude and longitude in
-            radians)
-        edge_dim : int
-            Number of features of the hidden-to-hidden edges
-        timestep : str
-            Model time step, e.g. "6h". Sets how far the learned velocities move the state.
-        advection : DictConfig, optional
-            Config of the advection step, e.g. ``anemoi.models.layers.adr.GraphAdvection``.
-            None leaves the step out.
-        diffusion : DictConfig, optional
-            Config of the diffusion step, e.g. ``anemoi.models.layers.adr.GraphDiffusion``.
-            None leaves the step out.
-        reaction : DictConfig, optional
-            Config of the reaction step, e.g. ``anemoi.models.layers.adr.GraphReaction``.
-            None leaves the step out.
-        cpu_offload : bool
-            Whether to offload processing to CPU, by default False
-        layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
-            Defined in config/models/<model>.yaml
-        """
-        super().__init__(
-            num_layers=num_layers,
-            num_channels=num_channels,
-            num_chunks=num_chunks,
-            cpu_offload=cpu_offload,
-            layer_kernels=layer_kernels,
-            **kwargs,
-        )
-
-        coords = hidden_nodes["x"].detach().to(device="cpu", dtype=torch.float64)
-        lat, lon = coords[:, 0], coords[:, 1]
-        self.register_buffer("node_lat", lat.float(), persistent=False)
-        self.register_buffer("node_lon", lon.float(), persistent=False)
-        self.node_spacing = typical_node_spacing(latlon_to_unit_vector(lat, lon).float())
-
-        self.shard_strategy = "edges"
-        self._cached_halo_info = None
-        self._cached_halo_cache_specs = None
-
-        time_step = frequency_to_seconds(timestep) * EARTH_ROTATION_RATE / num_layers
-        self.build_layers(
-            ADRProcessorBlock,
-            num_channels=num_channels,
-            geometry={"edge_dim": edge_dim},
-            time_step=time_step,
-            layer_kernels=self.layer_factory,
-            advection=advection,
-            diffusion=diffusion,
-            reaction=reaction,
-        )
-        self.offload_layers(cpu_offload)
-
-    def forward(
-        self,
-        x: Tensor,
-        batch_size: int,
-        shard_info: GraphShardInfo,
-        edge_attr: Tensor,
-        edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
-        edges_are_dst_sorted: bool = True,
-        *args,
-        **kwargs,
-    ) -> Tensor:
-        """Run the processor on the hidden graph.
-
-        x has shape (batch * local nodes, channels). The edges are prepared as in
-        ``GraphTransformerProcessor``; ``edges_are_dst_sorted`` says whether they already are
-        ordered by destination node.
-        """
-        size = sum(shard_info.nodes) if shard_info.nodes_are_sharded() else x.size(0)
-        edge_attr, edge_index = ensure_edges_are_dst_sorted(
-            edge_attr,
-            edge_index,
-            num_dst=size,
-            edges_are_sharded=shard_info.edges_are_sharded(),
-            model_comm_group=model_comm_group,
-            edges_are_dst_sorted=edges_are_dst_sorted,
-        )
-        if not shard_info.edges_are_sharded():
-            edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
-                edge_attr, edge_index, size, size, model_comm_group, edges_are_dst_sorted=edges_are_dst_sorted
-            )
-            shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
-        halo_info = self._get_or_build_cached_halo_info(x, edge_index, shard_info, batch_size, model_comm_group)
-
-        layout = GraphLayout(
-            lat=self.node_lat,
-            lon=self.node_lon,
-            spacing=self.node_spacing,
-            batch_size=batch_size,
-            shard_info=shard_info,
-            edge_attr=edge_attr,
-            edge_index=edge_index,
-            model_comm_group=model_comm_group,
-            halo_info=halo_info,
-        )
-        (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, layout=layout, **kwargs)
         return x

@@ -17,9 +17,9 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.layers.adr import LatLonAdvection
-from anemoi.models.layers.adr import LatLonDiffusion
-from anemoi.models.layers.adr import LatLonReaction
+from anemoi.models.layers.adr import Advection
+from anemoi.models.layers.adr import Diffusion
+from anemoi.models.layers.adr import Reaction
 from anemoi.models.layers.block import ADRProcessorBlock
 from anemoi.models.layers.layout import latlon_cell_centres
 from anemoi.models.layers.processor import ADRProcessor
@@ -27,30 +27,31 @@ from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 
-def _advection(**kwargs) -> dict:
+def _geometry(**kwargs) -> dict:
     return {
-        "_target_": "anemoi.models.layers.adr.LatLonAdvection",
-        "advection_channels": 16,
-        "velocity_hidden_dim": 12,
+        "_target_": "anemoi.models.layers.geometry.RegularLatLonGeometry",
+        "layout_node_attribute_name": "layout_index",
         "bias_rank": 4,
         "bias_base_maps": 2,
+        **kwargs,
+    }
+
+
+def _advection(**kwargs) -> dict:
+    return {
+        "_target_": "anemoi.models.layers.adr.Advection",
+        "advection_channels": 16,
+        "velocity_hidden_dim": 12,
         **kwargs,
     }
 
 
 def _diffusion(**kwargs) -> dict:
-    return {"_target_": "anemoi.models.layers.adr.LatLonDiffusion", "bias_rank": 4, "bias_base_maps": 2, **kwargs}
+    return {"_target_": "anemoi.models.layers.adr.Diffusion", **kwargs}
 
 
 def _reaction(**kwargs) -> dict:
-    return {
-        "_target_": "anemoi.models.layers.adr.LatLonReaction",
-        "hidden_dim": 24,
-        "num_layers": 4,
-        "bias_rank": 4,
-        "bias_base_maps": 2,
-        **kwargs,
-    }
+    return {"_target_": "anemoi.models.layers.adr.Reaction", "hidden_dim": 24, "num_layers": 4, **kwargs}
 
 
 @dataclass
@@ -62,6 +63,7 @@ class ADRProcessorConfig:
     num_chunks: int = 2
     nlat: int = 8
     nlon: int = 16
+    geometry: dict = field(default_factory=_geometry)
     timestep: str = "6h"
     advection: Optional[dict] = field(default_factory=_advection)
     diffusion: Optional[dict] = field(default_factory=_diffusion)
@@ -83,7 +85,7 @@ def _build(cfg: ADRProcessorConfig) -> ADRProcessor:
         torch.meshgrid(torch.arange(nlat), torch.arange(nlon), indexing="ij"), dim=-1
     ).view(-1, 2)
     graph["hidden"]["_layout_shape"] = [nlat, nlon]
-    return ADRProcessor(**kwargs, hidden_nodes=graph["hidden"], layout_node_attribute_name="layout_index")
+    return ADRProcessor(**kwargs, hidden_nodes=graph["hidden"])
 
 
 @pytest.fixture
@@ -102,20 +104,36 @@ def test_adr_processor_init(adr_processor, adr_processor_init):
     assert adr_processor.num_channels == adr_processor_init.num_channels
     assert adr_processor.chunk_size == adr_processor_init.num_layers // adr_processor_init.num_chunks
     assert len(adr_processor.proc) == adr_processor_init.num_layers
+    # The grid size comes from the hidden nodes' layout, read once by the shared geometry.
+    assert (adr_processor.geometry.nlat, adr_processor.geometry.nlon) == (
+        adr_processor_init.nlat,
+        adr_processor_init.nlon,
+    )
+    assert all(block.advection.transport.down.stencil.conv is not None for block in adr_processor.proc)
     for block in adr_processor.proc:
         assert isinstance(block, ADRProcessorBlock)
         # The grid size comes from the hidden nodes' layout.
-        sampler = block.advection.transport.sampler
-        assert (sampler.nlat, sampler.nlon) == (adr_processor_init.nlat, adr_processor_init.nlon)
-        assert isinstance(block.advection, LatLonAdvection)
-        assert isinstance(block.diffusion, LatLonDiffusion)
-        assert isinstance(block.reaction, LatLonReaction)
+        assert isinstance(block.advection, Advection)
+        assert isinstance(block.diffusion, Diffusion)
+        assert isinstance(block.reaction, Reaction)
         # By default every moved channel has its own velocity field.
         assert block.advection.transport.num_velocity_fields == adr_processor_init.advection["advection_channels"]
         # The layers split one 6 hour step, with velocities in units of 1 / Earth's rotation rate.
         assert block.advection.transport.time_step == pytest.approx(
             6 * 3600 * 7.29212e-5 / adr_processor_init.num_layers
         )
+
+
+def test_the_geometry_is_held_once_and_stays_out_of_the_state_dict(adr_processor):
+    """The grid is held once by the shared geometry, not once per layer.
+
+    Before the geometry was shared, every layer kept its own copy of the arrival coordinates and
+    of the grid index: on a 361 x 720 grid with 16 layers that is tens of megabytes of buffers.
+    """
+    assert adr_processor.geometry.position.shape == (adr_processor.geometry.nlat, adr_processor.geometry.nlon, 3)
+    assert not [name for block in adr_processor.proc for name, _ in block.named_buffers()]
+    assert not [name for name in adr_processor.state_dict() if name.startswith("geometry")]
+    assert not list(adr_processor.geometry.parameters())
 
 
 @pytest.mark.parametrize("batch_size", [1, 2])
@@ -126,10 +144,8 @@ def test_adr_processor_init(adr_processor, adr_processor_init):
 def test_adr_processor_forward_backward(
     adr_processor_init, batch_size, interpolation, kernel_size, cartesian_displacement
 ):
-    adr_processor_init.advection = _advection(
-        interpolation=interpolation, kernel_size=kernel_size, cartesian_displacement=cartesian_displacement
-    )
-    adr_processor_init.diffusion = _diffusion(kernel_size=kernel_size)
+    adr_processor_init.geometry = _geometry(interpolation=interpolation, kernel_size=kernel_size)
+    adr_processor_init.advection = _advection(cartesian_displacement=cartesian_displacement)
     processor = _build(adr_processor_init)
 
     grid = adr_processor_init.nlat * adr_processor_init.nlon

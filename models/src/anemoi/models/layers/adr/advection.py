@@ -8,29 +8,18 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from typing import Callable
 from typing import Optional
-from typing import Union
 
 import torch
 from torch import Tensor
 from torch import nn
 
-from anemoi.models.layers.adr.layers import GraphLowRankBias
-from anemoi.models.layers.adr.layers import GraphSpatialMixer
-from anemoi.models.layers.adr.layers import LatLonLowRankBias
-from anemoi.models.layers.adr.layers import LatLonSpatialMixer
 from anemoi.models.layers.adr.layers import init_branch
-from anemoi.models.layers.layout import GraphLayout
-from anemoi.models.layers.layout import LatLonLayout
-from anemoi.models.layers.semi_lagrangian import GraphSemiLagrangianLayer
-from anemoi.models.layers.semi_lagrangian import SemiLagrangianLayer
+from anemoi.models.layers.layout import Layout
 from anemoi.models.layers.semi_lagrangian import _at_least_float32
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
-
-Layout = Union[LatLonLayout, GraphLayout]
 
 
 class SemiLagrangianAdvection(nn.Module):
@@ -48,9 +37,8 @@ class SemiLagrangianAdvection(nn.Module):
 
     Each velocity field moves ``advection_channels // num_velocity_fields`` channels.
 
-    The geometry comes in through the sampler (``SemiLagrangianLayer`` on a latitude-longitude
-    grid, ``GraphSemiLagrangianLayer`` on a graph) and through ``mixer(in_channels, out_channels)``
-    and ``bias(num_channels)``, which build the spatial mixers and the bias field.
+    The geometry gives the spatial mixers, the bias field and the sampler, so this step runs
+    unchanged on a regular latitude-longitude grid and on a mesh.
     """
 
     def __init__(
@@ -62,9 +50,8 @@ class SemiLagrangianAdvection(nn.Module):
         velocity_hidden_dim: int,
         time_step: float,
         layer_kernels: DotDict,
-        sampler: Union[SemiLagrangianLayer, GraphSemiLagrangianLayer],
-        mixer: Callable[[int, int], nn.Module],
-        bias: Callable[[int], nn.Module],
+        geometry,
+        cartesian_displacement: bool = False,
     ) -> None:
         super().__init__()
         if advection_channels % num_velocity_fields != 0:
@@ -75,17 +62,20 @@ class SemiLagrangianAdvection(nn.Module):
         self.num_velocity_fields = num_velocity_fields
         self.advection_channels = advection_channels
         self.time_step = time_step
-        self.sampler = sampler
-        self.displacement_dim = sampler.displacement_dim
 
-        self.down = mixer(num_channels, advection_channels)
+        self.sampler = geometry.sampler(num_velocity_fields, cartesian_displacement=cartesian_displacement)
+        self.displacement_dim = self.sampler.displacement_dim
+
+        self.down = geometry.spatial_mixer(num_channels, advection_channels, layer_kernels)
         self.up = layer_kernels.Linear(advection_channels, num_channels)
 
         self.velocity_norm = layer_kernels.LayerNorm(normalized_shape=num_channels)
         self.velocity_in = layer_kernels.Linear(num_channels, velocity_hidden_dim)
-        self.velocity_bias = bias(velocity_hidden_dim)
+        self.velocity_bias = geometry.position_bias(velocity_hidden_dim, layer_kernels)
         self.velocity_activation = layer_kernels.Activation()
-        self.velocity_out = mixer(velocity_hidden_dim, self.displacement_dim * num_velocity_fields)
+        self.velocity_out = geometry.spatial_mixer(
+            velocity_hidden_dim, self.displacement_dim * num_velocity_fields, layer_kernels
+        )
 
         init_branch(*self.down.branch_layers())
         init_branch(self.up)
@@ -108,8 +98,9 @@ class SemiLagrangianAdvection(nn.Module):
 class Advection(nn.Module):
     """Advection step: the state moves towards its advected version by a learned share per channel.
 
-    The geometry-specific subclasses (``LatLonAdvection``, ``GraphAdvection``) build the
-    transport.
+    On a mesh the number of neighbour searches is ``batch * num_velocity_fields * nodes``, so a
+    velocity field per advected channel, the default on a grid, is slow with the brute-force
+    search of ``KNNSampler``.
 
     Attributes
     ----------
@@ -120,130 +111,41 @@ class Advection(nn.Module):
         advected state is applied to the current state.
     """
 
-    def __init__(self, *, num_channels: int, transport: SemiLagrangianAdvection) -> None:
+    def __init__(
+        self,
+        *,
+        num_channels: int,
+        layer_kernels: DotDict,
+        geometry,
+        time_step: float,
+        advection_channels: int = 768,
+        num_velocity_fields: Optional[int] = None,
+        velocity_hidden_dim: int = 384,
+        cartesian_displacement: bool = False,
+        **kwargs,
+    ) -> None:
+        del kwargs
         super().__init__()
-        self.transport = transport
+        if num_velocity_fields is None:
+            LOGGER.debug(
+                f"{type(self).__name__}: num_velocity_fields not specified, using {advection_channels}, "
+                "one velocity field per advected channel"
+            )
+            num_velocity_fields = advection_channels
+
+        self.transport = SemiLagrangianAdvection(
+            num_channels=num_channels,
+            advection_channels=advection_channels,
+            num_velocity_fields=num_velocity_fields,
+            velocity_hidden_dim=velocity_hidden_dim,
+            time_step=time_step,
+            layer_kernels=layer_kernels,
+            geometry=geometry,
+            cartesian_displacement=cartesian_displacement,
+        )
         # This determines how much of the advected state is applied to the current state.
         self.share = nn.Parameter(torch.full((num_channels,), -1.0))
 
     def forward(self, x: Tensor, layout: Layout, cond: Optional[Tensor] = None) -> Tensor:
         share = torch.sigmoid(self.share).to(x.dtype)
         return share * (self.transport(x, layout, cond) - x)
-
-
-def _default_velocity_fields(cls: type, num_velocity_fields: Optional[int], advection_channels: int) -> int:
-    if num_velocity_fields is None:
-        LOGGER.debug(
-            f"{cls.__name__}: num_velocity_fields not specified, using {advection_channels}, "
-            "one velocity field per advected channel"
-        )
-        return advection_channels
-    return num_velocity_fields
-
-
-class LatLonAdvection(Advection):
-    """Advection step on a regular latitude-longitude grid.
-
-    The spatial mixers are a stencil per channel and a channel mix, and the values are read at
-    the departure points with ``F.grid_sample`` (``SemiLagrangianLayer``).
-    """
-
-    def __init__(
-        self,
-        *,
-        num_channels: int,
-        nlat: int,
-        nlon: int,
-        time_step: float,
-        layer_kernels: DotDict,
-        advection_channels: int = 768,
-        num_velocity_fields: Optional[int] = None,
-        velocity_hidden_dim: int = 384,
-        kernel_size: int = 5,
-        interpolation: str = "bicubic",
-        bias_rank: int = 128,
-        bias_base_maps: int = 8,
-        cartesian_displacement: bool = False,
-    ) -> None:
-        num_velocity_fields = _default_velocity_fields(self.__class__, num_velocity_fields, advection_channels)
-        transport = SemiLagrangianAdvection(
-            num_channels=num_channels,
-            advection_channels=advection_channels,
-            num_velocity_fields=num_velocity_fields,
-            velocity_hidden_dim=velocity_hidden_dim,
-            time_step=time_step,
-            layer_kernels=layer_kernels,
-            sampler=SemiLagrangianLayer(
-                nlat=nlat,
-                nlon=nlon,
-                num_heads=num_velocity_fields,
-                interpolation=interpolation,
-                cartesian_displacement=cartesian_displacement,
-            ),
-            mixer=lambda i, o: LatLonSpatialMixer(i, o, layer_kernels, kernel_size),
-            bias=lambda c: LatLonLowRankBias(
-                c, nlat, nlon, layer_kernels, rank=bias_rank, num_base_maps=bias_base_maps
-            ),
-        )
-        super().__init__(num_channels=num_channels, transport=transport)
-
-
-class GraphAdvection(Advection):
-    """Advection step on the nodes of a graph.
-
-    The spatial mixers are a block over the hidden-to-hidden edges and a channel mix (see
-    ``GraphSpatialMixer``; ``mixer_block`` chooses ``"edge_conv"``, ``"transformer"`` or
-    ``"gnn"``, and ``mixer_kwargs`` go to the block), and the values are read at the departure
-    points from their nearest nodes (``GraphSemiLagrangianLayer``, with ``num_neighbours`` and
-    ``smoothing``).
-
-    The number of neighbour searches is ``batch * num_velocity_fields * nodes``, so a velocity
-    field per advected channel, as on a grid, is slow with the brute-force search.
-    """
-
-    def __init__(
-        self,
-        *,
-        num_channels: int,
-        edge_dim: int,
-        time_step: float,
-        layer_kernels: DotDict,
-        advection_channels: int = 768,
-        num_velocity_fields: Optional[int] = None,
-        velocity_hidden_dim: int = 384,
-        mixer_block: str = "edge_conv",
-        mixer_kwargs: Optional[dict] = None,
-        num_neighbours: int = 4,
-        smoothing: float = 0.01,
-        bias_rank: int = 128,
-        bias_base_maps: int = 8,
-        bias_lat_degree: int = 32,
-        bias_lon_wavenumber: int = 32,
-        cartesian_displacement: bool = False,
-    ) -> None:
-        num_velocity_fields = _default_velocity_fields(self.__class__, num_velocity_fields, advection_channels)
-        mixer_kwargs = dict(mixer_kwargs or {})
-        transport = SemiLagrangianAdvection(
-            num_channels=num_channels,
-            advection_channels=advection_channels,
-            num_velocity_fields=num_velocity_fields,
-            velocity_hidden_dim=velocity_hidden_dim,
-            time_step=time_step,
-            layer_kernels=layer_kernels,
-            sampler=GraphSemiLagrangianLayer(
-                num_heads=num_velocity_fields,
-                num_neighbours=num_neighbours,
-                smoothing=smoothing,
-                cartesian_displacement=cartesian_displacement,
-            ),
-            mixer=lambda i, o: GraphSpatialMixer(i, o, edge_dim, layer_kernels, block=mixer_block, **mixer_kwargs),
-            bias=lambda c: GraphLowRankBias(
-                c,
-                layer_kernels,
-                rank=bias_rank,
-                num_base_maps=bias_base_maps,
-                lat_degree=bias_lat_degree,
-                lon_wavenumber=bias_lon_wavenumber,
-            ),
-        )
-        super().__init__(num_channels=num_channels, transport=transport)
