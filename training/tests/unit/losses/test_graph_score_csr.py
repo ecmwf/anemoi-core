@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import pytest
 import torch
 
 from anemoi.training.losses.graph_score_base import csr_matmul
@@ -47,3 +48,27 @@ def test_safe_sqrt_has_a_finite_zero_derivative() -> None:
     torch.testing.assert_close(result, torch.tensor([0.0, 2.0]))
     assert squared_norm.grad is not None
     torch.testing.assert_close(squared_norm.grad, torch.tensor([0.0, 0.25]))
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [(4, 0), (2, 3, 4, 0), (0, 4, 3), (4, 1)],
+    ids=["no_leading_axes_no_variables", "no_variables", "empty_leading_axis", "one_variable"],
+)
+def test_csr_matmul_matches_dense_for_awkward_shapes(shape: tuple[int, ...]) -> None:
+    """Empty and size-one axes give the dense product and its gradient."""
+    dense_matrix = torch.tensor(
+        [[0.25, 0.75, 0.0, 0.0], [0.0, 0.0, 0.4, 0.6], [0.5, 0.0, 0.5, 0.0]],
+        dtype=torch.float64,
+    )
+    values = torch.randn(shape, dtype=torch.float64, requires_grad=True)
+    reference_values = values.detach().clone().requires_grad_()
+
+    actual = csr_matmul(dense_matrix.to_sparse_csr(), values)
+    expected = torch.einsum("ij,...jv->...iv", dense_matrix, reference_values)
+    actual.square().sum().backward()
+    expected.square().sum().backward()
+
+    assert actual.shape == expected.shape
+    torch.testing.assert_close(actual, expected)
+    torch.testing.assert_close(values.grad, reference_values.grad)
