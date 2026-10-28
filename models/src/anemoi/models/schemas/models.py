@@ -249,17 +249,13 @@ class BaseModelSchema(PydanticBaseModel):
         return data
 
     @model_validator(mode="after")
-    def validate_single_hidden_mesh(self) -> "BaseModelSchema":
-        single_hidden_mesh_models = {
+    def validate_hierarchical_hidden_nodes_name(self) -> "BaseModelSchema":
+        hierarchical_models = {
             DefinedModels.ANEMOI_MODEL_HIER_ENC_PROC_DEC,
             DefinedModels.ANEMOI_MODEL_HIER_ENC_PROC_DEC_SHORT,
-            DefinedModels.ANEMOI_TRANSPORT_MODEL_ENC_PROC_DEC,
-            DefinedModels.ANEMOI_TRANSPORT_MODEL_ENC_PROC_DEC_SHORT,
-            DefinedModels.ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC,
-            DefinedModels.ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC_SHORT,
         }
-        if self.model.target_ in single_hidden_mesh_models and isinstance(self.model.hidden_nodes_name, dict):
-            raise ValueError("Hierarchical and transport models do not support per-dataset hidden node mappings.")
+        if self.model.target_ in hierarchical_models and isinstance(self.model.hidden_nodes_name, dict):
+            raise ValueError("Hierarchical models do not support per-dataset hidden node mappings.")
         return self
 
 

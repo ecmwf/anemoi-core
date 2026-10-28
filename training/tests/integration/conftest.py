@@ -244,8 +244,22 @@ def multidatasets_config(
     return cfg, [url_dataset, url_dataset_b]
 
 
-@pytest.fixture
+@pytest.fixture(
+    params=[
+        pytest.param([], id="deterministic"),
+        pytest.param(
+            [
+                "model=graphtransformer_transport_edm",
+                "training=edm_diffusion",
+                "training/scalers=stretched",
+                "model.bounding.datasets.data=[]",
+            ],
+            id="edm_transport",
+        ),
+    ],
+)
 def multidomain_config(
+    request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, list[str]]:
@@ -254,7 +268,7 @@ def multidomain_config(
         config_module="anemoi.training.config",
         job_name="test_multidomain",
     ):
-        template = compose(config_name="multidomain")
+        template = compose(config_name="multidomain", overrides=request.param)
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidomain.yaml")
     assert isinstance(use_case_modifications, DictConfig)

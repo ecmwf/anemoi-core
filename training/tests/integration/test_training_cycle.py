@@ -736,11 +736,6 @@ def test_config_validation_edm_transport(edm_transport_config: tuple[DictConfig,
     cfg, _ = edm_transport_config
     BaseSchema(**cfg)
 
-    cfg = deepcopy(cfg)
-    cfg.model.model.hidden_nodes_name = {"data": "hidden"}
-    with pytest.raises(ValueError, match="do not support per-dataset hidden node mappings"):
-        BaseSchema(**cfg)
-
 
 def test_config_validation_stochastic_interpolant(stochastic_interpolant_config: tuple[DictConfig, str]) -> None:
     cfg, _ = stochastic_interpolant_config
