@@ -22,6 +22,8 @@ from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.variables_metadata import check_datasets_variables_compatibility
 
@@ -275,10 +277,10 @@ class CrossDatasetBatchSampler(Sampler[list[int]]):
                 num_replicas=num_replicas,
                 rank=rank,
                 shuffle=shuffle,
-                seed=seed,
+                seed=derive_seed(seed, SeedContext.DATALOADER, domain_index),
                 drop_last=drop_last,
             )
-            for domain in dataset.datasets
+            for domain_index, domain in enumerate(dataset.datasets)
         ]
         self._batches_yielded = 0
         self._next_batches_yielded = 0
