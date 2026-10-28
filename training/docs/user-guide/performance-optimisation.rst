@@ -417,7 +417,7 @@ By default, ``training.strategy.static_graph`` is ``false`` and
 settings, the gradients of all GPUs are summed in the same order in
 every step, so a resumed run continues bitwise identically. For large
 models, telling DDP that the same parameters are trained in every step
-can make training faster, at the cost of this reproducibility. In a
+can make training faster, at the cost of this exact reproducibility. In a
 benchmark of a 1B parameter model, this gave a 6% speedup, while smaller
 models showed no difference.
 
