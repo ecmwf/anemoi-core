@@ -7,31 +7,28 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
+
 import pytest
 import torch
 
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.adr import Advection
+from anemoi.models.layers.adr.layers import LatLonSpatialMixer
+from anemoi.models.layers.adr.layers import warn_conditioning_ignored
 from anemoi.models.layers.block import ADRProcessorBlock
 from anemoi.models.layers.geocyclic import geocyclic_pad
 from anemoi.models.layers.geometry import RegularLatLonGeometry
 from anemoi.models.layers.layout import LatLonLayout
 from anemoi.models.layers.layout import latlon_cell_centres
 from anemoi.models.layers.layout import latlon_grid_layout
+from anemoi.models.layers.layout import latlon_to_unit_vector
 from anemoi.models.layers.processor import ADRProcessor
 from anemoi.models.layers.processor import FlowersProcessor
 from anemoi.models.layers.semi_lagrangian import GridSampler
+from anemoi.models.layers.semi_lagrangian import departure_from_local_angles
 from anemoi.models.layers.utils import load_layer_kernels
-
-
-def _unit_vectors(lat: torch.Tensor, lon: torch.Tensor) -> torch.Tensor:
-    return torch.stack([lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()], dim=-1)
-
-
-def _smooth_field(points: torch.Tensor) -> torch.Tensor:
-    """A smooth function on the sphere, written in terms of 3D position so it has no pole artefacts."""
-    x, y, z = points.unbind(-1)
-    return x + 0.5 * y * z + 0.3 * z**2 - 0.2 * x * y
+from tests.layers.sphere import smooth_field
 
 
 def _geometry(nlat: int, nlon: int, order: torch.Tensor | None = None, **kwargs) -> RegularLatLonGeometry:
@@ -64,7 +61,7 @@ def test_latlon_cell_centres_order():
 def test_geocyclic_pad_continues_across_poles(pad):
     nlat, nlon = 6, 12
     lat, lon = latlon_cell_centres(nlat, nlon)
-    field = _smooth_field(_unit_vectors(lat, lon)).view(nlat, nlon)
+    field = smooth_field(latlon_to_unit_vector(lat, lon)).view(nlat, nlon)
 
     # Rows beyond a pole have latitudes past +-90 degrees. Plugging those latitudes into the usual
     # formula for a 3D position gives the point on the other side of the pole, which is exactly
@@ -74,7 +71,7 @@ def test_geocyclic_pad_continues_across_poles(pad):
     lat_ext = torch.pi / 2 - (rows + 0.5) * torch.pi / nlat
     lon_ext = cols * 2 * torch.pi / nlon
     lat_ext, lon_ext = torch.meshgrid(lat_ext, lon_ext, indexing="ij")
-    expected = _smooth_field(_unit_vectors(lat_ext, lon_ext))
+    expected = smooth_field(latlon_to_unit_vector(lat_ext, lon_ext))
 
     torch.testing.assert_close(geocyclic_pad(field, pad), expected)
 
@@ -284,9 +281,9 @@ def test_sampling_reads_from_departure_points(interpolation):
     layer = GridSampler(num_heads=heads, interpolation=interpolation)
 
     lat, lon = latlon_cell_centres(nlat, nlon)
-    position = _unit_vectors(lat, lon)[:, None, :]
+    position = latlon_to_unit_vector(lat, lon)[:, None, :]
     east_dir, north_dir = (d[:, None, :] for d in _local_directions(lat, lon))
-    values = _smooth_field(position).expand(-1, heads).unsqueeze(-1).float().contiguous()
+    values = smooth_field(position).expand(-1, heads).unsqueeze(-1).float().contiguous()
 
     displacement = (torch.rand(nlat * nlon, heads, 2, dtype=torch.float64) * 2 - 1) * 0.35
     e, n = displacement[..., :1], displacement[..., 1:]
@@ -298,7 +295,7 @@ def test_sampling_reads_from_departure_points(interpolation):
     # torch's bicubic kernel (cubic convolution with a = -0.75) is only first-order accurate, so on
     # a smooth field it is less accurate than bilinear.
     atol = 2e-3 if interpolation == "bilinear" else 5e-3
-    torch.testing.assert_close(moved.squeeze(-1), _smooth_field(departure).float(), atol=atol, rtol=0)
+    torch.testing.assert_close(moved.squeeze(-1), smooth_field(departure).float(), atol=atol, rtol=0)
 
 
 def test_sampling_across_the_north_pole():
@@ -306,7 +303,7 @@ def test_sampling_across_the_north_pole():
     nlat, nlon = 30, 60
     layer = GridSampler(num_heads=1)
     lat, lon = latlon_cell_centres(nlat, nlon)
-    values = _smooth_field(_unit_vectors(lat, lon)).float().view(-1, 1, 1)
+    values = smooth_field(latlon_to_unit_vector(lat, lon)).float().view(-1, 1, 1)
 
     # Moving south by 3 grid spacings means coming from 3 spacings further north: over the pole
     # and down to 2.5 spacings from the pole, half a turn round.
@@ -315,7 +312,7 @@ def test_sampling_across_the_north_pole():
     moved = layer.sample(_on_grid(values, nlat, nlon), displacement, _layout(nlat, nlon)).view(nlat, nlon)
 
     expected_lat = torch.full((nlon,), torch.pi / 2 - 2.5 * torch.pi / nlat, dtype=torch.float64)
-    expected = _smooth_field(_unit_vectors(expected_lat, lon[:nlon] + torch.pi)).float()
+    expected = smooth_field(latlon_to_unit_vector(expected_lat, lon[:nlon] + torch.pi)).float()
     torch.testing.assert_close(moved[0], expected, atol=2e-3, rtol=0)
 
 
@@ -408,8 +405,8 @@ def test_cartesian_displacement_follows_great_circles(interpolation):
     nlat, nlon, heads = 90, 180, 4
     layer = GridSampler(num_heads=heads, interpolation=interpolation, cartesian_displacement=True)
     lat, lon = latlon_cell_centres(nlat, nlon)
-    position = _unit_vectors(lat, lon)[:, None, :]
-    values = _smooth_field(position).expand(-1, heads).unsqueeze(-1).float().contiguous()
+    position = latlon_to_unit_vector(lat, lon)[:, None, :]
+    values = smooth_field(position).expand(-1, heads).unsqueeze(-1).float().contiguous()
 
     direction = torch.randn(nlat * nlon, heads, 3, dtype=torch.float64)
     direction = direction - (direction * position).sum(-1, keepdim=True) * position
@@ -421,7 +418,7 @@ def test_cartesian_displacement_follows_great_circles(interpolation):
     displacement = _on_grid((angle * direction + radial).float(), nlat, nlon)
     moved = layer.sample(_on_grid(values, nlat, nlon), displacement, _layout(nlat, nlon)).reshape(values.shape)
     atol = 2e-3 if interpolation == "bilinear" else 5e-3
-    torch.testing.assert_close(moved.squeeze(-1), _smooth_field(departure).float(), atol=atol, rtol=0)
+    torch.testing.assert_close(moved.squeeze(-1), smooth_field(departure).float(), atol=atol, rtol=0)
 
 
 @pytest.mark.parametrize("component", ["east", "north"])
@@ -458,7 +455,7 @@ def test_cartesian_displacement_across_the_north_pole():
     nlat, nlon = 30, 60
     layer = GridSampler(num_heads=1, cartesian_displacement=True)
     lat, lon = latlon_cell_centres(nlat, nlon)
-    values = _smooth_field(_unit_vectors(lat, lon)).float().view(-1, 1, 1)
+    values = smooth_field(latlon_to_unit_vector(lat, lon)).float().view(-1, 1, 1)
     _, north_dir = _local_directions(lat, lon)
 
     # Moving south by 3 grid spacings: the value comes from over the pole, half a turn round.
@@ -467,7 +464,7 @@ def test_cartesian_displacement_across_the_north_pole():
     moved = layer.sample(_on_grid(values, nlat, nlon), displacement, _layout(nlat, nlon)).view(nlat, nlon)
 
     expected_lat = torch.full((nlon,), torch.pi / 2 - 2.5 * torch.pi / nlat, dtype=torch.float64)
-    expected = _smooth_field(_unit_vectors(expected_lat, lon[:nlon] + torch.pi)).float()
+    expected = smooth_field(latlon_to_unit_vector(expected_lat, lon[:nlon] + torch.pi)).float()
     torch.testing.assert_close(moved[0], expected, atol=2e-3, rtol=0)
 
 
@@ -495,3 +492,48 @@ def test_layers_predict_one_displacement_per_head(cartesian_displacement):
     dim = 3 if cartesian_displacement else 2
     assert advection.velocity_out.mix.out_features == 4 * dim
     assert warp.flow[-1].out_features == 4 * dim
+
+
+def test_the_diagnostics_hook_sees_the_departure_points():
+    """``diag_hook`` is given the departure points in radians, one per grid point of each head."""
+    torch.manual_seed(0)
+    nlat, nlon, heads = 12, 24, 3
+    layer = GridSampler(num_heads=heads)
+    lat, lon = latlon_cell_centres(nlat, nlon)
+    displacement = (torch.rand(nlat * nlon, heads, 2, dtype=torch.float64) * 2 - 1) * 0.3
+    expected = departure_from_local_angles(lat[:, None], lon[:, None], displacement)
+
+    seen = []
+    layer.diag_hook = lambda sampler, layout, lat_d, lon_d: seen.append((sampler, layout, lat_d, lon_d))
+    layer.sample(
+        _on_grid(torch.randn(nlat * nlon, heads, 2), nlat, nlon),
+        _on_grid(displacement.float(), nlat, nlon),
+        _layout(nlat, nlon),
+    )
+
+    assert len(seen) == 1
+    sampler, _, lat_d, lon_d = seen[0]
+    assert sampler is layer
+    assert lat_d.shape == lon_d.shape == (heads, nlat, nlon)
+    for i, (seen_angles, expected_angles) in enumerate(zip((lat_d, lon_d), expected)):
+        got = seen_angles.permute(1, 2, 0).reshape(nlat * nlon, heads)
+        # Longitudes that come out either side of zero are the same angle, and close to a pole a
+        # longitude in float32 is only good to about a millionth of a radian.
+        difference = torch.remainder(got - expected_angles.float() + torch.pi, 2 * torch.pi) - torch.pi
+        torch.testing.assert_close(difference, torch.zeros_like(difference), atol=1e-5, rtol=0, msg=f"angle {i}")
+
+
+def test_the_mixer_on_a_grid_says_once_that_it_drops_the_conditioning(caplog):
+    """The stencil has no layer norm to condition, so a conditioned model must be told."""
+    torch.manual_seed(0)
+    nlat, nlon = 6, 12
+    mixer = LatLonSpatialMixer(4, 4, load_layer_kernels(), kernel_size=3)
+    x = torch.randn(1, nlat, nlon, 4)
+
+    warn_conditioning_ignored.cache_clear()
+    with caplog.at_level(logging.WARNING, logger="anemoi.models.layers.adr.layers"):
+        for _ in range(2):
+            mixer(x, _layout(nlat, nlon), cond=torch.randn(1, nlat, nlon, 4))
+        mixer(x, _layout(nlat, nlon))
+    records = [r for r in caplog.records if r.name == "anemoi.models.layers.adr.layers"]
+    assert len(records) == 1

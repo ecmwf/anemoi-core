@@ -144,7 +144,7 @@ class MeshGeometrySchema(BaseModel):
     num_neighbours: PositiveInt = Field(default=4)
     "Number of nearest nodes a value is read from at its departure point."
     smoothing: NonNegativeFloat = Field(default=0.01)
-    "Sharpness of the interpolation weights at a node, relative to the node spacing."
+    "Sharpness of the interpolation weights at a node, relative to how close together the nodes are there."
     bias_rank: PositiveInt = Field(default=128)
     "Number of latitude-longitude profile pairs in the learned bias fields."
     bias_base_maps: PositiveInt = Field(default=8)

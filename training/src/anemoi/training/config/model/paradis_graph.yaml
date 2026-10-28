@@ -37,7 +37,7 @@ processor:
     mixer_block: edge_conv # Options: "edge_conv", "transformer", "gnn"
     mixer_kwargs: {} # settings of the transformer or gnn block, e.g. num_heads, mlp_hidden_ratio
     num_neighbours: 4 # nearest nodes a value is read from at its departure point
-    smoothing: 0.01 # sharpness of the interpolation weights at a node, relative to the node spacing
+    smoothing: 0.01 # sharpness of the interpolation weights at a node, relative to how close together the nodes are there
     bias_rank: 128
     bias_base_maps: 8
     bias_lat_degree: 32

@@ -32,9 +32,9 @@ from anemoi.models.layers.geometry import RegularLatLonGeometry
 from anemoi.models.layers.layout import latlon_cell_centres
 from anemoi.models.layers.processor import ADRProcessor
 from anemoi.models.layers.utils import load_layer_kernels
-from tests.layers.graph_mesh import fibonacci_nodes
-from tests.layers.graph_mesh import hidden_nodes
-from tests.layers.graph_mesh import knn_edges
+from tests.layers.sphere import fibonacci_nodes
+from tests.layers.sphere import hidden_nodes
+from tests.layers.sphere import knn_edges
 
 from ._distributed_runner import _run_distributed_test
 from .distributed_test_utils import torch_version_less_than

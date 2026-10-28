@@ -94,6 +94,11 @@ class GridSampler(nn.Module):
     mixed precision: in bfloat16 a position on a 720-point circle can be off by most of a grid cell.
 
     The grid itself comes from the layout, so one sampler fits any ``RegularLatLonGeometry``.
+
+    ``diag_hook``, when set, is called once per forward pass as
+    ``diag_hook(sampler, layout, departure_lat, departure_lon)``, with the departure points in
+    radians and of shape (batch * local heads, nlat, nlon). ``KNNSampler`` calls it the same way,
+    with one entry per node instead.
     """
 
     def __init__(
@@ -118,25 +123,33 @@ class GridSampler(nn.Module):
         # Lazy init. Hook for diagnostics.
         self.diag_hook = None
 
-    def departure_points(self, displacement: Tensor, layout: LatLonLayout) -> Tensor:
-        """Positions, in grid_sample's [-1, 1] coordinates of the padded globe, to read each value from.
+    def departure_latlon(self, displacement: Tensor, layout: LatLonLayout) -> tuple[Tensor, Tensor]:
+        """Latitude and longitude in radians of the points to read each value from.
 
         displacement has shape (batch, local rows, nlon, heads, displacement_dim) and is in at least
         float32: the eastward and northward angles in radians, or a 3D vector with
-        ``cartesian_displacement``. Returns (batch, local rows, nlon, heads, 2) with the column
-        position first, as grid_sample expects.
+        ``cartesian_displacement``. Returns two tensors of shape (batch, local rows, nlon, heads).
         """
         start, end = layout.local_rows
         if self.cartesian_displacement:
             position = layout.position[start:end, :, None, :]
-            departure_lat, departure_lon = unit_vector_to_latlon(departure_from_vector(position, displacement))
-        else:
-            lat = layout.lat[start:end, :, None]
-            lon = layout.lon[start:end, :, None]
-            departure_lat, departure_lon = departure_from_local_angles(lat, lon, displacement)
+            return unit_vector_to_latlon(departure_from_vector(position, displacement))
+        lat = layout.lat[start:end, :, None]
+        lon = layout.lon[start:end, :, None]
+        return departure_from_local_angles(lat, lon, displacement)
 
-        row = (torch.pi / 2 - departure_lat) * (layout.nlat / torch.pi) - 0.5 + self.pad
-        col = departure_lon * (layout.nlon / (2 * torch.pi)) + self.pad
+    def departure_points(self, displacement: Tensor, layout: LatLonLayout) -> Tensor:
+        """Positions, in grid_sample's [-1, 1] coordinates of the padded globe, to read each value from.
+
+        displacement is as in ``departure_latlon``. Returns (batch, local rows, nlon, heads, 2)
+        with the column position first, as grid_sample expects.
+        """
+        return self.grid_coordinates(*self.departure_latlon(displacement, layout), layout)
+
+    def grid_coordinates(self, lat: Tensor, lon: Tensor, layout: LatLonLayout) -> Tensor:
+        """Points given in radians, in grid_sample's [-1, 1] coordinates of the padded globe."""
+        row = (torch.pi / 2 - lat) * (layout.nlat / torch.pi) - 0.5 + self.pad
+        col = lon * (layout.nlon / (2 * torch.pi)) + self.pad
         grid_x = 2 * col / (layout.nlon + 2 * self.pad - 1) - 1
         grid_y = 2 * row / (layout.nlat + 2 * self.pad - 1) - 1
         return torch.stack([grid_x, grid_y], dim=-1)
@@ -159,11 +172,15 @@ class GridSampler(nn.Module):
             The sampled values, with the same shape as the input `values`.
         """
         with torch.autocast(device_type=values.device.type, enabled=False):
-            grid = layout.to_field(self.departure_points(_at_least_float32(displacement), layout))
+            departure_lat, departure_lon = self.departure_latlon(_at_least_float32(displacement), layout)
+            grid = layout.to_field(self.grid_coordinates(departure_lat, departure_lon, layout))
             grid = einops.rearrange(grid, "b g k h w -> (b g) h w k")
 
             if self.diag_hook is not None:
-                self.diag_hook(self, layout, grid[:, :, :, 0], grid[:, :, :, 1])
+                # The hook sees whole globes, as the sampler does: the departure points are put in
+                # the field layout too, one entry per grid point of each local head.
+                points = layout.to_field(torch.stack([departure_lat, departure_lon], dim=-1))
+                self.diag_hook(self, layout, points[:, :, 0].flatten(0, 1), points[:, :, 1].flatten(0, 1))
 
             globe = layout.to_field(values)
             local_heads = globe.shape[1]
@@ -188,15 +205,17 @@ def knn_on_sphere(points: Tensor, queries: Tensor, k: int, chunk_elements: int =
         return torch.cat([(chunk @ points.T).topk(k, dim=-1).indices for chunk in queries.split(rows)])
 
 
-def typical_node_spacing(position: Tensor, max_queries: int = 2048) -> float:
-    """Median distance, as a chord of the unit sphere, from a node to its nearest other node.
+def nearest_node_distance(position: Tensor, chunk_elements: int = 2**26) -> Tensor:
+    """Distance, as a chord of the unit sphere, from each node to its nearest other node.
 
-    position (n, 3) holds the nodes as 3D unit vectors. Up to ``max_queries`` evenly spaced nodes
-    are used.
+    position (n, 3) holds the nodes as 3D unit vectors; the result has one distance per node. One
+    per node rather than one for the mesh, so that a mesh whose resolution varies -- a limited area
+    inside a global mesh, a stretched grid -- is described where it is fine as well as where it is
+    coarse. This is a brute-force search, as costly as one pass of a single-headed ``KNNSampler``,
+    but it is done once when the geometry is built.
     """
-    queries = position[:: max(1, position.shape[0] // max_queries)]
-    nearest = knn_on_sphere(position, queries, 2)[:, 1]
-    return (queries - position[nearest]).norm(dim=-1).median().item()
+    nearest = knn_on_sphere(position, position, 2, chunk_elements=chunk_elements)[:, 1]
+    return (position - position[nearest]).norm(dim=-1)
 
 
 class KNNSampler(nn.Module):
@@ -211,10 +230,16 @@ class KNNSampler(nn.Module):
 
     normalised to sum to one. The weights go to zero at R, so the result is continuous as the
     neighbours change, and they peak at a node, so a departure point on a node reads (almost) the
-    node's own value. ``smoothing`` sets how sharp that peak is, relative to the node spacing.
-    The gradient reaches the displacements through the distances.
+    node's own value. ``smoothing`` sets how sharp that peak is, relative to ``spacing``, the
+    distance from the nearest node to its own nearest neighbour: both R and the peak then follow
+    the resolution of the mesh, which need not be the same everywhere. The gradient reaches the
+    displacements through the distances.
 
     Distances are chords of the unit sphere. The search and the weights run in at least float32.
+
+    ``diag_hook`` is called as in ``GridSampler``, with the departure points of each local head at
+    every node: ``diag_hook(sampler, layout, departure_lat, departure_lon)``, two tensors in
+    radians of shape (batch * local heads, nodes).
     """
 
     def __init__(
@@ -233,6 +258,9 @@ class KNNSampler(nn.Module):
         self.smoothing = smoothing
         self.cartesian_displacement = cartesian_displacement
         self.displacement_dim = 3 if cartesian_displacement else 2
+
+        # Lazy init. Hook for diagnostics.
+        self.diag_hook = None
 
     def departure_points(self, displacement: Tensor, layout: GraphLayout) -> Tensor:
         """3D unit vectors of the points to read each value from.
@@ -267,6 +295,10 @@ class KNNSampler(nn.Module):
             field = _at_least_float32(layout.to_field(values))
             batch_size, local_heads, channels, num_nodes = field.shape
 
+            if self.diag_hook is not None:
+                lat, lon = unit_vector_to_latlon(einops.rearrange(departure, "b g k n -> b g n k"))
+                self.diag_hook(self, layout, lat.flatten(0, 1), lon.flatten(0, 1))
+
             # One query per (batch, head, node), all against the same nodes.
             queries = einops.rearrange(departure, "b g k n -> (b g n) k")
             points = layout.position.to(queries.dtype)
@@ -275,7 +307,9 @@ class KNNSampler(nn.Module):
             distance = distance.clamp_min(_MIN_SQUARED_ANGLE).sqrt()
             reach = distance[:, -1:]
             distance = distance[:, :-1]
-            weight = (reach - distance).square() / (distance.square() + (self.smoothing * layout.spacing) ** 2)
+            # How close together the nodes are where this departure point landed.
+            spacing = layout.spacing.to(distance.dtype)[neighbours[:, 0], None]
+            weight = (reach - distance).square() / (distance.square() + (self.smoothing * spacing) ** 2)
             weight = weight / weight.sum(-1, keepdim=True).clamp_min(torch.finfo(weight.dtype).tiny)
 
             # Value of each neighbour, from the field of its own batch member and head.

@@ -45,7 +45,7 @@ from anemoi.models.layers.layout import latlon_to_unit_vector
 from anemoi.models.layers.semi_lagrangian import GridSampler
 from anemoi.models.layers.semi_lagrangian import KNNSampler
 from anemoi.models.layers.semi_lagrangian import SemiLagrangianWarp
-from anemoi.models.layers.semi_lagrangian import typical_node_spacing
+from anemoi.models.layers.semi_lagrangian import nearest_node_distance
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -225,7 +225,7 @@ class MeshGeometry(LatentGeometry, HaloInfoCache):
         self.register_buffer("lat", lat.float(), persistent=False)
         self.register_buffer("lon", lon.float(), persistent=False)
         self.register_buffer("position", latlon_to_unit_vector(lat, lon).float(), persistent=False)
-        self.spacing = typical_node_spacing(self.position)
+        self.register_buffer("spacing", nearest_node_distance(self.position), persistent=False)
 
         self.edge_dim = edge_dim
         self.mixer_block = mixer_block

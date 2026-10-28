@@ -317,8 +317,8 @@ class GraphLayout(Layout):
         return self.geometry.position
 
     @property
-    def spacing(self) -> float:
-        """A typical distance between neighbouring nodes, as a chord of the unit sphere."""
+    def spacing(self) -> torch.Tensor:
+        """Distance from each node to its nearest other node, as a chord of the unit sphere."""
         return self.geometry.spacing
 
     def to_state(self, x: torch.Tensor) -> torch.Tensor:

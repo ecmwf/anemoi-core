@@ -21,6 +21,7 @@ The steps never build these themselves: ``anemoi.models.layers.geometry`` picks 
 its nodes. Mixers are called as ``mixer(x, layout, cond)`` and biases as ``bias(x, layout)``.
 """
 
+import functools
 import logging
 from typing import Optional
 
@@ -55,8 +56,26 @@ def init_branch(*layers: nn.Module, last_scale: float = 0.1) -> None:
             nn.init.zeros_(layer.bias)
 
 
+@functools.lru_cache(maxsize=None)
+def warn_conditioning_ignored(mixer: str) -> None:
+    """Say once, for each kind of mixer, that it drops the conditioning it is given.
+
+    The stencil on a grid and the edge stencil have no layer norm to condition, and the GNN block
+    has no way to take a condition. The step around the mixer still conditions its own layer norm,
+    so the conditioning does reach the state; only the mixing itself is unconditioned.
+    """
+    LOGGER.warning(
+        "%s cannot use a condition, so the conditioning given to it is dropped. The layer norms of the ADR "
+        "steps are still conditioned; use the 'transformer' mixer block to condition the mixing as well.",
+        mixer,
+    )
+
+
 class LatLonSpatialMixer(nn.Module):
-    """A stencil per channel followed by a linear mix of the channels at each point."""
+    """A stencil per channel followed by a linear mix of the channels at each point.
+
+    There is no layer norm here, so the conditioning is dropped; see ``warn_conditioning_ignored``.
+    """
 
     def __init__(self, in_channels: int, out_channels: int, layer_kernels: DotDict, kernel_size: int = 5) -> None:
         super().__init__()
@@ -64,6 +83,8 @@ class LatLonSpatialMixer(nn.Module):
         self.mix = layer_kernels.Linear(in_channels, out_channels)
 
     def forward(self, x: Tensor, layout: LatLonLayout, cond: Optional[Tensor] = None) -> Tensor:
+        if cond is not None:
+            warn_conditioning_ignored("The stencil mixer on a latitude-longitude grid")
         return self.mix(self.stencil(x, layout))
 
     def branch_layers(self) -> tuple[nn.Module, ...]:
@@ -84,7 +105,10 @@ class GraphSpatialMixer(nn.Module):
     All keep the number of channels; the transformer and the GNN also add their output to their
     input and bring their own MLP and layer norms. ``block_kwargs`` go to the block, e.g.
     ``graph_attention_backend`` or ``qk_norm`` for the transformer. Only the transformer passes the
-    conditioning on to its layer norms; the other two ignore it, as the mixers on a grid do.
+    conditioning on to its layer norms; the other two drop it and say so once, as the mixer on a
+    grid does (see ``warn_conditioning_ignored``). The GNN block cannot be used in a conditioned
+    model at all: its own layer norms, built from the same layer kernels, call them without a
+    condition, so a ``ConditionalLayerNorm`` raises there.
     """
 
     def __init__(
@@ -128,6 +152,8 @@ class GraphSpatialMixer(nn.Module):
         self.mix = layer_kernels.Linear(in_channels, out_channels)
 
     def forward(self, x: Tensor, layout: GraphLayout, cond: Optional[Tensor] = None) -> Tensor:
+        if cond is not None and self.block_type != "transformer":
+            warn_conditioning_ignored(f"The '{self.block_type}' mixer block")
         if self.block_type == "edge_conv":
             return self.mix(self.block(x, layout))
         if self.block_type == "transformer":

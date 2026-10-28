@@ -30,10 +30,10 @@ from anemoi.models.layers.processor import ADRProcessor
 from anemoi.models.layers.semi_lagrangian import KNNSampler
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
-from tests.layers.graph_mesh import expand_edges
-from tests.layers.graph_mesh import fibonacci_nodes
-from tests.layers.graph_mesh import hidden_nodes
-from tests.layers.graph_mesh import knn_edges
+from tests.layers.sphere import expand_edges
+from tests.layers.sphere import fibonacci_nodes
+from tests.layers.sphere import hidden_nodes
+from tests.layers.sphere import knn_edges
 
 NUM_NODES = 200
 NUM_NEIGHBOURS = 6

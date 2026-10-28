@@ -7,7 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""A small unstructured mesh for testing the graph semi-Lagrangian layers and processors."""
+"""What the tests of the semi-Lagrangian layers and processors need on the sphere.
+
+A small unstructured mesh and its edges, and a smooth field to move around on it or on a grid.
+"""
 
 import math
 
@@ -15,6 +18,12 @@ import torch
 
 from anemoi.models.layers.semi_lagrangian import knn_on_sphere
 from anemoi.models.layers.semi_lagrangian import latlon_to_unit_vector
+
+
+def smooth_field(points: torch.Tensor) -> torch.Tensor:
+    """A smooth function on the sphere, written in terms of 3D position so it has no pole artefacts."""
+    x, y, z = points.unbind(-1)
+    return x + 0.5 * y * z + 0.3 * z**2 - 0.2 * x * y
 
 
 def fibonacci_nodes(num_nodes: int) -> tuple[torch.Tensor, torch.Tensor]:
