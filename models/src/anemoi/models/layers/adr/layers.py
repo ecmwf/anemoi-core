@@ -71,13 +71,9 @@ class LowRankBias(nn.Module):
         self.projection = layer_kernels.Linear(num_base_maps, num_channels, bias=False)
 
     def forward(self, x: Tensor, layout: LatLonLayout) -> Tensor:
-        """Add the field to x, of shape (batch * local nodes, channels)."""
-        base_maps = torch.einsum("ck,ki,kj->ijc", self.coefficients, self.lat_profiles, self.lon_profiles)
-        start, end = layout.local_nodes
-        base_maps = base_maps.reshape(-1, base_maps.shape[-1])
-        if layout.grid_index is None:
-            base_maps = base_maps[start:end]
-        else:
-            base_maps = base_maps.index_select(0, layout.grid_index[start:end])
-        field = self.projection(base_maps)
-        return (x.view(layout.batch_size, end - start, -1) + field).view(x.shape)
+        """Add the field to x, of shape (batch, local rows, nlon, channels)."""
+        start, end = layout.local_rows
+        base_maps = torch.einsum(
+            "ck,ki,kj->ijc", self.coefficients, self.lat_profiles[:, start:end], self.lon_profiles
+        )
+        return x + self.projection(base_maps)

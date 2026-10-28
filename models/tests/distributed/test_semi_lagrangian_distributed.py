@@ -9,6 +9,10 @@
 
 """Semi-Lagrangian blocks split over several GPUs must match the same blocks on one GPU.
 
+The blocks run on the grid, as the processors run them: the nodes are put on the grid with
+``LatLonLayout.to_grid`` and taken back with ``LatLonLayout.from_grid``, so the split into bands
+of latitude rows is tested too.
+
 Parameter gradients are compared after summing them over the GPUs, which is what training does
 with model-parallel parameters.
 """
@@ -22,6 +26,7 @@ from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import ADRProcessorBlock
 from anemoi.models.layers.block import FlowersProcessorBlock
+from anemoi.models.layers.layout import LatLonLayout
 from anemoi.models.layers.utils import load_layer_kernels
 
 from ._distributed_runner import _run_distributed_test
@@ -67,9 +72,17 @@ def _build_block(
     return block
 
 
-def _block_rank(rank, world_size, device, group, kind, cartesian, dtype, nlat, nlon, num_heads):
+def _block_rank(rank, world_size, device, group, kind, cartesian, dtype, nlat, nlon, num_heads, shuffled):
     grid = nlat * nlon
     block = _build_block(kind, nlat, nlon, num_heads, cartesian, device).to(dtype)
+    order = torch.randperm(grid, generator=torch.Generator().manual_seed(2)).to(device) if shuffled else None
+
+    def run(x, shard_sizes, model_comm_group=None):
+        layout = LatLonLayout(nlat, nlon, 1, shard_sizes, model_comm_group, grid_index=order)
+        shard_info = GraphShardInfo(nodes=shard_sizes)
+        out = block(layout.to_grid(x), shard_info, 1, model_comm_group=model_comm_group, layout=layout)[0]
+        return layout.from_grid(out)
+
     channels = 16 if kind == "adr" else 12
     # float64 shows that splitting changes nothing beyond rounding; float32 is what training uses.
     atol, rtol = (1e-11, 1e-9) if dtype == torch.float64 else (1e-5, 1e-5)
@@ -80,7 +93,7 @@ def _block_rank(rank, world_size, device, group, kind, cartesian, dtype, nlat, n
     grad_out = torch.randn(grid, channels, device=device, dtype=dtype)
 
     x_full = x.clone().requires_grad_()
-    out_full = block(x_full, GraphShardInfo(nodes=[grid]), 1)[0]
+    out_full = run(x_full, [grid])
     out_full.backward(grad_out)
     grads_full = {name: p.grad.clone() for name, p in block.named_parameters()}
     block.zero_grad()
@@ -88,7 +101,7 @@ def _block_rank(rank, world_size, device, group, kind, cartesian, dtype, nlat, n
     shard_sizes = get_balanced_partition_sizes(grid, world_size)
     start, end = get_partition_range(shard_sizes, rank)
     x_local = x[start:end].clone().requires_grad_()
-    out_local = block(x_local, GraphShardInfo(nodes=shard_sizes), 1, model_comm_group=group)[0]
+    out_local = run(x_local, shard_sizes, group)
     out_local.backward(grad_out[start:end])
 
     torch.testing.assert_close(out_local, out_full[start:end].detach(), atol=atol, rtol=rtol)
@@ -103,6 +116,7 @@ def _block_rank(rank, world_size, device, group, kind, cartesian, dtype, nlat, n
 @pytest.mark.parametrize("kind", ["adr", "flowers"])
 @pytest.mark.parametrize("cartesian", [False, True], ids=["local-displacement", "cartesian-displacement"])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64], ids=["float32", "float64"])
+@pytest.mark.parametrize("shuffled", [False, True], ids=["nodes-row-by-row", "nodes-shuffled"])
 @pytest.mark.parametrize(
     ("nlat", "nlon", "num_heads"),
     [
@@ -111,7 +125,7 @@ def _block_rank(rank, world_size, device, group, kind, cartesian, dtype, nlat, n
     ],
 )
 def test_block_matches_single_gpu(
-    kind, cartesian, dtype, nlat, nlon, num_heads, distributed_backend, distributed_world_size
+    kind, cartesian, dtype, shuffled, nlat, nlon, num_heads, distributed_backend, distributed_world_size
 ):
     if dtype == torch.float64 and distributed_backend == "nccl":
         pytest.skip("The float64 comparison runs on CPU.")
@@ -129,4 +143,5 @@ def test_block_matches_single_gpu(
         nlat=nlat,
         nlon=nlon,
         num_heads=num_heads,
+        shuffled=shuffled,
     )

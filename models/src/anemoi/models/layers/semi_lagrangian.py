@@ -12,17 +12,13 @@
 The hidden grid has ``nlat x nlon`` points at cell centres. Latitudes run from north to south,
 ``90 - (i + 0.5) * 180 / nlat`` degrees, and longitudes run east from zero, ``j * 360 / nlon``
 degrees. No point lies on a pole. The hidden nodes carry their row and column in a node
-attribute (``anemoi.graphs.nodes.attributes.RectilinearLayoutIndex``). Nodes are usually stored
-row by row, so node ``n`` sits in row ``n // nlon`` and column ``n % nlon``; any other order is
-mapped onto the grid with the layout attribute.
+attribute (``anemoi.graphs.nodes.attributes.RectilinearLayoutIndex``).
 
-Across GPUs the processor state is split by grid point: each GPU holds every channel for one
-contiguous block of nodes. Steps that look at other points (interpolation, stencils) need
-the whole globe, so for those steps the state is exchanged so that each GPU holds the whole globe
-for a subset of channels, and exchanged back afterwards.
+The processor puts its state on the grid once (``LatLonLayout.to_grid``), so the layers here see
+tensors of shape (batch, local rows, nlon, ...). Across GPUs each GPU holds a band of whole
+latitude rows. Interpolation needs the whole globe, so for that step the state is exchanged so
+that each GPU holds the whole globe for a subset of channels, and exchanged back afterwards.
 """
-
-from typing import Optional
 
 import einops
 import torch
@@ -63,9 +59,6 @@ class SemiLagrangianLayer(nn.Module):
     The departure points are worked out and the interpolation is done in at least float32, also under
     mixed precision: in bfloat16 a position on a 720-point circle can be off by most of a grid cell.
 
-    ``grid_index`` gives the flat grid position ``row * nlon + col`` of each node, when the nodes
-    are not stored row by row (see ``latlon_grid_layout``).
-
     Subclasses decide what is moved and how the displacements are predicted, and call ``sample``.
     """
 
@@ -77,7 +70,6 @@ class SemiLagrangianLayer(nn.Module):
         num_heads: int,
         interpolation: str = "bicubic",
         cartesian_displacement: bool = False,
-        grid_index: Optional[Tensor] = None,
     ) -> None:
         super().__init__()
         if nlon % 2 != 0:
@@ -96,8 +88,7 @@ class SemiLagrangianLayer(nn.Module):
         self.displacement_dim = 3 if cartesian_displacement else 2
 
         lat, lon = latlon_cell_centres(nlat, nlon)
-        if grid_index is not None:
-            lat, lon = lat[grid_index], lon[grid_index]
+        lat, lon = lat.view(nlat, nlon), lon.view(nlat, nlon)
         self.register_buffer("arrival_lat", lat.float(), persistent=False)
         self.register_buffer("arrival_lon", lon.float(), persistent=False)
         if cartesian_displacement:
@@ -110,13 +101,12 @@ class SemiLagrangianLayer(nn.Module):
     def departure_points(self, displacement: Tensor, layout: LatLonLayout) -> Tensor:
         """Positions, in grid_sample's [-1, 1] coordinates of the padded globe, to read each value from.
 
-        displacement has shape (batch * local nodes, heads, displacement_dim) and is in at least float32: the
-        eastward and northward angles in radians, or a 3D vector with ``cartesian_displacement``.
-        Returns (batch * local nodes, heads, 2) with the column position first, as grid_sample
-        expects.
+        displacement has shape (batch, local rows, nlon, heads, displacement_dim) and is in at least
+        float32: the eastward and northward angles in radians, or a 3D vector with
+        ``cartesian_displacement``. Returns (batch, local rows, nlon, heads, 2) with the column
+        position first, as grid_sample expects.
         """
-        start, end = layout.local_nodes
-        displacement = displacement.view(layout.batch_size, end - start, self.num_heads, self.displacement_dim)
+        start, end = layout.local_rows
         if self.cartesian_displacement:
             departure_lat, departure_lon = self._departure_from_vector(displacement, start, end)
         else:
@@ -126,11 +116,11 @@ class SemiLagrangianLayer(nn.Module):
         col = departure_lon * (self.nlon / (2 * torch.pi)) + self.pad
         grid_x = 2 * col / (self.nlon + 2 * self.pad - 1) - 1
         grid_y = 2 * row / (self.nlat + 2 * self.pad - 1) - 1
-        return torch.stack([grid_x, grid_y], dim=-1).view(-1, self.num_heads, 2)
+        return torch.stack([grid_x, grid_y], dim=-1)
 
     def _departure_from_local_angles(self, displacement: Tensor, start: int, end: int) -> tuple[Tensor, Tensor]:
-        lat = self.arrival_lat[start:end].view(1, end - start, 1)
-        lon = self.arrival_lon[start:end].view(1, end - start, 1)
+        lat = self.arrival_lat[start:end, :, None]
+        lon = self.arrival_lon[start:end, :, None]
 
         # Position of the departure point in the rotated coordinates, then the same point in
         # ordinary latitude and longitude.
@@ -144,7 +134,7 @@ class SemiLagrangianLayer(nn.Module):
         return departure_lat, departure_lon
 
     def _departure_from_vector(self, displacement: Tensor, start: int, end: int) -> tuple[Tensor, Tensor]:
-        position = self.arrival_position[start:end].view(1, end - start, 1, 3)
+        position = self.arrival_position[start:end, :, None, :]
 
         # Keep only the part of the displacement along the sphere's surface, then go back along
         # the great circle by that angle.
@@ -163,9 +153,9 @@ class SemiLagrangianLayer(nn.Module):
         Arguments
         ---------
         values : torch.Tensor
-            The values to be sampled, with shape (batch * local nodes, heads, channels per head).
+            The values to be sampled, with shape (batch, local rows, nlon, heads, channels per head).
         displacement : torch.Tensor
-            The displacement vectors, with shape (batch * local nodes, heads, displacement_dim).
+            The displacement vectors, with shape (batch, local rows, nlon, heads, displacement_dim).
         layout : LatLonLayout
             The layout object describing the latitude-longitude grid.
 
@@ -213,7 +203,6 @@ class SemiLagrangianWarp(SemiLagrangianLayer):
         layer_kernels: DotDict,
         interpolation: str = "bilinear",
         cartesian_displacement: bool = False,
-        grid_index: Optional[Tensor] = None,
     ) -> None:
         super().__init__(
             nlat=nlat,
@@ -221,7 +210,6 @@ class SemiLagrangianWarp(SemiLagrangianLayer):
             num_heads=num_heads,
             interpolation=interpolation,
             cartesian_displacement=cartesian_displacement,
-            grid_index=grid_index,
         )
         if out_channels % num_heads != 0:
             raise ValueError(f"out_channels ({out_channels}) must be divisible by num_heads ({num_heads}).")
@@ -235,7 +223,8 @@ class SemiLagrangianWarp(SemiLagrangianLayer):
         self.value = layer_kernels.Linear(in_channels, out_channels)
 
     def forward(self, x: Tensor, layout: LatLonLayout) -> Tensor:
-        displacement = self.flow(x).view(-1, self.num_heads, self.displacement_dim)
-        values = self.value(x).view(-1, self.num_heads, self.out_channels // self.num_heads)
+        """Warp x, of shape (batch, local rows, nlon, in_channels)."""
+        displacement = self.flow(x).unflatten(-1, (self.num_heads, self.displacement_dim))
+        values = self.value(x).unflatten(-1, (self.num_heads, -1))
         moved = self.sample(values, _at_least_float32(displacement), layout)
-        return moved.view(-1, self.out_channels)
+        return moved.flatten(-2)

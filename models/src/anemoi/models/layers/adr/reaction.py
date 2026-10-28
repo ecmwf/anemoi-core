@@ -61,11 +61,11 @@ class Reaction(nn.Module):
         Parameters
         ----------
         x : Tensor
-            Input tensor of shape (batch_size, num_channels, nlat, nlon).
+            Input tensor of shape (batch, local rows, nlon, num_channels).
         layout : LatLonLayout
             Layout object describing the latitude and longitude grid.
         cond : Tensor, optional
-            Conditioning tensor, by default None.
+            Conditioning tensor of shape (batch, local rows, nlon, condition channels), by default None.
 
         Returns
         -------

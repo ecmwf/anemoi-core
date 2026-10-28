@@ -53,7 +53,7 @@ def latlon_grid_layout(
 
     index = hidden_nodes[layout_node_attribute_name].detach().to(device="cpu", dtype=torch.long)
     coords = hidden_nodes["x"].detach().to(device="cpu", dtype=torch.float64)
-    nlat, nlon = index.max(0).values + 1
+    nlat, nlon = (index.max(0).values + 1).tolist()
     if index.shape != (nlat * nlon, 2):
         raise ValueError(
             f"The hidden grid has {nlat} x {nlon} points, but there are {coords.shape[0]} hidden nodes. "
@@ -91,13 +91,19 @@ def _comm_size_and_rank(model_comm_group: Optional[ProcessGroup]) -> tuple[int, 
 
 
 class LatLonLayout:
-    """Switches the processor state between being split by grid point and being split by channel group.
+    """Puts the processor state on the latitude-longitude grid, and switches it between two splits across GPUs.
 
-    Split by grid point, each GPU holds a tensor of shape (batch * local nodes, groups, k): every
-    channel group for its own block of nodes. Split by channel group, each GPU holds a tensor of
-    shape (batch, local groups, k, nlat, nlon): the whole globe for some of the groups. The groups
-    are the unit of the split, so channels that belong together (for instance the channels moved
-    by one velocity field) always land on the same GPU.
+    The model passes the processor a flat tensor of shape (batch * local nodes, channels), split by
+    node, with the nodes in graph order. ``to_grid`` turns it into a tensor of shape
+    (batch, local rows, nlon, channels): each GPU holds a band of whole latitude rows, with every
+    channel. ``from_grid`` turns it back. The processor does this once, on the way in and on the way
+    out, and every layer works on the grid.
+
+    Steps that look at other points (stencils, interpolation) need the whole globe. ``to_globe``
+    switches a tensor of shape (batch, local rows, nlon, groups, k) to one of shape
+    (batch, local groups, k, nlat, nlon): the whole globe for some of the groups. The groups are the
+    unit of that split, so channels that belong together (for instance the channels moved by one
+    velocity field) always land on the same GPU. ``from_globe`` switches back.
 
     ``grid_index`` gives the flat grid position ``row * nlon + col`` of each node, when the nodes
     are not stored row by row.
@@ -124,20 +130,23 @@ class LatLonLayout:
         if self.comm_size > 1:
             if batch_size != 1:
                 raise ValueError("Only batch size of 1 is supported when the model is sharded across GPUs.")
-            self.grid_shard_sizes = list(grid_shard_sizes)
+            self.node_shard_sizes = list(grid_shard_sizes)
         else:
-            self.grid_shard_sizes = [sum(grid_shard_sizes) // batch_size]
+            self.node_shard_sizes = [sum(grid_shard_sizes) // batch_size]
 
-        if sum(self.grid_shard_sizes) != nlat * nlon:
+        if sum(self.node_shard_sizes) != nlat * nlon:
             raise ValueError(
-                f"The hidden grid has {sum(self.grid_shard_sizes)} nodes, but nlat * nlon = {nlat * nlon}. "
+                f"The hidden grid has {sum(self.node_shard_sizes)} nodes, but nlat * nlon = {nlat * nlon}. "
                 "The processor needs a regular latitude-longitude hidden grid."
             )
+        if nlat < self.comm_size:
+            raise ValueError(f"Cannot split {nlat} latitude rows over {self.comm_size} GPUs.")
+        self.row_shard_sizes = get_balanced_partition_sizes(nlat, self.comm_size)
 
     @property
-    def local_nodes(self) -> tuple[int, int]:
-        """Range [start, end) of the nodes held by this GPU when split by grid point."""
-        return get_partition_range(self.grid_shard_sizes, self.rank)
+    def local_rows(self) -> tuple[int, int]:
+        """Range [start, end) of the latitude rows held by this GPU on the grid."""
+        return get_partition_range(self.row_shard_sizes, self.rank)
 
     def group_shard_sizes(self, num_groups: int) -> list[int]:
         if num_groups < self.comm_size:
@@ -151,23 +160,46 @@ class LatLonLayout:
         """Range [start, end) of the channel groups held by this GPU when split by channel group."""
         return get_partition_range(self.group_shard_sizes(num_groups), self.rank)
 
-    def to_globe(self, x: torch.Tensor) -> torch.Tensor:
-        """(batch * local nodes, groups, k) -> (batch, local groups, k, nlat, nlon)."""
-        num_groups = x.shape[1]
-        x = x.view(self.batch_size, -1, num_groups, x.shape[-1])
-        x = all_to_all_transpose(
-            x, 2, self.group_shard_sizes(num_groups), 1, self.grid_shard_sizes, self.model_comm_group
-        )
+    def to_grid(self, x: torch.Tensor) -> torch.Tensor:
+        """(batch * local nodes, channels) -> (batch, local rows, nlon, channels).
+
+        The nodes are first gathered into whole globes for a share of the channels, put in grid
+        order, then split again into bands of rows. Across GPUs this needs at least as many
+        channels as GPUs.
+        """
+        num_channels = x.shape[-1]
+        channel_shard_sizes = self.group_shard_sizes(num_channels)
+        x = x.view(self.batch_size, -1, num_channels)
+        x = all_to_all_transpose(x, 2, channel_shard_sizes, 1, self.node_shard_sizes, self.model_comm_group)
         if self.grid_index is not None:
             x = x.new_zeros(x.shape).index_copy(1, self.grid_index, x)
-        return einops.rearrange(x, "b (h w) g k -> b g k h w", h=self.nlat, w=self.nlon)
+        band_sizes = [rows * self.nlon for rows in self.row_shard_sizes]
+        x = all_to_all_transpose(x, 1, band_sizes, 2, channel_shard_sizes, self.model_comm_group)
+        return x.view(self.batch_size, -1, self.nlon, num_channels)
 
-    def from_globe(self, x: torch.Tensor, num_groups: int) -> torch.Tensor:
-        """(batch, local groups, k, nlat, nlon) -> (batch * local nodes, groups, k)."""
-        x = einops.rearrange(x, "b g k h w -> b (h w) g k")
+    def from_grid(self, x: torch.Tensor) -> torch.Tensor:
+        """(batch, local rows, nlon, channels) -> (batch * local nodes, channels)."""
+        num_channels = x.shape[-1]
+        channel_shard_sizes = self.group_shard_sizes(num_channels)
+        band_sizes = [rows * self.nlon for rows in self.row_shard_sizes]
+        x = x.reshape(self.batch_size, -1, num_channels)
+        x = all_to_all_transpose(x, 2, channel_shard_sizes, 1, band_sizes, self.model_comm_group)
         if self.grid_index is not None:
             x = x.index_select(1, self.grid_index)
+        x = all_to_all_transpose(x, 1, self.node_shard_sizes, 2, channel_shard_sizes, self.model_comm_group)
+        return x.reshape(-1, num_channels)
+
+    def to_globe(self, x: torch.Tensor) -> torch.Tensor:
+        """(batch, local rows, nlon, groups, k) -> (batch, local groups, k, nlat, nlon)."""
+        num_groups = x.shape[3]
         x = all_to_all_transpose(
-            x, 1, self.grid_shard_sizes, 2, self.group_shard_sizes(num_groups), self.model_comm_group
+            x, 3, self.group_shard_sizes(num_groups), 1, self.row_shard_sizes, self.model_comm_group
         )
-        return x.reshape(-1, num_groups, x.shape[-1])
+        return einops.rearrange(x, "b h w g k -> b g k h w")
+
+    def from_globe(self, x: torch.Tensor, num_groups: int) -> torch.Tensor:
+        """(batch, local groups, k, nlat, nlon) -> (batch, local rows, nlon, groups, k)."""
+        x = einops.rearrange(x, "b g k h w -> b h w g k")
+        return all_to_all_transpose(
+            x, 1, self.row_shard_sizes, 3, self.group_shard_sizes(num_groups), self.model_comm_group
+        )

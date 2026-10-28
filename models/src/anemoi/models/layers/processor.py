@@ -37,6 +37,7 @@ from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
+from anemoi.models.layers.layout import LatLonLayout
 from anemoi.models.layers.layout import latlon_grid_layout
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
@@ -332,6 +333,32 @@ class TransformerProcessor(BaseProcessor):
         return x
 
 
+def run_on_latlon_grid(
+    processor: BaseProcessor,
+    x: Tensor,
+    batch_size: int,
+    shard_info: GraphShardInfo,
+    model_comm_group: Optional[ProcessGroup] = None,
+    cond: Optional[Tensor] = None,
+    **kwargs,
+) -> Tensor:
+    """Run the layers of a latitude-longitude processor on the grid.
+
+    x, and cond if given, go from graph nodes, of shape (batch * local nodes, channels), to the
+    grid, of shape (batch, local rows, nlon, channels), and x comes back to graph nodes at the end.
+    """
+    layout = LatLonLayout(
+        processor.nlat, processor.nlon, batch_size, shard_info.nodes, model_comm_group, processor.grid_index
+    )
+    if cond is not None:
+        kwargs["cond"] = layout.to_grid(cond)
+
+    (x,) = processor.run_layers(
+        (layout.to_grid(x),), shard_info, batch_size, model_comm_group=model_comm_group, layout=layout, **kwargs
+    )
+    return layout.from_grid(x)
+
+
 class ADRProcessor(BaseProcessor):
     """Advection-diffusion-reaction processor on a regular latitude-longitude hidden grid (PARADIS).
 
@@ -339,6 +366,11 @@ class ADRProcessor(BaseProcessor):
     (see ``anemoi.models.layers.adr``). A step set to None is left out.
 
     The layers split one model time step into equal sub-steps.
+
+    The processor puts the hidden nodes on the grid once, as a tensor of shape
+    (batch, local rows, nlon, channels), and every step works on that grid; across GPUs each GPU
+    holds a band of latitude rows (see ``LatLonLayout``). The nodes go back to graph order on the
+    way out.
     """
 
     def __init__(
@@ -397,14 +429,15 @@ class ADRProcessor(BaseProcessor):
             **kwargs,
         )
 
-        nlat, nlon, grid_index = latlon_grid_layout(hidden_nodes, layout_node_attribute_name)
+        self.nlat, self.nlon, grid_index = latlon_grid_layout(hidden_nodes, layout_node_attribute_name)
+        # Flat grid position of each node, when the nodes are not stored row by row.
+        self.register_buffer("grid_index", grid_index, persistent=False)
         time_step = frequency_to_seconds(timestep) * EARTH_ROTATION_RATE / num_layers
         self.build_layers(
             ADRProcessorBlock,
             num_channels=num_channels,
-            nlat=nlat,
-            nlon=nlon,
-            grid_index=grid_index,
+            nlat=self.nlat,
+            nlon=self.nlon,
             time_step=time_step,
             layer_kernels=self.layer_factory,
             advection=advection,
@@ -424,9 +457,7 @@ class ADRProcessor(BaseProcessor):
         *args,
         **kwargs,
     ) -> Tensor:
-        (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
-
-        return x
+        return run_on_latlon_grid(self, x, batch_size, shard_info, model_comm_group, **kwargs)
 
 
 class FlowersProcessor(BaseProcessor):
@@ -437,6 +468,8 @@ class FlowersProcessor(BaseProcessor):
     from zero, as built by ``anemoi.graphs.nodes.RectilinearNodes``. The grid size and the row
     and column of each node are read from the hidden nodes' layout attribute, built with
     ``anemoi.graphs.nodes.attributes.RectilinearLayoutIndex``.
+
+    As in ``ADRProcessor``, the hidden nodes are put on the grid once and the blocks work on it.
     """
 
     def __init__(
@@ -501,15 +534,16 @@ class FlowersProcessor(BaseProcessor):
             **kwargs,
         )
 
-        nlat, nlon, grid_index = latlon_grid_layout(hidden_nodes, layout_node_attribute_name)
+        self.nlat, self.nlon, grid_index = latlon_grid_layout(hidden_nodes, layout_node_attribute_name)
+        # Flat grid position of each node, when the nodes are not stored row by row.
+        self.register_buffer("grid_index", grid_index, persistent=False)
         self.build_layers(
             FlowersProcessorBlock,
             num_channels=num_channels,
             hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
             num_heads=num_heads if num_heads is not None else num_channels // 4,
-            nlat=nlat,
-            nlon=nlon,
-            grid_index=grid_index,
+            nlat=self.nlat,
+            nlon=self.nlon,
             layer_kernels=self.layer_factory,
             block_style=block_style,
             interpolation=interpolation,
@@ -530,9 +564,7 @@ class FlowersProcessor(BaseProcessor):
         *args,
         **kwargs,
     ) -> Tensor:
-        (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
-
-        return x
+        return run_on_latlon_grid(self, x, batch_size, shard_info, model_comm_group, **kwargs)
 
 
 class GNNProcessor(BaseProcessor):

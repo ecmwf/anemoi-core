@@ -206,8 +206,11 @@ class ADRProcessorBlock(BaseBlock):
     - reaction, e.g. ``anemoi.models.layers.adr.Reaction``.
 
     Each step is given as a config with a ``_target_``, built with the grid passed in
-    (``num_channels``, ``nlat``, ``nlon``, ``grid_index``, ``layer_kernels``, and ``time_step`` for
-    the advection step). A step set to None is left out.
+    (``num_channels``, ``nlat``, ``nlon``, ``layer_kernels``, and ``time_step`` for the advection
+    step). A step set to None is left out.
+
+    The block works on the state put on the grid by the processor, of shape
+    (batch, local rows, nlon, channels), and is given the processor's ``LatLonLayout``.
 
     Unlike the paper, the reaction step does not receive separately encoded static fields
     (orography, land-sea mask, ...); static information reaches the processor only through the
@@ -225,18 +228,14 @@ class ADRProcessorBlock(BaseBlock):
         advection: Optional[DictConfig],
         diffusion: Optional[DictConfig],
         reaction: Optional[DictConfig],
-        grid_index: Optional[Tensor] = None,
     ):
         super().__init__()
         self.nlat = nlat
         self.nlon = nlon
-        # Flat grid position of each node, when the nodes are not stored row by row.
-        self.register_buffer("grid_index", grid_index, persistent=False)
         grid_kwargs = {
             "num_channels": num_channels,
             "nlat": nlat,
             "nlon": nlon,
-            "grid_index": grid_index,
             "layer_kernels": layer_kernels,
         }
 
@@ -251,12 +250,10 @@ class ADRProcessorBlock(BaseBlock):
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
+        *,
+        layout: LatLonLayout,
         **layer_kwargs,
     ) -> tuple[Tensor]:
-        layout = LatLonLayout(
-            self.nlat, self.nlon, batch_size, shard_info.nodes, model_comm_group, grid_index=self.grid_index
-        )
-
         for step in (self.advection, self.diffusion, self.reaction):
             if step is not None:
                 x = x + step(x, layout, cond)
@@ -274,6 +271,9 @@ class FlowersProcessorBlock(BaseBlock):
       with GroupNorm, which takes statistics over the whole grid; here a layer norm over the
       channels at each point is used instead, so that the block works when the grid is split
       across GPUs.
+
+    The block works on the state put on the grid by the processor, of shape
+    (batch, local rows, nlon, channels), and is given the processor's ``LatLonLayout``.
     """
 
     def __init__(
@@ -289,15 +289,12 @@ class FlowersProcessorBlock(BaseBlock):
         interpolation: str = "bilinear",
         mlp_implementation: MLPImplementation = "mlp",
         cartesian_displacement: bool = False,
-        grid_index: Optional[Tensor] = None,
     ):
         super().__init__()
         if block_style not in ("pre_norm", "flowers"):
             raise ValueError(f"block_style must be 'pre_norm' or 'flowers', got {block_style}.")
         self.nlat = nlat
         self.nlon = nlon
-        # Flat grid position of each node, when the nodes are not stored row by row.
-        self.register_buffer("grid_index", grid_index, persistent=False)
         self.block_style = block_style
 
         self.warp = SemiLagrangianWarp(
@@ -309,7 +306,6 @@ class FlowersProcessorBlock(BaseBlock):
             layer_kernels=layer_kernels,
             interpolation=interpolation,
             cartesian_displacement=cartesian_displacement,
-            grid_index=grid_index,
         )
 
         if block_style == "pre_norm":
@@ -336,12 +332,10 @@ class FlowersProcessorBlock(BaseBlock):
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
+        *,
+        layout: LatLonLayout,
         **layer_kwargs,
     ) -> tuple[Tensor]:
-        layout = LatLonLayout(
-            self.nlat, self.nlon, batch_size, shard_info.nodes, model_comm_group, grid_index=self.grid_index
-        )
-
         # In case we have conditionings we pass these to the layer norm
         cond_kwargs = {"cond": cond} if cond is not None else {}
 

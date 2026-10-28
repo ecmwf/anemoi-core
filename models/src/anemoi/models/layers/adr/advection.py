@@ -40,6 +40,9 @@ class SemiLagrangianAdvection(SemiLagrangianLayer):
     the rows padded in from the other side of a pole.
 
     Each head has its own velocity and moves ``advection_channels // num_heads`` channels.
+
+    The state has shape (batch, local rows, nlon, channels), as put on the grid by
+    ``LatLonLayout.to_grid``.
     """
 
     def __init__(
@@ -58,7 +61,6 @@ class SemiLagrangianAdvection(SemiLagrangianLayer):
         bias_rank: int = 128,
         bias_base_maps: int = 8,
         cartesian_displacement: bool = False,
-        grid_index: Optional[Tensor] = None,
     ) -> None:
         super().__init__(
             nlat=nlat,
@@ -66,7 +68,6 @@ class SemiLagrangianAdvection(SemiLagrangianLayer):
             num_heads=num_heads,
             interpolation=interpolation,
             cartesian_displacement=cartesian_displacement,
-            grid_index=grid_index,
         )
         if advection_channels % num_heads != 0:
             raise ValueError(f"advection_channels ({advection_channels}) must be divisible by num_heads ({num_heads}).")
@@ -95,11 +96,11 @@ class SemiLagrangianAdvection(SemiLagrangianLayer):
 
         velocity = self.velocity_in(self.velocity_norm(x, **cond_kwargs))
         velocity = self.velocity_activation(self.velocity_bias(velocity, layout))
-        velocity = self.velocity_out(velocity, layout).view(-1, self.num_heads, self.displacement_dim)
+        velocity = self.velocity_out(velocity, layout).unflatten(-1, (self.num_heads, self.displacement_dim))
 
-        transported = self.down(x, layout).view(-1, self.num_heads, self.advection_channels // self.num_heads)
+        transported = self.down(x, layout).unflatten(-1, (self.num_heads, -1))
         moved = self.sample(transported, _at_least_float32(velocity) * self.time_step, layout)
-        return self.up(moved.view(-1, self.advection_channels))
+        return self.up(moved.flatten(-2))
 
 
 class NeuralSemiLagrangian(nn.Module):
@@ -124,7 +125,6 @@ class NeuralSemiLagrangian(nn.Module):
         nlon: int,
         time_step: float,
         layer_kernels: DotDict,
-        grid_index: Optional[Tensor] = None,
         advection_channels: int = 768,
         num_heads: Optional[int] = None,
         velocity_hidden_dim: int = 384,
@@ -155,7 +155,6 @@ class NeuralSemiLagrangian(nn.Module):
             bias_rank=bias_rank,
             bias_base_maps=bias_base_maps,
             cartesian_displacement=cartesian_displacement,
-            grid_index=grid_index,
         )
         # This determines how much of the advected state is applied to the current state.
         self.share = nn.Parameter(torch.full((num_channels,), -1.0))

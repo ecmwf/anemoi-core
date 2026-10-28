@@ -14,11 +14,12 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.adr.layers import LowRankBias
 from anemoi.models.layers.adr.advection import SemiLagrangianAdvection
 from anemoi.models.layers.block import ADRProcessorBlock
-from anemoi.models.layers.block import FlowersProcessorBlock
 from anemoi.models.layers.geocyclic import geocyclic_pad
 from anemoi.models.layers.layout import LatLonLayout
 from anemoi.models.layers.layout import latlon_cell_centres
 from anemoi.models.layers.layout import latlon_grid_layout
+from anemoi.models.layers.processor import ADRProcessor
+from anemoi.models.layers.processor import FlowersProcessor
 from anemoi.models.layers.semi_lagrangian import SemiLagrangianLayer
 from anemoi.models.layers.semi_lagrangian import SemiLagrangianWarp
 from anemoi.models.layers.utils import load_layer_kernels
@@ -36,6 +37,11 @@ def _smooth_field(points: torch.Tensor) -> torch.Tensor:
 
 def _layout(nlat: int, nlon: int, batch_size: int = 1) -> LatLonLayout:
     return LatLonLayout(nlat, nlon, batch_size, [batch_size * nlat * nlon])
+
+
+def _on_grid(x: torch.Tensor, nlat: int, nlon: int) -> torch.Tensor:
+    """Values given one per grid point, row by row, as the layers take them: (1, nlat, nlon, ...)."""
+    return x.view(1, nlat, nlon, *x.shape[1:])
 
 
 def test_latlon_cell_centres_order():
@@ -150,69 +156,66 @@ def test_grid_layout_rejects_other_grids(make_wrong_nodes):
 
 
 def test_layout_round_trip_single_process():
-    nlat, nlon, batch_size, groups = 4, 8, 2, 3
+    nlat, nlon, batch_size, channels = 4, 8, 2, 6
     layout = _layout(nlat, nlon, batch_size)
-    x = torch.randn(batch_size * nlat * nlon, groups, 5)
-    globe = layout.to_globe(x)
-    assert globe.shape == (batch_size, groups, 5, nlat, nlon)
+    x = torch.randn(batch_size * nlat * nlon, channels)
+    grid = layout.to_grid(x)
+    assert grid.shape == (batch_size, nlat, nlon, channels)
     # Node n of batch b sits at row n // nlon and column n % nlon.
-    torch.testing.assert_close(globe[1, 2, :, 3, 5], x[nlat * nlon + 3 * nlon + 5, 2])
-    torch.testing.assert_close(layout.from_globe(globe, groups), x)
+    torch.testing.assert_close(grid[1, 3, 5], x[nlat * nlon + 3 * nlon + 5])
+    torch.testing.assert_close(layout.from_grid(grid), x)
+
+    groups = grid.view(batch_size, nlat, nlon, 3, 2)
+    globe = layout.to_globe(groups)
+    assert globe.shape == (batch_size, 3, 2, nlat, nlon)
+    torch.testing.assert_close(globe[1, 2, :, 3, 5], groups[1, 3, 5, 2])
+    torch.testing.assert_close(layout.from_globe(globe, 3), groups)
 
 
 def test_layout_round_trip_with_grid_index():
-    nlat, nlon, batch_size, groups = 4, 8, 2, 3
+    nlat, nlon, batch_size, channels = 4, 8, 2, 6
     order = _shuffled(nlat, nlon)
     layout = LatLonLayout(nlat, nlon, batch_size, [batch_size * nlat * nlon], grid_index=order)
-    x = torch.randn(batch_size * nlat * nlon, groups, 5)
-    globe = layout.to_globe(x)
+    x = torch.randn(batch_size * nlat * nlon, channels)
+    grid = layout.to_grid(x)
     # Node n of batch b sits at the grid point order[n].
     node = 7
     row, col = divmod(order[node].item(), nlon)
-    torch.testing.assert_close(globe[1, 2, :, row, col], x[nlat * nlon + node, 2])
-    torch.testing.assert_close(layout.from_globe(globe, groups), x)
+    torch.testing.assert_close(grid[1, row, col], x[nlat * nlon + node])
+    torch.testing.assert_close(layout.from_grid(grid), x)
 
 
 @pytest.mark.parametrize("kind", ["adr", "flowers"])
-def test_blocks_do_not_depend_on_node_order(kind):
-    """A block on shuffled nodes gives the same values, node by node, as on nodes stored row by row."""
+def test_processors_do_not_depend_on_node_order(kind):
+    """A processor on shuffled nodes gives the same values, node by node, as on nodes stored row by row."""
     nlat, nlon, channels = 8, 16, 16
     order = _shuffled(nlat, nlon)
 
-    def build(grid_index):
+    def build(order):
         torch.manual_seed(0)
-        if kind == "adr":
-            bias_kwargs = {"bias_rank": 4, "bias_base_maps": 2}
-            return ADRProcessorBlock(
-                num_channels=channels,
-                nlat=nlat,
-                nlon=nlon,
-                time_step=0.2,
-                layer_kernels=load_layer_kernels(),
-                advection={
-                    "_target_": "anemoi.models.layers.adr.NeuralSemiLagrangian",
-                    "advection_channels": 8,
-                    "num_heads": 4,
-                    "velocity_hidden_dim": 8,
-                    **bias_kwargs,
-                },
-                diffusion={"_target_": "anemoi.models.layers.adr.Diffusion", **bias_kwargs},
-                reaction={
-                    "_target_": "anemoi.models.layers.adr.Reaction",
-                    "hidden_dim": 16,
-                    "num_layers": 2,
-                    **bias_kwargs,
-                },
-                grid_index=grid_index,
-            )
-        return FlowersProcessorBlock(
-            num_channels=channels,
-            hidden_dim=32,
-            num_heads=4,
-            nlat=nlat,
-            nlon=nlon,
-            layer_kernels=load_layer_kernels(),
-            grid_index=grid_index,
+        common = {
+            "num_layers": 1,
+            "num_channels": channels,
+            "num_chunks": 1,
+            "hidden_nodes": _hidden_nodes(nlat, nlon, order),
+            "layout_node_attribute_name": "layout_index",
+            "layer_kernels": load_layer_kernels(instance=False),
+        }
+        if kind == "flowers":
+            return FlowersProcessor(**common, num_heads=4)
+        bias_kwargs = {"bias_rank": 4, "bias_base_maps": 2}
+        return ADRProcessor(
+            **common,
+            timestep="6h",
+            advection={
+                "_target_": "anemoi.models.layers.adr.NeuralSemiLagrangian",
+                "advection_channels": 8,
+                "num_heads": 4,
+                "velocity_hidden_dim": 8,
+                **bias_kwargs,
+            },
+            diffusion={"_target_": "anemoi.models.layers.adr.Diffusion", **bias_kwargs},
+            reaction={"_target_": "anemoi.models.layers.adr.Reaction", "hidden_dim": 16, "num_layers": 2, **bias_kwargs},
         )
 
     row_by_row, shuffled = build(None), build(order)
@@ -223,8 +226,9 @@ def test_blocks_do_not_depend_on_node_order(kind):
     shuffled.load_state_dict(row_by_row.state_dict())
 
     x = torch.randn(nlat * nlon, channels)
-    expected = row_by_row(x, GraphShardInfo(nodes=[nlat * nlon]), 1)[0]
-    out = shuffled(x[order], GraphShardInfo(nodes=[nlat * nlon]), 1)[0]
+    shard_info = GraphShardInfo(nodes=[nlat * nlon])
+    expected = row_by_row(x, batch_size=1, shard_info=shard_info)
+    out = shuffled(x[order], batch_size=1, shard_info=shard_info)
     torch.testing.assert_close(out, expected[order], atol=1e-5, rtol=1e-5)
 
 
@@ -237,8 +241,8 @@ def test_layout_rejects_wrong_grid_size():
 def test_zero_displacement_is_identity(interpolation):
     nlat, nlon, heads = 10, 20, 3
     layer = SemiLagrangianLayer(nlat=nlat, nlon=nlon, num_heads=heads, interpolation=interpolation)
-    values = torch.randn(nlat * nlon, heads, 4)
-    moved = layer.sample(values, torch.zeros(nlat * nlon, heads, 2), _layout(nlat, nlon))
+    values = torch.randn(1, nlat, nlon, heads, 4)
+    moved = layer.sample(values, torch.zeros(1, nlat, nlon, heads, 2), _layout(nlat, nlon))
     torch.testing.assert_close(moved, values, atol=1e-4, rtol=0)
 
 
@@ -272,7 +276,9 @@ def test_sampling_reads_from_departure_points(interpolation):
     e, n = displacement[..., :1], displacement[..., 1:]
     departure = n.cos() * e.cos() * position - n.cos() * e.sin() * east_dir - n.sin() * north_dir
 
-    moved = layer.sample(values, displacement.float(), _layout(nlat, nlon))
+    moved = layer.sample(
+        _on_grid(values, nlat, nlon), _on_grid(displacement.float(), nlat, nlon), _layout(nlat, nlon)
+    ).reshape(values.shape)
     # torch's bicubic kernel (cubic convolution with a = -0.75) is only first-order accurate, so on
     # a smooth field it is less accurate than bilinear.
     atol = 2e-3 if interpolation == "bilinear" else 5e-3
@@ -288,9 +294,9 @@ def test_sampling_across_the_north_pole():
 
     # Moving south by 3 grid spacings means coming from 3 spacings further north: over the pole
     # and down to 2.5 spacings from the pole, half a turn round.
-    displacement = torch.zeros(nlat * nlon, 1, 2)
+    displacement = torch.zeros(1, nlat, nlon, 1, 2)
     displacement[..., 1] = -3 * torch.pi / nlat
-    moved = layer.sample(values, displacement, _layout(nlat, nlon)).view(nlat, nlon)
+    moved = layer.sample(_on_grid(values, nlat, nlon), displacement, _layout(nlat, nlon)).view(nlat, nlon)
 
     expected_lat = torch.full((nlon,), torch.pi / 2 - 2.5 * torch.pi / nlat, dtype=torch.float64)
     expected = _smooth_field(_unit_vectors(expected_lat, lon[:nlon] + torch.pi)).float()
@@ -313,7 +319,7 @@ def test_semi_lagrangian_advection_without_velocity_projects_down_and_up():
     )
     torch.nn.init.zeros_(advection.velocity_out.mix.weight)
     layout = _layout(nlat, nlon)
-    x = torch.randn(nlat * nlon, 16)
+    x = torch.randn(1, nlat, nlon, 16)
     torch.testing.assert_close(advection(x, layout), advection.up(advection.down(x, layout)), atol=1e-4, rtol=0)
 
 
@@ -353,8 +359,9 @@ def test_adr_block_matches_paper_parameter_counts():
 def test_low_rank_bias_adds_a_field_shared_over_the_batch():
     nlat, nlon, channels = 4, 8, 6
     bias = LowRankBias(channels, nlat, nlon, load_layer_kernels(), rank=3, num_base_maps=2)
-    x = torch.zeros(2 * nlat * nlon, channels)
-    out = bias(x, _layout(nlat, nlon, batch_size=2)).view(2, nlat * nlon, channels)
+    x = torch.zeros(2, nlat, nlon, channels)
+    out = bias(x, _layout(nlat, nlon, batch_size=2))
+    assert out.shape == x.shape
     torch.testing.assert_close(out[0], out[1])
     assert out.abs().sum() > 0
 
@@ -372,7 +379,7 @@ def test_warp_without_displacement_returns_the_values():
     torch.nn.init.zeros_(warp.flow[-1].weight)
     torch.nn.init.zeros_(warp.flow[-1].bias)
     layout = _layout(nlat, nlon)
-    x = torch.randn(nlat * nlon, 12)
+    x = torch.randn(1, nlat, nlon, 12)
     torch.testing.assert_close(warp(x, layout), warp.value(x), atol=1e-4, rtol=0)
 
 
@@ -405,7 +412,8 @@ def test_cartesian_displacement_follows_great_circles(interpolation):
     departure = angle.cos() * position - angle.sin() * direction
     radial = torch.randn(nlat * nlon, heads, 1, dtype=torch.float64) * position
 
-    moved = layer.sample(values, (angle * direction + radial).float(), _layout(nlat, nlon))
+    displacement = _on_grid((angle * direction + radial).float(), nlat, nlon)
+    moved = layer.sample(_on_grid(values, nlat, nlon), displacement, _layout(nlat, nlon)).reshape(values.shape)
     atol = 2e-3 if interpolation == "bilinear" else 5e-3
     torch.testing.assert_close(moved.squeeze(-1), _smooth_field(departure).float(), atol=atol, rtol=0)
 
@@ -428,7 +436,7 @@ def test_cartesian_and_local_displacements_agree_along_one_direction(component):
 
     def grid_cells(layer, displacement):
         # Row and column of each departure point; columns n and n + nlon are the same place.
-        grid = layer.departure_points(displacement, layout).squeeze(1).double()
+        grid = layer.departure_points(_on_grid(displacement, nlat, nlon), layout).reshape(-1, 2).double()
         col = (grid[:, 0] + 1) / 2 * (nlon + 2 * layer.pad - 1) - layer.pad
         row = (grid[:, 1] + 1) / 2 * (nlat + 2 * layer.pad - 1) - layer.pad
         return row, col
@@ -449,7 +457,8 @@ def test_cartesian_displacement_across_the_north_pole():
 
     # Moving south by 3 grid spacings: the value comes from over the pole, half a turn round.
     displacement = (-3 * torch.pi / nlat) * north_dir
-    moved = layer.sample(values, displacement.float().view(-1, 1, 3), _layout(nlat, nlon)).view(nlat, nlon)
+    displacement = displacement.float().view(1, nlat, nlon, 1, 3)
+    moved = layer.sample(_on_grid(values, nlat, nlon), displacement, _layout(nlat, nlon)).view(nlat, nlon)
 
     expected_lat = torch.full((nlon,), torch.pi / 2 - 2.5 * torch.pi / nlat, dtype=torch.float64)
     expected = _smooth_field(_unit_vectors(expected_lat, lon[:nlon] + torch.pi)).float()

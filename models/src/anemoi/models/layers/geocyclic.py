@@ -41,11 +41,11 @@ class GeocyclicDepthwiseConv(nn.Module):
         self.conv = nn.Conv2d(num_channels, num_channels, kernel_size, groups=num_channels, padding=0, bias=False)
 
     def forward(self, x: Tensor, layout: "LatLonLayout") -> Tensor:
+        """Apply the stencil to x, of shape (batch, local rows, nlon, channels)."""
         # Each GPU applies the stencil to the whole globe for its share of the channels, using
         # its share of the stencil weights.
         start, end = layout.local_groups(self.num_channels)
-        y = layout.to_globe(x.view(-1, self.num_channels, 1))
+        y = layout.to_globe(x.unsqueeze(-1))
         y = geocyclic_pad(y.flatten(1, 2), self.pad)
         y = F.conv2d(y, self.conv.weight[start:end], groups=end - start)
-        y = y.view(layout.batch_size, end - start, 1, layout.nlat, layout.nlon)
-        return layout.from_globe(y, self.num_channels).view(-1, self.num_channels)
+        return layout.from_globe(y.unsqueeze(2), self.num_channels).squeeze(-1)
