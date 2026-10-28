@@ -291,7 +291,7 @@ class AnemoiTrainer(ABC):
             return graph
 
         # Resuming or warm starting: reuse the graph the checkpoint was trained with, since
-        # rebuilding it is not guaranteed to reproduce the same node ordering.
+        # rebuilding it is not guaranteed to reproduce the same node ordering, if for example, training is continued on a different machine.
         resume_checkpoint = None if overwrite else self._resume_checkpoint_file
         if resume_checkpoint is not None:
             graph = load_graph_from_checkpoint(resume_checkpoint)
