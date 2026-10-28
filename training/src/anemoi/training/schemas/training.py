@@ -745,10 +745,10 @@ class BaseDDPStrategySchema(BaseModel):
     "Use synchronization local to the group when creating process groups."
     broadcast_buffers: bool = Field(default=False, example=False)
     "Broadcast model buffers at the start of each iteration. Defaults to False."
-    static_graph: bool = Field(default=True, example=True)
-    """Tell DDP that the same parameters are trained in every step. Must be false when
-    training.accum_grad_batches > 1."""
-    find_unused_parameters: bool = Field(default=False, example=False)
+    static_graph: bool = Field(default=False, example=False)
+    """Tell DDP that the same parameters are trained in every step. Can be faster for large models, but must be
+    false when training.accum_grad_batches > 1."""
+    find_unused_parameters: bool = Field(default=True, example=True)
     """Let DDP check every step for parameters that receive no gradient. Together with static_graph: false,
     DDP sums the gradients in the same groups in every step, so a resumed run continues bitwise identically."""
 

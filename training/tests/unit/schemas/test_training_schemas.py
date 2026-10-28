@@ -60,11 +60,11 @@ def _ddp_strategy(**kwargs: bool) -> BaseDDPStrategySchema:
     )
 
 
-def test_ddp_strategy_schema_defaults_to_static_graph() -> None:
+def test_ddp_strategy_schema_defaults_to_reproducible() -> None:
     schema = _ddp_strategy()
 
-    assert schema.static_graph is True
-    assert schema.find_unused_parameters is False
+    assert schema.static_graph is False
+    assert schema.find_unused_parameters is True
 
 
 def test_static_graph_rejected_with_gradient_accumulation() -> None:
