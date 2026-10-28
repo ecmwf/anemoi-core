@@ -17,9 +17,9 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.layers.adr import Diffusion
-from anemoi.models.layers.adr import NeuralSemiLagrangian
-from anemoi.models.layers.adr import Reaction
+from anemoi.models.layers.adr import LatLonAdvection
+from anemoi.models.layers.adr import LatLonDiffusion
+from anemoi.models.layers.adr import LatLonReaction
 from anemoi.models.layers.block import ADRProcessorBlock
 from anemoi.models.layers.layout import latlon_cell_centres
 from anemoi.models.layers.processor import ADRProcessor
@@ -29,7 +29,7 @@ from anemoi.utils.config import DotDict
 
 def _advection(**kwargs) -> dict:
     return {
-        "_target_": "anemoi.models.layers.adr.NeuralSemiLagrangian",
+        "_target_": "anemoi.models.layers.adr.LatLonAdvection",
         "advection_channels": 16,
         "velocity_hidden_dim": 12,
         "bias_rank": 4,
@@ -39,12 +39,12 @@ def _advection(**kwargs) -> dict:
 
 
 def _diffusion(**kwargs) -> dict:
-    return {"_target_": "anemoi.models.layers.adr.Diffusion", "bias_rank": 4, "bias_base_maps": 2, **kwargs}
+    return {"_target_": "anemoi.models.layers.adr.LatLonDiffusion", "bias_rank": 4, "bias_base_maps": 2, **kwargs}
 
 
 def _reaction(**kwargs) -> dict:
     return {
-        "_target_": "anemoi.models.layers.adr.Reaction",
+        "_target_": "anemoi.models.layers.adr.LatLonReaction",
         "hidden_dim": 24,
         "num_layers": 4,
         "bias_rank": 4,
@@ -105,10 +105,11 @@ def test_adr_processor_init(adr_processor, adr_processor_init):
     for block in adr_processor.proc:
         assert isinstance(block, ADRProcessorBlock)
         # The grid size comes from the hidden nodes' layout.
-        assert (block.nlat, block.nlon) == (adr_processor_init.nlat, adr_processor_init.nlon)
-        assert isinstance(block.advection, NeuralSemiLagrangian)
-        assert isinstance(block.diffusion, Diffusion)
-        assert isinstance(block.reaction, Reaction)
+        sampler = block.advection.transport.sampler
+        assert (sampler.nlat, sampler.nlon) == (adr_processor_init.nlat, adr_processor_init.nlon)
+        assert isinstance(block.advection, LatLonAdvection)
+        assert isinstance(block.diffusion, LatLonDiffusion)
+        assert isinstance(block.reaction, LatLonReaction)
         # By default every moved channel has its own velocity field.
         assert block.advection.transport.num_heads == adr_processor_init.advection["advection_channels"]
         # The layers split one 6 hour step, with velocities in units of 1 / Earth's rotation rate.

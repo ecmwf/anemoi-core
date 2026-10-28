@@ -118,8 +118,8 @@ class TransformerProcessorSchema(TransformerModelComponent):
         return self
 
 
-class NeuralSemiLagrangianSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.adr.NeuralSemiLagrangian"] = Field(..., alias="_target_")
+class LatLonAdvectionSchema(BaseModel):
+    target_: Literal["anemoi.models.layers.adr.LatLonAdvection"] = Field(..., alias="_target_")
     "Advection step: neural semi-Lagrangian advection with a learned share per channel."
     advection_channels: PositiveInt = Field(default=768)
     "Number of channels moved by the advection step."
@@ -139,8 +139,8 @@ class NeuralSemiLagrangianSchema(BaseModel):
     "Predict velocities as 3D vectors instead of local east and north components."
 
 
-class DiffusionSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.adr.Diffusion"] = Field(..., alias="_target_")
+class LatLonDiffusionSchema(BaseModel):
+    target_: Literal["anemoi.models.layers.adr.LatLonDiffusion"] = Field(..., alias="_target_")
     "Diffusion step: layer norm, a stencil per channel, a channel mix and a learned bias field."
     kernel_size: PositiveInt = Field(default=5)
     "Size of the square stencil, must be odd."
@@ -154,8 +154,8 @@ class DiffusionSchema(BaseModel):
     "Number of base maps the learned bias field is mixed from."
 
 
-class ReactionSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.adr.Reaction"] = Field(..., alias="_target_")
+class LatLonReactionSchema(BaseModel):
+    target_: Literal["anemoi.models.layers.adr.LatLonReaction"] = Field(..., alias="_target_")
     "Reaction step: layer norm and a pointwise MLP with a learned bias field after its first layer."
     hidden_dim: PositiveInt = Field(default=896)
     "Hidden dimension of the MLP."
@@ -182,11 +182,89 @@ class ADRProcessorSchema(PointWiseModelComponent):
     "Number of advection-diffusion-reaction layers."
     timestep: str = Field(example="6h")
     "Model time step. Sets how far the learned velocities move the state."
-    advection: Union[NeuralSemiLagrangianSchema, None]
+    advection: Union[LatLonAdvectionSchema, None]
     "Advection step of each layer. None leaves it out."
-    diffusion: Union[DiffusionSchema, None]
+    diffusion: Union[LatLonDiffusionSchema, None]
     "Diffusion step of each layer. None leaves it out."
-    reaction: Union[ReactionSchema, None]
+    reaction: Union[LatLonReactionSchema, None]
+    "Reaction step of each layer. None leaves it out."
+
+
+class _GraphBiasFields(BaseModel):
+    bias_rank: PositiveInt = Field(default=128)
+    "Number of latitude-longitude profile pairs in the learned bias field."
+    bias_base_maps: PositiveInt = Field(default=8)
+    "Number of base maps the learned bias field is mixed from."
+    bias_lat_degree: NonNegativeInt = Field(default=32)
+    "Highest degree of the latitude profiles (Chebyshev polynomials of sin(latitude))."
+    bias_lon_wavenumber: NonNegativeInt = Field(default=32)
+    "Highest wavenumber of the longitude profiles (Fourier series, tapered towards the poles)."
+
+
+class _GraphMixerFields(BaseModel):
+    mixer_block: Literal["transformer", "gnn"] = Field(default="transformer")
+    "Graph block of the spatial mixers: a graph transformer or a GNN block over the hidden-to-hidden edges."
+    mixer_kwargs: dict[str, Any] = Field(default_factory=dict)
+    "Settings of the graph block, e.g. num_heads, mlp_hidden_ratio, graph_attention_backend."
+
+
+class GraphAdvectionSchema(_GraphMixerFields, _GraphBiasFields):
+    target_: Literal["anemoi.models.layers.adr.GraphAdvection"] = Field(..., alias="_target_")
+    "Advection step on the nodes of a graph: neural semi-Lagrangian advection with a learned share per channel."
+    advection_channels: PositiveInt = Field(default=768)
+    "Number of channels moved by the advection step."
+    num_heads: Union[PositiveInt, None] = Field(default=None)
+    "Number of velocity fields. Default: one per moved channel."
+    velocity_hidden_dim: PositiveInt = Field(default=384)
+    "Hidden dimension of the velocity network."
+    num_neighbours: PositiveInt = Field(default=4)
+    "Number of nearest nodes a value is read from at its departure point."
+    smoothing: NonNegativeFloat = Field(default=0.01)
+    "Sharpness of the interpolation weights at a node, relative to the node spacing."
+    cartesian_displacement: bool = Field(default=False)
+    "Predict velocities as 3D vectors instead of local east and north components."
+
+
+class GraphDiffusionSchema(_GraphMixerFields, _GraphBiasFields):
+    target_: Literal["anemoi.models.layers.adr.GraphDiffusion"] = Field(..., alias="_target_")
+    "Diffusion step on the nodes of a graph: layer norm, a graph block, a channel mix and a learned bias field."
+    layer_norm: bool = Field(default=True)
+    "Apply a layer norm before the graph block."
+    low_rank_bias: bool = Field(default=True)
+    "Add a learned bias field after the channel mix."
+
+
+class GraphReactionSchema(_GraphBiasFields):
+    target_: Literal["anemoi.models.layers.adr.GraphReaction"] = Field(..., alias="_target_")
+    "Reaction step on the nodes of a graph: layer norm and a pointwise MLP with a learned bias field after its first layer."
+    hidden_dim: PositiveInt = Field(default=896)
+    "Hidden dimension of the MLP."
+    num_layers: int = Field(default=4, ge=2)
+    "Number of linear layers in the MLP, at least 2."
+    layer_norm: bool = Field(default=True)
+    "Apply a layer norm before the MLP."
+    low_rank_bias: bool = Field(default=True)
+    "Add a learned bias field after the first layer of the MLP."
+
+
+class GraphADRProcessorSchema(PointWiseModelComponent):
+    target_: Literal["anemoi.models.layers.processor.GraphADRProcessor"] = Field(..., alias="_target_")
+    "Advection-diffusion-reaction processor on the nodes of the hidden graph, mixing neighbours over the hidden-to-hidden edges."
+    trainable_size: NonNegativeInt = Field(example=8)
+    "Size of the trainable parameters vector added to the hidden-to-hidden edges."
+    sub_graph_edge_attributes: list[str] = Field(example=["edge_length", "edge_dirs"])
+    "Edge attributes of the hidden-to-hidden edges used by the graph blocks."
+    num_channels: NonNegativeInt = Field(example=1024)
+    "Number of channels in the processor."
+    num_layers: NonNegativeInt = Field(example=16)
+    "Number of advection-diffusion-reaction layers."
+    timestep: str = Field(example="6h")
+    "Model time step. Sets how far the learned velocities move the state."
+    advection: Union[GraphAdvectionSchema, None]
+    "Advection step of each layer. None leaves it out."
+    diffusion: Union[GraphDiffusionSchema, None]
+    "Diffusion step of each layer. None leaves it out."
+    reaction: Union[GraphReactionSchema, None]
     "Reaction step of each layer. None leaves it out."
 
 

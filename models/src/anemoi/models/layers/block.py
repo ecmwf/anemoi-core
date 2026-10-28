@@ -41,6 +41,7 @@ from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
+from anemoi.models.layers.layout import GraphLayout
 from anemoi.models.layers.layout import LatLonLayout
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
@@ -197,20 +198,22 @@ class TransformerProcessorBlock(BaseBlock):
 
 
 class ADRProcessorBlock(BaseBlock):
-    """Advection-diffusion-reaction block on a regular latitude-longitude grid, as in PARADIS.
+    """Advection-diffusion-reaction block, as in PARADIS.
 
     Three steps, one after the other, each adding its output to the state:
 
-    - advection, e.g. ``anemoi.models.layers.adr.NeuralSemiLagrangian``;
-    - diffusion, e.g. ``anemoi.models.layers.adr.Diffusion``;
-    - reaction, e.g. ``anemoi.models.layers.adr.Reaction``.
+    - advection, e.g. ``anemoi.models.layers.adr.LatLonAdvection`` or ``GraphAdvection``;
+    - diffusion, e.g. ``anemoi.models.layers.adr.LatLonDiffusion`` or ``GraphDiffusion``;
+    - reaction, e.g. ``anemoi.models.layers.adr.LatLonReaction`` or ``GraphReaction``.
 
-    Each step is given as a config with a ``_target_``, built with the grid passed in
-    (``num_channels``, ``nlat``, ``nlon``, ``layer_kernels``, and ``time_step`` for the advection
-    step). A step set to None is left out.
+    Each step is given as a config with a ``_target_``, built with ``num_channels``,
+    ``layer_kernels``, the processor's ``geometry`` (``nlat`` and ``nlon`` for a
+    latitude-longitude grid, ``edge_dim`` for a graph), and ``time_step`` for the advection step.
+    A step set to None is left out.
 
-    The block works on the state put on the grid by the processor, of shape
-    (batch, local rows, nlon, channels), and is given the processor's ``LatLonLayout``.
+    The block works on the state as the processor lays it out: (batch, local rows, nlon, channels)
+    with a ``LatLonLayout``, or (batch * local nodes, channels) with a ``GraphLayout``. It is
+    given that layout.
 
     Unlike the paper, the reaction step does not receive separately encoded static fields
     (orography, land-sea mask, ...); static information reaches the processor only through the
@@ -221,27 +224,19 @@ class ADRProcessorBlock(BaseBlock):
         self,
         *,
         num_channels: int,
-        nlat: int,
-        nlon: int,
         time_step: float,
         layer_kernels: DotDict,
         advection: Optional[DictConfig],
         diffusion: Optional[DictConfig],
         reaction: Optional[DictConfig],
+        geometry: Optional[dict] = None,
     ):
         super().__init__()
-        self.nlat = nlat
-        self.nlon = nlon
-        grid_kwargs = {
-            "num_channels": num_channels,
-            "nlat": nlat,
-            "nlon": nlon,
-            "layer_kernels": layer_kernels,
-        }
+        step_kwargs = {"num_channels": num_channels, "layer_kernels": layer_kernels, **(geometry or {})}
 
-        self.advection = instantiate(advection, **grid_kwargs, time_step=time_step) if advection is not None else None
-        self.diffusion = instantiate(diffusion, **grid_kwargs) if diffusion is not None else None
-        self.reaction = instantiate(reaction, **grid_kwargs) if reaction is not None else None
+        self.advection = instantiate(advection, **step_kwargs, time_step=time_step) if advection is not None else None
+        self.diffusion = instantiate(diffusion, **step_kwargs) if diffusion is not None else None
+        self.reaction = instantiate(reaction, **step_kwargs) if reaction is not None else None
 
     def forward(
         self,
@@ -251,7 +246,7 @@ class ADRProcessorBlock(BaseBlock):
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
         *,
-        layout: LatLonLayout,
+        layout: Union[LatLonLayout, GraphLayout],
         **layer_kwargs,
     ) -> tuple[Tensor]:
         for step in (self.advection, self.diffusion, self.reaction):

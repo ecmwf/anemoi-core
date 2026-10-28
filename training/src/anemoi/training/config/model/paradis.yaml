@@ -44,7 +44,7 @@ processor:
       _target_: torch.nn.SiLU
   # Each layer runs the steps below in order; set a step to null to leave it out.
   advection:
-    _target_: anemoi.models.layers.adr.NeuralSemiLagrangian
+    _target_: anemoi.models.layers.adr.LatLonAdvection
     advection_channels: 768
     num_heads: null # number of velocity fields; null gives one per advected channel
     velocity_hidden_dim: 384
@@ -54,14 +54,14 @@ processor:
     bias_base_maps: 8
     cartesian_displacement: False # True: 3D velocities, which do not turn round across the poles
   diffusion:
-    _target_: anemoi.models.layers.adr.Diffusion
+    _target_: anemoi.models.layers.adr.LatLonDiffusion
     kernel_size: 5
     layer_norm: True
     low_rank_bias: True
     bias_rank: 128
     bias_base_maps: 8
   reaction:
-    _target_: anemoi.models.layers.adr.Reaction
+    _target_: anemoi.models.layers.adr.LatLonReaction
     hidden_dim: 896
     num_layers: 4
     layer_norm: True

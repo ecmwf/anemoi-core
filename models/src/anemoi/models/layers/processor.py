@@ -12,6 +12,7 @@ import logging
 from abc import ABC
 from typing import Optional
 
+import torch
 from omegaconf import DictConfig
 from torch import Tensor
 from torch import nn
@@ -37,9 +38,12 @@ from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
+from anemoi.models.layers.layout import GraphLayout
 from anemoi.models.layers.layout import LatLonLayout
 from anemoi.models.layers.layout import latlon_grid_layout
+from anemoi.models.layers.layout import latlon_to_unit_vector
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.semi_lagrangian import typical_node_spacing
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -406,13 +410,13 @@ class ADRProcessor(BaseProcessor):
         timestep : str
             Model time step, e.g. "6h". Sets how far the learned velocities move the state.
         advection : DictConfig, optional
-            Config of the advection step, e.g. ``anemoi.models.layers.adr.NeuralSemiLagrangian``.
+            Config of the advection step, e.g. ``anemoi.models.layers.adr.LatLonAdvection``.
             None leaves the step out.
         diffusion : DictConfig, optional
-            Config of the diffusion step, e.g. ``anemoi.models.layers.adr.Diffusion``.
+            Config of the diffusion step, e.g. ``anemoi.models.layers.adr.LatLonDiffusion``.
             None leaves the step out.
         reaction : DictConfig, optional
-            Config of the reaction step, e.g. ``anemoi.models.layers.adr.Reaction``.
+            Config of the reaction step, e.g. ``anemoi.models.layers.adr.LatLonReaction``.
             None leaves the step out.
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
@@ -436,8 +440,7 @@ class ADRProcessor(BaseProcessor):
         self.build_layers(
             ADRProcessorBlock,
             num_channels=num_channels,
-            nlat=self.nlat,
-            nlon=self.nlon,
+            geometry={"nlat": self.nlat, "nlon": self.nlon},
             time_step=time_step,
             layer_kernels=self.layer_factory,
             advection=advection,
@@ -706,7 +709,70 @@ class GNNProcessor(BaseProcessor):
         return x
 
 
-class GraphTransformerProcessor(BaseProcessor):
+class _HaloInfoCache:
+    """Builds the halo exchange plan of the edge-sharded graph transformer, once for all layers.
+
+    Used by processors that run ``GraphTransformerProcessorBlock`` with ``shard_strategy="edges"``.
+    The processor sets ``shard_strategy``, ``_cached_halo_info`` and ``_cached_halo_cache_specs``.
+    """
+
+    def _get_or_build_cached_halo_info(
+        self,
+        x: Tensor,
+        edge_index: Adj,
+        shard_info: GraphShardInfo,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup],
+    ) -> Optional[HaloInfo]:
+        """Return one halo plan shared by all processor layers.
+
+        The plan is kept for as long as the shard sizes stay the same, so the
+        processor graph must not change between calls.
+        """
+        if self.shard_strategy != "edges" or not model_is_distributed(model_comm_group):
+            return None
+
+        if batch_size != 1:
+            raise ValueError(
+                "GraphTransformerProcessor halo exchange requires batch_size=1 when model sharding is enabled."
+            )
+        if not shard_info.nodes_are_sharded():
+            raise ValueError(
+                "GraphTransformerProcessor halo exchange requires sharded nodes when model sharding is enabled."
+            )
+        assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
+
+        cache_specs = halo_cache_specs(shard_info, model_comm_group)
+        if self._cached_halo_info is not None and self._cached_halo_cache_specs == cache_specs:
+            return self._cached_halo_info
+
+        LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
+
+        bipartite_shard_info = BipartiteGraphShardInfo(
+            src_nodes=shard_info.nodes,
+            dst_nodes=shard_info.nodes,
+            edges=shard_info.edges,
+        )
+        partition = build_graph_partition_from_shard_info(
+            edge_index,
+            (x, x),
+            bipartite_shard_info,
+            model_comm_group,
+        )
+        halo_info = build_halo_info(
+            partition,
+            edge_index,
+            model_comm_group,
+            shard_info.edges,
+            debug=ANEMOI_DEBUG_SHARDING,
+        )
+
+        self._cached_halo_info = halo_info
+        self._cached_halo_cache_specs = cache_specs
+        return halo_info
+
+
+class GraphTransformerProcessor(BaseProcessor, _HaloInfoCache):
     """Processor."""
 
     def __init__(
@@ -802,61 +868,6 @@ class GraphTransformerProcessor(BaseProcessor):
 
         self.offload_layers(cpu_offload)
 
-    def _get_or_build_cached_halo_info(
-        self,
-        x: Tensor,
-        edge_index: Adj,
-        shard_info: GraphShardInfo,
-        batch_size: int,
-        model_comm_group: Optional[ProcessGroup],
-    ) -> Optional[HaloInfo]:
-        """Return one halo plan shared by all processor layers.
-
-        The plan is kept for as long as the shard sizes stay the same, so the
-        processor graph must not change between calls.
-        """
-        if self.shard_strategy != "edges" or not model_is_distributed(model_comm_group):
-            return None
-
-        if batch_size != 1:
-            raise ValueError(
-                "GraphTransformerProcessor halo exchange requires batch_size=1 when model sharding is enabled."
-            )
-        if not shard_info.nodes_are_sharded():
-            raise ValueError(
-                "GraphTransformerProcessor halo exchange requires sharded nodes when model sharding is enabled."
-            )
-        assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
-
-        cache_specs = halo_cache_specs(shard_info, model_comm_group)
-        if self._cached_halo_info is not None and self._cached_halo_cache_specs == cache_specs:
-            return self._cached_halo_info
-
-        LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
-
-        bipartite_shard_info = BipartiteGraphShardInfo(
-            src_nodes=shard_info.nodes,
-            dst_nodes=shard_info.nodes,
-            edges=shard_info.edges,
-        )
-        partition = build_graph_partition_from_shard_info(
-            edge_index,
-            (x, x),
-            bipartite_shard_info,
-            model_comm_group,
-        )
-        halo_info = build_halo_info(
-            partition,
-            edge_index,
-            model_comm_group,
-            shard_info.edges,
-            debug=ANEMOI_DEBUG_SHARDING,
-        )
-
-        self._cached_halo_info = halo_info
-        self._cached_halo_cache_specs = cache_specs
-        return halo_info
-
     def forward(
         self,
         x: Tensor,
@@ -941,4 +952,148 @@ class GraphTransformerProcessor(BaseProcessor):
             **kwargs,
         )
 
+        return x
+
+
+class GraphADRProcessor(BaseProcessor, _HaloInfoCache):
+    """Advection-diffusion-reaction processor on the nodes of the hidden graph.
+
+    The graph counterpart of ``ADRProcessor``, for any set of hidden nodes (for instance a HEALPix,
+    icosahedral or reduced Gaussian mesh). The state stays on the nodes, as the model passes it in,
+    split by node across GPUs. Each layer runs an advection, a diffusion and a reaction step
+    (``anemoi.models.layers.adr.GraphAdvection``, ``GraphDiffusion``, ``GraphReaction``); a step
+    set to None is left out, and the layers split one model time step into equal sub-steps.
+
+    The steps mix neighbouring nodes with graph blocks over the hidden-to-hidden edges. The
+    processor sorts and splits the edges, and builds the halo exchange plan of the graph
+    transformer, once per forward (see ``GraphLayout``). The advection step reads each value at
+    its departure point from the nearest nodes.
+    """
+
+    def __init__(
+        self,
+        *,
+        num_layers: int,
+        num_channels: int,
+        num_chunks: int,
+        hidden_nodes: NodeStorage,
+        edge_dim: int,
+        timestep: str,
+        advection: Optional[DictConfig],
+        diffusion: Optional[DictConfig],
+        reaction: Optional[DictConfig],
+        cpu_offload: bool = False,
+        layer_kernels: DotDict,
+        **kwargs,
+    ) -> None:
+        """Initialize GraphADRProcessor.
+
+        Parameters
+        ----------
+        num_layers : int
+            Number of layers
+        num_channels : int
+            Number of channels
+        num_chunks: int
+            Number of chunks in processor
+        hidden_nodes : NodeStorage
+            The hidden nodes of the graph, with their coordinates ``x`` (latitude and longitude in
+            radians)
+        edge_dim : int
+            Number of features of the hidden-to-hidden edges
+        timestep : str
+            Model time step, e.g. "6h". Sets how far the learned velocities move the state.
+        advection : DictConfig, optional
+            Config of the advection step, e.g. ``anemoi.models.layers.adr.GraphAdvection``.
+            None leaves the step out.
+        diffusion : DictConfig, optional
+            Config of the diffusion step, e.g. ``anemoi.models.layers.adr.GraphDiffusion``.
+            None leaves the step out.
+        reaction : DictConfig, optional
+            Config of the reaction step, e.g. ``anemoi.models.layers.adr.GraphReaction``.
+            None leaves the step out.
+        cpu_offload : bool
+            Whether to offload processing to CPU, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
+        """
+        super().__init__(
+            num_layers=num_layers,
+            num_channels=num_channels,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            layer_kernels=layer_kernels,
+            **kwargs,
+        )
+
+        coords = hidden_nodes["x"].detach().to(device="cpu", dtype=torch.float64)
+        lat, lon = coords[:, 0], coords[:, 1]
+        self.register_buffer("node_lat", lat.float(), persistent=False)
+        self.register_buffer("node_lon", lon.float(), persistent=False)
+        self.node_spacing = typical_node_spacing(latlon_to_unit_vector(lat, lon).float())
+
+        self.shard_strategy = "edges"
+        self._cached_halo_info = None
+        self._cached_halo_cache_specs = None
+
+        time_step = frequency_to_seconds(timestep) * EARTH_ROTATION_RATE / num_layers
+        self.build_layers(
+            ADRProcessorBlock,
+            num_channels=num_channels,
+            geometry={"edge_dim": edge_dim},
+            time_step=time_step,
+            layer_kernels=self.layer_factory,
+            advection=advection,
+            diffusion=diffusion,
+            reaction=reaction,
+        )
+        self.offload_layers(cpu_offload)
+
+    def forward(
+        self,
+        x: Tensor,
+        batch_size: int,
+        shard_info: GraphShardInfo,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        model_comm_group: Optional[ProcessGroup] = None,
+        edges_are_dst_sorted: bool = True,
+        *args,
+        **kwargs,
+    ) -> Tensor:
+        """Run the processor on the hidden graph.
+
+        x has shape (batch * local nodes, channels). The edges are prepared as in
+        ``GraphTransformerProcessor``; ``edges_are_dst_sorted`` says whether they already are
+        ordered by destination node.
+        """
+        size = sum(shard_info.nodes) if shard_info.nodes_are_sharded() else x.size(0)
+        edge_attr, edge_index = ensure_edges_are_dst_sorted(
+            edge_attr,
+            edge_index,
+            num_dst=size,
+            edges_are_sharded=shard_info.edges_are_sharded(),
+            model_comm_group=model_comm_group,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
+        if not shard_info.edges_are_sharded():
+            edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
+                edge_attr, edge_index, size, size, model_comm_group, edges_are_dst_sorted=edges_are_dst_sorted
+            )
+            shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
+        halo_info = self._get_or_build_cached_halo_info(x, edge_index, shard_info, batch_size, model_comm_group)
+
+        layout = GraphLayout(
+            lat=self.node_lat,
+            lon=self.node_lon,
+            spacing=self.node_spacing,
+            batch_size=batch_size,
+            shard_info=shard_info,
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            model_comm_group=model_comm_group,
+            halo_info=halo_info,
+        )
+        (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, layout=layout, **kwargs)
         return x

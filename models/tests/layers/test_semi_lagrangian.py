@@ -11,8 +11,8 @@ import pytest
 import torch
 
 from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.layers.adr.layers import LowRankBias
-from anemoi.models.layers.adr.advection import SemiLagrangianAdvection
+from anemoi.models.layers.adr import LatLonAdvection
+from anemoi.models.layers.adr.layers import LatLonLowRankBias
 from anemoi.models.layers.block import ADRProcessorBlock
 from anemoi.models.layers.geocyclic import geocyclic_pad
 from anemoi.models.layers.layout import LatLonLayout
@@ -208,14 +208,14 @@ def test_processors_do_not_depend_on_node_order(kind):
             **common,
             timestep="6h",
             advection={
-                "_target_": "anemoi.models.layers.adr.NeuralSemiLagrangian",
+                "_target_": "anemoi.models.layers.adr.LatLonAdvection",
                 "advection_channels": 8,
                 "num_heads": 4,
                 "velocity_hidden_dim": 8,
                 **bias_kwargs,
             },
-            diffusion={"_target_": "anemoi.models.layers.adr.Diffusion", **bias_kwargs},
-            reaction={"_target_": "anemoi.models.layers.adr.Reaction", "hidden_dim": 16, "num_layers": 2, **bias_kwargs},
+            diffusion={"_target_": "anemoi.models.layers.adr.LatLonDiffusion", **bias_kwargs},
+            reaction={"_target_": "anemoi.models.layers.adr.LatLonReaction", "hidden_dim": 16, "num_layers": 2, **bias_kwargs},
         )
 
     row_by_row, shuffled = build(None), build(order)
@@ -233,7 +233,7 @@ def test_processors_do_not_depend_on_node_order(kind):
 
 
 def test_layout_rejects_wrong_grid_size():
-    with pytest.raises(ValueError, match="regular latitude-longitude"):
+    with pytest.raises(ValueError, match="hidden graph has 32"):
         LatLonLayout(4, 8, 1, [31])
 
 
@@ -305,7 +305,7 @@ def test_sampling_across_the_north_pole():
 
 def test_semi_lagrangian_advection_without_velocity_projects_down_and_up():
     nlat, nlon = 8, 16
-    advection = SemiLagrangianAdvection(
+    advection = LatLonAdvection(
         num_channels=16,
         advection_channels=8,
         num_heads=8,
@@ -316,7 +316,7 @@ def test_semi_lagrangian_advection_without_velocity_projects_down_and_up():
         layer_kernels=load_layer_kernels(),
         bias_rank=4,
         bias_base_maps=2,
-    )
+    ).transport
     torch.nn.init.zeros_(advection.velocity_out.mix.weight)
     layout = _layout(nlat, nlon)
     x = torch.randn(1, nlat, nlon, 16)
@@ -331,13 +331,12 @@ def test_adr_block_matches_paper_parameter_counts():
     """
     block = ADRProcessorBlock(
         num_channels=1024,
-        nlat=361,
-        nlon=720,
+        geometry={"nlat": 361, "nlon": 720},
         time_step=0.2,
         layer_kernels=load_layer_kernels(),
-        advection={"_target_": "anemoi.models.layers.adr.NeuralSemiLagrangian"},
-        diffusion={"_target_": "anemoi.models.layers.adr.Diffusion"},
-        reaction={"_target_": "anemoi.models.layers.adr.Reaction"},
+        advection={"_target_": "anemoi.models.layers.adr.LatLonAdvection"},
+        diffusion={"_target_": "anemoi.models.layers.adr.LatLonDiffusion"},
+        reaction={"_target_": "anemoi.models.layers.adr.LatLonReaction"},
     )
 
     def count(*modules):
@@ -358,7 +357,7 @@ def test_adr_block_matches_paper_parameter_counts():
 
 def test_low_rank_bias_adds_a_field_shared_over_the_batch():
     nlat, nlon, channels = 4, 8, 6
-    bias = LowRankBias(channels, nlat, nlon, load_layer_kernels(), rank=3, num_base_maps=2)
+    bias = LatLonLowRankBias(channels, nlat, nlon, load_layer_kernels(), rank=3, num_base_maps=2)
     x = torch.zeros(2, nlat, nlon, channels)
     out = bias(x, _layout(nlat, nlon, batch_size=2))
     assert out.shape == x.shape
@@ -468,7 +467,7 @@ def test_cartesian_displacement_across_the_north_pole():
 @pytest.mark.parametrize("cartesian_displacement", [False, True])
 def test_layers_predict_one_displacement_per_head(cartesian_displacement):
     kernels = load_layer_kernels()
-    advection = SemiLagrangianAdvection(
+    advection = LatLonAdvection(
         num_channels=16,
         advection_channels=8,
         num_heads=4,
@@ -480,7 +479,7 @@ def test_layers_predict_one_displacement_per_head(cartesian_displacement):
         bias_rank=4,
         bias_base_maps=2,
         cartesian_displacement=cartesian_displacement,
-    )
+    ).transport
     warp = SemiLagrangianWarp(
         in_channels=16,
         out_channels=8,

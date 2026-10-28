@@ -46,6 +46,7 @@ from .encoder import TransformerEncoderSchema  # noqa: TC001
 from .processor import ADRProcessorSchema  # noqa: TC001
 from .processor import FlowersProcessorSchema  # noqa: TC001
 from .processor import GNNProcessorSchema  # noqa: TC001
+from .processor import GraphADRProcessorSchema  # noqa: TC001
 from .processor import GraphTransformerProcessorSchema  # noqa: TC001
 from .processor import NoOpProcessorSchema  # noqa: TC001
 from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
@@ -225,6 +226,7 @@ class BaseModelSchema(PydanticBaseModel):
         TransformerProcessorSchema,
         PointWiseMLPProcessorSchema,
         ADRProcessorSchema,
+        GraphADRProcessorSchema,
         FlowersProcessorSchema,
     ] = Field(
         ...,

@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Semi-Lagrangian blocks split over several GPUs must match the same blocks on one GPU.
+"""Semi-Lagrangian blocks and graph processors split over several GPUs must match the same on one GPU.
 
 The blocks run on the grid, as the processors run them: the nodes are put on the grid with
 ``LatLonLayout.to_grid`` and taken back with ``LatLonLayout.from_grid``, so the split into bands
@@ -27,7 +27,11 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import ADRProcessorBlock
 from anemoi.models.layers.block import FlowersProcessorBlock
 from anemoi.models.layers.layout import LatLonLayout
+from anemoi.models.layers.processor import GraphADRProcessor
 from anemoi.models.layers.utils import load_layer_kernels
+from tests.layers.graph_mesh import fibonacci_nodes
+from tests.layers.graph_mesh import hidden_nodes
+from tests.layers.graph_mesh import knn_edges
 
 from ._distributed_runner import _run_distributed_test
 from .distributed_test_utils import torch_version_less_than
@@ -50,20 +54,19 @@ def _build_block(
     bias_kwargs = {"bias_rank": 4, "bias_base_maps": 2}
     block = ADRProcessorBlock(
         num_channels=16,
-        nlat=nlat,
-        nlon=nlon,
+        geometry={"nlat": nlat, "nlon": nlon},
         time_step=0.2,
         layer_kernels=load_layer_kernels(),
         advection={
-            "_target_": "anemoi.models.layers.adr.NeuralSemiLagrangian",
+            "_target_": "anemoi.models.layers.adr.LatLonAdvection",
             "advection_channels": 12,
             "num_heads": num_heads,
             "velocity_hidden_dim": 10,
             "cartesian_displacement": cartesian,
             **bias_kwargs,
         },
-        diffusion={"_target_": "anemoi.models.layers.adr.Diffusion", **bias_kwargs},
-        reaction={"_target_": "anemoi.models.layers.adr.Reaction", "hidden_dim": 24, "num_layers": 3, **bias_kwargs},
+        diffusion={"_target_": "anemoi.models.layers.adr.LatLonDiffusion", **bias_kwargs},
+        reaction={"_target_": "anemoi.models.layers.adr.LatLonReaction", "hidden_dim": 24, "num_layers": 3, **bias_kwargs},
     ).to(device)
     # The bias fields start close to zero; give them values so that every path is tested.
     for bias in (block.advection.transport.velocity_bias, block.diffusion.bias, block.reaction.bias):
@@ -144,4 +147,100 @@ def test_block_matches_single_gpu(
         nlon=nlon,
         num_heads=num_heads,
         shuffled=shuffled,
+    )
+
+
+def _graph_processor_rank(rank, world_size, device, group, block, cartesian, dtype):
+    num_nodes = 150
+    lat, lon = fibonacci_nodes(num_nodes)
+    edge_attr, edge_index = knn_edges(lat, lon, 6)
+    edge_attr, edge_index = edge_attr.to(device, dtype), edge_index.to(device)
+    mixer = {"mixer_block": block}
+    if block == "transformer":
+        mixer["mixer_kwargs"] = {"num_heads": 2, "graph_attention_backend": "pyg"}
+    bias_kwargs = {"bias_rank": 4, "bias_base_maps": 2, "bias_lat_degree": 4, "bias_lon_wavenumber": 3}
+
+    torch.manual_seed(0)
+    processor = GraphADRProcessor(
+        num_layers=2,
+        num_channels=16,
+        num_chunks=1,
+        hidden_nodes=hidden_nodes(lat, lon),
+        edge_dim=edge_attr.shape[1],
+        timestep="6h",
+        advection={
+            "_target_": "anemoi.models.layers.adr.GraphAdvection",
+            "advection_channels": 12,
+            "num_heads": 6,
+            "velocity_hidden_dim": 10,
+            "cartesian_displacement": cartesian,
+            **mixer,
+            **bias_kwargs,
+        },
+        diffusion={"_target_": "anemoi.models.layers.adr.GraphDiffusion", **mixer, **bias_kwargs},
+        reaction={"_target_": "anemoi.models.layers.adr.GraphReaction", "hidden_dim": 24, "num_layers": 3, **bias_kwargs},
+        layer_kernels=load_layer_kernels(instance=False),
+    ).to(device, dtype)
+    # The bias fields start close to zero; give them values so that every path is tested.
+    with torch.no_grad():
+        for name, p in processor.named_parameters():
+            if "_profiles" in name or "coefficients" in name:
+                p.normal_()
+    # The GNN block all-gathers its input, and the backward of that all-reduces the gradient in
+    # float32 (anemoi.models.distributed.primitives._reduce), so its gradients agree only to
+    # float32 precision.
+    exact = dtype == torch.float64 and block == "transformer"
+    atol, rtol = (1e-11, 1e-9) if exact else (1e-5, 1e-5)
+    grad_atol, grad_rtol = (1e-10, 1e-9) if exact else (1e-4, 1e-4)
+
+    def run(x, shard_sizes, model_comm_group=None):
+        return processor(
+            x,
+            batch_size=1,
+            shard_info=GraphShardInfo(nodes=shard_sizes),
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            model_comm_group=model_comm_group,
+        )
+
+    torch.manual_seed(1)
+    x = torch.randn(num_nodes, 16, device=device, dtype=dtype)
+    grad_out = torch.randn(num_nodes, 16, device=device, dtype=dtype)
+
+    x_full = x.clone().requires_grad_()
+    out_full = run(x_full, [num_nodes])
+    out_full.backward(grad_out)
+    grads_full = {name: p.grad.clone() for name, p in processor.named_parameters()}
+    processor.zero_grad()
+
+    shard_sizes = get_balanced_partition_sizes(num_nodes, world_size)
+    start, end = get_partition_range(shard_sizes, rank)
+    x_local = x[start:end].clone().requires_grad_()
+    out_local = run(x_local, shard_sizes, group)
+    out_local.backward(grad_out[start:end])
+
+    torch.testing.assert_close(out_local, out_full[start:end].detach(), atol=atol, rtol=rtol)
+    torch.testing.assert_close(x_local.grad, x_full.grad[start:end], atol=atol, rtol=rtol)
+    for name, p in processor.named_parameters():
+        grad = p.grad.clone()
+        dist.all_reduce(grad, group=group)
+        torch.testing.assert_close(grad, grads_full[name], atol=grad_atol, rtol=grad_rtol, msg=f"gradient of {name}")
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize("block", ["transformer", "gnn"])
+@pytest.mark.parametrize("cartesian", [False, True], ids=["local-displacement", "cartesian-displacement"])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64], ids=["float32", "float64"])
+def test_graph_processor_matches_single_gpu(block, cartesian, dtype, distributed_backend, distributed_world_size):
+    if dtype == torch.float64 and distributed_backend == "nccl":
+        pytest.skip("The float64 comparison runs on CPU.")
+    if distributed_backend == "gloo" and torch_version_less_than(2, 6):
+        pytest.skip("Gloo alltoall_transpose requires torch >= 2.6.")
+    _run_distributed_test(
+        _graph_processor_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        block=block,
+        cartesian=cartesian,
+        dtype=dtype,
     )
