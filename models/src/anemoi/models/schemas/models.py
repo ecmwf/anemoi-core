@@ -248,14 +248,25 @@ class BaseModelSchema(PydanticBaseModel):
                     data[field] = OmegaConf.create({str(k): v for k, v in data[field].items()})
         return data
 
+    # Checked here rather than in HierarchicalModelSchema: a hierarchical config also validates as
+    # BaseModelSchema, so a check that only HierarchicalModelSchema runs would be skipped.
     @model_validator(mode="after")
-    def validate_hierarchical_hidden_nodes_name(self) -> "BaseModelSchema":
+    def validate_hidden_nodes_name(self) -> "BaseModelSchema":
         hierarchical_models = {
             DefinedModels.ANEMOI_MODEL_HIER_ENC_PROC_DEC,
             DefinedModels.ANEMOI_MODEL_HIER_ENC_PROC_DEC_SHORT,
         }
-        if self.model.target_ in hierarchical_models and isinstance(self.model.hidden_nodes_name, dict):
-            raise ValueError("Hierarchical models do not support per-dataset hidden node mappings.")
+        hidden_nodes_name = self.model.hidden_nodes_name
+        if self.model.target_ in hierarchical_models:
+            if not isinstance(hidden_nodes_name, list) or not hidden_nodes_name:
+                msg = "Hierarchical models need a non-empty list of hidden node names, one per level."
+                raise ValueError(msg)
+        elif isinstance(hidden_nodes_name, list):
+            msg = (
+                "Only hierarchical models take a list of hidden node names. "
+                "Use a single name, or a mapping from dataset to hidden node name."
+            )
+            raise ValueError(msg)
         return self
 
 
