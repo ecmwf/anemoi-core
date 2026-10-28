@@ -449,6 +449,82 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
 
 
+class _RecordTrainingLosses(pl.Callback):
+    """Record the training loss of every step."""
+
+    def __init__(self) -> None:
+        self.losses: list[torch.Tensor] = []
+
+    def on_train_batch_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        outputs: torch.Tensor | dict[str, torch.Tensor],
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
+        del trainer, pl_module, batch, batch_idx
+        loss = outputs["loss"] if isinstance(outputs, dict) else outputs
+        self.losses.append(loss.detach().cpu().clone())
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_resumed_runs_are_bitwise_identical(
+    gnn_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """Two runs resumed from the same checkpoint have identical losses and weights.
+
+    A resumed run must not use state that is not in the checkpoint. The test uses the
+    default DDP strategy settings and deterministic GPU kernels. With one GPU, the test
+    does not examine the order in which DDP sums the gradients of different GPUs.
+    """
+    cfg, url = gnn_config
+    get_test_archive(url)
+    cfg.training.strategy._target_ = "anemoi.training.distributed.strategy.DDPGroupStrategy"
+    cfg.training.deterministic = True
+    cfg.training.seed = 42
+    cfg.dataloader.limit_batches.validation = 1
+    checkpoints_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+
+    pretraining_cfg = deepcopy(cfg)
+    pretraining_cfg.training.max_epochs = 1
+    AnemoiTrainer(pretraining_cfg).train()
+    (pretraining_dir,) = checkpoints_dir.iterdir()
+
+    def resume() -> tuple[list[torch.Tensor], dict[str, torch.Tensor]]:
+        resumed_cfg = deepcopy(cfg)
+        # A LocalSource without a loading strategy resumes through Lightning's ckpt_path
+        # in a new run directory, so both resumed runs start from the same file.
+        with open_dict(resumed_cfg):
+            resumed_cfg.training.checkpoint = {
+                "source": {
+                    "_target_": "anemoi.training.checkpoint.sources.local.LocalSource",
+                    "path": str(pretraining_dir / "last.ckpt"),
+                },
+            }
+        # Without a seed in the config, the resumed run takes the checkpoint's seed.
+        resumed_cfg.training.seed = None
+        resumed_cfg.training.max_epochs = 2
+        trainer = AnemoiTrainer(resumed_cfg)
+        recorder = _RecordTrainingLosses()
+        trainer.callbacks.append(recorder)
+        trainer.train()
+        weights = {name: param.detach().cpu().clone() for name, param in trainer.model.state_dict().items()}
+        return recorder.losses, weights
+
+    losses_2, weights_2 = resume()
+    losses_3, weights_3 = resume()
+
+    assert len(losses_2) == cfg.dataloader.limit_batches.training
+    for step, (loss_2, loss_3) in enumerate(zip(losses_2, losses_3, strict=True)):
+        assert torch.equal(loss_2, loss_3), f"step {step}: loss {loss_2.item()} != {loss_3.item()}"
+    assert weights_2.keys() == weights_3.keys()
+    for name in weights_2:
+        assert torch.equal(weights_2[name], weights_3[name]), f"weights of {name} differ"
+
+
 @skip_if_offline
 @pytest.mark.slow
 @pytest.mark.parametrize("config_fixture", ["lam_config", "ensemble_config", "multidatasets_config"])
