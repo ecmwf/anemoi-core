@@ -373,7 +373,7 @@ ZONAL_KEYS = {
 
 
 def test_zonal_identical_fields_score_perfectly(tmp_path: Path) -> None:
-    callback, trainer, pl_module = _zonal_setup(zonal={})
+    callback, trainer, pl_module = _zonal_setup(zonal={"log_scores": True})
     callback.save_basedir = str(tmp_path)
     result = callback.compute(trainer, pl_module)
     summary = result["zonal"]["rstep0"]
@@ -399,7 +399,7 @@ def test_zonal_identical_fields_score_perfectly(tmp_path: Path) -> None:
 
 def test_zonal_offsets_show_in_errors() -> None:
     callback, trainer, pl_module = _zonal_setup(
-        zonal={},
+        zonal={"log_scores": True},
         pred_offset={f"u_{level}": 2.0 for level in ZONAL_LEVELS} | {f"t_{level}": 1.0 for level in ZONAL_LEVELS},
     )
     scores = callback.scores(callback.compute(trainer, pl_module))
@@ -416,7 +416,7 @@ def test_zonal_offsets_show_in_errors() -> None:
 def test_zonal_rmse_sections_see_errors_the_zonal_mean_cancels() -> None:
     """A zonal-wave error leaves [u] unchanged but shows in the point-wise RMSE section."""
     wave = np.cos(np.deg2rad(3 * LON))
-    callback, trainer, pl_module = _zonal_setup(zonal={})
+    callback, trainer, pl_module = _zonal_setup(zonal={"log_scores": True})
     fields = dict(callback.reference.fields)  # the prediction keeps the unperturbed fields
     for level in ZONAL_LEVELS:
         fields[f"u_{level}"] = fields[f"u_{level}"] - 2.0 * wave
@@ -429,11 +429,21 @@ def test_zonal_rmse_sections_see_errors_the_zonal_mean_cancels() -> None:
 
 
 def test_zonal_flags_select_scores_and_rows(tmp_path: Path) -> None:
-    callback, trainer, pl_module = _zonal_setup(zonal={"sections": False, "thermal_wind": False})
+    callback, trainer, pl_module = _zonal_setup(zonal={"sections": False, "thermal_wind": False, "log_scores": True})
     callback.save_basedir = str(tmp_path)
     result = callback.compute(trainer, pl_module)
     zonal = {key.split("/")[1] for key in callback.scores(result) if key.startswith("val_ref_zonal/")}
     assert zonal == set(ZONAL_KEYS["rmse_sections"] + ZONAL_KEYS["streamfunction"] + ZONAL_KEYS["eddy_fluxes"])
+    callback._plot(SimpleNamespace(logger=None), pl_module, ["data"], epoch=0, result=result)
+    assert len(list((tmp_path / "plots").glob("zonal_rstep0_epoch000.jpg"))) == 1
+
+
+def test_zonal_scores_not_logged_by_default(tmp_path: Path) -> None:
+    callback, trainer, pl_module = _zonal_setup(zonal={})
+    callback.save_basedir = str(tmp_path)
+    result = callback.compute(trainer, pl_module)
+    assert "rstep0" in result["zonal"]
+    assert not any(key.startswith("val_ref_zonal/") for key in callback.scores(result))
     callback._plot(SimpleNamespace(logger=None), pl_module, ["data"], epoch=0, result=result)
     assert len(list((tmp_path / "plots").glob("zonal_rstep0_epoch000.jpg"))) == 1
 

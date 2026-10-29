@@ -60,6 +60,7 @@ ZONAL_FLAGS = ("sections", "rmse_sections", "thermal_wind", "streamfunction", "e
 ZONAL_DEFAULTS = {
     **dict.fromkeys(ZONAL_FLAGS, True),
     "mask_below_ground": True,
+    "log_scores": False,
     "tw_layer": (850, 250),
     "vt_level": 850,
     "uv_level": 250,
@@ -171,8 +172,9 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
     ``zonal`` adds zonal-mean circulation diagnostics (see
     :mod:`anemoi.training.diagnostics.evaluation.zonal`) from every ``u_*``, ``v_*`` and ``t_*``
     pressure level shared by the model outputs and the reference. Zonal moments are averaged
-    over all dates (plotted and score-only), plotted in one ``zonal_{step}`` figure and scored
-    as ``val_ref_zonal/{name}/{step}`` (errors are pred - ref, ratios pred / ref). Each flag
+    over all dates (plotted and score-only) and plotted in one ``zonal_{step}`` figure. With
+    ``log_scores: true`` (default off, to keep the metrics page quiet) they are also scored as
+    ``val_ref_zonal/{name}/{step}`` (errors are pred - ref, ratios pred / ref). Each flag
     adds a figure row and its scalars:
 
     - ``sections``: [u], [T] latitude-pressure sections; ``{u,t}_rmse`` (cos-lat weighted) and
@@ -214,6 +216,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         thermal_wind: true
         streamfunction: true
         eddy_fluxes: true
+        log_scores: false                               # true: also log val_ref_zonal/* scalars
       every_n_epochs: 1
     ```
     """
@@ -555,7 +558,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         return summary
 
     def scores(self, result: dict) -> dict[str, float]:
-        """Return the enabled ``scores`` per variable and step, plus the zonal scalars.
+        """Return the enabled ``scores`` per variable and step, plus the zonal scalars if ``log_scores``.
 
         The high-k ratio uses the plotted dates only; RMSE and bias use all dates, and per band
         for ``band_variables`` when ``bands`` is set.
@@ -585,7 +588,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
                     ratio = float(np.mean(p_pred[k] / np.maximum(p_ref[k], np.finfo(float).tiny)))
                     add(f"val_ref_highk_ratio/{var}/{step}", ratio)
         scores = {key: float(np.mean(values)) for key, values in sums.items()}
-        for step, summary in result.get("zonal", {}).items():
+        for step, summary in result.get("zonal", {}).items() if self.zonal and self.zonal["log_scores"] else ():
             scores.update({f"val_ref_zonal/{key}/{step}": value for key, value in self.zonal_scores(summary).items()})
         return scores
 
