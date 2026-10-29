@@ -54,6 +54,43 @@ def test_mlflow_login(mocker: "MockerFixture", mock_auth: "MockType") -> None:
     mock_auth.reset_mock()
 
 
+@pytest.fixture
+def mock_incremental_sync(mocker: "MockerFixture") -> "MockType":
+    mocker.patch("anemoi.utils.mlflow.utils.health_check")
+    return mocker.patch("anemoi.training.utils.mlflow_incremental_sync.MlFlowIncrementalSync")
+
+
+def test_mlflow_sync_incremental(mock_incremental_sync: "MockType") -> None:
+    sync_args = ("mlflow", "sync", "-s", "/logs/mlflow", "-d", "http://server", "-r", "abc", "-e", "exp")
+    cli_testing("anemoi-training", *sync_args, "--incremental", "--status", "KILLED")
+    mock_incremental_sync.assert_called_once_with(
+        "/logs/mlflow",
+        "http://server",
+        "exp",
+        authentication=False,
+        extra_tags={},
+    )
+    mock_incremental_sync.return_value.sync.assert_called_once_with("abc", status="KILLED")
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "error"),
+    [
+        (("-s", "http://other-server", "--incremental"), "offline store"),
+        (("-s", "/logs/mlflow", "--incremental", "-x"), "--export-deleted-runs"),
+        (("-s", "/logs/mlflow", "--status", "FINISHED"), "only be used with --incremental"),
+    ],
+)
+def test_mlflow_sync_incremental_invalid_args(
+    mock_incremental_sync: "MockType",
+    extra_args: tuple[str, ...],
+    error: str,
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        cli_testing("anemoi-training", "mlflow", "sync", "-d", "http://server", "-r", "abc", *extra_args)
+    mock_incremental_sync.assert_not_called()
+
+
 _RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
 
 
