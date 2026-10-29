@@ -27,6 +27,12 @@ diagnostics:
 data:
   datasets:
     data_2: ${data.datasets.data}
+  # multi-domain validation runs through the domains sequentially,
+  # limiting validation batches could potentially exclude one of the domains,
+  # so set data.limit_batches.validation to null to ensure both domains are validated.
+  # to select a shorter validation window adapt start and end in dataloader.validation
+  limit_batches:
+    validation: null
 
 dataloader:
   loading_policy:
@@ -96,6 +102,7 @@ model:
   output_mask:
     datasets:
       data_2: ${model.output_mask.datasets.data}
+  # multi-domain training does not support trainable parameters
   node_trainable_parameters:
     data: 0
     hidden: 0
