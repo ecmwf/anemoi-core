@@ -176,7 +176,7 @@ def test_graph_trainable_features_plot_handles_noop_processor_graph_provider():
 
     model = DummyModel()
     model._graph_name_data = "data"
-    model._graph_name_hidden = "hidden"
+    model.dataset2hidden = {"data": "hidden"}
     model.encoder_graph_provider = None
     model.decoder_graph_provider = None
     model.processor_graph_provider = NoOpGraphProvider()
@@ -195,7 +195,7 @@ def test_graph_trainable_features_plot_handles_noop_mapper_graph_providers():
 
     model = DummyModel()
     model._graph_name_data = "data"
-    model._graph_name_hidden = "hidden"
+    model.dataset2hidden = {"data": "hidden"}
     model.encoder_graph_provider = NoOpGraphProvider()
     model.decoder_graph_provider = NoOpGraphProvider()
     model.processor_graph_provider = NoOpGraphProvider()
@@ -217,7 +217,7 @@ def test_graph_trainable_features_plot_handles_missing_dataset_key_in_provider_m
 
     model = DummyModel()
     model._graph_name_data = "data"
-    model._graph_name_hidden = "hidden"
+    model.dataset2hidden = {"data": "hidden"}
     model.encoder_graph_provider = {"other": TrainableProvider()}
     model.decoder_graph_provider = {"other": TrainableProvider()}
     model.processor_graph_provider = None
@@ -225,6 +225,30 @@ def test_graph_trainable_features_plot_handles_missing_dataset_key_in_provider_m
     edge_modules = get_edge_trainable_modules(model, dataset_name="data")
 
     assert edge_modules == {}
+
+
+def test_graph_trainable_features_plot_finds_processor_provider_by_hidden_mesh():
+    class TrainableTensor:
+        trainable = object()
+
+    class TrainableProvider:
+        trainable = TrainableTensor()
+
+    class DummyModel:
+        pass
+
+    data_provider = TrainableProvider()
+    other_provider = TrainableProvider()
+
+    model = DummyModel()
+    model.dataset2hidden = {"data": "hidden_a", "other": "hidden_b"}
+    model.encoder_graph_provider = None
+    model.decoder_graph_provider = None
+    model.processor_graph_provider = {"hidden_a": data_provider, "hidden_b": other_provider}
+
+    edge_modules = get_edge_trainable_modules(model, dataset_name="data")
+
+    assert edge_modules == {("hidden_a", "hidden_a"): data_provider}
 
 
 # ---- Config and mocks for BasePlotAdditionalMetrics.process and task-type tests ----
@@ -425,6 +449,33 @@ def test_plot_sample_uses_auxiliary_output_from_validation_output():
     torch.testing.assert_close(plotted_output.predictions[0]["data"], output.predictions[0]["data"])
     torch.testing.assert_close(plotted_auxiliary["data"], conditioned_target["data"])
     assert plotted_output.plot_kwargs == {}
+
+
+def test_per_batch_plot_skips_datasets_missing_from_batch():
+    """A domain-homogeneous batch only plots the configured datasets it contains."""
+    callback = PlotSample(
+        sample_idx=0,
+        parameters=["a", "b"],
+        accumulation_levels_plot=[0.5],
+        dataset_names=["data", "data_2"],
+    )
+
+    batch_size, n_ens, nlatlon, nvar = 2, 1, 20, 2
+    pl_module = _make_pl_module_forecaster(validation_rollout=1, nlatlon=nlatlon)
+    pl_module.allgather_batch = lambda tensor, _grid_shard_sizes: tensor
+    # Like the module, only know the shard sizes of the datasets in the batch.
+    pl_module.grid_shard_sizes = {"data_2": None}
+    pl_module.model.post_processors = {"data": _IdentityProcessor(), "data_2": _IdentityProcessor()}
+
+    batch = {"data_2": torch.randn(batch_size, 3, n_ens, nlatlon, nvar)}
+    output = _step_output([{"data_2": torch.zeros(batch_size, 1, n_ens, nlatlon, nvar)}])
+    trainer = MagicMock()
+    trainer.current_epoch = 0
+
+    callback.plot = MagicMock()
+    callback.on_validation_batch_end(trainer, pl_module, output, batch, batch_idx=0)
+
+    assert callback.plot.call_args.args[2] == ["data_2"]
 
 
 def test_process_time_interpolator_output_shapes():

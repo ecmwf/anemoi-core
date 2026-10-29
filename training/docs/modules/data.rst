@@ -76,6 +76,63 @@ splits the samples of a distributed sampler into batches with torchdata's
 ``BatchSampler``, which remembers its position so that training can resume
 in the middle of an epoch.
 
+Multi-Domain
+------------
+
+``MultiDomainLoadingPolicy`` builds one independently indexed
+``MultiDataset`` per domain. Its batch sampler visits domains in a random (seeded)
+order and keeps every batch domain-homogeneous, including when the configured
+batch size is greater than one. The readers may use different grids and date
+ranges.
+
+Select it in the dataloader configuration::
+
+   dataloader:
+     loading_policy:
+       _target_: anemoi.training.data.loading.MultiDomainLoadingPolicy
+
+Common variables are checked for metadata compatibility when training starts.
+Flat encoder-processor-decoder models can route each domain through its own
+hidden mesh while sharing the encoder, processor, and decoder weights. Each
+mapped hidden node set must have corresponding domain-to-hidden,
+hidden-to-hidden, and hidden-to-domain edges in the graph. Hidden node and edge
+feature dimensions must match because the model weights remain shared.
+
+The model routing names the hidden mesh for each domain and assigns the same
+encoder and decoder group to both domains::
+
+   model:
+     model:
+       hidden_nodes_name:
+         data: hidden
+         data_2: hidden_2
+     encoders:
+       shared:
+         source_datasets: [data, data_2]
+         dataset_fusing_strategy: not_supported
+         mapper:
+           _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+           # ... mapper configuration
+     decoders:
+       shared:
+         target_datasets: [data, data_2]
+         target_node_features: [encoded_data]
+         mapper:
+           _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+           # ... mapper configuration
+
+The ``shared`` key is user-defined; datasets listed in the same group use the
+same mapper weights. ``hidden`` and ``hidden_2`` must be nodes in the
+graph configuration, with ``data -> hidden -> data`` and
+``data_2 -> hidden_2 -> data_2`` edges. The complete example is the top-level
+``multidomain`` configuration, which builds on the single-domain stretched-grid
+configurations (first domain ``data``) and adds the second domain ``data_2``; its
+graph is defined in the ``graph=multidomain`` group.
+
+With the current distributed strategy, domain-specific trainable node and edge
+features must be disabled because the active domain, and therefore the active
+graph-specific parameters, changes between batches.
+
 API Reference
 =============
 

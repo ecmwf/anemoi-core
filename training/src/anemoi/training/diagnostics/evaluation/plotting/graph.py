@@ -50,18 +50,18 @@ def get_node_trainable_tensors(node_attributes: NamedNodesAttributes) -> dict[st
     return {name: tt.trainable for name, tt in node_attributes.trainable_tensors.items() if tt.trainable is not None}
 
 
-def _resolve_edge_provider(provider: Any, dataset_name: str) -> Any:
-    """Resolve an edge provider to the specific dataset variant if needed."""
+def _resolve_edge_provider(provider: Any, key: str) -> Any:
+    """Resolve an edge provider to the variant stored under *key* (dataset or hidden mesh name) if needed."""
     if provider is None:
         return None
     if isinstance(provider, (dict,)):
-        if dataset_name in provider:
-            return provider[dataset_name]
+        if key in provider:
+            return provider[key]
         return None
     # Also handle torch.nn.ModuleDict without importing torch.nn at module level
     if type(provider).__name__ == "ModuleDict":
-        if dataset_name in provider:
-            return provider[dataset_name]
+        if key in provider:
+            return provider[key]
         return None
     return provider
 
@@ -104,14 +104,14 @@ def get_edge_trainable_modules(model: Any, dataset_name: str) -> dict[tuple[str,
         return {}
 
     trainable_modules = {}
-    hidden = model._graph_name_hidden
+    hidden = model.dataset2hidden[dataset_name]
     provider_specs = (
-        ("encoder_graph_provider", (dataset_name, hidden)),
-        ("decoder_graph_provider", (hidden, dataset_name)),
-        ("processor_graph_provider", (hidden, hidden)),
+        ("encoder_graph_provider", dataset_name, (dataset_name, hidden)),
+        ("decoder_graph_provider", dataset_name, (hidden, dataset_name)),
+        ("processor_graph_provider", hidden, (hidden, hidden)),
     )
-    for provider_name, edge_key in provider_specs:
-        provider = _resolve_edge_provider(getattr(model, provider_name, None), dataset_name)
+    for provider_name, provider_key, edge_key in provider_specs:
+        provider = _resolve_edge_provider(getattr(model, provider_name, None), provider_key)
         if _has_trainable_edge_params(provider):
             trainable_modules[edge_key] = provider
     return trainable_modules
