@@ -205,12 +205,12 @@ class DAForecaster(Forecaster):
         ``ClimatologySkipConnection(missing_value=0.0, fill_missing_only=True)`` returns
         pure climatology instead of a climatology/observation mosaic.
 
-        That pairing is a **config requirement, not a guarantee**: it holds when the
-        residual's ``missing_value`` is ``0.0`` and the variables are mean-std
-        normalized, which is what ``InputOnlyImputer(default: 0.0)`` already assumes
-        when it marks absent observations. It does not hold for an imputer filling a
-        literal raw-space ``0.0`` (which normalizes to ``-mean/stdev``), nor under
-        ``min-max``/``none`` normalizers. With a plain ``SkipConnection`` the zero base
+        That pairing is a **config requirement, not a guarantee**: the residual treats
+        a base as "no background" only when it equals ``missing_value`` at every
+        point, so the zeros returned here must stay exactly ``0.0`` in normalized
+        space and the residual's ``missing_value`` must be ``0.0``. Later bases are
+        complete states, and an isolated exact zero in them is a valid value (the
+        training mean), never a gap. With a plain ``SkipConnection`` the zero base
         simply disables the residual for step 0.
 
         Otherwise ``x`` is the state produced by :meth:`_advance_dataset_input_da`,

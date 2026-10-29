@@ -233,8 +233,8 @@ def test_build_skip_input_step0_is_zeros() -> None:
 
     skip_input = task.build_skip_input(x)
 
-    # No background exists at step 0, so every position carries the "missing"
-    # sentinel that ClimatologySkipConnection(missing_value=0.0) fills from climatology.
+    # No background exists at step 0, so the whole base is the all-zero cold-start
+    # value that ClimatologySkipConnection(missing_value=0.0) replaces with climatology.
     assert skip_input["data"].shape == x["data"].shape
     assert torch.all(skip_input["data"] == 0.0)
 

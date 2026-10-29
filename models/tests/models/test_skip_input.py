@@ -90,9 +90,9 @@ def test_skip_input_redirects_residual_but_not_encoder() -> None:
 def test_zero_skip_base_yields_pure_climatology(tmp_path) -> None:
     """The step-0 contract: an all-zero base means "no background", not a mosaic.
 
-    ``DAForecaster.build_skip_input`` returns zeros at step 0, relying on the
-    ``missing_value: 0.0`` sentinel that ``InputOnlyImputer`` already writes for
-    absent observations. This pins that coupling.
+    ``DAForecaster.build_skip_input`` returns zeros at step 0, and the residual
+    replaces a base with climatology only when it is ``missing_value`` at every
+    point. This pins that coupling.
     """
     npz_path = tmp_path / "clim.npz"
     np.savez(npz_path, var0=np.full(4, 7.0, dtype=np.float32))
@@ -111,9 +111,10 @@ def test_zero_skip_base_yields_pure_climatology(tmp_path) -> None:
     observations[0, -1, 0, 0, 0] = 5.0
     observations[0, -1, 0, 2, 0] = 6.0
 
-    mosaic = residual(observations)
-    # Today's step-0 behaviour: observations punch through into the residual.
-    assert torch.allclose(mosaic[0, 0, :, 0], torch.tensor([5.0, 7.0, 6.0, 7.0]))
+    # A partly-zero base is a complete state: exact zeros in it are valid values
+    # (the training mean) and must not be swapped for climatology.
+    passthrough = residual(observations)
+    assert torch.equal(passthrough[0, 0, :, 0], torch.tensor([5.0, 0.0, 6.0, 0.0]))
 
     # With a zero base the observations are gone and climatology covers the field.
     pure = residual(torch.zeros_like(observations))

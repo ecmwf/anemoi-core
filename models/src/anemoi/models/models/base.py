@@ -458,8 +458,8 @@ class BaseGraphModel(nn.Module):
         A ``None`` value means no background exists yet (the first DA cycle). It
         becomes zeros *after* normalization, matching the ``torch.zeros_like`` that
         training applies to an already-normalized ``x``. Passing a raw zeros tensor
-        instead would normalize to ``-mean/stdev`` and defeat the "missing" sentinel
-        that ``ClimatologySkipConnection(missing_value=0.0)`` relies on.
+        instead would normalize to ``-mean/stdev`` and defeat the all-zero cold-start
+        base that ``ClimatologySkipConnection(missing_value=0.0)`` relies on.
 
         Parameters
         ----------

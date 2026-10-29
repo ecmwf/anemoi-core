@@ -162,12 +162,13 @@ class ClimatologySkipConnectionSchema(BaseModel):
     )
     missing_value: float = Field(
         0.0,
-        description="Sentinel value marking missing points when fill_missing_only is enabled.",
+        description="Value marking a residual base with no background when fill_missing_only is enabled. "
+        "Only a base equal to it at every point counts.",
     )
     fill_missing_only: bool = Field(
         False,
-        description="If true, return the latest input with missing points replaced by climatology "
-        "instead of returning the climatology everywhere.",
+        description="If true, return the latest input, or climatology for any sample whose latest input "
+        "equals missing_value everywhere (the DA cold-start base), instead of climatology everywhere.",
     )
     normalize_climatology: bool = Field(
         False,

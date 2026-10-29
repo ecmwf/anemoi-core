@@ -345,11 +345,14 @@ def test_climatology_skip_connection_fill_missing_only(tmp_path, flat_data):
         fill_missing_only=True,
     )
     x = flat_data.clone()
-    x[0, -1, 0, 0, 0] = 0.0  # missing var0 point -> filled with climatology (1.0)
-    x[0, -1, 0, 1, 0] = 5.0  # present point -> kept
+    x[0, -1] = 0.0  # sample (0, 0): all-zero cold-start base -> pure climatology
+    x[1, -1, 0, 0, 0] = 0.0  # isolated exact zero in a complete state -> kept
     out = conn(x)
-    assert out[0, 0, 0, 0] == 1.0
-    assert out[0, 0, 1, 0] == 5.0
+    assert torch.equal(out[0, 0, :, 0], torch.ones(2))
+    assert torch.all(out[0, 0, :, 1:] == 0.0)  # variables absent from the file
+    assert out[1, 0, 0, 0] == 0.0
+    # Every other sample is passed through untouched.
+    assert torch.equal(out[1:], x[1:, -1])
 
 
 def test_climatology_skip_connection_normalized(tmp_path, flat_data):

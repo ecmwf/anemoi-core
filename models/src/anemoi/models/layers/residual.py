@@ -205,10 +205,17 @@ class ClimatologySkipConnection(BaseResidualConnection):
     data_indices : object, optional
         Index collection providing ``model.input.name_to_index``.
     missing_value : float, optional
-        Sentinel value marking missing points when ``fill_missing_only=True``.
+        Value that marks a residual base with no background (the DA cold start)
+        when ``fill_missing_only=True``. Only a base that equals it at *every*
+        point counts; see ``fill_missing_only``.
     fill_missing_only : bool, optional
-        If ``True``, return the latest input with points equal to ``missing_value``
-        replaced by climatology, instead of returning the climatology everywhere.
+        If ``True``, return the latest input, or climatology for any (batch,
+        ensemble) sample whose latest input equals ``missing_value`` at every grid
+        point and feature. This is the all-zero step-0 base that
+        ``DAForecaster.build_skip_input`` passes before any background exists.
+        Testing whole fields rather than single points matters because
+        ``missing_value=0.0`` is also a valid normalized value (the training mean),
+        which a complete state hits at isolated points.
     group_variables : list, optional
         When instantiated inside :class:`PerVariableGroupResidual`, the group's
         variable names; the buffer is then built for the group's feature dimension.
@@ -306,15 +313,18 @@ class ClimatologySkipConnection(BaseResidualConnection):
         model_comm_group=None,
         n_step_output: int | None = None,
     ) -> torch.Tensor:
-        """Return climatology, or input with missing values filled by climatology if fill_missing_only=True."""
+        """Return climatology, or the latest input with cold-start samples replaced by climatology."""
         batch, _time, ensemble, _grid, _features = x.shape
         clim = self._local_climatology(grid_shard_sizes, model_comm_group)
         # clim shape: (grid, features) -> broadcast to (batch, ensemble, grid, features)
         clim = clim.unsqueeze(0).unsqueeze(0).expand(batch, ensemble, -1, -1)
         if self._fill_missing_only:
             x_last = x[:, -1, ...]  # (batch, ensemble, grid, features)
-            mask = x_last == self._missing_value
-            x_skip = torch.where(mask, clim, x_last)
+            # Per sample, never per point: an exact missing_value inside a complete
+            # state is a valid value, not a gap. When sharded, every rank's shard of a
+            # cold-start base is uniform too, so the local test agrees across ranks.
+            cold_start = (x_last == self._missing_value).all(dim=-1, keepdim=True).all(dim=-2, keepdim=True)
+            x_skip = torch.where(cold_start, clim, x_last)
         else:
             x_skip = clim
         return self._expand_time(x_skip, n_step_output)
