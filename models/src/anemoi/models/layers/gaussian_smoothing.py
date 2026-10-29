@@ -7,21 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Gaussian smoothing over a fixed list of neighbours, for any smoothing width.
-
-Every point ``n`` gets the weighted mean of the values at its ``K`` neighbours ``idx[n, k]``:
+"""Gaussian smoothing over a fixed neighbour list.
 
     y[n] = sum_k w[n, k] * x[idx[n, k]] / sum_k w[n, k],   w[n, k] = exp(-d[n, k]**2 / (2 * sigma**2))
 
-where ``d[n, k]`` is the great-circle distance in radians from point ``n`` to its neighbour.
-The distances are worked out on the fly from the unit vectors ``u`` of the points, as
-``d = 2 * asin(|u[idx[n, k]] - u[n]| / 2)``, so one neighbour list (see
-:class:`anemoi.models.layers.graph_provider.NeighbourListProvider`) serves every width. The
-backward pass works the weights out again and sends each point's gradient back to its
-neighbours with the same weights.
+``d`` is the great-circle distance to the neighbour, computed from the unit vectors of the points
+in the forward and the backward pass. No weights are stored, so one neighbour list
+(:class:`anemoi.models.layers.graph_provider.NeighbourListProvider`) serves any ``sigma``.
 
-Two backends compute the same thing: ``"triton"`` (GPU kernels, see
-:mod:`anemoi.models.triton.gaussian_smoothing`) and ``"torch"`` (any device, in bands of rows).
+Backends: ``"triton"`` (:mod:`anemoi.models.triton.gaussian_smoothing`) and ``"torch"``, which
+runs on any device, eagerly in small bands or compiled (:class:`CompiledGaussianSmoothing`).
 """
 
 from __future__ import annotations
@@ -35,7 +30,7 @@ from anemoi.models.layers.projection_backend import PROJECTION_BACKENDS
 from anemoi.models.layers.projection_backend import ProjectionBackend
 from anemoi.models.layers.projection_backend import accumulation_dtype
 
-# Number of neighbour values the torch backend gathers at once, which bounds its extra memory.
+# Neighbour values gathered at once by the eager torch backend; bounds its extra memory.
 _TORCH_GATHER_ELEMENTS = 2**26
 
 
@@ -47,7 +42,7 @@ def squared_neighbour_distances(
 
 
 def _squared_angles(here: Tensor, there: Tensor, dtype: torch.dtype) -> Tensor:
-    """Squared great-circle distances in radians from points ``here`` (n, 3) to points ``there`` (n, k, 3)."""
+    """Squared great-circle distances from ``here`` (n, 3) to ``there`` (n, k, 3)."""
     chord = (there.to(dtype) - here.to(dtype)[:, None, :]).square().sum(dim=-1).sqrt()
     angle = 2.0 * torch.asin(torch.clamp(chord * 0.5, max=1.0))
     return angle * angle
@@ -56,7 +51,7 @@ def _squared_angles(here: Tensor, there: Tensor, dtype: torch.dtype) -> Tensor:
 def _normalised_weights(
     unit_vectors: Tensor, neighbours: Tensor, points: slice, sigma: float, dtype: torch.dtype
 ) -> Tensor:
-    """Gaussian weights of each point's neighbours, summing to one over the neighbours."""
+    """Gaussian weights of each point's neighbours, normalised to sum to one."""
     weights = torch.exp(-squared_neighbour_distances(unit_vectors, neighbours, points, dtype) / (2.0 * sigma**2))
     return weights / weights.sum(dim=1, keepdim=True)
 
@@ -66,7 +61,7 @@ def _rows_per_band(batch: int, num_neighbours: int, channels: int, num_points: i
 
 
 class _TorchGaussianSmoothing(torch.autograd.Function):
-    """Gaussian smoothing in PyTorch, worked through in bands of rows to bound its memory."""
+    """Eager torch backend, in bands of rows to bound the memory."""
 
     @staticmethod
     def forward(ctx, x: Tensor, neighbours: Tensor, unit_vectors: Tensor, sigma: float) -> Tensor:
@@ -95,21 +90,20 @@ class _TorchGaussianSmoothing(torch.autograd.Function):
         for start in range(0, num_points, rows):
             band = slice(start, start + rows)
             weights = _normalised_weights(unit_vectors, neighbours, band, ctx.sigma, acc_dtype)
-            # Each point sends its weighted gradient back to each of its neighbours.
             sent = weights[None, :, :, None] * grad_out[:, band, None, :].to(acc_dtype)
             grad_x.index_add_(1, neighbours[band].long().reshape(-1), sent.flatten(1, 2))
         return grad_x.to(ctx.dtype), None, None, None
 
 
 def _band_weights(band_neighbours: Tensor, band_vectors: Tensor, unit_vectors: Tensor, scale: Tensor) -> Tensor:
-    """Gaussian weights of the neighbours of a band of points; ``scale`` is ``1 / (2 * sigma**2)``."""
+    """Unnormalised weights for a band of points; ``scale`` is ``1 / (2 * sigma**2)``."""
     return torch.exp(-_squared_angles(band_vectors, unit_vectors[band_neighbours.long()], scale.dtype) * scale)
 
 
 def _smooth_band(
     x: Tensor, band_neighbours: Tensor, band_vectors: Tensor, unit_vectors: Tensor, scale: Tensor
 ) -> Tensor:
-    """Forward pass for a band of points: the weighted mean of each point's neighbours."""
+    """Compiled forward pass for one band of points."""
     weights = _band_weights(band_neighbours, band_vectors, unit_vectors, scale)
     gathered = x[:, band_neighbours.long()].to(scale.dtype)  # (batch, band points, neighbours, channels)
     sums = (weights[None, :, :, None] * gathered).sum(dim=2)
@@ -124,25 +118,23 @@ def _smooth_band_backward(
     unit_vectors: Tensor,
     scale: Tensor,
 ) -> None:
-    """Backward pass for a band of points: adds each point's weighted gradient to its neighbours in ``grad_x``."""
+    """Compiled backward pass for one band of points; adds into ``grad_x``."""
     weights = _band_weights(band_neighbours, band_vectors, unit_vectors, scale)
     scaled = grad_band.to(scale.dtype) / weights.sum(dim=1)[None, :, None]
     sent = weights[None, :, :, None] * scaled[:, :, None, :]
     grad_x.index_add_(1, band_neighbours.long().reshape(-1), sent.flatten(1, 2))
 
 
-# Number of points each call of a compiled pass works on. Bands of this size compile into kernels
-# within the limits of torch.compile on any grid (a whole O1280 grid does not), and keep the
-# weights of one band, a few hundred MB, as the only temporary.
+# Points per call of a compiled pass. A whole O1280 grid in one call fails in torch.compile
+# ("XBLOCK too large"), and the band also bounds the temporary weights.
 _COMPILED_BAND_POINTS = 2**19
 
 
 class CompiledGaussianSmoothing:
-    """The forward and backward passes of the torch backend, each compiled with ``torch.compile``.
+    """Compiled forward and backward passes for the torch backend.
 
-    The compiled passes work on large bands of points. ``torch.compile`` folds the gathering of
-    each point's neighbours into the weighted sums, so the gathered values are never stored, and
-    the width of the Gaussian is passed as a tensor, so one compiled pass serves every width.
+    The gather is fused into the weighted sum, so the gathered values are never stored. ``sigma``
+    is passed as a tensor, so all scales share one compiled graph.
 
     Parameters
     ----------
@@ -156,7 +148,7 @@ class CompiledGaussianSmoothing:
 
 
 class _CompiledTorchGaussianSmoothing(torch.autograd.Function):
-    """Gaussian smoothing with the compiled passes of :class:`CompiledGaussianSmoothing`, band by band."""
+    """Torch backend with the passes of :class:`CompiledGaussianSmoothing`."""
 
     @staticmethod
     def forward(
@@ -196,7 +188,7 @@ def gaussian_smooth(
     backend: ProjectionBackend = "triton",
     compiled: CompiledGaussianSmoothing | None = None,
 ) -> Tensor:
-    """Smooth ``x`` with Gaussian weights of width ``sigma`` over each point's neighbours.
+    """Smooth ``x`` with a Gaussian of width ``sigma`` over each point's neighbours.
 
     Parameters
     ----------
@@ -211,8 +203,7 @@ def gaussian_smooth(
     backend : str
         ``"triton"`` (GPU) or ``"torch"`` (any device).
     compiled : CompiledGaussianSmoothing, optional
-        Compiled passes for the torch backend. Without them, the torch backend works through the
-        points in small bands of rows with plain PyTorch operations.
+        Compiled passes for the torch backend; eager if not given.
 
     Returns
     -------
@@ -231,7 +222,7 @@ def gaussian_smooth(
         )
 
     shape = x.shape
-    # Spelled-out sizes let the reshape work for a field with zero channels too.
+    # Explicit sizes so that a field with zero channels reshapes too.
     flat = x.reshape(math.prod(shape[:-2]), shape[-2], shape[-1]).contiguous()
     if backend == "triton":
         if not flat.is_cuda:

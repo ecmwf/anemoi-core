@@ -119,8 +119,7 @@ class TruncatedConnection(BaseResidualConnection):
     sparse_projector_num_chunks : int, default 1
         Number of chunks to use for sparse projection matmuls.
     sparse_projector_backend : str, default "triton"
-        ``"triton"`` (GPU kernels) or ``"torch"`` (sparse matmul), see
-        :class:`~anemoi.models.layers.sparse_projector.SparseProjector`.
+        ``"triton"`` or ``"torch"``, see :class:`~anemoi.models.layers.sparse_projector.SparseProjector`.
     row_normalize : bool, optional
         Normalize projection weights per target node so each row sums to 1.
     truncation_up_file_path : str, optional
@@ -372,11 +371,11 @@ class ScalarOrnsteinConnection(BaseResidualConnection):
     regressors : list[str] | None
         Variable names to use as regressors.
     graph : HeteroData | None
-        Not used; taken so that every residual connection is built with the same arguments.
+        Unused; accepted so all residual connections share one signature.
     statistics : dict | None
-        Dataset statistics, used to initialise theta from the tendency statistics.
+        Dataset statistics, used to initialise theta.
     data_indices
-        Data indices of the dataset, to find the prognostic and regressor variables. Required.
+        Data indices of the dataset. Required.
     dataset_name : str | None
         Name of the dataset.
     """
@@ -470,13 +469,13 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
     anti_aliasing : bool
         If True (and ``truncate=True``), use anti-aliasing blending in the filter.
     graph : HeteroData | None
-        Graph holding the coordinates of the data nodes, from which the grid shape is read.
+        Graph with the data nodes; the grid shape is read from it.
     statistics : dict | None
-        Dataset statistics, used to initialise theta from the tendency statistics.
+        Dataset statistics, used to initialise theta.
     data_indices
-        Data indices of the dataset, to find the prognostic and regressor variables. Required.
+        Data indices of the dataset. Required.
     dataset_name : str | None
-        Name of the dataset, the data nodes in ``graph``.
+        Name of the dataset.
     """
 
     def __init__(

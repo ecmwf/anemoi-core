@@ -117,14 +117,11 @@ File-based example:
    ``truncation_down_file_path`` kwargs are still accepted for backward
    compatibility, but the recommended approach is to move them inside ``truncation_config``.
 
-By default (``sparse_projector.backend: triton`` in the model config), the
-projections run on GPU kernels that read each matrix as a table with one row
-per target point, padded to the longest row. The kernels read only the entries
-each row holds, so uneven rows, as in a grid-box average onto a much coarser
-grid, cost memory for the padding but no extra work. Building the table fails
-when the padded table would hold more than 2**31 entries (16 GiB).
-``sparse_projector.backend: torch`` applies the matrices with a sparse matrix
-product, which also runs on a CPU.
+With ``sparse_projector.backend: triton`` (the default) each matrix is stored
+as a table padded to the longest row and applied with GPU kernels; uneven rows
+cost memory for the padding but no compute. Tables above 2**31 entries
+(16 GiB) are refused. ``torch`` uses ``torch.sparse.mm`` and also runs on a
+CPU.
 
 *****************************
  Learnable residual (Ornstein)

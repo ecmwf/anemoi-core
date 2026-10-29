@@ -28,7 +28,7 @@ def _random_graph(num_points: int) -> HeteroData:
 
 
 def _knn_graph_table(graph: HeteroData, num_neighbours: int) -> torch.Tensor:
-    """The neighbours of the KNN edges that GraphCreator builds, grouped by the node that receives them."""
+    """Neighbours from the KNN edges built by GraphCreator, grouped by target."""
     subgraph = HeteroData()
     subgraph["data"].x = graph["data"].x
     config = OmegaConf.create(

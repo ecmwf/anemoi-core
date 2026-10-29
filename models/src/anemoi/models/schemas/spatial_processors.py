@@ -45,7 +45,7 @@ class CrossGridProjectorSchema(BaseModel):
     autocast: bool = Field(default=False)
     "Whether to run the sparse matmul under automatic mixed precision."
     backend: ProjectionBackend = Field(default="triton")
-    "Projection kernels: 'triton' (GPU) or 'torch' (sparse matmul, any device)."
+    "Sparse projection backend: 'triton' (GPU) or 'torch' (any device)."
 
     @model_validator(mode="after")
     def check_source_provided(self) -> CrossGridProjectorSchema:

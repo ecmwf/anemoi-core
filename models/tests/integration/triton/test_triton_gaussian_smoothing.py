@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""The Triton kernels and the compiled torch backend for Gaussian smoothing give the same results and gradients as PyTorch."""
+"""Triton and compiled torch Gaussian smoothing match the eager torch backend."""
 
 import pytest
 import torch
@@ -76,8 +76,7 @@ def test_triton_passes_gradcheck() -> None:
     neighbours, unit_vectors = neighbour_tables(2, 5)
     x = torch.randn(2, neighbours.shape[0], 3, device="cuda", dtype=torch.float64, requires_grad=True)
 
-    # The backward adds into shared neighbours in whatever order the GPU runs them, so two backward
-    # runs can differ in the last bits; nondet_tol allows for that.
+    # Atomic adds make the backward non-deterministic in the last bits.
     assert torch.autograd.gradcheck(
         lambda field: gaussian_smooth(field, neighbours, unit_vectors, 0.1, backend="triton"),
         (x,),
@@ -112,7 +111,7 @@ def test_triton_smoothing_of_a_field_with_zero_channels() -> None:
 
 @pytest.mark.parametrize("band_points", [2**19, 1000])
 def test_compiled_torch_backend_matches_the_eager_one(band_points: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    # With 1000 points per band the O24 grid of 3,168 points takes three full bands and a shorter one.
+    # 1000 points per band: O24 (3,168 points) gives three full bands and a shorter one.
     monkeypatch.setattr(gaussian_smoothing, "_COMPILED_BAND_POINTS", band_points)
     neighbours, unit_vectors = neighbour_tables(24, 32)
     generator = torch.Generator(device="cuda").manual_seed(2)
@@ -120,7 +119,6 @@ def test_compiled_torch_backend_matches_the_eager_one(band_points: int, monkeypa
     grad = torch.randn(x.shape, device="cuda", generator=generator)
     compiled = CompiledGaussianSmoothing()
 
-    # One compiled pass serves every width.
     for sigma in (0.02, 0.05):
         out_c, grad_c = forward_backward(x, neighbours, unit_vectors, sigma, "torch", grad, compiled=compiled)
         out_e, grad_e = forward_backward(x, neighbours, unit_vectors, sigma, "torch", grad)

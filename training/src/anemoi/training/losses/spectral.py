@@ -132,8 +132,7 @@ class SpectralLoss(BaseLoss):
         data_node_name
             Node type in *graph_data* holding the data-grid coordinates.
         sparse_projector_backend
-            Kernels for the projection: ``"triton"`` (GPU, the default) or ``"torch"`` (sparse matmul), see
-            :class:`~anemoi.models.layers.sparse_projector.SparseProjector`.
+            ``"triton"`` (default) or ``"torch"``, see :class:`~anemoi.models.layers.sparse_projector.SparseProjector`.
         ignore_nans
             Must be False; spectral losses cannot handle missing values.
         scalers

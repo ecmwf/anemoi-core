@@ -261,9 +261,9 @@ class NoiseInjector(BaseNoiseInjector):
         noise_matrix : str, optional
             Optional path to noise truncation matrix
         sparse_projector_num_chunks : int, optional
-            Number of chunks the noise projection is split into.
+            Number of chunks for the noise projection.
         sparse_projector_backend : str, optional
-            Kernels for the noise projection: ``"triton"`` (GPU, the default) or ``"torch"`` (sparse matmul).
+            ``"triton"`` (default) or ``"torch"``.
         graph_data : Optional[HeteroData], optional
             Graph data for noise conditioning.
         """

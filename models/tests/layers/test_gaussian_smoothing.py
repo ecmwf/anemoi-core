@@ -25,8 +25,7 @@ from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from tests.grids import octahedral_graph
 
-# The graph builder puts the neighbour tables on the GPU when there is one; these tests run the
-# torch backend on the CPU, so they ask for the tables there.
+# The tables are built on the GPU if there is one; these torch-backend tests use them on the CPU.
 CPU = torch.device("cpu")
 
 
@@ -60,7 +59,7 @@ def test_provider_tables(neighbour_list: NeighbourListProvider) -> None:
 
     squared_distances = squared_neighbour_distances(unit_vectors, neighbours, slice(None), torch.float64)
 
-    # The distances worked out from the unit vectors are the great-circle distances of the graph.
+    # Distances from the unit vectors match the haversine distances.
     coords = graph["data"].x.double()
     targets = torch.arange(num_points).repeat_interleave(12)
     expected = haversine_distance(coords[neighbours.reshape(-1).long()], coords[targets]) ** 2
@@ -143,7 +142,7 @@ def test_torch_smoothing_gives_the_same_result_in_bands(neighbour_list, monkeypa
     whole = gaussian_smooth(x, neighbours, unit_vectors, 0.05, backend="torch")
     (grad_whole,) = torch.autograd.grad(whole.sum(), x)
 
-    # Few enough gathered values at once to work through the points in many bands.
+    # Force many small bands.
     monkeypatch.setattr(gaussian_smoothing, "_TORCH_GATHER_ELEMENTS", 2 * 12 * 4 * 7)
     banded = gaussian_smooth(x, neighbours, unit_vectors, 0.05, backend="torch")
     (grad_banded,) = torch.autograd.grad(banded.sum(), x)
@@ -154,7 +153,7 @@ def test_torch_smoothing_gives_the_same_result_in_bands(neighbour_list, monkeypa
 
 @pytest.mark.parametrize("sigma", [0.03, 0.08])
 def test_smoothing_matches_the_smoother_matrix(sigma: float) -> None:
-    """With the same neighbours and width, the result equals the Gaussian smoothing matrix."""
+    """Same result as the Gaussian smoothing matrix with the same neighbours and width."""
     graph = octahedral_graph(6)
     neighbours, unit_vectors = NeighbourListProvider(graph, "data", num_neighbours=16).get_neighbours(device=CPU)
     subgraph = build_node_to_node_projection_subgraph(

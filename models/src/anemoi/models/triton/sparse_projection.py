@@ -7,34 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Triton kernels for projecting a field from one node set onto another with a table of weights.
+"""Triton kernels for a sparse projection stored as a padded table.
 
-Every target point ``t`` gets the weighted sum of the values at its source points:
+    y[t] = sum_k w[t, k] * x[idx[t, k]],   k < length[t]
 
-    y[t] = sum_k w[t, k] * x[idx[t, k]]
+with the table from :meth:`anemoi.models.layers.graph_provider.ProjectionGraphProvider.get_table`.
+The forward kernel writes the sums directly into the output. The backward kernel scatters the
+gradients with atomic adds, so results can differ in the last bits between runs.
 
-with ``idx`` and ``w`` of shape ``(target points, longest row)`` and the number of entries of
-each row, as given by :meth:`anemoi.models.layers.graph_provider.ProjectionGraphProvider.get_table`.
+Both kernels stop at each row's length, so the padding is never read. Uneven rows cost no extra
+work, and a NaN in the input only reaches the rows that hold it, as with ``torch.sparse.mm``.
 
-The forward kernel takes a block of target points and a block of channels of one field, and goes
-through the target points' source points several at a time: it gathers a tile of source values,
-weights them and adds them up, so that many loads are in flight at once, and writes the sums
-straight into the result.
-
-The backward kernel takes a block of target points of one field and, for each tile of source
-points, goes through all the channels, sending each target point's weighted gradient back to its
-source points with atomic additions, since several target points share a source point. The
-additions arrive in whatever order the GPU runs them, so repeated runs can differ in the last bits.
-
-Both kernels read only the stored entries of each row: a block of target points goes as far as
-its longest row, and the slots past each row's length are masked out. The padding at the end of
-short rows is never read or written, so rows of uneven length cost about what their entries do,
-and a NaN or infinity in the field reaches only the target points whose rows hold it, as with
-the sparse matrix product.
-
-Sums are kept in float32, or in float64 for float64 fields. The block sizes are fixed, with one
-forward tile for tables of long rows and one for narrow tables (chosen on an A100), so each kernel
-compiles once per field dtype, row tile width and, for the forward kernel, channel block size.
+Accumulation is in float32 (float64 for float64 inputs). Block sizes are fixed (tuned on an A100).
 """
 
 import torch
@@ -44,9 +28,8 @@ import triton.language as tl
 from anemoi.models.layers.projection_backend import accumulation_dtype
 from anemoi.models.triton.utils import torch_dtype_to_triton
 
-# Forward tiles as (target points, table slots, warps), chosen on an A100: tables of rows with
-# about 128 entries take the first, tables at most _SHORT_ROWS_WIDTH wide (interpolation from a
-# coarser grid, a few entries per row) the second.
+# Forward tiles (target points, slots, warps): one for wide tables, one for narrow ones such as
+# interpolation from a coarser grid.
 _FWD_TILE = (8, 8, 2)
 _FWD_SHORT_ROWS_TILE = (16, 4, 2)
 _SHORT_ROWS_WIDTH = 32
@@ -82,7 +65,7 @@ def _project_fwd(
     lengths = tl.load(lengths_ptr + points, mask=point_mask, other=0)
 
     acc = tl.zeros([BLOCK_POINTS, BLOCK_CHANNELS], dtype=ACC)
-    # The block goes as far as its longest row; the slots past each row's length are masked out.
+    # Loop to the longest row in the block; shorter rows are masked.
     for k0 in range(0, tl.max(lengths, axis=0), BLOCK_NEIGHBOURS):
         ks = k0 + tl.arange(0, BLOCK_NEIGHBOURS)
         tile_mask = point_mask[:, None] & (ks[None, :] < lengths[:, None])
@@ -147,7 +130,7 @@ def _project_bwd(
 
 
 class SparseProjectionTriton(torch.autograd.Function):
-    """Projection of a ``(batch, source points, channels)`` field with the Triton kernels."""
+    """Projection of a ``(batch, source points, channels)`` field."""
 
     @staticmethod
     def forward(ctx, x: torch.Tensor, neighbours: torch.Tensor, weights: torch.Tensor, row_lengths: torch.Tensor):
@@ -161,8 +144,7 @@ class SparseProjectionTriton(torch.autograd.Function):
         block_points, block_slots, warps = _FWD_SHORT_ROWS_TILE if num_neighbours <= _SHORT_ROWS_WIDTH else _FWD_TILE
         block_channels = _block(channels, _FWD_MAX_CHANNELS, smallest=16)
         grid = (triton.cdiv(num_targets, block_points), triton.cdiv(channels, block_channels), batch)
-        # The kernels run on fields with at least one channel; with the grid split by channels, a
-        # process can get an empty share.
+        # A rank can hold zero channels when the grid is split by channels.
         if out.numel() > 0:
             _project_fwd[grid](
                 x,
@@ -193,8 +175,7 @@ class SparseProjectionTriton(torch.autograd.Function):
         acc_dtype = accumulation_dtype(ctx.dtype)
         grad_x = torch.zeros(batch, ctx.num_sources, channels, dtype=acc_dtype, device=grad_out.device)
         grid = (triton.cdiv(num_targets, _BWD_POINTS), batch)
-        # The kernels run on fields with at least one channel; with the grid split by channels, a
-        # process can get an empty share.
+        # A rank can hold zero channels when the grid is split by channels.
         if grad_x.numel() > 0:
             _project_bwd[grid](
                 grad_out,
@@ -218,8 +199,8 @@ class SparseProjectionTriton(torch.autograd.Function):
 def project_triton(
     x: torch.Tensor, neighbours: torch.Tensor, weights: torch.Tensor, row_lengths: torch.Tensor
 ) -> torch.Tensor:
-    """Projection of a ``(batch, source points, channels)`` field with the Triton kernels.
+    """Projection of a ``(batch, source points, channels)`` field.
 
-    See :class:`anemoi.models.layers.sparse_projector.SparseProjector` for the backend that uses it.
+    Used by :class:`anemoi.models.layers.sparse_projector.SparseProjector`.
     """
     return SparseProjectionTriton.apply(x, neighbours, weights, row_lengths)

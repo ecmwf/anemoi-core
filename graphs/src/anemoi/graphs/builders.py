@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Helpers for building small projection subgraphs and neighbour tables from compact configs.
+"""Helpers for building small projection subgraphs from compact configs.
 
 These are used by model/loss components (TruncatedConnection,
 MultiscaleLossWrapper) that own their own subgraphs rather than relying on
@@ -29,9 +29,8 @@ from anemoi.graphs.projection_helpers import DEFAULT_GAUSSIAN_NORM
 
 LOGGER = logging.getLogger(__name__)
 
-# Number of nodes whose nearest neighbours build_neighbour_table searches for at once. Each search
-# over all nodes for one block needs a few GB for 128 neighbours, and a search that builds a tree
-# over all nodes builds it once per block, so the blocks are large.
+# Nodes per KNN search in build_neighbour_table. A block of 2**20 nodes with K=128 needs a few GB;
+# the blocks are kept large because tree-based searches rebuild their tree per block.
 NEIGHBOUR_TABLE_BLOCK_SIZE = 2**20
 
 
@@ -66,13 +65,10 @@ def build_neighbour_table(
     num_nearest_neighbours: int,
     block_size: int = NEIGHBOUR_TABLE_BLOCK_SIZE,
 ) -> torch.Tensor:
-    """List the nearest data nodes of every data node, the node itself included.
+    """Table of the K nearest data nodes of every data node, the node itself included.
 
-    The neighbours are found by :class:`~anemoi.graphs.edges.KNNEdges`, with the same search and
-    on the same device as when it builds a graph, so they are the neighbours of the
-    ``(data_node_name, "to", data_node_name)`` edges it would build. The search runs over
-    ``block_size`` nodes at a time and writes their neighbours straight into the table, so the
-    memory it needs beyond the table depends on ``block_size`` and not on the number of nodes.
+    Uses the search of :class:`~anemoi.graphs.edges.KNNEdges`, so the result matches the edges it
+    would build, but runs it block by block into an ``(N, K)`` table instead of a full edge index.
 
     Parameters
     ----------
@@ -81,15 +77,14 @@ def build_neighbour_table(
     data_node_name:
         Node type in *graph_data* that holds the data-grid coordinates.
     num_nearest_neighbours:
-        Number of neighbours of each node, the node itself included.
+        Neighbours per node, the node itself included.
     block_size:
-        Number of nodes whose neighbours are searched for at once.
+        Nodes per search.
 
     Returns
     -------
     torch.Tensor
-        ``int32`` table of shape ``(num_nodes, num_nearest_neighbours)``: row ``i`` holds the
-        neighbours of node ``i``, in the order the edge builder gives them.
+        ``int32`` table of shape ``(num_nodes, num_nearest_neighbours)``.
     """
     from anemoi.graphs.edges import KNNEdges
 
@@ -109,7 +104,7 @@ def build_neighbour_table(
                 f"Every node of '{data_node_name}' needs exactly {num_nearest_neighbours} neighbours, "
                 f"found between {int(counts.min())} and {int(counts.max())}."
             )
-        # Group the edges by the node that receives them, unless they already come grouped.
+        # Group the edges by target node if the search did not.
         if not bool((targets[1:] >= targets[:-1]).all()):
             sources = sources[torch.argsort(targets, stable=True)]
         table[start : start + block.shape[0]] = sources.reshape(-1, num_nearest_neighbours).to(table.device)

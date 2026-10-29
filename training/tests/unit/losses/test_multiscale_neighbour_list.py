@@ -66,7 +66,7 @@ def _wrapper(
 
 
 def _save_gaussian_matrix(graph: HeteroData, num_neighbours: int, sigma: float, path: Path) -> str:
-    """Gaussian smoothing matrix over the nearest neighbours of every data node, saved as .npz."""
+    """Save a KNN Gaussian smoothing matrix as .npz."""
     subgraph = build_node_to_node_projection_subgraph(
         graph,
         "data",
@@ -84,7 +84,7 @@ def _save_gaussian_matrix(graph: HeteroData, num_neighbours: int, sigma: float, 
 
 
 def _file_config(graph: HeteroData, num_neighbours: int, path: Path) -> dict:
-    """File-mode config with one Gaussian matrix per width in ``SIGMAS``, widest first."""
+    """File-mode config with one matrix per width in ``SIGMAS``."""
     files = [
         _save_gaussian_matrix(graph, num_neighbours, sigma, path / f"smooth_{i}.npz") for i, sigma in enumerate(SIGMAS)
     ]
@@ -94,7 +94,7 @@ def _file_config(graph: HeteroData, num_neighbours: int, path: Path) -> dict:
 def test_neighbour_list_gives_the_scales_of_the_smoothing_matrices(tmp_path: Path) -> None:
     graph = octahedral_graph(6)
     neighbour_list = _wrapper(graph, {"num_nearest_neighbours": 16, "sigmas": list(SIGMAS)})
-    # The same neighbours and widths as Gaussian matrices loaded from files, widest first.
+    # Same neighbours and widths, as matrices from files.
     matrices = _wrapper(graph, _file_config(graph, 16, tmp_path))
     generator = torch.Generator().manual_seed(0)
     num_points = graph["data"].num_nodes
@@ -216,7 +216,7 @@ def test_checkpointed_scales_give_the_same_loss_and_gradients(tmp_path: Path, mo
         losses.append(loss.detach())
         gradients.append(pred_leaf.grad)
 
-    # The forward pass runs the same operations in the same order with and without checkpoints.
+    # Checkpointing does not change the forward computation.
     torch.testing.assert_close(losses[1], losses[0], rtol=0, atol=0)
     torch.testing.assert_close(gradients[1], gradients[0], rtol=1e-5, atol=1e-6)
 

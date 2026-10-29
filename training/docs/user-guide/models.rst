@@ -211,8 +211,8 @@ training.
 The wrapper is configured via a single ``multiscale_config`` key that
 supports two modes.
 
-**Neighbour-list mode** — Gaussian smoothing of every width over one
-list of nearest neighbours, built from the graph at startup:
+**Neighbour-list mode** — Gaussian smoothing over the nearest neighbours,
+one width per scale:
 
 .. code:: yaml
 

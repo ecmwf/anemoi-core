@@ -323,7 +323,7 @@ def test_switching_to_the_torch_backend_gives_the_matrix_back() -> None:
     assert provider.backend == "torch"
     assert provider.projection_table is None
     torch.testing.assert_close(provider.get_edges().to_dense(), expected.get_edges().to_dense())
-    # The rows of 2, 0, 3 and 1 entries, padded in the table, project as with the matrix built for torch.
+    # Rows of 2, 0, 3 and 1 entries project as with the torch matrix.
     x = torch.randn(2, 5, 3)
     torch.testing.assert_close(SparseProjector()(x, provider), SparseProjector()(x, expected))
 

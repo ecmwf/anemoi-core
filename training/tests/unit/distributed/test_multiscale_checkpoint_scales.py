@@ -7,10 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""A multiscale loss on a grid split across processes matches one process, with and without per-scale checkpoints.
+"""A multiscale loss on a grid split across processes matches a single process.
 
-With checkpoints the exchanges between the grid split and the channel split run again in the
-backward pass, so this checks that they line up across the processes.
+With checkpoint_scales the all-to-all exchanges run again in the backward pass, so this also checks
+that they line up across processes.
 """
 
 from datetime import timedelta
@@ -31,7 +31,7 @@ from tests.unit.grids import octahedral_graph
 WORLD_SIZE = 2
 SIGMAS = (0.08, 0.04)  # widest first
 NUM_MEMBERS = 3
-# With one variable and two processes, one process holds no channels while the grid is split by channels.
+# One variable on two processes leaves one process without channels.
 VARIABLE_COUNTS = (5, 1)
 
 

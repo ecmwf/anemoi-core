@@ -37,20 +37,17 @@ from anemoi.models.layers.projection_backend import ProjectionBackend
 
 LOGGER = logging.getLogger(__name__)
 
-# Number of stored entries placed at once when a matrix is turned into a table, which bounds the
-# extra memory the conversion needs.
+# Entries converted per step in csr_to_table; bounds the temporary memory.
 _TABLE_BAND_ENTRIES = 2**24
-# Largest table, padding included, that a matrix is turned into: 2**31 entries take 16 GiB.
+# Largest padded table we build (16 GiB).
 _MAX_TABLE_ENTRIES = 2**31
 
 
 def csr_to_table(matrix: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-    """The columns and weights of every row of a CSR matrix, as tables padded to the longest row.
+    """Convert a CSR matrix into tables padded to the longest row.
 
-    Row ``i`` of the tables holds the column indices (``int32``) and the values (``float32``) of the
-    entries stored in row ``i`` of the matrix, so the tables have shape ``(rows, longest row)``.
-    The number of entries of each row is kept as well (``int32``, shape ``(rows,)``), so that the
-    padding at the end of shorter rows (column 0, weight 0) is never read.
+    Returns the column indices (``int32``) and values (``float32``), both ``(rows, longest row)``,
+    and the row lengths (``int32``). Padding is column 0 with weight 0.
 
     Parameters
     ----------
@@ -60,12 +57,12 @@ def csr_to_table(matrix: Tensor) -> tuple[Tensor, Tensor, Tensor]:
     Returns
     -------
     tuple[Tensor, Tensor, Tensor]
-        The column table, the weight table and the row lengths, on the device of ``matrix``.
+        Columns, weights and row lengths, on the device of ``matrix``.
 
     Raises
     ------
     ValueError
-        If the padded table would hold more than ``_MAX_TABLE_ENTRIES`` entries.
+        If the table would have more than ``_MAX_TABLE_ENTRIES`` entries.
     """
     row_starts = matrix.crow_indices().to(torch.int64)
     columns = matrix.col_indices()
@@ -83,7 +80,7 @@ def csr_to_table(matrix: Tensor) -> tuple[Tensor, Tensor, Tensor]:
 
     neighbours = torch.zeros(num_rows, width, dtype=torch.int32, device=columns.device)
     weights = torch.zeros(num_rows, width, dtype=torch.float32, device=values.device)
-    # Put every stored entry at its position within its row, a band of rows at a time.
+    # Scatter the entries into their slots, a band of rows at a time.
     rows_per_band = max(1, _TABLE_BAND_ENTRIES // width)
     for start in range(0, num_rows, rows_per_band):
         stop = min(num_rows, start + rows_per_band)
@@ -526,12 +523,10 @@ class DynamicGraphProvider(BaseGraphProvider):
 class ProjectionGraphProvider(BaseGraphProvider):
     """Provider for sparse projection matrices.
 
-    Builds a sparse projection matrix from a graph or a file and keeps it in the form its backend
-    reads:
+    Builds the matrix from a graph or a file and keeps only the form its backend needs:
 
-    - ``"torch"``: the sparse CSR matrix (:meth:`get_edges`), for ``torch.sparse.mm``.
-    - ``"triton"``: a table with one row per target node (:meth:`get_table`), for the Triton
-      projection kernels. The table is made from the matrix once, when the provider is built.
+    - ``"torch"``: CSR matrix (:meth:`get_edges`).
+    - ``"triton"``: padded table (:meth:`get_table`), built once from the matrix.
     """
 
     def __init__(
@@ -771,13 +766,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         return self.projection_matrix
 
     def get_table(self, device: Optional[torch.device] = None) -> tuple[Tensor, Tensor, Tensor]:
-        """Return the projection as a table with one row per target node.
-
-        The first table holds the source nodes each target node reads (``int32``), the second
-        their weights (``float32``), both of shape ``(target nodes, longest row)`` with shorter
-        rows padded, and the third the number of entries of each row (``int32``, shape
-        ``(target nodes,)``), see :func:`csr_to_table`. The tables stay on the device last asked
-        for.
+        """Return the padded table (see :func:`csr_to_table`), moved to ``device`` if given.
 
         Parameters
         ----------
@@ -787,7 +776,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         Returns
         -------
         tuple[Tensor, Tensor, Tensor]
-            The source-node table, the weight table and the row lengths.
+            Source nodes, weights and row lengths.
         """
         if self.projection_table is None:
             raise ValueError(
@@ -798,11 +787,9 @@ class ProjectionGraphProvider(BaseGraphProvider):
         return self.projection_table
 
     def use_torch_backend(self) -> None:
-        """Switch to the torch backend, so that the projection also runs on a CPU.
+        """Switch to the torch backend, e.g. to run on a CPU.
 
-        A provider built for the triton backend holds only its table. The table is turned back
-        into the sparse CSR matrix, without the padding of short rows, and dropped. The matrix
-        holds the same entries as the one the table was made from.
+        Rebuilds the CSR matrix from the padded table and drops the table.
         """
         if self.backend == "torch":
             return
@@ -832,9 +819,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
           building a Gaussian-weighted KNN subgraph on the fly from ``sigma`` (needs
           *graph_data*).
 
-        The provider keeps the form of the matrix that *backend* reads. Returns ``None`` for an
-        empty or ``None`` *config*, and raises ``ValueError`` on an ambiguous config or when
-        *graph_data* is required but missing.
+        Returns ``None`` for an empty or ``None`` *config*, and raises ``ValueError`` on an
+        ambiguous config or when *graph_data* is required but missing.
         """
         # --- normalise to plain dict ---
         if config is None:
@@ -908,40 +894,31 @@ class ProjectionGraphProvider(BaseGraphProvider):
 
 
 def use_torch_projections(model: nn.Module) -> None:
-    """Switch every sparse projection in ``model`` to the torch backend, so that it runs on a CPU.
-
-    Meant for a model built or loaded with the triton backend, such as one from an inference
-    checkpoint, before it is run on a CPU. See :meth:`ProjectionGraphProvider.use_torch_backend`.
-    """
+    """Switch all projections in ``model`` to the torch backend, e.g. to run a checkpoint on a CPU."""
     for module in model.modules():
         if isinstance(module, ProjectionGraphProvider):
             module.use_torch_backend()
 
 
 class NeighbourListProvider:
-    """The nearest neighbours of every node of one node set, and where the nodes are.
+    """K nearest neighbours of every node of one node set, plus the nodes' unit vectors.
 
-    Holds the neighbours of each node as an ``int32`` table of shape
-    ``(num_nodes, num_neighbours)``, the node itself included, and the position of every node
-    as a ``float32`` unit vector of shape ``(num_nodes, 3)``. Every node has the same number of
-    neighbours. Weights that depend on the distances, such as Gaussian smoothing of any width,
-    are worked out from the unit vectors when needed, so one provider serves every width.
-
-    The tables are built once from the graph. They stay on the device they were last asked
-    for and are shared by every deep copy of the provider.
+    ``neighbours`` is ``int32`` of shape ``(num_nodes, K)`` and includes the node itself;
+    ``unit_vectors`` is ``float32`` of shape ``(num_nodes, 3)``. No weights are stored, so one
+    provider serves any smoothing width. Deep copies share the tables.
     """
 
     def __init__(self, graph: HeteroData, nodes_name: str, num_neighbours: int) -> None:
-        """Build the neighbour tables of one node set.
+        """Build the neighbour table of one node set.
 
         Parameters
         ----------
         graph : HeteroData
-            Graph holding the coordinates of the nodes under ``nodes_name``.
+            Graph with the node coordinates.
         nodes_name : str
-            Node set whose nodes are both the points and their neighbours.
+            Node set to build the neighbours for.
         num_neighbours : int
-            Number of neighbours of each node, the node itself included.
+            Neighbours per node, the node itself included.
         """
         from anemoi.graphs.builders import build_neighbour_table
 
@@ -965,7 +942,7 @@ class NeighbourListProvider:
         self.num_neighbours = num_neighbours
 
     def __deepcopy__(self, memo: dict) -> "NeighbourListProvider":
-        """Deep copy that shares the neighbour tables, which stay the same for the whole run."""
+        """Deep copy that shares the (constant) tables."""
         cls = self.__class__
         new = cls.__new__(cls)
         memo[id(self)] = new
@@ -976,17 +953,14 @@ class NeighbourListProvider:
         return new
 
     def get_neighbours(self, device: Optional[torch.device] = None) -> tuple[Tensor, Tensor]:
-        """The neighbour table and the unit vectors of the nodes, moved to ``device`` if given."""
+        """Neighbour table and unit vectors, moved to ``device`` if given."""
         if device is not None and self.neighbours.device != torch.device(device):
             self.neighbours = self.neighbours.to(device)
             self.unit_vectors = self.unit_vectors.to(device)
         return self.neighbours, self.unit_vectors
 
     def typical_reach(self, num_samples: int = 10_000) -> float:
-        """How far the neighbourhoods reach: the median distance in radians to a node's farthest neighbour.
-
-        The median is taken over up to ``num_samples`` nodes spread evenly through the node set.
-        """
+        """Median distance (radians) to the farthest neighbour, over up to ``num_samples`` nodes."""
         from anemoi.models.layers.gaussian_smoothing import squared_neighbour_distances
 
         num_nodes = self.neighbours.shape[0]

@@ -7,24 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Triton kernels for Gaussian smoothing over a fixed list of neighbours.
+"""Triton kernels for Gaussian smoothing over a neighbour list.
 
-See :mod:`anemoi.models.layers.gaussian_smoothing` for what is computed. The forward kernel
-takes a block of points and a block of channels of one field, and goes through the points'
-neighbours several at a time: it works out the distances to a tile of neighbours from the unit
-vectors, turns them into weights, gathers the neighbours' values and adds them up, so that many
-loads are in flight at once. At the end it divides by the sum of the weights, which it also
-keeps for the backward pass.
+See :mod:`anemoi.models.layers.gaussian_smoothing` for the maths. The forward kernel computes
+the weights of a tile of neighbours from the unit vectors and accumulates the weighted values;
+it also stores the per-point weight sums for the backward pass. The backward kernel recomputes
+the weights and scatters the gradients with atomic adds, so results can differ in the last bits
+between runs.
 
-The backward kernel takes a block of points of one field. For each tile of neighbours it works
-the weights out again, once, and then goes through all the channels, sending each point's
-gradient, divided by its sum of weights, back to its neighbours with atomic additions, since
-several points share a neighbour. The additions arrive in whatever order the GPU runs them, so
-repeated runs can differ in the last bits.
-
-Sums are kept in float32, or in float64 for float64 fields. The block sizes are fixed (chosen
-on an A100 at O320); the forward kernel compiles once per field dtype and channel block size,
-the backward kernel once per field dtype.
+Accumulation is in float32 (float64 for float64 inputs). Block sizes are fixed (tuned on an A100
+at O320), so there is no autotuning.
 """
 
 import torch
@@ -45,7 +37,7 @@ def _block_channels(channels: int, largest: int) -> int:
 
 @triton.jit
 def _load_unit_vectors(unit_vectors_ptr, points, mask, ACC: tl.constexpr):
-    """The three components of the unit vectors of ``points``."""
+    """x, y and z of the unit vectors of ``points``."""
     ux = tl.load(unit_vectors_ptr + points * 3 + 0, mask=mask, other=0.0).to(ACC)
     uy = tl.load(unit_vectors_ptr + points * 3 + 1, mask=mask, other=0.0).to(ACC)
     uz = tl.load(unit_vectors_ptr + points * 3 + 2, mask=mask, other=0.0).to(ACC)
@@ -54,7 +46,7 @@ def _load_unit_vectors(unit_vectors_ptr, points, mask, ACC: tl.constexpr):
 
 @triton.jit
 def _neighbour_weights(unit_vectors_ptr, neighbour, tile_mask, px, py, pz, scale, ACC: tl.constexpr):
-    """Unnormalised Gaussian weights of a tile of neighbours, from their great-circle distances."""
+    """Unnormalised Gaussian weights of a tile of neighbours."""
     nx, ny, nz = _load_unit_vectors(unit_vectors_ptr, neighbour, tile_mask, ACC)
     dx = nx - px[:, None]
     dy = ny - py[:, None]
@@ -112,7 +104,7 @@ def _gaussian_smooth_fwd(
         out.to(out_ptr.dtype.element_ty),
         mask=point_mask[:, None] & col_mask[None, :],
     )
-    # The sums of weights are the same for every field and channel block; one program keeps them.
+    # The weight sums are the same for every field and channel block, so one program stores them.
     if tl.program_id(1) == 0 and tl.program_id(2) == 0:
         tl.store(totals_ptr + points, total, mask=point_mask)
 
@@ -164,7 +156,7 @@ def _gaussian_smooth_bwd(
 
 
 class GaussianSmoothingTriton(torch.autograd.Function):
-    """Gaussian smoothing of a ``(batch, num_points, channels)`` field with the Triton kernels."""
+    """Gaussian smoothing of a ``(batch, num_points, channels)`` field."""
 
     @staticmethod
     def forward(ctx, x: torch.Tensor, neighbours: torch.Tensor, unit_vectors: torch.Tensor, sigma: float):
@@ -178,8 +170,7 @@ class GaussianSmoothingTriton(torch.autograd.Function):
         out = torch.empty_like(x)
         block_channels = _block_channels(channels, _FWD_MAX_CHANNELS)
         grid = (triton.cdiv(num_points, _FWD_POINTS), triton.cdiv(channels, block_channels), batch)
-        # The kernels run on fields with at least one channel; with the grid split by channels, a
-        # process can get an empty share.
+        # A rank can hold zero channels when the grid is split by channels.
         if out.numel() > 0:
             _gaussian_smooth_fwd[grid](
                 x,
@@ -208,8 +199,7 @@ class GaussianSmoothingTriton(torch.autograd.Function):
         batch, num_points, channels = grad_out.shape
         grad_x = torch.zeros(grad_out.shape, dtype=scale.dtype, device=grad_out.device)
         grid = (triton.cdiv(num_points, _BWD_POINTS), batch)
-        # The kernels run on fields with at least one channel; with the grid split by channels, a
-        # process can get an empty share.
+        # A rank can hold zero channels when the grid is split by channels.
         if grad_x.numel() > 0:
             _gaussian_smooth_bwd[grid](
                 grad_out,
@@ -233,8 +223,5 @@ class GaussianSmoothingTriton(torch.autograd.Function):
 def gaussian_smooth_triton(
     x: torch.Tensor, neighbours: torch.Tensor, unit_vectors: torch.Tensor, sigma: float
 ) -> torch.Tensor:
-    """Gaussian smoothing with the Triton kernels.
-
-    See :func:`anemoi.models.layers.gaussian_smoothing.gaussian_smooth` for the arguments.
-    """
+    """See :func:`anemoi.models.layers.gaussian_smoothing.gaussian_smooth`."""
     return GaussianSmoothingTriton.apply(x, neighbours, unit_vectors, sigma)

@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""The Triton backend of the sparse projection gives the same results and gradients as the matrix."""
+"""The Triton sparse projection matches the CSR matrix, in values and gradients."""
 
 import pytest
 import torch
@@ -90,7 +90,7 @@ def test_triton_matches_the_matrix(provider_name: str, channels: int, dtype: tor
     out_t, grad_t = forward_backward(lambda x: SparseProjector()(x, provider), x, grad)
     out_r, grad_r = forward_backward(lambda x: torch.einsum("mn,...nc->...mc", dense, x), x, grad)
 
-    # The sums are taken in a different order, so they agree to the rounding of the dtype.
+    # Different summation order, so compare to the dtype's rounding.
     tolerance = 16 * torch.finfo(dtype).eps
     torch.testing.assert_close(out_t, out_r, rtol=tolerance, atol=tolerance * out_r.abs().max().item())
     torch.testing.assert_close(grad_t, grad_r, rtol=tolerance, atol=tolerance * grad_r.abs().max().item())

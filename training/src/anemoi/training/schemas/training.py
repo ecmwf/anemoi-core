@@ -407,18 +407,14 @@ class MultiscaleConfigDiskSchema(BaseModel):
 
 
 class MultiscaleConfigNeighbourListSchema(BaseModel):
-    """Multiscale config with one shared list of nearest neighbours and one Gaussian width per scale.
-
-    The smoothing weights are worked out from the distances to the neighbours on the fly, so one
-    list serves every scale.
-    """
+    """Multiscale config with a shared neighbour list and one Gaussian width per scale."""
 
     model_config = ConfigDict(extra="forbid")
 
     num_nearest_neighbours: PositiveInt
-    "Number of neighbours of each point, the point itself included, shared by every scale."
+    "Neighbours per point, the point itself included."
     sigmas: list[PositiveFloat] = Field(min_length=1)
-    "Gaussian width of each smoothed scale in radians, widest first; the unsmoothed field is the last scale."
+    "Gaussian width of each scale in radians, widest first. The unsmoothed field is added as the last scale."
 
     @field_validator("sigmas")
     @classmethod
@@ -475,9 +471,9 @@ class MultiScaleLossSchema(BaseModel):
     multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigNeighbourListSchema | None = None
     sparse_projector_num_chunks: PositiveInt = 1
     sparse_projector_backend: ProjectionBackend = "triton"
-    "Smoothing kernels in either mode: 'triton' (GPU) or 'torch' (any device)."
+    "Smoothing backend: 'triton' (GPU) or 'torch' (any device)."
     checkpoint_scales: bool = False
-    "Work out each scale's loss under its own gradient checkpoint while training."
+    "Recompute each scale in the backward pass to save memory."
     # Deprecated: pass inside multiscale_config instead.
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
@@ -587,7 +583,7 @@ class SpectralLossSchema(BaseLossSchema):
     projection_config: SpectralProjectionConfigSchema | None = None
     """Optional sparse projection applied to the data before the spectral transform."""
     sparse_projector_backend: ProjectionBackend = "triton"
-    """Kernels for the projection: 'triton' (GPU) or 'torch' (sparse matmul)."""
+    """Sparse projection backend: 'triton' (GPU) or 'torch' (any device)."""
     coefficient_magnitude: bool = False
     """For spectral CRPS, compare the moduli of the coefficients rather than their complex values."""
 

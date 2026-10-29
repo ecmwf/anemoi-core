@@ -17,7 +17,7 @@ from torch_geometric.data import HeteroData
 
 
 def octahedral_coords(n: int) -> torch.Tensor:
-    """Latitude and longitude in radians of the points of the octahedral grid O``n``, row by row."""
+    """Lat/lon in radians of the O``n`` grid points, row by row."""
     lengths = [4 * i + 20 for i in range(n)]
     lengths = lengths + lengths[::-1]
     latitudes = np.arcsin(np.polynomial.legendre.leggauss(2 * n)[0])[::-1]
@@ -26,7 +26,7 @@ def octahedral_coords(n: int) -> torch.Tensor:
 
 
 def octahedral_graph(n: int, nodes_name: str = "data") -> HeteroData:
-    """A graph whose ``nodes_name`` nodes are the points of the octahedral grid O``n``."""
+    """Graph with the O``n`` grid points as ``nodes_name`` nodes."""
     graph = HeteroData()
     graph[nodes_name].x = octahedral_coords(n)
     return graph

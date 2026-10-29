@@ -60,8 +60,7 @@ class CrossGridProjector(SpatialPreprocessor):
     autocast : bool
         Whether to run the sparse matmul under automatic mixed precision.
     backend : str
-        ``"triton"`` (GPU kernels) or ``"torch"`` (sparse matmul), see
-        :class:`~anemoi.models.layers.sparse_projector.SparseProjector`.
+        ``"triton"`` or ``"torch"``, see :class:`~anemoi.models.layers.sparse_projector.SparseProjector`.
     """
 
     def __init__(

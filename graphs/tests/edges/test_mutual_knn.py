@@ -175,7 +175,7 @@ def test_mutual_knn_sklearn_fallback_heterogeneous(graph_with_two_node_sets, mon
 @needs_pyg_lib
 @pytest.mark.parametrize("skip_flip", [False, True])
 def test_mutual_knn_edge_order_agrees_with_the_sklearn_fallback(graph_with_two_node_sets, monkeypatch, skip_flip):
-    """Both paths give the edges in the same (source, target) or, with skip_flip, (target, source) order."""
+    """pyg-lib and scikit-learn give the same edges, with and without skip_flip."""
     builder = MutualKNNEdges("src_nodes", "tgt_nodes", 3, reversed_num_nearest_neighbours=2)
     src, tgt = builder.get_cartesian_node_coordinates(
         graph_with_two_node_sets["src_nodes"], graph_with_two_node_sets["tgt_nodes"]

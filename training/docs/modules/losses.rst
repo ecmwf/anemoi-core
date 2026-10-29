@@ -232,16 +232,13 @@ scale loss is computed on the *residual* between successive smoothing levels,
 so coarser scales capture large-scale errors and finer scales capture
 small-scale structure.
 
-The number of weights must equal the number of smoothing levels. The
-unsmoothed field is always the final scale: a final ``null`` entry in
-``loss_matrices``, or the scale appended after the ``sigmas`` in
-neighbour-list mode. The examples use equal weights so that no scale is
-preferred; these can be tuned for a specific application.
+There is one weight per scale. The last scale is always the unsmoothed field:
+the final ``null`` in ``loss_matrices``, or the scale added after the
+``sigmas`` in neighbour-list mode. The examples use equal weights.
 
-All smoothing configuration is provided through the single
-``multiscale_config`` key, which supports two modes.
+The smoothing is configured in ``multiscale_config``, in one of two modes.
 
-Neighbour-list mode (one list of nearest neighbours shared by every scale):
+Neighbour-list mode:
 
 .. code:: yaml
 
@@ -261,13 +258,10 @@ Neighbour-list mode (one list of nearest neighbours shared by every scale):
                no_autocast: True
                alpha: 0.95
 
-Every scale smooths over the same ``num_nearest_neighbours`` nearest grid
-points with Gaussian weights, and each scale has its own width ``sigma``.
-Here, ``sigma`` is an angular distance: ``sigma * 6371 km`` gives the
-approximate physical scale. The ``sigmas`` must be listed from widest to
-narrowest. For an N320 grid, the values above are a
-possible starting point and should be refined for the forecast grid and
-application.
+Each scale is a Gaussian smoothing over the ``num_nearest_neighbours``
+nearest grid points, with its own width. ``sigma`` is in radians
+(``sigma * 6371 km`` gives the length scale) and the ``sigmas`` go from
+widest to narrowest. The values above are a starting point for N320.
 
 .. figure:: ../images/multiscale-knn-smoothers.png
    :alt: Normalized weights for the 25, 50, and 100 kilometre 128-nearest-neighbour smoothers
@@ -288,44 +282,27 @@ finest smoothing level:
    Example decomposition into the coarsest field, two differences between
    smoothing levels, and the finest residual.
 
-The wrapper keeps the index of each grid point's neighbours and the position
-of every grid point, and works out the distances and Gaussian weights while it
-smooths, in the forward and in the backward pass. The list takes
-``4 * num_nearest_neighbours`` bytes per grid point: about 3.2 GiB for an
-O1280 grid with 128 neighbours.
+Only the neighbour indices and the grid point positions are stored; the
+weights are computed on the fly for each ``sigma``. That is
+``4 * num_nearest_neighbours`` bytes per grid point, about 3.2 GiB for O1280
+with 128 neighbours, shared by all scales and by all multiscale losses with the
+same graph and ``num_nearest_neighbours``. File-based mode instead keeps one
+matrix per scale and loss.
 
-One list serves every scale. Every multiscale loss on the same graph, data
-nodes and ``num_nearest_neighbours`` shares it, including the copies made for
-validation, for example a multiscale CRPS and a multiscale edge CRPS in one
-``CombinedLoss``. Keep ``num_nearest_neighbours`` the same across losses to
-share one list. In file-based mode, every scale of every loss holds its own
-matrix.
+The Gaussian is cut off at the edge of the neighbourhood. On N320, 128
+neighbours reach about 200 km, twice the widest ``sigma`` above, where the
+weight is down to about 14%. A warning is logged if the neighbours reach less
+than twice the widest ``sigma``.
 
-The memory needed while the loss runs, besides the list, grows with the number
-of scales: the smoothed fields of every scale are kept for the backward pass.
-``checkpoint_scales`` (below) keeps it the same for any number of scales.
+``sparse_projector_backend`` is ``triton`` (default, GPU) or ``torch`` (any
+device, mainly for CPU tests).
 
-``sparse_projector_backend: triton`` (the default) smooths with GPU kernels.
-``sparse_projector_backend: torch`` works on any device and is meant for
-testing on a CPU.
+``checkpoint_scales: True`` recomputes each scale in the backward pass instead
+of keeping it, so the memory no longer grows with the number of scales. Every
+smoothing then runs four times. This works in both modes and helps for large
+ensembles on fine grids.
 
-Every grid point keeps exactly ``num_nearest_neighbours`` neighbours, however
-wide the Gaussian, so the weights are cut off at the edge of that
-neighbourhood. On an N320 grid, 128 neighbours reach about 200 km, twice the
-widest ``sigma`` above, where the weight has fallen to about 14% of its centre
-value. Use more neighbours or a narrower widest ``sigma`` for a softer cut-off.
-
-With ``checkpoint_scales: True`` (next to ``multiscale_config``, in either
-mode), each scale's loss runs under its own gradient checkpoint while
-training. Each scale smooths the prediction and target at its own width and
-at the next wider one, and the backward pass repeats this and the per-scale
-loss, so every smoothing runs four times. The backward pass keeps the
-unsmoothed prediction and target, so the memory it holds stays the same for
-any number of scales. Use it when the loss runs out of memory, for example
-with a large ensemble on a fine grid.
-
-File-based mode (load precomputed ``.npz`` matrices from disk, for any
-smoothing matrix):
+File-based mode, for precomputed ``.npz`` matrices:
 
 .. code:: yaml
 
@@ -355,14 +332,9 @@ smoothing matrix):
    still accepted for backward compatibility but are deprecated. Move
    them inside ``multiscale_config``.
 
-In file-based mode, ``sparse_projector_backend`` (next to
-``multiscale_config``) picks the kernels that apply the smoothing matrices,
-and each matrix is kept in the form those kernels read: ``triton`` (the
-default) turns each matrix into a table with one row per grid point, padded to
-the longest row, when it is loaded, and applies it with GPU kernels that write
-straight into the result; ``torch`` keeps the sparse matrix and applies it
-with a sparse matrix product on any device. In neighbour-list mode, the same
-key picks the smoothing kernels.
+In file-based mode, ``triton`` converts each matrix into a padded table when it
+is loaded and applies it with GPU kernels; ``torch`` keeps the sparse matrix
+and uses ``torch.sparse.mm``.
 
 ****************************
  Graph Score Loss Functions
@@ -736,14 +708,10 @@ Gaussian-weighted nearest-neighbour weights.
            sigma: 0.5
            row_normalize: false
 
-By default (``sparse_projector_backend: triton`` on the loss), the projection
-runs on GPU kernels that read the matrix as a table with one row per target
-point. The kernels write the result directly, which helps on large target
-grids. Each row is padded to the longest row; the kernels read only the
-entries each row holds, so the padding costs memory but no extra work.
-Building the table fails when the padded table would hold more than 2**31
-entries (16 GiB). ``sparse_projector_backend: torch`` applies the matrix with
-a sparse matrix product, which also runs on a CPU.
+With ``sparse_projector_backend: triton`` (the default) the matrix is stored as
+a table padded to the longest row and applied with GPU kernels; the padding
+costs memory but no compute. Tables above 2**31 entries (16 GiB) are refused.
+``torch`` uses ``torch.sparse.mm`` and also runs on a CPU.
 
 Spectral kernel CRPS
 ====================

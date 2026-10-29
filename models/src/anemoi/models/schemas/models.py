@@ -84,7 +84,7 @@ class SparseProjectorSchema(BaseModel):
     num_chunks: PositiveInt = Field(default=1, examples=[1])
     "Number of chunks to use for sparse projection matmuls."
     backend: ProjectionBackend = Field(default="triton")
-    "Projection kernels: 'triton' (GPU) or 'torch' (sparse matmul, any device)."
+    "Sparse projection backend: 'triton' (GPU) or 'torch' (any device)."
 
 
 class TransportSourceConfig(BaseModel):
