@@ -93,8 +93,9 @@ def _gt_fwd(
     C: tl.constexpr,
     out_dtype: tl.constexpr,
 ):
+    # Offsets are int64, because index * H * C can be more than 2**31 on large graphs
     pid = tl.program_id(0)
-    dst_idx = pid
+    dst_idx = pid.to(tl.int64)
     if dst_idx >= N_dst:
         return
 
@@ -105,8 +106,8 @@ def _gt_fwd(
     dst_start = dst_idx * H * C
     dst_off = dst_start + H_C_off
 
-    neigh_start = tl.load(COLPTR_ptr + dst_idx)
-    neigh_end = tl.load(COLPTR_ptr + dst_idx + 1)
+    neigh_start = tl.load(COLPTR_ptr + dst_idx).to(tl.int64)
+    neigh_end = tl.load(COLPTR_ptr + dst_idx + 1).to(tl.int64)
     num_edges = neigh_end - neigh_start
 
     if num_edges == 0:
@@ -135,7 +136,7 @@ def _gt_fwd(
         e = tl.load(edge_ptr, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
 
         # src neighbor index: rowptr[e_idx]
-        src_idx = tl.load(ROW_ptr + e_idx)
+        src_idx = tl.load(ROW_ptr + e_idx).to(tl.int64)
 
         src_off = src_idx * H * C + H_C_off
         k = tl.load(K_ptr + src_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
@@ -205,7 +206,8 @@ def _gt_bwd_dst_pass(
     C: tl.constexpr,
     out_dtype: tl.constexpr,
 ):
-    dst_idx = tl.program_id(0)
+    # Offsets are int64, because index * H * C can be more than 2**31 on large graphs
+    dst_idx = tl.program_id(0).to(tl.int64)
     if dst_idx >= N_dst:
         return
 
@@ -215,8 +217,8 @@ def _gt_bwd_dst_pass(
 
     dst_off = dst_idx * H * C + H_C_off
 
-    neigh_start = tl.load(COLPTR_ptr + dst_idx)
-    neigh_end = tl.load(COLPTR_ptr + dst_idx + 1)
+    neigh_start = tl.load(COLPTR_ptr + dst_idx).to(tl.int64)
+    neigh_end = tl.load(COLPTR_ptr + dst_idx + 1).to(tl.int64)
     num_edges = neigh_end - neigh_start
 
     if num_edges == 0:
@@ -247,7 +249,7 @@ def _gt_bwd_dst_pass(
     for _ in range(num_edges):
         e = tl.load(edge_ptr, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
 
-        src = tl.load(ROW_ptr + e_idx)
+        src = tl.load(ROW_ptr + e_idx).to(tl.int64)
         src_off = src * H * C + H_C_off
         k = tl.load(K_ptr + src_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
 
@@ -301,7 +303,8 @@ def _gt_bwd_src_pass(
     C: tl.constexpr,
     out_dtype: tl.constexpr,
 ):
-    src_idx = tl.program_id(0)
+    # Offsets are int64, because index * H * C can be more than 2**31 on large graphs
+    src_idx = tl.program_id(0).to(tl.int64)
     if src_idx >= N_src:
         return
 
@@ -309,8 +312,8 @@ def _gt_bwd_src_pass(
     C_pad: tl.constexpr = triton.next_power_of_2(C)
     H_mask, H_C_mask, H_C_off = build_masks_and_offsets(H, C, H_pad, C_pad)
 
-    start = tl.load(ROWPTR_ptr + src_idx)
-    end = tl.load(ROWPTR_ptr + src_idx + 1)
+    start = tl.load(ROWPTR_ptr + src_idx).to(tl.int64)
+    end = tl.load(ROWPTR_ptr + src_idx + 1).to(tl.int64)
     num_edges = end - start
 
     if num_edges == 0:
@@ -334,8 +337,8 @@ def _gt_bwd_src_pass(
     for i in range(num_edges):
         # for i in tl.range(0, num_edges, warp_specialize=True):
         # indexing into edge list + corresponding dst node
-        e_idx = tl.load(EDGE_IDS_ptr + start + i)
-        dst = tl.load(EDGE_DST_ptr + e_idx)
+        e_idx = tl.load(EDGE_IDS_ptr + start + i).to(tl.int64)
+        dst = tl.load(EDGE_DST_ptr + e_idx).to(tl.int64)
 
         # get saved tensors for dst node
         dst_off = dst * H * C + H_C_off
