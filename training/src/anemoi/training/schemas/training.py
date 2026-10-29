@@ -582,7 +582,7 @@ class SpectralLossSchema(BaseLossSchema):
 
     transform: Literal["fft2d", "dct2d", "regular_sht", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
-    subgrid: tuple[int, int | None] | str | None = None
+    subgrid: tuple[int, int | None] | Literal["output_mask"] | None = None
     """Optional slice or string to select a subgrid before the transform."""
     projection_config: SpectralProjectionConfigSchema | None = None
     """Optional sparse projection applied to the data before the spectral transform."""
@@ -745,6 +745,12 @@ class BaseDDPStrategySchema(BaseModel):
     "Use synchronization local to the group when creating process groups."
     broadcast_buffers: bool = Field(default=False, example=False)
     "Broadcast model buffers at the start of each iteration. Defaults to False."
+    static_graph: bool = Field(default=True, example=True)
+    """Tell DDP that the same parameters are trained in every step. Must be false when
+    training.accum_grad_batches > 1."""
+    find_unused_parameters: bool = Field(default=False, example=False)
+    """Let DDP check every step for parameters that receive no gradient. Together with static_graph: false,
+    DDP sums the gradients in the same groups in every step, so a resumed run continues bitwise identically."""
 
 
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
@@ -768,25 +774,45 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
     "Rebuild tendency pre/post-processing statistics from the current dataset."
 
 
+class CheckpointPipelineSchema(BaseModel):
+    """Declarative checkpoint pipeline consumed by ``build_checkpoint_pipeline``.
+
+    Each block is a Hydra ``_target_`` config: at most one acquisition ``source`` and
+    one ``loading`` strategy, plus an ordered list of ``modifiers`` applied after
+    loading. A ``None`` field configures no checkpoint pipeline (a fresh run).
+    """
+
+    source: GenericSchema | None = Field(default=None)
+    "Acquisition source stage (LocalSource / RunIdSource / S3Source / HTTPSource)."
+    loading: GenericSchema | None = Field(default=None)
+    "Loading strategy stage (WeightsOnlyLoader / TransferLearningLoader / WarmStartLoader / ColdStartLoader)."
+    modifiers: list[GenericSchema] | None = Field(default=None)
+    "Ordered model-modifier stages applied after loading (e.g. FreezingModifierStage)."
+
+
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
-    run_id: str | None = Field(example=None)
-    "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
-    fork_run_id: str | None = Field(example=None)
-    "Run ID to fork from, either last.ckpt or specified in system.input.warm_start."
-    load_weights_only: bool = Field(example=False)
-    "Load only the weights from the checkpoint, not the optimiser state."
-    transfer_learning: bool = Field(example=False)
-    "Flag to activate transfer learning mode when loading a checkpoint."
+    seed: NonNegativeInt | None = Field(default=None, example=None)
+    """Base seed of all random number generators. If null, a run continuing from a checkpoint takes the
+    checkpoint's seed and a new run draws one. A seed that differs from the checkpoint's changes the rest of the
+    interrupted epoch."""
     check_variables_compatibility: CheckVariablesCompatibilitySchema = Field(
         default_factory=CheckVariablesCompatibilitySchema,
     )
     "Options forwarded to ``Variable.check_compatibility`` when checking checkpoint vs. current dataset (fine-tuning)."
+    allow_variable_subset: bool = Field(default=False)
+    "Allow fine-tuning into a model with FEWER variables (issue #838). When True, a checkpoint"
+    " whose variable set is a superset of the current dataset's is accepted instead of raising,"
+    " provided the shared variables keep the same relative order; the variable-dependent layers"
+    " are re-initialised for the reduced set. Default False keeps the strict variable-order check."
     update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
     "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
-    submodules_to_freeze: list[str] = Field(example=["processor"])
-    "List of submodules to freeze during transfer learning."
+    checkpoint: CheckpointPipelineSchema | None = Field(default=None)
+    "Checkpoint pipeline configuration consumed by build_checkpoint_pipeline: an"
+    " acquisition source under `source`, a loading strategy under `loading`, and/or an"
+    " ordered list of model `modifiers`, each a Hydra `_target_` block. None configures"
+    " no checkpoint pipeline (a fresh run)."
     deterministic: bool = Field(default=False)
     "This flag sets torch.backends.cudnn.deterministic. It may reduce nondeterminism, but does not guarantee exact"
     " reproducibility."
@@ -825,6 +851,14 @@ class BaseTrainingSchema(BaseModel):
     "List of metrics"
     ensemble_size_per_device: PositiveInt = 1
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
+
+    @model_validator(mode="after")
+    def check_static_graph_without_accumulation(self) -> Self:
+        """DDP's static graph does not support accumulating gradients over several batches."""
+        if self.accum_grad_batches > 1 and getattr(self.strategy, "static_graph", False):
+            error_msg = "training.strategy.static_graph must be false when training.accum_grad_batches > 1."
+            raise ValueError(error_msg)
+        return self
 
 
 class SingleTrainingMethodSchema(BaseModel):
