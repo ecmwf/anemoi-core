@@ -88,6 +88,10 @@ data:
 dataloader:
   prefetch_factor: 2
   pin_memory: true
+  persistent_workers: false
+  fake_dataloading: false
+  loading_policy:
+    _target_: anemoi.training.data.loading.SynchronizedLoadingPolicy
   read_group_size: ${system.hardware.num_gpus_per_model}
   num_workers:
     training: 4
@@ -284,7 +288,14 @@ diagnostics:
     interval: 100
     wandb:
       enabled: false
+      _target_: pytorch_lightning.loggers.wandb.WandbLogger
+      offline: false
+      log_model: false
+      project: Anemoi
       entity: null
+      gradients: false
+      parameters: false
+      interval: ${diagnostics.log.interval}
   debug:
     anomaly_detection: false
   enable_checkpointing: true
@@ -298,6 +309,7 @@ diagnostics:
     every_n_train_steps:
       save_frequency: null
       num_models_saved: 0
+    exclude_hyperparameters: []
   enable_progress_bar: true
   progress_bar:
     _target_: pytorch_lightning.callbacks.TQDMProgressBar
@@ -325,7 +337,6 @@ system:
     loss_matrices_path: null
     truncation: null
     truncation_inv: null
-    warm_start: null
   hardware:
     accelerator: auto
     num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE,1}}
@@ -640,10 +651,15 @@ training:
     lr: 6.25e-05
     pl_lr_scheduler:
       interval: step
-  run_id: null
-  fork_run_id: null
-  transfer_learning: false
-  load_weights_only: false
+  # fixed, so reruns of this test draw the same batches (replaces the removed ANEMOI_BASE_SEED)
+  seed: 12345678
+  update_ds_stats_on_ckpt_load:
+    states: false
+    tendencies: true
+  check_variables_compatibility:
+    ignore_units: false
+    ignore_processing_period: false
+  allow_variable_subset: false
   deterministic: false
   precision: bf16-mixed
   accum_grad_batches: 1
@@ -667,7 +683,6 @@ training:
   loss_gradient_scaling: false
   max_epochs: 100
   max_steps: 75000
-  submodules_to_freeze: []
   # Almost-fair CRPS (AFCRPS): `alpha` interpolates between standard (0) and fair (1) CRPS.
   training_loss:
     datasets:
