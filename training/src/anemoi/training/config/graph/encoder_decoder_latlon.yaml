@@ -27,7 +27,14 @@ edges:
     cutoff_factor: 0.6 # only for cutoff method
     source_mask_attr_name: null
     target_mask_attr_name: null
-
+  attributes: ${graph.attributes.edges}
+- source_name: "hidden"
+  target_name: "hidden"
+  edge_builders:
+  - _target_: anemoi.graphs.edges.CutOffEdges # options: KNNEdges, CutOffEdges
+    cutoff_factor: 0.6 # only for cutoff method
+    source_mask_attr_name: null
+    target_mask_attr_name: null
   attributes: ${graph.attributes.edges}
   # Decoder configuration
 - source_name: "hidden"
