@@ -132,15 +132,14 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         autocast : bool
             Whether to use automatic mixed precision for the projections.
         sparse_projector_num_chunks : int
-            Default number of chunks for multiscale smoothing.
-            ``1`` means processing all fields in one go.
+            Number of chunks for the file-mode projections. ``1`` projects all fields at once.
         sparse_projector_backend : str
             ``"triton"`` (default, GPU) or ``"torch"`` (any device), in either mode.
         ignore_nans : bool
             Passed to :class:`BaseLoss`; ignored by the wrapper itself.
         checkpoint_scales : bool
             Recompute each scale in the backward pass instead of keeping it. The memory no longer
-            grows with the number of scales, but every smoothing runs four times.
+            grows with the number of scales, at the cost of extra smoothing passes.
         loss_matrices_path : Path | str | None
             Deprecated.  Pass inside *multiscale_config* instead.
         loss_matrices : list[Path | str] | None
@@ -187,17 +186,20 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         yield self
 
     def compile_for_training(self, **options) -> None:
-        """Compile the torch neighbour-list smoothing; hook for ``model.compile``.
+        """Compile the per-scale loss and the torch neighbour-list smoothing; hook for ``model.compile``.
 
-        Does nothing for the Triton backend or file mode. The per-scale loss needs its own entry.
+        The Triton kernels and the file-mode matrices are left as they are.
         """
+        compile_loss = getattr(self.loss, "compile_for_training", None)
+        if compile_loss is not None:
+            compile_loss(**options)
+        else:
+            self.loss.compile(**options)
         scales = [s for s in self.smoothers if isinstance(s, NeighbourSmoothingScale) and s.backend == "torch"]
-        if not scales:
-            LOGGER.info("MultiscaleLossWrapper: nothing to compile (no torch neighbour-list scales).")
-            return
-        compiled = CompiledGaussianSmoothing(**options)
-        for scale in scales:
-            scale.compiled = compiled
+        if scales:
+            compiled = CompiledGaussianSmoothing(**options)
+            for scale in scales:
+                scale.compiled = compiled
 
     def _build_smoothers(
         self,

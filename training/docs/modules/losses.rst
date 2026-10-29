@@ -298,8 +298,8 @@ than twice the widest ``sigma``.
 device, mainly for CPU tests).
 
 ``checkpoint_scales: True`` recomputes each scale in the backward pass instead
-of keeping it, so the memory no longer grows with the number of scales. Every
-smoothing then runs four times. This works in both modes and helps for large
+of keeping it, so the memory no longer grows with the number of scales, at the
+cost of extra smoothing passes. This works in both modes and helps for large
 ensembles on fine grids.
 
 File-based mode, for precomputed ``.npz`` matrices:

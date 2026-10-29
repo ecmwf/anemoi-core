@@ -44,7 +44,7 @@ def forward_backward(
     return out.detach(), x.grad
 
 
-@pytest.mark.parametrize(("n", "num_neighbours", "channels"), [(8, 9, 5), (24, 32, 70), (48, 128, 37)])
+@pytest.mark.parametrize(("n", "num_neighbours", "channels"), [(8, 9, 5), (24, 32, 70), (48, 128, 37), (16, 24, 130)])
 @pytest.mark.parametrize("sigma", [0.01, 0.05])
 def test_triton_matches_torch_in_float32(n: int, num_neighbours: int, channels: int, sigma: float) -> None:
     neighbours, unit_vectors = neighbour_tables(n, num_neighbours)
@@ -125,3 +125,18 @@ def test_compiled_torch_backend_matches_the_eager_one(band_points: int, monkeypa
 
         torch.testing.assert_close(out_c, out_e, rtol=1e-5, atol=1e-6)
         torch.testing.assert_close(grad_c, grad_e, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parametrize("backend", ["triton", "torch"])
+def test_neighbours_first_moved_in_inference_mode_can_be_used_in_training(backend: str) -> None:
+    # Lightning runs validation, the first use of the loss, under torch.inference_mode.
+    provider = NeighbourListProvider(octahedral_graph(8), "data", num_neighbours=9)
+    provider.get_neighbours(device=torch.device("cpu"))
+    x = torch.randn(2, provider.neighbours.shape[0], 4, device="cuda")
+    with torch.inference_mode():
+        gaussian_smooth(x, *provider.get_neighbours(device=x.device), 0.05, backend=backend)
+
+    x = x.clone().requires_grad_(True)
+    gaussian_smooth(x, *provider.get_neighbours(device=x.device), 0.05, backend=backend).sum().backward()
+
+    assert x.grad is not None

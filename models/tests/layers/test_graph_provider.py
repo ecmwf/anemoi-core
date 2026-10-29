@@ -342,3 +342,16 @@ def test_use_torch_projections_switches_every_projection_in_a_model() -> None:
     providers = [module for module in model.modules() if isinstance(module, ProjectionGraphProvider)]
     assert len(providers) == 3
     assert all(provider.backend == "torch" and provider.projection_table is None for provider in providers)
+
+
+def test_matrix_first_cast_in_inference_mode_can_be_used_in_training() -> None:
+    # Lightning runs validation, the first use of the loss, under torch.inference_mode.
+    provider = _uneven_provider("torch")
+    x = torch.randn(2, 5, 3, dtype=torch.float64)
+    with torch.inference_mode():
+        SparseProjector()(x, provider, matrix_dtype=torch.float64)
+
+    x = x.clone().requires_grad_(True)
+    SparseProjector()(x, provider, matrix_dtype=torch.float64).sum().backward()
+
+    assert x.grad is not None

@@ -172,22 +172,23 @@ class GaussianSmoothingTriton(torch.autograd.Function):
         grid = (triton.cdiv(num_points, _FWD_POINTS), triton.cdiv(channels, block_channels), batch)
         # A rank can hold zero channels when the grid is split by channels.
         if out.numel() > 0:
-            _gaussian_smooth_fwd[grid](
-                x,
-                out,
-                totals,
-                neighbours,
-                unit_vectors,
-                scale,
-                num_points,
-                channels,
-                neighbours.shape[1],
-                ACC=torch_dtype_to_triton(acc_dtype),
-                BLOCK_POINTS=_FWD_POINTS,
-                BLOCK_NEIGHBOURS=_FWD_NEIGHBOURS,
-                BLOCK_CHANNELS=block_channels,
-                num_warps=_FWD_WARPS,
-            )
+            with torch.cuda.device(out.device):
+                _gaussian_smooth_fwd[grid](
+                    x,
+                    out,
+                    totals,
+                    neighbours,
+                    unit_vectors,
+                    scale,
+                    num_points,
+                    channels,
+                    neighbours.shape[1],
+                    ACC=torch_dtype_to_triton(acc_dtype),
+                    BLOCK_POINTS=_FWD_POINTS,
+                    BLOCK_NEIGHBOURS=_FWD_NEIGHBOURS,
+                    BLOCK_CHANNELS=block_channels,
+                    num_warps=_FWD_WARPS,
+                )
         ctx.save_for_backward(neighbours, unit_vectors, scale, totals)
         ctx.dtype = x.dtype
         return out
@@ -201,22 +202,23 @@ class GaussianSmoothingTriton(torch.autograd.Function):
         grid = (triton.cdiv(num_points, _BWD_POINTS), batch)
         # A rank can hold zero channels when the grid is split by channels.
         if grad_x.numel() > 0:
-            _gaussian_smooth_bwd[grid](
-                grad_out,
-                grad_x,
-                totals,
-                neighbours,
-                unit_vectors,
-                scale,
-                num_points,
-                channels,
-                neighbours.shape[1],
-                ACC=torch_dtype_to_triton(scale.dtype),
-                BLOCK_POINTS=_BWD_POINTS,
-                BLOCK_NEIGHBOURS=_BWD_NEIGHBOURS,
-                BLOCK_CHANNELS=_BWD_CHANNELS,
-                num_warps=_BWD_WARPS,
-            )
+            with torch.cuda.device(grad_x.device):
+                _gaussian_smooth_bwd[grid](
+                    grad_out,
+                    grad_x,
+                    totals,
+                    neighbours,
+                    unit_vectors,
+                    scale,
+                    num_points,
+                    channels,
+                    neighbours.shape[1],
+                    ACC=torch_dtype_to_triton(scale.dtype),
+                    BLOCK_POINTS=_BWD_POINTS,
+                    BLOCK_NEIGHBOURS=_BWD_NEIGHBOURS,
+                    BLOCK_CHANNELS=_BWD_CHANNELS,
+                    num_warps=_BWD_WARPS,
+                )
         return grad_x.to(ctx.dtype), None, None, None
 
 

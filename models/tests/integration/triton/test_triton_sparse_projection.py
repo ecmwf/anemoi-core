@@ -153,3 +153,16 @@ def test_triton_projection_of_a_field_with_zero_channels() -> None:
 
     assert out.shape == (2, provider.shape[0], 0)
     assert x.grad.shape == x.shape
+
+
+def test_table_first_moved_in_inference_mode_can_be_used_in_training() -> None:
+    # Lightning runs validation, the first use of the loss, under torch.inference_mode.
+    provider = uneven_provider(300, 200, seed=3, backend="triton")
+    x = torch.randn(2, provider.shape[1], 8, device="cuda")
+    with torch.inference_mode():
+        SparseProjector()(x, provider)
+
+    x = x.clone().requires_grad_(True)
+    SparseProjector()(x, provider).sum().backward()
+
+    assert x.grad is not None

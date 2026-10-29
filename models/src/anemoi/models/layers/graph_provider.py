@@ -762,7 +762,9 @@ class ProjectionGraphProvider(BaseGraphProvider):
             # sparse tensors can't be registered as buffers with DDP, so materialize and retain them on demand
             # TODO(SL): Calling this with different dtypes at runtime can cause precision deterioration;
             # use a proper device/dtype cache that retains the canonical matrix.
-            self.projection_matrix = self.projection_matrix.to(device=device, dtype=dtype)
+            # Outside inference mode, so that a copy first made during validation can be used in training.
+            with torch.inference_mode(False):
+                self.projection_matrix = self.projection_matrix.to(device=device, dtype=dtype)
         return self.projection_matrix
 
     def get_table(self, device: Optional[torch.device] = None) -> tuple[Tensor, Tensor, Tensor]:
@@ -783,7 +785,9 @@ class ProjectionGraphProvider(BaseGraphProvider):
                 "This projection was built for the torch backend and holds only its matrix, see get_edges."
             )
         if device is not None and self.projection_table[0].device != torch.device(device):
-            self.projection_table = tuple(table.to(device) for table in self.projection_table)
+            # Outside inference mode, so that a copy first made during validation can be used in training.
+            with torch.inference_mode(False):
+                self.projection_table = tuple(table.to(device) for table in self.projection_table)
         return self.projection_table
 
     def use_torch_backend(self) -> None:
@@ -955,8 +959,10 @@ class NeighbourListProvider:
     def get_neighbours(self, device: Optional[torch.device] = None) -> tuple[Tensor, Tensor]:
         """Neighbour table and unit vectors, moved to ``device`` if given."""
         if device is not None and self.neighbours.device != torch.device(device):
-            self.neighbours = self.neighbours.to(device)
-            self.unit_vectors = self.unit_vectors.to(device)
+            # Outside inference mode, so that a copy first made during validation can be used in training.
+            with torch.inference_mode(False):
+                self.neighbours = self.neighbours.to(device)
+                self.unit_vectors = self.unit_vectors.to(device)
         return self.neighbours, self.unit_vectors
 
     def typical_reach(self, num_samples: int = 10_000) -> float:

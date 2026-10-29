@@ -146,22 +146,23 @@ class SparseProjectionTriton(torch.autograd.Function):
         grid = (triton.cdiv(num_targets, block_points), triton.cdiv(channels, block_channels), batch)
         # A rank can hold zero channels when the grid is split by channels.
         if out.numel() > 0:
-            _project_fwd[grid](
-                x,
-                out,
-                neighbours,
-                weights,
-                row_lengths,
-                num_sources,
-                num_targets,
-                channels,
-                num_neighbours,
-                ACC=torch_dtype_to_triton(accumulation_dtype(x.dtype)),
-                BLOCK_POINTS=block_points,
-                BLOCK_NEIGHBOURS=_block(num_neighbours, block_slots),
-                BLOCK_CHANNELS=block_channels,
-                num_warps=warps,
-            )
+            with torch.cuda.device(out.device):
+                _project_fwd[grid](
+                    x,
+                    out,
+                    neighbours,
+                    weights,
+                    row_lengths,
+                    num_sources,
+                    num_targets,
+                    channels,
+                    num_neighbours,
+                    ACC=torch_dtype_to_triton(accumulation_dtype(x.dtype)),
+                    BLOCK_POINTS=block_points,
+                    BLOCK_NEIGHBOURS=_block(num_neighbours, block_slots),
+                    BLOCK_CHANNELS=block_channels,
+                    num_warps=warps,
+                )
         ctx.save_for_backward(neighbours, weights, row_lengths)
         ctx.num_sources = num_sources
         ctx.dtype = x.dtype
@@ -177,22 +178,23 @@ class SparseProjectionTriton(torch.autograd.Function):
         grid = (triton.cdiv(num_targets, _BWD_POINTS), batch)
         # A rank can hold zero channels when the grid is split by channels.
         if grad_x.numel() > 0:
-            _project_bwd[grid](
-                grad_out,
-                grad_x,
-                neighbours,
-                weights,
-                row_lengths,
-                ctx.num_sources,
-                num_targets,
-                channels,
-                neighbours.shape[1],
-                ACC=torch_dtype_to_triton(acc_dtype),
-                BLOCK_POINTS=_BWD_POINTS,
-                BLOCK_NEIGHBOURS=_block(neighbours.shape[1], _BWD_MAX_NEIGHBOURS),
-                BLOCK_CHANNELS=_BWD_CHANNELS,
-                num_warps=_BWD_WARPS,
-            )
+            with torch.cuda.device(grad_x.device):
+                _project_bwd[grid](
+                    grad_out,
+                    grad_x,
+                    neighbours,
+                    weights,
+                    row_lengths,
+                    ctx.num_sources,
+                    num_targets,
+                    channels,
+                    neighbours.shape[1],
+                    ACC=torch_dtype_to_triton(acc_dtype),
+                    BLOCK_POINTS=_BWD_POINTS,
+                    BLOCK_NEIGHBOURS=_block(neighbours.shape[1], _BWD_MAX_NEIGHBOURS),
+                    BLOCK_CHANNELS=_BWD_CHANNELS,
+                    num_warps=_BWD_WARPS,
+                )
         return grad_x.to(ctx.dtype), None, None, None
 
 

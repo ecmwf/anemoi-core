@@ -129,11 +129,17 @@ def test_neighbour_list_scales_use_the_backend_of_the_loss(backend: str) -> None
 
 
 @pytest.mark.parametrize("backend", ["triton", "torch"])
-def test_compile_for_training_compiles_only_the_torch_smoothing(backend: str) -> None:
+def test_compile_for_training_compiles_the_per_scale_loss_and_the_torch_smoothing(
+    backend: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     wrapper = _wrapper(octahedral_graph(4), NEIGHBOUR_LIST_CONFIG, sparse_projector_backend=backend)
+    compile_calls = []
+    monkeypatch.setattr(wrapper.loss, "compile", lambda **options: compile_calls.append(options))
 
-    wrapper.compile_for_training()
+    wrapper.compile_for_training(mode="default")
 
+    assert compile_calls == [{"mode": "default"}]
     compiled = [scale.compiled for scale in wrapper.smoothers[:-1]]
     if backend == "torch":
         assert all(passes is not None for passes in compiled)
