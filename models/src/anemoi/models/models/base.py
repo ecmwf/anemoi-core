@@ -485,7 +485,7 @@ class BaseGraphModel(nn.Module):
         becomes zeros *after* normalization, matching the ``torch.zeros_like`` that
         training applies to an already-normalized ``x``. Passing a raw zeros tensor
         instead would normalize to ``-mean/stdev`` and defeat the all-zero cold-start
-        base that a residual with ``missing_value=0.0`` relies on.
+        base that ``ClimatologySkipConnection(missing_value=0.0)`` relies on.
 
         Parameters
         ----------
