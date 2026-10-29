@@ -17,8 +17,7 @@ The grid is a set of latitude rows of different lengths, stored row by row (see
 a row shorter than the window, or one the query also reaches over a pole, contributes its whole
 ring, each point once.
 
-The kernels follow the same flash attention scheme as the regular-grid kernels in
-:mod:`anemoi.models.triton.neighbourhood_attention`. Each program takes a tile of ``TILE_H``
+The kernels follow the flash attention scheme of :mod:`anemoi.models.triton.attention`. Each program takes a tile of ``TILE_H``
 neighbouring rows and one band of longitude: in every row it holds the points whose longitude lies
 in the band. The band edges come from the longest row of the group, so a row never has more than
 ``TILE_W`` points in a tile, and every point belongs to exactly one tile. Because the matching

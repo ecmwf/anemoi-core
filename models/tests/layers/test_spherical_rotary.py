@@ -18,9 +18,9 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.mapper import TransformerForwardMapper
-from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
 from anemoi.models.layers.processor import TransformerProcessor
 from anemoi.models.layers.reduced_grid import ReducedGrid
+from anemoi.models.layers.reduced_grid_neighbourhood import ReducedGridNeighbourhood
 from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
 from anemoi.models.layers.spherical_rotary import apply_rotary
 from anemoi.models.layers.spherical_rotary import build_spherical_rotary
@@ -227,7 +227,7 @@ def test_attention_layer_turns_queries_and_keys_after_their_norms(attention_impl
     settings = dict(num_heads=2, embed_dim=16, layer_kernels=load_layer_kernels(), qk_norm=True)
     settings["attention_implementation"] = attention_implementation
     if attention_implementation == "neighbourhood":
-        settings["neighbourhood"] = GridNeighbourhood.from_config(
+        settings["neighbourhood"] = ReducedGridNeighbourhood.from_config(
             {"grid": "octahedral", "kernel_size": [3, 5], "backend": "sdpa"}, coords
         )
     torch.manual_seed(0)

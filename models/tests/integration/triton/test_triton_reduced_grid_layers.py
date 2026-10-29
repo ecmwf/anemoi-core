@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""The Triton kernels used through the model layers, with nodes stored in any order."""
+"""The reduced-grid Triton kernels inside the attention module, processor and encoder, with nodes stored in any order."""
 
 import math
 
@@ -17,10 +17,10 @@ import torch
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.mapper import TransformerForwardMapper
-from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
-from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionWrapper
 from anemoi.models.layers.processor import TransformerProcessor
 from anemoi.models.layers.reduced_grid import ReducedGrid
+from anemoi.models.layers.reduced_grid_neighbourhood import ReducedGridAttentionWrapper
+from anemoi.models.layers.reduced_grid_neighbourhood import ReducedGridNeighbourhood
 from anemoi.models.layers.utils import load_layer_kernels
 
 pytestmark = [
@@ -69,7 +69,9 @@ def test_wrapper_on_shuffled_nodes_matches_dense_mask(family, key_grid, query_gr
     results = {}
     for backend in ("triton", "sdpa"):
         config = {"grid": family, "kernel_size": [3, 7], "backend": backend}
-        wrapper = NeighbourhoodAttentionWrapper(GridNeighbourhood.from_config(config, key_coords, query_coords)).cuda()
+        wrapper = ReducedGridAttentionWrapper(
+            ReducedGridNeighbourhood.from_config(config, key_coords, query_coords)
+        ).cuda()
         generator = torch.Generator(device="cuda").manual_seed(0)
         q = torch.randn(2, 3, num_queries, 32, generator=generator, device="cuda")
         k, v = (torch.randn(2, 3, key_grid.num_points, 32, generator=generator, device="cuda") for _ in range(2))

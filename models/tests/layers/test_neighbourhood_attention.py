@@ -23,15 +23,15 @@ from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.mapper import TransformerBackwardMapper
 from anemoi.models.layers.mapper import TransformerForwardMapper
 from anemoi.models.layers.neighbourhood_attention import GRID_FAMILIES
-from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
 from anemoi.models.layers.neighbourhood_attention import Neighbourhood
-from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionWrapper
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
-from anemoi.models.layers.neighbourhood_attention import check_every_key_attended
-from anemoi.models.layers.neighbourhood_attention import grid_from_coords
 from anemoi.models.layers.neighbourhood_attention import load
 from anemoi.models.layers.processor import TransformerProcessor
 from anemoi.models.layers.reduced_grid import ReducedGrid
+from anemoi.models.layers.reduced_grid_neighbourhood import ReducedGridAttentionWrapper
+from anemoi.models.layers.reduced_grid_neighbourhood import ReducedGridNeighbourhood
+from anemoi.models.layers.reduced_grid_neighbourhood import check_every_key_attended
+from anemoi.models.layers.reduced_grid_neighbourhood import grid_from_coords
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.schemas.decoder import TransformerDecoderSchema
 from anemoi.models.schemas.processor import TransformerProcessorSchema
@@ -114,24 +114,24 @@ def test_nodes_in_any_order_are_sorted_into_the_grid():
 )
 def test_invalid_settings_are_rejected(config, message):
     with pytest.raises(ValueError, match=message):
-        GridNeighbourhood.from_config(config, grid_coords(ReducedGrid.octahedral(8)))
+        ReducedGridNeighbourhood.from_config(config, grid_coords(ReducedGrid.octahedral(8)))
 
 
 def test_cross_attention_that_leaves_keys_unread_is_rejected():
     query_coords, key_coords = grid_coords(ReducedGrid.octahedral(4)), grid_coords(ReducedGrid.octahedral(24))
     config = {"grid": "octahedral", "kernel_size": [1, 3]}
     with pytest.raises(ValueError, match=r"are attended to by no query") as error:
-        GridNeighbourhood.from_config(config, key_coords, query_coords=query_coords)
+        ReducedGridNeighbourhood.from_config(config, key_coords, query_coords=query_coords)
     # The kernel named in the message reads every key point.
     suggested = [int(k) for k in re.search(r"kernel_size \[(\d+), (\d+)\] reads every key", str(error.value)).groups()]
-    neighbourhood = GridNeighbourhood.from_config({**config, "kernel_size": suggested}, key_coords, query_coords)
+    neighbourhood = ReducedGridNeighbourhood.from_config({**config, "kernel_size": suggested}, key_coords, query_coords)
     assert neighbourhood.kernel_size == tuple(suggested)
     assert suggested[0] >= 1 and suggested[1] >= 3
 
 
 def test_cross_attention_logs_how_queries_and_keys_are_connected(caplog):
     query_grid, key_grid = ReducedGrid.octahedral(4), ReducedGrid.octahedral(8)
-    with caplog.at_level(logging.INFO, logger="anemoi.models.layers.neighbourhood_attention"):
+    with caplog.at_level(logging.INFO, logger="anemoi.models.layers.reduced_grid_neighbourhood"):
         check_every_key_attended(query_grid, key_grid, (5, 5))
     assert f"from {key_grid.num_points} key points ({key_grid.num_rows} rows)" in caplog.text
     assert f"to {query_grid.num_points} queries ({query_grid.num_rows} rows)" in caplog.text
@@ -157,9 +157,9 @@ def test_self_attention_follows_the_node_order():
     """Nodes stored in another order give the same result for each node."""
     grid = ReducedGrid.octahedral(8)
     config = {**NEIGHBOURHOOD, "backend": "sdpa"}
-    in_order = NeighbourhoodAttentionWrapper(GridNeighbourhood.from_config(config, grid_coords(grid)))
+    in_order = ReducedGridAttentionWrapper(ReducedGridNeighbourhood.from_config(config, grid_coords(grid)))
     coords, perm = shuffled(grid_coords(grid))
-    out_of_order = NeighbourhoodAttentionWrapper(GridNeighbourhood.from_config(config, coords))
+    out_of_order = ReducedGridAttentionWrapper(ReducedGridNeighbourhood.from_config(config, coords))
 
     q, k, v = (torch.randn(2, 3, grid.num_points, 8, generator=torch.Generator().manual_seed(i)) for i in range(3))
     expected = in_order(q, k, v, 2)[:, :, perm]
@@ -169,12 +169,14 @@ def test_self_attention_follows_the_node_order():
 
 def test_cross_attention_follows_the_node_order():
     key_grid, query_grid = ReducedGrid.octahedral(8), ReducedGrid.octahedral(4)
-    in_order = NeighbourhoodAttentionWrapper(
-        GridNeighbourhood.from_config(NEIGHBOURHOOD, grid_coords(key_grid), grid_coords(query_grid))
+    in_order = ReducedGridAttentionWrapper(
+        ReducedGridNeighbourhood.from_config(NEIGHBOURHOOD, grid_coords(key_grid), grid_coords(query_grid))
     )
     key_coords, key_perm = shuffled(grid_coords(key_grid), seed=1)
     query_coords, query_perm = shuffled(grid_coords(query_grid), seed=2)
-    out_of_order = NeighbourhoodAttentionWrapper(GridNeighbourhood.from_config(NEIGHBOURHOOD, key_coords, query_coords))
+    out_of_order = ReducedGridAttentionWrapper(
+        ReducedGridNeighbourhood.from_config(NEIGHBOURHOOD, key_coords, query_coords)
+    )
     assert not out_of_order.neighbourhood.is_self_attention
 
     generator = torch.Generator().manual_seed(0)
@@ -187,14 +189,14 @@ def test_cross_attention_follows_the_node_order():
 
 def test_node_orders_are_not_saved_with_the_weights():
     coords, _ = shuffled(grid_coords(ReducedGrid.octahedral(8)))
-    wrapper = NeighbourhoodAttentionWrapper(GridNeighbourhood.from_config(NEIGHBOURHOOD, coords))
+    wrapper = ReducedGridAttentionWrapper(ReducedGridNeighbourhood.from_config(NEIGHBOURHOOD, coords))
     assert wrapper.query_order is not None
     assert wrapper.state_dict() == {}
 
 
 def test_wrapper_rejects_other_sizes():
     grid = ReducedGrid.octahedral(8)
-    wrapper = NeighbourhoodAttentionWrapper(GridNeighbourhood.from_config(NEIGHBOURHOOD, grid_coords(grid)))
+    wrapper = ReducedGridAttentionWrapper(ReducedGridNeighbourhood.from_config(NEIGHBOURHOOD, grid_coords(grid)))
     q = torch.randn(1, 2, grid.num_points, 8)
     with pytest.raises(ValueError, match="set up for 544 queries"):
         wrapper(q[:, :, :-1], q, q, 1)
@@ -214,7 +216,7 @@ def test_wrapper_rejects_other_sizes():
 )
 def test_layer_refuses_options_the_backend_cannot_honour_when_built(backend, option, name):
     grid = ReducedGrid.octahedral(8)
-    neighbourhood = GridNeighbourhood.from_config({**NEIGHBOURHOOD, "backend": backend}, grid_coords(grid))
+    neighbourhood = ReducedGridNeighbourhood.from_config({**NEIGHBOURHOOD, "backend": backend}, grid_coords(grid))
     with pytest.raises(NotImplementedError, match=f"'{backend}' backend does not support: {name}"):
         MultiHeadSelfAttention(
             num_heads=2,
@@ -228,15 +230,15 @@ def test_layer_refuses_options_the_backend_cannot_honour_when_built(backend, opt
 
 def test_sdpa_backend_takes_dropout():
     grid = ReducedGrid.octahedral(8)
-    neighbourhood = GridNeighbourhood.from_config({**NEIGHBOURHOOD, "backend": "sdpa"}, grid_coords(grid))
+    neighbourhood = ReducedGridNeighbourhood.from_config({**NEIGHBOURHOOD, "backend": "sdpa"}, grid_coords(grid))
     layer = _self_attention_layer(neighbourhood, dropout_p=0.1)
-    assert isinstance(layer.attention, NeighbourhoodAttentionWrapper)
+    assert isinstance(layer.attention, ReducedGridAttentionWrapper)
 
 
 @pytest.mark.skipif(not is_triton_available(), reason="Triton and a GPU are needed")
 def test_triton_backend_refuses_head_sizes_its_kernels_cannot_take_when_built():
     grid = ReducedGrid.octahedral(8)
-    neighbourhood = GridNeighbourhood.from_config({**NEIGHBOURHOOD, "backend": "triton"}, grid_coords(grid))
+    neighbourhood = ReducedGridNeighbourhood.from_config({**NEIGHBOURHOOD, "backend": "triton"}, grid_coords(grid))
     with pytest.raises(ValueError, match="power of two of at least 16 channels, got 12"):
         MultiHeadSelfAttention(
             num_heads=2,
@@ -250,7 +252,7 @@ def test_triton_backend_refuses_head_sizes_its_kernels_cannot_take_when_built():
 def test_triton_backend_needs_triton_when_built(monkeypatch):
     monkeypatch.setattr(neighbourhood_attention_module, "is_triton_available", lambda: False)
     grid = ReducedGrid.octahedral(8)
-    neighbourhood = GridNeighbourhood.from_config({**NEIGHBOURHOOD, "backend": "triton"}, grid_coords(grid))
+    neighbourhood = ReducedGridNeighbourhood.from_config({**NEIGHBOURHOOD, "backend": "triton"}, grid_coords(grid))
     with pytest.raises(ImportError, match="needs Triton and a GPU"):
         neighbourhood.attention_module()
 
@@ -269,11 +271,11 @@ def _self_attention_layer(neighbourhood, **options):
 def test_self_attention_layer_ignores_the_backend_environment_variable(monkeypatch):
     grid = ReducedGrid.octahedral(8)
     monkeypatch.setattr(attention_module, "ATTENTION_BACKEND", "scaled_dot_product_attention")
-    layer = _self_attention_layer(GridNeighbourhood.from_config(NEIGHBOURHOOD, grid_coords(grid)))
+    layer = _self_attention_layer(ReducedGridNeighbourhood.from_config(NEIGHBOURHOOD, grid_coords(grid)))
     x = torch.randn(grid.num_points, 16)
     out = layer(x, GraphShardInfo(nodes=[grid.num_points]), batch_size=1)
     assert out.shape == x.shape
-    assert isinstance(layer.attention, NeighbourhoodAttentionWrapper)
+    assert isinstance(layer.attention, ReducedGridAttentionWrapper)
 
 
 def test_self_attention_layer_needs_a_neighbourhood():
@@ -297,7 +299,7 @@ def test_processor_only_mixes_neighbouring_nodes():
         layer_kernels=load_layer_kernels(instance=False),
     )
     wrapper = processor.proc[0].attention.attention
-    assert isinstance(wrapper, NeighbourhoodAttentionWrapper)
+    assert isinstance(wrapper, ReducedGridAttentionWrapper)
 
     x = torch.randn(2 * grid.num_points, 16, requires_grad=True)
     out = processor(x, 2, GraphShardInfo(nodes=[2 * grid.num_points]))

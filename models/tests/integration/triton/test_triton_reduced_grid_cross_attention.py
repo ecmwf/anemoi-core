@@ -10,9 +10,9 @@
 import pytest
 import torch
 
-from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
-from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionWrapper
 from anemoi.models.layers.reduced_grid import ReducedGrid
+from anemoi.models.layers.reduced_grid_neighbourhood import ReducedGridAttentionWrapper
+from anemoi.models.layers.reduced_grid_neighbourhood import ReducedGridNeighbourhood
 
 pytestmark = [
     pytest.mark.gpu,
@@ -38,18 +38,20 @@ def _family(grid: ReducedGrid) -> str:
     return "healpix" if grid.is_shifted else "octahedral"
 
 
-def self_attention(grid: ReducedGrid, kernel_size, backend: str) -> NeighbourhoodAttentionWrapper:
+def self_attention(grid: ReducedGrid, kernel_size, backend: str) -> ReducedGridAttentionWrapper:
     """Neighbourhood self attention on ``grid``, with the points in grid order."""
-    neighbourhood = GridNeighbourhood(_family(grid), tuple(kernel_size), backend, grid, grid, is_self_attention=True)
-    return NeighbourhoodAttentionWrapper(neighbourhood)
+    neighbourhood = ReducedGridNeighbourhood(
+        _family(grid), tuple(kernel_size), backend, grid, grid, is_self_attention=True
+    )
+    return ReducedGridAttentionWrapper(neighbourhood)
 
 
 def cross_attention(
     query_grid: ReducedGrid, key_grid: ReducedGrid, kernel_size, backend: str
-) -> NeighbourhoodAttentionWrapper:
+) -> ReducedGridAttentionWrapper:
     """Neighbourhood cross attention from ``query_grid`` to ``key_grid``, with the points in grid order."""
-    neighbourhood = GridNeighbourhood(_family(key_grid), tuple(kernel_size), backend, query_grid, key_grid)
-    return NeighbourhoodAttentionWrapper(neighbourhood)
+    neighbourhood = ReducedGridNeighbourhood(_family(key_grid), tuple(kernel_size), backend, query_grid, key_grid)
+    return ReducedGridAttentionWrapper(neighbourhood)
 
 
 def _grid(name: str) -> ReducedGrid:

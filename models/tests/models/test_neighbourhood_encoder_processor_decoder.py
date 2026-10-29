@@ -17,8 +17,8 @@ from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionWrapper
 from anemoi.models.layers.reduced_grid import ReducedGrid
+from anemoi.models.layers.reduced_grid_neighbourhood import ReducedGridAttentionWrapper
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.models.schemas.models import BaseModelSchema
 
@@ -136,13 +136,13 @@ def _inputs(batch_size: int = 2) -> dict[str, torch.Tensor]:
 
 def test_every_attention_layer_uses_the_grid_neighbourhood():
     model = _build()
-    wrappers = [m for m in model.modules() if isinstance(m, NeighbourhoodAttentionWrapper)]
+    wrappers = [m for m in model.modules() if isinstance(m, ReducedGridAttentionWrapper)]
     # Each attention layer has one neighbourhood, given by its query and key grids.
     grids = {(w.neighbourhood.query_grid, w.neighbourhood.key_grid) for w in wrappers}
     assert (HIDDEN_GRID, DATA_GRID) in grids  # encoder
     assert (HIDDEN_GRID, HIDDEN_GRID) in grids  # processor
     assert (DATA_GRID, HIDDEN_GRID) in grids  # decoder
-    assert all(isinstance(layer.attention.attention, NeighbourhoodAttentionWrapper) for layer in model.processor.proc)
+    assert all(isinstance(layer.attention.attention, ReducedGridAttentionWrapper) for layer in model.processor.proc)
 
 
 def test_forward_shape_and_gradients():

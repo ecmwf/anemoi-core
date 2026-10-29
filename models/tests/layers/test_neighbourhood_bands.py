@@ -24,13 +24,13 @@ from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.mapper import TransformerBackwardMapper
 from anemoi.models.layers.mapper import TransformerForwardMapper
-from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
-from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBands
-from anemoi.models.layers.neighbourhood_attention import split_into_bands
 from anemoi.models.layers.processor import TransformerProcessor
 from anemoi.models.layers.reduced_grid import ReducedGrid
 from anemoi.models.layers.reduced_grid import ReducedGridCrossNeighbourhoodMask
 from anemoi.models.layers.reduced_grid import ReducedGridNeighbourhoodMask
+from anemoi.models.layers.reduced_grid_neighbourhood import ReducedGridBands
+from anemoi.models.layers.reduced_grid_neighbourhood import ReducedGridNeighbourhood
+from anemoi.models.layers.reduced_grid_neighbourhood import split_into_bands
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.schemas.common_components import NeighbourhoodSchema
 
@@ -55,11 +55,13 @@ def dense(rule) -> torch.Tensor:
     return rule(q_idx, k_idx)
 
 
-def neighbourhood(family: str, query_grid: ReducedGrid, key_grid: ReducedGrid | None, kernel_size) -> GridNeighbourhood:
+def neighbourhood(
+    family: str, query_grid: ReducedGrid, key_grid: ReducedGrid | None, kernel_size
+) -> ReducedGridNeighbourhood:
     config = {"grid": family, "kernel_size": list(kernel_size), "backend": "sdpa"}
     if key_grid is None:
-        return GridNeighbourhood.from_config(config, grid_coords(query_grid))
-    return GridNeighbourhood.from_config(config, grid_coords(key_grid), grid_coords(query_grid))
+        return ReducedGridNeighbourhood.from_config(config, grid_coords(query_grid))
+    return ReducedGridNeighbourhood.from_config(config, grid_coords(key_grid), grid_coords(query_grid))
 
 
 CASES = {
@@ -117,9 +119,9 @@ def test_bands_are_planned_with_the_gpu_as_default_device(case: str) -> None:
     family, query_grid, key_grid, kernel_size = CASES[case]
     nb = replace(neighbourhood(family, query_grid, key_grid, kernel_size), num_bands=3)
     sizes = [7, nb.query_grid.num_points - 7]
-    expected = [(plan.query_points, plan.key_points) for plan in NeighbourhoodBands(nb).plans(sizes)]
+    expected = [(plan.query_points, plan.key_points) for plan in ReducedGridBands(nb).plans(sizes)]
     with torch.device("cuda"):
-        plans = NeighbourhoodBands(nb).plans(sizes)
+        plans = ReducedGridBands(nb).plans(sizes)
     assert [(plan.query_points, plan.key_points) for plan in plans] == expected
     assert all(len(plan.bands) > 1 for plan in plans[1:])
 
@@ -129,7 +131,7 @@ def test_bands_need_nodes_in_grid_order() -> None:
     coords = grid_coords(grid)[torch.randperm(grid.num_points, generator=torch.Generator().manual_seed(0))]
     config = {"grid": "octahedral", "kernel_size": [3, 5], "backend": "sdpa", "num_bands": 2}
     with pytest.raises(ValueError, match="grid order"):
-        GridNeighbourhood.from_config(config, coords)
+        ReducedGridNeighbourhood.from_config(config, coords)
 
 
 def test_schema_takes_the_number_of_bands() -> None:
@@ -362,7 +364,7 @@ def test_every_gpu_sees_the_keys_of_its_own_queries(case: str, num_bands: int) -
         full = dense(ReducedGridCrossNeighbourhoodMask(nb.query_grid, nb.key_grid, nb.kernel_size))
 
     for sizes in _splits(nb.query_grid.num_points):
-        plans = NeighbourhoodBands(nb).plans(sizes)
+        plans = ReducedGridBands(nb).plans(sizes)
         assert [p.own_points.stop - p.own_points.start for p in plans] == sizes
         for plan in plans:
             own, rows, keys = plan.own_points, plan.query_points, plan.key_points

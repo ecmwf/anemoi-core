@@ -14,8 +14,8 @@ import torch
 
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.layers.attention import MultiHeadCrossAttention
-from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
 from anemoi.models.layers.reduced_grid import ReducedGrid
+from anemoi.models.layers.reduced_grid_neighbourhood import ReducedGridNeighbourhood
 from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
 from anemoi.models.layers.spherical_rotary import apply_rotary
 from anemoi.models.layers.spherical_rotary import rotary_angles
@@ -178,7 +178,7 @@ def _assert_layers_agree(layers, inputs, shard, batch_size):
 
 def test_neighbourhood_cross_attention_with_either_backend():
     data, hidden = ReducedGrid.octahedral(16), ReducedGrid.octahedral(8)
-    neighbourhood = GridNeighbourhood.from_config(
+    neighbourhood = ReducedGridNeighbourhood.from_config(
         {"grid": "octahedral", "kernel_size": [3, 5], "backend": "triton"}, data.coords.float(), hidden.coords.float()
     )
     settings = {
