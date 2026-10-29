@@ -1333,17 +1333,14 @@ class TransformerBaseMapper(BaseMapper, ABC):
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         neighbourhood : dict, optional
-            Grid family, its settings and backend for attention_implementation "neighbourhood",
-            see :func:`anemoi.models.layers.neighbourhood_attention.build_grid_neighbourhood`
+            Settings of attention_implementation "neighbourhood"; see
+            :func:`anemoi.models.layers.neighbourhood_attention.build_grid_neighbourhood`
         rotary_embeddings : dict, optional
-            Highest frequency and backend of rotary position embeddings,
-            see :func:`anemoi.models.layers.spherical_rotary.build_spherical_rotary`
+            Rotary position embeddings; see :func:`anemoi.models.layers.spherical_rotary.build_spherical_rotary`
         src_node_coords : Tensor, optional
-            Latitude and longitude of the source nodes (keys) in radians, used by neighbourhood attention
-            and rotary embeddings
+            Latitude and longitude of the source nodes in radians
         dst_node_coords : Tensor, optional
-            Latitude and longitude of the destination nodes (queries) in radians, used by neighbourhood
-            attention and rotary embeddings
+            Latitude and longitude of the destination nodes in radians
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -1376,8 +1373,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
             ),
         )
 
-        # The grid family of neighbourhood attention says when the mapper works through bands of
-        # destination points, and how each GPU gathers their inputs (see forward_in_bands).
+        # How neighbourhood attention splits the work into bands, or None (see forward_in_bands).
         self.split: Optional[LayerSplit] = (
             None if grid_neighbourhood is None else grid_neighbourhood.layer_split(cpu_offload)
         )
@@ -1462,18 +1458,11 @@ class TransformerBaseMapper(BaseMapper, ABC):
         keep_x_dst_sharded: bool = False,
         cond: Optional[tuple[Tensor, Tensor]] = None,
     ) -> Tensor:
-        """The mapper worked through band by band, with one checkpoint per band.
+        """Run the mapper band by band, with one checkpoint per band, to save memory.
 
-        Every band runs the whole mapper, from the embeddings to the output layer, for its
-        destination points and the source points they attend to, so only one band is held in
-        memory at a time.
-
-        When the points are split across GPUs, each GPU works through the bands that hold its own
-        destination points. It first fetches, from the GPUs that own them, the destination and
-        source points those bands read (see
-        :class:`anemoi.models.layers.neighbourhood_attention.LayerSplit`); the bands then run
-        without communication. The output holds the GPU's own destination points, and is gathered
-        onto every GPU unless ``keep_x_dst_sharded``.
+        Each band runs the whole mapper for its destination points. Across GPUs, each GPU first
+        fetches the points its bands need, then runs them without communication. The output is
+        gathered onto every GPU unless ``keep_x_dst_sharded``.
         """
         x_src, x_dst = x
         sharded = model_comm_group is not None and model_comm_group.size() > 1
@@ -1525,7 +1514,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         band: NeighbourhoodBand,
         cond: Optional[tuple[Tensor, Tensor]] = None,
     ) -> Tensor:
-        """The mapper for one band: embeddings, the transformer block and the output layer."""
+        """The mapper for one band: embeddings, transformer block and output layer."""
         x_src, x_dst = self.pre_process((x_src, x_dst))
         x_dst = self.proc.forward_band((x_src, x_dst), band, cond=cond)
         return self.post_process(x_dst)

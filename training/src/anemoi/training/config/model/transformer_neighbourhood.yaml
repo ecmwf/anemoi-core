@@ -23,26 +23,21 @@ layer_kernels:
     _target_: anemoi.models.layers.normalization.AutocastLayerNorm
     bias: False
 
-# Neighbourhood attention: every query attends only to the nodes around it on a global grid.
-# The encoder, processor and decoder name the grid family of their nodes, which selects the
-# attention kernels (see GRID_FAMILIES in anemoi.models.layers.neighbourhood_attention):
-#   octahedral  octahedral reduced Gaussian grids, e.g. O96 data with O48 hidden nodes
-#   healpix     HEALPix grids, in ring or nested ordering; build HEALPixNodes with
-#               nest_ordering: False, as nodes in nested order are reordered in every layer
-# The node coordinates of the graph fix the resolution and the order of the points, so the
-# hidden nodes must lie on a grid of the same family, e.g. graph=encoder_decoder_only with
-# hidden nodes from ReducedGaussianGridNodes (grid: o48).
-# kernel_size is [latitude rows, points per row], both odd. backend is "triton" (GPU) or
-# "sdpa" (dense mask; CPUs and small grids).
+# Neighbourhood attention: every query attends only to the nodes around it.
+# grid is the grid family of the nodes:
+#   octahedral  e.g. O96 data with O48 hidden nodes (graph=encoder_decoder_only, hidden nodes
+#               from ReducedGaussianGridNodes with grid: o48)
+#   healpix     HEALPixNodes, preferably with nest_ordering: False (nested order is reordered in every layer)
+# kernel_size is [latitude rows, points per row], both odd. backend is triton (GPU) or sdpa
+# (dense mask; CPUs and small grids).
 #
-# The processor can also run on a refined icosahedron: every node attends to the nodes within
-# `radius` hops (radius 3, 5, 7: 37, 91, 169 nodes). Build the hidden nodes with TriNodes and
-# `ordering: diamonds`, keep encoder and decoder of another kind (e.g. graph transformer mappers),
-# and set
+# The processor can also run on a refined icosahedron (TriNodes with ordering: diamonds), with
+# graph transformer mappers. Each node attends to the nodes within `radius` hops (3, 5, 7 hops:
+# 37, 91, 169 nodes):
 #   neighbourhood:
 #     grid: icosahedral
 #     radius: 5
-#     backend: triton  # or sdpa (dense mask, small meshes only)
+#     backend: triton
 
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
@@ -63,7 +58,7 @@ processor:
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
-  rotary_embeddings: # rotary position embeddings from the positions of the nodes on the sphere; null switches them off
+  rotary_embeddings: # null to switch off
     max_frequency: 10000 # shortest wavelength ~ 40,000 km / max_frequency = 4 km
     backend: triton # triton (GPU kernel) or torch (PyTorch, any device)
 
@@ -89,7 +84,7 @@ encoders:
       cpu_offload: ${model.cpu_offload}
       gradient_checkpointing: True
       layer_kernels: ${model.layer_kernels}
-      rotary_embeddings: # rotary position embeddings from the positions of the nodes on the sphere; null switches them off
+      rotary_embeddings: # null to switch off
         max_frequency: 10000 # shortest wavelength ~ 40,000 km / max_frequency = 4 km
         backend: triton # triton (GPU kernel) or torch (PyTorch, any device)
 
@@ -118,7 +113,7 @@ decoders:
       cpu_offload: ${model.cpu_offload}
       gradient_checkpointing: True
       layer_kernels: ${model.layer_kernels}
-      rotary_embeddings: # rotary position embeddings from the positions of the nodes on the sphere; null switches them off
+      rotary_embeddings: # null to switch off
         max_frequency: 10000 # shortest wavelength ~ 40,000 km / max_frequency = 4 km
         backend: triton # triton (GPU kernel) or torch (PyTorch, any device)
 

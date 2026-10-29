@@ -193,22 +193,21 @@ class TransformerProcessorBlock(BaseBlock):
         return (x,)
 
     def forward_band(self, x: Tensor, band: NeighbourhoodBand, cond: Optional[Tensor] = None) -> Tensor:
-        """The block for one band of points: the same steps as :meth:`forward` on the band.
+        """:meth:`forward` for one band of points.
 
         Parameters
         ----------
         x : Tensor
-            Input of the band's key points, which include its query points, shape
-            ``(batch, band key points, num_channels)``.
+            Input of the band's key points (which include its queries), ``(batch, band key points, num_channels)``.
         band : NeighbourhoodBand
             The band.
         cond : Tensor, optional
-            Conditioning of the band's key points, laid out like ``x``.
+            Conditioning of the band's key points, like ``x``.
 
         Returns
         -------
         Tensor
-            Output of the band's query points, shape ``(batch, band query points, num_channels)``.
+            ``(batch, band query points, num_channels)``.
         """
         queries = band.queries_in_keys
         cond_kwargs = {"cond": cond} if cond is not None else {}
@@ -293,22 +292,21 @@ class TransformerMapperBlock(BaseBlock):
         band: NeighbourhoodBand,
         cond: Optional[tuple[Tensor, Tensor]] = None,
     ) -> Tensor:
-        """The block for one band of destination points: the same steps as :meth:`forward` on the band.
+        """:meth:`forward` for one band of destination points.
 
         Parameters
         ----------
         x : OptPairTensor
-            Source input of the band's key points, shape ``(batch, band key points, num_channels)``,
-            and destination input of its query points, shape ``(batch, band query points, num_channels)``.
+            Source input of the band's key points and destination input of its query points.
         band : NeighbourhoodBand
             The band.
         cond : tuple[Tensor, Tensor], optional
-            Conditioning of the band's source and destination points, laid out like ``x``.
+            Conditioning of the band's source and destination points, like ``x``.
 
         Returns
         -------
         Tensor
-            Destination output of the band, shape ``(batch, band query points, num_channels)``.
+            ``(batch, band query points, num_channels)``.
         """
         cond_src_kwargs = {"cond": cond[0]} if cond is not None else {}
         cond_dst_kwargs = {"cond": cond[1]} if cond is not None else {}

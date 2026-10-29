@@ -150,10 +150,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
     def _node_coords(self, component_config: DotDict, **node_names: list[str]) -> dict[str, Tensor]:
-        """Node coordinates for a model component, which neighbourhood attention and rotary embeddings need.
+        """Node coordinates for neighbourhood attention and rotary embeddings of a model component.
 
-        Each keyword names the graph nodes whose coordinates the component receives under that
-        keyword. Several names, for datasets sharing an encoder or decoder, must share one grid.
+        Each keyword maps to the graph nodes whose coordinates the component gets under that name.
+        Several names (datasets sharing an encoder or decoder) must be the same nodes.
         """
         uses_positions = (
             component_config.get("attention_implementation") == "neighbourhood"

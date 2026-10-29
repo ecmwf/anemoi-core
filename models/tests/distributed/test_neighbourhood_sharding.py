@@ -9,15 +9,9 @@
 
 """Neighbourhood attention layers with the points split across GPUs give the same results as on one GPU.
 
-Every rank builds the same layer and inputs, runs it once on its own over the whole grids (the
-reference) and once with the points split across the ranks, and compares outputs, input
-gradients and the parameter gradients summed over the ranks. On CPU (gloo) the layers run in
-float64 with the dense-mask backend; on GPU (nccl) in float32 with the Triton kernels.
-
-The grids are large enough that every rank holds several rows, so its bands lie both inside its
-own points and at the edges of its shard. The points are split three ways: in the balanced runs
-the model uses (shard edges inside rows), at row boundaries (a rank may then need nothing from its
-neighbours for one of the inputs), and unevenly with one tiny shard.
+Each rank runs the layer once alone and once split across the ranks, and compares outputs and
+gradients. gloo: float64, dense mask; nccl: float32, Triton kernels. The points are split as the
+model does (shard edges inside rows), at row boundaries, and unevenly with one tiny shard.
 
 Run with ``pytest --distributed [--distributed-world-size N] [--distributed-backend nccl]``.
 """
@@ -254,9 +248,8 @@ def _split_matches_one_gpu_rank(
         else:
             _assert_close(value.grad, ref_inputs[name].grad[own_of[name]], tolerance, f"{name} grad")
 
-    # Each rank holds the parameter gradient of its own points; together they make the whole. A
-    # parameter gradient is a sum over all points, added up in another order when split, so its
-    # rounding error scales with its largest entries rather than with each entry.
+    # Parameter gradients are partial per rank and add up; compare relative to their largest
+    # entries, since the summation order differs when split.
     ref_params = dict(one_gpu.named_parameters())
     without_grad = set()
     for name, param in split_layer.named_parameters():

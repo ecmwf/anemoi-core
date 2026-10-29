@@ -15,10 +15,9 @@ from torch import nn
 class AttentionWrapper(nn.Module):
     """Base class of the attention backends.
 
-    Each backend lists in ``unsupported`` the options of MultiHeadSelfAttention it cannot honour,
-    named as in the model config, and says in :meth:`check_head_dim` which head sizes it works
-    with. MultiHeadSelfAttention checks both once, when it sets up the backend, so a config asking
-    for something the backend cannot do fails when the model is built rather than at the first step.
+    ``unsupported`` lists the attention options a backend cannot handle, named as in the model
+    config, and :meth:`check_head_dim` the head sizes it rejects. Both are checked when the model is
+    built, so a bad config fails early.
     """
 
     unsupported: frozenset[str] = frozenset()
@@ -28,7 +27,7 @@ class AttentionWrapper(nn.Module):
         return type(self).__name__
 
     def check_supported(self, **options: bool) -> None:
-        """Raises if any of the options that are switched on is one this backend cannot honour."""
+        """Raise if an option that is switched on is unsupported."""
         requested = sorted(name for name, used in options.items() if used and name in self.unsupported)
         if requested:
             raise NotImplementedError(
@@ -37,4 +36,4 @@ class AttentionWrapper(nn.Module):
             )
 
     def check_head_dim(self, head_dim: int) -> None:
-        """Raises if the backend cannot work with heads of ``head_dim`` channels; any size works by default."""
+        """Raise if the backend cannot use heads of ``head_dim`` channels; any size works by default."""

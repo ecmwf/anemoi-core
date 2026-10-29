@@ -503,8 +503,7 @@ class BenchmarkProfiler(Profiler):
 
         from torchinfo import summary
 
-        # The summary runs one forward pass on the GPU in half precision, since the Triton attention
-        # kernels only run on GPUs.
+        # One forward pass on the GPU in half precision, since the Triton kernels need a GPU.
         for dataset_name in example_input_array:
             example_input_array[dataset_name] = example_input_array[dataset_name].to(dtype=torch.float16)
             example_input_array[dataset_name] = example_input_array[dataset_name].to("cuda")

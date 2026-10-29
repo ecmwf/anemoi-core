@@ -9,16 +9,10 @@
 
 """Triton kernels for neighbourhood cross attention between two reduced grids, e.g. O1280 and O96.
 
-Queries live on one reduced grid and keys and values on another (see
-:class:`anemoi.models.layers.reduced_grid.ReducedGridCrossNeighbourhoodMask` for the rule). Each
-query row is matched to the key row nearest in latitude through a small table, and the window's
-key rows are centred there; the longitude matching and the whole rings of rows reached over a pole
-are the same as for self attention.
-
-The kernels are those of :mod:`anemoi.models.triton.reduced_grid_attention` with the query and key
-grids kept apart, and they reuse its helpers and tile tables. Query tiles (forward and dQ) are
-tiles of the query grid; key tiles (dK and dV) are tiles of the key grid, and a second table gives
-for every key row the first and last query row whose window includes it.
+Queries are on one reduced grid, keys and values on another (see
+:class:`anemoi.models.layers.reduced_grid.ReducedGridCrossNeighbourhoodMask`). Each query row's
+window is centred on the key row nearest in latitude; the rest works as in
+:mod:`anemoi.models.triton.reduced_grid_attention`, whose helpers and tile tables are reused.
 """
 
 from functools import lru_cache
@@ -76,14 +70,10 @@ _AUTOTUNE_KEY = [
 def _cross_tables(query_grid: ReducedGrid, key_grid: ReducedGrid, kernel_h: int, device: torch.device) -> dict:
     """Row tables linking the two grids, and the sizes of the per-tile row vectors.
 
-    ``centre_row[r]`` is the key row the window of query row ``r`` is centred on; ``see_first[k]``
-    and ``see_last[k]`` are the first and last query rows whose window includes key row ``k``
-    (``see_first > see_last`` when there are none).
-
-    The tables are kept for each pair of grids. Grids compare equal on their row lengths and
-    shifts only, but the row latitudes decide which key rows a query row sees, so they are part
-    of what the tables are kept by: parts of a grid with the same rows at other latitudes, such
-    as bands of rows, get their own tables.
+    ``centre_row[r]`` is the key row query row ``r`` is centred on; ``see_first[k]`` and
+    ``see_last[k]`` are the first and last query rows that see key row ``k`` (``see_first > see_last``
+    if none). Cached per pair of grids, keyed on the row latitudes too, since bands of rows can have
+    equal row lengths at other latitudes.
     """
     return _cross_tables_for(query_grid, key_grid, query_grid.row_latitudes, key_grid.row_latitudes, kernel_h, device)
 
@@ -427,13 +417,8 @@ def _xg_bwd_dq(
 
     qk_scale = sm_scale * _RCP_LN2
     dq = tl.zeros([TILE_H * TILE_W, HEAD_DIM], dtype=tl.float32)
-    # The exact ds of a query sums to zero over its keys, which keeps dq blind to where the keys sit
-    # as a group. Rounding ds to the input precision before the product with k leaves a small sum,
-    # and dq picks up that sum times the mean key, which outweighs the true gradient when the keys
-    # are far from the origin compared with their spread. The sums of the rounded ds and of the
-    # rounded probabilities are kept, and lam = their ratio, so that ds - lam * p sums to zero; dq
-    # and dk use that. See Chen et al., "Broken symmetry in BF16 attention" (GProj),
-    # https://arxiv.org/abs/2609.34272.
+    # Make the rounded ds sum to zero (GProj), as in reduced_grid_attention. See Chen et al.,
+    # "Broken symmetry in BF16 attention", https://arxiv.org/abs/2609.34272.
     p_k = tl.zeros([TILE_H * TILE_W, HEAD_DIM], dtype=tl.float32)
     # The sums are kept per key column and added up after the loop, so each step only adds elementwise.
     ds_sums = tl.zeros([TILE_H * TILE_W, BLOCK_ITER], dtype=tl.float32)
@@ -460,11 +445,7 @@ def _xg_bwd_dq(
         KEY_ROWS,
         BLOCK_ITER,
     )
-    # Each row gets only the blocks its own stretch needs, rather than as many as the longest stretch,
-    # so blocks whose keys would all be masked out are never computed; ends holds the running total of
-    # blocks per row. Finding the row and block of each step costs a little index arithmetic, so this
-    # gains most where the stretches differ in length (near the poles, between grids of different
-    # resolution) and can be a few percent slower where they are about equally long.
+    # Only the blocks each row's own stretch needs, as in reduced_grid_attention.
     row_blocks = tl.where(idx < num_k_rows, tl.cdiv(lengths, BLOCK_ITER), 0)
     ends = tl.cumsum(row_blocks, 0)
     offs = tl.arange(0, BLOCK_ITER)
@@ -607,11 +588,9 @@ def _xg_bwd_dkdv(
     idx, row_valid, q_starts, q_lengths = _rows_info(Q_ROW_START, q_first_row, num_q_rows, QUERY_ROWS)
     q_centres = tl.load(CENTRE_ROW + q_first_row + idx, mask=row_valid, other=0)
 
-    # In each query row, the queries whose matching position in a tile row lies within RADIUS_W of the
-    # tile's points there. The matching position only grows along a row, so inverting it gives one
-    # stretch per tile row; only the tile rows inside the query row's window count, and a query row
-    # that reaches a tile row over the pole is taken whole. Two turns are added so the divisions work
-    # on positive numbers.
+    # In each query row, the queries whose matching position in a tile row is within RADIUS_W of the
+    # tile's points there: one stretch per tile row, or the whole row over the pole. Two turns are
+    # added so the divisions see positive numbers.
     nonempty = hi_h > lo_h
     n_k = tl.maximum(lengths_h, 1)
     if SHIFTED:
@@ -633,11 +612,7 @@ def _xg_bwd_dkdv(
     firsts = tl.where(whole, 0, lowest)
     lengths = tl.maximum(tl.where(whole, q_lengths, highest - lowest + 1), 0)
 
-    # Each row gets only the blocks its own stretch needs, rather than as many as the longest stretch,
-    # so blocks whose keys would all be masked out are never computed; ends holds the running total of
-    # blocks per row. Finding the row and block of each step costs a little index arithmetic, so this
-    # gains most where the stretches differ in length (near the poles, between grids of different
-    # resolution) and can be a few percent slower where they are about equally long.
+    # Only the blocks each row's own stretch needs, as in reduced_grid_attention.
     row_blocks = tl.where(row_valid, tl.cdiv(lengths, BLOCK_ITER), 0)
     ends = tl.cumsum(row_blocks, 0)
     offs = tl.arange(0, BLOCK_ITER)
@@ -681,12 +656,8 @@ def _xg_bwd_dkdv(
         dp_t = tl.dot(v, tl.trans(do), input_precision=DOT_PRECISION)
         ds_t = p_t * (dp_t - delta[None, :])
         dv = tl.dot(p_t.to(do.dtype), do, dv, input_precision=DOT_PRECISION)
-        # dk from ds - lam * p, with lam from the dQ kernel, so the rounded ds rows sum to zero there too.
+        # dk from ds - lam * p, with lam from the dQ kernel.
         dk = tl.dot(ds_t.to(q.dtype), q, dk, input_precision=DOT_PRECISION)
-        # This deviates from the paper (arXiv:2609.34272, appendix B, eq. 13), which rounds p and lam * q
-        # separately: here -lam * p is rounded once and multiplied with q, which is already 16-bit.
-        # The paper's version:
-        # dk = tl.dot(p_t, (-lam[:, None] * q).to(q.dtype), dk, input_precision=DOT_PRECISION)
         dk = tl.dot((p_t * -lam[None, :]).to(q.dtype), q, dk, input_precision=DOT_PRECISION)
 
     dk = dk * sm_scale
@@ -696,13 +667,9 @@ def _xg_bwd_dkdv(
 
 
 class ReducedGridCrossAttentionTriton(torch.autograd.Function):
-    """Neighbourhood cross attention between two reduced grids, computed with Triton kernels.
+    """Neighbourhood cross attention between two reduced grids with Triton kernels.
 
-    Queries are ``(batch, heads, query points, head_dim)`` on ``query_grid``; keys and values are
-    ``(batch, heads, key points, head_dim)`` on ``key_grid``, both stored as in
-    :class:`anemoi.models.layers.reduced_grid.ReducedGrid`. ``head_dim`` must be a power of two of
-    at least 16. The inputs may have any layout in which the head_dim values of each point are
-    contiguous; the output and the gradients are stored point by point, as for
+    Queries are on ``query_grid``, keys and values on ``key_grid``; layouts as for
     :class:`anemoi.models.triton.reduced_grid_attention.ReducedGridAttentionTriton`.
     """
 

@@ -79,11 +79,9 @@ def device():
 
 @pytest.fixture(autouse=True)
 def full_float32_matmuls():
-    """Every test runs with full float32 matrix products, PyTorch's default precision.
+    """Run every test with full float32 matrix products, PyTorch's default.
 
-    Training sets torch.set_float32_matmul_precision("high") for the whole process, and the Triton
-    attention kernels follow that setting; tests that compare float32 results with tight tolerances
-    would then see TF32 if training code ran earlier in the same process.
+    Training code sets the precision to "high" for the whole process, and the Triton kernels follow it.
     """
     previous = torch.get_float32_matmul_precision()
     torch.set_float32_matmul_precision("highest")

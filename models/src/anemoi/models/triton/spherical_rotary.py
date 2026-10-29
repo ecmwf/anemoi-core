@@ -7,13 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Triton kernel for the turn of rotary position embeddings.
+"""Triton kernel for the rotation of rotary position embeddings.
 
-Computes the same as :func:`anemoi.models.layers.spherical_rotary.apply_rotary`: channel ``i`` and
-channel ``head_dim // 2 + i`` of every point are turned by the angle of that point and pair, for the
-first ``n`` pairs, and the other channels pass through. One pass reads each value once and writes it
-once; the turn is worked out in float32 (float64 for float64 inputs) and stored in the input's dtype.
-The backward pass is the same turn by the opposite angle.
+Computes :func:`anemoi.models.layers.spherical_rotary.apply_rotary` in one pass, in float32 (float64
+for float64 inputs). The backward pass rotates by the opposite angle.
 """
 
 from __future__ import annotations
@@ -46,7 +43,7 @@ def _turn(
     BLOCK_N: tl.constexpr,
     WIDE: tl.constexpr,
 ):
-    # One program turns BLOCK_N points of one (batch, head) pair.
+    # One program rotates BLOCK_N points of one (batch, head).
     point_block = tl.program_id(0)
     bh = tl.program_id(1)
     b = bh // HEADS
@@ -101,7 +98,7 @@ def _launch(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, sign: int) ->
     batch, heads, num_points, head_dim = x4.shape
     half = head_dim // 2
     half_block = triton.next_power_of_2(half)
-    # About 8192 values of each of the four tiles per program keeps registers in check for any head size.
+    # About 8192 values per tile keeps register use in check for any head size.
     block_n = max(16, min(128, 8192 // half_block))
     grid = (triton.cdiv(num_points, block_n), batch * heads)
     _turn[grid](
@@ -126,11 +123,10 @@ def _launch(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, sign: int) ->
 
 
 class SphericalRotaryTriton(torch.autograd.Function):
-    """Rotary turn of ``x`` (shape ``(..., points, channels)``) with a Triton kernel, forward and backward.
+    """Rotary rotation of ``x`` ``(..., points, channels)`` with a Triton kernel.
 
-    ``cos`` and ``sin`` are float32 (or float64) tables of shape ``(points, n)`` with ``n`` at most
-    ``channels // 2``; they carry no gradient. The last dimension of ``x`` must be contiguous (it is
-    made so if not); the other dimensions may have any strides, as after moving the heads dimension.
+    ``cos`` and ``sin`` are ``(points, n)`` tables, ``n <= channels // 2``, without gradient. Only the
+    last dimension of ``x`` needs to be contiguous.
     """
 
     @staticmethod
@@ -153,10 +149,10 @@ class SphericalRotaryTriton(torch.autograd.Function):
     @once_differentiable
     def backward(ctx, grad: torch.Tensor) -> tuple[torch.Tensor, None, None]:
         cos, sin = ctx.saved_tensors
-        # A turn keeps lengths, so its gradient is the turn by the opposite angle.
+        # The gradient of a rotation is the rotation by the opposite angle.
         return _launch(grad, cos, sin, sign=-1), None, None
 
 
 def spherical_rotary(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    """Rotary turn of ``x`` with the Triton kernel; see :class:`SphericalRotaryTriton`."""
+    """Rotary rotation of ``x`` with the Triton kernel; see :class:`SphericalRotaryTriton`."""
     return SphericalRotaryTriton.apply(x, cos, sin)

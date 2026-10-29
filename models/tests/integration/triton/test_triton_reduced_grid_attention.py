@@ -117,11 +117,7 @@ def _relative_error(result, reference):
 
 @pytest.mark.parametrize("grid_name", ["O16", "H8"])
 def test_triton_bfloat16_gradients_with_offset_keys(grid_name):
-    """Keys sharing an offset 100 times their spread still give gradients as accurate as bfloat16 allows.
-
-    The exact gradients do not depend on such an offset; rounding the score gradient to bfloat16 before
-    the products with the keys and queries would leak it into dQ (https://arxiv.org/abs/2609.34272).
-    """
+    """Keys sharing a large common offset do not leak it into dQ (GProj, https://arxiv.org/abs/2609.34272)."""
     grid, kernel_size, head_dim = _grid(grid_name), (5, 7), 64
     q, k, v = _qkv(grid.num_points, head_dim, torch.float32)
     offset = torch.randn(head_dim, generator=torch.Generator().manual_seed(1)).cuda()

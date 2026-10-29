@@ -7,25 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Neighbourhood attention on reduced grids: the grid families ``octahedral`` and ``healpix``.
+"""Neighbourhood attention on reduced grids (grid families ``octahedral`` and ``healpix``).
 
-The grid families of :data:`anemoi.models.layers.neighbourhood_attention.GRID_FAMILIES` whose
-points lie in latitude rows. A query attends to ``kernel_size[0]`` latitude rows centred on its
-own and, in each row, the ``kernel_size[1]`` points nearest in longitude, going round the globe,
-with whole rings of the rows it reaches over a pole (see
-:class:`anemoi.models.layers.reduced_grid.ReducedGridCrossNeighbourhoodMask`). Queries and keys
-may sit on the same grid (self attention, as in the processor) or on two grids of the same family
-(cross attention, as in the encoder and decoder).
+A query attends to ``kernel_size[0]`` latitude rows centred on its own and, in each row, to the
+``kernel_size[1]`` points nearest in longitude (see :mod:`anemoi.models.layers.reduced_grid`).
+Queries and keys can be on the same grid (processor) or on two grids of one family (encoder,
+decoder).
 
-With ``num_bands`` above one a model component works through its queries in bands of whole
-latitude rows, each with only the key rows its queries reach (see :func:`split_into_bands`). When
-the points are split across GPUs, each GPU works through bands of the rows that hold its own
-points and fetches before each layer the points just outside its share that those rows reach
-(see :class:`ShardPlan`).
-
-The grids are described in :mod:`anemoi.models.layers.reduced_grid`, the kernels are in
-:mod:`anemoi.models.triton.reduced_grid_attention` and
-:mod:`anemoi.models.triton.reduced_grid_cross_attention`.
+With ``num_bands > 1`` the queries are processed in bands of whole rows to save memory. When the
+points are split across GPUs, each GPU processes the rows holding its own points and first fetches
+the neighbouring points those rows need (see :class:`ShardPlan`).
 """
 
 from __future__ import annotations
@@ -72,20 +63,20 @@ def is_healpix(grid: ReducedGrid) -> bool:
 
 
 def grid_from_coords(family: str, coords: Tensor) -> tuple[ReducedGrid, Optional[Tensor]]:
-    """Recognise the grid formed by the nodes at ``coords`` and check that it belongs to ``family``.
+    """Find the grid formed by the nodes and check that it belongs to ``family``.
 
     Parameters
     ----------
     family : str
-        A reduced-grid family of :data:`anemoi.models.layers.neighbourhood_attention.GRID_FAMILIES`.
+        A reduced-grid family.
     coords : Tensor
-        Latitude and longitude of each node in radians, shape ``(num_nodes, 2)``.
+        Latitude and longitude of the nodes in radians, ``(num_nodes, 2)``.
 
     Returns
     -------
     tuple[ReducedGrid, Tensor | None]
-        The grid, and the order that sorts the nodes into it (node ``order[i]`` is point ``i`` of
-        the grid), or None when the nodes are already in grid order.
+        The grid, and the node order that sorts the nodes into it (node ``order[i]`` is grid point
+        ``i``), or None if the nodes are already in grid order.
     """
     if grid_family(family).is_member is None:
         raise ValueError(f"'{family}' is not a family of reduced grids.")
@@ -102,20 +93,15 @@ def grid_from_coords(family: str, coords: Tensor) -> tuple[ReducedGrid, Optional
 
 
 def check_every_key_attended(query_grid: ReducedGrid, key_grid: ReducedGrid, kernel_size: tuple[int, int]) -> None:
-    """Check that cross attention reads every key point, and log how the queries and keys are connected.
+    """Check that every key is read by some query in cross attention, and log the counts.
 
-    The log gives how many keys each query reads and how many queries read each key point.
-
-    Every query gets its keys, but when the key grid is much finer than the query grid, the keys
-    between two queries can be left out by both; their values then never reach the queries (in an
-    encoder: data that never reaches the processor).
+    If the key grid is much finer than the query grid, keys between two queries can be missed by
+    both. In an encoder that data would never reach the processor.
 
     Raises
     ------
     ValueError
-        If some key point is attended to by no query. The message names the smallest kernel of
-        at least ``kernel_size`` in both directions, with equal sides where possible, that reads
-        every key point.
+        If a key is read by no query. The message suggests a kernel size that reads them all.
     """
     rule = ReducedGridCrossNeighbourhoodMask(query_grid, key_grid, kernel_size)
     counts = rule.times_attended()
@@ -154,10 +140,7 @@ def check_every_key_attended(query_grid: ReducedGrid, key_grid: ReducedGrid, ker
 
 @dataclass(frozen=True, eq=False)
 class ReducedGridNeighbourhood(Neighbourhood):
-    """The query and key grids of neighbourhood attention on a family of reduced grids.
-
-    Built once per model component and shared by all of its layers.
-    """
+    """Query and key grids of neighbourhood attention on reduced grids."""
 
     family: str
     kernel_size: tuple[int, int]
@@ -176,25 +159,23 @@ class ReducedGridNeighbourhood(Neighbourhood):
         key_coords: Optional[Tensor],
         query_coords: Optional[Tensor] = None,
     ) -> ReducedGridNeighbourhood:
-        """Set up neighbourhood attention from its configuration and the node coordinates.
+        """Build the neighbourhood from its config and the node coordinates.
 
         Parameters
         ----------
         config : dict
-            ``grid`` (a reduced-grid family of
-            :data:`anemoi.models.layers.neighbourhood_attention.GRID_FAMILIES`), ``kernel_size`` (two odd
-            numbers: latitude rows and points per row), optionally ``backend`` (``"triton"``,
-            the default, or ``"sdpa"``) and optionally ``num_bands`` (the number of
-            bands of query rows to work through one at a time, 1 by default).
+            ``grid``, ``kernel_size`` (two odd numbers: latitude rows and points per row),
+            optional ``backend`` (``"triton"`` or ``"sdpa"``, default ``"triton"``) and optional
+            ``num_bands`` (bands of query rows processed one at a time, default 1).
         key_coords : Tensor
-            Coordinates of the key nodes in radians, shape ``(num_keys, 2)``.
+            Coordinates of the key nodes in radians, ``(num_keys, 2)``.
         query_coords : Tensor, optional
-            Coordinates of the query nodes. Leave out for self attention.
+            Same for the query nodes; None for self attention.
 
         Returns
         -------
         ReducedGridNeighbourhood
-            The query and key grids, the point orders and the neighbourhood settings.
+            The grids, node orders and settings.
         """
         family, backend = check_settings(
             config, {"grid", "kernel_size", "backend", "num_bands"}, key_coords, query_coords
@@ -234,15 +215,16 @@ class ReducedGridNeighbourhood(Neighbourhood):
 
     @property
     def in_grid_order(self) -> bool:
-        """Whether the query and key nodes are stored in grid order, row by row from north to south."""
+        """Whether the nodes are stored in grid order, row by row from north to south."""
         return self.query_order is None and self.key_order is None
 
     def attention_module(self) -> ReducedGridAttentionWrapper:
         return ReducedGridAttentionWrapper(self)
 
     def layer_split(self, cpu_offload: bool) -> Optional[ReducedGridBands]:
-        """Bands of whole rows, for nodes in grid order: on one GPU when num_bands > 1, and whenever
-        the points are split across GPUs, with num_bands bands of each GPU's own rows.
+        """Bands of whole rows, used when num_bands > 1 or the points are split across GPUs.
+
+        Needs the nodes in grid order.
         """
         if not self.in_grid_order:
             return None
@@ -254,20 +236,17 @@ class ReducedGridNeighbourhood(Neighbourhood):
 
 
 def _gather_points(x: Tensor, order: Tensor) -> Tensor:
-    """The points (second-to-last dimension) of ``(batch, heads, points, head_dim)`` ``x`` in the order ``order``.
+    """Reorder the points of ``(batch, heads, points, head_dim)`` ``x``.
 
-    The result is stored point by point, all heads of a point together, the layout of the model's
-    ``(batch * points, heads * head_dim)`` features; the gather then moves whole rows of them.
+    Gathers along the point dimension of the point-major layout, so whole rows of memory are moved.
     """
     return x.transpose(-3, -2).index_select(-3, order).transpose(-3, -2)
 
 
 class _ReorderPoints(torch.autograd.Function):
-    """Puts the points (second-to-last dimension) in a new order.
+    """Reorder the points; the backward pass gathers with the inverse permutation.
 
-    ``order`` is a permutation and ``inverse`` undoes it. The gradient is put back with
-    ``inverse``, a plain gather, which is much faster than the scattered additions autograd
-    would otherwise use.
+    A gather is much faster than the scatter-add autograd would use.
     """
 
     @staticmethod
@@ -282,16 +261,16 @@ class _ReorderPoints(torch.autograd.Function):
 
 
 class ReducedGridAttentionWrapper(NeighbourhoodAttention):
-    """Neighbourhood attention on the grids described by a :class:`ReducedGridNeighbourhood`.
+    """Neighbourhood attention on reduced grids.
 
-    Takes ``(batch, heads, points, head_dim)`` tensors with the points in node order, puts them in
-    grid order when the two differ, and puts the output back in node order.
+    Takes points in node order, reorders them to grid order if needed, and returns the output in
+    node order.
     """
 
     def __init__(self, neighbourhood: ReducedGridNeighbourhood) -> None:
         super().__init__(neighbourhood)
 
-        # The point orders move with the module to the GPU but are not part of the saved weights.
+        # Buffers so they follow the module to the GPU; not saved with the weights.
         self._reorder_queries = neighbourhood.query_order is not None
         self._reorder_keys = neighbourhood.key_order is not None
         if self._reorder_queries:
@@ -349,7 +328,7 @@ class ReducedGridAttentionWrapper(NeighbourhoodAttention):
 
 
 def centre_rows(neighbourhood: ReducedGridNeighbourhood) -> Tensor:
-    """The key row each query row's window is centred on: its own row for self attention, else the nearest in latitude."""
+    """Key row each query row is centred on: its own row in self attention, else the nearest in latitude."""
     query_grid, key_grid = neighbourhood.query_grid, neighbourhood.key_grid
     if neighbourhood.is_self_attention:
         return torch.arange(query_grid.num_rows, device=query_grid.row_starts.device)
@@ -357,21 +336,21 @@ def centre_rows(neighbourhood: ReducedGridNeighbourhood) -> Tensor:
 
 
 def key_rows_reached(neighbourhood: ReducedGridNeighbourhood, first_row: int, end_row: int) -> tuple[int, int]:
-    """The key rows ``(first, end)`` that the query rows ``first_row`` to ``end_row - 1`` attend to."""
+    """Key rows ``(first, end)`` reached by the query rows ``first_row`` to ``end_row - 1``."""
     centre = centre_rows(neighbourhood)[first_row:end_row]
     radius = neighbourhood.kernel_size[0] // 2
     return max(int(centre.min()) - radius, 0), min(int(centre.max()) + radius + 1, neighbourhood.key_grid.num_rows)
 
 
 def rows_holding(grid: ReducedGrid, points: slice) -> tuple[int, int]:
-    """The rows ``(first, end)`` of ``grid`` that hold any of the points ``points.start`` to ``points.stop - 1``."""
+    """Rows ``(first, end)`` of ``grid`` holding any of ``points``."""
     first = int(torch.searchsorted(grid.row_starts, points.start, right=True)) - 1
     end = int(torch.searchsorted(grid.row_starts, points.stop - 1, right=True))
     return first, end
 
 
 def points_of_rows(grid: ReducedGrid, first_row: int, end_row: int) -> slice:
-    """The points of the rows ``first_row`` to ``end_row - 1`` of ``grid``."""
+    """Points of the rows ``first_row`` to ``end_row - 1``."""
     return slice(int(grid.row_starts[first_row]), int(grid.row_starts[end_row]))
 
 
@@ -380,25 +359,22 @@ def split_into_bands(
 ) -> list[NeighbourhoodBand]:
     """Split query rows into bands of whole rows with about the same number of points.
 
-    Each band attends to the rows of the key grid its queries reach, which themselves form a
-    small grid. A query finds its key rows from its own latitude and its points from the lengths
-    and shifts of the rows, so within its band it sees exactly the keys it sees on the whole grid.
-    For self attention the band's key rows are its own rows and a margin of ``kernel_size[0] // 2``
-    rows on either side (fewer at the poles).
+    Each band gets the key rows its queries reach. These form a small grid of their own, on which
+    every query sees exactly the keys it sees on the whole grid.
 
     Parameters
     ----------
     neighbourhood : ReducedGridNeighbourhood
-        The neighbourhood of the whole grids, with the nodes in grid order.
+        Neighbourhood of the whole grids, nodes in grid order.
     num_bands : int
-        Number of bands to aim for; there are fewer when there are fewer rows.
+        Number of bands to aim for; fewer if there are fewer rows.
     rows : tuple[int, int], optional
-        The query rows ``(first, end)`` to split; all rows by default.
+        Query rows ``(first, end)`` to split; all rows by default.
 
     Returns
     -------
     list[NeighbourhoodBand]
-        The bands from north to south. Their point ranges count from the first point of the whole grids.
+        Bands from north to south, with point ranges on the whole grids.
     """
     if not neighbourhood.in_grid_order:
         raise ValueError("Bands of rows need the query and key nodes stored in grid order.")
@@ -443,29 +419,25 @@ def split_into_bands(
 
 @dataclass(frozen=True, eq=False)
 class ShardPlan:
-    """The work of one GPU: the outputs of its own query points, computed band by band.
+    """The work of one GPU.
 
-    When the points are split across GPUs, each GPU owns a run of consecutive query points (its
-    shard) and returns their outputs. A shard can start and end inside a row, but attention works
-    on whole rows, so the GPU computes every row that holds one of its points and keeps only its
-    own outputs. For that it needs the inputs of a run of points from its neighbours as well:
-    the query points of those whole rows and the key points their rows reach.
-
-    All point ranges count from the first point of the whole grids.
+    Each GPU owns a run of consecutive query points. A run can start or end inside a row, so the GPU
+    computes every row holding one of its points and keeps only its own outputs. It fetches the
+    inputs it lacks from the neighbouring GPUs. Point ranges are on the whole grids.
     """
 
     own_points: slice
-    "The GPU's own query points, whose outputs it returns."
+    "The query points whose outputs this GPU returns."
     query_points: slice
-    "The points of every query row that holds one of the GPU's own points."
+    "Points of every query row holding one of the own points."
     key_points: slice
-    "The key points those query rows attend to."
+    "Key points those rows reach."
     bands: list[NeighbourhoodBand]
-    "Bands covering ``query_points``, from north to south."
+    "Bands covering ``query_points``, north to south."
 
 
 def plan_shard(neighbourhood: ReducedGridNeighbourhood, num_bands: int, own_points: slice) -> ShardPlan:
-    """The work of the GPU that owns the query points ``own_points`` (see :class:`ShardPlan`)."""
+    """Plan the work of the GPU that owns ``own_points``."""
     if own_points.stop <= own_points.start:
         raise ValueError(f"Every GPU needs at least one query point, got the points {own_points}.")
     first_row, end_row = rows_holding(neighbourhood.query_grid, own_points)
@@ -479,12 +451,9 @@ def plan_shard(neighbourhood: ReducedGridNeighbourhood, num_bands: int, own_poin
 
 
 class ReducedGridBands(LayerSplit):
-    """The bands of one model component, for the query points each GPU owns.
+    """Bands of whole rows for one model component.
 
-    On a single GPU there is one plan, owning every query point. When the query points are split
-    across GPUs in runs of consecutive points (``shard_sizes`` points each, in rank order), there
-    is one plan per GPU (see :class:`ShardPlan`). The plans for each way of splitting are worked
-    out once and kept.
+    One plan on a single GPU, one per GPU when the points are split. Plans are cached per split.
     """
 
     def __init__(self, neighbourhood: ReducedGridNeighbourhood) -> None:
@@ -494,7 +463,7 @@ class ReducedGridBands(LayerSplit):
         self._exchanges: dict[tuple, PointRangeExchange] = {}
 
     def __getstate__(self) -> dict:
-        # The exchanges hold index tensors on a device; they are planned again where the model is loaded.
+        # Exchanges hold device tensors; they are rebuilt after loading.
         state = self.__dict__.copy()
         state["_exchanges"] = {}
         return state
@@ -537,7 +506,7 @@ class ReducedGridBands(LayerSplit):
         return self.neighbourhood.key_grid.num_points
 
     def plans(self, shard_sizes: Optional[list[int]] = None) -> list[ShardPlan]:
-        """One plan per GPU, in rank order; a single plan for all query points if ``shard_sizes`` is None."""
+        """One plan per GPU in rank order; a single plan if ``shard_sizes`` is None."""
         sizes = tuple(shard_sizes) if shard_sizes is not None else (self.num_query_points,)
         if sum(sizes) != self.num_query_points:
             raise ValueError(
@@ -554,11 +523,11 @@ class ReducedGridBands(LayerSplit):
     def key_exchange(
         self, query_shard_sizes: list[int], key_shard_sizes: list[int], rank: int, device: torch.device
     ) -> PointRangeExchange:
-        """The exchange that brings every GPU the key points its query rows reach."""
+        """Exchange that brings each GPU the key points its rows reach."""
         return self._exchange("key", query_shard_sizes, key_shard_sizes, rank, device)
 
     def query_exchange(self, query_shard_sizes: list[int], rank: int, device: torch.device) -> PointRangeExchange:
-        """The exchange that brings every GPU the query points of the whole rows holding its own points."""
+        """Exchange that brings each GPU the query points of the rows holding its own points."""
         return self._exchange("query", query_shard_sizes, query_shard_sizes, rank, device)
 
     def _exchange(
@@ -574,11 +543,10 @@ class ReducedGridBands(LayerSplit):
 
 @dataclass(eq=False)
 class BandWork(GpuWork):
-    """The bands of one GPU on reduced grids (see :class:`ShardPlan`).
+    """Bands of one GPU on reduced grids.
 
-    On one GPU the inputs are those of all points and are only reshaped. Split across GPUs, the
-    GPU fetches the runs of key points (and in cross attention of query points) its whole rows
-    reach from the GPUs that own them, and reads its own points in place.
+    On one GPU the inputs are only reshaped. Across GPUs, the missing runs of key points (and in
+    cross attention query points) are fetched from the GPUs that own them.
     """
 
     plan: ShardPlan
@@ -617,7 +585,7 @@ class BandWork(GpuWork):
     def keep(self, out: Optional[Tensor], band_out: Tensor, band: NeighbourhoodBand) -> Tensor:
         if out is None:
             out = band_out.new_empty(self.batch_size, self.num_own_queries, band_out.shape[-1])
-        # Copy the outputs of the band's query points that this GPU owns.
+        # Copy the outputs of the band's queries that this GPU owns.
         own = self.plan.own_points
         first, stop = max(band.query_points.start, own.start), min(band.query_points.stop, own.stop)
         if stop > first:

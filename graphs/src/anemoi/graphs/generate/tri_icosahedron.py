@@ -38,9 +38,8 @@ def create_tri_nodes(
     area_mask_builder : AreaMaskBuilder
         AreaMaskBuilder with the cloud of points to limit the mesh area, by default None.
     ordering : str
-        Order of the nodes: "latlon" sorts them by latitude and longitude; "diamonds" stores them
-        diamond by diamond, see :mod:`anemoi.graphs.generate.icosahedral_diamonds`. "diamonds"
-        needs the whole globe, so it does not go with an area mask.
+        "latlon" (by latitude, then longitude) or "diamonds" (see
+        :mod:`anemoi.graphs.generate.icosahedral_diamonds`; whole globe only, no area mask).
 
     Returns
     -------

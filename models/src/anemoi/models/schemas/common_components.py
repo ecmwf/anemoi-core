@@ -26,13 +26,13 @@ from anemoi.utils.schemas import BaseModel
 
 class NeighbourhoodSchema(BaseModel):
     grid: str = Field(example="octahedral")
-    "Grid family of the nodes, a reduced-grid family of anemoi.models.layers.neighbourhood_attention.GRID_FAMILIES, e.g. 'octahedral' or 'healpix'."
+    "Grid family of the nodes: 'octahedral' or 'healpix'."
     kernel_size: tuple[PositiveInt, PositiveInt] = Field(example=(7, 13))
     "Latitude rows and points per row each query attends to; both odd."
     backend: Literal["triton", "sdpa"] = Field(default="triton")
     "Kernels to use: 'triton' (GPU) or 'sdpa' (dense mask; CPUs and small grids). Default to 'triton'."
     num_bands: PositiveInt = Field(default=1)
-    "Number of bands of query rows worked through one at a time, each with its own checkpoint, to save memory on large grids; per GPU when the points are split across GPUs. Each query attends to the same keys whatever the number. Default to 1."
+    "Number of bands of query rows processed one at a time (per GPU), to save memory on large grids. Does not change the result. Default to 1."
 
     @field_validator("grid")
     @classmethod
@@ -81,9 +81,9 @@ ProcessorNeighbourhoodSchema = Annotated[
 
 class RotaryEmbeddingsSchema(BaseModel):
     max_frequency: float = Field(ge=1.0, example=10000.0)
-    "Highest frequency of the rotary embeddings in radians per Earth radius; it repeats every 40,000 km / max_frequency. The lowest is 1."
+    "Highest frequency in radians per Earth radius; it repeats every 40,000 km / max_frequency. The lowest is 1."
     backend: Literal["triton", "torch"] = Field(default="triton")
-    "Computes the turn with a Triton kernel ('triton', GPU) or with PyTorch ('torch', any device). Default to 'triton'."
+    "Rotate with a Triton kernel ('triton', GPU) or with PyTorch ('torch', any device). Default to 'triton'."
 
 
 def check_neighbourhood_attention(component: Any) -> Any:

@@ -9,12 +9,9 @@
 
 """A whole encoder-processor-decoder model with neighbourhood attention gives the same results split across GPUs.
 
-Every rank builds the same model (encoder, processor and decoder with neighbourhood attention,
-rotary embeddings and gradient checkpointing) and runs it once on its own over the whole grids
-and once with the points split across the ranks: either the input already split, as training
-does with the batch kept split, or the whole input given to every rank and split by the model.
-Outputs, input gradients and the parameter gradients summed over the ranks must match. On CPU
-(gloo) in float64 with the dense-mask backend; on GPU (nccl) in float32 with the Triton kernels.
+Each rank runs the model (with rotary embeddings and gradient checkpointing) once alone and once
+split across the ranks, with the input either already split or whole, and compares outputs and
+gradients. gloo: float64, dense mask; nccl: float32, Triton kernels.
 
 Run with ``pytest --distributed [--distributed-world-size N] [--distributed-backend nccl]``.
 """
@@ -187,14 +184,13 @@ def _model_matches_one_gpu_rank(rank, world_size, device, group, case, num_bands
         if param.grad is None:
             continue
         grad = param.grad.clone()
-        # Most parameters get from each rank the gradient of its own points, which add up to the
-        # whole. Trainable node features are split with shard_tensor, whose backward gathers, so
-        # every rank already holds their whole gradient; training leaves these out of its
-        # gradient scaling for the same reason (register_gradient_scaling_hooks).
+        # Most parameter gradients are partial per rank and add up. Trainable node features are
+        # split with shard_tensor, whose backward gathers, so each rank already has the whole
+        # gradient (as in register_gradient_scaling_hooks).
         if not any(part in name for part in COMPLETE_ON_EVERY_RANK):
             dist.all_reduce(grad, group=group)
         expected = ref_params[name].grad
-        # A parameter gradient sums over all points, so its rounding error scales with its largest entries.
+        # Compare relative to the largest entries; the summation order differs when split.
         scale = max(1.0, expected.abs().max().item())
         torch.testing.assert_close(grad, expected, rtol=rtol, atol=atol * scale, msg=lambda m, n=name: f"{n}: {m}")
         with_grad += 1

@@ -7,13 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""A processor with icosahedral neighbourhood attention gives the same results with the points split across GPUs.
+"""A processor with icosahedral neighbourhood attention gives the same results split across GPUs.
 
-Every rank builds the same processor and inputs, runs it once on its own over the whole mesh (the
-reference) and once with the points split across the ranks, each rank fetching its halo before
-every layer, and compares outputs, input gradients and the parameter gradients summed over the
-ranks. On CPU (gloo) in float64 with the dense-mask backend; on GPU (nccl) in float32 with the
-Triton kernels.
+Each rank runs the processor once alone on the whole mesh and once split across the ranks, and
+compares outputs and gradients. gloo: float64, dense mask; nccl: float32, Triton kernels.
 
 Run with ``pytest --distributed [--distributed-world-size N] [--distributed-backend nccl]``.
 """
@@ -121,8 +118,8 @@ def _split_matches_one_gpu_rank(rank, world_size, device, group, radius, conditi
     for name, value in split_inputs.items():
         _assert_close(value.grad, ref_inputs[name].grad[own], tolerance, f"{name} grad")
 
-    # A parameter gradient is a sum over all points, added up in another order when split, so its
-    # rounding error scales with its largest entries rather than with each entry.
+    # Parameter gradients sum over all points in a different order when split, so compare them
+    # relative to their largest entries.
     ref_params = dict(one_gpu.named_parameters())
     for name, param in split_layer.named_parameters():
         assert param.grad is not None, name

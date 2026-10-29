@@ -7,23 +7,17 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Triton kernels for neighbourhood attention on reduced grids such as octahedral O48, O96, ...
+"""Triton kernels for neighbourhood attention on reduced grids (octahedral, HEALPix).
 
-The grid is a set of latitude rows of different lengths, stored row by row (see
-:class:`anemoi.models.layers.reduced_grid.ReducedGrid`). Each query attends to the rows at most
-``kernel_h // 2`` rows from its own (fewer next to the poles) and, in each of them, to the
-``kernel_w`` points nearest in longitude (see
-:class:`anemoi.models.layers.reduced_grid.ReducedGridNeighbourhoodMask`). Longitudes wrap around;
-a row shorter than the window, or one the query also reaches over a pole, contributes its whole
-ring, each point once.
+Each query attends to ``kernel_h`` rows around its own and, in each, to the ``kernel_w`` points
+nearest in longitude (see :class:`anemoi.models.layers.reduced_grid.ReducedGridNeighbourhoodMask`).
+A row shorter than the window, or reached over a pole, contributes its whole ring.
 
-The kernels follow the flash attention scheme of :mod:`anemoi.models.triton.attention`. Each program takes a tile of ``TILE_H``
-neighbouring rows and one band of longitude: in every row it holds the points whose longitude lies
-in the band. The band edges come from the longest row of the group, so a row never has more than
-``TILE_W`` points in a tile, and every point belongs to exactly one tile. Because the matching
-longitude only grows along a row, the keys a tile needs in another row form a single stretch of
-that row, which may wrap past longitude 0. The backward pass for dK and dV uses the same tiles for
-the keys and walks the queries the same way, in the opposite direction.
+The kernels are flash attention (as in :mod:`anemoi.models.triton.attention`) over tiles of
+``TILE_H`` rows and one band of longitude. The band edges come from the longest row, so no row has
+more than ``TILE_W`` points in a tile. The keys a tile needs in another row form one stretch of that
+row, which may wrap past longitude 0. The dK/dV pass tiles the keys the same way and walks the
+queries in reverse.
 """
 
 from functools import lru_cache
@@ -131,10 +125,7 @@ def _base(bh, heads, stride_b, stride_h):
 
 @triton.jit
 def _rows(tok, stride, WIDE: tl.constexpr):
-    """Offsets of the points ``tok`` from the first point, the points being ``stride`` elements apart.
-
-    ``WIDE`` computes them in 64 bits, for tensors where they reach past 2**31.
-    """
+    """Offsets of the points ``tok``, ``stride`` elements apart; in 64 bits if ``WIDE``."""
     if WIDE:
         return tok.to(tl.int64) * stride
     else:
@@ -149,9 +140,9 @@ def _spread(per_row, TILE_H: tl.constexpr, TILE_W: tl.constexpr):
 
 @triton.jit
 def _tile_points(ROW_START, first_row, band, NUM_ROWS: tl.constexpr, TILE_H: tl.constexpr, TILE_W: tl.constexpr):
-    """Points of a tile, and the first position, end position and length of its segment in each of its rows.
+    """Points of a tile, and the start, end and length of its segment in each row.
 
-    Rows past the grid get empty segments. Point values are laid out row by row, ``TILE_W`` per row.
+    Rows past the grid get empty segments. Points are laid out row by row, ``TILE_W`` per row.
     """
     rows_h = first_row + tl.arange(0, TILE_H)
     valid_h = rows_h < NUM_ROWS
@@ -201,11 +192,7 @@ def _matching_shifted(j, n, other_n, shift, other_shift):
 
 @triton.jit
 def _over_the_pole(centre_row, row, NUM_ROWS: tl.constexpr, beyond_north, beyond_south, RADIUS_H: tl.constexpr):
-    """Whether ``row`` can be reached from ``centre_row`` over a pole; such a row contributes its whole ring.
-
-    See :func:`anemoi.models.layers.reduced_grid.over_the_pole`; ``beyond_north`` and ``beyond_south``
-    are the grid's ``rows_beyond``.
-    """
+    """Whether ``row`` is reached from ``centre_row`` over a pole; see :func:`anemoi.models.layers.reduced_grid.over_the_pole`."""
     from_north = 2 * beyond_north + centre_row + row
     from_south = 2 * (beyond_south + NUM_ROWS - 1) - centre_row - row
     return (from_north < RADIUS_H) | (from_south < RADIUS_H)
@@ -213,10 +200,9 @@ def _over_the_pole(centre_row, row, NUM_ROWS: tl.constexpr, beyond_north, beyond
 
 @triton.jit
 def _near_in_row(pos_a, pos_b, n, RADIUS_W: tl.constexpr):
-    """True where two positions ``0 <= pos < n`` of a row are at most ``RADIUS_W`` apart, going round the globe.
+    """True where two positions of a row are at most ``RADIUS_W`` apart, going round the globe.
 
-    Comparisons stand in for the remainder, which is slow on GPUs: the difference is less than one
-    turn, so at most one turn has to be added or taken away.
+    Uses comparisons instead of a slow modulo: the difference is less than one turn.
     """
     half = n // 2
     offset = pos_a - pos_b
@@ -233,10 +219,9 @@ def _wrap(pos, n):
 
 @triton.jit
 def _union(firsts, lasts, nonempty, lengths):
-    """One stretch covering the stretches of the non-empty tile rows (last axis), capped at a whole row.
+    """One stretch covering those of the non-empty tile rows (last axis), at most a whole row.
 
-    A stretch covering a whole row starts at position 0, so windows wider than a row never make a
-    stretch start more than one turn before position 0.
+    A whole row starts at position 0, so no stretch starts more than one turn before 0.
     """
     first = tl.min(tl.where(nonempty[None, :], firsts, _FAR), axis=1)
     last = tl.max(tl.where(nonempty[None, :], lasts, -_FAR), axis=1)
@@ -411,12 +396,9 @@ def _rg_fwd(
         keep = keep & row_seen[:, None] & k_valid[None, :]
         qk = tl.where(keep, tl.dot(q, tl.trans(k), input_precision=DOT_PRECISION), _MASKED)
 
-        # The row maximum is subtracted from the raw scores before they are scaled. Near the maximum
-        # the difference is exact, so the rounding error in the exponent is relative to the gap from the
-        # maximum rather than to the score itself; with scaling first, large scores (around 1e5 and
-        # beyond) would lose the small gaps that decide the probabilities of the runner-up keys. The
-        # backward kernels recompute the probabilities the same way. See KohakuBlueleaf, KohakuFA,
-        # https://github.com/KohakuBlueleaf/KohakuFA (bug 2, scale before shift).
+        # Subtract the row maximum before scaling. The difference is exact near the maximum, so large
+        # scores (1e5 and up) keep the small gaps that decide the runner-up keys. The backward kernels
+        # do the same. See KohakuFA, bug 2 (scale before shift), https://github.com/KohakuBlueleaf/KohakuFA.
         m_new = tl.maximum(m_i, tl.max(qk, 1))
         p = tl.math.exp2((qk - m_new[:, None]) * qk_scale)
         alpha = tl.math.exp2((m_i - m_new) * qk_scale)
@@ -514,13 +496,10 @@ def _rg_bwd_dq(
 
     qk_scale = sm_scale * _RCP_LN2
     dq = tl.zeros([TILE_H * TILE_W, HEAD_DIM], dtype=tl.float32)
-    # The exact ds of a query sums to zero over its keys, which keeps dq blind to where the keys sit
-    # as a group. Rounding ds to the input precision before the product with k leaves a small sum,
-    # and dq picks up that sum times the mean key, which outweighs the true gradient when the keys
-    # are far from the origin compared with their spread. The sums of the rounded ds and of the
-    # rounded probabilities are kept, and lam = their ratio, so that ds - lam * p sums to zero; dq
-    # and dk use that. See Chen et al., "Broken symmetry in BF16 attention" (GProj),
-    # https://arxiv.org/abs/2609.34272.
+    # The exact ds of a query sums to zero over its keys. Rounding ds to 16 bits leaves a small sum,
+    # and dq picks up that sum times the mean key, which can outweigh the true gradient. So we keep
+    # the sums of the rounded ds and p, and use ds - lam * p with lam = their ratio, which sums to
+    # zero. See Chen et al., "Broken symmetry in BF16 attention" (GProj), https://arxiv.org/abs/2609.34272.
     p_k = tl.zeros([TILE_H * TILE_W, HEAD_DIM], dtype=tl.float32)
     # The sums are kept per key column and added up after the loop, so each step only adds elementwise.
     ds_sums = tl.zeros([TILE_H * TILE_W, BLOCK_ITER], dtype=tl.float32)
@@ -544,11 +523,9 @@ def _rg_bwd_dq(
         BLOCK_ITER,
         SHIFTED,
     )
-    # Each row gets only the blocks its own stretch needs, rather than as many as the longest stretch,
-    # so blocks whose keys would all be masked out are never computed; ends holds the running total of
-    # blocks per row. Finding the row and block of each step costs a little index arithmetic, so this
-    # gains most where the stretches differ in length (near the poles, between grids of different
-    # resolution) and can be a few percent slower where they are about equally long.
+    # Each row gets only the blocks its own stretch needs, so fully masked blocks are skipped; ends holds
+    # the running total of blocks per row. This pays off where the stretches differ in length (near the
+    # poles, between grids of different resolution) and costs a few percent elsewhere.
     row_blocks = tl.where(idx < num_k_rows, tl.cdiv(lengths, BLOCK_ITER), 0)
     ends = tl.cumsum(row_blocks, 0)
     offs = tl.arange(0, BLOCK_ITER)
@@ -676,11 +653,9 @@ def _rg_bwd_dkdv(
     q_first_row = tl.maximum(first_row - RADIUS_H, 0)
     num_q_rows = tl.minimum(last_row + RADIUS_H, NUM_ROWS - 1) + 1 - q_first_row
     idx, row_valid, q_starts, q_lengths = _rows_info(ROW_START, q_first_row, num_q_rows, QUERY_ROWS)
-    # In each query row, the queries whose matching position in a tile row lies within RADIUS_W of the
-    # tile's points there. The matching position only grows along a row, so inverting it gives one
-    # stretch per tile row; only the tile rows inside the query row's window count, and a query row
-    # that reaches a tile row over the pole is taken whole. Two turns are added so the divisions work
-    # on positive numbers.
+    # In each query row, the queries whose matching position in a tile row is within RADIUS_W of the
+    # tile's points there: one stretch per tile row, or the whole row over the pole. Two turns are
+    # added so the divisions see positive numbers.
     nonempty = hi_h > lo_h
     n_k = tl.maximum(lengths_h, 1)
     if SHIFTED:
@@ -703,11 +678,9 @@ def _rg_bwd_dkdv(
     firsts = tl.where(whole, 0, lowest)
     lengths = tl.maximum(tl.where(whole, q_lengths, highest - lowest + 1), 0)
 
-    # Each row gets only the blocks its own stretch needs, rather than as many as the longest stretch,
-    # so blocks whose keys would all be masked out are never computed; ends holds the running total of
-    # blocks per row. Finding the row and block of each step costs a little index arithmetic, so this
-    # gains most where the stretches differ in length (near the poles, between grids of different
-    # resolution) and can be a few percent slower where they are about equally long.
+    # Each row gets only the blocks its own stretch needs, so fully masked blocks are skipped; ends holds
+    # the running total of blocks per row. This pays off where the stretches differ in length (near the
+    # poles, between grids of different resolution) and costs a few percent elsewhere.
     row_blocks = tl.where(row_valid, tl.cdiv(lengths, BLOCK_ITER), 0)
     ends = tl.cumsum(row_blocks, 0)
     offs = tl.arange(0, BLOCK_ITER)
@@ -751,12 +724,9 @@ def _rg_bwd_dkdv(
         dp_t = tl.dot(v, tl.trans(do), input_precision=DOT_PRECISION)
         ds_t = p_t * (dp_t - delta[None, :])
         dv = tl.dot(p_t.to(do.dtype), do, dv, input_precision=DOT_PRECISION)
-        # dk from ds - lam * p, with lam from the dQ kernel, so the rounded ds rows sum to zero there too.
+        # dk from ds - lam * p, with lam from the dQ kernel.
         dk = tl.dot(ds_t.to(q.dtype), q, dk, input_precision=DOT_PRECISION)
-        # This deviates from the paper (arXiv:2609.34272, appendix B, eq. 13), which rounds p and lam * q
-        # separately: here -lam * p is rounded once and multiplied with q, which is already 16-bit.
-        # The paper's version:
-        # dk = tl.dot(p_t, (-lam[:, None] * q).to(q.dtype), dk, input_precision=DOT_PRECISION)
+        # The paper (appendix B, eq. 13) rounds lam * q instead; rounding -lam * p keeps q as it is.
         dk = tl.dot((p_t * -lam[None, :]).to(q.dtype), q, dk, input_precision=DOT_PRECISION)
 
     dk = dk * sm_scale
@@ -783,11 +753,7 @@ def _rows_readable(t: torch.Tensor) -> torch.Tensor:
 
 
 def _point_major(batch: int, heads: int, points: int, head_dim: int, like: torch.Tensor) -> torch.Tensor:
-    """An empty ``(batch, heads, points, head_dim)`` tensor stored point by point, all heads of a point together.
-
-    This is the layout of the model's ``(batch * points, heads * head_dim)`` features, so turning the
-    result back into them needs no copy.
-    """
+    """Empty ``(batch, heads, points, head_dim)`` tensor in the model's point-major layout, so no copy is needed later."""
     return torch.empty((batch, points, heads, head_dim), dtype=like.dtype, device=like.device).transpose(1, 2)
 
 
@@ -797,13 +763,10 @@ def _needs_wide(*tensors: torch.Tensor) -> bool:
 
 
 def _dot_precision(dtype: torch.dtype) -> str:
-    """How the kernels' matrix products treat float32 inputs, following torch.set_float32_matmul_precision.
+    """Precision of float32 matrix products, following torch.set_float32_matmul_precision.
 
-    Triton does not read PyTorch's setting, so it is passed on here: at "highest" (PyTorch's default) the
-    products keep full float32 precision, at "high" or "medium" they use TF32 on the tensor cores, as
-    PyTorch's own float32 matrix products do then. TF32 keeps 10 of the 23 mantissa bits of q and k, so
-    at large logits the scores are then about as coarse as with bfloat16 inputs. 16-bit inputs always
-    multiply in their own precision; the setting does not apply to them.
+    "highest" (the PyTorch default) keeps full float32; "high" and "medium" use TF32, as PyTorch
+    does. 16-bit inputs are not affected.
     """
     if dtype == torch.float32 and torch.get_float32_matmul_precision() == "highest":
         return "ieee"
@@ -811,13 +774,11 @@ def _dot_precision(dtype: torch.dtype) -> str:
 
 
 class ReducedGridAttentionTriton(torch.autograd.Function):
-    """Neighbourhood attention on a reduced grid, computed with Triton kernels.
+    """Neighbourhood attention on a reduced grid with Triton kernels.
 
-    Inputs are ``(batch, heads, points, head_dim)`` with the points stored as in
-    :class:`anemoi.models.layers.reduced_grid.ReducedGrid`. ``head_dim`` must be a power of two
-    of at least 16. The inputs may have any layout in which the head_dim values of each point are
-    contiguous, so views of the model's ``(batch * points, heads * head_dim)`` features are read as they
-    are; the output and the gradients are stored point by point, the layout of those features.
+    Inputs are ``(batch, heads, points, head_dim)`` in grid order, in any layout where each point's
+    head_dim values are contiguous; ``head_dim`` is a power of two of at least 16. Outputs and
+    gradients are point-major, like the model's features.
     """
 
     @staticmethod

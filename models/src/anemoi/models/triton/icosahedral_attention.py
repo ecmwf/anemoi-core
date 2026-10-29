@@ -10,18 +10,12 @@
 """Triton kernels for neighbourhood attention on the refined icosahedron.
 
 Every query attends to the keys within ``radius`` hops (see
-:mod:`anemoi.models.layers.icosahedral_grid`). Each program takes a tile of ``TILE_I`` by
-``TILE_J`` neighbouring lattice positions of one diamond. The keys any query of the tile can
-reach lie in the tile grown by the hexagon of ``radius`` hops; the positions of that region,
-relative to the tile, are listed once per tile shape, row by row, and the kernels walk them in
-blocks of ``BLOCK_ITER``. The point at each position is read from the diamond's lookup table,
-so keys in neighbouring diamonds are found the same way as keys in the tile's own diamond.
+:mod:`anemoi.models.layers.icosahedral_grid`). Each program takes a ``TILE_I`` x ``TILE_J`` tile of
+one diamond. Its keys lie in the tile grown by ``radius`` hops; that region is listed once per tile
+shape and read through the diamond's lookup table, so keys in neighbouring diamonds come for free.
 
-The kernels follow the flash attention scheme of :mod:`anemoi.models.triton.reduced_grid_attention`.
-The queries near the twelve icosahedron vertices (the exceptions) are left out of the tiled
-kernels. Block kernels handle them in blocks of 16 queries near the same vertex, each block
-reading the union of its queries' keys with a bit mask of which query attends to which key; the
-gradients of the keys they touch are put together the same way.
+The queries near the twelve vertices (the exceptions) are left to block kernels: 16 queries near
+the same vertex read the union of their keys, with a bit mask of who attends to whom.
 """
 
 from dataclasses import dataclass
@@ -61,23 +55,23 @@ _ROW_BLOCK = 16
 
 @dataclass(frozen=True, eq=False)
 class _Blocks:
-    """Points handled outside the tiled kernels, in blocks of ``_ROW_BLOCK``, each with the points it attends with.
+    """Points handled by the block kernels, in blocks of ``_ROW_BLOCK``, with their partner points.
 
-    Each block's partners are the union of the lists of its points, in chunks of 32; a 32-bit word
-    per chunk and slot marks which of them the slot's point is paired with.
+    A block's partners are the union of its points' lists, in chunks of 32; one 32-bit word per chunk
+    and slot marks the slot's partners.
     """
 
     num_blocks: int
     rows: torch.Tensor
     "Point in each slot, -1 for empty slots, shape ``(num_blocks * _ROW_BLOCK,)``."
     replaced: torch.Tensor
-    "Per slot: 1 if the point's gradient from the tiled kernels is replaced, 0 if added to (corrected keys only)."
+    "Corrected keys only: 1 if the slot replaces the tiled kernels' gradient, 0 if it adds to it."
     chunk_starts: torch.Tensor
     "First chunk of each block, and the end of the last, shape ``(num_blocks + 1,)``."
     columns: torch.Tensor
     "Partner points, 32 per chunk, -1 where a chunk is not full."
     words: torch.Tensor
-    "Per chunk and slot, bit ``c`` set when the slot's point is paired with column ``c`` of the chunk."
+    "Per chunk and slot, bit ``c`` set if the slot's point is paired with column ``c``."
 
 
 def _blocks(
@@ -88,10 +82,9 @@ def _blocks(
     replaced: np.ndarray,
     device: torch.device,
 ) -> _Blocks:
-    """Group ``rows`` with their CSR ``lists`` into blocks of ``_ROW_BLOCK`` rows of the same cluster.
+    """Group ``rows`` with their CSR ``lists`` into blocks of ``_ROW_BLOCK`` rows near the same vertex.
 
-    Rows near the same icosahedron vertex share most of their partners, so each block reads few
-    partner points, each once for all its rows.
+    Such rows share most of their partners, so each block reads few partner points.
     """
     order = np.lexsort((rows, clusters))
     slots, flags, chunk_starts, columns, words = [], [], [0], [], []
@@ -151,7 +144,7 @@ class _DeviceTables:
 
 
 def _region(tile_i: int, tile_j: int, radius: int) -> np.ndarray:
-    """Positions, relative to the first position of a tile, within ``radius`` hops of some position of the tile, row by row."""
+    """Positions within ``radius`` hops of a tile, relative to its first position, row by row."""
     offsets = hexagon_offsets(radius)
     i, j = np.meshgrid(np.arange(tile_i), np.arange(tile_j), indexing="ij")
     reach = (np.stack([i.ravel(), j.ravel()], axis=1)[:, None, :] + offsets[None, :, :]).reshape(-1, 2)
@@ -159,12 +152,12 @@ def _region(tile_i: int, tile_j: int, radius: int) -> np.ndarray:
 
 
 def _region_size(tile_i: int, tile_j: int, radius: int) -> int:
-    """Number of positions in :func:`_region`: the tile, a border ``radius`` wide and the hexagon's corners."""
+    """Number of positions in :func:`_region`."""
     return tile_i * tile_j + 2 * radius * (tile_i + tile_j) + 3 * radius * radius - radius
 
 
 def _tiles(occupied: np.ndarray, tile_i: int, tile_j: int, radius: int, n: int) -> np.ndarray:
-    """(diamond, row, column) of the first position of every tile over the diamonds' own points holding an occupied position."""
+    """(diamond, row, column) of the first position of every tile that holds a point."""
     own = occupied[:, radius : radius + n, radius : radius + n]
     rows, cols = -(-n // tile_i), -(-n // tile_j)
     padded = np.zeros((own.shape[0], rows * tile_i, cols * tile_j), dtype=bool)
@@ -184,7 +177,7 @@ def _pack(parts: list[np.ndarray], device: torch.device) -> tuple[torch.Tensor, 
     )
 
 
-# Keyed by the shard itself, which stays alive with the model component that planned it.
+# Keyed by the shard, which lives as long as the model component that planned it.
 @lru_cache(maxsize=64)
 def _device_tables(shard: IcosahedralShard, device: torch.device) -> _DeviceTables:
     radius, n = shard.radius, shard.n
@@ -260,10 +253,7 @@ def _base(bh, heads, stride_b, stride_h):
 
 @triton.jit
 def _rows(tok, stride, WIDE: tl.constexpr):
-    """Offsets of the points ``tok`` from the first point, the points being ``stride`` elements apart.
-
-    ``WIDE`` computes them in 64 bits, for tensors where they reach past 2**31.
-    """
+    """Offsets of the points ``tok``, ``stride`` elements apart; in 64 bits if ``WIDE``."""
     if WIDE:
         return tok.to(tl.int64) * stride
     else:
@@ -272,7 +262,7 @@ def _rows(tok, stride, WIDE: tl.constexpr):
 
 @triton.jit
 def _tile_points(TABLE, d, row0, col0, N: tl.constexpr, RADIUS: tl.constexpr, SIZE: tl.constexpr, TILE_I, TILE_J):
-    """Table row, table column and point (or -1) of every position of a tile; positions past the diamond hold -1."""
+    """Table row, table column and point (-1 if none) of every position of a tile."""
     t = tl.arange(0, TILE_I * TILE_J)
     rows = row0 + t // TILE_J
     cols = col0 + t % TILE_J
@@ -283,7 +273,7 @@ def _tile_points(TABLE, d, row0, col0, N: tl.constexpr, RADIUS: tl.constexpr, SI
 
 @triton.jit
 def _region_size_jit(TILE_I: tl.constexpr, TILE_J: tl.constexpr, RADIUS: tl.constexpr):
-    """Number of positions in the region of a tile, as :func:`_region_size`; known when the kernel is compiled."""
+    """:func:`_region_size` at compile time."""
     return TILE_I * TILE_J + 2 * RADIUS * (TILE_I + TILE_J) + 3 * RADIUS * RADIUS - RADIUS
 
 
@@ -302,7 +292,7 @@ def _region_points(
     TILE_J: tl.constexpr,
     BLOCK_ITER: tl.constexpr,
 ):
-    """Table row, table column and point (or -1) of block ``it`` of the positions listed for the tile's region."""
+    """Table row, table column and point (-1 if none) of block ``it`` of the tile's region."""
     start = _shape_index(TILE_I, TILE_J) * REGION_STRIDE
     o = it * BLOCK_ITER + tl.arange(0, BLOCK_ITER)
     listed = o < _region_size_jit(TILE_I, TILE_J, RADIUS)
@@ -315,7 +305,7 @@ def _region_points(
 
 @triton.jit
 def _near(rows_a, cols_a, rows_b, cols_b, RADIUS: tl.constexpr):
-    """True where two lattice positions (the first along axis 0, the second along axis 1) are at most ``RADIUS`` hops apart."""
+    """True where two lattice positions (axis 0 and axis 1) are at most ``RADIUS`` hops apart."""
     di = rows_b[None, :] - rows_a[:, None]
     dj = cols_b[None, :] - cols_a[:, None]
     return (tl.abs(di) <= RADIUS) & (tl.abs(dj) <= RADIUS) & (tl.abs(di + dj) <= RADIUS)
@@ -393,9 +383,7 @@ def _ico_fwd(
         keep = _near(q_rows, q_cols, k_rows, k_cols, RADIUS) & k_valid[None, :]
         qk = tl.where(keep, tl.dot(q, tl.trans(k), input_precision=DOT_PRECISION), _MASKED)
 
-        # The row maximum is subtracted from the raw scores before they are scaled, as in the
-        # reduced-grid kernels; see KohakuBlueleaf, KohakuFA, https://github.com/KohakuBlueleaf/KohakuFA
-        # (bug 2, scale before shift).
+        # Shift by the row maximum before scaling, as in reduced_grid_attention (KohakuFA, bug 2).
         m_new = tl.maximum(m_i, tl.max(qk, 1))
         p = tl.math.exp2((qk - m_new[:, None]) * qk_scale)
         alpha = tl.math.exp2((m_i - m_new) * qk_scale)
@@ -483,10 +471,8 @@ def _ico_bwd_dq(
 
     qk_scale = sm_scale * _RCP_LN2
     dq = tl.zeros([TILE_I * TILE_J, HEAD_DIM], dtype=tl.float32)
-    # The exact ds of a query sums to zero over its keys; rounding ds before the product with k
-    # leaves a small sum that dq would pick up times the mean key. lam = (sum of the rounded ds) /
-    # (sum of the rounded probabilities) makes ds - lam * p sum to zero; dq and dk use that. See
-    # Chen et al., "Broken symmetry in BF16 attention" (GProj), https://arxiv.org/abs/2609.34272.
+    # Make the rounded ds sum to zero (GProj), as in reduced_grid_attention. See Chen et al.,
+    # "Broken symmetry in BF16 attention", https://arxiv.org/abs/2609.34272.
     p_k = tl.zeros([TILE_I * TILE_J, HEAD_DIM], dtype=tl.float32)
     ds_sums = tl.zeros([TILE_I * TILE_J, BLOCK_ITER], dtype=tl.float32)
     p_sums = tl.zeros([TILE_I * TILE_J, BLOCK_ITER], dtype=tl.float32)
@@ -568,10 +554,9 @@ def _ico_bwd_dkdv(
     TILE_J: tl.constexpr,
     BLOCK_ITER: tl.constexpr,
 ):
-    """Each program computes dK and dV for one tile of keys, visiting every query within ``radius`` hops.
+    """Each program computes dK and dV for one tile of keys, from the queries within ``radius`` hops.
 
-    Being within ``radius`` hops goes both ways, so the queries of a key tile lie in the same
-    region around it as the keys of a query tile.
+    Hops are symmetric, so this is the same region as in the forward pass.
     """
     bh = tl.program_id(1).to(tl.int64)
     q_base = _base(bh, heads, stride_qb, stride_qh)
@@ -615,7 +600,7 @@ def _ico_bwd_dkdv(
         dp_t = tl.dot(v, tl.trans(do), input_precision=DOT_PRECISION)
         ds_t = p_t * (dp_t - delta[None, :])
         dv = tl.dot(p_t.to(do.dtype), do, dv, input_precision=DOT_PRECISION)
-        # dk from ds - lam * p, with lam from the dQ kernel, so the rounded ds rows sum to zero there too.
+        # dk from ds - lam * p, with lam from the dQ kernel.
         dk = tl.dot(ds_t.to(q.dtype), q, dk, input_precision=DOT_PRECISION)
         dk = tl.dot((p_t * -lam[None, :]).to(q.dtype), q, dk, input_precision=DOT_PRECISION)
 
@@ -635,7 +620,7 @@ def _block_rows(ROWS, block, ROW_BLOCK: tl.constexpr):
 
 @triton.jit
 def _block_chunk(COLUMNS, WORDS, chunk, ROW_BLOCK: tl.constexpr):
-    """Points of a chunk of 32 columns (0 for empty ones), which columns hold one, and which (row, column) pairs attend."""
+    """Points of a chunk of 32 columns (0 if empty), which columns are used, and which pairs attend."""
     c = tl.arange(0, 32)
     tok = tl.load(COLUMNS + chunk * 32 + c)
     words = tl.load(WORDS + chunk * ROW_BLOCK + tl.arange(0, ROW_BLOCK))
@@ -675,10 +660,7 @@ def _ico_block_fwd(
     WIDE: tl.constexpr,
     ROW_BLOCK: tl.constexpr,
 ):
-    """Each program computes the output of one block of exception queries, for one batch entry and head.
-
-    The row maximum and sum follow the tiled kernels' convention, so the backward kernels read them alike.
-    """
+    """Each program computes the output of one block of exception queries, for one batch entry and head."""
     block = tl.program_id(0)
     bh = tl.program_id(1).to(tl.int64)
     k_base = _base(bh, heads, stride_kb, stride_kh)
@@ -845,7 +827,7 @@ def _ico_block_dkdv(
     WIDE: tl.constexpr,
     ROW_BLOCK: tl.constexpr,
 ):
-    """Each program puts together dK and dV of one block of corrected keys from the queries of its columns."""
+    """Each program computes dK and dV of one block of corrected keys from the queries of its columns."""
     block = tl.program_id(0)
     bh = tl.program_id(1).to(tl.int64)
     q_base = _base(bh, heads, stride_qb, stride_qh)
@@ -914,11 +896,7 @@ def _rows_readable(t: torch.Tensor) -> torch.Tensor:
 
 
 def _point_major(batch: int, heads: int, points: int, head_dim: int, like: torch.Tensor) -> torch.Tensor:
-    """An empty ``(batch, heads, points, head_dim)`` tensor stored point by point, all heads of a point together.
-
-    This is the layout of the model's ``(batch * points, heads * head_dim)`` features, so turning the
-    result back into them needs no copy.
-    """
+    """Empty ``(batch, heads, points, head_dim)`` tensor in the model's point-major layout, so no copy is needed later."""
     return torch.empty((batch, points, heads, head_dim), dtype=like.dtype, device=like.device).transpose(1, 2)
 
 
@@ -937,10 +915,8 @@ def _dot_precision(dtype: torch.dtype) -> str:
 class IcosahedralAttentionTriton(torch.autograd.Function):
     """Neighbourhood attention on the refined icosahedron, for the queries and keys of one shard.
 
-    ``q`` is ``(batch, heads, shard.num_queries, head_dim)``, ``k`` and ``v`` are
-    ``(batch, heads, shard.num_keys, head_dim)``; ``head_dim`` must be a power of two of at least
-    16. The inputs may have any layout in which the head_dim values of each point are contiguous;
-    the output and the gradients are stored point by point.
+    ``q`` has ``shard.num_queries`` points, ``k`` and ``v`` have ``shard.num_keys``. Inputs may use any
+    layout where each point's head_dim values are contiguous; outputs are point-major.
     """
 
     @staticmethod
@@ -1113,10 +1089,8 @@ class IcosahedralAttentionTriton(torch.autograd.Function):
             **ctx.sizes,
         )
 
-        # The tiled kernels leave out the exception queries, and their tables are wrong around the
-        # exception keys: those keys get all their gradient from the block kernel, the keys next to
-        # an exception query get that query's part added. This runs after both dQ kernels, which
-        # write delta and lam of all queries.
+        # Exception keys get all their gradient here; keys next to an exception query get that
+        # query's part added. Runs after both dQ kernels, which write delta and lam.
         corrected = tables.corrected_blocks
         if corrected.num_blocks:
             _ico_block_dkdv[(corrected.num_blocks, batch * heads)](

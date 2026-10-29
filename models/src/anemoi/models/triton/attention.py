@@ -1456,9 +1456,9 @@ def _dot_input_precision() -> str:
 
 
 def _rounded_lengths(n_q: int, n_kv: int) -> tuple[int, bool, bool]:
-    """The number of queries rounded up to the largest block size, and whether each length is not a multiple of it.
+    """Number of queries rounded up to the largest block size, and whether each length is not a multiple of it.
 
-    The block sizes are only known after autotuning, so the largest one stands in for all of them.
+    The block sizes are only known after autotuning, so the largest one is used.
     """
     max_block_size = 128
     n_q_rounded = math.ceil(n_q / max_block_size) * max_block_size
@@ -1472,9 +1472,8 @@ class TritonAttention(torch.autograd.Function):
         """This function implements a tiled version of the attention algorithm.
         Causal and sliding window masking are supported. Arbitrary context lengths are supported.
         Currently the following Head dimensions are supported: 16, 32, 64, 128, 256.
-        Q may have a different number of points than K and V (cross attention, as in the
-        transformer mappers); every query then attends to every key, without causal or sliding
-        window masks, which need the two sequences to line up.
+        Q may have a different number of points than K and V (cross attention, as in the mappers);
+        every query then attends to every key, without causal or sliding window masks.
 
         Q is in the shape [BATCH, N_HEAD, N_Q, HEAD_DIM], K and V in the shape [BATCH, N_HEAD, N_KV, HEAD_DIM].
 

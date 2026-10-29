@@ -9,12 +9,9 @@
 
 """Gradients of the Triton neighbourhood attention kernels when the attention logits are large.
 
-Large logits make attention nearly one-hot. Flash attention kernels then return gradients that are
-wrong by orders of magnitude while the output still looks right, because of how the softmax is
-recomputed in float32 in the backward (KohakuBlueleaf, KohakuFA, https://github.com/KohakuBlueleaf/KohakuFA).
-Here the neighbourhood self and cross attention kernels are compared with dense attention in float64
-on the same connections, and their errors with those of dense attention computed in float32, which is
-what correct float32 arithmetic gives.
+With large logits attention is nearly one-hot, and flash attention gradients can be wrong by orders
+of magnitude while the output looks fine (KohakuFA, https://github.com/KohakuBlueleaf/KohakuFA). The
+kernels are compared with float64 dense attention, and their errors with those of float32 dense attention.
 """
 
 import math

@@ -7,18 +7,17 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Rotary position embeddings from the positions of points on the sphere.
+"""Rotary position embeddings from positions on the sphere.
 
-Attention compares queries and keys by their content. Turning each query and key by angles that depend
-on where its point lies makes the score of a pair depend also on where the key lies relative to the
-query, which graph transformers get from their edge features. A model component switches it on with::
+Rotating queries and keys by angles that depend on their positions makes attention scores depend on
+where a key lies relative to its query, the role edge features play in graph transformers. Enable
+it in a model component with::
 
     rotary_embeddings:
       max_frequency: 10000
       backend: triton
 
-It works with every attention implementation (scaled dot product, Triton and neighbourhood attention)
-and for self attention on one set of nodes as well as cross attention between two.
+Works with every attention implementation, in self and cross attention.
 """
 
 from __future__ import annotations
@@ -34,17 +33,13 @@ ROTARY_BACKENDS = ("triton", "torch")
 
 
 def rotary_angles(coords: Tensor, head_dim: int, max_frequency: float) -> Tensor:
-    """Rotation angles of rotary position embeddings from the 3D positions of points on the sphere.
+    """Rotation angles of rotary embeddings from the 3D positions of points on the unit sphere.
 
-    Each point's position on the unit sphere, ``(x, y, z) = (cos lat cos lon, cos lat sin lon, sin lat)``,
-    turns ``n = head_dim // 6`` channel pairs by ``w * x``, ``n`` pairs by ``w * y`` and ``n`` pairs by
-    ``w * z``, with the same ``n`` frequencies ``w`` spread evenly on a log scale from 1 to
-    ``max_frequency``. After rotating queries and keys, the score of a pair depends on the straight
-    line from the query to the key, ``(x_q - x_k, y_q - y_k, z_q - z_k)``, at every frequency; the
-    channels left over are not rotated. A frequency ``w`` repeats every ``2 pi / w`` Earth radii, about
-    ``40,000 km / w``, so ``max_frequency`` 10000 reaches down to offsets of a few km. The
-    frequencies do not depend on the grid, so a model keeps its embeddings when it is moved to another
-    resolution.
+    With ``(x, y, z) = (cos lat cos lon, cos lat sin lon, sin lat)``, ``n = head_dim // 6`` channel pairs
+    turn by ``w * x``, ``n`` by ``w * y`` and ``n`` by ``w * z``, for ``n`` frequencies ``w`` spaced
+    evenly on a log scale from 1 to ``max_frequency``. Scores then depend on the offset from query to
+    key; leftover channels are not rotated. A frequency ``w`` repeats every ``40,000 km / w``. The
+    frequencies do not depend on the grid, so the embeddings carry over to other resolutions.
 
     Parameters
     ----------
@@ -58,8 +53,7 @@ def rotary_angles(coords: Tensor, head_dim: int, max_frequency: float) -> Tensor
     Returns
     -------
     Tensor
-        Angles in radians, in float64, shape ``(num_points, 3 * (head_dim // 6))``: the ``x`` angles
-        first, then ``y``, then ``z``.
+        Angles in radians, float64, ``(num_points, 3 * (head_dim // 6))``: ``x`` angles, then ``y``, then ``z``.
     """
     per_axis = head_dim // 6
     if per_axis == 0:
@@ -73,12 +67,10 @@ def rotary_angles(coords: Tensor, head_dim: int, max_frequency: float) -> Tensor
 
 
 def apply_rotary(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
-    """Turn channel ``i`` and channel ``head_dim // 2 + i`` of every point by the angle whose cosine and sine are given.
+    """Rotate channels ``i`` and ``head_dim // 2 + i`` of every point by the given angles, in PyTorch.
 
-    The PyTorch version of the turn, against which the Triton kernel is tested. ``x`` has shape
-    ``(..., points, head_dim)``; ``cos`` and ``sin`` have shape ``(points, n)`` for the first ``n``
-    pairs; the other channels pass through unchanged. The turn is worked out in float32, or in float64
-    for float64 inputs, and the result is returned in that precision.
+    ``x`` is ``(..., points, head_dim)``; ``cos`` and ``sin`` are ``(points, n)`` for the first ``n``
+    pairs; other channels pass through. Computed and returned in float32, or float64 for float64 inputs.
     """
     n = cos.shape[-1]
     half = x.shape[-1] // 2
@@ -91,15 +83,11 @@ def apply_rotary(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
 
 
 class SphericalRotaryEmbedding(nn.Module):
-    """Turns queries and keys by the rotary angles of their points (see :func:`rotary_angles`).
+    """Rotates queries and keys by the rotary angles of their points (see :func:`rotary_angles`).
 
-    Holds the cosines and sines of the angles of the query points and of the key points, in the order
-    in which the nodes are stored. They move with the module to the GPU but are not part of the saved
-    weights; one module serves all attention layers of a model component.
-
-    ``backend`` chooses how the turn is computed: ``"triton"`` runs one GPU kernel per tensor (see
-    :mod:`anemoi.models.triton.spherical_rotary`), ``"torch"`` runs :func:`apply_rotary`, which works on
-    any device and can be listed in the ``compile`` section of the model configuration.
+    Holds cos and sin per query and key point, in node order, as non-persistent buffers. One module is
+    shared by all attention layers of a component. ``backend`` is ``"triton"`` (GPU kernel) or
+    ``"torch"`` (:func:`apply_rotary`, any device, can be compiled).
     """
 
     def __init__(
@@ -110,15 +98,14 @@ class SphericalRotaryEmbedding(nn.Module):
         max_frequency: float,
         backend: str = "triton",
     ) -> None:
-        """Set up the tables of one model component.
+        """Build the tables of one model component.
 
         Parameters
         ----------
         query_coords : Tensor
-            Latitude and longitude of the query nodes in radians, shape ``(num_queries, 2)``.
+            Latitude and longitude of the query nodes in radians, ``(num_queries, 2)``.
         key_coords : Tensor, optional
-            Latitude and longitude of the key nodes. Leave out for self attention, where the queries
-            and keys are the same nodes.
+            Same for the key nodes; None for self attention.
         head_dim : int
             Number of channels per head; at least 6.
         max_frequency : float
@@ -155,16 +142,16 @@ class SphericalRotaryEmbedding(nn.Module):
         return spherical_rotary(x, cos, sin)
 
     def forward(self, query: Tensor, key: Tensor) -> tuple[Tensor, Tensor]:
-        """Queries and keys of shape ``(..., points, head_dim)``, points in node order, turned and in their own dtype."""
+        """Rotate queries and keys, ``(..., points, head_dim)`` in node order."""
         key_cos, key_sin = (self.query_cos, self.query_sin) if self.shared else (self.key_cos, self.key_sin)
         return self._turn(query, self.query_cos, self.query_sin, "query"), self._turn(key, key_cos, key_sin, "key")
 
     def turn_queries(self, query: Tensor, points: slice) -> Tensor:
-        """Turn the queries of a contiguous range of query points, given in node order."""
+        """Rotate the queries of a run of query points."""
         return self._turn(query, self.query_cos[points], self.query_sin[points], "query")
 
     def turn_keys(self, key: Tensor, points: slice | Tensor) -> Tensor:
-        """Turn the keys of a contiguous range of key points in node order, or of the key points numbered ``points``."""
+        """Rotate the keys of a run of key points, or of the key points with indices ``points``."""
         key_cos, key_sin = (self.query_cos, self.query_sin) if self.shared else (self.key_cos, self.key_sin)
         return self._turn(key, key_cos[points], key_sin[points], "key")
 
@@ -175,23 +162,23 @@ def build_spherical_rotary(
     query_coords: Optional[Tensor],
     key_coords: Optional[Tensor] = None,
 ) -> Optional[SphericalRotaryEmbedding]:
-    """The rotary embeddings of a model component, or None if its ``rotary_embeddings`` section is empty.
+    """Build the rotary embeddings of a model component; None if not configured.
 
     Parameters
     ----------
     config : dict, optional
-        ``max_frequency`` and optionally ``backend`` (``"triton"``, the default, or ``"torch"``).
+        ``max_frequency`` and optional ``backend`` (``"triton"``, default, or ``"torch"``).
     head_dim : int
         Number of channels per attention head.
     query_coords : Tensor, optional
         Latitude and longitude of the query nodes in radians.
     key_coords : Tensor, optional
-        Latitude and longitude of the key nodes; leave out for self attention.
+        Same for the key nodes; None for self attention.
 
     Returns
     -------
     SphericalRotaryEmbedding or None
-        The module shared by the attention layers of the component.
+        Shared by the attention layers of the component.
     """
     if config is None:
         return None

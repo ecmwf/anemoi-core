@@ -7,27 +7,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Neighbourhood attention on the refined icosahedron: every point attends to the points within ``radius`` hops.
+"""Lookup tables for neighbourhood attention on the refined icosahedron.
 
-The points are stored in diamond order (see :mod:`anemoi.graphs.generate.icosahedral_diamonds`):
-ten diamonds, each an ``n`` by ``n`` lattice in which every point has six neighbours. Within a
-diamond the points within ``radius`` hops of a point ``(i, j)`` are the lattice points
+The points are in diamond order (see :mod:`anemoi.graphs.generate.icosahedral_diamonds`): ten
+``n`` x ``n`` lattices. Within a diamond the points within ``radius`` hops of ``(i, j)`` are
 ``(i + di, j + dj)`` with ``max(|di|, |dj|, |di + dj|) <= radius``, a hexagon of
 ``3 * radius * (radius + 1) + 1`` points.
 
-Near the edge of a diamond that hexagon reaches into the neighbouring diamonds. Each diamond
-therefore gets a lookup table, ``radius`` points wider on every side, that names the point at
-every lattice position around it: the neighbouring diamonds are unfolded flat around it, the way
-a paper net of the icosahedron is laid out. The attention kernels read keys only through these
-tables and never need a list of edges; a table holds one number per lattice position.
+Each diamond gets a lookup table ``radius`` wider on every side, with the neighbouring diamonds
+unfolded flat around it like a paper net. The kernels find keys through these tables, without an
+edge list.
 
-At the twelve vertices of the original icosahedron five triangles meet instead of six, so the
-unfolded neighbours do not fill the plane: around each corner of a diamond a wedge stays empty,
-or points meet twice along a seam. For the few points near those vertices (and for the two
-vertices that belong to no diamond) the hexagon read from the table differs from the true set of
-points within ``radius`` hops. These points are the exceptions; their neighbourhoods are kept
-as explicit lists and handled outside the kernels, so every point attends to exactly the points
-within ``radius`` hops.
+At the twelve vertices five triangles meet instead of six, so the unfolding leaves gaps or seams
+there. Points near them (the exceptions) get explicit neighbour lists instead.
 """
 
 from __future__ import annotations
@@ -56,17 +48,15 @@ def hexagon_offsets(radius: int) -> np.ndarray:
 
 
 class IcosahedralNeighbourhood:
-    """The lookup tables and exceptions of neighbourhood attention on one refined icosahedron.
+    """Lookup tables and exceptions of neighbourhood attention on one refined icosahedron.
 
-    Lattice positions are counted in the padded frame of each diamond: the point ``(i, j)`` of
-    diamond ``d`` (``1 <= i <= n``, ``0 <= j < n`` for its own points) sits at row
-    ``i - 1 + radius`` and column ``j + radius`` of the diamond's table, which has
-    ``n + 2 * radius`` rows and columns.
+    Point ``(i, j)`` of a diamond (``1 <= i <= n``, ``0 <= j < n``) sits at row ``i - 1 + radius`` and
+    column ``j + radius`` of its ``(n + 2 * radius)``-square table.
 
     Parameters
     ----------
     resolution : int
-        Refinement level of the icosahedron; ``n = 2**resolution`` points along a diamond edge.
+        Refinement level; ``n = 2**resolution`` points along a diamond edge.
     radius : int
         Each point attends to the points within this many hops.
     """
@@ -86,11 +76,11 @@ class IcosahedralNeighbourhood:
 
     @property
     def window_size(self) -> int:
-        """Number of points within ``radius`` hops of a point away from the twelve icosahedron vertices."""
+        """Number of points within ``radius`` hops, away from the vertices."""
         return 3 * self.radius * (self.radius + 1) + 1
 
     def cells(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Diamond, table row and table column of points owned by a diamond (not the first or last point)."""
+        """Diamond, table row and table column of every point except the first and last, which belong to no diamond."""
         n, rest = self.n, np.asarray(points) - 1
         d, rest = rest // n**2, rest % n**2
         return d, rest // n + self.radius, rest % n + self.radius
@@ -107,7 +97,7 @@ class IcosahedralNeighbourhood:
 
     @cached_property
     def table(self) -> np.ndarray:
-        """The point at every lattice position around every diamond, or -1, shape ``(10, size, size)``."""
+        """Point at every lattice position around every diamond (-1 if none), ``(10, size, size)``."""
         tables = np.full((NUM_DIAMONDS, self.size, self.size), -1, dtype=np.int64)
         across = _triangles_across_edges(self.layout.triangles(), self.num_points)
         for d in range(NUM_DIAMONDS):
@@ -115,12 +105,10 @@ class IcosahedralNeighbourhood:
         return tables
 
     def _unfold_around(self, d: int, table: np.ndarray, across: tuple[np.ndarray, np.ndarray]) -> None:
-        """Fill the table of diamond ``d`` by laying the triangles around it flat, nearest first.
+        """Fill the table of diamond ``d`` by unfolding the triangles around it, nearest first.
 
-        Positions are kept in the diamond's own coordinates ``(i, j)``. A triangle with corners at
-        ``A``, ``B`` and ``C`` has its neighbour across the edge ``A - B`` with the third corner at
-        ``A + B - C``. Each triangle of the mesh is laid down once; a position reached by two
-        different points keeps the first.
+        The neighbour of triangle ``A, B, C`` across edge ``A - B`` has its third corner at
+        ``A + B - C``. Each triangle is laid down once; at a seam the first point wins.
         """
         n, radius = self.n, self.radius
         triangles = self.layout.triangles()
@@ -128,7 +116,7 @@ class IcosahedralNeighbourhood:
         grid = self.layout.closed_grids[d]
         table[radius - 1 : radius + n, radius : radius + n + 1] = grid
 
-        # Unfold a little past the table so that positions only reached round its corner are found.
+        # Unfold a little past the table to catch positions reached only round its corners.
         lo_i, hi_i, lo_j, hi_j = -radius - 1, n + radius + 1, -radius - 1, n + radius
 
         placed = np.zeros(len(triangles), dtype=bool)
@@ -161,7 +149,7 @@ class IcosahedralNeighbourhood:
                 queue.append((int(other), tuple(where[int(p)] for p in triangles[other])))
 
     def windows(self, points: np.ndarray) -> np.ndarray:
-        """The hexagon read from the tables for each of ``points`` (owned by a diamond), -1 where empty."""
+        """Hexagon read from the tables for each of ``points``, -1 where empty."""
         d, row, col = self.cells(points)
         offsets = hexagon_offsets(self.radius)
         rows = np.clip(row[:, None] + offsets[None, :, 0], 0, self.size - 1)
@@ -182,7 +170,7 @@ class IcosahedralNeighbourhood:
 
     @cached_property
     def nearest_vertex(self) -> np.ndarray:
-        """For every point within ``3 * radius`` hops of one of the twelve icosahedron vertices, which of them is nearest; -1 elsewhere."""
+        """Nearest vertex of every point within ``3 * radius`` hops of one; -1 elsewhere."""
         degree = np.diff(self.adjacency.indptr)
         vertices = np.flatnonzero(degree == 5)
         hops = scipy.sparse.csgraph.dijkstra(
@@ -192,12 +180,9 @@ class IcosahedralNeighbourhood:
 
     @cached_property
     def exceptions(self) -> np.ndarray:
-        """The points whose hexagon read from the tables differs from the points within ``radius`` hops.
+        """Points whose hexagon from the tables differs from the points within ``radius`` hops.
 
-        Away from the twelve icosahedron vertices the unfolding is exact, so only points close to
-        them are checked: a seam starts at a vertex and stays within the ``radius`` wide border of
-        the table, so a hexagon can only touch it when its centre is within ``3 * radius`` hops of
-        the vertex.
+        Only points within ``3 * radius`` hops of a vertex can touch a seam, so only those are checked.
         """
         near = np.flatnonzero(self.nearest_vertex >= 0)
         candidates = near[(near != self.layout.north) & (near != self.layout.south)]
@@ -213,12 +198,12 @@ class IcosahedralNeighbourhood:
         return np.sort(np.array(wrong, dtype=np.int64))
 
     def mask(self, device: torch.device | None = None) -> Tensor:
-        """The full ``points x points`` attention mask, True where a query attends to a key. For small grids and tests."""
+        """Dense ``points x points`` mask, True where a query attends to a key. For small grids and tests."""
         reach = self.within_radius(np.arange(self.num_points))
         return torch.as_tensor(reach.toarray(), device=device)
 
     def shard(self, own: slice | None = None) -> IcosahedralShard:
-        """What the GPU that owns the query points ``own`` needs (see :class:`IcosahedralShard`); all points by default."""
+        """Tables of the GPU that owns the query points ``own``; all points by default."""
         own = slice(0, self.num_points) if own is None else own
         if not 0 <= own.start < own.stop <= self.num_points:
             raise ValueError(f"The own points {own} are not a non-empty run of the {self.num_points} points.")
@@ -227,9 +212,8 @@ class IcosahedralNeighbourhood:
         is_exception[self.exceptions] = True
         own_exceptions = points[is_exception[points]]
 
-        # Keys: every point a hexagon of an own point reaches in the tables, and the neighbours of the
-        # own exceptions. A point's own diamond holds it at a single position, so marking those
-        # positions and growing them by the hexagon finds the reach of all own points at once.
+        # Keys: every point the own points' hexagons reach, plus the neighbours of the own exceptions.
+        # Marking the own positions and growing them by the hexagon finds them all at once.
         in_diamond = points[(points > self.layout.north) & (points < self.layout.south)]
         d, row, col = self.cells(in_diamond)
         marked = np.zeros(self.table.shape, dtype=bool)
@@ -253,9 +237,8 @@ class IcosahedralNeighbourhood:
         keys = key_position[self.table].astype(np.int32)
         queries = query_position[self.table].astype(np.int32)
 
-        # Keys whose gradient is put together outside the tiled kernels: the exceptions among the
-        # keys take it from all their own queries, keys next to an own exception query take that
-        # query's part.
+        # Keys whose gradient comes from the block kernel: exception keys take all of it, keys next
+        # to an own exception query take that query's part.
         key_points = np.concatenate([points, halo])
         key_exceptions = key_points[is_exception[key_points]]
         corrected = np.union1d(key_exceptions, exception_lists.indices)
@@ -290,12 +273,10 @@ class IcosahedralNeighbourhood:
 
 @dataclass(frozen=True, eq=False)
 class IcosahedralShard:
-    """The tables and lists one GPU needs for icosahedral neighbourhood attention.
+    """Tables and lists one GPU needs for icosahedral neighbourhood attention.
 
-    The GPU owns the query points ``own``, a run of consecutive points, and holds as keys its own
-    points followed by the ``halo``, the points of other GPUs that its queries reach, in
-    increasing order. Query positions count from ``own.start``, key positions from the first of
-    these keys. All arrays are on the host; -1 marks an empty entry.
+    The GPU owns the run of query points ``own``. Its keys are its own points followed by the
+    ``halo`` (points of other GPUs its queries reach). Arrays are on the host; -1 marks an empty entry.
     """
 
     radius: int
@@ -303,27 +284,27 @@ class IcosahedralShard:
     own: slice
     halo: np.ndarray
     keys: np.ndarray
-    "Key position of the point at every lattice position around every diamond, shape ``(10, n + 2 * radius, n + 2 * radius)``."
+    "Key position of the point at every lattice position, ``(10, n + 2 * radius, n + 2 * radius)``."
     queries: np.ndarray
-    "Query position of the point at every lattice position, if it is an own query and not an exception."
+    "Query position at every lattice position, for own queries that are not exceptions."
     exception_queries: np.ndarray
     "Query positions of the own exceptions, in increasing order."
     exception_clusters: np.ndarray
-    "The icosahedron vertex nearest to each own exception."
+    "Nearest vertex of each own exception."
     exception_key_starts: np.ndarray
-    "Where the key list of each own exception starts in ``exception_key_lists``, and where the last ends."
+    "CSR offsets into ``exception_key_lists``."
     exception_key_lists: np.ndarray
-    "Key positions of the points within ``radius`` hops of each own exception, one list after the other."
+    "Keys within ``radius`` hops of each own exception."
     corrected_keys: np.ndarray
-    "Key positions of the keys that get gradient from queries outside the tiled kernels."
+    "Keys that get gradient from the block kernel."
     corrected_clusters: np.ndarray
-    "The icosahedron vertex nearest to each corrected key."
+    "Nearest vertex of each corrected key."
     replaced: np.ndarray
-    "Which corrected keys are exceptions, whose gradient from the tiled kernels is replaced; the others' is added to."
+    "Corrected keys that are exceptions: their tiled gradient is replaced; the others' is added to."
     corrected_query_starts: np.ndarray
-    "Where the query list of each corrected key starts in ``corrected_query_lists``, and where the last ends."
+    "CSR offsets into ``corrected_query_lists``."
     corrected_query_lists: np.ndarray
-    "For each corrected key, the positions of the own queries whose part is put together outside the tiled kernels."
+    "For each corrected key, the own queries whose part comes from the block kernel."
 
     @property
     def num_queries(self) -> int:
@@ -335,7 +316,7 @@ class IcosahedralShard:
 
 
 def _triangles_across_edges(triangles: np.ndarray, num_points: int) -> tuple[np.ndarray, np.ndarray]:
-    """For each triangle and each edge ``e`` (corners ``e`` and ``e + 1``): the triangle across it and that triangle's third corner."""
+    """For each triangle and edge ``e`` (corners ``e``, ``e + 1``): the triangle across it and its third corner."""
     num = len(triangles)
     a = triangles[:, [0, 1, 2]].ravel()
     b = triangles[:, [1, 2, 0]].ravel()
@@ -346,7 +327,7 @@ def _triangles_across_edges(triangles: np.ndarray, num_points: int) -> tuple[np.
     partner = np.empty(3 * num, dtype=np.int64)
     partner[first], partner[second] = second, first
     neighbour = (partner // 3).reshape(num, 3)
-    # The corner of the triangle across that is on neither end of the shared edge.
+    # Its corner that is not on the shared edge.
     other = triangles[neighbour]
     edge_ends = np.stack([triangles, np.roll(triangles, -1, axis=1)], axis=-1)
     on_edge = (other[:, :, :, None] == edge_ends[:, :, None, :]).any(axis=-1)

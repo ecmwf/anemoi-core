@@ -7,16 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Hold a run of consecutive points, part of it owned by other GPUs.
+"""Fetch a run of consecutive points that overlaps the shards of neighbouring GPUs.
 
-The points of a grid are split across the GPUs of a model group in runs of consecutive points,
-one run per GPU in rank order (its shard). Some layers need, on each GPU, a run of points that
-overlaps its own shard and those of its neighbours, for example the rows around its own rows.
-
-Such a run is held in three parts (:class:`PointRun`): the points owned by GPUs of lower rank,
-the GPU's own points, read from its shard in place, and the points owned by GPUs of higher rank.
-Only the first and last part are sent between GPUs (:func:`fetch_point_range`); their gradient
-goes back to the GPUs that own the points, where the contributions of all GPUs are added up.
+Each GPU owns a run of consecutive points (its shard), in rank order. Some layers need a longer run,
+e.g. the rows around their own rows. Such a run is held in three parts (:class:`PointRun`): points
+of lower ranks, the own shard read in place, and points of higher ranks. Only the outer parts are
+sent; their gradients go back to the owning GPUs.
 """
 
 import itertools
@@ -32,25 +28,25 @@ from anemoi.models.distributed.primitives import _alltoallwrapper
 
 @dataclass(frozen=True)
 class PointRangeExchange:
-    """What one GPU sends and receives so that it can hold the run of points it asked for."""
+    """What one GPU sends and receives to get the run of points it wants."""
 
     send_indices: tuple[Tensor, ...]
-    "For each GPU, the positions within this GPU's shard of the points to send it."
+    "Per GPU, positions in this GPU's shard of the points to send it."
     recv_counts: tuple[int, ...]
-    "For each GPU, how many points to receive from it."
+    "Per GPU, number of points to receive from it."
     wanted: slice
-    "The run of points this GPU asked for, numbered over the whole grid."
+    "The run this GPU wants, in global point numbers."
     own_shard: slice
-    "This GPU's shard, numbered over the whole grid."
+    "This GPU's shard, in global point numbers."
 
     @property
     def num_before(self) -> int:
-        """How many of the wanted points belong to GPUs of lower rank, and so come before the own ones."""
+        """Number of wanted points owned by lower ranks."""
         return max(0, min(self.wanted.stop, self.own_shard.start) - self.wanted.start)
 
     @property
     def own_part(self) -> slice:
-        """The wanted points that this GPU owns, as positions within its shard."""
+        """Wanted points this GPU owns, as positions in its shard."""
         first = max(self.wanted.start, self.own_shard.start)
         stop = max(min(self.wanted.stop, self.own_shard.stop), first)
         return slice(first - self.own_shard.start, stop - self.own_shard.start)
@@ -59,26 +55,25 @@ class PointRangeExchange:
 def build_point_range_exchange(
     shard_sizes: list[int], wanted: list[slice], rank: int, device: torch.device
 ) -> PointRangeExchange:
-    """Plan the exchange that gives every GPU the points it wants from the other GPUs.
+    """Plan the exchange that gives every GPU the points it wants.
 
-    Every GPU calls this with the same ``shard_sizes`` and ``wanted``, so they all agree on what
-    is sent where without talking to each other.
+    All GPUs call this with the same arguments, so they agree on the plan without communicating.
 
     Parameters
     ----------
     shard_sizes : list[int]
-        Number of points each GPU owns, in rank order; GPU ``r`` owns the run after those of GPUs ``0`` to ``r - 1``.
+        Number of points each GPU owns, in rank order.
     wanted : list[slice]
-        The run of points each GPU wants, in rank order.
+        Run of points each GPU wants, in rank order.
     rank : int
-        The rank of this GPU.
+        Rank of this GPU.
     device : torch.device
         Where to put the index tensors.
 
     Returns
     -------
     PointRangeExchange
-        The exchange as seen by this GPU.
+        The exchange seen from this GPU.
     """
     if len(wanted) != len(shard_sizes):
         raise ValueError(f"Got {len(wanted)} wanted runs of points for {len(shard_sizes)} GPUs.")
@@ -93,13 +88,13 @@ def build_point_range_exchange(
         first = max(a.start, b.start)
         return slice(first, max(min(a.stop, b.stop), first))
 
-    # This GPU sends every other GPU the part of its own shard that the other GPU wants.
+    # Send each GPU the part of this shard it wants.
     send_indices = []
     for other, want in enumerate(wanted):
         part = overlap(own, want) if other != rank else slice(own.start, own.start)
         send_indices.append(torch.arange(part.start - own.start, part.stop - own.start, device=device))
 
-    # It receives from every other GPU the part of that GPU's shard that it wants itself.
+    # Receive from each GPU the part of its shard this GPU wants.
     recv_counts = []
     for other, shard in enumerate(shards):
         part = overlap(shard, wanted[rank])
@@ -114,17 +109,11 @@ def build_point_range_exchange(
 
 
 class _FetchPoints(torch.autograd.Function):
-    """Sends every GPU the points it asked for from this GPU's shard.
+    """Send every GPU the points it wants from this shard; the backward sends the gradients back.
 
-    Returns this GPU's own wanted points, a view of its shard, and the points received from the
-    other GPUs in rank order, which is also point order, since the shards follow each other in
-    rank order. The backward pass sends the gradients of the received points back to the GPUs
-    that own them and adds what comes back for the points this GPU sent at their places in its
-    shard.
-
-    The own points go through this function as well, so that everything reading them depends on
-    it. Its backward then runs after all of them, at the same point on every GPU, which keeps the
-    exchanges of all GPUs in the same order.
+    Returns the own wanted points (a view of the shard) and the received points in rank order. The
+    own points pass through here too, so the backward runs after everything that reads them, at the
+    same place on every GPU, which keeps the exchanges of all GPUs in step.
     """
 
     @staticmethod
@@ -152,21 +141,21 @@ class _FetchPoints(torch.autograd.Function):
 
 @dataclass(frozen=True)
 class PointRun:
-    """A run of consecutive points held in three parts, laid out ``(batch, points, channels)``.
+    """A run of consecutive points in three parts, ``(batch, points, channels)`` each.
 
-    ``before`` holds the points owned by GPUs of lower rank, ``own`` a view of this GPU's own points
-    and ``after`` the points owned by GPUs of higher rank. On a single GPU the whole run is ``own``.
+    ``before`` and ``after`` hold points of lower and higher ranks, ``own`` a view of this GPU's
+    points. On one GPU the whole run is ``own``.
     """
 
     start: int
-    "Number of the run's first point, counted over the whole grid."
+    "Global number of the run's first point."
     before: Tensor
     own: Tensor
     after: Tensor
 
     @classmethod
     def whole(cls, x: Tensor) -> "PointRun":
-        """All points of ``x``, laid out ``(batch, points, channels)``, as the run's own part."""
+        """A run whose own part is all of ``x``, ``(batch, points, channels)``."""
         return cls(start=0, before=x[:, :0], own=x, after=x[:, :0])
 
     @property
@@ -174,11 +163,10 @@ class PointRun:
         return self.start + self.before.shape[1] + self.own.shape[1] + self.after.shape[1]
 
     def take(self, points: slice) -> Tensor:
-        """The points ``points`` (numbered over the whole grid) of the run.
+        """The points ``points`` (global numbers) of the run.
 
-        A view of one part when they all lie in it; otherwise the overlapping pieces joined. The
-        result always reads the own part, if need be none of its points, so that the exchange's
-        backward runs only after everything taken from the run (see :class:`_FetchPoints`).
+        A view if they lie in one part, else the pieces joined. Always reads the own part, even if
+        empty, so the exchange's backward runs last (see :class:`_FetchPoints`).
         """
         if points.start < self.start or points.stop > self.stop:
             raise ValueError(f"The points {points} lie outside the run {self.start}..{self.stop}.")
@@ -196,11 +184,7 @@ class PointRun:
 
 
 def assemble_point_run(own: Tensor, received: Tensor, exchange: PointRangeExchange) -> PointRun:
-    """The wanted run from this GPU's own wanted points and the points ``received`` from the other GPUs.
-
-    ``own`` is laid out ``(points, channels)`` and ``received`` holds the received points in rank
-    order, as :class:`_FetchPoints` returns them.
-    """
+    """Assemble the wanted run from the own points ``(points, channels)`` and the ``received`` ones."""
     num_before = exchange.num_before
     return PointRun(
         start=exchange.wanted.start,
@@ -211,21 +195,21 @@ def assemble_point_run(own: Tensor, received: Tensor, exchange: PointRangeExchan
 
 
 def fetch_point_range(x: Tensor, exchange: PointRangeExchange, model_comm_group: Optional[ProcessGroup]) -> PointRun:
-    """The wanted run of points: the own ones read from ``x`` in place, the others fetched from their GPUs.
+    """Fetch the wanted run of points: own ones read in place, the others from their GPUs.
 
     Parameters
     ----------
     x : Tensor
-        This GPU's own points, shape ``(points in the shard, channels)``.
+        This GPU's points, ``(shard points, channels)``.
     exchange : PointRangeExchange
-        The exchange planned by :func:`build_point_range_exchange`.
+        From :func:`build_point_range_exchange`.
     model_comm_group : ProcessGroup, optional
-        The GPUs the points are split across.
+        GPUs the points are split across.
 
     Returns
     -------
     PointRun
-        The wanted points, with a batch dimension of 1.
+        The wanted points, batch dimension 1.
     """
     own, received = _FetchPoints.apply(
         x, exchange.send_indices, exchange.recv_counts, exchange.own_part, model_comm_group

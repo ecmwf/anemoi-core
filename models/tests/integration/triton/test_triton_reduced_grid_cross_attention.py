@@ -120,11 +120,7 @@ def test_triton_float32_follows_torch_matmul_precision(query_name, key_name):
     ("query_name", "key_name", "kernel_size"), [("O8", "O16", (5, 5)), ("O16", "O8", (3, 5)), ("H8", "H4", (3, 5))]
 )
 def test_triton_bfloat16_gradients_with_offset_keys(query_name, key_name, kernel_size):
-    """Keys sharing an offset 100 times their spread still give gradients as accurate as bfloat16 allows.
-
-    The exact gradients do not depend on such an offset; rounding the score gradient to bfloat16 before
-    the products with the keys and queries would leak it into dQ (https://arxiv.org/abs/2609.34272).
-    """
+    """Keys sharing a large common offset do not leak it into dQ (GProj, https://arxiv.org/abs/2609.34272)."""
     query_grid, key_grid, head_dim = _grid(query_name), _grid(key_name), 64
     q, k, v = _tensors(query_grid, key_grid, head_dim, torch.float32)
     offset = torch.randn(head_dim, generator=torch.Generator().manual_seed(1)).cuda()

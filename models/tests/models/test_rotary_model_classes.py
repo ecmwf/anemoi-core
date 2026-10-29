@@ -9,9 +9,8 @@
 
 """Rotary embeddings reach every transformer part of every model class.
 
-Each model is built with rotary embeddings in its processor(s) and transformer mappers. The module
-checks that the queries and keys it turns belong to the nodes it was set up for, so a forward and
-backward pass through the whole model shows that every part received the coordinates of its own nodes.
+The rotary module checks that it gets the nodes it was built for, so a forward and backward pass
+shows that every part got the coordinates of its own nodes.
 """
 
 import copy

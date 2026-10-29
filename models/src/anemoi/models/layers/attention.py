@@ -51,21 +51,17 @@ class MultiHeadSelfAttention(nn.Module):
     The config parameter "model.processor.attention_implementation" is used to control which attention implementation is used.
 
     "scaled_dot_product_attention" (SDPA)
-        SDPA is a pytorch function. It runs on CPUs and GPUs. A sliding window becomes a mask of one
-        byte per query-key pair.
+        PyTorch attention, on CPUs and GPUs. A sliding window becomes a dense mask.
 
     "triton_attention"
-        The flash attention algorithm written in Triton, for GPUs. It does self attention and cross
-        attention between sequences of any length, and sliding windows but not dropout.
+        Flash attention in Triton, for GPUs. Self and cross attention, sliding windows, no dropout.
 
-    With both, a sliding window needs queries and keys of the same length: position i of one is
-    position i of the other. Cross attention between sequences of different lengths attends to every key.
+    For both, a sliding window needs queries and keys of the same length.
 
     "neighbourhood"
-        Each query attends only to the keys around it on a registered grid family, such as octahedral
-        or HEALPix grids, or the refined icosahedron. The grids and the neighbourhood size come from ``neighbourhood``. The
-        ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND environment variable does not change it, as the
-        other implementations attend to different keys.
+        Each query attends to the keys around it on a grid (octahedral, HEALPix, icosahedral), set
+        by ``neighbourhood``. Not affected by ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND, since
+        the other implementations attend to different keys.
     """
 
     def __init__(
@@ -108,11 +104,9 @@ class MultiHeadSelfAttention(nn.Module):
             A predefined string which selects which underlying attention
             implementation, by default "scaled_dot_product_attention"
         neighbourhood : Neighbourhood, optional
-            The grids and neighbourhood of the "neighbourhood" implementation (see
-            :func:`anemoi.models.layers.neighbourhood_attention.build_grid_neighbourhood`)
+            Grids and settings for the "neighbourhood" implementation.
         rotary : SphericalRotaryEmbedding, optional
-            Rotary position embeddings that turn queries and keys by the positions of their nodes,
-            shared by the attention layers of a model component; works with every implementation
+            Rotary position embeddings, shared by the attention layers of a model component.
         """
         super().__init__()
 
@@ -223,7 +217,7 @@ class MultiHeadSelfAttention(nn.Module):
             query = self.q_norm(query)
             key = self.k_norm(key)
 
-        # Every node is present here (the heads are split across GPUs, not the nodes), in node order.
+        # All nodes are here in node order; across GPUs the heads are split, not the nodes.
         if self.rotary is not None:
             query, key = self.rotary(query, key)
 
@@ -270,25 +264,23 @@ class MultiHeadSelfAttention(nn.Module):
         return self.attention_computation(query, key, value, grid_shard_sizes.nodes, batch_size, model_comm_group)
 
     def attend_band(self, query: Tensor, key: Tensor, value: Tensor, band: NeighbourhoodBand) -> Tensor:
-        """Neighbourhood attention for one band of queries, followed by the output projection.
+        """Neighbourhood attention and output projection for one band of queries.
 
-        Does for one band what :meth:`attention_computation` does for the whole grid, on a single
-        GPU: the same normalisation, rotary turn, attention and projection of every point.
+        Same as :meth:`attention_computation` on the whole grid, restricted to the band.
 
         Parameters
         ----------
         query : Tensor
-            Projected queries of the band, shape ``(batch, band query points, channels)``.
+            Projected queries of the band, ``(batch, band query points, channels)``.
         key, value : Tensor
-            Projected keys and values of the key rows the band reaches, shape
-            ``(batch, band key points, channels)``.
+            Projected keys and values of the band, ``(batch, band key points, channels)``.
         band : NeighbourhoodBand
-            The band, with its own neighbourhood attention.
+            The band.
 
         Returns
         -------
         Tensor
-            Attention output of the band, shape ``(batch, band query points, embed_dim)``.
+            ``(batch, band query points, embed_dim)``.
         """
         query, key, value = (
             einops.rearrange(t, "batch grid (heads vars) -> batch heads grid vars", heads=self.num_heads)
@@ -318,15 +310,14 @@ class MultiHeadSelfAttention(nn.Module):
         Parameters
         ----------
         x : Tensor
-            Input of the band's key points, which include its query points, shape
-            ``(batch, band key points, embed_dim)``.
+            Input of the band's key points (which include its queries), ``(batch, band key points, embed_dim)``.
         band : NeighbourhoodBand
             The band.
 
         Returns
         -------
         Tensor
-            Attention output of the band's query points, shape ``(batch, band query points, embed_dim)``.
+            ``(batch, band query points, embed_dim)``.
         """
         queries = x[:, band.queries_in_keys]
         return self.attend_band(self.lin_q(queries), self.lin_k(x), self.lin_v(x), band)
@@ -360,21 +351,21 @@ class SDPAAttentionWrapper(AttentionWrapper):
 
     @staticmethod
     def create_sliding_window_mask(num_queries: int, num_keys: int, window_size: int, device="cpu") -> Tensor:
-        """Mask of the keys within ``window_size`` positions of each query, on either side.
+        """Mask of the keys within ``window_size`` positions of each query.
 
         Parameters
         ----------
         num_queries, num_keys : int
             Number of queries and keys.
         window_size : int
-            Number of positions a query reaches on each side.
+            Positions a query reaches on each side.
         device : str
             Device for the mask tensor.
 
         Returns
         -------
         Tensor
-            Boolean mask of shape ``(num_queries, num_keys)``, True where the query attends to the key.
+            Boolean ``(num_queries, num_keys)``, True where the query attends to the key.
         """
         query_idx = torch.arange(num_queries, device=device)[:, None]
         key_idx = torch.arange(num_keys, device=device)[None, :]
@@ -392,8 +383,7 @@ class SDPAAttentionWrapper(AttentionWrapper):
     ):
         check_window_lengths(query, key, window_size)
         if window_size is not None and self.attn_mask is None:
-            # The mask is the same for every forward pass as long as the sequence lengths do not
-            # change, so it is built once and kept.
+            # Built once; assumes the sequence lengths do not change.
             self.attn_mask = self.create_sliding_window_mask(
                 query.shape[2], key.shape[2], window_size, device=query.device
             )
@@ -402,7 +392,7 @@ class SDPAAttentionWrapper(AttentionWrapper):
             query,
             key,
             value,
-            # No mask for global attention; the sliding window mask otherwise.
+            # None for global attention.
             attn_mask=self.attn_mask,
             is_causal=False,
             dropout_p=dropout_p,
@@ -412,10 +402,7 @@ class SDPAAttentionWrapper(AttentionWrapper):
 
 
 class TritonAttentionWrapper(AttentionWrapper):
-    """Wrapper for Anemoi Triton attention, the flash attention algorithm written in Triton.
-
-    Queries and keys may differ in number, as in the transformer mappers.
-    """
+    """Flash attention in Triton. Queries and keys may differ in number, as in the mappers."""
 
     unsupported = frozenset({"dropout_p"})
 
@@ -484,15 +471,14 @@ class MultiHeadCrossAttention(MultiHeadSelfAttention):
         Parameters
         ----------
         x : PairTensor
-            Input of the band's key points, shape ``(batch, band key points, embed_dim)``, and of its
-            query points, shape ``(batch, band query points, embed_dim)``.
+            Inputs of the band's key points and query points, ``(batch, points, embed_dim)`` each.
         band : NeighbourhoodBand
             The band.
 
         Returns
         -------
         Tensor
-            Attention output of the band's query points, shape ``(batch, band query points, embed_dim)``.
+            ``(batch, band query points, embed_dim)``.
         """
         return self.attend_band(self.lin_q(x[1]), self.lin_k(x[0]), self.lin_v(x[0]), band)
 

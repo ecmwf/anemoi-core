@@ -102,9 +102,8 @@ class TriNodes(IcosahedralNodes):
     Attributes
     ----------
     ordering : str
-        Order of the nodes: "latlon" (by latitude, then longitude) or "diamonds" (diamond by
-        diamond, the order of the icosahedral neighbourhood attention kernels, see
-        :mod:`anemoi.graphs.generate.icosahedral_diamonds`).
+        "latlon" (by latitude, then longitude) or "diamonds" (the order the icosahedral
+        neighbourhood attention needs, see :mod:`anemoi.graphs.generate.icosahedral_diamonds`).
     """
 
     multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.TriNodesEdgeBuilder"

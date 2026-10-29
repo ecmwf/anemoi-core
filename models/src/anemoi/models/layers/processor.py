@@ -271,14 +271,13 @@ class TransformerProcessor(BaseProcessor):
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         neighbourhood : dict, optional
-            Grid family, its settings and backend for attention_implementation "neighbourhood",
-            see :func:`anemoi.models.layers.neighbourhood_attention.build_grid_neighbourhood`
+            Settings of attention_implementation "neighbourhood"; see
+            :func:`anemoi.models.layers.neighbourhood_attention.build_grid_neighbourhood`
         rotary_embeddings : dict, optional
-            Highest frequency and backend of rotary position embeddings, shared by all layers,
-            see :func:`anemoi.models.layers.spherical_rotary.build_spherical_rotary`
+            Rotary position embeddings, shared by all layers; see
+            :func:`anemoi.models.layers.spherical_rotary.build_spherical_rotary`
         node_coords : Tensor, optional
-            Latitude and longitude of the processor nodes in radians, used by neighbourhood attention
-            and rotary embeddings
+            Latitude and longitude of the processor nodes in radians
         """
         super().__init__(
             num_layers=num_layers,
@@ -310,8 +309,7 @@ class TransformerProcessor(BaseProcessor):
             rotary=build_spherical_rotary(rotary_embeddings, (attn_channels or num_channels) // num_heads, node_coords),
         )
 
-        # The grid family of neighbourhood attention says when the layers work through bands of
-        # queries, and how each GPU gathers their inputs (see forward_in_bands).
+        # How neighbourhood attention splits the work into bands, or None (see forward_in_bands).
         self.split: Optional[LayerSplit] = (
             None if grid_neighbourhood is None else grid_neighbourhood.layer_split(cpu_offload)
         )
@@ -350,16 +348,10 @@ class TransformerProcessor(BaseProcessor):
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
     ) -> Tensor:
-        """The layers worked through band by band, with one checkpoint per band of each layer.
+        """Run the layers band by band, with one checkpoint per band of each layer, to save memory.
 
-        Each band of a layer reads the inputs of its key points, which include its query points,
-        and gives the outputs of its query points. Only one band is held in memory at a time,
-        besides the input and output of the layer.
-
-        When the points are split across GPUs, ``x`` holds this GPU's own points and so does the
-        output. Before each layer the GPU fetches the inputs of the points of other GPUs that its
-        bands reach, one exchange per layer, and the bands then run without communication; how
-        depends on the grid family (see :class:`anemoi.models.layers.neighbourhood_attention.LayerSplit`).
+        Across GPUs, ``x`` and the output hold this GPU's own points. Before each layer the GPU
+        fetches the points of other GPUs its bands reach; the bands then run without communication.
         """
         sharded = model_comm_group is not None and model_comm_group.size() > 1
         work = self.split.work(

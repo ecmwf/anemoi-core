@@ -7,12 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Neighbourhood attention on the refined icosahedron: every point attends to the points within ``radius`` hops.
+"""Neighbourhood attention on the refined icosahedron (grid family ``icosahedral``).
 
-The grid family ``icosahedral`` of :data:`anemoi.models.layers.neighbourhood_attention.GRID_FAMILIES`.
-The lookup tables and exception lists that find each point's neighbours are in
-:mod:`anemoi.models.layers.icosahedral_grid`, the kernels in
-:mod:`anemoi.models.triton.icosahedral_attention`.
+Every point attends to the points within ``radius`` hops. The lookup tables are in
+:mod:`anemoi.models.layers.icosahedral_grid`, the kernels in :mod:`anemoi.models.triton.icosahedral_attention`.
 """
 
 from __future__ import annotations
@@ -43,10 +41,10 @@ from anemoi.models.layers.neighbourhood_attention import check_settings
 
 @dataclass(frozen=True, eq=False)
 class IcosahedralGridNeighbourhood(Neighbourhood):
-    """Neighbourhood attention on the refined icosahedron: every point attends to the points within ``radius`` hops.
+    """Neighbourhood of the refined icosahedron: the points within ``radius`` hops.
 
-    Self attention only, with the nodes stored in diamond order (anemoi-graphs ``TriNodes`` with
-    ``ordering: diamonds``); see :mod:`anemoi.models.layers.icosahedral_grid`. Configured as::
+    Self attention only, nodes in diamond order (anemoi-graphs ``TriNodes`` with
+    ``ordering: diamonds``). Configured as::
 
         attention_implementation: neighbourhood
         neighbourhood:
@@ -63,22 +61,22 @@ class IcosahedralGridNeighbourhood(Neighbourhood):
     def from_config(
         cls, config: dict, key_coords: Optional[Tensor], query_coords: Optional[Tensor] = None
     ) -> IcosahedralGridNeighbourhood:
-        """Set up icosahedral neighbourhood attention from its configuration and the node coordinates.
+        """Build the neighbourhood from its config and the node coordinates.
 
         Parameters
         ----------
         config : dict
-            ``grid: icosahedral``, ``radius`` (hops) and optionally ``backend`` (``"triton"``,
-            the default, or ``"sdpa"``).
+            ``grid: icosahedral``, ``radius`` (hops) and optional ``backend`` (``"triton"``, default,
+            or ``"sdpa"``).
         key_coords : Tensor
-            Latitude and longitude of the nodes in radians, shape ``(num_nodes, 2)``.
+            Latitude and longitude of the nodes in radians, ``(num_nodes, 2)``.
         query_coords : Tensor, optional
-            Must be left out: the icosahedral kernels only do self attention.
+            Must be None: self attention only.
 
         Returns
         -------
         IcosahedralGridNeighbourhood
-            The lookup tables of the mesh and the backend.
+            The lookup tables and the backend.
         """
         _, backend = check_settings(config, {"grid", "radius", "backend"}, key_coords, query_coords)
         if "radius" not in config:
@@ -92,22 +90,21 @@ class IcosahedralGridNeighbourhood(Neighbourhood):
 
     @cached_property
     def whole_shard(self) -> IcosahedralShard:
-        """The tables and lists for all points on one GPU."""
+        """Tables for all points on one GPU."""
         return self.tables.shard()
 
     def attention_module(self) -> IcosahedralAttentionWrapper:
         return IcosahedralAttentionWrapper(self, self.whole_shard)
 
     def layer_split(self, cpu_offload: bool) -> Optional[IcosahedralShards]:
-        """GPU shards with a halo, when the points are split across GPUs; one GPU runs all points at once."""
+        """Shards with a halo when the points are split across GPUs; one GPU runs all points at once."""
         return None if cpu_offload else IcosahedralShards(self)
 
 
 def check_diamond_order(coords: Tensor, layout: IcosahedralDiamonds) -> None:
-    """Check that the nodes at ``coords`` (radians) are the refined icosahedron in diamond order.
+    """Check that the nodes are the refined icosahedron in diamond order.
 
-    In diamond order the points joined by the lattice are neighbours on the sphere, so all lattice
-    edges are about equally long; in any other order some of them span the globe.
+    In diamond order all lattice edges are about equally long; in any other order some span the globe.
     """
     lat, lon = coords[:, 0].double(), coords[:, 1].double()
     xyz = torch.stack([lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()], dim=1)
@@ -122,11 +119,7 @@ def check_diamond_order(coords: Tensor, layout: IcosahedralDiamonds) -> None:
 
 
 class IcosahedralAttentionWrapper(NeighbourhoodAttention):
-    """Neighbourhood attention on the refined icosahedron for the queries and keys of one shard.
-
-    Takes ``(batch, heads, points, head_dim)`` queries of the shard's own points and keys and
-    values of its key points (see :class:`anemoi.models.layers.icosahedral_grid.IcosahedralShard`).
-    """
+    """Neighbourhood attention on the refined icosahedron for the queries and keys of one shard."""
 
     def __init__(self, neighbourhood: IcosahedralGridNeighbourhood, shard: IcosahedralShard) -> None:
         super().__init__(neighbourhood)
@@ -160,7 +153,7 @@ class IcosahedralAttentionWrapper(NeighbourhoodAttention):
 
 @dataclass(frozen=True, eq=False)
 class IcosahedralShardPlan:
-    """The work of one GPU in icosahedral attention: its own points as one band, and the halo it fetches."""
+    """Plan of one GPU: its own points as one band, and the halo it fetches."""
 
     band: NeighbourhoodBand
     halo_info: HaloInfo
@@ -168,7 +161,7 @@ class IcosahedralShardPlan:
 
 @dataclass(eq=False)
 class HaloWork(GpuWork):
-    """The work of one GPU in a layer: one band of its own points, whose keys are those points and the halo."""
+    """Work of one GPU in a layer: one band of its own points, with those points and the halo as keys."""
 
     plan: IcosahedralShardPlan
     model_comm_group: ProcessGroup
@@ -192,12 +185,10 @@ class HaloWork(GpuWork):
 
 
 class IcosahedralShards(LayerSplit):
-    """The plans of icosahedral attention for each way of splitting the points across GPUs.
+    """Icosahedral attention split across GPUs.
 
-    Each GPU owns a run of consecutive points in diamond order. Before each layer it fetches the
-    points of other GPUs that its queries reach (its halo); attention itself needs no
-    communication. Every GPU works out the halos of all GPUs, so they agree on what is sent where
-    without talking to each other. The plans are worked out once for each way of splitting.
+    Each GPU owns a run of points in diamond order and fetches its halo before each layer. Every GPU
+    works out all halos, so they agree on the exchange without communicating. Plans are cached per split.
     """
 
     def __init__(self, neighbourhood: IcosahedralGridNeighbourhood) -> None:
@@ -205,7 +196,7 @@ class IcosahedralShards(LayerSplit):
         self._plans: dict[tuple, IcosahedralShardPlan] = {}
 
     def __getstate__(self) -> dict:
-        # The plans hold tensors on a device; they are worked out again where the model is loaded.
+        # Plans hold device tensors; they are rebuilt after loading.
         state = self.__dict__.copy()
         state["_plans"] = {}
         return state
@@ -228,7 +219,7 @@ class IcosahedralShards(LayerSplit):
         return HaloWork(self.plan(query_shard_sizes, model_comm_group.rank(), device), model_comm_group)
 
     def plan(self, shard_sizes: list[int], rank: int, device: torch.device) -> IcosahedralShardPlan:
-        """The plan of GPU ``rank`` when GPU ``r`` owns ``shard_sizes[r]`` points, in rank order."""
+        """Plan of GPU ``rank``, with ``shard_sizes`` points per GPU in rank order."""
         cache_key = (tuple(shard_sizes), rank, device)
         if cache_key not in self._plans:
             self._plans[cache_key] = self._make_plan(list(shard_sizes), rank, device)
