@@ -238,6 +238,57 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         assert torch.allclose(x_src_sorted, x_src_unsorted, atol=1e-4)
         assert torch.allclose(x_dst_sorted, x_dst_unsorted, atol=1e-4)
 
+    def test_graph_plan_is_cached(self, mapper, pair_tensor, graph_provider):
+        x = pair_tensor
+        batch_size = 1
+        shard_info = BipartiteGraphShardInfo(
+            src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
+        )
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+
+        with torch.no_grad():
+            out_first = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
+            assert len(mapper._graph_plan_cache) == 1
+            plan = next(iter(mapper._graph_plan_cache.values()))
+
+            out_second = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
+            assert len(mapper._graph_plan_cache) == 1
+            assert next(iter(mapper._graph_plan_cache.values())) is plan
+
+        assert torch.allclose(out_first[1], out_second[1], atol=1e-4)
+
+    def test_graph_plan_cache_is_bounded(self, mapper, pair_tensor, graph_provider, monkeypatch):
+        monkeypatch.setattr("anemoi.models.layers.mapper.MAPPER_GRAPH_CACHE_SIZE", 2)
+        x = pair_tensor
+        batch_size = 1
+        shard_info = BipartiteGraphShardInfo(
+            src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
+        )
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+
+        with torch.no_grad():
+            for num_chunks in (1, 2, 3):
+                mapper.num_chunks = num_chunks
+                mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
+
+        assert len(mapper._graph_plan_cache) == 2
+        # the least recently used plan (num_chunks=1) is removed
+        assert [plan.chunk_partition.num_parts for plan in mapper._graph_plan_cache.values()] == [2, 3]
+
+    def test_unsorted_edges_do_not_use_graph_plan_cache(self, mapper, pair_tensor, graph_provider):
+        x = pair_tensor
+        batch_size = 1
+        shard_info = BipartiteGraphShardInfo(
+            src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
+        )
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+        perm = torch.randperm(edge_index.shape[1], device=edge_index.device)
+
+        with torch.no_grad():
+            mapper.forward(x, batch_size, shard_info, edge_attr[perm], edge_index[:, perm], edges_are_dst_sorted=False)
+
+        assert len(mapper._graph_plan_cache) == 0
+
     def test_strategy(self, mapper, pair_tensor, graph_provider):
         x = pair_tensor
         batch_size = 1

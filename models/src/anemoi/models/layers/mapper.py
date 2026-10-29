@@ -12,6 +12,8 @@ import logging
 import os
 from abc import ABC
 from abc import abstractmethod
+from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Optional
 
 import torch
@@ -25,12 +27,15 @@ from torch_geometric.typing import PairTensor
 from anemoi.models.distributed.graph import ensure_sharded
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.khop_edges import GraphPartition
+from anemoi.models.distributed.khop_edges import LocalGraph
+from anemoi.models.distributed.khop_edges import apply_local_graph
 from anemoi.models.distributed.khop_edges import build_graph_partition
 from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
+from anemoi.models.distributed.khop_edges import build_local_graph
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
-from anemoi.models.distributed.khop_edges import shard_graph_to_local
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
@@ -46,6 +51,28 @@ LOGGER = logging.getLogger(__name__)
 # Number of chunks used in inference (https://github.com/ecmwf/anemoi-core/pull/406)
 NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
 NUM_CHUNKS_INFERENCE_MAPPER = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER", NUM_CHUNKS_INFERENCE))
+
+# Maximum number of graph topologies that each mapper keeps in its cache. Set to 0 to disable the cache.
+MAPPER_GRAPH_CACHE_SIZE = int(os.environ.get("ANEMOI_MAPPER_GRAPH_CACHE_SIZE", "8"))
+
+
+@dataclass(frozen=True)
+class MapperGraphPlan:
+    """Topology of the mapper graph on this rank, kept for each forward pass on the same graph.
+
+    Parameters
+    ----------
+    local_graph : LocalGraph, optional
+        Topology of the local graph shard. None if the model is not distributed.
+    chunk_partition : GraphPartition
+        Partition of the local graph shard into chunks.
+    chunk_topologies : tuple[tuple[Adj, Tensor], ...]
+        For each chunk, the relabeled edge index and the connected src nodes.
+    """
+
+    local_graph: Optional[LocalGraph]
+    chunk_partition: GraphPartition
+    chunk_topologies: tuple[tuple[Adj, Tensor], ...]
 
 
 class BaseMapper(nn.Module, ABC):
@@ -239,11 +266,84 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         self.emb_nodes_dst = Linear(self.in_channels_dst, self.hidden_dim)
 
         self.shard_strategy = shard_strategy
+        self._graph_plan_cache: OrderedDict[tuple, MapperGraphPlan] = OrderedDict()
 
         assert shard_strategy in ["heads", "edges"], (
             f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
             f"Supported strategies are 'heads' and 'edges'."
         )
+
+    @torch.compiler.disable
+    def _get_or_build_graph_plan(
+        self,
+        x: PairTensor,
+        shard_info: BipartiteGraphShardInfo,
+        batch_size: int,
+        edge_index: Adj,
+        model_comm_group: Optional[ProcessGroup] = None,
+        use_cache: bool = True,
+    ) -> MapperGraphPlan:
+        """Return the graph plan for this graph from the cache, or build it.
+
+        The cache key contains only the tensor sizes and the shard sizes, so the
+        mapper graph and its edge order must not change between calls with the same
+        sizes. The cache keeps the most recently used ``MAPPER_GRAPH_CACHE_SIZE`` plans.
+        If use_cache is False, the plan is built and not kept.
+
+        This function is not compiled, thus torch.compile does not make guards on
+        the cache contents.
+        """
+        is_distributed = model_is_distributed(model_comm_group)
+        num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
+        cache_key = (
+            model_comm_group.size() if is_distributed else 1,
+            torch.distributed.get_rank(group=model_comm_group) if is_distributed else 0,
+            batch_size,
+            num_chunks,
+            str(edge_index.device),
+            x[0].shape[0],
+            x[1].shape[0],
+            edge_index.shape[1],
+            tuple(shard_info.src_nodes) if shard_info.src_is_sharded() else None,
+            tuple(shard_info.dst_nodes) if shard_info.dst_is_sharded() else None,
+            tuple(shard_info.edges) if shard_info.edges_are_sharded() else None,
+        )
+
+        plan = self._graph_plan_cache.get(cache_key) if use_cache else None
+        if plan is not None:
+            self._graph_plan_cache.move_to_end(cache_key)
+            return plan
+
+        LOGGER.debug("Building graph plan for %s with key %s", self.__class__.__name__, cache_key)
+
+        local_graph = None
+        num_nodes = (x[0].shape[0], x[1].shape[0])
+        if is_distributed:
+            # build a GraphPartition for the distributed shard (across GPUs)
+            shard_partition = build_graph_partition_from_shard_info(edge_index, x, shard_info, model_comm_group)
+            local_graph = build_local_graph(shard_partition, edge_index, shard_info, model_comm_group)
+            edge_index = local_graph.edge_index
+            my_rank = torch.distributed.get_rank(group=model_comm_group)
+            num_nodes = (local_graph.src_ids.shape[0], shard_partition.dst_splits[my_rank])
+
+        # build a second GraphPartition for local chunking within this shard
+        chunk_partition = build_graph_partition(edge_index, num_parts=num_chunks, num_nodes=num_nodes)
+        chunk_topologies = tuple(
+            chunk_partition.materialise_topology(chunk_id, edge_index) for chunk_id in range(chunk_partition.num_parts)
+        )
+
+        plan = MapperGraphPlan(
+            local_graph=local_graph,
+            chunk_partition=chunk_partition,
+            chunk_topologies=chunk_topologies,
+        )
+
+        if use_cache and MAPPER_GRAPH_CACHE_SIZE > 0:
+            self._graph_plan_cache[cache_key] = plan
+            while len(self._graph_plan_cache) > MAPPER_GRAPH_CACHE_SIZE:
+                self._graph_plan_cache.popitem(last=False)
+
+        return plan
 
     def prepare_edge_sharding_wrapper(
         self,
@@ -267,51 +367,41 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             edges_are_dst_sorted=edges_are_dst_sorted,
         )
 
-        # build a GraphPartition for the distributed shard (across GPUs)
-        shard_partition = build_graph_partition_from_shard_info(
-            edge_index,
-            x,
-            shard_info,
-            model_comm_group,
+        # Edges given in a different order with the same sizes would hit a cached plan with
+        # the wrong edge order, so only edges that are already dst-sorted use the cache.
+        plan = self._get_or_build_graph_plan(
+            x, shard_info, batch_size, edge_index, model_comm_group, use_cache=edges_are_dst_sorted
         )
 
-        # shard to local rank: gathers src, shards dst+edges, relabels dst, drops unconnected src
-        (x_src, x_dst), edge_attr, edge_index, shard_info, cond = shard_graph_to_local(
-            shard_partition,
-            x,
-            edge_attr,
-            edge_index,
-            shard_info,
-            model_comm_group,
-            cond=cond,
-        )
+        if plan.local_graph is not None:
+            # shard to local rank: gathers src, shards dst+edges, drops unconnected src
+            x, edge_attr, cond = apply_local_graph(
+                plan.local_graph,
+                x,
+                edge_attr,
+                shard_info,
+                model_comm_group,
+                cond=cond,
+            )
+            shard_info = plan.local_graph.shard_info
 
-        # build a second GraphPartition for local chunking within this shard
-        num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
-        chunk_partition = build_graph_partition(
-            edge_index,
-            num_parts=num_chunks,
-            num_nodes=(x_src.shape[0], x_dst.shape[0]),
-        )
-
-        return x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition
+        return x[0], x[1], edge_attr, shard_info, cond, plan
 
     def run_processor_chunk(
         self,
-        chunk_partition: GraphPartition,
+        plan: MapperGraphPlan,
         chunk_id: int,
         x: tuple[Tensor, Tensor],
         edge_attr: Tensor,
-        edge_index: Adj,
         shard_info: BipartiteGraphShardInfo,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[tuple[Tensor, Tensor]] = None,
         **kwargs,
     ) -> Tensor:
-        # O(1) slicing: extract subgraph for this chunk
-        (x_src_chunk, x_dst_chunk), edge_attr_chunk, edge_index_chunk, cond_chunk = chunk_partition.materialise(
-            chunk_id, x, edge_attr, edge_index, cond=cond
+        # O(1) slicing with the cached topology of this chunk
+        (x_src_chunk, x_dst_chunk), edge_attr_chunk, edge_index_chunk, cond_chunk = plan.chunk_partition.materialise(
+            chunk_id, x, edge_attr, edge_index=None, cond=cond, topology=plan.chunk_topologies[chunk_id]
         )
         chunk_size = (x_src_chunk.shape[0], x_dst_chunk.shape[0])
 
@@ -345,7 +435,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
-        x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition = maybe_checkpoint(
+        x_src, x_dst, edge_attr, shard_info, cond, plan = maybe_checkpoint(
             self.prepare_edge_sharding_wrapper,
             self.gradient_checkpointing,
             x,
@@ -362,16 +452,15 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         out_type = torch.get_autocast_gpu_dtype() if torch.is_autocast_enabled() else x_dst.dtype
         out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=out_type)
 
-        for chunk_id in range(chunk_partition.num_parts):
-            dst_range = chunk_partition._get_dst_range(chunk_id)
+        for chunk_id in range(plan.chunk_partition.num_parts):
+            dst_range = plan.chunk_partition._get_dst_range(chunk_id)
             out_dst[dst_range] = maybe_checkpoint(
                 self.run_processor_chunk,
                 self.gradient_checkpointing,
-                chunk_partition,
+                plan,
                 chunk_id,
                 (x_src, x_dst),
                 edge_attr,
-                edge_index,
                 shard_info,
                 batch_size,
                 model_comm_group,

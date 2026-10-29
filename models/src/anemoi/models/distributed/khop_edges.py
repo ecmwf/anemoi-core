@@ -86,8 +86,9 @@ class GraphPartition:
         partition_id: int,
         x: PairTensor,
         edge_attr: Tensor,
-        edge_index: Adj,
+        edge_index: Optional[Adj],
         cond: Optional[PairTensor] = None,
+        topology: Optional[tuple[Adj, Tensor]] = None,
     ) -> tuple[PairTensor, Tensor, Adj, Tensor, Optional[PairTensor]]:
         """Materialise a single partition by slicing nodes, edges and conditioning.
 
@@ -102,10 +103,13 @@ class GraphPartition:
             Node features (src, dst).
         edge_attr : Tensor
             Edge attributes.
-        edge_index : Adj
-            Edge indices (assumed dst-sorted).
+        edge_index : Adj, optional
+            Edge indices (assumed dst-sorted). Not used if topology is given.
         cond : tuple[Tensor, Tensor], optional
             Conditioning tensors (cond_src, cond_dst).
+        topology : tuple[Adj, Tensor], optional
+            The result of ``materialise_topology`` for this partition. Give it to
+            use it again. If None, it is calculated.
 
         Returns
         -------
@@ -115,19 +119,17 @@ class GraphPartition:
         """
         x_src, x_dst = x
 
-        # slice edges and dst nodes for this partition
-        edge_range = self._get_edge_range(partition_id)
-        edge_attr_subset = edge_attr[edge_range]
-        edge_index_subset = edge_index[:, edge_range].clone()  # clone to avoid in-place corruption
+        if topology is None:
+            topology = self.materialise_topology(partition_id, edge_index)
+        edge_index_subset, src_ids = topology
 
+        # slice edges and dst nodes for this partition
+        edge_attr_subset = edge_attr[self._get_edge_range(partition_id)]
         dst_range = self._get_dst_range(partition_id)
         x_dst_subset = x_dst[dst_range]
 
-        # relabel dst indices to local [0, partition_dst_size)
-        self._relabel_dst_nodes(edge_index_subset, partition_id)
-
-        # drop src nodes with no edges in this partition
-        x_src_subset, edge_index_subset, src_ids = _drop_unconnected_src_nodes(x_src, edge_index_subset)
+        # keep only the src nodes with edges in this partition
+        x_src_subset = x_src[src_ids]
 
         # subset conditioning if provided
         cond_subset = None
@@ -136,6 +138,34 @@ class GraphPartition:
             cond_subset = (cond_src[src_ids], cond_dst[dst_range])
 
         return (x_src_subset, x_dst_subset), edge_attr_subset, edge_index_subset, cond_subset
+
+    def materialise_topology(self, partition_id: int, edge_index: Adj) -> tuple[Adj, Tensor]:
+        """Get the relabeled edge index and the connected src nodes of a single partition.
+
+        The result is a function of the graph topology only. Thus, you can keep it
+        and use it again for each forward pass on the same graph.
+
+        Parameters
+        ----------
+        partition_id : int
+            The partition to materialise.
+        edge_index : Adj
+            Edge indices (assumed dst-sorted).
+
+        Returns
+        -------
+        tuple[Adj, Tensor]
+            Edge index with src and dst relabeled to the partition, and the
+            indices of the src nodes that have edges in this partition.
+        """
+        # clone to avoid in-place corruption
+        edge_index_subset = edge_index[:, self._get_edge_range(partition_id)].clone()
+
+        # relabel dst indices to local [0, partition_dst_size)
+        self._relabel_dst_nodes(edge_index_subset, partition_id)
+
+        # drop src nodes with no edges in this partition
+        return _compact_src_nodes(edge_index_subset, self.num_nodes[0])
 
     def _get_edge_range(self, partition_id: int) -> slice:
         start, end = get_partition_range(self.edge_splits, partition_id)
@@ -323,6 +353,149 @@ def shard_edges_1hop(
     return edge_attr, edge_index, edge_shard_sizes
 
 
+@dataclass(frozen=True)
+class LocalGraph:
+    """Topology of the local graph shard of one rank.
+
+    It is a function of the graph topology and the shard sizes only. Thus, you can
+    keep it and use it again for each forward pass on the same graph.
+
+    Parameters
+    ----------
+    edge_index : Adj
+        Local edge index. Src indices refer to ``x_src_full[src_ids]`` and dst
+        indices refer to the local dst shard.
+    src_ids : Tensor
+        Indices of the src nodes (in the full src node set) that have local edges.
+    shard_info : BipartiteGraphShardInfo
+        Shard metadata after sharding to the local rank.
+    """
+
+    edge_index: Adj
+    src_ids: Tensor
+    shard_info: BipartiteGraphShardInfo
+
+
+def build_local_graph(
+    partition: GraphPartition,
+    edge_index: Adj,
+    shard_info: BipartiteGraphShardInfo,
+    model_comm_group: ProcessGroup,
+) -> LocalGraph:
+    """Build the topology of the local graph shard from precomputed partition metadata.
+
+    The model communication group must be distributed.
+
+    Parameters
+    ----------
+    partition : GraphPartition
+        Precomputed partition metadata.
+    edge_index : Adj
+        Edge indices (assumed dst-sorted).
+    shard_info : BipartiteGraphShardInfo
+        Current shard metadata.
+    model_comm_group : ProcessGroup
+        Model communication group.
+
+    Returns
+    -------
+    LocalGraph
+        Topology of the local graph shard.
+    """
+    assert (
+        model_comm_group.size() == partition.num_parts
+    ), f"Expected comm group size {partition.num_parts} but got {model_comm_group.size()}"
+
+    my_rank = torch.distributed.get_rank(group=model_comm_group)
+
+    # validate dst nodes
+    if shard_info.dst_is_sharded():
+        assert (
+            shard_info.dst_nodes == partition.dst_splits
+        ), f"Expected dst shard shapes {partition.dst_splits} but got {shard_info.dst_nodes}"
+
+    # shard or validate edges
+    if shard_info.edges_are_sharded():
+        assert (
+            shard_info.edges == partition.edge_splits
+        ), f"Expected edge shard shapes {partition.edge_splits} but got {shard_info.edges}"
+    else:
+        edge_index = shard_tensor(edge_index, 1, partition.edge_splits, model_comm_group)
+
+    # relabel dst indices to local
+    edge_index = edge_index.clone()
+    partition._relabel_dst_nodes(edge_index, partition_id=my_rank)
+
+    edge_index, src_ids = _compact_src_nodes(edge_index, partition.num_nodes[0])
+
+    updated_shard_info = BipartiteGraphShardInfo(
+        src_nodes=shard_info.src_nodes,
+        dst_nodes=partition.dst_splits,
+        edges=partition.edge_splits,
+    )
+
+    return LocalGraph(edge_index=edge_index, src_ids=src_ids, shard_info=updated_shard_info)
+
+
+def apply_local_graph(
+    local_graph: LocalGraph,
+    x: PairTensor,
+    edge_attr: Tensor,
+    shard_info: BipartiteGraphShardInfo,
+    model_comm_group: ProcessGroup,
+    cond: Optional[PairTensor] = None,
+) -> tuple[PairTensor, Tensor, Optional[PairTensor]]:
+    """Shard node features, edge attributes and conditioning to the local graph shard.
+
+    Parameters
+    ----------
+    local_graph : LocalGraph
+        Topology of the local graph shard, from ``build_local_graph``.
+    x : PairTensor
+        Node features (src, dst).
+    edge_attr : Tensor
+        Edge attributes.
+    shard_info : BipartiteGraphShardInfo
+        Shard metadata of the inputs (before sharding to the local rank).
+    model_comm_group : ProcessGroup
+        Model communication group.
+    cond : tuple[Tensor, Tensor], optional
+        Conditioning tensors (cond_src, cond_dst).
+
+    Returns
+    -------
+    tuple[PairTensor, Tensor, Optional[PairTensor]]
+        Sharded (x_src_local, x_dst), edge_attr, cond subset (or None).
+    """
+    x_src, x_dst = x
+    local_shard_info = local_graph.shard_info
+
+    if not shard_info.dst_is_sharded():
+        x_dst = shard_tensor(x_dst, 0, local_shard_info.dst_nodes, model_comm_group)
+
+    if not shard_info.edges_are_sharded():
+        edge_attr = shard_tensor(edge_attr, 0, local_shard_info.edges, model_comm_group)
+
+    # gather x_src — always reduce in backward for correct gradients on halo nodes
+    x_src_full = sync_tensor(
+        x_src,
+        0,
+        shard_info.src_nodes,
+        model_comm_group,
+        gather_in_fwd=shard_info.src_is_sharded(),
+    )
+    x_src_local = x_src_full[local_graph.src_ids]
+
+    # same for conditioning [if cond is not None]
+    cond_local = None
+    if cond is not None:
+        cond_src, cond_dst = cond
+        cond_src_full = sync_tensor(cond_src, 0, shard_info.src_nodes, model_comm_group)
+        cond_local = (cond_src_full[local_graph.src_ids], cond_dst)
+
+    return (x_src_local, x_dst), edge_attr, cond_local
+
+
 def shard_graph_to_local(
     partition: GraphPartition,
     x: PairTensor,
@@ -363,59 +536,9 @@ def shard_graph_to_local(
     if not model_is_distributed(model_comm_group):
         return x, edge_attr, edge_index, shard_info, cond
 
-    assert (
-        model_comm_group.size() == partition.num_parts
-    ), f"Expected comm group size {partition.num_parts} but got {model_comm_group.size()}"
-
-    x_src, x_dst = x
-    my_rank = torch.distributed.get_rank(group=model_comm_group)
-
-    # shard or validate dst nodes
-    if shard_info.dst_is_sharded():
-        assert (
-            shard_info.dst_nodes == partition.dst_splits
-        ), f"Expected dst shard shapes {partition.dst_splits} but got {shard_info.dst_nodes}"
-    else:
-        x_dst = shard_tensor(x_dst, 0, partition.dst_splits, model_comm_group)
-
-    # shard or validate edges
-    if shard_info.edges_are_sharded():
-        assert (
-            shard_info.edges == partition.edge_splits
-        ), f"Expected edge shard shapes {partition.edge_splits} but got {shard_info.edges}"
-    else:
-        edge_attr = shard_tensor(edge_attr, 0, partition.edge_splits, model_comm_group)
-        edge_index = shard_tensor(edge_index, 1, partition.edge_splits, model_comm_group)
-
-    # relabel dst indices to local
-    edge_index = edge_index.clone()
-    partition._relabel_dst_nodes(edge_index, partition_id=my_rank)
-
-    # gather x_src — always reduce in backward for correct gradients on halo nodes
-    x_src_full = sync_tensor(
-        x_src,
-        0,
-        shard_info.src_nodes,
-        model_comm_group,
-        gather_in_fwd=shard_info.src_is_sharded(),
-    )
-
-    x_src_local, edge_index, src_ids = _drop_unconnected_src_nodes(x_src_full, edge_index)
-
-    # same for conditioning [if cond is not None]
-    cond_local = None
-    if cond is not None:
-        cond_src, cond_dst = cond
-        cond_src_full = sync_tensor(cond_src, 0, shard_info.src_nodes, model_comm_group)
-        cond_local = (cond_src_full[src_ids], cond_dst)
-
-    updated_shard_info = BipartiteGraphShardInfo(
-        src_nodes=shard_info.src_nodes,
-        dst_nodes=partition.dst_splits,
-        edges=partition.edge_splits,
-    )
-
-    return (x_src_local, x_dst), edge_attr, edge_index, updated_shard_info, cond_local
+    local_graph = build_local_graph(partition, edge_index, shard_info, model_comm_group)
+    x, edge_attr, cond = apply_local_graph(local_graph, x, edge_attr, shard_info, model_comm_group, cond=cond)
+    return x, edge_attr, local_graph.edge_index, local_graph.shard_info, cond
 
 
 def sort_edges_1hop_chunks(
@@ -480,33 +603,28 @@ def _sort_edges_1hop_chunks_fast(
     return edge_attr_list, edge_index_list
 
 
-def _drop_unconnected_src_nodes(x_src: Tensor, edge_index: Adj, in_place: bool = True) -> tuple[Tensor, Adj, Tensor]:
-    """Drop src nodes with no edges and relabel src indices to be contiguous.
+def _compact_src_nodes(edge_index: Adj, num_src_nodes: int) -> tuple[Adj, Tensor]:
+    """Relabel src indices in-place to be contiguous over the connected src nodes.
 
     Parameters
     ----------
-    x_src : Tensor
-        Source node features.
     edge_index : Adj
-        Edge index (row 0 will be modified in-place if in_place=True).
-    in_place : bool, optional
-        Whether to modify edge_index in-place (default: True).
-        If False, a clone is made before relabeling.
+        Edge index (row 0 is modified in-place).
+    num_src_nodes : int
+        Number of src nodes before the relabel.
 
     Returns
     -------
-    tuple[Tensor, Adj, Tensor]
-        Subset of x_src, relabeled edge_index, indices of connected source nodes.
+    tuple[Adj, Tensor]
+        Relabeled edge_index, indices of connected source nodes.
     """
-    edge_index = edge_index if in_place else edge_index.clone()
     connected_src_nodes = torch.unique(edge_index[0])
-    x_src_subset = x_src[connected_src_nodes]
 
-    relabel_map = torch.empty(x_src.shape[0], dtype=torch.long, device=x_src.device)
-    relabel_map[connected_src_nodes] = torch.arange(connected_src_nodes.size(0), device=x_src.device)
+    relabel_map = torch.empty(num_src_nodes, dtype=torch.long, device=edge_index.device)
+    relabel_map[connected_src_nodes] = torch.arange(connected_src_nodes.size(0), device=edge_index.device)
     edge_index[0] = relabel_map[edge_index[0]]
 
-    return x_src_subset, edge_index, connected_src_nodes
+    return edge_index, connected_src_nodes
 
 
 ########## Slow path: explicit subgraph extraction (used when edges are NOT pre-sorted). ##########
