@@ -32,7 +32,6 @@ from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_train
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
-from anemoi.training.tasks.spatial_downscaler import SpatialDownscaler
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
 
@@ -1181,7 +1180,11 @@ def test_ensemble_plot_adapter_delegates_to_inner():
     data = np.zeros((5, 100, 10))
     output = np.zeros((3, 100, 10))
     list(adapter.iter_plot_samples(data, output))
-    inner.iter_plot_samples.assert_called_once_with(data, output)
+    inner.iter_plot_samples.assert_called_once_with(data, output, input_data=None)
+
+    pl_module, batch, post_processors = MagicMock(), {}, {}
+    adapter.prepare_plot_input(pl_module, "data", batch, post_processors)
+    inner.prepare_plot_input.assert_called_once_with(pl_module, "data", batch, post_processors)
 
 
 def test_base_adapter_select_members_is_noop():
@@ -1204,8 +1207,8 @@ def test_base_adapter_prepare_loss_batch_is_noop():
     assert torch.equal(result["data"], batch["data"])
 
 
-def _spatial_downscaler_task() -> SpatialDownscaler:
-    return SpatialDownscaler(input_datasets=["in_lres"], target_datasets=["out_hres"])
+class _UnplottableAdapter(ForecasterPlotAdapter):
+    supports_plotting = False
 
 
 @pytest.mark.parametrize(
@@ -1220,11 +1223,13 @@ def _spatial_downscaler_task() -> SpatialDownscaler:
 @pytest.mark.parametrize("ensemble", [False, True], ids=["deterministic", "ensemble"])
 def test_plot_callbacks_fail_at_fit_start_for_tasks_without_plotting_support(make_callback, ensemble):
     """Fail before training starts rather than at the first plotting step."""
-    adapter = _spatial_downscaler_task()._plot_adapter
+    task = MagicMock()
+    task.name = "unplottable"
+    adapter = _UnplottableAdapter(task)
     pl_module = MagicMock()
     pl_module.plot_adapter = EnsemblePlotAdapterWrapper(adapter) if ensemble else adapter
 
-    with pytest.raises(NotImplementedError, match=r"spatial_downscaler.*diagnostics\.plot\.callbacks"):
+    with pytest.raises(NotImplementedError, match=r"unplottable.*diagnostics\.plot\.callbacks"):
         make_callback().on_fit_start(MagicMock(), pl_module)
 
 

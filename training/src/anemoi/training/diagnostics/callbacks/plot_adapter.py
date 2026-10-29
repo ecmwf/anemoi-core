@@ -64,8 +64,30 @@ class BasePlotAdapter(ABC):
         """Prepare batch for loss plotting. No-op for non-ensemble adapters."""
         return batch
 
+    def prepare_plot_input(
+        self,
+        pl_module: Any,
+        dataset_name: str,
+        batch: dict[str, Any],
+        post_processors: dict[str, Any],
+    ) -> Any | None:
+        """Return the denormalised model input to plot against ``dataset_name``, or ``None``.
+
+        ``None`` (the default) means the input is read from the plotted dataset's own
+        batch entry. Tasks whose inputs live in other datasets return a tensor of shape
+        ``(bs, time, ens, grid, n_output_vars)`` in the output layout of ``dataset_name``,
+        which :meth:`iter_plot_samples` receives as ``input_data`` (one sample).
+        """
+        del pl_module, dataset_name, batch, post_processors
+        return None
+
     @abstractmethod
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        input_data: Any | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
         """Yield (x, y_true, y_pred, tag_suffix) or (sample, recon, tag) per plot sample."""
         ...
 
@@ -82,7 +104,12 @@ class ForecasterPlotAdapter(BasePlotAdapter):
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         return self._task.num_input_timesteps + rollout_step * self._task.num_output_timesteps
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        input_data: Any | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
         input_time_indices = self._task.get_batch_input_indices()
 
         input_data = data[input_time_indices, ...]
@@ -111,7 +138,12 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
     def get_init_step(self) -> int:
         return 0
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        input_data: Any | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
         input_time_indices = self._task.get_batch_input_indices()
         output_time_indices = self._task.get_batch_output_indices()
 
@@ -134,27 +166,77 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
 
 
 class SpatialDownscalerPlotAdapter(BasePlotAdapter):
-    """Plot Adapter placeholder for SpatialDownscaler Task.
+    """Plot Adapter for SpatialDownscaler Task.
 
-    Plotting is not supported yet: inputs and targets live on different grids, which
-    the plot callbacks cannot handle. Plot callbacks are rejected at fit start.
+    Plot callbacks run on the batch returned by ``on_after_batch_transfer``, where the
+    residual reference of each target (e.g. ``in_lres``) has already been projected onto
+    the target grid. The plotted input is that projected reference, at the same time as
+    the output, so ``pred - input`` and ``truth - input`` are the predicted and true
+    residuals. Only target datasets can be plotted.
     """
-
-    supports_plotting = False
 
     def get_init_step(self) -> int:
         return 0
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
-        del data, output_tensor
-        msg = f"Plotting is not supported yet for the '{self._task.name}' task."
-        raise NotImplementedError(msg)
+    def prepare_plot_input(
+        self,
+        pl_module: Any,
+        dataset_name: str,
+        batch: dict[str, Any],
+        post_processors: dict[str, Any],
+    ) -> Any:
+        """Return the denormalised projected reference of ``dataset_name`` in its output layout."""
+        cpu_batch = {name: batch[name].detach().cpu() for name in self._task.input_datasets}
+        model_inputs = self._task.get_inputs(cpu_batch, data_indices=pl_module.data_indices)
+        references, columns = pl_module.model.model.reference_on_target_grid(model_inputs, post_processors)
+        reference = references[dataset_name]
+        reference_columns = columns[dataset_name]
+
+        output_name_to_index = pl_module.data_indices[dataset_name].model.output.name_to_index
+        plot_input = reference.new_zeros((*reference.shape[:-1], len(output_name_to_index)))
+        for name, output_index in output_name_to_index.items():
+            if name in reference_columns:
+                plot_input[..., output_index] = reference[..., reference_columns[name]]
+        return plot_input
+
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        input_data: Any | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
+        if input_data is None:
+            msg = (
+                f"The '{self._task.name}' plot adapter needs the projected reference as input_data; "
+                "it cannot be read from the target's own batch entry."
+            )
+            raise ValueError(msg)
+
+        # input_data holds the input offsets only; the residual mode requires them to equal
+        # the output offsets, so output step k pairs with input step k.
+        output_time_indices = self._task.get_batch_output_indices()
+        for output_step, time_index in enumerate(output_time_indices):
+            x = input_data[output_step].squeeze()
+            y_true = data[time_index].squeeze()
+            y_pred = output_tensor[output_step]
+            y_pred = y_pred.squeeze() if hasattr(y_pred, "squeeze") else y_pred
+            yield x, y_true, y_pred, f"out{output_step:02d}"
+
+    def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
+        if getattr(output_tensor, "ndim", 0) == 5 and getattr(output_tensor, "shape", (0,))[0] == 1:
+            return output_tensor.squeeze(0)
+        return output_tensor
 
 
 class AutoencoderPlotAdapter(BasePlotAdapter):
     """Plot Adapter for Autoencoder Task: single (sample, recon, tag) yield."""
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        input_data: Any | None = None,  # noqa: ARG002
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
         sample = data[0, ...].squeeze()
         recon = output_tensor[0, ...].squeeze()
         yield sample, sample, recon, "recon"
@@ -216,5 +298,19 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
         """Return the batch for loss plotting."""
         return batch
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
-        yield from self._inner.iter_plot_samples(data, output_tensor)
+    def prepare_plot_input(
+        self,
+        pl_module: Any,
+        dataset_name: str,
+        batch: dict[str, Any],
+        post_processors: dict[str, Any],
+    ) -> Any | None:
+        return self._inner.prepare_plot_input(pl_module, dataset_name, batch, post_processors)
+
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        input_data: Any | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
+        yield from self._inner.iter_plot_samples(data, output_tensor, input_data=input_data)

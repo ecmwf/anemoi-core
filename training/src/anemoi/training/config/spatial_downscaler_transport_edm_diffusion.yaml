@@ -17,7 +17,43 @@ config_validation: false
 diagnostics:
   callbacks: []
   plot:
-    callbacks: []
+    # Only targets can be plotted. The input panel shows the low-res reference
+    # projected onto the target grid, so pred - input is the predicted residual.
+    datasets_to_plot: [out_hres]
+    parameters: [2t]
+    callbacks:
+      - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+        parameter_groups: {}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+        tag_infix: sample
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters: ${diagnostics.plot.parameters}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        with_auxiliary: true
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
+          _partial_: true
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+        tag_infix: spec
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters: ${diagnostics.plot.parameters}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn
+          _partial_: true
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+        tag_infix: histo
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters: ${diagnostics.plot.parameters}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn
+          _partial_: true
   log:
     mlflow:
       tracking_uri: null

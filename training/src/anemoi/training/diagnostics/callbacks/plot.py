@@ -399,6 +399,21 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         super().__init__(dataset_names=dataset_names, plotting_settings=plotting_settings)
         self.every_n_batches = every_n_batches or 750
 
+    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Also reject datasets the model does not predict, as they have nothing to plot."""
+        super().on_fit_start(trainer, pl_module)
+        target_datasets = getattr(pl_module.model.model, "target_datasets", None)
+        if not isinstance(target_datasets, list | tuple):
+            return
+        not_predicted = [name for name in self.dataset_names if name not in target_datasets]
+        if not_predicted:
+            msg = (
+                f"{type(self).__name__} is configured for dataset(s) {not_predicted} which the model does not "
+                f"predict. Only the target datasets {list(target_datasets)} can be plotted; "
+                "set diagnostics.plot.datasets_to_plot accordingly."
+            )
+            raise ValueError(msg)
+
     def _plot_kwargs_from_output(
         self,
         pl_module: pl.LightningModule,
@@ -696,7 +711,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
             for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
                 y_hat = outputs.predictions[i][dataset_name]
                 y_true = pl_module.task.get_targets(
-                    batch={dataset_name: batch[dataset_name]},
+                    batch=batch,
                     data_indices=pl_module.data_indices,
                     **task_kwargs,
                 )[dataset_name]
@@ -875,6 +890,27 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         return data, output_tensor
 
+    def process_plot_input(
+        self,
+        pl_module: pl.LightningModule,
+        dataset_name: str,
+        batch: dict[str, torch.Tensor],
+    ) -> np.ndarray | None:
+        """Return the plot adapter's input for ``dataset_name`` for one sample, or ``None``.
+
+        ``None`` means the adapter reads the input from the plotted dataset's own data,
+        as returned by :meth:`process`.
+        """
+        plot_input = pl_module.plot_adapter.prepare_plot_input(pl_module, dataset_name, batch, self.post_processors)
+        if plot_input is None:
+            return None
+        plot_input = pl_module.output_mask[dataset_name].apply(
+            plot_input.detach().cpu(),
+            dim=pl_module.grid_dim,
+            fill_value=np.nan,
+        )
+        return plot_input[self.sample_idx].numpy()
+
     def process_output_tensor(
         self,
         pl_module: pl.LightningModule,
@@ -1026,8 +1062,9 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                     [auxiliary_output],
                     members=self._get_process_members(),
                 )
+            plot_input = self.process_plot_input(pl_module, dataset_name, batch)
 
-            extra_fields = (auxiliary_tensor,) if auxiliary_tensor is not None else ()
+            extra_fields = tuple(field for field in (plot_input, auxiliary_tensor) if field is not None)
             latlons, data, output_tensor, *masked_extra = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
                 self.latlons[dataset_name],
@@ -1035,16 +1072,26 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                 output_tensor,
                 *extra_fields,
             )
+            if plot_input is not None:
+                plot_input, *masked_extra = masked_extra
             auxiliary_tensor = masked_extra[0] if masked_extra else None
 
             auxiliary_by_suffix: dict[str, Any] = {}
             if auxiliary_tensor is not None:
                 auxiliary_by_suffix = {
                     suffix: aux
-                    for _, _, aux, suffix in pl_module.plot_adapter.iter_plot_samples(data, auxiliary_tensor)
+                    for _, _, aux, suffix in pl_module.plot_adapter.iter_plot_samples(
+                        data,
+                        auxiliary_tensor,
+                        input_data=plot_input,
+                    )
                 }
 
-            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(
+                data,
+                output_tensor,
+                input_data=plot_input,
+            ):
                 fig = self.plot_fn(
                     **spatial_inputs,
                     x=x,
