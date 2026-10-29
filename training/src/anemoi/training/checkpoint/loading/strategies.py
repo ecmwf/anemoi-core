@@ -22,6 +22,7 @@ from anemoi.training.checkpoint.loading.base import LoadingStrategy
 from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
 from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
 from anemoi.training.checkpoint.loading.base import warn_on_hparams_divergence
+from anemoi.training.utils.checkpoint import check_node_coordinates_match_checkpoint
 
 if TYPE_CHECKING:
     from typing import Any
@@ -97,6 +98,10 @@ class WeightsOnlyLoader(LoadingStrategy):
         state_dict = self._extract_state_dict(context)
 
         skipped = self._shape_mismatched_keys(context.model, state_dict) if self.skip_mismatched else {}
+        check_node_coordinates_match_checkpoint(
+            context.model,
+            {key: value for key, value in state_dict.items() if key not in skipped},
+        )
         if skipped:
             state_dict = {key: value for key, value in state_dict.items() if key not in skipped}
             self._load_skipping(context, state_dict, skipped)

@@ -47,6 +47,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.train.step_output import TrainingStepOutput
+from anemoi.training.utils.checkpoint import check_node_coordinates_match_checkpoint
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import build_output_masks
 from anemoi.training.utils.resolve_config import is_container
@@ -497,6 +498,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if corrected is not checkpoint:
             checkpoint.clear()
             checkpoint.update(corrected)
+
+        check_node_coordinates_match_checkpoint(self, checkpoint["state_dict"])
 
         # Checkpoint conversion loads the module without creating a Trainer; only a
         # training run that continues from the checkpoint takes over its seed.
