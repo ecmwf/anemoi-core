@@ -203,6 +203,12 @@ class AnemoiCheckpoint(ModelCheckpoint):
         """Calls the strategy to remove the checkpoint file."""
         super()._remove_checkpoint(trainer, filepath)
         trainer.strategy.remove_checkpoint(self._get_inference_checkpoint_filepath(filepath))
+        # EMA siblings written by EMAWeights next to this checkpoint go with it.
+        ema = getattr(self.config.training, "ema", None)
+        if ema is not None and getattr(ema, "enabled", False):
+            for halflife in ema.halflife_steps:
+                prefix = f"inference-ema{halflife}-"
+                trainer.strategy.remove_checkpoint(get_inference_checkpoint_filepath(filepath, prefix=prefix))
 
     def _get_inference_checkpoint_filepath(self, filepath: str) -> str:
         """Defines the filepath for the inference checkpoint."""
