@@ -1,6 +1,6 @@
-#######################################
-Shared Encoder–Decoder (Multi-Domain)
-#######################################
+###########################################
+Multi-Domain Training (Shared Architecture)
+###########################################
 
 Multi-domain training enables multiple datasets to share a single encoder, processor, and decoder within one training workflow. Unlike the multiple encoder–decoder approach, in which each dataset has its own encoder and decoder, this setup uses shared model parameters across datasets. It supports training with different spatial resolutions, grid structures, and geographical domains, making it useful for applications such as downscaling, combining global and regional datasets, and improving model generalisation across domains and resolutions.
 
@@ -120,10 +120,45 @@ The following constraints apply:
 Graph Creation
 **************
 
-Multi-domain training requires graph definitions that support each dataset's spatial structure. Since datasets may have different resolutions, geographical domains, and numbers of spatial nodes, their graphs can differ. The graph recipe must define the data nodes associated with each dataset, using the dataset names to identify the corresponding nodes. For example, when training with ``era5_o96`` and ``era5_n320``, the graph configuration must provide appropriate data-node definitions for both datasets, together with the hidden mesh of each dataset and the data-to-hidden, hidden-to-hidden, and hidden-to-data edges.
+Multi-domain training requires graph definitions that support the spatial structure of each dataset. Since datasets may differ in resolution, geographical domain, and number of spatial nodes, their graph structures can also vary. The graph recipe must define the data nodes associated with each dataset, using the dataset names to identify the corresponding nodes. For example, when training with ``era5_o96`` and ``era5_n320``, the graph configuration must define the data nodes, hidden meshes, and corresponding data-to-hidden, hidden-to-hidden, and hidden-to-data edges for both datasets.
 
-During training, the graph associated with the selected dataset is used to encode and decode its spatial representation, while the shared model parameters are reused across the different graph structures.
+During training, the graph associated with the selected dataset is used to encode and decode its spatial representation, while the encoder, processor, and decoder parameters remain shared across the different graph structures.
 
-.. note::
+One of the key features of multi-domain training is its ability to support different hidden mesh sizes and structures, provided they are compatible with the shared model architecture. For example, training can alternate between batches from global datasets at O96 and N320 resolutions, each with its own hidden mesh resolution. This can be configured by defining separate data and hidden nodes for each dataset in the graph configuration file:
 
-   Multi-domain training can support different hidden mesh sizes and structures, provided the graph configuration and shared model architecture are compatible.
+.. code-block:: yaml
+
+   nodes:
+       o96:
+           node_builder:
+               _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+               dataset: ${dataloader.data_o96}
+           attributes: ${graph.attributes.nodes}
+       hidden_o96:
+           node_builder:
+               _target_: anemoi.graphs.nodes.TriNodes
+               resolution: 5
+       n320:
+           node_builder:
+               _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+               dataset: ${dataloader.data_n320}
+           attributes: ${graph.attributes.nodes}
+       hidden_n320:
+           node_builder:
+               _target_: anemoi.graphs.nodes.TriNodes
+               resolution: 7
+
+This configuration creates separate data and hidden nodes for each grid, allowing the O96 and N320 datasets to use different hidden mesh resolutions. The corresponding hidden nodes must then be mapped to their respective datasets in the model configuration, located under ``config/model/`` (see the processor section):
+
+.. code-block:: yaml
+
+   model:
+       num_channels: ...
+       condition_on_residual: ...
+       cpu_offload: ...
+       keep_batch_sharded: ...
+       model:
+           _target_: ...
+           hidden_nodes_name:
+               o96: hidden_o96
+               n320: hidden_n320

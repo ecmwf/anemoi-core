@@ -7,7 +7,7 @@ Two multi-dataset architectures are supported:
 
 - **Multiple Encoders and Decoders:** Each dataset has its own encoder and decoder, allowing dataset-specific input and output representations. The encoded representations are combined in a shared latent space and processed by a common processor. This approach supports datasets with different variables and preprocessing requirements.
 
-- **Shared Encoder–Decoder (Multi-Domain):** Multiple datasets share the same encoder, processor, and decoder. This approach enables training across different spatial resolutions, grid structures, and geographical domains while using shared model parameters. Datasets must have compatible input and output variable definitions and consistent variable ordering.
+- **Multi-Domain Training (Shared Architecture):** Multiple datasets share the same encoder, processor, and decoder. This approach enables training across different spatial resolutions, grid structures, and geographical domains while using shared model parameters. Datasets must have compatible input and output variable definitions and consistent variable ordering.
 
 Both approaches enable learning from multiple datasets, but differ in how dataset-specific information is encoded, processed, and decoded. The following sections describe their architectures, training procedures, and configuration requirements.
 
@@ -16,4 +16,4 @@ Both approaches enable learning from multiple datasets, but differ in how datase
    :hidden:
 
    multi-dataset/multiple-encoder-decoder
-   multi-dataset/shared-encoder-decoder
+   multi-dataset/multi-domain-training
