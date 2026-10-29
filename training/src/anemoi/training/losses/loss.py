@@ -273,15 +273,15 @@ def get_loss_function(
     if takes_scalers:
         scalers_to_include = []
         scalers = {}
-    if takes_data_indices:
-        data_indices = None
+    # Losses that take data_indices do their own variable mapping; keep the indices for scaler logging.
+    mapper_indices = None if takes_data_indices else data_indices
 
-    if data_indices is not None:
+    if mapper_indices is not None:
         loss_function = LossVariableMapper(
             loss=loss_function,
             predicted_variables=predicted_variables,
             target_variables=target_variables,
-            data_indices=data_indices,
+            data_indices=mapper_indices,
         )
         loss_function.compatibility_options = dict(compatibility_options)
     _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)

@@ -24,6 +24,7 @@ from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
 from .nan_aware_mse import BandNaNAwareMSELoss
 from .nan_aware_mse import NaNAwareMSELoss
+from .obs_source_weighted import ObsSourceWeightedMSELoss
 from .refractivity import RefractivityOperatorLoss
 from .rmse import RMSELoss
 from .spectral import FourierCorrelationLoss
@@ -56,6 +57,7 @@ __all__ = [
     "MSELoss",
     "MultiscaleLossWrapper",
     "NaNAwareMSELoss",
+    "ObsSourceWeightedMSELoss",
     "PowerSpectrumLoss",
     "RMSELoss",
     "RefractivityOperatorLoss",
