@@ -79,7 +79,7 @@ in the middle of an epoch.
 Multi-Domain
 ------------
 
-``CrossDatasetLoadingPolicy`` builds one independently indexed
+``MultiDomainLoadingPolicy`` builds one independently indexed
 ``MultiDataset`` per domain. Its batch sampler visits domains in a random (seeded)
 order and keeps every batch domain-homogeneous, including when the configured
 batch size is greater than one. The readers may use different grids and date
@@ -89,7 +89,7 @@ Select it in the dataloader configuration::
 
    dataloader:
      loading_policy:
-       _target_: anemoi.training.data.loading.CrossDatasetLoadingPolicy
+       _target_: anemoi.training.data.loading.MultiDomainLoadingPolicy
 
 Common variables are checked for metadata compatibility when training starts.
 Flat encoder-processor-decoder models can route each domain through its own

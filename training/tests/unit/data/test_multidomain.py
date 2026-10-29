@@ -15,7 +15,7 @@ import torch
 from pytest_mock import MockFixture
 from torch.utils.data import ConcatDataset
 
-from anemoi.training.data.loading import CrossDatasetLoadingPolicy
+from anemoi.training.data.loading import MultiDomainLoadingPolicy
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.tasks import TemporalDownscaler
@@ -23,7 +23,7 @@ from anemoi.transform.variables import Variable
 
 
 class TestMultiDomain:
-    """Test cross-dataset sampling with independently indexed domains."""
+    """Test multi-domain sampling with independently indexed domains."""
 
     @pytest.fixture
     def data_readers(self, mocker: MockFixture) -> dict:
@@ -51,7 +51,7 @@ class TestMultiDomain:
     @pytest.fixture
     def multi_domain(self, data_readers: dict) -> ConcatDataset:
         relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}
-        return CrossDatasetLoadingPolicy().build_dataset(data_readers, relative_date_indices)
+        return MultiDomainLoadingPolicy().build_dataset(data_readers, relative_date_indices)
 
     def test_independent_domain_anchors(self, multi_domain: ConcatDataset) -> None:
         domains = dict(zip(("dataset_a", "dataset_b"), multi_domain.datasets, strict=True))
@@ -73,7 +73,7 @@ class TestMultiDomain:
         assert multi_domain.cumulative_sizes == [2, 5]
         assert set(multi_domain[4]) == {"dataset_b"}
 
-        sampler = CrossDatasetLoadingPolicy().build_batch_sampler(
+        sampler = MultiDomainLoadingPolicy().build_batch_sampler(
             multi_domain,
             num_replicas=1,
             rank=0,
@@ -88,7 +88,7 @@ class TestMultiDomain:
         data_readers["dataset_b"].compute_anchors.return_value = np.empty((0, 2), dtype=np.int64)
 
         with pytest.raises(ValueError, match="No valid anchors found for data reader 'dataset_b'"):
-            CrossDatasetLoadingPolicy().build_dataset(
+            MultiDomainLoadingPolicy().build_dataset(
                 data_readers,
                 {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]},
             )
@@ -101,7 +101,7 @@ class TestMultiDomain:
     def test_check_datasets_variables_order(self, data_readers: dict, name_to_index: dict) -> None:
         data_readers["dataset_a"].name_to_index = {"10u": 0, "2t": 1}
         data_readers["dataset_b"].name_to_index = name_to_index
-        policy = CrossDatasetLoadingPolicy()
+        policy = MultiDomainLoadingPolicy()
         dataset = policy.build_dataset(data_readers, {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]})
 
         with pytest.raises(ValueError, match="same variables in the same order"):
@@ -111,7 +111,7 @@ class TestMultiDomain:
         data_readers["dataset_b"].data.typed_variables = {
             "10u": Variable.from_dict("10u", {"units": "K"}),
         }
-        policy = CrossDatasetLoadingPolicy()
+        policy = MultiDomainLoadingPolicy()
         dataset = policy.build_dataset(data_readers, {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]})
 
         with pytest.raises(ValueError, match="Variable compatibility check failed"):
@@ -121,7 +121,7 @@ class TestMultiDomain:
         data_readers["dataset_b"].data.typed_variables = {
             "10u": Variable.from_dict("10u", {"units": "km/h"}),
         }
-        policy = CrossDatasetLoadingPolicy()
+        policy = MultiDomainLoadingPolicy()
         dataset = policy.build_dataset(data_readers, {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]})
 
         policy.check_dataset_compatibility(dataset, ignore_units=True)
@@ -142,7 +142,7 @@ def test_temporal_downscaler_offsets_are_loaded_from_one_domain(mocker: MockFixt
     relative_date_indices = compute_relative_date_indices(task, readers)
     assert relative_date_indices == {"data": [0, 2, 4, 6], "data_2": [0, 1, 2, 3]}
 
-    dataset = CrossDatasetLoadingPolicy().build_dataset(readers, relative_date_indices)
+    dataset = MultiDomainLoadingPolicy().build_dataset(readers, relative_date_indices)
     sample = dataset[0]
 
     readers["data"].get_sample.assert_called_once_with(0, slice(0, 8, 2), slice(None))

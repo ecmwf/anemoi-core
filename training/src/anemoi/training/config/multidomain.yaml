@@ -36,7 +36,7 @@ data:
 
 dataloader:
   loading_policy:
-    _target_: anemoi.training.data.loading.CrossDatasetLoadingPolicy
+    _target_: anemoi.training.data.loading.MultiDomainLoadingPolicy
   training:
     datasets:
       data:

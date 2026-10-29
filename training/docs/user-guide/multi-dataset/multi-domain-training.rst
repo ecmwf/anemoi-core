@@ -100,13 +100,13 @@ The second dataset reuses the first dataset's ``drop`` setting through a configu
 Loading Policy and Model Configuration
 **************************************
 
-Multi-domain training is enabled by selecting the cross-dataset loading policy, which builds one independently indexed dataset per domain and keeps every batch domain-homogeneous:
+Multi-domain training is enabled by selecting the multi-domain loading policy, which builds one independently indexed dataset per domain and keeps every batch domain-homogeneous:
 
 .. code-block:: yaml
 
    dataloader:
        loading_policy:
-           _target_: anemoi.training.data.loading.CrossDatasetLoadingPolicy
+           _target_: anemoi.training.data.loading.MultiDomainLoadingPolicy
 
 The model must then name the hidden mesh of each dataset under ``model.model.hidden_nodes_name`` and list the datasets that share an encoder or decoder group under ``source_datasets`` and ``target_datasets``. The configuration is described in :doc:`/modules/data`, and a complete example is the top-level ``multidomain`` configuration.
 

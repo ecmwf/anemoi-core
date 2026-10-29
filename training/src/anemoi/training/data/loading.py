@@ -160,7 +160,7 @@ class SynchronizedLoadingPolicy(DataLoadingPolicy):
         return BatchSampler(sampler, batch_size=batch_size, drop_last=False)
 
 
-class CrossDataset(ConcatDataset):
+class MultiDomainDataset(ConcatDataset):
     """Concatenated domains exposing the dataset metadata used by Anemoi."""
 
     def __init__(self, datasets: list[MultiDataset]) -> None:
@@ -168,7 +168,7 @@ class CrossDataset(ConcatDataset):
         self.data_readers = {name: reader for dataset in datasets for name, reader in dataset.data_readers.items()}
 
     # TODO(dieter): the properties below duplicate MultiDataset's reader-collecting properties;
-    # extract them into a mixin shared by MultiDataset and CrossDataset.
+    # extract them into a mixin shared by MultiDataset and MultiDomainDataset.
     @property
     def statistics(self) -> dict:
         return {name: reader.statistics for name, reader in self.data_readers.items()}
@@ -201,7 +201,7 @@ class CrossDataset(ConcatDataset):
             dataset.set_reader_group_info(reader_group_rank, shard_sizes)
 
 
-class CrossDatasetLoadingPolicy(DataLoadingPolicy):
+class MultiDomainLoadingPolicy(DataLoadingPolicy):
     """Each sample comes from exactly one domain; batches are domain-homogeneous."""
 
     def build_dataset(
@@ -219,7 +219,7 @@ class CrossDatasetLoadingPolicy(DataLoadingPolicy):
             )
             for name, reader in data_readers.items()
         ]
-        return CrossDataset(domains)
+        return MultiDomainDataset(domains)
 
     def build_batch_sampler(
         self,
@@ -231,8 +231,8 @@ class CrossDatasetLoadingPolicy(DataLoadingPolicy):
         seed: int,
         batch_size: int,
         drop_last: bool,
-    ) -> "CrossDatasetBatchSampler":
-        return CrossDatasetBatchSampler(
+    ) -> "MultiDomainBatchSampler":
+        return MultiDomainBatchSampler(
             dataset,
             num_replicas=num_replicas,
             rank=rank,
@@ -242,7 +242,7 @@ class CrossDatasetLoadingPolicy(DataLoadingPolicy):
             drop_last=drop_last,
         )
 
-    def check_dataset_compatibility(self, dataset: CrossDataset, **options: object) -> None:
+    def check_dataset_compatibility(self, dataset: MultiDomainDataset, **options: object) -> None:
         check_datasets_variables_order(dataset.name_to_index)
         check_datasets_variables_compatibility(
             {name: data.typed_variables for name, data in dataset.data.items()},
@@ -250,7 +250,7 @@ class CrossDatasetLoadingPolicy(DataLoadingPolicy):
         )
 
 
-class CrossDatasetBatchSampler(Sampler[list[int]]):
+class MultiDomainBatchSampler(Sampler[list[int]]):
     """Randomly interleave whole, domain-homogeneous batches of independently sampled domains.
 
     The domain order is a shuffle of every domain's batches that depends only on the seed and the
@@ -343,6 +343,6 @@ class CrossDatasetBatchSampler(Sampler[list[int]]):
         self._batches_yielded = self._next_batches_yielded = state_dict["batches_yielded"]
 
     @property
-    def sampler(self) -> "CrossDatasetBatchSampler":
+    def sampler(self) -> "MultiDomainBatchSampler":
         """Expose the epoch setter under the same interface as torchdata's BatchSampler."""
         return self

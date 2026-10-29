@@ -109,7 +109,7 @@ string or a dataset mapping (see below), not a list of hierarchical levels.
 When several datasets of a group are present in the same batch, each is encoded
 separately with the shared weights and the latents are merged by the
 :ref:`latent aggregator <usage-multi-dataset-aggregator>`. Together with
-``CrossDatasetLoadingPolicy`` (one domain per batch) this lets domains with
+``MultiDomainLoadingPolicy`` (one domain per batch) this lets domains with
 different grids be trained with one set of weights.
 
 .. _usage-multi-dataset-hidden-nodes:
@@ -143,7 +143,7 @@ The following rules apply to the mapping form:
 - Every dataset of the model must be listed, and no other names may appear.
 - All datasets present in one batch must resolve to the same hidden mesh, so a
   batch may not mix datasets with different meshes (use
-  ``CrossDatasetLoadingPolicy``, which keeps every batch to one domain).
+  ``MultiDomainLoadingPolicy``, which keeps every batch to one domain).
 - All hidden meshes must have the same node attribute dimension, because the
   processor weights are shared.
 - Hierarchical models do not support the mapping.

@@ -463,7 +463,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 metrics=output.metrics,
                 predictions=gathered_predictions,
             )
-            # A batch may hold only some datasets (e.g. one domain with CrossDatasetLoadingPolicy).
+            # A batch may hold only some datasets (e.g. one domain with MultiDomainLoadingPolicy).
             self.plot(
                 trainer,
                 pl_module,
