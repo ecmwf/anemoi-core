@@ -218,3 +218,112 @@ def test_graph_transformer_attention_opcheck(n_src: int, n_dst: int, h: int, d: 
         graph_transformer_attention,
         (query, key, value, edge_attr_csc, row, colptr, rowptr, edge_ids, edge_dst),
     )
+
+
+#####################################################################
+# int32 offset overflow                                             #
+#####################################################################
+# The kernels calculate memory offsets as ``index * H * C``. If the index is int32, this product
+# overflows when it is ``2**31`` or more. The kernel then reads incorrect memory. The result is
+# an illegal memory access or an incorrect output without an error.
+#
+# Each test runs the kernel on a large graph. Then it runs the kernel again on a small graph that
+# contains only the last destination nodes and their edges. The two outputs must be equal, because
+# the kernel calculates each destination node independently.
+
+OVERFLOW_INT32_LIMIT = 2**31
+OVERFLOW_NUM_HEADS = 16
+OVERFLOW_NUM_CHANNELS = 64  # 16 * 64 = 1024 attention channels, as in the o1280 encoder
+OVERFLOW_NUM_SRC = 1024
+OVERFLOW_NUM_TAIL = 100  # number of destination nodes that we compare with the small graph
+OVERFLOW_DTYPE = torch.bfloat16
+
+
+def build_dst_sorted_graph(n_dst: int, degree: int, index_dtype: torch.dtype) -> torch.Tensor:
+    """Build a dst-sorted bipartite edge_index where each destination node has ``degree`` sources."""
+    dst = torch.arange(n_dst, dtype=torch.int64).repeat_interleave(degree)
+    src = torch.arange(n_dst * degree, dtype=torch.int64) % OVERFLOW_NUM_SRC
+    return torch.stack([src, dst]).to(index_dtype)
+
+
+def run_gt_dst_sorted(query, key, value, edge_attr, edge_index):
+    """Run the Triton GT on a dst-sorted edge_index."""
+    n_src, n_dst = key.shape[0], query.shape[0]
+    csc, _, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True, edges_are_dst_sorted=True)
+    return graph_transformer_attention_conv(query, key, value, edge_attr, csc, reverse)
+
+
+def check_tail_matches_subgraph(n_dst: int, degree: int, index_dtype: torch.dtype) -> None:
+    """Compare the output and gradients of the last destination nodes with a small graph."""
+    if torch.cuda.get_device_properties(0).total_memory < 40 * 2**30:
+        pytest.skip("Test needs a GPU with 40 GB of memory or more")
+    torch.manual_seed(0)
+    num_edges = n_dst * degree
+
+    edge_index = build_dst_sorted_graph(n_dst, degree, index_dtype)
+    query = torch.randn((n_dst, OVERFLOW_NUM_HEADS, OVERFLOW_NUM_CHANNELS), dtype=OVERFLOW_DTYPE, requires_grad=True)
+    key = torch.randn(
+        (OVERFLOW_NUM_SRC, OVERFLOW_NUM_HEADS, OVERFLOW_NUM_CHANNELS), dtype=OVERFLOW_DTYPE, requires_grad=True
+    )
+    value = torch.randn(
+        (OVERFLOW_NUM_SRC, OVERFLOW_NUM_HEADS, OVERFLOW_NUM_CHANNELS), dtype=OVERFLOW_DTYPE, requires_grad=True
+    )
+    edge_attr = torch.randn(
+        (num_edges, OVERFLOW_NUM_HEADS, OVERFLOW_NUM_CHANNELS), dtype=OVERFLOW_DTYPE, requires_grad=True
+    )
+
+    out = run_gt_dst_sorted(query, key, value, edge_attr, edge_index)
+    out_tail = out[-OVERFLOW_NUM_TAIL:].float()
+    out_tail.sum().backward()
+    grad_q_tail = query.grad[-OVERFLOW_NUM_TAIL:].float()
+    grad_e_tail = edge_attr.grad[-OVERFLOW_NUM_TAIL * degree :].float()
+    del out, edge_index
+    edge_attr.grad = None
+    query.grad = None
+
+    # Small graph: the same last destination nodes, the same edges and the same source nodes.
+    query_sub = query[-OVERFLOW_NUM_TAIL:].detach().clone().requires_grad_(True)
+    edge_attr_sub = edge_attr[-OVERFLOW_NUM_TAIL * degree :].detach().clone().requires_grad_(True)
+    edge_index_sub = build_dst_sorted_graph(n_dst, degree, torch.int64)[:, -OVERFLOW_NUM_TAIL * degree :]
+    edge_index_sub[1] -= n_dst - OVERFLOW_NUM_TAIL
+
+    out_sub = run_gt_dst_sorted(query_sub, key, value, edge_attr_sub, edge_index_sub).float()
+    out_sub.sum().backward()
+
+    assert torch.isfinite(out_tail).all(), "Output contains NaN or Inf"
+    torch.testing.assert_close(out_tail, out_sub, atol=0, rtol=0, msg="Forward output is incorrect")
+    torch.testing.assert_close(grad_q_tail, query_sub.grad.float(), atol=0, rtol=0, msg="Query gradient is incorrect")
+    torch.testing.assert_close(
+        grad_e_tail, edge_attr_sub.grad.float(), atol=0, rtol=0, msg="Edge gradient is incorrect"
+    )
+    torch.cuda.empty_cache()
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("index_dtype", [torch.int64, torch.int32], ids=["int64", "int32"])
+def test_gt_edge_offset_overflow(index_dtype: torch.dtype):
+    """Test a graph where ``num_edges * H * C`` is more than ``2**31``.
+
+    The number of destination nodes is small enough that ``n_dst * H * C`` does not overflow.
+    """
+    degree = 4
+    num_edges = OVERFLOW_INT32_LIMIT // (OVERFLOW_NUM_HEADS * OVERFLOW_NUM_CHANNELS) + 100_000
+    n_dst = num_edges // degree
+    assert n_dst * OVERFLOW_NUM_HEADS * OVERFLOW_NUM_CHANNELS < OVERFLOW_INT32_LIMIT
+    assert n_dst * degree * OVERFLOW_NUM_HEADS * OVERFLOW_NUM_CHANNELS >= OVERFLOW_INT32_LIMIT
+
+    check_tail_matches_subgraph(n_dst, degree, index_dtype)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("index_dtype", [torch.int64, torch.int32], ids=["int64", "int32"])
+def test_gt_dst_offset_overflow(index_dtype: torch.dtype):
+    """Test a graph where ``n_dst * H * C`` is more than ``2**31``.
+
+    The program id is always int32, thus this overflow occurs for all index dtypes.
+    """
+    degree = 1
+    n_dst = OVERFLOW_INT32_LIMIT // (OVERFLOW_NUM_HEADS * OVERFLOW_NUM_CHANNELS) + 100_000
+    assert n_dst * OVERFLOW_NUM_HEADS * OVERFLOW_NUM_CHANNELS >= OVERFLOW_INT32_LIMIT
+
+    check_tail_matches_subgraph(n_dst, degree, index_dtype)
