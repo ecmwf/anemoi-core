@@ -32,8 +32,70 @@ from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.layers.graph import TrainableTensor
+from anemoi.models.layers.projection_backend import PROJECTION_BACKENDS
+from anemoi.models.layers.projection_backend import ProjectionBackend
 
 LOGGER = logging.getLogger(__name__)
+
+# Number of stored entries placed at once when a matrix is turned into a table, which bounds the
+# extra memory the conversion needs.
+_TABLE_BAND_ENTRIES = 2**24
+# Largest table, padding included, that a matrix is turned into: 2**31 entries take 16 GiB.
+_MAX_TABLE_ENTRIES = 2**31
+
+
+def csr_to_table(matrix: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+    """The columns and weights of every row of a CSR matrix, as tables padded to the longest row.
+
+    Row ``i`` of the tables holds the column indices (``int32``) and the values (``float32``) of the
+    entries stored in row ``i`` of the matrix, so the tables have shape ``(rows, longest row)``.
+    The number of entries of each row is kept as well (``int32``, shape ``(rows,)``), so that the
+    padding at the end of shorter rows (column 0, weight 0) is never read.
+
+    Parameters
+    ----------
+    matrix : Tensor
+        Sparse CSR matrix of shape ``(rows, columns)``.
+
+    Returns
+    -------
+    tuple[Tensor, Tensor, Tensor]
+        The column table, the weight table and the row lengths, on the device of ``matrix``.
+
+    Raises
+    ------
+    ValueError
+        If the padded table would hold more than ``_MAX_TABLE_ENTRIES`` entries.
+    """
+    row_starts = matrix.crow_indices().to(torch.int64)
+    columns = matrix.col_indices()
+    values = matrix.values()
+    num_rows = matrix.shape[0]
+    row_lengths = row_starts.diff()
+    width = max(1, int(row_lengths.max())) if num_rows else 1
+
+    if num_rows * width > _MAX_TABLE_ENTRIES:
+        raise ValueError(
+            f"The projection matrix is too large for the triton backend: its {num_rows} rows padded to the "
+            f"longest row of {width} entries would make a table of {num_rows * width} entries, more than "
+            f"{_MAX_TABLE_ENTRIES}. Use the 'torch' backend for this matrix."
+        )
+
+    neighbours = torch.zeros(num_rows, width, dtype=torch.int32, device=columns.device)
+    weights = torch.zeros(num_rows, width, dtype=torch.float32, device=values.device)
+    # Put every stored entry at its position within its row, a band of rows at a time.
+    rows_per_band = max(1, _TABLE_BAND_ENTRIES // width)
+    for start in range(0, num_rows, rows_per_band):
+        stop = min(num_rows, start + rows_per_band)
+        first, last = int(row_starts[start]), int(row_starts[stop])
+        lengths = row_lengths[start:stop]
+        rows = torch.repeat_interleave(torch.arange(start, stop, device=columns.device), lengths)
+        slots = torch.arange(first, last, device=columns.device) - torch.repeat_interleave(
+            row_starts[start:stop], lengths
+        )
+        neighbours[rows, slots] = columns[first:last].to(torch.int32)
+        weights[rows, slots] = values[first:last].to(torch.float32)
+    return neighbours, weights, row_lengths.to(torch.int32)
 
 
 def create_graph_provider(
@@ -464,7 +526,12 @@ class DynamicGraphProvider(BaseGraphProvider):
 class ProjectionGraphProvider(BaseGraphProvider):
     """Provider for sparse projection matrices.
 
-    Builds and stores sparse projection matrix from graph or file.
+    Builds a sparse projection matrix from a graph or a file and keeps it in the form its backend
+    reads:
+
+    - ``"torch"``: the sparse CSR matrix (:meth:`get_edges`), for ``torch.sparse.mm``.
+    - ``"triton"``: a table with one row per target node (:meth:`get_table`), for the Triton
+      projection kernels. The table is made from the matrix once, when the provider is built.
     """
 
     def __init__(
@@ -476,6 +543,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         file_path: Optional[str | Path] = None,
         row_normalize: bool = False,
         edge_mask: Optional[Tensor] = None,
+        backend: ProjectionBackend = "triton",
     ) -> None:
         """Initialize ProjectionGraphProvider.
 
@@ -495,8 +563,15 @@ class ProjectionGraphProvider(BaseGraphProvider):
             Whether to normalize weights per row (target node) so each row sums to 1
         edge_mask : Tensor, optional
             Boolean mask which selects graph edges before constructing the matrix
+        backend : str
+            ``"torch"`` keeps the CSR matrix, ``"triton"`` keeps the table made from it.
         """
         super().__init__()
+        if backend not in PROJECTION_BACKENDS:
+            raise ValueError(f"Projection backend must be one of {PROJECTION_BACKENDS}, got '{backend}'.")
+        self.backend = backend
+        self.projection_matrix: Optional[Tensor] = None
+        self.projection_table: Optional[tuple[Tensor, Tensor, Tensor]] = None
 
         if (file_path is None and edges_name is None) or (file_path is not None and edges_name is not None):
             raise ValueError("Exactly one of file_path or edges_name must be provided.")
@@ -524,12 +599,15 @@ class ProjectionGraphProvider(BaseGraphProvider):
         be deepcopied (``NotImplementedError: Cannot access storage of
         SparseCsrTensorImpl``), which breaks ``copy.deepcopy(pl_module.loss)``
         during validation/plotting. It is a constant lookup table, so sharing it
-        by reference is safe and avoids the copy.
+        by reference is safe and avoids the copy. ``projection_table`` is shared the same way.
         """
         cls = self.__class__
         new = cls.__new__(cls)
         memo[id(self)] = new
-        memo[id(self.projection_matrix)] = self.projection_matrix
+        if self.projection_matrix is not None:
+            memo[id(self.projection_matrix)] = self.projection_matrix
+        if self.projection_table is not None:
+            memo[id(self.projection_table)] = self.projection_table
         for key, value in self.__dict__.items():
             new.__dict__[key] = copy.deepcopy(value, memo)
         return new
@@ -602,13 +680,26 @@ class ProjectionGraphProvider(BaseGraphProvider):
                 row_sums.mean().item(),
             )
 
-        self.projection_matrix = torch.sparse_csr_tensor(
+        csr = torch.sparse_csr_tensor(
             torch.from_numpy(matrix.indptr),
             torch.from_numpy(matrix.indices),
             torch.from_numpy(matrix.data),
             size=matrix.shape,
         )
-        self._edge_dim = self.projection_matrix.shape[1]
+        self.shape = tuple(matrix.shape)
+        self._edge_dim = self.shape[1]
+        if self.backend == "torch":
+            self.projection_matrix = csr
+            return
+
+        self.projection_table = csr_to_table(csr)
+        num_rows, width = self.projection_table[0].shape
+        LOGGER.info(
+            "Projection table: %d target nodes, %d entries per row (%.2f stored on average).",
+            num_rows,
+            width,
+            matrix.nnz / max(1, num_rows),
+        )
 
     @staticmethod
     def _row_normalize_matrix(matrix: spmatrix) -> spmatrix:
@@ -668,6 +759,10 @@ class ProjectionGraphProvider(BaseGraphProvider):
         Tensor
             Sparse projection matrix
         """
+        if self.projection_matrix is None:
+            raise ValueError(
+                "This projection was built for the triton backend and holds only its table, see get_table."
+            )
         if device is not None or dtype is not None:
             # sparse tensors can't be registered as buffers with DDP, so materialize and retain them on demand
             # TODO(SL): Calling this with different dtypes at runtime can cause precision deterioration;
@@ -675,12 +770,59 @@ class ProjectionGraphProvider(BaseGraphProvider):
             self.projection_matrix = self.projection_matrix.to(device=device, dtype=dtype)
         return self.projection_matrix
 
+    def get_table(self, device: Optional[torch.device] = None) -> tuple[Tensor, Tensor, Tensor]:
+        """Return the projection as a table with one row per target node.
+
+        The first table holds the source nodes each target node reads (``int32``), the second
+        their weights (``float32``), both of shape ``(target nodes, longest row)`` with shorter
+        rows padded, and the third the number of entries of each row (``int32``, shape
+        ``(target nodes,)``), see :func:`csr_to_table`. The tables stay on the device last asked
+        for.
+
+        Parameters
+        ----------
+        device : torch.device, optional
+            Device to move the tables to.
+
+        Returns
+        -------
+        tuple[Tensor, Tensor, Tensor]
+            The source-node table, the weight table and the row lengths.
+        """
+        if self.projection_table is None:
+            raise ValueError(
+                "This projection was built for the torch backend and holds only its matrix, see get_edges."
+            )
+        if device is not None and self.projection_table[0].device != torch.device(device):
+            self.projection_table = tuple(table.to(device) for table in self.projection_table)
+        return self.projection_table
+
+    def use_torch_backend(self) -> None:
+        """Switch to the torch backend, so that the projection also runs on a CPU.
+
+        A provider built for the triton backend holds only its table. The table is turned back
+        into the sparse CSR matrix, without the padding of short rows, and dropped. The matrix
+        holds the same entries as the one the table was made from.
+        """
+        if self.backend == "torch":
+            return
+        neighbours, weights, row_lengths = (table.cpu() for table in self.projection_table)
+        stored = torch.arange(neighbours.shape[1])[None, :] < row_lengths[:, None]
+        row_starts = torch.zeros(neighbours.shape[0] + 1, dtype=torch.int64)
+        row_starts[1:] = row_lengths.to(torch.int64).cumsum(0)
+        self.projection_matrix = torch.sparse_csr_tensor(
+            row_starts, neighbours[stored].long(), weights[stored], size=self.shape
+        )
+        self.projection_table = None
+        self.backend = "torch"
+
     @classmethod
     def from_config(
         cls,
         config: object,
         graph_data: Optional[HeteroData] = None,
         data_node_name: str = "data",
+        backend: ProjectionBackend = "triton",
     ) -> Optional["ProjectionGraphProvider"]:
         """Create a provider from a config mapping, choosing the mode from the keys present.
 
@@ -690,8 +832,9 @@ class ProjectionGraphProvider(BaseGraphProvider):
           building a Gaussian-weighted KNN subgraph on the fly from ``sigma`` (needs
           *graph_data*).
 
-        Returns ``None`` for an empty or ``None`` *config*, and raises ``ValueError`` on an
-        ambiguous config or when *graph_data* is required but missing.
+        The provider keeps the form of the matrix that *backend* reads. Returns ``None`` for an
+        empty or ``None`` *config*, and raises ``ValueError`` on an ambiguous config or when
+        *graph_data* is required but missing.
         """
         # --- normalise to plain dict ---
         if config is None:
@@ -718,6 +861,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
             return cls(
                 file_path=config["matrix_path"],
                 row_normalize=bool(config.get("row_normalize", False)),
+                backend=backend,
             )
 
         if has_edges:
@@ -729,6 +873,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
                 edge_weight_attribute=config.get("edge_weight_attribute"),
                 src_node_weight_attribute=config.get("src_node_weight_attribute"),
                 row_normalize=bool(config.get("row_normalize", False)),
+                backend=backend,
             )
 
         # target-grid mode: require its signal key here for a clear error, not a deep KeyError.
@@ -758,4 +903,93 @@ class ProjectionGraphProvider(BaseGraphProvider):
             edge_weight_attribute=edge_weight_attribute,
             src_node_weight_attribute=config.get("src_node_weight_attribute"),
             row_normalize=bool(config.get("row_normalize", False)),
+            backend=backend,
         )
+
+
+def use_torch_projections(model: nn.Module) -> None:
+    """Switch every sparse projection in ``model`` to the torch backend, so that it runs on a CPU.
+
+    Meant for a model built or loaded with the triton backend, such as one from an inference
+    checkpoint, before it is run on a CPU. See :meth:`ProjectionGraphProvider.use_torch_backend`.
+    """
+    for module in model.modules():
+        if isinstance(module, ProjectionGraphProvider):
+            module.use_torch_backend()
+
+
+class NeighbourListProvider:
+    """The nearest neighbours of every node of one node set, and where the nodes are.
+
+    Holds the neighbours of each node as an ``int32`` table of shape
+    ``(num_nodes, num_neighbours)``, the node itself included, and the position of every node
+    as a ``float32`` unit vector of shape ``(num_nodes, 3)``. Every node has the same number of
+    neighbours. Weights that depend on the distances, such as Gaussian smoothing of any width,
+    are worked out from the unit vectors when needed, so one provider serves every width.
+
+    The tables are built once from the graph. They stay on the device they were last asked
+    for and are shared by every deep copy of the provider.
+    """
+
+    def __init__(self, graph: HeteroData, nodes_name: str, num_neighbours: int) -> None:
+        """Build the neighbour tables of one node set.
+
+        Parameters
+        ----------
+        graph : HeteroData
+            Graph holding the coordinates of the nodes under ``nodes_name``.
+        nodes_name : str
+            Node set whose nodes are both the points and their neighbours.
+        num_neighbours : int
+            Number of neighbours of each node, the node itself included.
+        """
+        from anemoi.graphs.builders import build_neighbour_table
+
+        num_nodes = graph[nodes_name].num_nodes
+        if num_neighbours > num_nodes:
+            raise ValueError(f"num_neighbours={num_neighbours} exceeds the {num_nodes} nodes of '{nodes_name}'.")
+
+        self.neighbours = build_neighbour_table(graph, nodes_name, num_neighbours)
+
+        latitude, longitude = graph[nodes_name].x.to(torch.float64).unbind(dim=1)
+        self.unit_vectors = (
+            torch.stack(
+                [latitude.cos() * longitude.cos(), latitude.cos() * longitude.sin(), latitude.sin()],
+                dim=1,
+            )
+            .to(torch.float32)
+            .to(self.neighbours.device)
+            .contiguous()
+        )
+        self.nodes_name = nodes_name
+        self.num_neighbours = num_neighbours
+
+    def __deepcopy__(self, memo: dict) -> "NeighbourListProvider":
+        """Deep copy that shares the neighbour tables, which stay the same for the whole run."""
+        cls = self.__class__
+        new = cls.__new__(cls)
+        memo[id(self)] = new
+        memo[id(self.neighbours)] = self.neighbours
+        memo[id(self.unit_vectors)] = self.unit_vectors
+        for key, value in self.__dict__.items():
+            new.__dict__[key] = copy.deepcopy(value, memo)
+        return new
+
+    def get_neighbours(self, device: Optional[torch.device] = None) -> tuple[Tensor, Tensor]:
+        """The neighbour table and the unit vectors of the nodes, moved to ``device`` if given."""
+        if device is not None and self.neighbours.device != torch.device(device):
+            self.neighbours = self.neighbours.to(device)
+            self.unit_vectors = self.unit_vectors.to(device)
+        return self.neighbours, self.unit_vectors
+
+    def typical_reach(self, num_samples: int = 10_000) -> float:
+        """How far the neighbourhoods reach: the median distance in radians to a node's farthest neighbour.
+
+        The median is taken over up to ``num_samples`` nodes spread evenly through the node set.
+        """
+        from anemoi.models.layers.gaussian_smoothing import squared_neighbour_distances
+
+        num_nodes = self.neighbours.shape[0]
+        sample = torch.linspace(0, num_nodes - 1, min(num_samples, num_nodes), device=self.neighbours.device).long()
+        farthest = squared_neighbour_distances(self.unit_vectors, self.neighbours, sample, torch.float64).amax(dim=1)
+        return float(farthest.median().sqrt())

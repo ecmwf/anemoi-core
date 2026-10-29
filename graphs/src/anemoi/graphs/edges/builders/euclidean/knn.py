@@ -257,6 +257,7 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         target_coords: torch.Tensor,
         num_nearest_neighbours: int,
         reversed_num_nearest_neighbours: int,
+        skip_flip: bool = False,
     ) -> torch.Tensor:
         # Forward: for each target node, its nearest source nodes.
         # knn(x=source, y=target) -> rows (target_idx, source_idx); flip -> (source, target).
@@ -264,7 +265,9 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         # Reversed: for each source node, its nearest target nodes.
         # knn(x=target, y=source) -> rows (source_idx, target_idx); already (source, target).
         reversed_ = knn(target_coords, source_coords, k=reversed_num_nearest_neighbours)
-        return intersect_edges(forward, reversed_)
+        mutual = intersect_edges(forward, reversed_)
+        # With skip_flip the edges come as (target, source), as from the scikit-learn path.
+        return torch.flip(mutual, [0]) if skip_flip else mutual
 
     def _compute_adj_matrix_sklearn(
         self,

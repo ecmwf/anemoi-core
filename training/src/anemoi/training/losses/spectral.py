@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.distributed.shapes import ShardSizes
+    from anemoi.models.layers.projection_backend import ProjectionBackend
     from anemoi.training.losses.scaler_tensor import ScaleTensor
 
 LOGGER = logging.getLogger(__name__)
@@ -107,6 +108,7 @@ class SpectralLoss(BaseLoss):
         projection_config: object | None = None,
         graph_data: HeteroData | None = None,
         data_node_name: str = DEFAULT_DATASET_NAME,
+        sparse_projector_backend: ProjectionBackend = "triton",
         ignore_nans: bool = False,
         scalers: list | None = None,
         **kwargs,
@@ -129,6 +131,9 @@ class SpectralLoss(BaseLoss):
             Model graph; required when *projection_config* uses edge or target-grid mode.
         data_node_name
             Node type in *graph_data* holding the data-grid coordinates.
+        sparse_projector_backend
+            Kernels for the projection: ``"triton"`` (GPU, the default) or ``"torch"`` (sparse matmul), see
+            :class:`~anemoi.models.layers.sparse_projector.SparseProjector`.
         ignore_nans
             Must be False; spectral losses cannot handle missing values.
         scalers
@@ -163,6 +168,7 @@ class SpectralLoss(BaseLoss):
             projection_config,
             graph_data=graph_data,
             data_node_name=data_node_name,
+            backend=sparse_projector_backend,
         )
         if self.projection_provider is not None:
             self.projector = SparseProjector()
@@ -204,8 +210,7 @@ class SpectralLoss(BaseLoss):
         x = self._select_subgrid(x)
         LOGGER.debug("Spectral loss: shape after subgrid selection: %s", tuple(x.shape))
         if self.projection_provider is not None:
-            projection_matrix = self.projection_provider.get_edges(device=x.device)
-            x = self.projector(x, projection_matrix)
+            x = self.projector(x, self.projection_provider)
             LOGGER.debug("Spectral loss: shape after projection: %s", tuple(x.shape))
         return x
 

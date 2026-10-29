@@ -16,6 +16,7 @@ from typing import Union
 from pydantic import Field
 from pydantic import model_validator
 
+from anemoi.models.layers.projection_backend import ProjectionBackend
 from anemoi.utils.schemas import BaseModel
 
 
@@ -43,6 +44,8 @@ class CrossGridProjectorSchema(BaseModel):
     "If ``True``, each row of the projection matrix is normalised to sum to 1."
     autocast: bool = Field(default=False)
     "Whether to run the sparse matmul under automatic mixed precision."
+    backend: ProjectionBackend = Field(default="triton")
+    "Projection kernels: 'triton' (GPU) or 'torch' (sparse matmul, any device)."
 
     @model_validator(mode="after")
     def check_source_provided(self) -> CrossGridProjectorSchema:

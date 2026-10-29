@@ -21,6 +21,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.projection_backend import ProjectionBackend
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 
@@ -58,6 +59,9 @@ class CrossGridProjector(SpatialPreprocessor):
         conservative interpolation).
     autocast : bool
         Whether to run the sparse matmul under automatic mixed precision.
+    backend : str
+        ``"triton"`` (GPU kernels) or ``"torch"`` (sparse matmul), see
+        :class:`~anemoi.models.layers.sparse_projector.SparseProjector`.
     """
 
     def __init__(
@@ -69,6 +73,7 @@ class CrossGridProjector(SpatialPreprocessor):
         file_path: Optional[str | Path] = None,
         row_normalize: bool = True,
         autocast: bool = False,
+        backend: ProjectionBackend = "triton",
     ) -> None:
         super().__init__()
 
@@ -79,18 +84,19 @@ class CrossGridProjector(SpatialPreprocessor):
             src_node_weight_attribute=src_node_weight_attribute,
             file_path=file_path,
             row_normalize=row_normalize,
+            backend=backend,
         )
         self.projector = SparseProjector(autocast=autocast)
 
     @property
     def input_grid_size(self) -> int:
         """Number of source-grid points expected by the projection matrix."""
-        return self.provider.projection_matrix.shape[1]
+        return self.provider.shape[1]
 
     @property
     def output_grid_size(self) -> int:
         """Number of target-grid points produced by the projection matrix."""
-        return self.provider.projection_matrix.shape[0]
+        return self.provider.shape[0]
 
     def forward(
         self,
@@ -126,7 +132,7 @@ class CrossGridProjector(SpatialPreprocessor):
         if grid_shard_sizes is not None and min(channel_shard_sizes) > 0:
             # All ranks have at least one channel: use channel-transpose strategy for efficiency.
             x_flat = all_to_all_transpose(x_flat, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
-            x_proj = self.projector(x_flat, self.provider.get_edges(device=x.device, dtype=x.dtype))
+            x_proj = self.projector(x_flat, self.provider, matrix_dtype=x.dtype)
             output_grid_shard_sizes = get_shard_sizes(x_proj, -2, model_comm_group)
             x_proj = all_to_all_transpose(
                 x_proj, -2, output_grid_shard_sizes, -1, channel_shard_sizes, model_comm_group
@@ -136,11 +142,11 @@ class CrossGridProjector(SpatialPreprocessor):
             # ranks.  Fall back to gather the full source grid, project locally, then shard the
             # output grid.
             x_flat = gather_tensor(x_flat, -2, grid_shard_sizes, model_comm_group)
-            x_proj = self.projector(x_flat, self.provider.get_edges(device=x.device, dtype=x.dtype))
+            x_proj = self.projector(x_flat, self.provider, matrix_dtype=x.dtype)
             output_grid_shard_sizes = get_shard_sizes(x_proj, -2, model_comm_group)
             x_proj = shard_tensor(x_proj, -2, output_grid_shard_sizes, model_comm_group)
         else:
-            x_proj = self.projector(x_flat, self.provider.get_edges(device=x.device, dtype=x.dtype))
+            x_proj = self.projector(x_flat, self.provider, matrix_dtype=x.dtype)
 
         x_proj = einops.rearrange(x_proj, "(b t e) g v -> b t e g v", b=batch, t=time, e=ensemble)
         return x_proj, output_grid_shard_sizes

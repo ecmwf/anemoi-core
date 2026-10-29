@@ -8,28 +8,70 @@
 # nor does it submit to any jurisdiction.
 
 
+import functools
 import logging
+import math
+import weakref
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import einops
 import torch
+import torch.utils.checkpoint
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.builders import _expand_smoother_config
-from anemoi.graphs.builders import build_smoother_subgraph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.layers.gaussian_smoothing import CompiledGaussianSmoothing
+from anemoi.models.layers.gaussian_smoothing import gaussian_smooth
+from anemoi.models.layers.graph_provider import NeighbourListProvider
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.projection_backend import ProjectionBackend
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
 
+if TYPE_CHECKING:
+    from anemoi.training.schemas.training import MultiscaleConfigNeighbourListSchema
+
 LOGGER = logging.getLogger(__name__)
+
+# Neighbour lists already built, by graph, node set and number of neighbours, so that every
+# multiscale loss on the same grid shares one list. An entry is removed when its graph is freed.
+_NEIGHBOUR_LISTS: dict[tuple[int, str, int], NeighbourListProvider] = {}
+
+
+def shared_neighbour_list(graph_data: HeteroData, data_node_name: str, num_neighbours: int) -> NeighbourListProvider:
+    """The neighbour list of a node set, built on first use and shared after that."""
+    key = (id(graph_data), data_node_name, num_neighbours)
+    if key not in _NEIGHBOUR_LISTS:
+        _NEIGHBOUR_LISTS[key] = NeighbourListProvider(graph_data, data_node_name, num_neighbours)
+        weakref.finalize(graph_data, _NEIGHBOUR_LISTS.pop, key, None)
+    return _NEIGHBOUR_LISTS[key]
+
+
+class NeighbourSmoothingScale:
+    """One smoothed scale: Gaussian smoothing of width ``sigma`` over a shared neighbour list."""
+
+    def __init__(self, neighbour_list: NeighbourListProvider, sigma: float, backend: ProjectionBackend) -> None:
+        self.neighbour_list = neighbour_list
+        self.sigma = sigma
+        self.backend = backend
+        self.compiled: CompiledGaussianSmoothing | None = None
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        neighbours, unit_vectors = self.neighbour_list.get_neighbours(device=x.device)
+        return gaussian_smooth(x, neighbours, unit_vectors, self.sigma, backend=self.backend, compiled=self.compiled)
+
+    def __repr__(self) -> str:
+        return (
+            f"NeighbourSmoothingScale(sigma={self.sigma}, neighbours={self.neighbour_list.num_neighbours}, "
+            f"backend={self.backend!r}, compiled={self.compiled is not None})"
+        )
 
 
 class MultiscaleLossWrapper(BaseLossWrapper):
@@ -47,7 +89,9 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         data_node_name: str = DEFAULT_DATASET_NAME,
         autocast: bool = False,
         sparse_projector_num_chunks: int = 1,
+        sparse_projector_backend: ProjectionBackend = "triton",
         ignore_nans: bool = False,
+        checkpoint_scales: bool = False,
         # Deprecated: pass loss_matrices_path / loss_matrices inside multiscale_config instead.
         loss_matrices_path: Path | str | None = None,
         loss_matrices: list[Path | str] | None = None,
@@ -61,7 +105,7 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         weights : list[float]
             Per-scale loss weights
         multiscale_config : object | None
-            Configuration for the smoothing matrices.  Accepts two forms:
+            Configuration of the smoothing.  Accepts two forms:
 
             - **File mode** provide ``loss_matrices`` (list of filenames) and
               optionally ``loss_matrices_path`` (directory prefix)::
@@ -73,18 +117,18 @@ class MultiscaleLossWrapper(BaseLossWrapper):
                     - filter_4x.npz
                     - null            # full resolution
 
-            - **On-the-fly mode** provide a compact geometric-progression spec
-              or an explicit ``smoothers`` mapping (passed to
-              ``_expand_smoother_config``)::
+            - **Neighbour-list mode** provide one number of nearest neighbours,
+              shared by every scale, and one Gaussian width per scale, widest
+              first. The weights are worked out from the distances on the fly
+              (see :func:`anemoi.models.layers.gaussian_smoothing.gaussian_smooth`),
+              so one list serves every scale::
 
                 multiscale_config:
-                  num_scales: 3
-                  base_num_nearest_neighbours: 4
-                  base_sigma: 0.1
-                  scale_factor: 2
+                  num_nearest_neighbours: 128
+                  sigmas: [0.0157, 0.0078, 0.0039]
 
         graph_data : HeteroData | None
-            Main graph; required for on-the-fly mode to copy data-node positions.
+            Main graph; required for neighbour-list mode, which reads the data-node positions.
         data_node_name : str
             Node type in *graph_data* that holds the data-grid coordinates.
         autocast : bool
@@ -92,8 +136,19 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         sparse_projector_num_chunks : int
             Default number of chunks for multiscale smoothing.
             ``1`` means processing all fields in one go.
+        sparse_projector_backend : str
+            Kernels for the smoothing in either mode: ``"triton"`` (GPU, the default) or
+            ``"torch"`` (any device), see
+            :class:`~anemoi.models.layers.sparse_projector.SparseProjector` and
+            :func:`~anemoi.models.layers.gaussian_smoothing.gaussian_smooth`.
         ignore_nans : bool
             Passed to :class:`BaseLoss`; ignored by the wrapper itself.
+        checkpoint_scales : bool
+            Work out each scale's loss under its own gradient checkpoint while training. Each
+            scale smooths the prediction and target at its own width and at the next wider one,
+            and the backward pass repeats this, so every smoothing runs four times. The backward
+            pass keeps the unsmoothed fields, so the memory it holds stays the same for any
+            number of scales.
         loss_matrices_path : Path | str | None
             Deprecated.  Pass inside *multiscale_config* instead.
         loss_matrices : list[Path | str] | None
@@ -114,12 +169,13 @@ class MultiscaleLossWrapper(BaseLossWrapper):
                 cfg.setdefault("loss_matrices_path", loss_matrices_path)
             multiscale_config = cfg
 
-        self.smoothing_matrices = self._load_smoothing_matrices(
+        self.smoothers = self._build_smoothers(
             multiscale_config,
             graph_data,
             data_node_name,
+            sparse_projector_backend,
         )
-        self.num_scales = len(self.smoothing_matrices)
+        self.num_scales = len(self.smoothers)
         assert (
             len(weights) == self.num_scales
         ), f"Number of weights ({len(weights)}) must match number of scales ({self.num_scales})"
@@ -128,6 +184,7 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         self.mloss = None
         self.projector = SparseProjector(autocast=autocast)
         self.sparse_projector_num_chunks = sparse_projector_num_chunks
+        self.checkpoint_scales = checkpoint_scales
 
     @property
     def needs_shard_layout_info(self) -> bool:
@@ -137,16 +194,32 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         """MultiscaleLossWrapper is a leaf: it performs substantive computation."""
         yield self
 
-    def _load_smoothing_matrices(
+    def compile_for_training(self, **options) -> None:
+        """Compile the torch backend of the neighbour-list smoothing.
+
+        Called for a ``model.compile`` entry naming this class. The Triton kernels and the
+        smoothing matrices of file mode are left as they are, and so is the per-scale loss, which
+        has its own ``model.compile`` entry if it is to be compiled.
+        """
+        scales = [s for s in self.smoothers if isinstance(s, NeighbourSmoothingScale) and s.backend == "torch"]
+        if not scales:
+            LOGGER.info("MultiscaleLossWrapper: nothing to compile, no scale smooths with the torch backend.")
+            return
+        compiled = CompiledGaussianSmoothing(**options)
+        for scale in scales:
+            scale.compiled = compiled
+
+    def _build_smoothers(
         self,
         multiscale_config: object | None,
         graph_data: HeteroData | None,
         data_node_name: str,
-    ) -> list[ProjectionGraphProvider | None]:
-        """Load smoothing matrices for multi-scale loss computation.
+        sparse_projector_backend: ProjectionBackend,
+    ) -> list[ProjectionGraphProvider | NeighbourSmoothingScale | None]:
+        """Set up the smoothing of every scale.
 
-        Dispatches to file mode when *multiscale_config* contains a
-        ``loss_matrices`` key, otherwise to on-the-fly graph mode.
+        Dispatches to neighbour-list mode when *multiscale_config* contains ``sigmas`` and to
+        file mode when it contains ``loss_matrices``.
         """
         if multiscale_config is None:
             LOGGER.info("No multiscale_config specified, using single scale without smoothing")
@@ -160,76 +233,82 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             else dict(multiscale_config)
         )
 
-        if "loss_matrices" in cfg:
-            from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
+        if "sigmas" in cfg:
+            from anemoi.training.schemas.training import MultiscaleConfigNeighbourListSchema
 
-            onthefly_keys = set(MultiscaleConfigOnTheFlySchema.model_fields)
-            if cfg.keys() & onthefly_keys:
-                msg = (
-                    "multiscale_config mixes file-based ('loss_matrices') and on-the-fly "
-                    f"keys ({cfg.keys() & onthefly_keys}). Use one mode only."
-                )
+            assert graph_data is not None, "graph_data must be provided for a neighbour-list multiscale_config."
+            return self._build_neighbour_smoothing_scales(
+                MultiscaleConfigNeighbourListSchema(**cfg),
+                graph_data,
+                data_node_name,
+                sparse_projector_backend,
+            )
+
+        if "loss_matrices" in cfg:
+            from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
+
+            other_keys = cfg.keys() - set(MultiscaleConfigDiskSchema.model_fields)
+            if other_keys:
+                msg = f"multiscale_config mixes file keys ('loss_matrices') with other keys ({other_keys})."
                 raise ValueError(msg)
             return self._load_file_smoothing_matrices(
                 cfg.get("loss_matrices_path"),
                 cfg["loss_matrices"],
+                sparse_projector_backend,
             )
 
-        assert graph_data is not None, "graph_data must be provided for on-the-fly multiscale_config."
-        return self._build_graph_smoothing_matrices(cfg, graph_data, data_node_name)
+        msg = f"multiscale_config needs 'sigmas' (neighbour-list mode) or 'loss_matrices' (file mode), got {set(cfg)}."
+        raise ValueError(msg)
 
-    def _build_graph_smoothing_matrices(
+    def _build_neighbour_smoothing_scales(
         self,
-        multiscale_config: object,
+        multiscale_config: "MultiscaleConfigNeighbourListSchema",
         graph_data: HeteroData,
         data_node_name: str,
-    ) -> list[ProjectionGraphProvider | None]:
-        """Build one projection provider per smoother scale from config."""
-        smoothers = _expand_smoother_config(multiscale_config)
-        assert smoothers, "multiscale_config must define smoothers (explicit or via num_scales)."
-
-        smoothing_matrices: list[ProjectionGraphProvider | None] = []
-        edge_name = (data_node_name, "to", data_node_name)
-
-        # Reverse order: coarsest scale first (highest smoothing)
-        for smoother_name, smoother_cfg in reversed(list(smoothers.items())):
-            subgraph = build_smoother_subgraph(graph_data, data_node_name, smoother_cfg)
-            src_node_weight_attribute = (
-                smoother_cfg.get("src_node_weight_attribute") if isinstance(smoother_cfg, dict) else None
+        backend: ProjectionBackend,
+    ) -> list[NeighbourSmoothingScale | None]:
+        """One smoothed scale per Gaussian width, all over one shared neighbour list, then the unsmoothed field."""
+        neighbour_list = shared_neighbour_list(graph_data, data_node_name, multiscale_config.num_nearest_neighbours)
+        scales: list[NeighbourSmoothingScale | None] = [
+            NeighbourSmoothingScale(neighbour_list, sigma, backend) for sigma in multiscale_config.sigmas
+        ]
+        for scale in scales:
+            LOGGER.info("Loss smoothing (neighbour list): %s", scale)
+        reach, widest = neighbour_list.typical_reach(), multiscale_config.sigmas[0]
+        LOGGER.info(
+            "Loss smoothing neighbours reach %.4f rad (median), %.1f times the widest sigma.",
+            reach,
+            reach / widest,
+        )
+        if reach < 2 * widest:
+            LOGGER.warning(
+                "The %d nearest neighbours reach only %.1f times the widest sigma (%.4f rad), so its Gaussian is "
+                "cut off at %.0f%% of its centre weight. Use more neighbours or a narrower widest sigma for a "
+                "softer cut-off.",
+                multiscale_config.num_nearest_neighbours,
+                reach / widest,
+                widest,
+                100 * math.exp(-0.5 * (reach / widest) ** 2),
             )
-            row_normalize = bool(smoother_cfg.get("row_normalize", False)) if isinstance(smoother_cfg, dict) else False
-            provider = ProjectionGraphProvider(
-                graph=subgraph,
-                edges_name=edge_name,
-                edge_weight_attribute=DEFAULT_EDGE_WEIGHT_ATTRIBUTE,
-                src_node_weight_attribute=src_node_weight_attribute,
-                row_normalize=row_normalize,
-            )
-            smoothing_matrices.append(provider)
-            LOGGER.info(
-                "Loss smoothing (graph, %s): %s",
-                smoother_name,
-                provider.get_edges().shape,
-            )
-
-        smoothing_matrices.append(None)  # full-resolution scale — no smoothing
-        return smoothing_matrices
+        scales.append(None)  # the unsmoothed field is the last scale
+        return scales
 
     def _load_file_smoothing_matrices(
         self,
         loss_matrices_path: Path | str | None,
         loss_matrices: list[Path | str] | None,
+        backend: ProjectionBackend,
     ) -> list[ProjectionGraphProvider | None]:
         """Create file-backed projection providers from serialized sparse matrices."""
         if not loss_matrices:
             LOGGER.info("No smoothing files specified, using single scale without smoothing")
             return [None]
 
-        smoothing_matrices: list[ProjectionGraphProvider | None] = []
+        smoothers: list[ProjectionGraphProvider | None] = []
         for filename in loss_matrices:
             # Skip None, False, or the string "None"
             if filename is None or filename is False or filename == "None":
-                smoothing_matrices.append(None)
+                smoothers.append(None)
                 LOGGER.info("Loss smoothing: %s", None)
                 continue
 
@@ -237,11 +316,12 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             provider = ProjectionGraphProvider(
                 file_path=file_path,
                 row_normalize=False,
+                backend=backend,
             )
-            smoothing_matrices.append(provider)
-            LOGGER.info("Loss smoothing: %s", provider.get_edges().shape)
+            smoothers.append(provider)
+            LOGGER.info("Loss smoothing: %s, %s backend", provider.shape, backend)
 
-        return smoothing_matrices
+        return smoothers
 
     def _prepare_for_smoothing(
         self,
@@ -302,20 +382,70 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         )
 
     def _smooth_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """Apply smoothing matrix to predictions and targets for loss computation."""
-        if self.smoothing_matrices[i] is not None:
-            projection_matrix = self.smoothing_matrices[i].get_edges(device=x.device)
+        """Smooth predictions and targets at scale ``i`` for the loss."""
+        if isinstance(self.smoothers[i], NeighbourSmoothingScale):
+            return self.smoothers[i](x), self.smoothers[i](y)
+        if self.smoothers[i] is not None:
             x = self.projector(
                 x,
-                projection_matrix,
+                self.smoothers[i],
                 num_chunks=self.sparse_projector_num_chunks,
             )
             y = self.projector(
                 y,
-                projection_matrix,
+                self.smoothers[i],
                 num_chunks=self.sparse_projector_num_chunks,
             )
         return x, y
+
+    def _scale_fields(
+        self,
+        y_pred_ens_for_smooth: torch.Tensor,
+        y_for_smooth: torch.Tensor,
+        i: int,
+        layout: dict,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Prediction and target smoothed at scale ``i``, in the grid layout the per-scale loss expects."""
+        y_pred_ens_tmp, y_tmp = self._smooth_for_loss(y_pred_ens_for_smooth, y_for_smooth, i)
+        if layout["is_model_sharded"]:
+            # channel-sharded -> grid-sharded: reverse the all-to-all
+            y_pred_ens_tmp = all_to_all_transpose(
+                y_pred_ens_tmp,
+                -2,
+                layout["grid_shard_sizes"],
+                -1,
+                layout["channel_shard_sizes_pred"],
+                layout["group"],
+            )
+            y_tmp = all_to_all_transpose(
+                y_tmp,
+                -2,
+                layout["grid_shard_sizes"],
+                -1,
+                layout["channel_shard_sizes_y"],
+                layout["group"],
+            )
+        return y_pred_ens_tmp, y_tmp
+
+    def _scale_loss(
+        self,
+        i: int,
+        layout: dict,
+        score: functools.partial,
+        y_pred_ens_for_smooth: torch.Tensor,
+        y_for_smooth: torch.Tensor,
+    ) -> torch.Tensor:
+        """Loss of scale ``i`` worked out from the unsmoothed fields alone.
+
+        Scale ``i`` is the field smoothed at its own width minus the field smoothed at the next
+        wider one (scales go from the widest to the unsmoothed field), so both are smoothed here.
+        """
+        y_pred_ens_tmp, y_tmp = self._scale_fields(y_pred_ens_for_smooth, y_for_smooth, i, layout)
+        if i > 0:
+            wider_y_pred_ens, wider_y = self._scale_fields(y_pred_ens_for_smooth, y_for_smooth, i - 1, layout)
+            y_pred_ens_tmp = y_pred_ens_tmp - wider_y_pred_ens
+            y_tmp = y_tmp - wider_y
+        return score(y_pred_ens_tmp, y_tmp)
 
     def forward(
         self,
@@ -351,74 +481,59 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             y_pred_ens_for_smooth = y_pred_ens
             y_for_smooth = y
 
+        layout = {
+            "is_model_sharded": is_model_sharded,
+            "group": group,
+            "grid_shard_sizes": grid_shard_sizes,
+            "channel_shard_sizes_pred": channel_shard_sizes_pred,
+            "channel_shard_sizes_y": channel_shard_sizes_y,
+        }
+        # sharding kwargs - only pass if the loss needs them
+        sharding_kwargs = (
+            {"grid_shard_sizes": grid_shard_sizes, "grid_dim": grid_dim} if self.loss.needs_shard_layout_info else {}
+        )
+        score = functools.partial(
+            self.loss,
+            squash=squash,
+            scaler_indices=scaler_indices,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice,
+            group=group,
+            **sharding_kwargs,
+            **kwargs,
+        )
+        checkpointed = self.checkpoint_scales and torch.is_grad_enabled()
+
         weighted_losses = []
         prev_y_pred_ens = None
         prev_y = None
-        for i, (weight, provider) in enumerate(zip(self.weights, self.smoothing_matrices, strict=True)):
+        for i, (weight, provider) in enumerate(zip(self.weights, self.smoothers, strict=True)):
             if LOGGER.isEnabledFor(logging.DEBUG):
                 LOGGER.debug(
                     "Loss: %s %s",
                     i,
-                    provider.projection_matrix.shape if provider is not None else None,
+                    provider.shape if isinstance(provider, ProjectionGraphProvider) else provider,
                 )
 
-            # smooth the predictions and the truth for loss computation
-            y_pred_ens_tmp, y_tmp = self._smooth_for_loss(
-                y_pred_ens_for_smooth,
-                y_for_smooth,
-                i,
-            )
-
-            if is_model_sharded:
-                # channel-sharded -> grid-sharded: reverse the all-to-all
-                y_pred_ens_tmp = all_to_all_transpose(
-                    y_pred_ens_tmp,
-                    -2,
-                    grid_shard_sizes,
-                    -1,
-                    channel_shard_sizes_pred,
-                    group,
+            if checkpointed:
+                scale_loss = torch.utils.checkpoint.checkpoint(
+                    functools.partial(self._scale_loss, i, layout, score),
+                    y_pred_ens_for_smooth,
+                    y_for_smooth,
+                    use_reentrant=False,
                 )
-                y_tmp = all_to_all_transpose(
-                    y_tmp,
-                    -2,
-                    grid_shard_sizes,
-                    -1,
-                    channel_shard_sizes_y,
-                    group,
-                )
+            else:
+                # smooth the predictions and the truth for loss computation
+                current_y_pred_ens, current_y = self._scale_fields(y_pred_ens_for_smooth, y_for_smooth, i, layout)
+                y_pred_ens_tmp, y_tmp = current_y_pred_ens, current_y
+                if prev_y_pred_ens is not None:  # assumption, resol 0 < 1 < 2 < ... < n
+                    y_pred_ens_tmp = y_pred_ens_tmp - prev_y_pred_ens
+                    y_tmp = y_tmp - prev_y
+                prev_y_pred_ens = current_y_pred_ens
+                prev_y = current_y
+                scale_loss = score(y_pred_ens_tmp, y_tmp)
 
-            current_y_pred_ens = y_pred_ens_tmp
-            current_y = y_tmp
-
-            if prev_y_pred_ens is not None:  # assumption, resol 0 < 1 < 2 < ... < n
-                y_pred_ens_tmp = y_pred_ens_tmp - prev_y_pred_ens
-                y_tmp = y_tmp - prev_y
-
-            prev_y_pred_ens = current_y_pred_ens
-            prev_y = current_y
-
-            # sharding kwargs - only pass if the loss needs them
-            sharding_kwargs = (
-                {"grid_shard_sizes": grid_shard_sizes, "grid_dim": grid_dim}
-                if self.loss.needs_shard_layout_info
-                else {}
-            )
-            # compute the loss
-            weighted_losses.append(
-                weight
-                * self.loss(
-                    y_pred_ens_tmp,
-                    y_tmp,
-                    squash=squash,
-                    scaler_indices=scaler_indices,
-                    without_scalers=without_scalers,
-                    grid_shard_slice=grid_shard_slice,
-                    group=group,
-                    **sharding_kwargs,
-                    **kwargs,
-                ),
-            )
+            weighted_losses.append(weight * scale_loss)
 
         # The scale dimension is internal to this wrapper. Return the same
         # scalar or per-variable shape as the wrapped loss.

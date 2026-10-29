@@ -211,8 +211,8 @@ training.
 The wrapper is configured via a single ``multiscale_config`` key that
 supports two modes.
 
-**On-the-fly mode** — build smoothing graphs at startup from a
-geometric progression of KNN smoothers:
+**Neighbour-list mode** — Gaussian smoothing of every width over one
+list of nearest neighbours, built from the graph at startup:
 
 .. code:: yaml
 
@@ -223,10 +223,8 @@ geometric progression of KNN smoothers:
            _target_: anemoi.training.losses.MultiscaleLossWrapper
            weights: [0.5, 0.25, 0.15, 0.1]
            multiscale_config:
-             num_scales: 3          # builds 3 smoothed + 1 full-res = 4 scales
-             base_num_nearest_neighbours: 4
-             base_sigma: 0.1
-             scale_factor: 2
+             num_nearest_neighbours: 128
+             sigmas: [0.0157, 0.0078, 0.0039]   # widest first; 3 smoothed + 1 full-res = 4 scales
            per_scale_loss:
              _target_: anemoi.training.losses.CRPS
              alpha: 0.95           # 1.0 = fair CRPS, 0.0 = standard, in between = almost fair
