@@ -87,6 +87,14 @@ class MapperGraphExport(Callback):
         provider.capture_next_graph(source_name, target_name)
         self._armed_providers.append((dataset_name, role, provider))
 
+    @staticmethod
+    def _hidden_name(model: Any, dataset_name: str) -> str:
+        """Hidden node set a dataset's encoder and decoder connect to."""
+        if model.dataset2hidden is None:
+            # Hierarchical model: the encoders and decoders connect to the first hidden level.
+            return model.hidden_names[0]
+        return model.dataset2hidden[dataset_name]
+
     def on_train_batch_start(
         self,
         trainer: pl.Trainer,
@@ -98,24 +106,20 @@ class MapperGraphExport(Callback):
             return
 
         model = self._torch_drop_down(pl_module)
-        hidden_name = model._graph_name_hidden
-        if not isinstance(hidden_name, str):
-            # Hierarchical model: the encoders and decoders connect to the first hidden level.
-            hidden_name = hidden_name[0]
         for dataset_name, provider in model.encoder_graph_provider.items():
             self._arm_provider(
                 provider,
                 dataset_name,
                 "encoder",
                 f"{dataset_name}_input",
-                hidden_name,
+                self._hidden_name(model, dataset_name),
             )
         for dataset_name, provider in model.decoder_graph_provider.items():
             self._arm_provider(
                 provider,
                 dataset_name,
                 "decoder",
-                hidden_name,
+                self._hidden_name(model, dataset_name),
                 f"{dataset_name}_output",
             )
 

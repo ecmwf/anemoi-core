@@ -150,7 +150,7 @@ def test_graph_trainable_features_plot_handles_noop_processor_graph_provider():
 
     model = DummyModel()
     model._graph_name_data = "data"
-    model._graph_name_hidden = "hidden"
+    model.dataset2hidden = {"data": "hidden"}
     model.encoder_graph_provider = None
     model.decoder_graph_provider = None
     model.processor_graph_provider = NoOpGraphProvider()
@@ -169,7 +169,7 @@ def test_graph_trainable_features_plot_handles_noop_mapper_graph_providers():
 
     model = DummyModel()
     model._graph_name_data = "data"
-    model._graph_name_hidden = "hidden"
+    model.dataset2hidden = {"data": "hidden"}
     model.encoder_graph_provider = NoOpGraphProvider()
     model.decoder_graph_provider = NoOpGraphProvider()
     model.processor_graph_provider = NoOpGraphProvider()
@@ -191,7 +191,7 @@ def test_graph_trainable_features_plot_handles_missing_dataset_key_in_provider_m
 
     model = DummyModel()
     model._graph_name_data = "data"
-    model._graph_name_hidden = "hidden"
+    model.dataset2hidden = {"data": "hidden"}
     model.encoder_graph_provider = {"other": TrainableProvider()}
     model.decoder_graph_provider = {"other": TrainableProvider()}
     model.processor_graph_provider = None
@@ -199,6 +199,30 @@ def test_graph_trainable_features_plot_handles_missing_dataset_key_in_provider_m
     edge_modules = get_edge_trainable_modules(model, dataset_name="data")
 
     assert edge_modules == {}
+
+
+def test_graph_trainable_features_plot_finds_processor_provider_by_hidden_mesh():
+    class TrainableTensor:
+        trainable = object()
+
+    class TrainableProvider:
+        trainable = TrainableTensor()
+
+    class DummyModel:
+        pass
+
+    data_provider = TrainableProvider()
+    other_provider = TrainableProvider()
+
+    model = DummyModel()
+    model.dataset2hidden = {"data": "hidden_a", "other": "hidden_b"}
+    model.encoder_graph_provider = None
+    model.decoder_graph_provider = None
+    model.processor_graph_provider = {"hidden_a": data_provider, "hidden_b": other_provider}
+
+    edge_modules = get_edge_trainable_modules(model, dataset_name="data")
+
+    assert edge_modules == {("hidden_a", "hidden_a"): data_provider}
 
 
 # ---- Mocks for BasePlotAdditionalMetrics.process and task-type tests ----

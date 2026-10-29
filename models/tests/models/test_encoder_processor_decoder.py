@@ -53,6 +53,7 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
         self.encoder2datasets = {"shared": self.input_datasets}
         self.encoder_fusing_strategy = {"shared": "sequential"}
         self._graph_name_hidden = "hidden"
+        self.dataset2hidden = {"dataset_a": "hidden", "dataset_b": "hidden"}
         self.input_dim_latent = 4
         self.node_attributes = _HiddenAttributes()
         self.encoder_graph_provider = nn.ModuleDict(
@@ -62,7 +63,7 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
         self.encoder_src_projection = nn.ModuleDict()
         self.latent_aggregator = _CaptureAggregator()
 
-    def _hidden_coordinates(self) -> torch.Tensor:
+    def _hidden_coordinates(self, hidden_name: str | None = None) -> torch.Tensor:
         return torch.zeros(1, 2)
 
     def _build_networks(self, model_config) -> None:

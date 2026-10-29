@@ -491,7 +491,8 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             self.plot(
                 trainer,
                 pl_module,
-                self.dataset_names,
+                # A domain-homogeneous batch (CrossDatasetLoadingPolicy) holds only some of the datasets.
+                [name for name in self.dataset_names if name in batch],
                 output,
                 batch,
                 batch_idx,

@@ -256,36 +256,44 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 continue
 
             encoder_config = encoders_config[self.dataset2encoder[dataset_name]]
+            hidden_name = self.dataset2hidden[dataset_name]
 
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=_edges_or_none(static_graph, (dataset_name, "to", self._graph_name_hidden)),
+                graph=_edges_or_none(static_graph, (dataset_name, "to", hidden_name)),
                 edge_attribute_names=encoder_config.mapper.get("sub_graph_edge_attributes"),
-                **dynamic_graph_config.get((dataset_name, "to", self._graph_name_hidden), {}),
+                **dynamic_graph_config.get((dataset_name, "to", hidden_name), {}),
                 src_size=static_graph[dataset_name].num_nodes,
-                dst_size=static_graph[self._graph_name_hidden].num_nodes,
+                dst_size=static_graph[hidden_name].num_nodes,
                 trainable_size=encoder_config.mapper.get("trainable_size", 0),
             )
 
     def _build_processing_graphproviders(
         self, processor_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict
     ) -> None:
-        """Builds the graph providers for the processor network."""
+        """Builds the graph providers for the processor network, one per hidden mesh."""
 
-        self.processor_graph_provider = create_graph_provider(
-            graph=_edges_or_none(static_graph, (self._graph_name_hidden, "to", self._graph_name_hidden)),
-            edge_attribute_names=processor_config.get("sub_graph_edge_attributes"),
-            **dynamic_graph_config.get((self._graph_name_hidden, "to", self._graph_name_hidden), {}),
-            src_size=static_graph[self._graph_name_hidden].num_nodes,
-            dst_size=static_graph[self._graph_name_hidden].num_nodes,
-            trainable_size=processor_config.get("trainable_size", 0),
-        )
+        self.processor_graph_provider = torch.nn.ModuleDict()
+        for hidden_name in self.hidden_names:
+            self.processor_graph_provider[hidden_name] = create_graph_provider(
+                graph=_edges_or_none(static_graph, (hidden_name, "to", hidden_name)),
+                edge_attribute_names=processor_config.get("sub_graph_edge_attributes"),
+                **dynamic_graph_config.get((hidden_name, "to", hidden_name), {}),
+                src_size=static_graph[hidden_name].num_nodes,
+                dst_size=static_graph[hidden_name].num_nodes,
+                trainable_size=processor_config.get("trainable_size", 0),
+            )
 
     def _build_processing_networks(self, processor_config: DotDict) -> None:
+        processor_edge_dims = [provider.edge_dim for provider in self.processor_graph_provider.values()]
+        assert all(
+            dim == processor_edge_dims[0] for dim in processor_edge_dims
+        ), f"All hidden meshes must have the same processor edge dimension, got {processor_edge_dims}."
+
         self.processor = instantiate(
             processor_config,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
-            edge_dim=self.processor_graph_provider.edge_dim,
+            edge_dim=processor_edge_dims[0],
         )
 
         assert (
@@ -309,11 +317,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 continue
 
             decoder_config = decoders_config[self.dataset2decoder[dataset_name]]
+            hidden_name = self.dataset2hidden[dataset_name]
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=_edges_or_none(static_graph, (self._graph_name_hidden, "to", dataset_name)),
+                graph=_edges_or_none(static_graph, (hidden_name, "to", dataset_name)),
                 edge_attribute_names=decoder_config.mapper.get("sub_graph_edge_attributes"),
-                **dynamic_graph_config.get((self._graph_name_hidden, "to", dataset_name), {}),
-                src_size=static_graph[self._graph_name_hidden].num_nodes,
+                **dynamic_graph_config.get((hidden_name, "to", dataset_name), {}),
+                src_size=static_graph[hidden_name].num_nodes,
                 dst_size=static_graph[dataset_name].num_nodes,
                 trainable_size=decoder_config.mapper.get("trainable_size", 0),
             )
@@ -332,6 +341,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 f"All datasets for decoder {decoder_name} must have the same output dimension, "
                 f"but got {decoder_output_channels_dst}."
             )
+            decoder_edge_dims = [self.decoder_graph_provider[d].edge_dim for d in decoder_config.target_datasets]
+            assert all(dim == decoder_edge_dims[0] for dim in decoder_edge_dims), (
+                f"All datasets for decoder {decoder_name} must have the same edge dimension, "
+                f"but got {decoder_edge_dims}."
+            )
 
             self.decoder[decoder_name] = instantiate(
                 decoder_config.mapper,
@@ -339,7 +353,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 in_channels_src=self.latent_aggregator.hidden_dim,
                 in_channels_dst=decoder_in_channels_dst[0],
                 out_channels_dst=decoder_output_channels_dst[0],
-                edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
+                edge_dim=decoder_edge_dims[0],
             )
 
     def _build_networks(self, model_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict) -> None:
@@ -798,19 +812,22 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # The graph and mappers operate on one node copy per sample and member.
         batch_size *= ensemble_size
 
+        # All datasets in the batch share one hidden mesh
+        hidden_name = self._get_active_hidden_name(dataset_names)
+
         # Latents produced by the encoders, keyed by dataset name
         dataset_latents = {}
         x_skip_dict = {}
         x_data_latent_dict = {}
 
         # Prepare hidden latent
-        hidden_coordinates = self._hidden_coordinates().to(batch.device)
+        hidden_coordinates = self._hidden_coordinates(hidden_name).to(batch.device)
         hidden_coordinates_batched = einops.repeat(hidden_coordinates, "n f -> (repeat n) f", repeat=batch_size)
         hidden_batch_sizes = (hidden_coordinates.shape[0],) * batch_size
         x_hidden_latent = latlons_to_sincos(hidden_coordinates)
         x_hidden_latent = einops.repeat(x_hidden_latent, "n f -> (repeat n) f", repeat=batch_size)
 
-        hidden_trainable_parameters = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        hidden_trainable_parameters = self.node_attributes(hidden_name, batch_size=batch_size)
         if hidden_trainable_parameters is not None:
             x_hidden_latent = torch.cat([x_hidden_latent, hidden_trainable_parameters], dim=-1)
 
@@ -856,7 +873,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
 
         # Processor
-        processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider.get_edges(
+        processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider[
+            hidden_name
+        ].get_edges(
             src_coords=hidden_coordinates,
             dst_coords=hidden_coordinates,
             batch_size=batch_size,

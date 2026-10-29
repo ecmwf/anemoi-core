@@ -594,7 +594,7 @@ def test_tendency_transport_forward_network_uses_dense_source_view_override() ->
     model.latent_aggregator = SumAggregator(input_channels=4, source_channels={"data": 4})
     model.decoder = {"data": _Decoder()}
     model.encoder_graph_provider = {"data": _GraphProvider()}
-    model.processor_graph_provider = _GraphProvider()
+    model.processor_graph_provider = {"hidden": _GraphProvider()}
     model.decoder_graph_provider = {"data": _GraphProvider()}
 
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
@@ -730,7 +730,7 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
     model.latent_aggregator = SumAggregator(input_channels=4, source_channels={"obs": 4})
     model.decoder = {"obs": decoder}
     model.encoder_graph_provider = {"obs": _GraphProvider()}
-    model.processor_graph_provider = _GraphProvider()
+    model.processor_graph_provider = {"hidden": _GraphProvider()}
     model.decoder_graph_provider = {"obs": _GraphProvider()}
 
     layout = TensorLayout(grid=0, variables=1)
