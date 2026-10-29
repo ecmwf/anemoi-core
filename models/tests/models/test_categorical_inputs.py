@@ -175,8 +175,47 @@ def test_invalid_config(spec: dict, match: str) -> None:
 def test_unsupported_models_refuse_the_key() -> None:
     assert AnemoiModelEncProcDec.supports_categorical_embeddings
     assert AnemoiModelEncProcDecHierarchical.supports_categorical_embeddings
-    for cls in (AnemoiEnsModelEncProcDec, AnemoiModelAutoEncoder, AnemoiTransportModelEncProcDec):
+    assert AnemoiEnsModelEncProcDec.supports_categorical_embeddings
+    for cls in (AnemoiModelAutoEncoder, AnemoiTransportModelEncProcDec):
         assert not cls.supports_categorical_embeddings, cls.__name__
+
+
+def _build_ens(categorical: dict | None = None) -> AnemoiEnsModelEncProcDec:
+    config = _config(categorical)
+    config.model.condition_on_residual = False
+    config.model.noise_injector = {
+        "_target_": "anemoi.models.layers.ensemble.NoiseConditioning",
+        "noise_std": 1,
+        "noise_channels_dim": 4,
+        "noise_mlp_hidden_dim": 8,
+        "layer_kernels": {"Activation": {"_target_": "torch.nn.GELU"}},
+    }
+    return AnemoiEnsModelEncProcDec(
+        model_config=config,
+        data_indices=_data_indices(),
+        statistics={"data": None},
+        n_step_input=_STEPS,
+        n_step_output=1,
+        graph_data=_graph(),
+    )
+
+
+def test_ensemble_input_dim_and_forward_with_embedding() -> None:
+    model = _build_ens(_SPEC)
+    attr = model.node_attributes.attr_ndims["data"]
+    # As for the deterministic model, plus the forecast-step channel.
+    assert model.input_dim["data"] == _STEPS * (5 - 1 + 4) + attr + 1
+    assert _encoder_in_features(model) == model.input_dim["data"]
+
+    n_members = 2
+    x = _input([49001, 21009, 1004, 0, 7, 49001]).expand(-1, -1, n_members, -1, -1).clone()
+    out = model({"data": x}, fcstep=0)
+    assert out["data"].shape == (1, 1, n_members, _GRID, 2)
+
+    out["data"].sum().backward()
+    grad = model.categorical_embeddings["data"]["rt"].embedding.weight.grad
+    # MISSING (0), UNKNOWN (7) and the three known codes all appear in the input.
+    assert (grad.abs().sum(-1) > 0).all()
 
 
 def _processors(norm_mul: list[float], norm_add: list[float], fill: list[float]) -> SimpleNamespace:

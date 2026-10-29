@@ -392,7 +392,13 @@ class InstrumentCorrectors(nn.Module):
                 )
                 raise ValueError(msg)
             if graph_batch_size != 1:
-                msg = "Processor correctors require batch_size=1 (one graph instance) when model sharding is enabled."
+                batch_size, time_size, ensemble_size, _, _ = y_pred.shape
+                msg = (
+                    "Processor correctors require exactly one graph instance when model sharding is enabled, "
+                    f"but got batch={batch_size} x time={time_size} x ensemble={ensemble_size} = {graph_batch_size}. "
+                    "Reduce training.batch_size, task.multistep_output or training.ensemble_size_per_device to 1 "
+                    "(ensemble members can instead come from system.hardware.num_gpus_per_ensemble)."
+                )
                 raise ValueError(msg)
             expected_sizes = get_balanced_partition_sizes(self.num_nodes, model_comm_group.size())
             if grid_shard_sizes != expected_sizes:

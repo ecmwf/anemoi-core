@@ -236,6 +236,26 @@ def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> 
     BaseSchema(**cfg)
 
 
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_da_ensemble(
+    da_ensemble_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """DA cycling, the ensemble member gather and kernel CRPS, end to end."""
+    cfg, url = da_ensemble_config
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+@skip_if_offline
+def test_config_validation_da_ensemble(da_ensemble_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = da_ensemble_config
+    BaseSchema(**cfg)
+
+
 def test_config_validation_ensemble_graph_multiscale(ensemble_graph_multiscale_config: tuple[DictConfig, str]) -> None:
     cfg, _ = ensemble_graph_multiscale_config
     BaseSchema(**cfg)

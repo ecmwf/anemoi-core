@@ -12,6 +12,7 @@ import logging
 from abc import abstractmethod
 from typing import Optional
 
+import einops
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
@@ -388,6 +389,50 @@ class BaseGraphModel(nn.Module):
             the corresponding input dataset is sharded).
         """
         pass
+
+    def _append_decoder_forcings(
+        self,
+        x_dst: torch.Tensor,
+        decoder_forcings: Optional[dict[str, torch.Tensor]],
+        dataset_name: str,
+        ensemble_size: int,
+    ) -> torch.Tensor:
+        """Concatenate this dataset's decoder forcings onto the decoder's destination features.
+
+        Parameters
+        ----------
+        x_dst : torch.Tensor
+            Destination node features, shape ``((batch ensemble grid), channels)``.
+        decoder_forcings : Optional[dict[str, torch.Tensor]]
+            Per-dataset forcings, shape
+            ``(batch, n_step_output, ensemble, grid, num_decoder_forcing_channels)``.
+            ``None``, or a dict without this dataset, leaves ``x_dst`` untouched.
+        dataset_name : str
+            Dataset being decoded.
+        ensemble_size : int
+            Members folded into ``x_dst``'s node axis. Forcings describe the grid point
+            and time rather than the member, so a single-member tensor is broadcast.
+
+        Returns
+        -------
+        torch.Tensor
+            ``x_dst``, with the forcings appended along the feature axis.
+        """
+        if decoder_forcings is None or dataset_name not in decoder_forcings:
+            return x_dst
+
+        df = decoder_forcings[dataset_name]
+        assert (
+            df.shape[1] == self.n_step_output
+        ), f"decoder_forcings time dim ({df.shape[1]}) must match n_step_output ({self.n_step_output})."
+        assert df.shape[-1] == self.num_decoder_forcing_channels[dataset_name], (
+            f"decoder_forcings channels ({df.shape[-1]}) must match "
+            f"num_decoder_forcing_channels ({self.num_decoder_forcing_channels[dataset_name]})."
+        )
+        if df.shape[2] != ensemble_size:
+            df = df.expand(-1, -1, ensemble_size, -1, -1)
+        df = einops.rearrange(df, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
+        return torch.cat((x_dst, df), dim=-1)
 
     def _normalize_decoder_forcings(
         self,

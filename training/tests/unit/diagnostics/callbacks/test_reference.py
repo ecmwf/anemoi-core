@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import contextlib
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -15,9 +16,13 @@ from typing import Any
 import numpy as np
 import pytest
 import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
 from omegaconf import DictConfig
+from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.reference import ReferenceComparisonPlot
 from anemoi.training.diagnostics.callbacks.reference import regular_grid_spectra
 from anemoi.training.tasks import DAForecaster
@@ -455,3 +460,42 @@ def test_zonal_below_ground_is_masked() -> None:
     assert np.all(np.isnan(summary["ref"]["u"][-1, south]))
     assert np.all(summary["ref"]["frac"][-1, south] == 0.0)
     assert np.all(np.isfinite(summary["ref"]["psi"]))
+
+
+def _check_epoch_end_with_member_gather(rank: int, store_path: str) -> None:
+    torch.set_num_threads(1)
+    dist.init_process_group(
+        "gloo",
+        init_method=f"file://{store_path}",
+        rank=rank,
+        world_size=2,
+        timeout=timedelta(seconds=30),
+    )
+    rank_zero_only.rank = rank
+    try:
+        callback, trainer, pl_module = _setup()
+        local_step = pl_module._step
+
+        def _step(batch: dict, validation_mode: bool) -> SimpleNamespace:
+            # Like DAEnsembleTraining._output_prediction: gather the members over the ensemble group.
+            output = local_step(batch, validation_mode)
+            output.predictions = [
+                {name: gather_tensor(pred, dim=2, sizes=[1, 1], mgroup=dist.group.WORLD) for name, pred in step.items()}
+                for step in output.predictions
+            ]
+            return output
+
+        pl_module._step = _step
+        trainer.sanity_checking, trainer.current_epoch, trainer.logger = False, 0, None
+        plotted = []
+        callback.plot = lambda *_args, **kwargs: plotted.append(kwargs["result"])
+        callback.on_validation_epoch_end(trainer, pl_module)
+        dist.barrier()  # the next collective every rank enters after validation
+        assert len(plotted) == (1 if rank == 0 else 0)
+    finally:
+        dist.destroy_process_group()
+
+
+def test_epoch_end_runs_the_forward_on_every_rank(tmp_path: Path) -> None:
+    """The ensemble forward gathers members across ranks, so rank 0 cannot run it alone (control_ens hang)."""
+    mp.spawn(_check_epoch_end_with_member_gather, args=(str(tmp_path / "process_group"),), nprocs=2, join=True)

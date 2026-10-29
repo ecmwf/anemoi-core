@@ -26,6 +26,7 @@ from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.training.schemas.training import CorrectorSchema
 from anemoi.training.train.methods.corrector import CorrectorMLP
 from anemoi.training.train.methods.corrector import InstrumentCorrectors
+from anemoi.training.train.methods.da_mixin import DATrainingMixin
 from anemoi.training.train.methods.da_single import DASingleTraining
 
 
@@ -213,7 +214,7 @@ def test_processor_corrector_shared_provider_checkpoint_gradients(processor_conf
 @pytest.mark.parametrize(
     ("batch_size", "local_nodes", "shard_sizes", "message"),
     [
-        (2, 3, [3, 2], "batch_size=1"),
+        (2, 3, [3, 2], r"exactly one graph instance .* batch=2 x time=1 x ensemble=1 = 2"),
         (1, 3, None, "graph provider partitions"),
         (1, 2, [2, 3], "graph provider partitions"),
         (1, 2, [3, 2], "local grid nodes"),
@@ -363,6 +364,81 @@ def test_instrument_corrector_prefix_matching() -> None:
     )
     target_idx = corrector._target_idx_mwt.tolist()
     assert target_idx == [0, 1]  # mwt_1, mwt_2 matched by prefix, not "other"
+
+
+def _corrector_module(n_members_in_target: int = 1) -> tuple[SimpleNamespace, torch.Tensor, torch.Tensor]:
+    """A module stub wired for _apply_corrector, plus a prediction and a DATA_FULL target."""
+    corrector = InstrumentCorrectors(
+        instrument_groups={"hirs": {"corrector_variables": ["geom"], "channels": None}},
+        all_corrector_names=["geom"],
+        output_name_to_index={"hirs_1": 0, "hirs_2": 1},
+        hidden_dim=8,
+        corrector_type="mlp",
+    )
+    # Make the correction non-zero so a broadcast error cannot hide behind zero-init.
+    corrector.correctors["hirs"].out.weight.data.fill_(0.1)
+    corrector.correctors["hirs"].out.bias.data.fill_(0.5)
+
+    module = SimpleNamespace(
+        corrector=torch.nn.ModuleDict({"data": corrector}),
+        data_indices={
+            "data": SimpleNamespace(
+                data=SimpleNamespace(input=SimpleNamespace(corrector=torch.tensor([2], dtype=torch.long))),
+            ),
+        },
+        model_comm_group=None,
+        grid_shard_sizes={"data": None},
+    )
+    b, t_out, g = 2, 1, 4
+    pred = torch.randn(b, t_out, 3, g, 2)  # 3 members
+    target = torch.randn(b, t_out, n_members_in_target, g, 3)  # DATA_FULL, col 2 is 'geom'
+    return module, pred, target
+
+
+def test_corrector_broadcasts_metadata_across_members() -> None:
+    """The single-member target metadata is broadcast to the prediction's members.
+
+    The target always carries one member while an ensemble prediction carries several;
+    InstrumentCorrectors concatenates the two, which needs matching extents.
+    """
+    module, pred, target = _corrector_module()
+
+    out = DATrainingMixin._apply_corrector(module, {"data": pred}, {"data": target})["data"]
+
+    assert out.shape == pred.shape
+    assert not torch.allclose(out, pred)  # the correction actually fired
+    # Every member saw the same metadata, so members differing only in the prediction
+    # must still get member-specific corrections (the corrector is pointwise in y too).
+    assert not torch.allclose(out[:, :, 0], out[:, :, 1])
+
+
+def test_apply_corrector_is_unchanged_for_a_single_member() -> None:
+    """With one member the broadcast is a no-op, so the deterministic path is untouched."""
+    module, pred, target = _corrector_module()
+    single_pred = pred[:, :, :1]
+
+    out = DATrainingMixin._apply_corrector(module, {"data": single_pred}, {"data": target})["data"]
+    assert out.shape == single_pred.shape
+
+    # Member 0 of the ensemble call must equal the single-member call exactly: the
+    # broadcast adds members, it does not change what any one member computes.
+    ens_out = DATrainingMixin._apply_corrector(module, {"data": pred}, {"data": target})["data"]
+    torch.testing.assert_close(ens_out[:, :, :1], out)
+
+
+def test_instrument_corrector_rejects_mismatched_member_counts() -> None:
+    """Without the broadcast the concatenation fails -- i.e. the fix is load-bearing."""
+    corrector = InstrumentCorrectors(
+        instrument_groups={"hirs": {"corrector_variables": ["geom"], "channels": None}},
+        all_corrector_names=["geom"],
+        output_name_to_index={"hirs_1": 0, "hirs_2": 1},
+        hidden_dim=8,
+        corrector_type="mlp",
+    )
+    pred = torch.randn(2, 1, 3, 4, 2)  # 3 members
+    corrector_vars = torch.randn(2, 1, 1, 4, 1)  # 1 member, not broadcast
+    with pytest.raises(RuntimeError, match=r"Sizes of tensors must match|must match the size"):
+        corrector(pred, corrector_vars)
 
 
 # ── categorical (embedded) corrector variables ─────────────────────────────

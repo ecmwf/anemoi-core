@@ -37,7 +37,7 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
-from anemoi.training.losses.scaler_tensor import grad_scaler
+from anemoi.training.losses.scaler_tensor import LossScaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
@@ -150,7 +150,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     - `BaseLoss`
     - `IndexCollection`
     - `CosineLRScheduler`
-    - `create_scalers`, `grad_scaler`
+    - `create_scalers`, `LossScaler`
 
     """
 
@@ -317,10 +317,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_indices[dataset_name],
             )
 
-        if config.training.loss_gradient_scaling:
-            # Multi-dataset: register hook for each loss
-            for loss_fn in self.loss.values():
-                loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
+        # Stateless, so it can be switched on or off when resuming from a checkpoint.
+        self.loss_gradient_scaler = LossScaler.from_config(config.training.loss_gradient_scaling)
+        LOGGER.info("Loss gradient scaling: %s", self.loss_gradient_scaler or "disabled")
 
         self.is_first_step = True
 
@@ -780,6 +779,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
                 grid_shard_sizes=self.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None,
+            )
+
+        if self.loss_gradient_scaler is not None and y_pred.requires_grad:
+            # Reduce the gradient norms over the model group only if the grid is still sharded here.
+            y_pred = self.loss_gradient_scaler(
+                y_pred,
+                group=self.model_comm_group if grid_shard_slice is not None else None,
             )
 
         return loss(y_pred, y, **loss_kwargs)

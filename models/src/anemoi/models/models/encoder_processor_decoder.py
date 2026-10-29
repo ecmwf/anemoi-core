@@ -376,23 +376,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edges=dec_edge_shard_sizes,
             )
 
-            x_dst = x_data_latent_dict[dataset_name]
-            dataset_decoder_forcing = None
-            if decoder_forcings is not None and dataset_name in decoder_forcings:
-                df = decoder_forcings[dataset_name]
-                dataset_decoder_forcing = df
-                assert (
-                    df.shape[1] == self.n_step_output
-                ), f"decoder_forcings time dim ({df.shape[1]}) must match n_step_output ({self.n_step_output})."
-                assert df.shape[-1] == self.num_decoder_forcing_channels[dataset_name], (
-                    f"decoder_forcings channels ({df.shape[-1]}) must match "
-                    f"num_decoder_forcing_channels ({self.num_decoder_forcing_channels[dataset_name]})."
-                )
-                df = einops.rearrange(
-                    df,
-                    "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
-                )
-                x_dst = torch.cat((x_dst, df), dim=-1)
+            # The bounding reads the raw (unflattened) forcings, e.g. the sp anchor's orography.
+            dataset_decoder_forcing = None if decoder_forcings is None else decoder_forcings.get(dataset_name)
+            x_dst = self._append_decoder_forcings(
+                x_data_latent_dict[dataset_name],
+                decoder_forcings,
+                dataset_name,
+                ensemble_size,
+            )
 
             x_out = self.decoder[dataset_name](
                 (x_latent_proc, x_dst),
