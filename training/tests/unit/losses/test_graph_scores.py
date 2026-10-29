@@ -346,6 +346,48 @@ def test_weighted_edge_row_l2_norm_passes_gradcheck() -> None:
     assert torch.autograd.gradcheck(row_norm, (node_values,))
 
 
+@pytest.mark.parametrize(
+    "shape",
+    [(1, 1, 3, 0), (0, 2, 3, 2), (2, 1, 3, 1)],
+    ids=["no_variables", "empty_leading_axis", "one_variable"],
+)
+def test_weighted_edge_row_l2_norm_matches_autograd_for_awkward_shapes(shape: tuple[int, ...]) -> None:
+    """Empty and size-one axes give the plain autograd result and gradient."""
+    source_index = torch.tensor([1, 2, 0, 2, 0, 1])
+    destination_index = torch.tensor([0, 0, 1, 1, 2, 2])
+    edge_weights = torch.tensor([0.25, 0.75, 0.4, 0.6, 0.3, 0.7], dtype=torch.float64)
+    generator = torch.Generator().manual_seed(42)
+    node_values = torch.randn(shape, dtype=torch.float64, generator=generator, requires_grad=True)
+    reference_values = node_values.detach().clone().requires_grad_()
+
+    actual = weighted_edge_row_l2_norm(
+        node_values,
+        source_index,
+        destination_index,
+        edge_weights,
+        node_valid=None,
+        edge_valid=None,
+        valid_weight_sum=None,
+        row_normalize=False,
+    )
+    expected = weighted_row_l2_norm(
+        edge_difference(reference_values, source_index, destination_index),
+        destination_index,
+        edge_weights,
+        shape[-2],
+        node_valid=None,
+        edge_valid=None,
+        valid_weight_sum=None,
+        row_normalize=False,
+    )
+    actual.sum().backward()
+    expected.sum().backward()
+
+    assert actual.shape == expected.shape == shape
+    torch.testing.assert_close(actual, expected)
+    torch.testing.assert_close(node_values.grad, reference_values.grad)
+
+
 def test_weighted_edge_row_l2_norm_matches_nan_normalized_autograd() -> None:
     source_index = torch.tensor([1, 2, 0, 2, 0, 1])
     destination_index = torch.tensor([0, 0, 1, 1, 2, 2])
