@@ -22,12 +22,12 @@ from pydantic import ValidationError
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.wavelet_transforms import WaveletPyramid
-from anemoi.training.losses import WaveletAMSELoss
+from anemoi.training.losses import DTCWT2DLoss
 from anemoi.training.losses.loss import get_loss_function
+from anemoi.training.schemas.training import DTCWT2DLossSchema
 from anemoi.training.schemas.training import ImplementedLossesUsingBaseLossSchema
 from anemoi.training.schemas.training import LossSchemas
 from anemoi.training.schemas.training import SpectralProjectionConfigSchema
-from anemoi.training.schemas.training import WaveletAMSELossSchema
 
 pytest.importorskip("pytorch_wavelets")
 
@@ -89,27 +89,27 @@ def _manual_reference(
     return (total / (shape[0] * shape[1])).reshape(b, t, e, v).sum(1).mean((0, 1))
 
 
-def test_public_wavelet_amse_name_and_factory_target() -> None:
+def test_public_dtcwt_2d_name_and_factory_target() -> None:
     from anemoi.training import losses
 
-    target = "anemoi.training.losses.WaveletAMSELoss"
+    target = "anemoi.training.losses.DTCWT2DLoss"
     config = {"_target_": target, "grid_shape": [8, 10], "J": 2}
     validated = TypeAdapter(LossSchemas).validate_python(config)
-    assert isinstance(validated, WaveletAMSELossSchema)
+    assert isinstance(validated, DTCWT2DLossSchema)
     assert validated.target_ == target
-    assert ImplementedLossesUsingBaseLossSchema.wavelet_amse.value == target
-    assert losses.WaveletAMSELoss is WaveletAMSELoss
-    assert "WaveletAMSELoss" in losses.__all__
+    assert ImplementedLossesUsingBaseLossSchema.dtcwt_2d.value == target
+    assert losses.DTCWT2DLoss is DTCWT2DLoss
+    assert "DTCWT2DLoss" in losses.__all__
     loss = get_loss_function(OmegaConf.create(config))
-    assert isinstance(loss, WaveletAMSELoss)
-    assert loss.name == "wavelet_amse"
+    assert isinstance(loss, DTCWT2DLoss)
+    assert loss.name == "dtcwt_2d"
 
 
 @pytest.mark.parametrize("shape", [(8, 10), (7, 9)])
 def test_numerical_values_and_gradients_match_native_reference(shape: tuple[int, int]) -> None:
     pred, target = _data(shape, batch=2, time=2, ensemble=2)
     pred.requires_grad_()
-    loss = WaveletAMSELoss(shape, J=2, scale_weights=[0.25, 1.5])
+    loss = DTCWT2DLoss(shape, J=2, scale_weights=[0.25, 1.5])
     actual = loss(pred, target, squash=False)
     expected = _manual_reference(pred, target, shape, 2, [0.25, 1.5])
     torch.testing.assert_close(actual, expected, rtol=3e-6, atol=3e-6)
@@ -128,7 +128,7 @@ def test_chunked_nonspatial_scaler_matches_dense_reference(dtype: torch.dtype) -
     pred = pred.transpose(-1, -2).contiguous().transpose(-1, -2).requires_grad_()
     target.requires_grad_()
     variable_weights = torch.tensor([1.0, 2.0, 3.0])
-    loss = WaveletAMSELoss([7, 9], J=2, subgrid=(4, 67), transform_field_chunk_size=5)
+    loss = DTCWT2DLoss([7, 9], J=2, subgrid=(4, 67), transform_field_chunk_size=5)
     loss.add_scaler(4, variable_weights, name="variable")
     actual = loss(pred, target, squash=False)
     expected = torch.cat(
@@ -158,29 +158,33 @@ def test_field_gathering_and_fp32_casting_are_chunk_local(monkeypatch: pytest.Mo
     pred, target = _data((10, 9), batch=2, time=2, ensemble=2, variables=3)
     pred = pred.bfloat16().transpose(-1, -2).contiguous().transpose(-1, -2).requires_grad_()
     target = target[:, :, :1].bfloat16()
-    loss = WaveletAMSELoss([7, 9], J=2, subgrid=(5, 68), transform_field_chunk_size=5)
-    gather = loss._chunk_fields
+    loss = DTCWT2DLoss([7, 9], J=2, subgrid=(5, 68), transform_field_chunk_size=5)
+    chunk_inputs = loss._chunk_inputs
     chunk_sizes = []
 
-    def record(values: torch.Tensor, indices: tuple[torch.Tensor, ...]) -> torch.Tensor:
+    def record(
+        values: torch.Tensor,
+        indices: tuple[torch.Tensor, ...],
+        projection_matrix: torch.Tensor | None,
+    ) -> torch.Tensor:
         assert values.dtype == torch.bfloat16
         assert values.shape[3] == 63
-        result = gather(values, indices)
+        result = chunk_inputs(values, indices, projection_matrix)
         assert result.dtype == torch.float32
         assert result.shape[1:] == (1, 7, 9)
         chunk_sizes.append(result.shape[0])
         return result
 
-    monkeypatch.setattr(loss, "_chunk_fields", record)
+    monkeypatch.setattr(loss, "_chunk_inputs", record)
     actual = loss(pred, target)
-    expected = WaveletAMSELoss([7, 9], J=2)(pred[:, :, :, 5:68].float(), target[:, :, :, 5:68].float())
+    expected = DTCWT2DLoss([7, 9], J=2)(pred[:, :, :, 5:68].float(), target[:, :, :, 5:68].float())
     torch.testing.assert_close(actual, expected)
     torch.testing.assert_close(torch.autograd.grad(actual, pred)[0], torch.autograd.grad(expected, pred)[0])
     assert chunk_sizes == [5, 5, 5, 5, 5, 5, 5, 5, 4, 4]
 
 
-def test_power_and_cross_terms_are_summed_before_amse() -> None:
-    loss = WaveletAMSELoss([2, 2], J=1)
+def test_power_and_cross_terms_are_summed_before_band_score() -> None:
+    loss = DTCWT2DLoss([2, 2], J=1)
     pred = torch.zeros(1, 1, 6, 1, 2, 2)
     target = torch.zeros_like(pred)
     pred[0, 0, 0, 0, 0, 0] = 1
@@ -195,8 +199,8 @@ def test_power_and_cross_terms_are_summed_before_amse() -> None:
 
 def test_ignore_nans_masks_affected_coefficients_and_preserves_gradients() -> None:
     pred, target = _data(variables=1)
-    ordinary_loss = WaveletAMSELoss([8, 10], J=2)
-    nan_aware_loss = WaveletAMSELoss([8, 10], J=2, ignore_nans=True)
+    ordinary_loss = DTCWT2DLoss([8, 10], J=2)
+    nan_aware_loss = DTCWT2DLoss([8, 10], J=2, ignore_nans=True)
     torch.testing.assert_close(nan_aware_loss(pred, target), ordinary_loss(pred, target))
 
     missing_location = (0, 0, 0, 35, 0)
@@ -212,17 +216,51 @@ def test_ignore_nans_masks_affected_coefficients_and_preserves_gradients() -> No
 def test_ignore_nans_masks_target_and_all_missing_fields() -> None:
     pred, target = _data(variables=1)
     target[..., 0, :] = float("nan")
-    loss = WaveletAMSELoss([8, 10], J=2, ignore_nans=True)
+    loss = DTCWT2DLoss([8, 10], J=2, ignore_nans=True)
     assert torch.isfinite(loss(pred, target))
     all_missing_score = loss(torch.full_like(pred, float("nan")), torch.full_like(target, float("nan")))
     torch.testing.assert_close(all_missing_score, torch.zeros_like(all_missing_score))
+
+
+def test_pooled_nan_handling_uses_fractional_support_and_preserves_gradients() -> None:
+    pred, target = _data(variables=1)
+    pred[0, 0, 0, 0, 0] = 0.0
+    missing_location = (0, 0, 0, 35, 0)
+    pred[missing_location] = float("nan")
+    pred.requires_grad_()
+
+    loss = DTCWT2DLoss([8, 10], J=2, nan_handling="pooled")
+    assert loss.ignore_nans
+    assert loss.nan_handling == "pooled"
+
+    field_indices = tuple(torch.tensor([0]) for _ in range(4))
+    pred_chunk, _, valid_grid = loss._chunk_inputs_with_validity(pred, target, field_indices, None)
+    assert valid_grid[0, 0, 0, 0]
+    assert not valid_grid[0, 0, 3, 5]
+
+    pyramid = loss.transform(pred_chunk)
+    support = loss._pooled_coefficient_support(valid_grid, pyramid)
+    assert any(torch.any((level > 0) & (level < 1)) for level in (*support.highpasses, support.lowpass))
+
+    score = loss(pred, target)
+    assert torch.isfinite(score)
+    gradient = torch.autograd.grad(score, pred)[0]
+    assert torch.isfinite(gradient).all()
+    assert gradient[missing_location] == 0
+
+
+def test_pooled_nan_handling_matches_unmasked_loss_for_complete_fields() -> None:
+    pred, target = _data(variables=1)
+    pooled_loss = DTCWT2DLoss([8, 10], J=2, nan_handling="pooled")
+    ordinary_loss = DTCWT2DLoss([8, 10], J=2)
+    torch.testing.assert_close(pooled_loss(pred, target), ordinary_loss(pred, target))
 
 
 @pytest.mark.parametrize("field", ["pred", "target"])
 def test_ignore_nans_does_not_mask_infinities(field: str) -> None:
     pred, target = _data()
     (pred if field == "pred" else target)[..., 1, 0] = float("inf")
-    loss = WaveletAMSELoss([8, 10], J=2, ignore_nans=True)
+    loss = DTCWT2DLoss([8, 10], J=2, ignore_nans=True)
     assert not torch.isfinite(loss(pred, target))
 
 
@@ -231,18 +269,18 @@ def test_ignore_nans_does_not_mask_infinities(field: str) -> None:
 def test_nonfinite_inputs_propagate_without_projection(bad: float, field: str) -> None:
     pred, target = _data()
     (pred if field == "pred" else target)[..., 1, 0] = bad
-    loss = WaveletAMSELoss([8, 10], J=2)
+    loss = DTCWT2DLoss([8, 10], J=2)
     assert not torch.isfinite(loss(pred, target))
 
 
 def test_lowpass_only_constant_field_and_finite_difference_gradient() -> None:
-    loss = WaveletAMSELoss([8, 10], J=1, scale_weights=[0])
+    loss = DTCWT2DLoss([8, 10], J=1, scale_weights=[0])
     pred = torch.ones(1, 1, 1, 80, 1, requires_grad=True)
     target = torch.zeros_like(pred)
     torch.testing.assert_close(loss(pred, target), torch.tensor(1.0), atol=2e-6, rtol=2e-6)
     pred, target = _data(variables=1)
     pred.requires_grad_()
-    loss = WaveletAMSELoss([8, 10], J=2)
+    loss = DTCWT2DLoss([8, 10], J=2)
     direction = torch.randn_like(pred)
     derivative = (torch.autograd.grad(loss(pred, target), pred)[0] * direction).sum()
     step = 1e-3
@@ -258,8 +296,8 @@ def test_chunking_and_target_detachment(transform_separately: bool, field_chunk_
     pred, target = _data(batch=2, time=2, ensemble=3)
     target = target.clone().requires_grad_()
     pred.requires_grad_()
-    baseline = WaveletAMSELoss([8, 10], J=2)(pred, target)
-    actual = WaveletAMSELoss(
+    baseline = DTCWT2DLoss([8, 10], J=2)(pred, target)
+    actual = DTCWT2DLoss(
         [8, 10],
         J=2,
         transform_prediction_and_target_separately=transform_separately,
@@ -277,8 +315,8 @@ def test_chunking_and_target_detachment(transform_separately: bool, field_chunk_
 
 def test_subgrid_scalers_and_reductions() -> None:
     pred, target = _data((9, 10), time=2, ensemble=2, variables=3)
-    loss = WaveletAMSELoss([8, 10], J=2, subgrid=(5, 85))
-    reference = WaveletAMSELoss([8, 10], J=2)
+    loss = DTCWT2DLoss([8, 10], J=2, subgrid=(5, 85))
+    reference = DTCWT2DLoss([8, 10], J=2)
     loss.add_scaler(4, torch.tensor([1.0, 2.0, 3.0]), name="variable")
     reference.add_scaler(4, torch.tensor([1.0, 2.0, 3.0]), name="variable")
     loss.add_scaler(1, torch.tensor([0.25, 0.75]), name="time")
@@ -301,11 +339,11 @@ def test_subgrid_scalers_and_reductions() -> None:
 
 def test_nonspatial_scalers_apply_to_collapsed_scores_and_support_exclusions() -> None:
     pred, target = _data(time=2, variables=3)
-    baseline_loss = WaveletAMSELoss([8, 10], J=2)
+    baseline_loss = DTCWT2DLoss([8, 10], J=2)
     baseline_by_time = torch.stack(
         [baseline_loss(pred[:, index : index + 1], target[:, index : index + 1], squash=False) for index in range(2)],
     )
-    loss = WaveletAMSELoss([8, 10], J=2)
+    loss = DTCWT2DLoss([8, 10], J=2)
     time_weights = torch.tensor([0.25, 0.75])
     variable_weights = torch.tensor([1.0, 2.0, 3.0])
     loss.add_scaler(1, time_weights, name="time")
@@ -334,7 +372,7 @@ def test_nonspatial_scalers_apply_to_collapsed_scores_and_support_exclusions() -
 def test_autocast_and_no_grad_contexts() -> None:
     pred, target = _data()
     pred.requires_grad_()
-    loss = WaveletAMSELoss([8, 10], J=2)
+    loss = DTCWT2DLoss([8, 10], J=2)
     expected = loss(pred, target)
     with torch.autocast("cpu", dtype=torch.bfloat16):
         actual = loss(pred, target)
@@ -348,7 +386,7 @@ def test_autocast_and_no_grad_contexts() -> None:
 def test_identical_and_zero_fields_have_stable_gradients(value: float) -> None:
     pred = torch.full((1, 1, 1, 80, 1), value, requires_grad=True)
     target = pred.detach().clone()
-    loss = WaveletAMSELoss([8, 10], J=2)
+    loss = DTCWT2DLoss([8, 10], J=2)
     out = loss(pred, target)
     assert torch.isfinite(out) and out >= -1e-6
     assert torch.isfinite(torch.autograd.grad(out, pred)[0]).all()
@@ -357,11 +395,11 @@ def test_identical_and_zero_fields_have_stable_gradients(value: float) -> None:
 
 def test_default_levels_and_transform_configuration() -> None:
     pred, target = _data((32, 48))
-    automatic = WaveletAMSELoss([32, 48], transform={"biort": "near_sym_a", "qshift": "qshift_a"})
-    explicit = WaveletAMSELoss([32, 48], J=2, transform={"biort": "near_sym_a", "qshift": "qshift_a"})
+    automatic = DTCWT2DLoss([32, 48], transform={"biort": "near_sym_a", "qshift": "qshift_a"})
+    explicit = DTCWT2DLoss([32, 48], J=2, transform={"biort": "near_sym_a", "qshift": "qshift_a"})
     assert automatic.J == 2
     torch.testing.assert_close(automatic(pred, target), explicit(pred, target))
-    assert WaveletAMSELoss(
+    assert DTCWT2DLoss(
         [32, 48],
         separate_transform_gridpoint_threshold=100,
     ).transform_prediction_and_target_separately
@@ -370,8 +408,8 @@ def test_default_levels_and_transform_configuration() -> None:
 def test_scaler_dimension_order_broadcasting_and_exclusions() -> None:
     pred, target = _data(variables=2)
     time_variable = torch.tensor([[1.0, 2.0]])
-    reference = WaveletAMSELoss([8, 10], J=2)
-    reordered = WaveletAMSELoss([8, 10], J=2)
+    reference = DTCWT2DLoss([8, 10], J=2)
+    reordered = DTCWT2DLoss([8, 10], J=2)
     reference.add_scaler((1, 4), time_variable, name="mask")
     reordered.add_scaler((-1, -4), time_variable.T, name="mask")
     torch.testing.assert_close(reordered(pred, target), reference(pred, target))
@@ -397,7 +435,7 @@ def test_loss_variable_mapper_aligns_nonspatial_weights() -> None:
     mapped = get_loss_function(
         OmegaConf.create(
             {
-                "_target_": "anemoi.training.losses.WaveletAMSELoss",
+                "_target_": "anemoi.training.losses.DTCWT2DLoss",
                 "grid_shape": [8, 10],
                 "J": 2,
                 "predicted_variables": ["c", "a"],
@@ -408,7 +446,7 @@ def test_loss_variable_mapper_aligns_nonspatial_weights() -> None:
         data_indices=indices,
     )
     pred, target = _data(variables=3)
-    direct = WaveletAMSELoss([8, 10], J=2)
+    direct = DTCWT2DLoss([8, 10], J=2)
     direct.add_scaler(4, torch.tensor([3.0, 1.0]), name="variable")
     torch.testing.assert_close(
         mapped(pred, target, pred_layout=IndexSpace.MODEL_OUTPUT, target_layout=IndexSpace.MODEL_OUTPUT),
@@ -428,10 +466,10 @@ def test_anemoi_compile_configuration_selects_the_scoring_kernel(monkeypatch: py
     monkeypatch.setattr("anemoi.models.utils.compile._meets_library_versions_for_compile", lambda: True)
     monkeypatch.setattr(torch, "compile", compile_kernel)
     model = torch.nn.Module()
-    loss = WaveletAMSELoss([8, 10], J=2)
+    loss = DTCWT2DLoss([8, 10], J=2)
     model.add_module("loss", loss)
     config = OmegaConf.create(
-        [{"module": "anemoi.training.losses.WaveletAMSELoss", "options": {"fullgraph": True, "dynamic": False}}],
+        [{"module": "anemoi.training.losses.DTCWT2DLoss", "options": {"fullgraph": True, "dynamic": False}}],
     )
     mark_for_compilation(model, config)
     assert calls == [(loss._score_pyramid, {"fullgraph": True, "dynamic": False})]
@@ -451,28 +489,28 @@ def test_anemoi_compile_configuration_selects_the_scoring_kernel(monkeypatch: py
     ],
 )
 def test_invalid_configuration_is_rejected_by_schema(options: dict[str, Any]) -> None:
-    config = {"_target_": "anemoi.training.losses.WaveletAMSELoss", "grid_shape": [8, 10], "J": 2, **options}
+    config = {"_target_": "anemoi.training.losses.DTCWT2DLoss", "grid_shape": [8, 10], "J": 2, **options}
     with pytest.raises(ValidationError):
         TypeAdapter(LossSchemas).validate_python(config)
 
 
 def test_scale_weight_count_matches_wavelet_levels() -> None:
     with pytest.raises(ValueError, match="one weight per wavelet level"):
-        WaveletAMSELoss([8, 10], J=2, scale_weights=[1])
+        DTCWT2DLoss([8, 10], J=2, scale_weights=[1])
 
 
 @pytest.mark.parametrize("removed_mode", ["band_summed", "per_point"])
 def test_mode_selector_is_not_supported(removed_mode: str) -> None:
     options: dict[str, Any] = {"grid_shape": [8, 10], "J": 2, "psd_mode": removed_mode}
     with pytest.raises(TypeError, match="psd_mode"):
-        WaveletAMSELoss(**options)
+        DTCWT2DLoss(**options)
     with pytest.raises(ValidationError, match="psd_mode"):
-        TypeAdapter(LossSchemas).validate_python({"_target_": "anemoi.training.losses.WaveletAMSELoss", **options})
+        TypeAdapter(LossSchemas).validate_python({"_target_": "anemoi.training.losses.DTCWT2DLoss", **options})
 
 
 @pytest.mark.parametrize("dimension", [3, (1, 3), (0, 2, 3, 4)])
 def test_area_scalers_are_rejected_on_add_and_update(dimension: int | tuple[int, ...]) -> None:
-    loss = WaveletAMSELoss([8, 10], J=2)
+    loss = DTCWT2DLoss([8, 10], J=2)
     with pytest.raises(ValueError, match="does not support area weights"):
         loss.add_scaler(dimension, torch.ones(80), name="area")
 
@@ -480,7 +518,7 @@ def test_area_scalers_are_rejected_on_add_and_update(dimension: int | tuple[int,
         get_loss_function(
             OmegaConf.create(
                 {
-                    "_target_": "anemoi.training.losses.WaveletAMSELoss",
+                    "_target_": "anemoi.training.losses.DTCWT2DLoss",
                     "grid_shape": [8, 10],
                     "J": 2,
                     "scalers": ["area"],
@@ -498,7 +536,7 @@ def test_area_scalers_are_rejected_on_add_and_update(dimension: int | tuple[int,
 
 def test_shard_metadata_and_grid_dimension_validation() -> None:
     pred, target = _data()
-    loss = WaveletAMSELoss([8, 10], J=2)
+    loss = DTCWT2DLoss([8, 10], J=2)
     for kwargs in (
         {"grid_shard_slice": slice(0, 80)},
         {"grid_shard_sizes": [80]},
@@ -517,14 +555,14 @@ def test_schema_factory_combination_and_output_mask_resolution() -> None:
     from anemoi.training.train.methods.base import resolve_subgrid
 
     config = {
-        "_target_": "anemoi.training.losses.WaveletAMSELoss",
+        "_target_": "anemoi.training.losses.DTCWT2DLoss",
         "grid_shape": [8, 10],
         "J": 2,
         "subgrid": "output_mask",
         "transform": {"backend": "pytorch_wavelets"},
     }
     validated = TypeAdapter(LossSchemas).validate_python(config)
-    assert isinstance(validated, WaveletAMSELossSchema)
+    assert isinstance(validated, DTCWT2DLossSchema)
     data_config = OmegaConf.create({"regional": config})
 
     class Mask:
@@ -551,7 +589,7 @@ def test_schema_factory_combination_and_output_mask_resolution() -> None:
 def test_real_reference_compiled_score_forward_backward_and_scaler_update(backend: str) -> None:
     pred, target = _data((7, 9), ensemble=2)
     options = {"grid_shape": [7, 9], "J": 2, "transform_field_chunk_size": 2}
-    eager, compiled = WaveletAMSELoss(**options), WaveletAMSELoss(**options)
+    eager, compiled = DTCWT2DLoss(**options), DTCWT2DLoss(**options)
     for loss in (eager, compiled):
         loss.add_scaler(4, torch.ones(2), name="variable")
     compiled.compile_for_training(backend=backend, fullgraph=True, dynamic=False)
@@ -570,7 +608,7 @@ def test_real_reference_compiled_score_forward_backward_and_scaler_update(backen
 def test_compiled_uniform_scoring_and_partial_chunks(backend: str) -> None:
     pred, target = _data((7, 9), ensemble=2)
     options = {"grid_shape": [7, 9], "J": 2, "transform_field_chunk_size": 3}
-    eager, compiled = WaveletAMSELoss(**options), WaveletAMSELoss(**options)
+    eager, compiled = DTCWT2DLoss(**options), DTCWT2DLoss(**options)
     compiled.compile_for_training(backend=backend, fullgraph=True, dynamic=False)
     p1, p2 = pred.clone().requires_grad_(), pred.clone().requires_grad_()
     actual, expected = compiled(p1, target), eager(p2, target)
@@ -584,7 +622,7 @@ def test_real_triton_eager_compiled_loss() -> None:
     pytest.importorskip("triton_dtcwt")
     pred, target = (t.cuda() for t in _data((16, 20), variables=1))
     options = {"grid_shape": [16, 20], "J": 2, "transform": {"backend": "triton"}}
-    eager, compiled = WaveletAMSELoss(**options), WaveletAMSELoss(**options)
+    eager, compiled = DTCWT2DLoss(**options), DTCWT2DLoss(**options)
     compiled.compile_for_training(fullgraph=True, dynamic=False)
     p1, p2 = pred.clone().requires_grad_(), pred.clone().requires_grad_()
     actual, expected = compiled(p1, target), eager(p2, target)
@@ -609,8 +647,8 @@ def _distributed_worker(rank: int, rendezvous: str, variables: int) -> None:
             "subgrid": (3, 51),
             "transform_field_chunk_size": 1,
         }
-        full_loss = WaveletAMSELoss(**options)
-        loss = WaveletAMSELoss(**options)
+        full_loss = DTCWT2DLoss(**options)
+        loss = DTCWT2DLoss(**options)
         sizes = [19, 35]
         start = sum(sizes[:rank])
         shard_slice = slice(start, start + sizes[rank])
@@ -692,7 +730,7 @@ def test_projection_values_and_source_gradients_match_dense_reference(
     pred = pred.to(dtype).transpose(-1, -2).contiguous().transpose(-1, -2).requires_grad_()
     target = target[:, :, :1].to(dtype).requires_grad_()
     variables = torch.tensor([0.5, 2, 1.25])
-    loss = WaveletAMSELoss(
+    loss = DTCWT2DLoss(
         [6, 8],
         J=2,
         projection_config=config,
@@ -722,13 +760,33 @@ def test_projection_values_and_source_gradients_match_dense_reference(
     assert torch.autograd.grad(actual.sum(), target, allow_unused=True)[0] is None
 
 
+def test_projection_uses_the_selected_subgrid_source_nodes() -> None:
+    graph, config = _projection_graph(_projection_matrix())
+    pred, target = _data((1, 17), variables=1)
+    pred.requires_grad_()
+    options = {"grid_shape": [6, 8], "J": 2, "projection_config": config, "graph_data": graph}
+    subgrid_loss = DTCWT2DLoss(**options, subgrid=(2, 15))
+    reference_loss = DTCWT2DLoss(**options)
+
+    actual = subgrid_loss(pred, target, squash=False)
+    expected = reference_loss(pred[:, :, :, 2:15], target[:, :, :, 2:15], squash=False)
+    torch.testing.assert_close(actual, expected)
+    torch.testing.assert_close(
+        torch.autograd.grad(actual.sum(), pred, retain_graph=True)[0],
+        torch.autograd.grad(expected.sum(), pred)[0],
+    )
+
+    with pytest.raises(ValueError, match="selected input grid size"):
+        DTCWT2DLoss(**options, subgrid=(2, 14))(pred, target, squash=False)
+
+
 def test_projection_ignore_nans_propagates_source_validity() -> None:
     matrix = _projection_matrix()
     graph, config = _projection_graph(matrix)
     pred, target = _data((1, 13), variables=1)
     pred[..., 0, 0] = float("nan")
     pred.requires_grad_()
-    loss = WaveletAMSELoss(
+    loss = DTCWT2DLoss(
         [6, 8],
         J=2,
         projection_config=config,
@@ -751,7 +809,7 @@ def test_projection_identity_and_permutation_preserve_target_order(permuted: boo
     if permuted:
         matrix = matrix.flip(0)
     graph, config = _projection_graph(matrix)
-    loss = WaveletAMSELoss(
+    loss = DTCWT2DLoss(
         [6, 8],
         J=2,
         projection_config={**config, "row_normalize": row_normalize},
@@ -760,7 +818,7 @@ def test_projection_identity_and_permutation_preserve_target_order(permuted: boo
     pred, target = _data((6, 8))
     pred.requires_grad_()
     actual = loss(pred, target)
-    expected = WaveletAMSELoss([6, 8], J=2)(
+    expected = DTCWT2DLoss([6, 8], J=2)(
         pred.flip(3) if permuted else pred,
         target.flip(3) if permuted else target,
     )
@@ -773,7 +831,7 @@ def test_projection_knn_target_builder_schema_and_factory() -> None:
     graph["source"].x = torch.deg2rad(torch.tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]]))
     graph["source"].num_nodes = 4
     config = {
-        "_target_": "anemoi.training.losses.WaveletAMSELoss",
+        "_target_": "anemoi.training.losses.DTCWT2DLoss",
         "grid_shape": [2, 3],
         "J": 1,
         "scalers": ["variable"],
@@ -825,14 +883,14 @@ def test_projection_knn_target_builder_schema_and_factory() -> None:
     )
     torch.testing.assert_close(combined(fields, zeros), 0.4 * actual.mean())
     with pytest.raises(ValueError, match="n_neighbors"):
-        WaveletAMSELoss(
+        DTCWT2DLoss(
             [2, 3],
             projection_config={**config["projection_config"], "num_nearest_neighbours": 5},
             graph_data=graph,
             data_node_name="source",
         )
     with pytest.raises(ValueError, match="missing from graph_data"):
-        WaveletAMSELoss(
+        DTCWT2DLoss(
             [2, 3],
             projection_config=config["projection_config"],
             graph_data=graph,
@@ -851,7 +909,7 @@ def test_projection_loss_variable_mapping_and_scaler_subsets() -> None:
     loss = get_loss_function(
         OmegaConf.create(
             {
-                "_target_": "anemoi.training.losses.WaveletAMSELoss",
+                "_target_": "anemoi.training.losses.DTCWT2DLoss",
                 "grid_shape": [6, 8],
                 "J": 2,
                 "projection_config": config,
@@ -895,7 +953,7 @@ def test_projection_file_deepcopy_and_module_state(tmp_path: Path) -> None:
     matrix = _projection_matrix()
     matrix_path = tmp_path / "projection.npz"
     save_npz(matrix_path, csr_matrix((2 * matrix).numpy()))
-    loss = WaveletAMSELoss(
+    loss = DTCWT2DLoss(
         [6, 8],
         J=2,
         projection_config={"matrix_path": str(matrix_path)},
@@ -918,14 +976,14 @@ def test_projection_file_deepcopy_and_module_state(tmp_path: Path) -> None:
 def test_projection_and_unprojected_losses_reject_area_scalers() -> None:
     graph, config = _projection_graph(torch.eye(48))
     for options in ({}, {"projection_config": config, "graph_data": graph}):
-        loss = WaveletAMSELoss([6, 8], J=2, **options)
+        loss = DTCWT2DLoss([6, 8], J=2, **options)
         with pytest.raises(ValueError, match="does not support area weights"):
             loss.add_scaler(3, torch.ones(48), name="area")
 
 
 def test_projection_gathering_and_projection_stay_chunk_local(monkeypatch: pytest.MonkeyPatch) -> None:
     graph, config = _projection_graph(_projection_matrix())
-    loss = WaveletAMSELoss(
+    loss = DTCWT2DLoss(
         [6, 8],
         J=2,
         projection_config=config,
@@ -989,7 +1047,7 @@ def test_projection_invalid_matrices(kind: str, message: str) -> None:
         options["row_normalize"] = False
     graph, config = _projection_graph(matrix)
     with pytest.raises(ValueError, match=message):
-        WaveletAMSELoss([6, 8], J=2, projection_config={**config, **options}, graph_data=graph)
+        DTCWT2DLoss([6, 8], J=2, projection_config={**config, **options}, graph_data=graph)
 
 
 @pytest.mark.parametrize(
@@ -1001,32 +1059,64 @@ def test_projection_invalid_matrices(kind: str, message: str) -> None:
         {"projection_config": {"num_nearest_neighbours": 0, "sigma": 1, "grid": "O16"}},
         {"projection_config": {"num_nearest_neighbours": 1, "sigma": 0, "grid": "O16"}},
         {"projection_config": {"num_nearest_neighbours": 1, "sigma": float("inf"), "grid": "O16"}},
-        {"projection_config": {"matrix_path": "unused.npz"}, "subgrid": (0, None)},
     ],
 )
 def test_projection_schema_rejects_invalid_options(options: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         TypeAdapter(LossSchemas).validate_python(
-            {"_target_": "anemoi.training.losses.WaveletAMSELoss", "grid_shape": [6, 8], **options},
+            {"_target_": "anemoi.training.losses.DTCWT2DLoss", "grid_shape": [6, 8], **options},
         )
+
+
+def test_projection_schema_accepts_subgrid() -> None:
+    _, config = _projection_graph(_projection_matrix())
+    validated = TypeAdapter(LossSchemas).validate_python(
+        {
+            "_target_": "anemoi.training.losses.DTCWT2DLoss",
+            "grid_shape": [6, 8],
+            "subgrid": [2, 15],
+            "projection_config": config,
+        },
+    )
+    assert isinstance(validated, DTCWT2DLossSchema)
+    assert validated.subgrid == (2, 15)
 
 
 def test_ignore_nans_is_accepted_by_constructor_and_schema() -> None:
     config = {
-        "_target_": "anemoi.training.losses.WaveletAMSELoss",
+        "_target_": "anemoi.training.losses.DTCWT2DLoss",
         "grid_shape": [6, 8],
         "ignore_nans": True,
     }
-    assert WaveletAMSELoss([6, 8], ignore_nans=True).ignore_nans
+    assert DTCWT2DLoss([6, 8], ignore_nans=True).ignore_nans
     validated = TypeAdapter(LossSchemas).validate_python(config)
-    assert isinstance(validated, WaveletAMSELossSchema)
+    assert isinstance(validated, DTCWT2DLossSchema)
     assert validated.ignore_nans
 
 
+def test_pooled_nan_handling_is_accepted_by_factory_and_schema() -> None:
+    config = {
+        "_target_": "anemoi.training.losses.DTCWT2DLoss",
+        "grid_shape": [6, 8],
+        "nan_handling": "pooled",
+    }
+    validated = TypeAdapter(LossSchemas).validate_python(config)
+    assert isinstance(validated, DTCWT2DLossSchema)
+    assert validated.nan_handling == "pooled"
+
+    loss = get_loss_function(OmegaConf.create(config))
+    assert isinstance(loss, DTCWT2DLoss)
+    assert loss.ignore_nans
+    assert loss.nan_handling == "pooled"
+
+    with pytest.raises(ValidationError):
+        TypeAdapter(LossSchemas).validate_python({**config, "nan_handling": "fractional"})
+
+
 def test_target_grid_weights_is_not_a_loss_option() -> None:
-    config = {"_target_": "anemoi.training.losses.WaveletAMSELoss", "grid_shape": [6, 8]}
+    config = {"_target_": "anemoi.training.losses.DTCWT2DLoss", "grid_shape": [6, 8]}
     with pytest.raises(TypeError, match="target_grid_weights"):
-        WaveletAMSELoss([6, 8], target_grid_weights=[1.0] * 48)
+        DTCWT2DLoss([6, 8], target_grid_weights=[1.0] * 48)
     with pytest.raises(ValidationError, match="target_grid_weights"):
         TypeAdapter(LossSchemas).validate_python({**config, "target_grid_weights": [1.0] * 48})
 
@@ -1035,7 +1125,7 @@ def test_target_grid_weights_is_not_a_loss_option() -> None:
 @pytest.mark.parametrize("field", ["pred", "target"])
 def test_projection_propagates_nonfinite_source_values(bad: float, field: str) -> None:
     graph, config = _projection_graph(_projection_matrix())
-    loss = WaveletAMSELoss(
+    loss = DTCWT2DLoss(
         [6, 8],
         projection_config=config,
         graph_data=graph,
@@ -1049,9 +1139,9 @@ def test_projection_propagates_nonfinite_source_values(bad: float, field: str) -
 def test_projection_missing_context(tmp_path: Path) -> None:
     _, config = _projection_graph(_projection_matrix())
     with pytest.raises(ValueError, match="graph_data"):
-        WaveletAMSELoss([6, 8], projection_config=config)
+        DTCWT2DLoss([6, 8], projection_config=config)
     with pytest.raises(FileNotFoundError):
-        WaveletAMSELoss([6, 8], projection_config={"matrix_path": str(tmp_path / "missing.npz")})
+        DTCWT2DLoss([6, 8], projection_config={"matrix_path": str(tmp_path / "missing.npz")})
 
 
 @pytest.mark.usefixtures("isolated_compile_cache")
@@ -1065,7 +1155,7 @@ def test_projection_real_compiled_scoring(backend: str) -> None:
         "graph_data": graph,
         "transform_field_chunk_size": 2,
     }
-    eager, compiled = WaveletAMSELoss(**options), WaveletAMSELoss(**options)
+    eager, compiled = DTCWT2DLoss(**options), DTCWT2DLoss(**options)
     compiled.compile_for_training(backend=backend, fullgraph=True, dynamic=False)
     pred, target = _data((1, 13), variables=3)
     p1, p2 = pred.clone().requires_grad_(), pred.clone().requires_grad_()
@@ -1077,7 +1167,7 @@ def test_projection_real_compiled_scoring(backend: str) -> None:
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU sparse projection requires a GPU")
 def test_projection_gpu_matches_cpu_values_and_gradients() -> None:
     graph, config = _projection_graph(_projection_matrix())
-    loss = WaveletAMSELoss(
+    loss = DTCWT2DLoss(
         [6, 8],
         J=2,
         projection_config=config,
@@ -1112,7 +1202,7 @@ def _distributed_projection_worker(rank: int, rendezvous: str, variables: int, n
     try:
         matrix = _projection_matrix()
         graph, config = _projection_graph(matrix)
-        loss = WaveletAMSELoss(
+        loss = DTCWT2DLoss(
             [6, 8],
             J=2,
             projection_config=config,

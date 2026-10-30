@@ -272,8 +272,8 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     logfft2d = "anemoi.training.losses.LogFFT2Distance"
     spectral_crps = "anemoi.training.losses.SpectralCRPSLoss"
     power_spectrum = "anemoi.training.losses.PowerSpectrumLoss"
-    spectral_amse = "anemoi.training.losses.SpectralAMSELoss"
-    wavelet_amse = "anemoi.training.losses.WaveletAMSELoss"
+    spectral_band_score = "anemoi.training.losses.SpectralAMSELoss"
+    dtcwt_2d = "anemoi.training.losses.DTCWT2DLoss"
 
 
 class CheckVariablesCompatibilitySchema(BaseModel):
@@ -407,18 +407,20 @@ class WaveletTransformSchema(BaseModel):
     backend_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
-class WaveletAMSELossSchema(BaseLossSchema):
-    """2D DTCWT AMSE with optional projection and no missing values or area weights."""
+class DTCWT2DLossSchema(BaseLossSchema):
+    """2D DTCWT loss with optional projection and NaN handling."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    target_: Literal["anemoi.training.losses.WaveletAMSELoss"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.training.losses.DTCWT2DLoss"] = Field(..., alias="_target_")
     scalers: list[str] = Field(default_factory=list)
     grid_shape: tuple[Annotated[int, Field(ge=2)], Annotated[int, Field(ge=2)]]
     J: PositiveInt | None = None
     transform: WaveletTransformSchema = Field(default_factory=WaveletTransformSchema)
     scale_weights: list[Annotated[float, Field(ge=0, allow_inf_nan=False)]] | None = None
     eps: float = Field(default=1e-8, gt=0, allow_inf_nan=False)
+    nan_handling: Literal["strict", "pooled"] | None = None
+    "NaN handling strategy; setting it enables NaN handling."
     subgrid: tuple[NonNegativeInt, int | None] | Literal["output_mask"] | None = None
     projection_config: WaveletProjectionConfigSchema | None = None
     transform_prediction_and_target_separately: bool | None = None
@@ -430,9 +432,6 @@ class WaveletAMSELossSchema(BaseLossSchema):
         """Validate subgrid and projection options."""
         if isinstance(self.subgrid, tuple) and self.subgrid[1] is not None and self.subgrid[1] <= self.subgrid[0]:
             msg = "subgrid end must be greater than its start"
-            raise ValueError(msg)
-        if self.projection_config is not None and self.subgrid is not None:
-            msg = "Wavelet projection requires subgrid=None"
             raise ValueError(msg)
         return self
 
@@ -565,7 +564,7 @@ class TimeAggregateLossWrapperSchema(BaseModel):
     target_: Literal["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"] = Field(..., alias="_target_")
     time_aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
     "Time aggregation operations to apply over the time dimension before computing the loss."
-    loss_fn: WaveletAMSELossSchema | BaseLossSchema | CRPSSchema
+    loss_fn: DTCWT2DLossSchema | BaseLossSchema | CRPSSchema
     "Inner loss function applied to each time-aggregated output."
     scalers: list[str] | None = None
     "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
@@ -599,7 +598,7 @@ class MultiScaleLossSchema(BaseModel):
         | GraphVariogramScoreLossSchema
         | GraphEdgeCRPSLossSchema
         | GraphEdgeEnergyScoreLossSchema
-        | WaveletAMSELossSchema
+        | DTCWT2DLossSchema
         | BaseLossSchema
     )
     weights: list[float]
@@ -689,7 +688,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.SpectralCRPSLoss": "spectral",
     "anemoi.training.losses.PowerSpectrumLoss": "spectral",
     "anemoi.training.losses.SpectralAMSELoss": "spectral",
-    "anemoi.training.losses.WaveletAMSELoss": "wavelet",
+    "anemoi.training.losses.DTCWT2DLoss": "wavelet",
     "anemoi.training.losses.HuberLoss": "huber",
     "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
 }
@@ -724,7 +723,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
             | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
-            | Annotated[WaveletAMSELossSchema, Tag("wavelet")]
+            | Annotated[DTCWT2DLossSchema, Tag("wavelet")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
             Discriminator(_loss_discriminator),
@@ -785,7 +784,7 @@ LossSchemas = Annotated[
     | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
     | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
-    | Annotated[WaveletAMSELossSchema, Tag("wavelet")]
+    | Annotated[DTCWT2DLossSchema, Tag("wavelet")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),

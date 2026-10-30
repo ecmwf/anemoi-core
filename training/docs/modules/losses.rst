@@ -535,220 +535,6 @@ Graph scores can be selected through ``model.compile``:
 
 Only classes present in the configured loss need to be listed.
 
-*******************************
-Wavelet AMSE loss
-*******************************
-
-``WaveletAMSELoss`` compares fields using a two-dimensional dual-tree complex
-wavelet transform (DTCWT). It adds band-summed AMSE over six oriented high-pass subbands at
-each level to MSE of the real low-pass residual. Unlike spherical spectral
-AMSE, the coefficients retain spatial information and form a pyramid of
-different-sized grids.
-
-The transform operates on a structured 2D grid with symmetric boundaries.
-Optional interpolation allows other source grids, but does not make the
-transform spherical or introduce periodic global boundary handling.
-
-Install the reference backend with ``pip install 'anemoi-training[wavelet]'``.
-Both backend imports are optional until a wavelet transform is constructed.
-The experimental ``triton`` backend requires a separately installed
-``triton-dtcwt`` package and a supported CUDA/ROCm device. It is not currently
-published on PyPI, so there is deliberately no non-installable Triton extra.
-The reference backend uses ``pytorch-wavelets>=1.3``; no FastNet-specific fork
-is required by the scoring kernel's compilation boundary.
-The extra includes ``setuptools<81`` because the published reference backend
-still imports the legacy ``pkg_resources`` API.
-
-Example regional configuration (under the appropriate dataset):
-
-.. code-block:: yaml
-
-   _target_: anemoi.training.losses.WaveletAMSELoss
-   grid_shape: [808, 621]
-   subgrid: output_mask  # optional; a resolved contiguous slice of the input grid
-   J: 6                 # optional; otherwise max(1, floor(log2(min(H,W))) - 3)
-   transform:
-     backend: pytorch_wavelets
-     biort: near_sym_b
-     qshift: qshift_b
-   scale_weights: [1, 1, 1, 1, 1, 1]
-   ignore_nans: false
-   transform_field_chunk_size: 20
-   scalers: [general_variable, time_steps]
-
-Inputs use ``[batch,time,ensemble,grid,variable]`` layout; targets can have a
-singleton ensemble dimension or omit it. The selected grid must contain exactly
-``H*W`` points in row-major order. ``subgrid`` accepts ``[start,end]``, with a
-null end extending to the last point. ``output_mask`` reuses the trainer's
-contiguous-mask resolution; arbitrary scattered extraction and sparse projection
-are not part of this subgrid selection. For a different source grid, use the
-optional projection described below.
-
-Area weights and all GRID-bearing scalers, including spatial masks, are not
-supported. The score uses uniform spatial weighting on the selected grid;
-``target_grid_weights`` is not a valid loss option and is rejected by the
-configuration schema.
-Non-spatial scalers such as variable and time weights are applied once after
-wavelet scoring. Their updates, ``without_scalers`` selection and
-``scaler_indices`` remain available.
-
-With ``ignore_nans: false`` (the default), NaNs and infinities propagate
-through the transform and may make the loss nonfinite. With
-``ignore_nans: true``, locations where either prediction or target is NaN are
-excluded. NaN validity is propagated through the DTCWT filter support, and
-affected coefficients are omitted and each scale is normalized over its valid
-coefficients. Infinities are not masked. This mask propagation adds a
-transform pass, but is only performed when ``ignore_nans`` is enabled.
-Epsilon regularization can give a small nonzero AMSE for identical nonzero
-inputs.
-
-Projecting onto a rectangular target grid
-========================================
-
-Set ``projection_config`` to interpolate arbitrary source nodes before the
-DTCWT. ``grid_shape`` then describes the **target** grid, not the source grid.
-The existing ``ProjectionGraphProvider`` constructs one fixed sparse matrix at
-initialization; ``SparseProjector`` applies it differentiably to field values on
-every forward pass. Neighbours are not rebuilt every step, and gradients flow
-through prediction values, not the fixed coordinates or interpolation weights.
-
-For example, provide a rectangular target through an existing node builder:
-
-.. code-block:: yaml
-
-   _target_: anemoi.training.losses.WaveletAMSELoss
-   grid_shape: [240, 320]
-   J: 4
-   projection_config:
-     target_node_name: wavelet_grid
-     node_builder:
-       _target_: anemoi.graphs.nodes.NPZFileNodes
-       npz_file: /path/to/rectangular-target.npz
-       lat_key: latitudes
-       lon_key: longitudes
-     num_nearest_neighbours: 4
-     sigma: 0.02  # illustrative Gaussian bandwidth; choose for your domain
-     row_normalize: true
-   ignore_nans: false
-   transform_field_chunk_size: 20
-   scalers: [general_variable, time_steps]
-
-The latitude/longitude arrays in this example must be **paired, flattened
-vectors** of length ``240*320``, ordered row by row. ``LatLonNodes`` can likewise
-accept paired coordinate lists in degrees; it does not mesh two independent
-coordinate axes. The caller must supply a meaningful logical rectangular grid:
-matching the point count does not establish the geometry or ordering. Nodes
-are not automatically sorted. The provider's ``grid`` shortcut creates a
-reduced Gaussian grid, which is not generally suitable as a rectangular target.
-
-The normal training loss factory supplies the model graph and dataset node
-name. Direct Python callers must pass ``graph_data`` and, when needed,
-``data_node_name`` for graph-backed modes. Besides the configured target builder,
-the existing provider supports:
-
-* **Existing edges:** ``edges_name: [data, to, wavelet_grid]`` and optionally
-  ``edge_weight_attribute`` / ``src_node_weight_attribute``. The matrix has one
-  row per destination node and one column per source node.
-* **Saved matrix:** ``matrix_path: /path/to/projection.npz``, a SciPy sparse
-  matrix with shape ``[H*W, source_nodes]``. This mode needs no model graph.
-
-These are mutually exclusive modes. Matrix columns must match the complete
-input-node ordering exactly. Configured target-grid mode uses Gaussian-weighted
-KNN; one neighbour gives nearest-neighbour interpolation. Other supplied edge
-weights or matrices can encode different rules.
-
-Wavelet projection defaults to ``row_normalize: true``, independently of
-spectral-loss defaults. Weights must be finite and nonnegative **before**
-normalization, and every destination row must have positive support. With
-normalization disabled, row sums must already equal one (``rtol=1e-5``,
-``atol=1e-6``). Invalid rows raise an error instead of being filled with zeros.
-Normalized rows preserve constants; this is **not** a guarantee of
-area-conservative interpolation. KNN also finds distant neighbours outside
-geographic coverage: row support alone is not a coverage or extrapolation check.
-Choose target extent, resolution, neighbour count and bandwidth deliberately.
-Interpolation smooths fields and changes which spatial scales the loss measures.
-
-Area weights, ``target_grid_weights`` and all GRID-bearing scalers are
-unsupported and raise an actionable error. This applies to both source and
-target grids, including spatial masks; excluding a scaler with
-``without_scalers`` does not enable GRID-bearing scalers. Non-spatial
-variable/time scalers still apply once after scoring.
-
-For this first version, projection cannot be combined with ``subgrid`` /
-``subgrid: output_mask``. Nonfinite source prediction or target values are not
-checked and may propagate through interpolation and make the loss nonfinite.
-Missing-value interpolation and source-mask remapping are not implemented.
-The configured destination defines the regional footprint. An input already
-restricted to a node subset can use a matrix explicitly built for that input
-ordering, but the loss does not infer a column subset.
-
-Projection runs in float32 inside the existing field chunks, before reshaping
-to ``[chunk,1,H,W]``; the entire batch is not projected at once. Distributed
-scoring retains complete target grids on variable shards and gathers only the
-final scores.
-
-Migration from FastNet
-=====================
-
-Only the 2D DTCWT AMSE formulation is included, not FastNet's global wavelet
-losses or wrappers. Backend/filter options now belong under
-``transform``. Area weighting and GRID-bearing scalers are not supported;
-remove ``area_weighting``, ``cell_areas`` or spatial mask scalers from the
-wavelet loss configuration. They are rejected rather than silently ignored.
-Non-spatial variable/time scalers remain supported.
-
-Compilation and distribution
-============================
-
-There is a single loss class, usable eagerly or through normal Anemoi compilation:
-
-.. code-block:: yaml
-
-   model:
-     compile:
-       - module: anemoi.training.losses.WaveletAMSELoss
-         options:
-           dynamic: false
-           fullgraph: true
-
-The compiled unit is the tensor scoring kernel on real coefficients. The DTCWT
-backend, input validation, scaler alignment and distributed collectives remain
-eager; this does not claim fullgraph compilation of ``pytorch_wavelets`` itself.
-Transform implementations use symmetric boundaries. Triton currently supports
-``near_sym_b``/``qshift_b``; tuning belongs in ``transform.backend_kwargs``, for
-example ``compute_dtype: float32``. Autograd through predictions is always enabled
-when the calling context requires it, while targets are detached.
-
-Grid-sharded inputs are transposed to variable shards with complete grids before
-selection and transformation. Only the small per-variable scores are gathered
-back. ``transform_prediction_and_target_separately`` and
-``transform_field_chunk_size`` control working memory use; separate transforms
-are selected automatically above one million selected grid points by default.
-Set ``separate_transform_gridpoint_threshold`` to change that threshold. Field
-gathering, FP32 input conversion, spatial-weight
-products and masking are performed one chunk at a time after subgrid selection.
-Spatial scalers retain their compact broadcast shapes, and implicit uniform
-weights do not require full-grid absolute or relative weight tensors. Band statistics
-are reduced immediately rather than keeping spatial power and cross maps
-alive together.
-
-Chunking bounds these forward preparation and transform working buffers, but
-autograd can still retain coefficients across all chunks until backward. This
-loss does not apply activation checkpointing.
-
-The loss can also be combined with grid-point losses, with separate scalers:
-
-.. code-block:: yaml
-
-   _target_: anemoi.training.losses.combined.CombinedLoss
-   loss_weights: [1.0, 0.1]
-   losses:
-     - _target_: anemoi.training.losses.MSELoss
-       scalers: [regional_node_weights, general_variable, time_steps]
-     - _target_: anemoi.training.losses.WaveletAMSELoss
-       grid_shape: [808, 621]
-       scalers: [regional_node_weights, general_variable, time_steps]
-
 ************************
 Spectral loss functions
 ************************
@@ -842,6 +628,8 @@ axis ahead of ``l, m`` when passing the forward wrapper's output to the inverse.
             subgrid: [0, 100]   # or, for a LAM model:  subgrid: output_mask
 
 
+.. _spectral-projections:
+
 Spectral projections
 --------------------
 
@@ -849,7 +637,9 @@ Before the spectral transform is applied, but after the grid has been subset, an
 the input field from its native (possibly unstructured) grid to the regular 2D grid
 expected by the transform. This is configured via the ``projection_config`` key and
 works with *any* spectral loss class (``SpectralCRPSLoss``,
-``LogSpectralDistance``, ``FourierCorrelationLoss``, …).
+``LogSpectralDistance``, ``FourierCorrelationLoss``, …). The same projection
+options are supported by ``DTCWT2DLoss``; see its section below for rectangular
+target-grid requirements.
 
 Two modes are available:
 
@@ -1044,6 +834,156 @@ Spectral losses can be combined with standard grid-point losses through
              x_dim: 256
              y_dim: 128
          loss_weights: [1.0, 0.1]
+
+
+*******************************
+2D DTCWT loss
+*******************************
+
+``DTCWT2DLoss`` compares fields using a two-dimensional dual-tree complex
+wavelet transform (DTCWT). It adds a band-summed score over six oriented
+high-pass subbands at each level to MSE of the real low-pass residual. Unlike
+spectral losses, the coefficients retain spatial information and form a pyramid of
+different-sized grids.
+
+Install the supported ``pytorch_wavelets`` backend with
+``pip install 'anemoi-training[wavelet]'``. It is imported only when a wavelet
+transform is constructed. The extra includes ``setuptools<81`` because
+``pytorch-wavelets`` still imports the legacy ``pkg_resources`` API. A custom
+Triton implementation of the DTCWT is planned but is not yet supported within Anemoi.
+
+Example configuration:
+
+.. code-block:: yaml
+
+   _target_: anemoi.training.losses.DTCWT2DLoss
+   grid_shape: [808, 621]
+   subgrid: output_mask  # optional; a resolved contiguous slice of the input grid
+   J: 6                 # optional; otherwise max(1, floor(log2(min(H,W))) - 3)
+   transform:
+     backend: pytorch_wavelets
+     biort: near_sym_b
+     qshift: qshift_b
+   scale_weights: [1, 1, 1, 1, 1, 1]
+   transform_field_chunk_size: 20
+   scalers: [general_variable, time_steps]
+
+Without projection, the selected input grid must contain exactly ``H*W`` points
+in row-major order. ``subgrid`` accepts ``[start,end]``, with a
+null end extending to the last point. ``output_mask`` reuses the trainer's
+contiguous-mask resolution; arbitrary scattered extraction and sparse projection
+are not part of this subgrid selection. For a different source grid, use the
+optional projection described below.
+
+Wavelet scoring collapses the grid dimension, so area weights and all
+GRID-bearing scalers (including spatial masks and ``target_grid_weights``) are
+unsupported on either source or target grids, even if excluded with
+``without_scalers``. Spatial weighting is uniform; non-spatial scalers are
+applied after scoring. Non-spatial scaler updates and ``scaler_indices`` remain
+available. See :ref:`loss-function-scaling` for general scaler behavior.
+
+By default (``ignore_nans: false`` or ``nan_handling: null``), NaNs propagate through
+the transform and may make the loss nonfinite. Set ``nan_handling: strict`` to
+exclude each wavelet coefficient whose filter support includes an input that
+is NaN in either the prediction or target. Each scale is normalized over its
+valid coefficients; propagating validity through the DTCWT requires an
+additional transform pass.
+
+Set ``nan_handling: pooled`` to weight coefficients by fractions of valid input
+cells. Adaptive average pooling propagates those fractions to each coefficient
+resolution, and the score is normalized by the number of valid input cells. In
+both modes, a location is missing if either prediction or target is NaN;
+infinities are not masked. For backward compatibility, ``ignore_nans: true``
+selects ``strict`` when ``nan_handling`` is omitted.
+
+Strict handling is conservative: as filter support widens at coarser levels,
+NaNs can invalidate a large fraction of coefficients, depending on their
+distribution, particularly for deeper transforms (for example, ``J > 2``).
+Pooled handling retains partial
+contributions at those levels by weighting them with the pooled validity
+fraction.
+
+Projecting onto a rectangular target grid
+========================================
+
+Set ``projection_config`` to interpolate source nodes before the DTCWT.
+Projection modes are described in :ref:`spectral-projections` above.
+Here, ``grid_shape`` describes the **target** 2D grid on which the wavelet
+transform is performed, not the source grid. A fixed
+sparse matrix is constructed at initialization and applied to field values on
+each forward pass; gradients flow through prediction values, not the fixed
+coordinates or interpolation weights.
+
+For example, provide a rectangular target through an existing node builder:
+
+.. code-block:: yaml
+
+   _target_: anemoi.training.losses.DTCWT2DLoss
+   grid_shape: [181, 360]
+   J: 4
+   projection_config:
+     target_node_name: wavelet_grid
+     node_builder:
+       _target_: anemoi.graphs.nodes.NPZFileNodes
+       npz_file: /path/to/rectangular-target.npz
+       lat_key: latitudes
+       lon_key: longitudes
+     num_nearest_neighbours: 4
+     sigma: 0.02  # illustrative Gaussian bandwidth; choose for your domain
+
+The latitude/longitude arrays in this example must be **paired, flattened
+vectors** of length ``181*360``, ordered row by row. ``LatLonNodes`` can likewise
+accept paired coordinate lists in degrees; it does not mesh two independent
+coordinate axes. The caller must supply a meaningful logical rectangular grid:
+matching the point count does not establish the geometry or ordering. Nodes
+are not automatically sorted. The provider's ``grid`` shortcut creates a
+reduced Gaussian grid, which is not generally suitable as a rectangular target.
+
+The normal training loss factory supplies the model graph and dataset node
+name. Direct Python callers must pass ``graph_data`` and, when needed,
+``data_node_name`` for graph-backed modes.
+
+When ``subgrid`` is used, it is applied before projection, so matrix columns
+must correspond to the selected source nodes in their input order. The loss
+checks only the column count and does not slice full-grid matrices automatically.
+
+Wavelet projection defaults to ``row_normalize: true``. Weights must be finite
+and nonnegative **before** normalization, and every destination row must have
+positive support. With normalization disabled, row sums must already equal one
+(``rtol=1e-5``,
+``atol=1e-6``). Invalid rows raise an error instead of being filled with zeros.
+Normalized rows preserve constants; this is **not** a guarantee of
+area-conservative interpolation. KNN also finds distant neighbours outside
+geographic coverage: row support alone is not a coverage or extrapolation check.
+Choose target extent, resolution, neighbour count and bandwidth deliberately.
+Interpolation smooths fields and changes which spatial scales the loss measures.
+
+Projection does not perform missing-value interpolation or remap source masks.
+The configured destination defines the regional footprint.
+
+After subgrid selection, fields are gathered and converted to FP32 one chunk at
+a time. If configured, projection is applied within each chunk before reshaping
+to ``[chunk,1,H,W]``; the full batch is not projected at once.
+
+Compilation and distribution
+============================
+
+With ``pytorch_wavelets``, only the tensor scoring kernel on real coefficients
+is compiled; the DTCWT transform, input validation, scaler alignment and
+distributed collectives remain eager. A fully compilable loss path is planned
+once custom Triton DTCWT kernels are available.
+
+Grid-sharded inputs are transposed to variable shards with complete grids before
+selection and transformation. Only the small per-variable scores are gathered
+back. ``transform_prediction_and_target_separately`` and
+``transform_field_chunk_size`` control working memory use; separate transforms
+are selected automatically above one million selected grid points by default.
+Set ``separate_transform_gridpoint_threshold`` to change that threshold.
+Band statistics are reduced immediately rather than keeping spatial power and
+cross maps alive together.
+
+Chunking bounds these forward preparation and transform working buffers, but
+autograd can still retain coefficients across all chunks until backward.
 
 
 *********
