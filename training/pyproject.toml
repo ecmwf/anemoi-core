@@ -89,7 +89,7 @@ optional-dependencies.s3 = [
 ]
 optional-dependencies.tests = [
   "anemoi-graphs[tri]",                              # required to load the gnn checkpoint as part of the tests
-  "anemoi-models[spectral]",                         # required to test the DCT2D spectral loss
+  "anemoi-models[spectral,wavelet]",                 # required to test spectral and wavelet losses
   "anemoi-training[azure,mlflow,plotting,s3,wandb]", # AzureMlflowLogger / S3Source / plotting integration
   "hypothesis>=6.11",
   "pytest>=8",
@@ -100,6 +100,7 @@ optional-dependencies.tests = [
 optional-dependencies.wandb = [
   "wandb>=0.22.2",
 ]
+optional-dependencies.wavelet = [ "anemoi-models[wavelet]" ]
 urls.Changelog = "https://github.com/ecmwf/anemoi-training/CHANGELOG.md"
 urls.Documentation = "https://anemoi-training.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-training/"

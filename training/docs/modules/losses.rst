@@ -628,6 +628,8 @@ axis ahead of ``l, m`` when passing the forward wrapper's output to the inverse.
             subgrid: [0, 100]   # or, for a LAM model:  subgrid: output_mask
 
 
+.. _spectral-projections:
+
 Spectral projections
 --------------------
 
@@ -635,7 +637,9 @@ Before the spectral transform is applied, but after the grid has been subset, an
 the input field from its native (possibly unstructured) grid to the regular 2D grid
 expected by the transform. This is configured via the ``projection_config`` key and
 works with *any* spectral loss class (``SpectralCRPSLoss``,
-``LogSpectralDistance``, ``FourierCorrelationLoss``, …).
+``LogSpectralDistance``, ``FourierCorrelationLoss``, …). The same projection
+options are supported by ``DTCWT2DLoss``; see its section below for rectangular
+target-grid requirements.
 
 Two modes are available:
 
@@ -830,6 +834,156 @@ Spectral losses can be combined with standard grid-point losses through
              x_dim: 256
              y_dim: 128
          loss_weights: [1.0, 0.1]
+
+
+*******************************
+2D DTCWT loss
+*******************************
+
+``DTCWT2DLoss`` compares fields using a two-dimensional dual-tree complex
+wavelet transform (DTCWT). It adds a band-summed score over six oriented
+high-pass subbands at each level to MSE of the real low-pass residual. Unlike
+spectral losses, the coefficients retain spatial information and form a pyramid of
+different-sized grids.
+
+Install the supported ``pytorch_wavelets`` backend with
+``pip install 'anemoi-training[wavelet]'``. It is imported only when a wavelet
+transform is constructed. The extra includes ``setuptools<81`` because
+``pytorch-wavelets`` still imports the legacy ``pkg_resources`` API. A custom
+Triton implementation of the DTCWT is planned but is not yet supported within Anemoi.
+
+Example configuration:
+
+.. code-block:: yaml
+
+   _target_: anemoi.training.losses.DTCWT2DLoss
+   grid_shape: [808, 621]
+   subgrid: output_mask  # optional; a resolved contiguous slice of the input grid
+   J: 6                 # optional; otherwise max(1, floor(log2(min(H,W))) - 3)
+   transform:
+     backend: pytorch_wavelets
+     biort: near_sym_b
+     qshift: qshift_b
+   scale_weights: [1, 1, 1, 1, 1, 1]
+   transform_field_chunk_size: 20
+   scalers: [general_variable, time_steps]
+
+Without projection, the selected input grid must contain exactly ``H*W`` points
+in row-major order. ``subgrid`` accepts ``[start,end]``, with a
+null end extending to the last point. ``output_mask`` reuses the trainer's
+contiguous-mask resolution; arbitrary scattered extraction and sparse projection
+are not part of this subgrid selection. For a different source grid, use the
+optional projection described below.
+
+Wavelet scoring collapses the grid dimension, so area weights and all
+GRID-bearing scalers (including spatial masks and ``target_grid_weights``) are
+unsupported on either source or target grids, even if excluded with
+``without_scalers``. Spatial weighting is uniform; non-spatial scalers are
+applied after scoring. Non-spatial scaler updates and ``scaler_indices`` remain
+available. See :ref:`loss-function-scaling` for general scaler behavior.
+
+By default (``ignore_nans: false`` or ``nan_handling: null``), NaNs propagate through
+the transform and may make the loss nonfinite. Set ``nan_handling: strict`` to
+exclude each wavelet coefficient whose filter support includes an input that
+is NaN in either the prediction or target. Each scale is normalized over its
+valid coefficients; propagating validity through the DTCWT requires an
+additional transform pass.
+
+Set ``nan_handling: pooled`` to weight coefficients by fractions of valid input
+cells. Adaptive average pooling propagates those fractions to each coefficient
+resolution, and the score is normalized by the number of valid input cells. In
+both modes, a location is missing if either prediction or target is NaN;
+infinities are not masked. For backward compatibility, ``ignore_nans: true``
+selects ``strict`` when ``nan_handling`` is omitted.
+
+Strict handling is conservative: as filter support widens at coarser levels,
+NaNs can invalidate a large fraction of coefficients, depending on their
+distribution, particularly for deeper transforms (for example, ``J > 2``).
+Pooled handling retains partial
+contributions at those levels by weighting them with the pooled validity
+fraction.
+
+Projecting onto a rectangular target grid
+========================================
+
+Set ``projection_config`` to interpolate source nodes before the DTCWT.
+Projection modes are described in :ref:`spectral-projections` above.
+Here, ``grid_shape`` describes the **target** 2D grid on which the wavelet
+transform is performed, not the source grid. A fixed
+sparse matrix is constructed at initialization and applied to field values on
+each forward pass; gradients flow through prediction values, not the fixed
+coordinates or interpolation weights.
+
+For example, provide a rectangular target through an existing node builder:
+
+.. code-block:: yaml
+
+   _target_: anemoi.training.losses.DTCWT2DLoss
+   grid_shape: [181, 360]
+   J: 4
+   projection_config:
+     target_node_name: wavelet_grid
+     node_builder:
+       _target_: anemoi.graphs.nodes.NPZFileNodes
+       npz_file: /path/to/rectangular-target.npz
+       lat_key: latitudes
+       lon_key: longitudes
+     num_nearest_neighbours: 4
+     sigma: 0.02  # illustrative Gaussian bandwidth; choose for your domain
+
+The latitude/longitude arrays in this example must be **paired, flattened
+vectors** of length ``181*360``, ordered row by row. ``LatLonNodes`` can likewise
+accept paired coordinate lists in degrees; it does not mesh two independent
+coordinate axes. The caller must supply a meaningful logical rectangular grid:
+matching the point count does not establish the geometry or ordering. Nodes
+are not automatically sorted. The provider's ``grid`` shortcut creates a
+reduced Gaussian grid, which is not generally suitable as a rectangular target.
+
+The normal training loss factory supplies the model graph and dataset node
+name. Direct Python callers must pass ``graph_data`` and, when needed,
+``data_node_name`` for graph-backed modes.
+
+When ``subgrid`` is used, it is applied before projection, so matrix columns
+must correspond to the selected source nodes in their input order. The loss
+checks only the column count and does not slice full-grid matrices automatically.
+
+Wavelet projection defaults to ``row_normalize: true``. Weights must be finite
+and nonnegative **before** normalization, and every destination row must have
+positive support. With normalization disabled, row sums must already equal one
+(``rtol=1e-5``,
+``atol=1e-6``). Invalid rows raise an error instead of being filled with zeros.
+Normalized rows preserve constants; this is **not** a guarantee of
+area-conservative interpolation. KNN also finds distant neighbours outside
+geographic coverage: row support alone is not a coverage or extrapolation check.
+Choose target extent, resolution, neighbour count and bandwidth deliberately.
+Interpolation smooths fields and changes which spatial scales the loss measures.
+
+Projection does not perform missing-value interpolation or remap source masks.
+The configured destination defines the regional footprint.
+
+After subgrid selection, fields are gathered and converted to FP32 one chunk at
+a time. If configured, projection is applied within each chunk before reshaping
+to ``[chunk,1,H,W]``; the full batch is not projected at once.
+
+Compilation and distribution
+============================
+
+With ``pytorch_wavelets``, only the tensor scoring kernel on real coefficients
+is compiled; the DTCWT transform, input validation, scaler alignment and
+distributed collectives remain eager. A fully compilable loss path is planned
+once custom Triton DTCWT kernels are available.
+
+Grid-sharded inputs are transposed to variable shards with complete grids before
+selection and transformation. Only the small per-variable scores are gathered
+back. ``transform_prediction_and_target_separately`` and
+``transform_field_chunk_size`` control working memory use; separate transforms
+are selected automatically above one million selected grid points by default.
+Set ``separate_transform_gridpoint_threshold`` to change that threshold.
+Band statistics are reduced immediately rather than keeping spatial power and
+cross maps alive together.
+
+Chunking bounds these forward preparation and transform working buffers, but
+autograd can still retain coefficients across all chunks until backward.
 
 
 *********

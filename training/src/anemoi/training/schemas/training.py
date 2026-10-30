@@ -273,6 +273,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     spectral_crps = "anemoi.training.losses.SpectralCRPSLoss"
     power_spectrum = "anemoi.training.losses.PowerSpectrumLoss"
     spectral_amse = "anemoi.training.losses.SpectralAMSELoss"
+    dtcwt_2d = "anemoi.training.losses.DTCWT2DLoss"
 
 
 class CheckVariablesCompatibilitySchema(BaseModel):
@@ -605,6 +606,71 @@ class SpectralLossSchema(BaseLossSchema):
         extra = "allow"
 
 
+class WaveletProjectionConfigSchema(SpectralProjectionConfigSchema):
+    """Reuse projection modes with constant-preserving wavelet defaults."""
+
+    row_normalize: bool = True
+    num_nearest_neighbours: Annotated[int, Field(gt=0, strict=True)] | None = None
+    sigma: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def check_wavelet_mode(self) -> Self:
+        """Reject conflicting or unused target-grid options."""
+        if self.node_builder is not None and self.grid is not None:
+            msg = "projection_config: 'grid' and 'node_builder' are mutually exclusive"
+            raise ValueError(msg)
+        if (self.matrix_path is not None or self.edges_name is not None) and any(
+            value is not None for value in (self.sigma, self.grid, self.node_builder)
+        ):
+            msg = "projection_config: file/edge and target-grid options are mutually exclusive"
+            raise ValueError(msg)
+        if self.matrix_path is not None and (
+            self.edge_weight_attribute is not None or self.src_node_weight_attribute is not None
+        ):
+            msg = "projection_config: weight attributes are not supported in matrix-file mode"
+            raise ValueError(msg)
+        return self
+
+
+class WaveletTransformSchema(BaseModel):
+    """Backend configuration for a two-dimensional DTCWT."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    backend: Literal["pytorch_wavelets"] = "pytorch_wavelets"
+    biort: str = "near_sym_b"
+    qshift: str = "qshift_b"
+
+
+class DTCWT2DLossSchema(BaseLossSchema):
+    """2D DTCWT loss with optional projection and NaN handling."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    target_: Literal["anemoi.training.losses.DTCWT2DLoss"] = Field(..., alias="_target_")
+    scalers: list[str] = Field(default_factory=list)
+    grid_shape: tuple[Annotated[int, Field(ge=2)], Annotated[int, Field(ge=2)]]
+    J: PositiveInt | None = None
+    transform: WaveletTransformSchema = Field(default_factory=WaveletTransformSchema)
+    scale_weights: list[Annotated[float, Field(ge=0, allow_inf_nan=False)]] | None = None
+    eps: float = Field(default=1e-8, gt=0, allow_inf_nan=False)
+    nan_handling: Literal["strict", "pooled"] | None = None
+    "NaN handling strategy; setting it enables NaN handling."
+    subgrid: tuple[NonNegativeInt, int | None] | Literal["output_mask"] | None = None
+    projection_config: WaveletProjectionConfigSchema | None = None
+    transform_prediction_and_target_separately: bool | None = None
+    separate_transform_gridpoint_threshold: PositiveInt = 1_000_000
+    transform_field_chunk_size: PositiveInt | None = None
+
+    @model_validator(mode="after")
+    def check_projection_options(self) -> Self:
+        """Validate subgrid and projection options."""
+        if isinstance(self.subgrid, tuple) and self.subgrid[1] is not None and self.subgrid[1] <= self.subgrid[0]:
+            msg = "subgrid end must be greater than its start"
+            raise ValueError(msg)
+        return self
+
+
 _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.combined.CombinedLoss": "combined",
     "anemoi.training.losses.MultiscaleLossWrapper": "multiscale",
@@ -620,6 +686,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.SpectralCRPSLoss": "spectral",
     "anemoi.training.losses.PowerSpectrumLoss": "spectral",
     "anemoi.training.losses.SpectralAMSELoss": "spectral",
+    "anemoi.training.losses.DTCWT2DLoss": "wavelet",
     "anemoi.training.losses.HuberLoss": "huber",
     "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
 }
@@ -654,6 +721,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
             | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
+            | Annotated[DTCWT2DLossSchema, Tag("wavelet")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
             Discriminator(_loss_discriminator),
@@ -714,6 +782,7 @@ LossSchemas = Annotated[
     | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
     | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
+    | Annotated[DTCWT2DLossSchema, Tag("wavelet")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),
