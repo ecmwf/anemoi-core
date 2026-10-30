@@ -56,7 +56,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
-        dataset_metadata: Optional[dict] = None,
+        variable_metadata: Optional[dict] = None,
     ) -> None:
 
         model_config = DotDict(model_config)
@@ -79,7 +79,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             graph_data=graph_data,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
-            dataset_metadata=dataset_metadata,
+            variable_metadata=variable_metadata,
         )
 
         self.noise_embedder = instantiate(transport_params.noise_embedder)
@@ -684,7 +684,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
-        dataset_metadata: Optional[dict] = None,
+        variable_metadata: Optional[dict] = None,
     ) -> None:
         model_config = DotDict(model_config)
 
@@ -696,7 +696,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             n_step_input=n_step_input,
             n_step_output=n_step_output,
             graph_data=graph_data,
-            dataset_metadata=dataset_metadata,
+            variable_metadata=variable_metadata,
         )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:

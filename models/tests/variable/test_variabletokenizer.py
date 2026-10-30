@@ -15,15 +15,11 @@ from anemoi.models.variable.variabletokenizer import MeanPoolingTransform
 from anemoi.models.variable.variabletokenizer import MultiHeadAttentionTransform
 from anemoi.models.variable.variabletokenizer import SumPoolingTransform
 
-DATASET_METADATA = {
-    "data": {
-        "variables_metadata": {
-            "2t": {"mars": {"levtype": "sfc", "param": "2t", "time": 0, "step": 0}},
-            "t_850": {"mars": {"levtype": "pl", "levelist": 850, "param": "t", "time": 0, "step": 0}},
-            "tp": {"mars": {"levtype": "sfc", "param": "tp", "time": 1800, "step": 6}},
-            "cos_latitude": {"computed_forcing": True, "constant_in_time": True},
-        }
-    }
+VARIABLES_METADATA = {
+    "2t": {"mars": {"levtype": "sfc", "param": "2t", "time": 0, "step": 0}},
+    "t_850": {"mars": {"levtype": "pl", "levelist": 850, "param": "t", "time": 0, "step": 0}},
+    "tp": {"mars": {"levtype": "sfc", "param": "tp", "time": 1800, "step": 6}},
+    "cos_latitude": {"computed_forcing": True, "constant_in_time": True},
 }
 VARIABLES = ["2t", "t_850", "tp", "cos_latitude"]
 
@@ -38,7 +34,7 @@ VARIABLES = ["2t", "t_850", "tp", "cos_latitude"]
 )
 def test_tokenizer_returns_encoder_input(tokenizer_class, kwargs):
     batch, time, ensemble, grid, n_attributes, out_dim = 2, 3, 1, 5, 4, 6
-    tokenizer = tokenizer_class(emb_dim=8, out_dim=out_dim, dataset_metadata=DATASET_METADATA, **kwargs)
+    tokenizer = tokenizer_class(emb_dim=8, out_dim=out_dim, variable_metadata=VARIABLES_METADATA, **kwargs)
     x = torch.randn(batch, time, ensemble, grid, len(VARIABLES))
     node_attributes = torch.randn(batch * ensemble * grid, n_attributes)
 
@@ -51,7 +47,7 @@ def test_tokenizer_returns_encoder_input(tokenizer_class, kwargs):
 
 
 def test_tokenizer_accepts_a_subset_of_variables():
-    tokenizer = MultiHeadAttentionTransform(emb_dim=8, out_dim=6, dataset_metadata=DATASET_METADATA, num_heads=2)
+    tokenizer = MultiHeadAttentionTransform(emb_dim=8, out_dim=6, variable_metadata=VARIABLES_METADATA, num_heads=2)
     x = torch.randn(1, 1, 1, 5, 2)
 
     out = tokenizer(x, torch.zeros(5, 0), variables=["tp", "2t"])

@@ -211,6 +211,7 @@ class AnemoiModelInterface(torch.nn.Module):
             "_target_": self.config.model.model._target_,
             "_convert_": getattr(self.config.model.model, "_convert_", "none"),
         }
+        variable_metadata = self.metadata["dataset"]["data"]["variables_metadata"]
         self.model = instantiate(
             model_instantiate_config,
             model_config=self.config.model,
@@ -219,7 +220,7 @@ class AnemoiModelInterface(torch.nn.Module):
             graph_data=self.graph_data,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
-            dataset_metadata=self.metadata.get("dataset"),
+            variable_metadata=variable_metadata,
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
 

@@ -30,7 +30,7 @@ def test_flatten_matches_rearrange_and_concat():
 
 
 def test_flatten_ignores_metadata_and_keeps_variable_width():
-    transform = FlattenInputTransform(dataset_metadata={"data": {"variables_metadata": {}}})
+    transform = FlattenInputTransform(variable_metadata={})
 
     assert transform.output_dim is None
     assert not list(transform.parameters())

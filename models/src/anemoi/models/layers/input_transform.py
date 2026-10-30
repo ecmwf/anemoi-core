@@ -27,15 +27,15 @@ class BaseInputTransform(nn.Module, ABC):
 
     Parameters
     ----------
-    dataset_metadata : dict, optional
-        Per-dataset metadata as stored by anemoi-training (``metadata["dataset"]``), for
-        transforms that describe variables by their physical meaning.
+    variable_metadata : dict, optional
+        Per-variable metadata of the dataset (``variables_metadata``), for transforms that
+        describe variables by their physical meaning.
     """
 
     output_dim: Optional[int] = None
     """Feature width per input time step, or ``None`` to keep one feature per variable."""
 
-    def __init__(self, dataset_metadata: Optional[dict] = None) -> None:
+    def __init__(self, variable_metadata: Optional[dict] = None) -> None:
         super().__init__()
 
     @abstractmethod

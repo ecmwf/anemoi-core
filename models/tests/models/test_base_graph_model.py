@@ -326,9 +326,7 @@ def test_base_graph_model_builds_configured_input_transform() -> None:
             },
         },
     )
-    dataset_metadata = {
-        "data": {"variables_metadata": {"var": {"mars": {"levtype": "sfc", "param": "2t", "time": 0, "step": 0}}}}
-    }
+    variable_metadata = {"var": {"mars": {"levtype": "sfc", "param": "2t", "time": 0, "step": 0}}}
 
     model = DummyGraphModel(
         model_config=model_config,
@@ -337,7 +335,7 @@ def test_base_graph_model_builds_configured_input_transform() -> None:
         n_step_input=2,
         n_step_output=1,
         graph_data=_make_graph(),
-        dataset_metadata=dataset_metadata,
+        variable_metadata=variable_metadata,
     )
 
     assert model.input_transform.output_dim == 6
