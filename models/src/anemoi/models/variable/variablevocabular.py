@@ -361,8 +361,7 @@ class VariableVocabulary:
         Parameters
         ----------
         metadata : dict[str, dict[str, Any]]
-            Dataset metadata indexed by variable name; to combine several datasets,
-            see :func:`merge_variables_metadata`.
+            Dataset metadata indexed by variable name.
 
         Returns
         -------
@@ -626,49 +625,3 @@ class VariableVocabulary:
             vertical_type_to_id=dict(state["vertical_type_to_id"]),
             temporal_operator_to_id=dict(state["temporal_operator_to_id"]),
         )
-
-
-def merge_variables_metadata(
-    per_dataset: dict[str, dict[str, dict[str, Any]]],
-) -> dict[str, dict[str, Any]]:
-    """Combine the variable metadata of several datasets into one.
-
-    The vocabulary is keyed by variable name, so a name must mean the same physical
-    variable in every dataset (e.g. ``tp`` accumulated over 6 h in one and 3 h in
-    another cannot share an entry). Raw metadata is compared through its
-    specification, so fields that do not change the variable's identity, such as
-    the MARS date, may differ.
-
-    Parameters
-    ----------
-    per_dataset : dict[str, dict[str, dict[str, Any]]]
-        Variable metadata indexed by dataset name, then by variable name.
-
-    Returns
-    -------
-    dict[str, dict[str, Any]]
-        Variable metadata indexed by variable name.
-
-    Raises
-    ------
-    ValueError
-        If a variable name describes different variables in two datasets.
-    """
-    merged: dict[str, dict[str, Any]] = {}
-    origin: dict[str, str] = {}
-
-    for dataset_name, metadata in per_dataset.items():
-        for name in metadata:
-            if name in merged:
-                spec = VariableVocabulary.make_specification(name=name, metadata=metadata)
-                known = VariableVocabulary.make_specification(name=name, metadata=merged)
-                if spec != known:
-                    raise ValueError(
-                        f"Variable '{name}' differs between datasets '{origin[name]}' and '{dataset_name}': "
-                        f"{known} vs {spec}. Rename it in one of the datasets."
-                    )
-                continue
-            merged[name] = metadata[name]
-            origin[name] = dataset_name
-
-    return merged

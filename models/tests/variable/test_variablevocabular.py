@@ -7,13 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import copy
-
-import pytest
 import torch
 
 from anemoi.models.variable.variablevocabular import VariableVocabulary
-from anemoi.models.variable.variablevocabular import merge_variables_metadata
 
 ERA5_METADATA = {
     "2t": {"mars": {"levtype": "sfc", "param": "2t", "time": 0, "step": 0, "date": 19790101}},
@@ -31,19 +27,3 @@ def test_from_foundation_shares_param_between_levels():
     assert tensors.param_ids[0] == tensors.param_ids[1] == vocabulary.param_to_id["t"]
     assert tensors.is_forcing.tolist() == [False, False, False, True]
     torch.testing.assert_close(tensors.vertical_levels, torch.tensor([2.0, 850.0, 0.0, 0.0]))
-
-
-def test_merge_keeps_union_of_datasets():
-    danra = {"2t": copy.deepcopy(ERA5_METADATA["2t"]), "sp": {"mars": {"levtype": "sfc", "param": "sp"}}}
-    danra["2t"]["mars"]["date"] = 19900901
-
-    merged = merge_variables_metadata({"era5": ERA5_METADATA, "danra": danra})
-
-    assert set(merged) == {"2t", "t_850", "tp", "cos_latitude", "sp"}
-
-
-def test_merge_rejects_same_name_for_different_variables():
-    danra = {"t_850": {"mars": {"levtype": "pl", "levelist": 500, "param": "t", "time": 0, "step": 0}}}
-
-    with pytest.raises(ValueError, match="t_850"):
-        merge_variables_metadata({"era5": ERA5_METADATA, "danra": danra})

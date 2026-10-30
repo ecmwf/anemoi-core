@@ -19,7 +19,6 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.layers.input_transform import BaseInputTransform
 from anemoi.models.variable.embedmetadata import EmbedMetadata
 from anemoi.models.variable.variablevocabular import VariableVocabulary
-from anemoi.models.variable.variablevocabular import merge_variables_metadata
 
 
 class BaseVariableTokenizer(BaseInputTransform):
@@ -29,9 +28,10 @@ class BaseVariableTokenizer(BaseInputTransform):
 
         if not dataset_metadata:
             raise ValueError(f"{type(self).__name__} needs the datasets' metadata to build its vocabulary.")
-        vocabulary = VariableVocabulary.from_foundation(
-            merge_variables_metadata({name: meta["variables_metadata"] for name, meta in dataset_metadata.items()})
-        )
+        # Built from the first dataset only, so variables that exist only in another dataset
+        # are not in the vocabulary yet.
+        first_dataset = next(iter(dataset_metadata.values()))
+        vocabulary = VariableVocabulary.from_foundation(first_dataset["variables_metadata"])
 
         assert isinstance(emb_dim, int), f"expecting emb_dim to be int, got {type(emb_dim)}"
         assert isinstance(out_dim, int), f"expecting out_dim to be int, got {type(out_dim)}"
