@@ -771,7 +771,7 @@ A suite of different anemoi configurations are tested. The current list
 of configurations is * Global GraphTransformer model * LAM model *
 Stretched grid model * Ensemble model The exact configuration for each
 benchmark can be found under
-``anemoi-core/training/tests/integration/config/benchmark``. Each
+``anemoi-core/training/tests/integration/benchmark/config``. Each
 benchmark is run over two GPUs to ensure the model sharding performance
 is captured in the automatic benchmarks. The tests take approximately 40
 minutes. A successful test looks like
@@ -838,7 +838,7 @@ be found in the pytest log.
            3641c550afe69d7919f00b1a19445c69cb374f65.tar.gz  d89390ae6a34738d3f441e7c65bd4f0c33b13dcd.tar.gz
 
 The code implementing these tests can be found in
-``tests/integration/test_benchmark.py`` and
+``tests/integration/benchmark/test_benchmark.py`` and
 ``src/anemoi/training/diagnostics/benchmark_server.py``.
 
 Local Benchmarking
@@ -850,7 +850,7 @@ The benchmarking tests can also be run locally.
 
    cd anemoi-core
    pip install -e training[tests]
-   pytest -o tmp_path_retention_policy=all -s -vvv -v training/tests/integration/ --slow --multigpu -k "test_benchmark_training_cycle"
+   pytest -o tmp_path_retention_policy=all -s -vvv -v training/tests/integration/benchmark/ --slow --multigpu -k "test_benchmark_training_cycle"
 
 The server location is read from a file
 "~/.config/anemoi/anemoi-benchmark.yaml". The expected format is
@@ -864,8 +864,8 @@ The server location is read from a file
 The base ``path`` is used as the parent directory for the different
 kinds of integration tests: results land under ``<path>/<kind>``, where
 ``kind`` is chosen by each test (currently ``benchmarks`` for the
-performance benchmarks in ``test_benchmark.py`` and ``accuracy`` for the
-loss-curve regression check in ``test_accuracy.py``). For example, with
+performance benchmarks in ``benchmark/test_benchmark.py`` and ``accuracy`` for the
+loss-curve regression check in ``accuracy/test_accuracy.py``). For example, with
 
 .. code:: yaml
 
@@ -896,7 +896,7 @@ The resolution is performed by ``get_benchmark_store(kind)`` in
 ``src/anemoi/training/diagnostics/benchmark_server.py``.
 
 Alternatively you can edit the code in
-``tests/integration/test_benchmark.py`` to pass a local folder. The
+``tests/integration/benchmark/test_benchmark.py`` to pass a local folder. The
 benchmark datasets are read from a path defined at
-``tests/integration/configs/benchmark/base.yaml``. This path should be
+``tests/integration/benchmark/config/base.yaml``. This path should be
 updated if running locally.
