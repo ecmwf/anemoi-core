@@ -13,6 +13,7 @@ from pathlib import Path
 import mlflow
 import pytest
 from mlflow import MlflowClient
+from mlflow.exceptions import RestException
 
 from anemoi.training.diagnostics.mlflow.azureml import AnemoiAzureMLflowLogger
 from anemoi.training.diagnostics.mlflow.azureml import AzureIdentity
@@ -105,3 +106,70 @@ def test_azure_mlflow_schema_covers_logger_init_params() -> None:
 
     missing = logger_params - schema_fields
     assert not missing, f"AzureMlflowSchema is missing fields for logger params: {missing}"
+
+
+def _refusing_log_metrics(monkeypatch: pytest.MonkeyPatch, errors: list) -> tuple[list, list]:
+    """Make the MLflow write raise the given errors in turn (None = succeed); returns the calls made."""
+    from pytorch_lightning.loggers.mlflow import MLFlowLogger
+
+    from anemoi.training.diagnostics.mlflow import logger as logger_module
+
+    calls, pauses = [], []
+
+    def log_metrics(_self: MLFlowLogger, metrics: dict, step: int | None = None) -> None:
+        calls.append((dict(metrics), step))
+        error = errors.pop(0) if errors else None
+        if error is not None:
+            raise error
+
+    monkeypatch.setattr(MLFlowLogger, "log_metrics", log_metrics)
+    monkeypatch.setattr(logger_module.time, "sleep", pauses.append)
+    return calls, pauses
+
+
+def _etag_conflict() -> RestException:
+    # as AzureML's MLflow server answered on 2026-10-29 (plum_jewel, at the end of a validation)
+    return RestException(
+        {"error_code": "RESOURCE_ALREADY_EXISTS", "message": 'Etag conflict on abc with etag "56074f6a"'},
+    )
+
+
+def test_a_write_conflict_is_retried(default_logger: AnemoiAzureMLflowLogger, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls, pauses = _refusing_log_metrics(monkeypatch, [_etag_conflict(), None])
+    default_logger.log_metrics({"val_loss": 1.0}, step=8000)
+    assert calls == [({"val_loss": 1.0}, 8000)] * 2
+    assert pauses == [2.0]
+
+
+def test_a_persistent_write_conflict_drops_the_metrics_and_training_continues(
+    default_logger: AnemoiAzureMLflowLogger,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    calls, pauses = _refusing_log_metrics(monkeypatch, [_etag_conflict() for _ in range(10)])
+    default_logger.log_metrics({"val_loss": 1.0, "val_mse": 2.0}, step=8000)  # no exception
+    assert len(calls) == 4
+    assert pauses == [2.0, 5.0, 10.0]
+    assert "they are not logged, and training continues" in caplog.text
+
+
+def test_other_tracking_errors_still_raise(
+    default_logger: AnemoiAzureMLflowLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _refusing_log_metrics(monkeypatch, [RestException({"error_code": "INVALID_PARAMETER_VALUE", "message": "bad"})])
+    with pytest.raises(RestException, match="bad"):
+        default_logger.log_metrics({"val_loss": 1.0}, step=1)
+
+
+def test_a_duplicate_metric_is_not_retried(
+    default_logger: AnemoiAzureMLflowLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    duplicate = RestException(
+        {"error_code": "INTERNAL_ERROR", "message": "duplicate key value violates unique constraint"},
+    )
+    calls, pauses = _refusing_log_metrics(monkeypatch, [duplicate])
+    default_logger.log_metrics({"val_loss": 1.0}, step=1)
+    assert len(calls) == 1
+    assert pauses == []

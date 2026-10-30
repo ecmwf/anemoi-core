@@ -46,6 +46,19 @@ from anemoi.utils.mlflow.utils import health_check
 
 LOGGER = logging.getLogger(__name__)
 
+# AzureML's MLflow server refuses a write that races another write to the same run (optimistic concurrency on an
+# etag: RESOURCE_ALREADY_EXISTS "Etag conflict", HTTP 400), and the MLflow client does not retry it. A lost batch of
+# metrics costs little; a run stopped by one costs days. So such a write is retried after these pauses (seconds) and,
+# if it is still refused, dropped with a warning.
+WRITE_CONFLICT_RETRY_SECONDS = (2.0, 5.0, 10.0)
+
+
+def _is_write_conflict(error: RestException) -> bool:
+    """Whether the tracking server refused a write because it conflicted with another write to the run."""
+    return getattr(error, "error_code", None) == "RESOURCE_ALREADY_EXISTS" or any(
+        marker in str(error) for marker in ("Etag conflict", "Resource Conflict")
+    )
+
 
 class LogsMonitor:
     """Class for logging terminal output.
@@ -523,15 +536,37 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
                 cleaned_metrics.pop(k)
                 continue
             self._logged_metrics.add(metric_id)
-        try:
-            return super().log_metrics(metrics=cleaned_metrics, step=step)
-        except RestException as e:
-            # Handle duplicate metric key issue gracefully
-            if "duplicate key value violates unique constraint" in str(e):
-                LOGGER.warning("Duplicate metric detected %s", e)
-            else:
+        for attempt, pause in enumerate((*WRITE_CONFLICT_RETRY_SECONDS, None), start=1):
+            try:
+                return super().log_metrics(metrics=cleaned_metrics, step=step)
+            except RestException as e:
+                # Handle duplicate metric key issue gracefully
+                if "duplicate key value violates unique constraint" in str(e):
+                    LOGGER.warning("Duplicate metric detected %s", e)
+                    return None
                 # Re-raise if it's a different kind of error
-                raise
+                if not _is_write_conflict(e):
+                    raise
+                if pause is None:
+                    LOGGER.warning(
+                        "MLflow refused %d metrics at step %s with a write conflict %d times; they are not logged, "
+                        "and training continues. Last error: %s",
+                        len(cleaned_metrics),
+                        step,
+                        attempt,
+                        e,
+                    )
+                    return None
+                LOGGER.warning(
+                    "MLflow write conflict logging %d metrics at step %s (attempt %d); retrying in %.0f s: %s",
+                    len(cleaned_metrics),
+                    step,
+                    attempt,
+                    pause,
+                    e,
+                )
+                time.sleep(pause)
+        return None
 
     @rank_zero_only
     def log_system_metrics(self) -> None:
