@@ -208,23 +208,7 @@ class EnsembleTraining(BaseTrainingModule):
         target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], Source]:
-        # a Source has no ndim; the layout's rank is the per-tensor rank (per sample for tabular sources)
-        ensemble_axis = y_pred.layout.axis(TensorDim.ENSEMBLE_DIM, ndim=y_pred.layout.ndim)
-
-        def gather_members(tensor: torch.Tensor) -> torch.Tensor:
-            return gather_tensor(
-                tensor.clone(),  # for bwd because we checkpoint this region
-                dim=ensemble_axis,
-                sizes=[tensor.shape[ensemble_axis]] * self.ens_comm_subgroup_size,
-                mgroup=self.ens_comm_subgroup,
-            )
-
-        payload = y_pred.data
-        y_pred_ens = y_pred.clone(
-            data=(
-                [gather_members(sample) for sample in payload] if isinstance(payload, list) else gather_members(payload)
-            ),
-        )
+        y_pred_ens = self._gather_source_members(y_pred)
 
         y_pred_ens_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
             y_pred_ens,
@@ -265,9 +249,36 @@ class EnsembleTraining(BaseTrainingModule):
                 grid_shard_slice=grid_shard_slice,
                 pred_layout=pred_layout,
                 target_layout=target_layout,
+                **_kwargs,
             )
 
         return loss, metrics_next, y_pred_ens
+
+    def _gather_source_members(self, source: Source) -> Source:
+        """Return ``source`` with the members held by every device of the ensemble subgroup."""
+        # a Source has no ndim; the layout's rank is the per-tensor rank (per sample for tabular sources)
+        ensemble_axis = source.layout.axis(TensorDim.ENSEMBLE_DIM, ndim=source.layout.ndim)
+
+        def gather_members(tensor: torch.Tensor) -> torch.Tensor:
+            return gather_tensor(
+                tensor.clone(),  # for bwd because we checkpoint this region
+                dim=ensemble_axis,
+                sizes=[tensor.shape[ensemble_axis]] * self.ens_comm_subgroup_size,
+                mgroup=self.ens_comm_subgroup,
+            )
+
+        payload = source.data
+        return source.clone(
+            data=(
+                [gather_members(sample) for sample in payload] if isinstance(payload, list) else gather_members(payload)
+            ),
+        )
+
+    def _gather_members(self, y_pred: Batch) -> Batch:
+        """Return the predictions of the target datasets with the members of the whole ensemble subgroup."""
+        return Batch(
+            {name: self._gather_source_members(y_pred[name]) for name in self.target_dataset_names if name in y_pred},
+        )
 
     def forward(
         self,
@@ -298,10 +309,12 @@ class EnsembleTraining(BaseTrainingModule):
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Training / validation step."""
-        step_losses, step_metrics, y_preds = [], [], []
+        step_losses, step_metrics, y_preds, step_weights = [], [], [], []
 
         x = self.preprocess_inputs(self.task.get_inputs(batch, data_indices=self.data_indices))
         x = self._expand_ens_dim(x)
+        # The task may replace the input as the residual base (e.g. a DA forecaster's background).
+        skip_input = self.task.build_skip_input(x, data_indices=self.data_indices)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for step_index, task_step_kwargs in enumerate(task_steps):
@@ -318,26 +331,45 @@ class EnsembleTraining(BaseTrainingModule):
             # must be preprocessed accordingly (e.g., with NaN masking) and tiled like x
             target_forcings = self._expand_ens_dim(self.preprocess_inputs(target_forcings))
 
-            y_pred = self(
+            y_pred = self._forward_step(
                 x,
+                use_checkpoint=not validation_mode and self.task.step_uses_checkpoint(**task_step_kwargs),
                 target_forcings=target_forcings,
                 target_template=self._member_template(target_template),
                 **task_step_kwargs,
+                **({} if skip_input is None else {"skip_input": skip_input}),
             )
 
-            loss_next, metrics_next, y_preds_next = checkpoint(
-                self.compute_loss_metrics,
-                y_pred,
-                y,
-                **task_step_kwargs,
-                validation_mode=validation_mode,
-                pred_layout=IndexSpace.MODEL_OUTPUT,
-                target_layout=IndexSpace.DATA_FULL,
-                use_reentrant=False,
-            )
+            weight = self.task.step_loss_weight(**task_step_kwargs)
+            if weight > 0:
+                loss_next, metrics_next, y_preds_next = checkpoint(
+                    self.compute_loss_metrics,
+                    y_pred,
+                    y,
+                    **task_step_kwargs,
+                    validation_mode=validation_mode,
+                    pred_layout=IndexSpace.MODEL_OUTPUT,
+                    target_layout=IndexSpace.DATA_FULL,
+                    use_reentrant=False,
+                )
+            else:
+                # A step without loss (e.g. a DA cycle) returns the members gathered from the ensemble
+                # subgroup, like compute_loss_metrics, only in validation (the plot and metric callbacks
+                # score the full ensemble); a training step skips the collective.
+                loss_next, metrics_next = None, {}
+                y_preds_next = (
+                    self._gather_members(y_pred)
+                    if validation_mode
+                    else Batch({name: y_pred[name] for name in self.target_dataset_names if name in y_pred})
+                )
 
             # Advance input state for each dataset, except at the final step
             if step_index < len(task_steps) - 1:
+                observed = (
+                    {"observed": self.preprocess_observations(raw_targets)}
+                    if self.task.advance_needs_observations(**task_step_kwargs)
+                    else {}
+                )
                 x = self.task.advance_input(
                     x,
                     y_pred,
@@ -347,10 +379,13 @@ class EnsembleTraining(BaseTrainingModule):
                     output_mask=self.output_mask,
                     # The LAM boundary refill indexes the local grid shard.
                     grid_shard_slice={name: self._grid_shard_slice(view) for name, view in x.items()},
+                    **observed,
                 )
+                skip_input = self.task.build_skip_input(x, y_pred, data_indices=self.data_indices, **task_step_kwargs)
 
             step_losses.append(loss_next)
             step_metrics.append(metrics_next)
             y_preds.append(y_preds_next)
+            step_weights.append(weight)
 
-        return self._combine_loss_and_metrics(step_losses, step_metrics, y_preds)
+        return self._combine_loss_and_metrics(step_losses, step_metrics, y_preds, step_weights)

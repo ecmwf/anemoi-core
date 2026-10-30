@@ -34,6 +34,7 @@ from omegaconf import OmegaConf
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.tasks.base import BaseTask
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.single import SingleTraining
 from tests.batch_builders import build_batch
@@ -62,6 +63,18 @@ class StubTask:
         self.num_steps = num_steps
         self.num_validation_steps = num_steps if num_validation_steps is None else num_validation_steps
         self.advance_calls: list[dict[str, Any]] = []
+
+    # The default per-step policy of every task.
+    requires_skip_input = BaseTask.requires_skip_input
+    step_loss_weight = BaseTask.step_loss_weight
+    step_uses_checkpoint = BaseTask.step_uses_checkpoint
+    advance_needs_observations = BaseTask.advance_needs_observations
+    get_metric_step = BaseTask.get_metric_step
+    build_skip_input = BaseTask.build_skip_input
+
+    @property
+    def num_loss_steps(self) -> int:
+        return self.num_steps
 
     def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
         n = self.num_validation_steps if mode == "validation" else self.num_steps

@@ -113,6 +113,10 @@ class BaseForecaster(BaseTask):
         """Get the metric name for the current step."""
         return f"_rstep{rollout_step}"
 
+    def get_step_label(self, rollout_step: int = 0, **_kwargs) -> str:
+        """Short label of a step for plot tags."""
+        return f"rstep{rollout_step:02d}"
+
     def _compute_rollout_offsets(self, rollout_step: int) -> list[datetime.timedelta]:
         """Compute the full list of offsets needed for the current rollout configuration."""
         all_offsets = set(self._input_offsets)

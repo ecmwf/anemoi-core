@@ -80,6 +80,49 @@ class BaseTask(ABC):
         """Get the metric name for the current step (if any)."""
         return ""
 
+    # Per-step training policy. The training methods consult these for every step dict returned
+    # by ``steps``; the defaults give every step the same weight, no checkpointing and no residual
+    # override, so a task only overrides what it changes (see ``DAForecaster``).
+
+    #: Whether ``build_skip_input`` can return a residual base, which the model must then honour.
+    requires_skip_input: bool = False
+
+    def step_loss_weight(self, **_step_kwargs) -> float:
+        """Weight of a step's loss in the total loss. A step weighted 0 computes no loss nor metrics."""
+        return 1.0
+
+    def step_uses_checkpoint(self, **_step_kwargs) -> bool:
+        """Whether a training step's model call is activation-checkpointed (recomputed in backward)."""
+        return False
+
+    def advance_needs_observations(self, **_step_kwargs) -> bool:
+        """Whether ``advance_input`` needs the step's observations with their missing values (``observed=``)."""
+        return False
+
+    @property
+    def num_loss_steps(self) -> int:
+        """Denominator of the step-averaged training loss."""
+        return self.num_steps
+
+    def get_metric_step(self, rollout_step: int | None = None, **_step_kwargs) -> int | str | None:
+        """Step label of the validation metrics: an int ``i`` is reported as ``/{i + 1}``, a str as is."""
+        return rollout_step
+
+    def build_skip_input(
+        self,
+        x: "Batch",
+        y_pred: "Batch | None" = None,
+        data_indices: dict[str, IndexCollection] | None = None,
+        **_step_kwargs,
+    ) -> "Batch | None":
+        """Residual base for the next model call, in place of its input; ``None`` keeps the input.
+
+        Called once before the first step with ``y_pred=None``, then after each input advance with
+        the step's raw prediction and step kwargs.
+        """
+        del x, y_pred, data_indices
+        return None
+
     def get_input_offsets(self, **_kwargs) -> list[datetime.timedelta]:
         """Get the list of input time offsets."""
         return self._input_offsets

@@ -111,11 +111,12 @@ class ForecasterPlotAdapter(BasePlotAdapter):
 
             output_data = self.select_time(data, output_time_indices)
 
+            step_label = self._task.get_step_label(**validation_step_kwargs)
             for out_step in range(self._task.num_output_timesteps):
                 y_true = output_data[out_step, ...].squeeze()
                 y_pred = output_tensor[rollout_step, out_step, ...]
                 y_pred = y_pred.squeeze() if hasattr(y_pred, "squeeze") else y_pred
-                yield x, y_true, y_pred, f"rstep{rollout_step:02d}_out{out_step:02d}"
+                yield x, y_true, y_pred, f"{step_label}_out{out_step:02d}"
 
 
 class TemporalDownscalerPlotAdapter(BasePlotAdapter):

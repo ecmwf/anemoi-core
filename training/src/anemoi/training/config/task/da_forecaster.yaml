@@ -1,0 +1,33 @@
+_target_: anemoi.training.tasks.DAForecaster
+multistep_input: 2
+multistep_output: 1
+timestep: "6H"
+
+# Rollout configuration of the forecast steps, which follow the DA cycles
+rollout:
+  start: 1
+  # increase rollout every n epochs
+  epoch_increment: 0
+  # maximum rollout to use
+  maximum: 1
+
+# set validation rollout length if more rollout is required in validation than
+# training, or set to null to follow the training rollout.
+validation_rollout: null
+
+# number of data-assimilation cycles run before the forecast rollout. In a cycle the
+# prediction is blended with the observations (observation where present, model
+# background where missing) to give the input of the next cycle. The `corrector`
+# (observation-metadata) inputs are zeroed in the forecast steps.
+da_cycles: 0
+# weight of each DA cycle's loss (0 skips it); the loss is averaged over the forecast steps
+da_loss_weight: 0.0
+
+# use the pre-observation model background as the residual base after a DA blend, so
+# the additive skip connection stays smooth instead of stamping sparse observations
+# into the output (needs a model supporting skip_input)
+da_flow_dependent_skip: False
+
+# activation-checkpoint the model call of the first n training steps (DA cycles first):
+# trades compute for memory without changing gradients
+checkpoint_steps: 0

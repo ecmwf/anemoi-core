@@ -22,6 +22,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler.scheduler import Scheduler as TimmScheduler
+from torch.utils.checkpoint import checkpoint
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.models.data import Batch
@@ -255,6 +256,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             self.model.supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
         self.data_indices = data_indices
+
+        # forward() swallows unknown kwargs, so a model that ignores skip_input would silently
+        # train against the default residual base instead.
+        if self.task.requires_skip_input and not getattr(self.model.model, "supports_skip_input", False):
+            msg = (
+                f"The {type(self.task).__name__} task needs a model supporting 'skip_input' "
+                f"(e.g. task.da_flow_dependent_skip), but {type(self.model.model).__name__} does not."
+            )
+            raise ValueError(msg)
 
         # `task` holds runtime objects that cannot be deepcopied by Lightning's
         # `save_hyperparameters` and are not meaningful to persist in the
@@ -972,7 +982,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         return self.calculate_val_metrics(
             y_pred,
             y,
-            step=rollout_step,
+            step=self.task.get_metric_step(rollout_step=rollout_step, **_kwargs),
             grid_shard_slice=grid_shard_slice,
             dataset_name=dataset_name,
             pred_layout=pred_layout,
@@ -1114,6 +1124,19 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """Normalize selected targets while preserving missing values."""
         return self._map_dataset_processors(batch, self.model.pre_processors, skip_imputation=True)
 
+    def preprocess_observations(self, batch: Batch) -> Batch:
+        """Pre-process observations that feed the model state but keep their missing values.
+
+        Like the inputs (input dropout included), but without imputation, so that dropped and
+        missing observations stay NaN (e.g. for a DA forecaster's observation blend).
+        """
+        return self._map_dataset_processors(
+            batch,
+            self.model.pre_processors,
+            skip_imputation=True,
+            apply_dropout=True,
+        )
+
     def postprocess_targets(
         self,
         batch: Batch,
@@ -1196,27 +1219,54 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def _combine_loss_and_metrics(
         self,
-        step_losses: list[torch.Tensor],
+        step_losses: list[torch.Tensor | None],
         step_metrics: list[dict[str, torch.Tensor]],
         predictions: list[dict[str, torch.Tensor]],
+        step_weights: list[float] | None = None,
     ) -> TrainingStepOutput:
         """Average all losses over the training rollout; keep the per-step metrics of every unrolled step.
 
         Validation may unroll more steps than training. The total loss and the per-dataset
         losses only cover the first ``task.num_steps`` steps, so ``val_*_loss`` is directly
         comparable to ``train_*_loss``. Validation metrics are reported for every step.
+
+        Each step's loss is weighted by ``step_weights`` (``task.step_loss_weight``, default 1) and
+        the sum divided by ``task.num_loss_steps``; a step without a loss (``None``, weight 0) adds
+        nothing.
         """
-        num_loss_steps = self.task.num_steps
-        loss = sum(step_losses[:num_loss_steps]) / num_loss_steps
+        num_steps = self.task.num_steps
+        normaliser = self.task.num_loss_steps
+        weights = [1.0] * len(step_losses) if step_weights is None else step_weights
+        weighted = [
+            weight * step_loss
+            for weight, step_loss in zip(weights[:num_steps], step_losses[:num_steps], strict=True)
+            if step_loss is not None
+        ]
+        loss = sum(weighted) / normaliser
         loss_names = {self._dataset_loss_metric_name(name) for name in self.target_dataset_names}
         metrics: dict[str, torch.Tensor] = {}
         for i, metrics_next in enumerate(step_metrics):
             for name, value in metrics_next.items():
                 if name not in loss_names:
                     metrics[name] = value
-                elif i < num_loss_steps:
-                    metrics[name] = metrics.get(name, 0.0) + value / num_loss_steps
+                elif i < num_steps:
+                    metrics[name] = metrics.get(name, 0.0) + weights[i] * value / normaliser
         return TrainingStepOutput(loss=loss, metrics=metrics, predictions=predictions)
+
+    def _forward_step(self, x: Batch, use_checkpoint: bool = False, **kwargs) -> Batch:
+        """Run the model on one step, optionally activation-checkpointed (recomputed in backward).
+
+        The checkpoint is handed a tensor on the batch's device so that it restores that device's
+        RNG state on recompute, which keeps any noise the model draws (e.g. ensemble members)
+        identical in the recomputed forward.
+        """
+        if not use_checkpoint:
+            return self(x, **kwargs)
+
+        def run(_device_anchor: torch.Tensor, batch: Batch, step_kwargs: dict) -> Batch:
+            return self(batch, **step_kwargs)
+
+        return checkpoint(run, torch.empty(0, device=x.device), x, kwargs, use_reentrant=False)
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
         """Allgather the shards of a grid-sharded tensor across the reader group.
@@ -1276,7 +1326,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         y: Source,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
-        step: int | None = None,
+        step: int | str | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
         without_scalers: list[str] | list[int] | None = None,
@@ -1294,8 +1344,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Grid shard slice for distributed validation.
         dataset_name : str | None, optional
             Dataset being processed.
-        step : int | None, optional
-            Step number.
+        step : int | str | None, optional
+            Step number (reported as ``/{step + 1}``), or a step label (reported as is).
         pred_layout : IndexSpace | str | None, optional
             Variable layout of the predictions.
         target_layout : IndexSpace | str | None, optional
@@ -1329,7 +1379,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         y_postprocessed = self._postprocess_dataset_view(y, dataset_name, target_layout)
         y_pred_postprocessed = self._postprocess_dataset_view(y_pred, dataset_name, pred_layout)
 
-        suffix = "" if step is None else f"/{step + 1}"
+        suffix = "" if step is None else f"/{step}" if isinstance(step, str) else f"/{step + 1}"
         for metric_name, metric in metrics_dict.items():
             # Validation now compares the model output tensor with the full target tensor.
             # Those can contain different variables, so the metric needs to know how to

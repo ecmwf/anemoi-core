@@ -12,6 +12,7 @@ from typing import Literal
 
 from pydantic import Discriminator
 from pydantic import Field
+from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
 
@@ -45,6 +46,31 @@ class ForecasterSchema(BaseModel):
     validation_rollout: PositiveInt | None = Field(default=None, example=[None, 6, 12])
     "Minimum number of rollout steps unrolled in validation; the training rollout is always unrolled. "
     "The val loss is averaged over the training rollout only."
+
+
+class DAForecasterSchema(BaseModel):
+    """Configuration for the data-assimilation forecasting task."""
+
+    target_: Literal["anemoi.training.tasks.DAForecaster"] = Field(..., alias="_target_")
+    "Task class path for the data-assimilation forecasting task."
+    multistep_input: PositiveInt = Field(example=2)
+    "Number of input timesteps provided to the model."
+    multistep_output: PositiveInt = Field(example=1)
+    "Number of output timesteps the model should predict."
+    timestep: str = Field(example="6H")
+    "Timestep string (e.g. '6H') defining the frequency of the input and output steps."
+    rollout: RolloutSchema = Field(...)
+    "Rollout configuration of the forecast steps (after the DA cycles)."
+    validation_rollout: PositiveInt | None = Field(default=None, example=[None, 6, 12])
+    "Minimum number of forecast steps unrolled in validation; the training rollout is always unrolled."
+    da_cycles: NonNegativeInt = Field(default=0)
+    "Number of data-assimilation cycles run before the forecast rollout."
+    da_loss_weight: NonNegativeFloat = Field(default=0.0)
+    "Weight of each DA cycle's loss (0 skips it). The loss is averaged over the forecast steps."
+    da_flow_dependent_skip: bool = Field(default=False)
+    "Use the pre-observation model background as the residual base after a DA blend (needs skip_input support)."
+    checkpoint_steps: NonNegativeInt = Field(default=0)
+    "Number of leading training steps (DA cycles first) whose model call is activation-checkpointed."
 
 
 class OffsetForecasterSchema(BaseModel):
@@ -88,6 +114,6 @@ class TemporalDownscalerSchema(BaseModel):
 
 
 TaskSchema = Annotated[
-    ForecasterSchema | OffsetForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
+    ForecasterSchema | DAForecasterSchema | OffsetForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
     Discriminator("target_"),
 ]
