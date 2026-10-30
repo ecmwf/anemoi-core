@@ -65,10 +65,13 @@ class SingleTraining(BaseTrainingModule):
             )
 
             weight = self.task.step_loss_weight(**task_kwargs)
+            # The prediction of the target datasets, which advances the input state: always the raw one.
+            raw_y_preds = Batch({name: y_pred[name] for name in self.target_dataset_names if name in y_pred})
             if weight > 0:
+                y_pred_loss = self._loss_prediction(y_pred, y)
                 loss_next, metrics_next, y_preds_next = checkpoint(
                     self.compute_loss_metrics,
-                    y_pred,
+                    y_pred_loss,
                     y,
                     **task_kwargs,
                     validation_mode=validation_mode,
@@ -76,10 +79,11 @@ class SingleTraining(BaseTrainingModule):
                     target_layout=IndexSpace.DATA_FULL,
                     use_reentrant=False,
                 )
+                if y_pred_loss is not y_pred:
+                    y_preds_next = raw_y_preds
             else:
-                # A step without loss (e.g. a DA cycle): only its prediction of the target datasets is kept.
-                loss_next, metrics_next = None, {}
-                y_preds_next = Batch({name: y_pred[name] for name in self.target_dataset_names if name in y_pred})
+                # A step without loss (e.g. a DA cycle): only its prediction is kept.
+                loss_next, metrics_next, y_preds_next = None, {}, raw_y_preds
 
             # advance input state for each dataset, except on the final step
             if step_index < len(task_steps) - 1:

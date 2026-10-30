@@ -274,6 +274,16 @@ class EnsembleTraining(BaseTrainingModule):
             ),
         )
 
+    def _raw_predictions(self, y_pred: Batch, validation_mode: bool) -> Batch:
+        """The raw prediction of the target datasets, as ``compute_loss_metrics`` returns it.
+
+        In validation it holds the members gathered from the ensemble subgroup (the plot and metric
+        callbacks score the full ensemble); a training step skips the collective.
+        """
+        if validation_mode:
+            return self._gather_members(y_pred)
+        return Batch({name: y_pred[name] for name in self.target_dataset_names if name in y_pred})
+
     def _gather_members(self, y_pred: Batch) -> Batch:
         """Return the predictions of the target datasets with the members of the whole ensemble subgroup."""
         return Batch(
@@ -342,9 +352,11 @@ class EnsembleTraining(BaseTrainingModule):
 
             weight = self.task.step_loss_weight(**task_step_kwargs)
             if weight > 0:
+                # The correctors run on the members held locally, before the loss gathers them.
+                y_pred_loss = self._loss_prediction(y_pred, y)
                 loss_next, metrics_next, y_preds_next = checkpoint(
                     self.compute_loss_metrics,
-                    y_pred,
+                    y_pred_loss,
                     y,
                     **task_step_kwargs,
                     validation_mode=validation_mode,
@@ -352,16 +364,12 @@ class EnsembleTraining(BaseTrainingModule):
                     target_layout=IndexSpace.DATA_FULL,
                     use_reentrant=False,
                 )
+                if y_pred_loss is not y_pred:
+                    y_preds_next = self._raw_predictions(y_pred, validation_mode)
             else:
-                # A step without loss (e.g. a DA cycle) returns the members gathered from the ensemble
-                # subgroup, like compute_loss_metrics, only in validation (the plot and metric callbacks
-                # score the full ensemble); a training step skips the collective.
+                # A step without loss (e.g. a DA cycle): only its prediction is kept.
                 loss_next, metrics_next = None, {}
-                y_preds_next = (
-                    self._gather_members(y_pred)
-                    if validation_mode
-                    else Batch({name: y_pred[name] for name in self.target_dataset_names if name in y_pred})
-                )
+                y_preds_next = self._raw_predictions(y_pred, validation_mode)
 
             # Advance input state for each dataset, except at the final step
             if step_index < len(task_steps) - 1:

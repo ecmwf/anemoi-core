@@ -28,6 +28,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks import DAForecaster
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks.base import BaseTask
+from anemoi.training.train.corrector import InstrumentCorrectors
 from anemoi.training.train.methods.ensemble import EnsembleTraining
 from anemoi.training.train.methods.single import SingleTraining
 from anemoi.training.utils.masks import NoOutputMask
@@ -256,3 +257,31 @@ def test_ensemble_da_tiles_members_and_conditions_on_the_continuous_step() -> No
     assert first_skip.shape[2] == 3
     assert torch.equal(first_skip, torch.zeros_like(first_skip))
     assert all(p["data"].data.shape[2] == 3 for p in output.predictions)
+
+
+# -- correctors ---------------------------------------------------------------------------------
+
+
+def test_corrector_changes_the_loss_but_not_the_state() -> None:
+    batch = _batch(_num_times(_da_task()))
+    plain = _module(_da_task(da_loss_weight=1.0))
+    plain_output = plain._step(batch)
+
+    corrected = _module(_da_task(da_loss_weight=1.0))
+    corrector = InstrumentCorrectors(
+        instrument_groups={"obs": {"corrector_variables": ["c"], "channels": ["a"]}},
+        all_corrector_names=["c"],
+        output_name_to_index=_indices().model.output.name_to_index,
+        hidden_dim=4,
+    )
+    corrector.correctors["obs"].out.bias.data.fill_(0.3)  # a non-zero correction
+    corrected.corrector = torch.nn.ModuleDict({"data": corrector})
+    corrected_output = corrected._step(batch)
+
+    assert not torch.allclose(corrected_output.loss, plain_output.loss)
+    # the predictions returned and advanced are the raw ones: identical to the run without corrector
+    for raw, plain_pred in zip(corrected_output.predictions, plain_output.predictions, strict=True):
+        torch.testing.assert_close(raw["data"].data, plain_pred["data"].data)
+    # and the corrector trains
+    (grad,) = torch.autograd.grad(corrected_output.loss, corrector.correctors["obs"].out.bias)
+    assert grad.abs().sum() > 0

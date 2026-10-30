@@ -40,6 +40,8 @@ from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
+from anemoi.training.train.corrector import apply_correctors
+from anemoi.training.train.corrector import build_correctors
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
@@ -399,6 +401,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # set flag if loss and metrics support sharding
         self._check_sharding_support()
+
+        # Training-only correctors of the predictions for the loss (``training.corrector``); not part
+        # of the model, so never in an inference checkpoint. Empty without a corrector configuration.
+        self.corrector = build_correctors(
+            config.training.get("corrector"),
+            data_indices,
+            self.target_dataset_names,
+            self.model.graph_data,
+            categorical_config=config.model.get("categorical_embeddings"),
+        )
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_id = 0
@@ -1252,6 +1264,26 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 elif i < num_steps:
                     metrics[name] = metrics.get(name, 0.0) + weights[i] * value / normaliser
         return TrainingStepOutput(loss=loss, metrics=metrics, predictions=predictions)
+
+    def _loss_prediction(self, y_pred: Batch, y: Batch) -> Batch:
+        """The prediction the loss sees: corrected by the training-only correctors, if any.
+
+        Parameters
+        ----------
+        y_pred : Batch
+            Raw predictions.
+        y : Batch
+            Pre-processed targets, which carry the correctors' metadata at the target time.
+
+        Returns
+        -------
+        Batch
+            ``y_pred`` itself without correctors.
+        """
+        correctors = getattr(self, "corrector", None)
+        if not correctors:
+            return y_pred
+        return apply_correctors(correctors, y_pred, y, self.data_indices, model_comm_group=self.model_comm_group)
 
     def _forward_step(self, x: Batch, use_checkpoint: bool = False, **kwargs) -> Batch:
         """Run the model on one step, optionally activation-checkpointed (recomputed in backward).

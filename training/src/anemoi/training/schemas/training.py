@@ -25,6 +25,8 @@ from pydantic import Tag
 from pydantic import field_validator
 from pydantic import model_validator
 
+from anemoi.models.schemas.processor import GNNProcessorSchema
+from anemoi.models.schemas.processor import GraphTransformerProcessorSchema
 from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
@@ -870,9 +872,73 @@ class CheckpointPipelineSchema(BaseModel):
     "Ordered model-modifier stages applied after loading (e.g. FreezingModifierStage)."
 
 
+class CorrectorGroupSchema(BaseModel):
+    """One instrument group of the training-time corrector."""
+
+    corrector_variables: list[str] = Field(..., min_length=1)
+    "Corrector (observation-metadata) variables routed to this group's network."
+    channels: list[str] | None = None
+    "Output channels to correct; if unset, the output variables prefixed by the group name."
+
+
+class CorrectorSchema(BaseModel):
+    """Training-time corrector networks applied to the predictions for the loss."""
+
+    type: Literal["mlp", "processor"] = "mlp"
+    "Corrector backend: a pointwise MLP, or a graph processor on the data-to-data edges (gridded only)."
+    hidden_dim: PositiveInt = 64
+    "Width of each instrument's network."
+    processor: (
+        Annotated[
+            GraphTransformerProcessorSchema | GNNProcessorSchema,
+            Field(discriminator="target_"),
+        ]
+        | None
+    ) = None
+    "Processor configuration (type processor), including the graph edge attributes and layer kernels."
+    instrument_groups: dict[str, CorrectorGroupSchema]
+    "Instrument-group name to its corrector configuration."
+    categorical_embedding_dim: PositiveInt | None = None
+    "Embedding width of the corrector variables in model.categorical_embeddings; None: each variable's own."
+    categorical_unknown_prob: float | None = Field(default=None, ge=0.0, lt=1.0)
+    "Training-only UNKNOWN replacement probability of those variables; None: each variable's own."
+
+    @model_validator(mode="before")
+    @classmethod
+    def processor_width_is_hidden_dim(cls, data: Any) -> Any:
+        """The corrector builds its processor with ``num_channels=hidden_dim``; validate it so."""
+        processor = data.get("processor") if hasattr(data, "get") else None
+        if processor is not None and hasattr(processor, "get") and processor.get("num_channels") is None:
+            data = {**data, "processor": {**processor, "num_channels": data.get("hidden_dim", 64)}}
+        return data
+
+    @model_validator(mode="after")
+    def check_processor(self) -> Self:
+        if self.type == "processor" and self.processor is None:
+            msg = "Corrector type 'processor' requires a processor configuration."
+            raise ValueError(msg)
+        if self.type == "mlp" and self.processor is not None:
+            msg = "A processor configuration requires corrector type 'processor'."
+            raise ValueError(msg)
+        if self.processor is not None:
+            processor = self.processor
+            if processor.num_layers < 1 or processor.num_chunks < 1:
+                msg = "Corrector processor num_layers and num_chunks must be positive."
+                raise ValueError(msg)
+            if processor.num_layers % processor.num_chunks:
+                msg = "Corrector processor num_layers must be divisible by num_chunks."
+                raise ValueError(msg)
+            if not processor.sub_graph_edge_attributes:
+                msg = "Corrector processors require sub_graph_edge_attributes."
+                raise ValueError(msg)
+        return self
+
+
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
+    corrector: CorrectorSchema | None = None
+    "Optional training-time corrector networks applied to the predictions for the loss."
     seed: NonNegativeInt | None = Field(default=None, example=None)
     """Base seed of all random number generators. If null, a run continuing from a checkpoint takes the
     checkpoint's seed and a new run draws one. A seed that differs from the checkpoint's changes the rest of the
