@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import random
@@ -21,6 +22,7 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.seeding import SeedContext
@@ -28,13 +30,13 @@ from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from collections.abc import Mapping
 
     from omegaconf import DictConfig
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
-    from anemoi.training.train.step_output import TrainingStepOutput
     from anemoi.training.train.training_task.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
@@ -96,6 +98,10 @@ class EnsembleTraining(BaseTrainingModule):
     input_noise_seed: int | None = None
     # training.input_dataset_dropout, set in __init__ ({dataset: probability}); none by default.
     input_dataset_dropout: Mapping[str, float] = MappingProxyType({})
+    # training.rollout_windows, set in __init__: (rollout steps per window, weight per window); None = one window.
+    rollout_windows: tuple[int, tuple[float, ...]] | None = None
+    # With rollout windows, the first optimiser steps check that every rank holds the same parameters.
+    _parameter_sync_checks_left = 3
 
     def __init__(
         self,
@@ -175,6 +181,26 @@ class EnsembleTraining(BaseTrainingModule):
         )
         if self.input_dataset_dropout:
             LOGGER.info("Input datasets left out of training samples with probability %s", self.input_dataset_dropout)
+
+        # The rollout cut into windows, each backpropagated on its own (training.rollout_windows).
+        self.rollout_windows = self._validated_rollout_windows(
+            config.training.get("rollout_windows", None),
+            config.training.accum_grad_batches,
+        )
+        if self.rollout_windows is not None:
+            rollout = getattr(self.task, "rollout", None)
+            if rollout is not None and rollout.epoch_increment > 0 and rollout.maximum > rollout.step:
+                msg = "training.rollout_windows needs a fixed rollout (task.rollout: start = maximum)."
+                raise ValueError(msg)
+            weights = self._rollout_window_step_weights(self.task.num_steps)
+            # Several backward passes per optimiser step: Lightning's manual optimisation (training_step below).
+            self.automatic_optimization = False
+            LOGGER.info(
+                "Rollout windows: %d steps in windows of %d, gradients cut between windows; weight per step %s",
+                self.task.num_steps,
+                self.rollout_windows[0],
+                [round(w, 5) for w in weights],
+            )
 
         # lazy init ensemble group info, will be set by the DDPEnsGroupStrategy.
         # Defaults are the single-device values used by SingleDeviceStrategy,
@@ -276,6 +302,232 @@ class EnsembleTraining(BaseTrainingModule):
             if draw < probability:
                 dropped.append(name)
         return tuple(dropped)
+
+    @staticmethod
+    def _validated_rollout_windows(
+        windows: dict | None,
+        accum_grad_batches: int,
+    ) -> tuple[int, tuple[float, ...]] | None:
+        """training.rollout_windows as (rollout steps per window, weight per window), or None when it is not set.
+
+        ``steps`` is the window length; ``weights`` (optional, one per window) weigh the windows' losses and are
+        normalised to sum to one (equal weights by default).
+        """
+        if not windows:
+            return None
+        steps = int(windows["steps"])
+        weights = tuple(float(weight) for weight in (windows.get("weights") or ()))
+        if steps < 1:
+            msg = f"training.rollout_windows.steps must be at least 1, got {steps}."
+            raise ValueError(msg)
+        if any(weight < 0 for weight in weights) or (weights and sum(weights) <= 0):
+            msg = f"training.rollout_windows.weights must be non-negative with a positive sum, got {list(weights)}."
+            raise ValueError(msg)
+        if accum_grad_batches != 1:
+            msg = (
+                "training.rollout_windows makes one optimiser step per batch (manual optimisation): set "
+                f"training.accum_grad_batches to 1, not {accum_grad_batches}."
+            )
+            raise ValueError(msg)
+        return steps, weights
+
+    def _rollout_window_step_weights(self, num_steps: int) -> list[float]:
+        """The weight of each of ``num_steps`` rollout steps in the loss: its window's weight, shared by its steps.
+
+        The weights sum to one, so equal window weights give the plain mean over the steps (the loss without
+        windows).
+        """
+        window_steps, weights = self.rollout_windows
+        if num_steps % window_steps:
+            msg = f"The rollout ({num_steps} steps) must be a whole number of rollout windows of {window_steps} steps."
+            raise ValueError(msg)
+        num_windows = num_steps // window_steps
+        weights = weights or (1.0,) * num_windows
+        if len(weights) != num_windows:
+            msg = (
+                f"training.rollout_windows.weights has {len(weights)} weights, for {num_windows} windows "
+                f"({num_steps} steps in windows of {window_steps})."
+            )
+            raise ValueError(msg)
+        total = sum(weights)
+        return [weights[i // window_steps] / (total * window_steps) for i in range(num_steps)]
+
+    def _windowed_rollout_backward(
+        self,
+        batch: dict[str, torch.Tensor],
+        backward: Callable[[torch.Tensor, bool], None],
+    ) -> torch.Tensor:
+        """Run the training rollout window by window, calling ``backward(window_loss, is_last_window)`` for each.
+
+        Each window's loss is its steps' losses times their weights (``_rollout_window_step_weights``), so the
+        gradients added up over the windows are those of the weighted loss over the whole rollout, with the
+        gradient cut at every window boundary: the next window starts from the values of the state, not from the
+        graph that made them. Only one window's graph is in memory at a time. Steps keep their absolute index, so
+        the noise follows the lead time, and noise modules carry their own state from one window to the next.
+        Returns the weighted loss over the rollout (detached).
+        """
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)
+        x = self._expand_ens_dim(x)
+        dropped = self._dropped_input_datasets()
+
+        task_steps = self.task.steps("training")
+        step_weights = self._rollout_window_step_weights(len(task_steps))
+        window_steps = self.rollout_windows[0]
+        num_windows = len(task_steps) // window_steps
+
+        log_memory = _claim_rollout_memory_log("training", len(task_steps))
+        label = f"training, {len(task_steps)} steps in {num_windows} windows"
+        self._memory_log_training_label = label if log_memory else None
+        rank = getattr(self, "global_rank", 0)
+        if log_memory:
+            torch.cuda.reset_peak_memory_stats(self.device)
+            _log_rollout_memory(rank, f"{label} | start of batch", self.device)
+
+        total = None
+        for window in range(num_windows):
+            window_loss = None
+            for i in range(window * window_steps, (window + 1) * window_steps):
+                task_step_kwargs = task_steps[i]
+                y_pred = self(x, dropped_input_datasets=dropped, **task_step_kwargs)
+                y = self.task.get_targets(batch, **task_step_kwargs)
+                loss_next, _, _ = checkpoint(
+                    self.compute_loss_metrics,
+                    y_pred,
+                    y,
+                    **task_step_kwargs,
+                    validation_mode=False,
+                    pred_layout=IndexSpace.MODEL_OUTPUT,
+                    target_layout=IndexSpace.DATA_FULL,
+                    use_reentrant=False,
+                )
+                weighted = step_weights[i] * loss_next
+                window_loss = weighted if window_loss is None else window_loss + weighted
+                if i < len(task_steps) - 1:
+                    x = self.task.advance_input(
+                        x,
+                        y_pred,
+                        batch,
+                        **task_step_kwargs,
+                        data_indices=self.data_indices,
+                        output_mask=self.output_mask,
+                        grid_shard_slice=self.grid_shard_slice,
+                    )
+                if log_memory:
+                    _log_rollout_memory(rank, f"{label} | step {i + 1} after loss", self.device)
+
+            backward(window_loss, window == num_windows - 1)
+            window_loss = window_loss.detach()
+            total = window_loss if total is None else total + window_loss
+            # The gradient cut.
+            x = {name: tensor.detach() for name, tensor in x.items()}
+
+        return total
+
+    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        """Without rollout windows, the usual step. With them, one optimiser step after a backward pass per window.
+
+        The gradients of the windows are added up locally (DDP's gradient synchronisation is blocked for all but
+        the last window's backward pass), clipped as training.gradient_clip sets, and the optimiser and the
+        step-interval learning-rate schedulers then step once.
+        """
+        if self.rollout_windows is None:
+            return super().training_step(batch, batch_idx)
+        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
+        batch_size = next(iter(batch.values())).shape[0]
+
+        optimizer = self.optimizers()
+        optimizer.zero_grad()
+        block_sync = getattr(self.trainer.strategy, "block_backward_sync", contextlib.nullcontext)
+
+        def backward(loss: torch.Tensor, last_window: bool) -> None:
+            with contextlib.nullcontext() if last_window else block_sync():
+                self.manual_backward(loss)
+
+        train_loss = self._windowed_rollout_backward(batch, backward)
+
+        clip = self.config.training.gradient_clip
+        if clip.val:
+            self.clip_gradients(optimizer, gradient_clip_val=clip.val, gradient_clip_algorithm=clip.algorithm)
+        optimizer.step()
+        for scheduler_config in self.trainer.lr_scheduler_configs:
+            if scheduler_config.interval != "step":
+                msg = "training.rollout_windows supports learning-rate schedulers with interval 'step' only."
+                raise NotImplementedError(msg)
+            self.lr_scheduler_step(scheduler_config.scheduler, None)
+        self._check_parameter_sync()
+
+        self.log(
+            "train_" + self._get_loss_name() + "_loss",
+            train_loss,
+            on_epoch=True,
+            on_step=True,
+            prog_bar=True,
+            logger=self.logger_enabled,
+            batch_size=batch_size,
+            sync_dist=True,
+        )
+        self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled)
+        return train_loss
+
+    def _check_parameter_sync(self) -> None:
+        """After each of the first optimiser steps with rollout windows, check every rank holds the same parameters.
+
+        Ranks hold copies of one model; if the gradients of the windows were not synchronised, the copies would
+        drift apart silently. A checksum of all parameters is compared across ranks, and a difference stops
+        training.
+        """
+        if self._parameter_sync_checks_left <= 0:
+            return
+        self._parameter_sync_checks_left -= 1
+        distributed = torch.distributed
+        if not (distributed.is_available() and distributed.is_initialized()) or distributed.get_world_size() == 1:
+            return
+        with torch.no_grad():
+            parameters = [p for p in self.parameters() if p.requires_grad]
+            checksum = torch.stack(
+                [
+                    sum(p.double().sum() for p in parameters),
+                    sum(p.double().square().sum() for p in parameters),
+                ],
+            )
+            gathered = [torch.zeros_like(checksum) for _ in range(distributed.get_world_size())]
+            distributed.all_gather(gathered, checksum)
+        if any(not torch.equal(other, gathered[0]) for other in gathered[1:]):
+            msg = (
+                f"After optimiser step {self.global_step} the ranks hold different parameters "
+                f"({[g.tolist() for g in gathered]}): the windows' gradients were not synchronised."
+            )
+            raise RuntimeError(msg)
+        LOGGER.info(
+            "Rollout windows: parameters identical on all %d ranks after optimiser step %d.",
+            distributed.get_world_size(),
+            self.global_step,
+        )
+
+    def _combine_loss_and_metrics(
+        self,
+        step_losses: list[torch.Tensor],
+        step_metrics: list[dict[str, torch.Tensor]],
+        predictions: list[dict[str, torch.Tensor]],
+    ) -> TrainingStepOutput:
+        """As BaseTrainingModule's, but with rollout windows the loss weighs the steps as training does.
+
+        So ``val_*_loss`` is the same weighted loss as ``train_*_loss``.
+        """
+        if self.rollout_windows is None:
+            return super()._combine_loss_and_metrics(step_losses, step_metrics, predictions)
+        num_loss_steps = self.task.num_steps
+        weights = self._rollout_window_step_weights(num_loss_steps)
+        loss = sum(weight * step_loss for weight, step_loss in zip(weights, step_losses[:num_loss_steps], strict=True))
+        loss_names = {self._dataset_loss_metric_name(name) for name in self.target_dataset_names}
+        metrics: dict[str, torch.Tensor] = {}
+        for i, metrics_next in enumerate(step_metrics):
+            for name, value in metrics_next.items():
+                if name not in loss_names:
+                    metrics[name] = value
+                elif i < num_loss_steps:
+                    metrics[name] = metrics.get(name, 0.0) + weights[i] * value
+        return TrainingStepOutput(loss=loss, metrics=metrics, predictions=predictions)
 
     def _expand_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Expand the ensemble dimension in the input batch by stacking the data nens_per_device times."""

@@ -160,6 +160,79 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     return model
 
 
+def load_optimizer_state_by_name(
+    optimizer: torch.optim.Optimizer,
+    named_parameters: list[tuple[str, torch.nn.Parameter]],
+    checkpoint: dict,
+) -> int:
+    """Load a training checkpoint's per-parameter optimiser state (e.g. Adam's moments), matched by parameter name.
+
+    The optimiser's own hyperparameters (learning rate, betas, weight decay) are kept: only each parameter's state
+    is taken, so a new learning-rate schedule can follow. A Lightning checkpoint stores that state by position, in
+    the order the parameters were given to its optimiser; that order is recovered from the checkpoint's own
+    ``state_dict``, whose parameters come in the same (module registration) order, so a model whose parameters
+    are registered in another order still gets each parameter's own state.
+
+    Parameters
+    ----------
+    optimizer : torch.optim.Optimizer
+        The new optimiser, built over exactly the parameters in ``named_parameters``, in that order.
+    named_parameters : list[tuple[str, torch.nn.Parameter]]
+        The parameters the optimiser was built over, with their names in the training module (as in the
+        checkpoint's ``state_dict``).
+    checkpoint : dict
+        A Lightning training checkpoint (``state_dict`` and ``optimizer_states``).
+
+    Returns
+    -------
+    int
+        The number of parameters that received a state.
+
+    Raises
+    ------
+    ValueError
+        If the checkpoint has no optimiser state, its parameters cannot be matched by name one to one, or a state
+        does not have its parameter's shape.
+    """
+    states = checkpoint.get("optimizer_states") or []
+    if len(states) != 1:
+        msg = f"Expected the state of one optimiser in the checkpoint, found {len(states)}."
+        raise ValueError(msg)
+    saved = states[0]
+    saved_indices = [index for group in saved["param_groups"] for index in group["params"]]
+
+    names = [name for name, _ in named_parameters]
+    name_set = set(names)
+    saved_names = [key for key in checkpoint["state_dict"] if key in name_set]
+    if len(saved_names) != len(saved_indices) or set(saved_names) != name_set:
+        msg = (
+            f"Cannot match the checkpoint's optimiser state to the model's parameters by name: the checkpoint's "
+            f"optimiser has {len(saved_indices)} parameters, {len(saved_names)} of the model's {len(names)} parameter "
+            "names are in its state_dict. The checkpoint must come from the same model (e.g. the previous stage)."
+        )
+        raise ValueError(msg)
+
+    position = {name: i for i, name in enumerate(names)}
+    remapped = {}
+    for saved_index, name in zip(saved_indices, saved_names, strict=True):
+        state = saved["state"].get(saved_index)
+        if state is None:
+            continue
+        parameter = named_parameters[position[name]][1]
+        for key, value in state.items():
+            if torch.is_tensor(value) and value.dim() > 0 and value.shape != parameter.shape:
+                msg = (
+                    f"Optimiser state '{key}' of {name} has shape {tuple(value.shape)}, "
+                    f"the parameter {tuple(parameter.shape)}."
+                )
+                raise ValueError(msg)
+        remapped[position[name]] = state
+
+    current = optimizer.state_dict()
+    optimizer.load_state_dict({"state": remapped, "param_groups": current["param_groups"]})
+    return len(remapped)
+
+
 def freeze_submodule_by_name(module: nn.Module, target_name: str, base_target: str = "") -> bool:
     """Recursively freezes the parameters of a submodule with the specified name.
 

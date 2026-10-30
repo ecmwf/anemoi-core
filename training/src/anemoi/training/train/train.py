@@ -396,6 +396,14 @@ class AnemoiTrainer(ABC):
                     map_location="cpu",
                 )
 
+            if self.config.training.get("load_optimizer_state", False):
+                if self.config.training.transfer_learning:
+                    msg = "training.load_optimizer_state cannot be combined with training.transfer_learning."
+                    raise ValueError(msg)
+                # Read when the optimiser is built (BaseTrainingModule.configure_optimizers): the checkpoint's
+                # optimiser state, with this run's step count, learning rate and schedule.
+                model.optimizer_state_checkpoint = self.last_checkpoint
+
             model.data_indices = self.data_indices
             # Validate data indices between checkpoint and current config
             self._validate_transfer_learning_datasets(model)
@@ -684,10 +692,17 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def strategy(self) -> Any:
+        # Rollout windows (training.rollout_windows) run several backward passes per optimiser step, which DDP's
+        # static graph mode does not support.
         return instantiate(
             self.config.training.strategy,
-            static_graph=not self.config.training.accum_grad_batches > 1,
+            static_graph=not (self.config.training.accum_grad_batches > 1 or self._rollout_windows),
         )
+
+    @property
+    def _rollout_windows(self) -> bool:
+        """Whether the training rollout is cut into windows (manual optimisation in the training method)."""
+        return bool(self.config.training.get("rollout_windows", None))
 
     @cached_property
     def fit_parameters(self) -> Any:
@@ -734,8 +749,9 @@ class AnemoiTrainer(ABC):
             limit_val_batches=self.config.dataloader.limit_batches.validation,
             num_sanity_val_steps=self.config.training.num_sanity_val_steps,
             accumulate_grad_batches=self.config.training.accum_grad_batches,
-            gradient_clip_val=self.config.training.gradient_clip.val,
-            gradient_clip_algorithm=self.config.training.gradient_clip.algorithm,
+            # With rollout windows the training method clips the gradients itself (manual optimisation).
+            gradient_clip_val=None if self._rollout_windows else self.config.training.gradient_clip.val,
+            gradient_clip_algorithm=None if self._rollout_windows else self.config.training.gradient_clip.algorithm,
             # we have our own DDP-compliant sampler logic baked into the dataset
             use_distributed_sampler=False,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,

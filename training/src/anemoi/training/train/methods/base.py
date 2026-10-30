@@ -45,6 +45,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.train.step_output import TrainingStepOutput
+from anemoi.training.utils.checkpoint import load_optimizer_state_by_name
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import build_output_masks
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -1291,9 +1292,24 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     ) -> OptimizerLRScheduler:
         """Create optimizer and LR scheduler based on Hydra config."""
         optimization_config = self.config.training.optimization
-        params = filter(lambda p: p.requires_grad, self.parameters())
+        named_params = [(name, p) for name, p in self.named_parameters() if p.requires_grad]
+        params = [p for _, p in named_params]
         optimizer = instantiate(optimization_config.optimizer, params=params, lr=self.effective_lr)
         self.log_optimizer(optimizer)
+
+        # training.load_optimizer_state: the warm-start checkpoint's optimiser state, with this run's learning rate
+        # and schedule (set by AnemoiTrainer with load_weights_only).
+        state_checkpoint = getattr(self, "optimizer_state_checkpoint", None)
+        if state_checkpoint is not None:
+            checkpoint = torch.load(state_checkpoint, map_location="cpu", weights_only=False)
+            loaded = load_optimizer_state_by_name(optimizer, named_params, checkpoint)
+            del checkpoint
+            LOGGER.info(
+                "Optimiser state loaded for %d of %d parameters from %s; learning rate and schedule are this run's.",
+                loaded,
+                len(named_params),
+                state_checkpoint,
+            )
 
         if not getattr(optimization_config, "lr_scheduler", None):
             return optimizer
