@@ -1,0 +1,493 @@
+# (C) Copyright 2025-2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+import hashlib
+from collections.abc import Callable
+from copy import deepcopy
+from pathlib import Path
+
+import pytest
+import pytorch_lightning as pl
+import torch
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
+from omegaconf import open_dict
+
+from anemoi.training.data.relative_time_indices import compute_relative_date_indices
+from anemoi.training.train.evaluate import AnemoiEvaluator
+from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.train import AnemoiTrainer
+from anemoi.training.utils.time_indices import normalize_time_indices
+from anemoi.utils.testing import GetTestArchive
+from anemoi.utils.testing import skip_if_offline
+
+
+def get_single_checkpoint_dir(cfg: DictConfig) -> Path:
+    """Return the single run-id checkpoint directory produced by a training run."""
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
+
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert (
+        len(run_dirs) == 1
+    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
+    return run_dirs[0]
+
+
+def _digest(tensor: torch.Tensor) -> str:
+    return hashlib.sha256(tensor.detach().float().cpu().contiguous().numpy().tobytes()).hexdigest()
+
+
+def _record_training_batches(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, int, str, str]]:
+    """Record epoch, batch number, loaded data and random state at the start of every training batch."""
+    records = []
+    seed_batch = BaseTrainingModule.on_train_batch_start
+
+    def seed_and_record(self: BaseTrainingModule, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
+        seed_batch(self, batch, batch_idx)
+        data = next(iter(batch.values()))
+        records.append((self.current_epoch, batch_idx, _digest(data), _digest(torch.get_rng_state())))
+
+    monkeypatch.setattr(BaseTrainingModule, "on_train_batch_start", seed_and_record)
+    return records
+
+
+@skip_if_offline
+@pytest.mark.slow
+@pytest.mark.parametrize("interrupt_after_steps", [4, 8], ids=["mid-first-epoch", "mid-second-epoch"])
+def test_resume_mid_epoch_matches_uninterrupted_training(
+    ensemble_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+    monkeypatch: pytest.MonkeyPatch,
+    interrupt_after_steps: int,
+) -> None:
+    """Training resumed from a mid-epoch checkpoint trains on the batches of an uninterrupted run.
+
+    Every resumed step loads the same data and starts from the same random state, so
+    the ensemble noise matches too. The weights are not compared, because training on
+    GPUs is not bitwise reproducible between runs.
+    """
+    cfg, url = ensemble_config
+    get_test_archive(url)
+    # Two epochs of 6 batches each.
+    cfg.dataloader.batch_size.training = 1
+    cfg.dataloader.limit_batches.training = 6
+    cfg.dataloader.limit_batches.validation = 1
+    cfg.diagnostics.plot.callbacks = []
+    cfg.training.seed = 42
+    checkpoints_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    records = _record_training_batches(monkeypatch)
+
+    AnemoiTrainer(deepcopy(cfg)).train()
+    uninterrupted = list(records)
+    records.clear()
+    (uninterrupted_dir,) = checkpoints_dir.iterdir()
+
+    interrupted_cfg = deepcopy(cfg)
+    interrupted_cfg.training.max_steps = interrupt_after_steps
+    interrupted_cfg.diagnostics.checkpoint.every_n_train_steps.save_frequency = interrupt_after_steps
+    interrupted_cfg.diagnostics.checkpoint.every_n_train_steps.num_models_saved = 1
+    AnemoiTrainer(interrupted_cfg).train()
+    (interrupted_dir,) = set(checkpoints_dir.iterdir()) - {uninterrupted_dir}
+    interrupted = torch.load(interrupted_dir / "last.ckpt", map_location="cpu", weights_only=False)
+    assert interrupted["global_step"] == interrupt_after_steps
+    assert interrupted["loops"]["fit_loop"]["state_dict"]["combined_loader"], "dataloader position not saved"
+
+    resumed_cfg = deepcopy(cfg)
+    # A RunIdSource without a loading strategy resumes the run through Lightning's ckpt_path.
+    with open_dict(resumed_cfg):
+        resumed_cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": interrupted_dir.name,
+                "fork": False,
+            },
+        }
+    # Without a seed in the config, the resumed run takes the checkpoint's seed.
+    resumed_cfg.training.seed = None
+    AnemoiTrainer(resumed_cfg).train()
+
+    assert len(uninterrupted) == 12
+    assert records == uninterrupted
+
+
+class _RecordTrainingStart(pl.Callback):
+    """Record the epoch and global step a run starts training at."""
+
+    epoch: int | None = None
+    global_step: int | None = None
+
+    def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        del pl_module
+        self.epoch = trainer.current_epoch
+        self.global_step = trainer.global_step
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
+    cfg, url = gnn_config
+    get_test_archive(url)
+
+    AnemoiTrainer(cfg).train()
+    checkpoint_dir = get_single_checkpoint_dir(cfg)
+    assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
+    # What the resume reads back: RunIdSource resolves the run's last.ckpt. At on_train_start
+    # Lightning reports the epoch and step recorded in that file (the epoch that wrote it, not
+    # the number of epochs finished), so pin those values rather than a hand-computed epoch.
+    parent = torch.load(checkpoint_dir / "last.ckpt", map_location="cpu", weights_only=False)
+    parent_epoch, parent_global_step = parent["epoch"], parent["global_step"]
+
+    # Resume the run via the checkpoint pipeline surface (the legacy ``training.run_id``
+    # key was removed): a RunIdSource (fork=false) resolves the run's last.ckpt and a
+    # WarmStartLoader restores it so Lightning's ckpt_path continues the global step.
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+        }
+    cfg.training.max_epochs = 3
+    trainer = AnemoiTrainer(cfg)
+    # The resumed run must start where the parent stopped, not at epoch 0: a from-scratch
+    # 3-epoch run would reach the same final global step and checkpoint count.
+    start = _RecordTrainingStart()
+    trainer.callbacks.append(start)
+    trainer.train()
+
+    assert start.epoch == parent_epoch, f"resumed run started at epoch {start.epoch}, checkpoint has {parent_epoch}"
+    assert (
+        start.global_step == parent_global_step
+    ), f"resumed run started at step {start.global_step}, checkpoint has {parent_global_step}"
+
+    expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+
+    assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
+
+
+@skip_if_offline
+@pytest.mark.slow
+@pytest.mark.parametrize("config_fixture", ["lam_config", "ensemble_config", "multidatasets_config"])
+def test_restart_training_architectures(
+    config_fixture: str,
+    request: pytest.FixtureRequest,
+    get_test_archive: GetTestArchive,
+) -> None:
+    """Warm-start resume on the architectures models actually use (LAM, ensemble, multi-dataset).
+
+    ``test_restart_training`` covers GNN only; these exercise the non-GNN paths — including
+    the multi-dataset metadata handling — through the same resume cycle: train, then
+    ``RunIdSource(fork=false)`` + ``WarmStartLoader``, and assert the global step continues.
+    A strict warm-start load that does not round-trip an architecture's state dict fails
+    here — this is how the tendency-processor regression was caught.
+    """
+    cfg, urls = request.getfixturevalue(config_fixture)
+    for url in urls if isinstance(urls, list) else [urls]:
+        get_test_archive(url)
+
+    # Drop plotting / rollout-eval callbacks: they are not part of the resume contract
+    # and pull optional plotting deps (datashader) — same as the checkpoint fixtures.
+    with open_dict(cfg):
+        cfg.diagnostics.plot.callbacks = []
+        cfg.diagnostics.callbacks = []
+
+    AnemoiTrainer(cfg).train()
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert len(run_dirs) == 1, f"Expected exactly one run_id directory, found {[d.name for d in run_dirs]}"
+    checkpoint_dir = run_dirs[0]
+
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+        }
+    cfg.training.max_epochs = 3
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"{config_fixture} resume: expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_inference_checkpoint_round_trips(
+    gnn_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+    assert_metadata_schema: Callable[[dict], None],
+) -> None:
+    """A training run's inference checkpoint loads back and carries the inference contract.
+
+    ``AnemoiCheckpoint`` writes an ``inference-*.ckpt`` next to each Lightning checkpoint;
+    it is what anemoi-inference consumes downstream, and the existing UUID test never loads
+    it back. Train, then assert the saved inference checkpoint ``torch.load``s into a model
+    that carries weights and that its metadata satisfies the inference schema — the
+    consumption contract — without taking a dependency on anemoi-inference.
+    """
+    import torch
+
+    from anemoi.utils.checkpoints import load_metadata
+
+    cfg, url = gnn_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    run_dir = next(item for item in output_dir.iterdir() if item.is_dir())
+    inference_ckpts = sorted(run_dir.glob("inference-*.ckpt"))
+    assert inference_ckpts, f"No inference checkpoint was saved in {run_dir}"
+    inference_ckpt = inference_ckpts[0]
+
+    # Loads back as a usable model carrying weights.
+    model = torch.load(inference_ckpt, map_location="cpu", weights_only=False)
+    assert sum(p.numel() for p in model.parameters()) > 0, "Inference checkpoint model has no weights"
+
+    # Carries the metadata anemoi-inference consumes (the consumption contract).
+    metadata = load_metadata(inference_ckpt)
+    assert_metadata_schema(metadata)
+
+
+@skip_if_offline
+def test_loading_checkpoint(
+    global_config_with_checkpoint: tuple[DictConfig, str],
+    get_test_archive: callable,
+) -> None:
+    cfg, url = global_config_with_checkpoint
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.model
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_restart_from_existing_checkpoint(
+    global_config_with_checkpoint: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = global_config_with_checkpoint
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+@skip_if_offline
+@pytest.mark.slow
+@pytest.mark.parametrize("loader", ["WeightsOnlyLoader", "ColdStartLoader", "TransferLearningLoader"])
+def test_loading_strategy_loads_real_checkpoint(
+    global_config_with_checkpoint: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+    loader: str,
+) -> None:
+    """weights-only / cold-start / transfer-learning load a real checkpoint into a real model.
+
+    Only warm start was integration-tested. The processor-refresh bug hit every loader:
+    warm start crashed loudly, but these three (strict=False) would *silently* drop the
+    re-injected ``model_output_idx`` buffers on a real model. This loads a real GNN
+    checkpoint via each strategy through the pipeline and trains, asserting the model is
+    marked initialised and the run completes — the synthetic unit tests cannot catch a
+    real-model load regression like that.
+    """
+    cfg, url = global_config_with_checkpoint
+    get_test_archive(url)
+    with open_dict(cfg):
+        cfg.training.checkpoint.loading = {
+            "_target_": f"anemoi.training.checkpoint.loading.strategies.{loader}",
+        }
+        cfg.diagnostics.plot.callbacks = []
+        cfg.diagnostics.callbacks = []
+
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    # The pipeline applies weights at model-build and marks the model; if the strategy
+    # had silently failed to load, this would be unset (or the run would have crashed).
+    assert (
+        getattr(trainer.model, "weights_initialized", False) is True
+    ), f"{loader} did not mark the model weights as initialised"
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_transfer_learning_into_fewer_variables_cycle(
+    global_config_with_checkpoint: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """Issue #838 end-to-end: load a checkpoint into a model trained on FEWER variables.
+
+    The fixture seeds a checkpoint trained on the full variable set. Here we drop one
+    prognostic variable from the current dataset so the fine-tuned model has fewer
+    variables than the checkpoint, then load through ``TransferLearningLoader`` with
+    ``training.allow_variable_subset=True`` and run a short training cycle.
+
+    This was breaking before the #838 fix: the loader skips the variable-sized layers on
+    the shape mismatch, but ``_validate_transfer_learning_datasets`` ->
+    ``compare_variables`` then rejected the reduced set, so ``trainer.train()`` raised a
+    ValueError. The run completing is the proof the fix works end-to-end on a real model.
+
+    The dropped variable is chosen from the dataset at runtime (a prognostic that is not a
+    forcing/diagnostic and not a validation metric), so the scenario is self-contained.
+    """
+    from anemoi.datasets import open_dataset
+
+    cfg, url = global_config_with_checkpoint
+    get_test_archive(url)
+
+    dataset_variables = list(open_dataset(cfg.system.input.dataset).variables)
+    protected = (
+        set(OmegaConf.select(cfg, "data.forcing", default=[]) or [])
+        | set(OmegaConf.select(cfg, "data.diagnostic", default=[]) or [])
+        | set(OmegaConf.select(cfg, "training.metrics.datasets.data", default=[]) or [])
+    )
+    droppable = [name for name in dataset_variables if name not in protected]
+    if not droppable:
+        pytest.skip("no prognostic variable available to drop for the fewer-variables scenario")
+    drop_var = droppable[-1]
+
+    with open_dict(cfg):
+        # Fewer variables than the checkpoint: drop one prognostic variable from the data.
+        cfg.dataloader.training.datasets.data.dataset_config.drop = [drop_var]
+        cfg.dataloader.validation.datasets.data.dataset_config.drop = [drop_var]
+        # Transfer-learning load, opting in to the reduced variable set (issue #838).
+        cfg.training.checkpoint.loading = {
+            "_target_": "anemoi.training.checkpoint.loading.strategies.TransferLearningLoader",
+        }
+        cfg.training.allow_variable_subset = True
+        cfg.diagnostics.plot.callbacks = []
+        cfg.diagnostics.callbacks = []
+
+    # Without allow_variable_subset (or before the fix) this raises ValueError at
+    # _validate_transfer_learning_datasets; completing the cycle is the #838 proof.
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    # The reduced-variable model was built and trained on fewer variables than the checkpoint.
+    assert drop_var not in trainer.data_indices["data"].name_to_index
+    assert len(trainer.data_indices["data"].name_to_index) == len(dataset_variables) - 1
+    # Transfer learning applied the compatible weights and marked the model initialised...
+    assert getattr(trainer.model, "weights_initialized", False) is True
+    # ...and training actually progressed on the reduced variable set.
+    assert trainer.model.trainer.global_step > 0
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_evaluator(
+    gnn_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = gnn_config
+    get_test_archive(url)
+    training_cfg = deepcopy(cfg)
+    training_cfg.diagnostics.plot.callbacks = []
+    training_cfg.dataloader.limit_batches.validation = 0
+    AnemoiTrainer(training_cfg).train()
+
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    checkpoint_dir = run_dirs[0]
+
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": checkpoint_dir.name,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"},
+        }
+    evaluator = AnemoiEvaluator(cfg)
+    evaluator.evaluate()
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_restart_training_with_rollout(
+    gnn_config_with_rollout: tuple[DictConfig, str, str],
+    get_test_archive: GetTestArchive,
+    assert_metadata_schema: Callable[[dict], None],
+) -> None:
+    cfg, url = gnn_config_with_rollout
+    get_test_archive(url)
+    weights_only_cfg = deepcopy(cfg)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_metadata_schema(trainer.metadata)
+    # The rollout step should be incremented after each epoch, so after 2 epochs it should be 3
+    assert (
+        trainer.task.rollout.step == 3
+    ), f"Expected rollout step after 2 epochs to be 1+2=3, got {trainer.task.rollout.step}"
+
+    # Resume training from the checkpoint and verify the rollout counter is restored
+    # correctly and continues to increment on further epochs.
+    checkpoint_dir = get_single_checkpoint_dir(cfg)
+    checkpoint_path = sorted(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))[-1]
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    assert checkpoint["AnemoiDatasetsDataModule"]["epoch"] == 1
+
+    # Start a new training run from the model weights. The configured rollout
+    # must determine both the task steps and the dataset time window.
+    last_checkpoint_path = checkpoint_dir / "last.ckpt"
+    with open_dict(weights_only_cfg):
+        weights_only_cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.local.LocalSource",
+                "path": str(last_checkpoint_path),
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"},
+        }
+    weights_only_cfg.training.max_epochs = 1
+    weights_only_cfg.task.rollout = {
+        "start": 4,
+        "epoch_increment": 0,
+        "maximum": 4,
+    }
+    weights_only_cfg.diagnostics.enable_checkpointing = False
+    weights_only_cfg.dataloader.limit_batches.validation = 0
+    weights_only_trainer = AnemoiTrainer(weights_only_cfg)
+    weights_only_trainer.train()
+
+    assert weights_only_trainer.task.rollout.step == 4
+    ds_train = weights_only_trainer.datamodule.ds_train
+    expected_indices = compute_relative_date_indices(weights_only_trainer.task, ds_train.data_readers, mode="training")
+    assert ds_train.relative_date_indices == {
+        name: normalize_time_indices(indices) for name, indices in expected_indices.items()
+    }
+
+    # Resume the run: a RunIdSource with no loading block hands last.ckpt to
+    # Lightning's ckpt_path, which restores the task state along with everything else.
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+        }
+    cfg.training.max_epochs = 4
+    resumed_trainer = AnemoiTrainer(cfg)
+    resumed_trainer.train()
+
+    # After two additional epochs the counter loaded from the checkpoint (3) must have advanced
+    # to the maximum specified in the beginning.
+    assert resumed_trainer.task.rollout.step == 4, (
+        "Expected rollout step after resuming for 2 more epochs to be 4 (maximum rollout step), "
+        f"got {resumed_trainer.task.rollout.step}"
+    )
