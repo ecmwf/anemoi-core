@@ -101,6 +101,7 @@ def test_dataindices_todict(data_indices) -> None:
         "input": {
             "full": torch.Tensor([0, 1, 4, 5, 6]).to(torch.int),
             "target": torch.Tensor([]).to(torch.int),
+            "corrector": torch.Tensor([]).to(torch.int),
             "forcing": torch.Tensor([0, 4]).to(torch.int),
             "diagnostic": torch.Tensor([2, 3]).to(torch.int),
             "prognostic": torch.Tensor([1, 5, 6]).to(torch.int),
@@ -109,6 +110,7 @@ def test_dataindices_todict(data_indices) -> None:
         "output": {
             "full": torch.Tensor([1, 2, 3, 5, 6]).to(torch.int),
             "target": torch.Tensor([]).to(torch.int),
+            "corrector": torch.Tensor([]).to(torch.int),
             "forcing": torch.Tensor([0, 4]).to(torch.int),
             "diagnostic": torch.Tensor([2, 3]).to(torch.int),
             "prognostic": torch.Tensor([1, 5, 6]).to(torch.int),
@@ -130,6 +132,7 @@ def test_modelindices_todict(data_indices) -> None:
         "input": {
             "full": torch.Tensor([0, 1, 2, 3, 4]).to(torch.int),
             "target": torch.Tensor([]).to(torch.int),
+            "corrector": torch.Tensor([]).to(torch.int),
             "forcing": torch.Tensor([0, 2]).to(torch.int),
             "diagnostic": torch.Tensor([]).to(torch.int),
             "prognostic": torch.Tensor([1, 3, 4]).to(torch.int),
@@ -138,6 +141,7 @@ def test_modelindices_todict(data_indices) -> None:
         "output": {
             "full": torch.Tensor([0, 1, 2, 3, 4]).to(torch.int),
             "target": torch.Tensor([]).to(torch.int),
+            "corrector": torch.Tensor([]).to(torch.int),
             "forcing": torch.Tensor([]).to(torch.int),
             "diagnostic": torch.Tensor([1, 2]).to(torch.int),
             "prognostic": torch.Tensor([0, 3, 4]).to(torch.int),
@@ -273,3 +277,61 @@ def test_compare_variables_exact_match_passes(data_indices) -> None:
     """An exact match never raises, regardless of allow_subset."""
     data_indices.compare_variables(_CKPT, _CKPT, allow_subset=False)
     data_indices.compare_variables(_CKPT, _CKPT, allow_subset=True)
+
+
+@pytest.fixture()
+def data_indices_with_corrector():
+    config = DictConfig(
+        {
+            "data": {
+                "forcing": ["x", "e"],
+                "diagnostic": ["z"],
+                "corrector": ["c1", "c2"],
+            },
+        },
+    )
+    name_to_index = {"x": 0, "y": 1, "z": 2, "c1": 3, "e": 4, "c2": 5, "other": 6}
+    return IndexCollection(config.data, name_to_index=name_to_index)
+
+
+def test_data_indices_with_corrector(data_indices_with_corrector) -> None:
+    di = data_indices_with_corrector
+    # correctors are model inputs but never outputs, and not prognostic
+    assert set(di.data.input.includes) == {"x", "e", "y", "other", "c1", "c2"}
+    assert set(di.data.output.includes) == {"z", "y", "other"}
+    assert set(di.model.input.includes) == {"x", "e", "y", "other", "c1", "c2"}
+    assert set(di.model.output.includes) == {"z", "y", "other"}
+    assert di.prognostic == ["y", "other"]
+    assert di.data.input.corrector.tolist() == [3, 5]
+    assert di.data.input.forcing.tolist() == [0, 4]
+    assert di.model.input.name_to_index == {"x": 0, "y": 1, "c1": 2, "e": 3, "c2": 4, "other": 5}
+    assert di.model.input.corrector.tolist() == [2, 4]
+    # model input width includes the correctors
+    assert len(di.model.input) == 6
+    # output-side cross-space maps are unaffected by input-only correctors
+    assert di.model_output_positions_in_data_output == list(range(len(di.model.output.ordered_names)))
+    assert di.model_output_in_data_output_is_identity is True
+
+
+@pytest.mark.parametrize("category", ["forcing", "diagnostic", "target"])
+def test_data_indices_corrector_overlap_rejected(category) -> None:
+    data = {"forcing": [], "diagnostic": [], "target": [], "corrector": ["x"]}
+    data[category] = ["x"]
+    with pytest.raises(AssertionError):
+        IndexCollection(DictConfig({"data": data}).data, name_to_index={"x": 0, "y": 1})
+
+
+def test_data_indices_todict_contains_corrector(data_indices_with_corrector) -> None:
+    for space in (data_indices_with_corrector.data, data_indices_with_corrector.model):
+        for key in ("input", "output"):
+            assert "corrector" in space.todict()[key]
+
+
+def test_tensor_index_setstate_backcompat(data_indices) -> None:
+    # simulate unpickling a checkpoint written before the corrector category existed
+    index = data_indices.data.input
+    state = {k: v for k, v in index.__dict__.items() if k != "corrector"}
+    restored = object.__new__(type(index))
+    restored.__setstate__(state)
+    assert restored.corrector.numel() == 0
+    assert restored == index

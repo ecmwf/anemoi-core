@@ -54,7 +54,14 @@ class IndexCollection:
         self.target = (
             [] if data_config.get("target", None) is None else OmegaConf.to_container(data_config.target, resolve=True)
         )
-        defined_variables = set.union(set(self.forcing), set(self.diagnostic), set(self.target))
+        # Corrector variables are observation metadata: model inputs (like forcings), but never model
+        # outputs and never decoder forcings. They condition the training-time correctors.
+        self.corrector = (
+            []
+            if data_config.get("corrector", None) is None
+            else OmegaConf.to_container(data_config.corrector, resolve=True)
+        )
+        defined_variables = set.union(set(self.forcing), set(self.diagnostic), set(self.target), set(self.corrector))
         self.prognostic = [v for v in self.name_to_index.keys() if v not in defined_variables]
 
         assert set(self.diagnostic).isdisjoint(self.forcing), (
@@ -65,9 +72,19 @@ class IndexCollection:
             f"Diagnostic and target variables overlap: {set(self.diagnostic).intersection(self.target)}. ",
             "Please drop them at a dataset-level to exclude them from the training data.",
         )
+        for category in ("forcing", "diagnostic", "target"):
+            overlap = set(self.corrector).intersection(getattr(self, category))
+            assert not overlap, (
+                f"Corrector and {category} variables overlap: {overlap}. ",
+                "A variable can only belong to one category.",
+            )
         name_to_index_model_input = {
             name: i
-            for i, name in enumerate(key for key in self.name_to_index if key in self.forcing or key in self.prognostic)
+            for i, name in enumerate(
+                key
+                for key in self.name_to_index
+                if key in self.forcing or key in self.prognostic or key in self.corrector
+            )
         }
         name_to_index_model_output = {
             name: i
@@ -79,12 +96,14 @@ class IndexCollection:
             diagnostic=self.diagnostic,
             forcing=self.forcing,
             target=self.target,
+            corrector=self.corrector,
             name_to_index=self.name_to_index,
         )
         self.model = ModelIndex(
             diagnostic=self.diagnostic,
             forcing=self.forcing,
             target=self.target,
+            corrector=self.corrector,
             name_to_index_model_input=name_to_index_model_input,
             name_to_index_model_output=name_to_index_model_output,
         )

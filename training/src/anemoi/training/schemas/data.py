@@ -30,6 +30,13 @@ class DatasetDataSchema(PydanticBaseModel):
         "Cannot be prognostic or diagnostic, can have the same name as forcing variables "
         "but have a different role. Such that: prognostic = diagnostic - forcing.union(target)."
     )
+    corrector: list[str] = Field(default_factory=list)
+    (
+        "Observation-metadata features used as model inputs (like forcings) that also feed the "
+        "training-time corrector networks. Never part of the model output nor of the decoder "
+        "forcings, and zeroed during the forecast phase of a DA forecaster. "
+        "Must be disjoint from forcing, diagnostic and target variables."
+    )
 
     processors: dict[str, PreprocessorSchema]
     "Layers of model performing computation on latent space. \
