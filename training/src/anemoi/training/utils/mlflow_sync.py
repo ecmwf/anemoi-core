@@ -22,6 +22,8 @@ import mlflow.entities
 from anemoi.training.diagnostics.mlflow.utils import check_params_length
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 from anemoi.training.diagnostics.mlflow.utils import get_max_params_length
+from anemoi.training.diagnostics.mlflow.utils import rewrite_lineage
+from anemoi.training.diagnostics.mlflow.utils import update_run_id
 
 
 def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
@@ -179,33 +181,23 @@ class MlFlowSync:
 
     @staticmethod
     def update_run_id(params: dict, key: str, new_run_id: str, src_run_id: str, run_type: str) -> dict:
-        params[f"config.training.{key}"] = new_run_id
-        params[f"config.training.{run_type}_{key}"] = src_run_id
+        return update_run_id(params, key, new_run_id=new_run_id, src_run_id=src_run_id, run_type=run_type)
 
-        if key == "run_id":
-            params[f"metadata.{run_type}_{key}"] = src_run_id
-            params[f"metadata.{key}"] = new_run_id
-        return params
-
-    def update_parent_run_info(self, tags: dict, tag_key: str, tag_dest: str, dst_run_id: str, run_type: str) -> dict:
+    def _find_dst_run_id(self, src_run_id: str, run_type: str) -> str | None:
+        """Destination run id of an already synced run (parent or fork source), or None."""
         mlflow.set_tracking_uri(self.dest_tracking_uri)
 
         # Check if there is already a parent run in the destination tracking uri
         runs = mlflow.search_runs(
             experiment_ids=mlflow.get_experiment_by_name(self.experiment_name).experiment_id,
-            filter_string=f"params.metadata.{run_type}_run_id = '{tags[tag_key]}'",
+            filter_string=f"params.metadata.{run_type}_run_id = '{src_run_id}'",
         )
 
-        if not runs.empty:
-            if (runs.shape[0] > 1) and ("tags.resumedRun" in runs.columns):
-                new_parent_run_id = runs[runs["tags.resumedRun"] != "True"].run_id.iloc[0]
-            else:
-                new_parent_run_id = runs.iloc[0].run_id  # read the parent run online run_id
-        else:
-            new_parent_run_id = dst_run_id
-        tags[tag_dest] = tags[tag_key]  # keep offline parent run_id
-        tags[tag_key] = new_parent_run_id  # update new online parent run_id
-        return tags
+        if runs.empty:
+            return None
+        if (runs.shape[0] > 1) and ("tags.resumedRun" in runs.columns):
+            return runs[runs["tags.resumedRun"] != "True"].run_id.iloc[0]
+        return runs.iloc[0].run_id  # read the parent run online run_id
 
     def check_run_is_logged(self, status: str = "FINISHED", server2server: bool = False) -> bool:
         """Blocks sync if top-level parent run or single runs are unavailable."""
@@ -276,68 +268,14 @@ class MlFlowSync:
         src_run_id: str,
         run_type: str = "offline",
     ) -> (dict, dict):
-
-        if (params["config.training.fork_run_id"] == "None") and (params["metadata.run_id"] == src_run_id):
-            params = self.update_run_id(
-                params,
-                "run_id",
-                new_run_id=dst_run_id,
-                src_run_id=src_run_id,
-                run_type=run_type,
-            )
-
-        elif "forkedRun" in tags:
-            try:
-                tags = self.update_parent_run_info(
-                    tags=tags,
-                    tag_key="forkedRunId",
-                    tag_dest=f"{run_type}.forkedRunId",
-                    dst_run_id=dst_run_id,
-                    run_type=run_type,
-                )
-                params = self.update_run_id(
-                    params,
-                    "fork_run_id",
-                    new_run_id=tags["forkedRunId"],
-                    src_run_id=tags[f"{run_type}.forkedRunId"],
-                    run_type=run_type,
-                )
-                params = self.update_run_id(
-                    params,
-                    "run_id",
-                    new_run_id=dst_run_id,
-                    src_run_id=src_run_id,
-                    run_type=run_type,
-                )
-
-            except AttributeError:
-                LOGGER.warning("No forked run parent found")
-
-        elif "resumedRun" in tags:
-            try:
-                tags = self.update_parent_run_info(
-                    tags=tags,
-                    tag_key="mlflow.parentRunId",
-                    tag_dest=f"mlflow.{run_type}.parentRunId",
-                    dst_run_id=dst_run_id,
-                    run_type=run_type,
-                )
-                params = self.update_run_id(
-                    params,
-                    "run_id",
-                    new_run_id=tags["mlflow.parentRunId"],
-                    src_run_id=tags[f"mlflow.{run_type}.parentRunId"],
-                    run_type=run_type,
-                )
-
-                # in the offline case that's the local folder name for the resumed run
-                # in the server2server case that's the source server run_id of the resumed run
-                params[f"config.training.{run_type}_self_run_id"] = src_run_id
-
-            except AttributeError:
-                LOGGER.warning("No parent run found")
-
-        return params, tags
+        return rewrite_lineage(
+            params,
+            tags,
+            dst_run_id=dst_run_id,
+            src_run_id=src_run_id,
+            resolve=lambda related_run_id: self._find_dst_run_id(related_run_id, run_type),
+            run_type=run_type,
+        )
 
     @staticmethod
     def check_params_length(params: dict[str, Any]) -> None:

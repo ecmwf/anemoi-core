@@ -1,0 +1,5 @@
+# Checkpoint source — download a checkpoint from S3-compatible storage. Set
+# `url` to an s3://bucket/key location; credentials and endpoints are read from
+# ~/.config/anemoi/settings.toml.
+_target_: anemoi.training.checkpoint.sources.s3.S3Source
+url: s3://my-bucket/path/to/checkpoint.ckpt
