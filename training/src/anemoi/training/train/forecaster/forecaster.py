@@ -490,6 +490,8 @@ class GraphForecaster(pl.LightningModule):
                 # single out only pressure variables if rollout >= 1
                 # get pressure Indices
                 p_indices_model = [v for  k, v in self.data_indices.model.output.name_to_index.items() if k.startswith("P")]
+                if training_mode and not p_indices_model:
+                    raise ValueError("Pressure rollout requires at least one output variable starting with 'P'.")
                 mask = torch.zeros_like(y_pred)  # same shape
                 mask[..., p_indices_model] = 1.0  # 1 where you want to train
                 y_pred_p = y_pred * mask  
@@ -501,6 +503,9 @@ class GraphForecaster(pl.LightningModule):
                     y_p,
                     use_reentrant=False,
                 ) if training_mode else None 
+                if training_mode:
+                    # The loss averages over all outputs, including masked variables.
+                    loss = loss * (y_pred.shape[-1] / len(p_indices_model))
 
                 metrics_next = {}
                 if validation_mode:
