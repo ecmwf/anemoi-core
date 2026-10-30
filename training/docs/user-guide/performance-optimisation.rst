@@ -298,7 +298,7 @@ The processor is a large component of the overall runtime. Both the
 GraphTransformer and Transformer processors support multiple backends
 which have different performance characteristics.
 
-For the Transformer processor, the Triton backend is the fastest. It
+For the Transformer processor, the Triton backend is the default. It
 implements the flash attention algorithm in Triton, supports sliding
 windows, and runs on Nvidia and AMD GPUs. It is the default for the
 processor:
@@ -321,6 +321,15 @@ With a sliding window, scaled dot product attention builds a mask of one
 byte per query-key pair, so it suits CPUs and small grids. A sliding
 window needs queries and keys of the same length, so the mappers attend
 to every key.
+
+If the `flash-attn <https://github.com/Dao-AILab/flash-attention>`__
+package (version 2) is installed, it can be selected instead. It needs
+float16 or bfloat16 inputs, as in mixed-precision training, and is about
+twice as fast as the Triton backend for sliding windows on A100 GPUs:
+
+.. code::
+
+   model.processor.attention_implementation: 'flash_attention'
 
 
 For the GraphTransformer processor, the 'triton' backend is the fastest.
@@ -352,7 +361,7 @@ supported on CPUs.
 
    The override is applied once on the first forward pass. Valid values
    are the same as the corresponding config options (e.g.
-   ``triton_attention``, ``scaled_dot_product_attention`` for the
+   ``triton_attention``, ``flash_attention``, ``scaled_dot_product_attention`` for the
    Transformer; ``triton``, ``pyg`` for the GraphTransformer).
 
 Compiling

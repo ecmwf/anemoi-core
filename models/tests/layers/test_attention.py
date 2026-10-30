@@ -245,6 +245,74 @@ def test_triton_cross_attention_refuses_a_window_between_sequences_of_different_
         attention((keys, queries), shard_info, batch_size=1)
 
 
+def _flash_attn_available() -> bool:
+    try:
+        import flash_attn  # noqa: F401
+    except ImportError:
+        return False
+    return torch.cuda.is_available()
+
+
+requires_flash_attn = pytest.mark.skipif(not _flash_attn_available(), reason="flash-attn and a GPU are needed")
+
+
+@requires_flash_attn
+@pytest.mark.parametrize("window_size", [None, 8])
+def test_flash_attention_matches_sdpa(window_size, layer_kernels):
+    torch.manual_seed(0)
+    layers = [
+        MultiHeadSelfAttention(
+            num_heads=4,
+            embed_dim=256,
+            layer_kernels=layer_kernels,
+            window_size=window_size,
+            attention_implementation=implementation,
+        ).cuda()
+        for implementation in ("scaled_dot_product_attention", "flash_attention")
+    ]
+    layers[1].load_state_dict(layers[0].state_dict())
+    x = torch.randn(2 * 100, 256, device="cuda")
+    shard_info = GraphShardInfo(nodes=[2 * 100])
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        expected, got = (layer(x, shard_info, batch_size=2).float() for layer in layers)
+    torch.testing.assert_close(got, expected, rtol=2e-2, atol=2e-2)
+
+
+@requires_flash_attn
+def test_flash_cross_attention_between_sequences_of_different_lengths_matches_sdpa(layer_kernels):
+    torch.manual_seed(0)
+    layers = [
+        MultiHeadCrossAttention(
+            num_heads=4, embed_dim=128, layer_kernels=layer_kernels, attention_implementation=implementation
+        ).cuda()
+        for implementation in ("scaled_dot_product_attention", "flash_attention")
+    ]
+    layers[1].load_state_dict(layers[0].state_dict())
+    keys, queries = torch.randn(2 * 500, 128, device="cuda"), torch.randn(2 * 130, 128, device="cuda")
+    shard_info = BipartiteGraphShardInfo(src_nodes=[2 * 500], dst_nodes=[2 * 130])
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        expected, got = (layer((keys, queries), shard_info, batch_size=2).float() for layer in layers)
+    assert got.shape == (2 * 130, 128)
+    torch.testing.assert_close(got, expected, rtol=2e-2, atol=2e-2)
+
+
+@requires_flash_attn
+def test_flash_attention_rejects_unsupported_head_sizes_when_built(layer_kernels):
+    with pytest.raises(ValueError, match="multiple of 8"):
+        MultiHeadSelfAttention(
+            num_heads=2, embed_dim=24, layer_kernels=layer_kernels, attention_implementation="flash_attention"
+        )
+
+
+@requires_flash_attn
+def test_flash_attention_rejects_float32_inputs(layer_kernels):
+    attention = MultiHeadSelfAttention(
+        num_heads=2, embed_dim=32, layer_kernels=layer_kernels, attention_implementation="flash_attention"
+    ).cuda()
+    with pytest.raises(ValueError, match="float16 or bfloat16"):
+        attention(torch.randn(8, 32, device="cuda"), GraphShardInfo(nodes=[8]), batch_size=1)
+
+
 @pytest.mark.gpu
 @given(
     batch_size=st.integers(min_value=1, max_value=64),

@@ -43,9 +43,10 @@ ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKE
 class MultiHeadSelfAttention(nn.Module):
     """Multi Head Self Attention Pytorch Layer
 
-    allows for three different attention implementations:
+    allows for four different attention implementations:
     - scaled dot product attention, see https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
     - Triton attention, the flash attention algorithm written in Triton, see :mod:`anemoi.models.triton.attention`
+    - flash-attn 2, see https://github.com/Dao-AILab/flash-attention
     - neighbourhood attention on a global grid, see :mod:`anemoi.models.layers.neighbourhood_attention`
 
     The config parameter "model.processor.attention_implementation" is used to control which attention implementation is used.
@@ -56,7 +57,11 @@ class MultiHeadSelfAttention(nn.Module):
     "triton_attention"
         Flash attention in Triton, for GPUs. Self and cross attention, sliding windows, no dropout.
 
-    For both, a sliding window needs queries and keys of the same length.
+    "flash_attention"
+        The flash-attn package, for GPUs and 16-bit inputs. Self and cross attention, sliding windows,
+        dropout. Faster than the Triton kernel for sliding windows.
+
+    For all three, a sliding window needs queries and keys of the same length.
 
     "neighbourhood"
         Each query attends to the keys around it on a grid (octahedral, HEALPix, icosahedral), set
@@ -145,6 +150,7 @@ class MultiHeadSelfAttention(nn.Module):
         attn_funcs = {
             "scaled_dot_product_attention": SDPAAttentionWrapper,
             "triton_attention": TritonAttentionWrapper,
+            "flash_attention": FlashAttentionWrapper,
         }
 
         # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
@@ -442,6 +448,41 @@ class TritonAttentionWrapper(AttentionWrapper):
         out = self.attention.apply(query, key, value, causal, window_size, softmax_scale).to(query.dtype)
 
         return out
+
+
+class FlashAttentionWrapper(AttentionWrapper):
+    """flash-attn 2, for GPUs and 16-bit inputs. Self and cross attention, sliding windows, dropout."""
+
+    def __init__(self):
+        super().__init__()
+        try:
+            from flash_attn import flash_attn_func
+        except ImportError as error:
+            raise ImportError("attention_implementation 'flash_attention' needs the flash-attn package.") from error
+        self.attention = flash_attn_func
+
+    def check_head_dim(self, head_dim: int) -> None:
+        if head_dim > 256 or head_dim % 8:
+            raise ValueError(f"{self.describe()} needs heads of at most 256 channels, a multiple of 8, got {head_dim}.")
+
+    def forward(
+        self,
+        query,
+        key,
+        value,
+        batch_size: int,
+        causal: bool = False,
+        window_size: Optional[int] = None,
+        dropout_p: float = 0.0,
+    ):
+        check_window_lengths(query, key, window_size)
+        if query.dtype not in (torch.float16, torch.bfloat16):
+            raise ValueError(f"{self.describe()} needs float16 or bfloat16 inputs, got {query.dtype}.")
+        window = (-1, -1) if window_size is None else (window_size, window_size)
+        # flash-attn takes (batch, points, heads, channels).
+        query, key, value = (t.transpose(1, 2) for t in (query, key, value))
+        out = self.attention(query, key, value, dropout_p=dropout_p, causal=causal, window_size=window)
+        return out.transpose(1, 2)
 
 
 class MultiHeadCrossAttention(MultiHeadSelfAttention):
