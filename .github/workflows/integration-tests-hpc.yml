@@ -82,7 +82,7 @@ jobs:
             git clone -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
             python3 -m venv venv
             source venv/bin/activate
-            pip install --upgrade pip
+            python3 -m pip install "pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
             cd "$REPO_NAME"
             git show -s --format=oneline
             TORCH_MINOR="${{ github.event.inputs.torch_version }}"
@@ -127,7 +127,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_training_cycle' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: python3 -m pytest -v training/tests/integration/ --ignore=training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL; python3 -m pytest -v models/tests/integration/ --slow
+      pytest_cmd: python3 -m pytest -v training/tests/integration/ --ignore=training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL; python3 -m pytest -v models/tests/integration/ --slow; python3 -m pytest -v graphs/tests/integration/
       timeout_minutes: 120
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_training_cycle

@@ -17,9 +17,10 @@ from typing import Any
 import pytest
 import torch
 from hydra import compose
-from hydra import initialize
+from hydra import initialize_config_module
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from omegaconf import open_dict
 
 from anemoi.models.migrations import Migrator
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -135,7 +136,7 @@ def build_global_config(
 
     model_architecture = overrides[0].split("=")[1]
 
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config", job_name="test_config"):
         template = compose(config_name="config", overrides=overrides)
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_global.yaml")
@@ -196,7 +197,7 @@ def stretched_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, list[str]]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_stretched"):
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config", job_name="test_stretched"):
         template = compose(config_name="stretched")
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_stretched.yaml")
@@ -218,7 +219,11 @@ def multidatasets_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, list[str]]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multidatasets"):
+    with initialize_config_module(
+        version_base=None,
+        config_module="anemoi.training.config",
+        job_name="test_multidatasets",
+    ):
         template = compose(config_name="multi")
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidatasets.yaml")
@@ -244,7 +249,7 @@ def lam_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, list[str]]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_lam"):
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config", job_name="test_lam"):
         template = compose(config_name="lam")
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_lam.yaml")
@@ -326,7 +331,11 @@ def ensemble_config(
 ) -> tuple[DictConfig, str]:
     overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
 
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_ensemble_crps"):
+    with initialize_config_module(
+        version_base=None,
+        config_module="anemoi.training.config",
+        job_name="test_ensemble_crps",
+    ):
         template = compose(config_name="ensemble_crps", overrides=overrides)
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
@@ -353,7 +362,11 @@ def ensemble_graph_multiscale_config(
 ) -> tuple[DictConfig, str]:
     overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
 
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_ensemble_graph"):
+    with initialize_config_module(
+        version_base=None,
+        config_module="anemoi.training.config",
+        job_name="test_ensemble_graph",
+    ):
         template = compose(config_name="ensemble_crps", overrides=overrides)
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
@@ -392,9 +405,9 @@ def ensemble_truncated_connection_config(
 ) -> tuple[DictConfig, str]:
     overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
 
-    with initialize(
+    with initialize_config_module(
         version_base=None,
-        config_path="../../src/anemoi/training/config",
+        config_module="anemoi.training.config",
         job_name="test_ensemble_truncated_connection",
     ):
         template = compose(config_name="ensemble_crps", overrides=overrides)
@@ -437,7 +450,11 @@ def hierarchical_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, list[str]]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_hierarchical"):
+    with initialize_config_module(
+        version_base=None,
+        config_module="anemoi.training.config",
+        job_name="test_hierarchical",
+    ):
         template = compose(config_name="hierarchical")
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_global.yaml")
@@ -459,7 +476,11 @@ def autoencoder_config(
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_path: GetTmpPath,
 ) -> tuple[OmegaConf, list[str]]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_autoencoder"):
+    with initialize_config_module(
+        version_base=None,
+        config_module="anemoi.training.config",
+        job_name="test_autoencoder",
+    ):
         template = compose(config_name="autoencoder")
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_autoencoder.yaml")
@@ -473,7 +494,7 @@ def autoencoder_config(
 
 @pytest.fixture
 def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: GetTmpPath) -> tuple[DictConfig, str]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_config"):
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config", job_name="test_config"):
         template = compose(config_name="config")
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_global.yaml")
@@ -540,7 +561,7 @@ def benchmark_config(
         msg = f"Error. Unknown benchmark configuration: {test_case}"
         raise ValueError(msg)
 
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="benchmark"):
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config", job_name="benchmark"):
         template = compose(config_name=base_config, overrides=overrides)
 
     # Settings for benchmarking in general (sets atos paths, enables profiling, disables plotting etc)
@@ -592,7 +613,18 @@ def global_config_with_checkpoint(
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     torch.save(new_ckpt, checkpoint_dir / "last.ckpt")
 
-    cfg.training.run_id = "dummy_id"
+    # Resume the staged run via the checkpoint pipeline surface (the legacy
+    # ``training.run_id`` key was removed): a RunIdSource (fork=false) resolves the
+    # run's last.ckpt and a WarmStartLoader restores it.
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": "dummy_id",
+                "fork": False,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+        }
     cfg.training.max_epochs = 3
 
     cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in global training cycle test
@@ -613,9 +645,9 @@ def temporal_downscaler_config(
     """
     # No model override here - the template already sets the dedicated
     # temporal downscaling model + task.
-    with initialize(
+    with initialize_config_module(
         version_base=None,
-        config_path="../../src/anemoi/training/config",
+        config_module="anemoi.training.config",
         job_name="test_temporal_downscaler",
     ):
         template = compose(config_name="temporal_downscaler_ensemble.yaml")
@@ -638,7 +670,7 @@ def imerg_target_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, str]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_filtering"):
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config", job_name="test_filtering"):
         template = compose(config_name="config")
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_filtering.yaml")
@@ -666,7 +698,11 @@ def edm_transport_config(
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_path: GetTmpPath,
 ) -> tuple[OmegaConf, str]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_edm_transport"):
+    with initialize_config_module(
+        version_base=None,
+        config_module="anemoi.training.config",
+        job_name="test_edm_transport",
+    ):
         template = compose(config_name=request.param)
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_transport.yaml")
@@ -687,9 +723,9 @@ def stochastic_interpolant_config(
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_path: GetTmpPath,
 ) -> tuple[OmegaConf, str]:
-    with initialize(
+    with initialize_config_module(
         version_base=None,
-        config_path="../../src/anemoi/training/config",
+        config_module="anemoi.training.config",
         job_name="test_stochastic_interpolant",
     ):
         template = compose(config_name=request.param)
@@ -734,9 +770,9 @@ def multidatasets_edm_transport_config(
     overrides = request.param
     is_tendency = any("graphtransformer_transport_tendency" in override for override in overrides)
 
-    with initialize(
+    with initialize_config_module(
         version_base=None,
-        config_path="../../src/anemoi/training/config",
+        config_module="anemoi.training.config",
         job_name="test_multi_edm_transport",
     ):
         template = compose(config_name="multi", overrides=overrides)
@@ -760,9 +796,7 @@ def multidatasets_edm_transport_config(
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
 
-    cfg.diagnostics.plot.callbacks = (
-        []
-    )  # remove plotting callbacks as they are tested in multidatasets and EDM transport test cases
+    cfg.diagnostics.plot.callbacks = []  # tested in the multidatasets / EDM transport cases
     return cfg, [url_dataset, url_dataset_b]
 
 
@@ -782,9 +816,9 @@ def temporal_downscaler_ensemble_config(
     get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
 
-    with initialize(
+    with initialize_config_module(
         version_base=None,
-        config_path="../../src/anemoi/training/config",
+        config_module="anemoi.training.config",
         job_name="test_temporal_downscaler_ensemble",
     ):
         template = compose(config_name="temporal_downscaler_ensemble")
@@ -838,9 +872,9 @@ def offset_forecaster_tendency_transport_config(
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, str]:
     """Compose a multi-output tendency transport model using irregular input offsets."""
-    with initialize(
+    with initialize_config_module(
         version_base=None,
-        config_path="../../src/anemoi/training/config",
+        config_module="anemoi.training.config",
         job_name="test_offset_forecaster_tendency_transport",
     ):
         template = compose(config_name="transport_edm_diffusion_tendency")
