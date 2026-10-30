@@ -151,6 +151,16 @@ metrics:
       - u_850
       - v_850
 
+# Training-time correctors of the predictions for the loss (any training method). They read the
+# dataset's `corrector` variables (data.datasets.<ds>.corrector) at the target time.
+# corrector:
+#   type: mlp            # or processor (a GraphTransformer/GNN processor on data->data edges)
+#   hidden_dim: 64
+#   instrument_groups:
+#     hirs:
+#       corrector_variables: [hirs_cos_sza, hirs_reportype]
+#       channels: null   # default: the output variables prefixed by the group name
+
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null
 max_steps: 150000

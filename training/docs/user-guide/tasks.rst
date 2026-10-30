@@ -20,12 +20,25 @@ the training loop relies on:
 * ``advance_input()`` — update model inputs between rollout steps
   (only relevant for multi-step tasks).
 
+A task also sets the **per-step policy** of the training loop. The
+defaults give every step the same weight, so most tasks override none of
+these:
+
+* ``step_loss_weight()`` and ``num_loss_steps`` — how each step's loss
+  enters the step-averaged loss (a step weighted 0 computes no loss).
+* ``step_uses_checkpoint()`` — activation-checkpoint a step's model call.
+* ``advance_needs_observations()`` — hand ``advance_input`` the step's
+  observations with their missing values (not imputed).
+* ``build_skip_input()`` — replace the input as the residual base of the
+  next model call.
+* ``get_metric_step()`` — the label of a step's validation metrics.
+
 
 ************
  Our tasks
 ************
 
-The four built-in tasks are:
+The five built-in tasks are:
 
 ``Forecaster``
    Autoregressive rollout training. Inputs are ``multistep_input``
@@ -45,6 +58,45 @@ The four built-in tasks are:
           start: 1
           epoch_increment: 1
           maximum: 12
+
+``DAForecaster``
+   A ``Forecaster`` with ``da_cycles`` data-assimilation cycles before
+   the forecast rollout. A cycle blends the observations at its output
+   times into the prediction (observation where present, model
+   background where missing) to form the input of the next cycle. The
+   forecast steps that follow autoregress, with the ``corrector``
+   (observation-metadata) inputs zeroed. It works with any training
+   method (deterministic or ensemble):
+
+   * ``da_loss_weight`` weights each cycle's loss (0 skips it); the
+     loss is averaged over the forecast steps only.
+   * ``da_flow_dependent_skip`` hands the model the pre-blend
+     background as the residual base after a blend, so the skip
+     connection does not stamp sparse observations into the output
+     (needs a model supporting ``skip_input``).
+   * ``checkpoint_steps`` activation-checkpoints the model call of the
+     first training steps, DA cycles first.
+
+   Validation metrics of the forecast steps keep the ``/1``, ``/2``
+   suffixes; DA cycles are ``/da1``, ``/da2``. Observation-metadata
+   variables are declared per dataset under
+   ``data.datasets.<name>.corrector`` and can feed training-time
+   correctors (see :ref:`correctors`).
+
+   .. code:: yaml
+
+      task:
+        _target_: anemoi.training.tasks.DAForecaster
+        multistep_input: 2
+        multistep_output: 1
+        timestep: "6H"
+        rollout:
+          start: 1
+          epoch_increment: 0
+          maximum: 1
+        da_cycles: 2
+        da_loss_weight: 0.0
+        da_flow_dependent_skip: true
 
 ``OffsetForecaster``
    An experimental generalization of ``Forecaster`` where inputs and

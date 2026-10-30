@@ -258,6 +258,45 @@ def test_training_cycle_ensemble(
     assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_da(
+    da_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
+    cfg, url = da_config
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
+    assert len(trainer.model.corrector) == 1
+
+
+def test_config_validation_da(da_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = da_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_da_ensemble(
+    da_ensemble_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
+    cfg, url = da_ensemble_config
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
+
+
+def test_config_validation_da_ensemble(da_ensemble_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = da_ensemble_config
+    BaseSchema(**cfg)
+
+
 def _digest(tensor: torch.Tensor) -> str:
     return hashlib.sha256(tensor.detach().float().cpu().contiguous().numpy().tobytes()).hexdigest()
 

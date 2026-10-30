@@ -25,6 +25,9 @@ datasets:
     diagnostic:
     - tp
     - cp
+    # observation metadata (e.g. viewing geometry, report type): model inputs zeroed in the
+    # forecast steps of a DA forecaster, which feed the training-time correctors
+    # corrector: []
 
     # const_imputer:
     #   default: "none"

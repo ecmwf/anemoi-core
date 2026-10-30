@@ -590,6 +590,57 @@ def migrator() -> Migrator:
 
 
 @pytest.fixture
+def da_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    """Deterministic graph transformer with DA cycling, a flow-dependent residual base and an MLP corrector."""
+    cfg, url, _ = build_global_config(
+        ["model=graphtransformer", "task=da_forecaster"],
+        testing_modifications_with_temp_dir,
+        get_tmp_path,
+    )
+    # training.corrector and data.datasets.<ds>.corrector are optional keys the templates leave out.
+    OmegaConf.set_struct(cfg, False)
+    cfg = OmegaConf.merge(cfg, OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_da.yaml"))
+    cfg.task.da_flow_dependent_skip = True
+    assert isinstance(cfg, DictConfig)
+    return cfg, url
+
+
+@pytest.fixture
+def da_ensemble_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+    get_test_data: GetTestData,
+) -> tuple[DictConfig, str]:
+    """The ensemble CRPS template with DA cycling and an MLP corrector."""
+    with initialize_config_module(
+        version_base=None,
+        config_module="anemoi.training.config",
+        job_name="test_da_ensemble",
+    ):
+        template = compose(
+            config_name="ensemble_crps",
+            overrides=["model=graphtransformer_ens", "graph=multi_scale", "task=da_forecaster"],
+        )
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+    da_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_da.yaml")
+
+    # training.corrector and data.datasets.<ds>.corrector are optional keys the templates leave out.
+    OmegaConf.set_struct(template, False)
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications, da_modifications)
+    OmegaConf.resolve(cfg)
+    cfg = handle_truncation_matrices(cfg, get_test_data)
+    assert isinstance(cfg, DictConfig)
+    return cfg, url_dataset
+
+
+@pytest.fixture
 def global_config_with_checkpoint(
     migrator: Migrator,
     global_config: tuple[DictConfig, str, str],

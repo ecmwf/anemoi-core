@@ -28,6 +28,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.reference import ReferenceComparisonPlot
 from anemoi.training.diagnostics.callbacks.reference import regular_grid_spectra
+from anemoi.training.tasks import DAForecaster
 from anemoi.training.tasks import Forecaster
 
 START = np.datetime64("2025-01-01T00:00", "s")
@@ -578,3 +579,15 @@ def test_missing_surface_pressure_raises() -> None:
     callback, trainer, pl_module = _zonal_setup(zonal={}, surface_pressure_variable="ps")
     with pytest.raises(ValueError, match="needs 'ps' in the reference"):
         callback.compute(trainer, pl_module)
+
+
+def test_select_steps_with_da_forecaster_labels() -> None:
+    """DA cycles and forecast steps are selected by their DAForecaster metric names."""
+    task = DAForecaster(2, 1, "6H", rollout={"start": 1, "maximum": 1}, validation_rollout=2, da_cycles=2)
+    callback = SimpleNamespace(steps=["dacycle1", "rstep1"])
+    task_steps, labels, selected = ReferenceComparisonPlot._select_steps(callback, task)
+    assert labels == ["dacycle0", "dacycle1", "rstep0", "rstep1"]
+    assert selected == ["dacycle1", "rstep1"]
+    assert task_steps[1] == {"rollout_step": 1, "is_da": True}
+    with pytest.raises(ValueError, match="not in the validation task steps"):
+        ReferenceComparisonPlot._select_steps(SimpleNamespace(steps=["rstep3"]), task)

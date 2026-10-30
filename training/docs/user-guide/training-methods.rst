@@ -272,6 +272,39 @@ A typical config file for CRPS training is:
 
 .. _diffusion-training:
 
+.. _correctors:
+
+*****************************
+ Training-time correctors
+*****************************
+
+Any training method can correct its predictions before the loss with
+small per-instrument networks configured under ``training.corrector``.
+They are training-only: they are not part of the model, so they never
+change an inference checkpoint, and the input state of a rollout always
+advances with the raw prediction.
+
+A corrector reads a dataset's ``corrector`` variables (observation
+metadata such as viewing geometry or report type, declared under
+``data.datasets.<name>.corrector``) at the target time, and adds a
+zero-initialised correction to the instrument's output channels.
+Categorical metadata listed in ``model.categorical_embeddings`` is
+embedded with the corrector's own tables. The ``mlp`` backend is
+pointwise and works for gridded and tabular datasets; the
+``processor`` backend runs a GraphTransformer or GNN processor on the
+dataset's data-to-data edges (gridded only).
+
+.. code:: yaml
+
+   training:
+     corrector:
+       type: mlp
+       hidden_dim: 64
+       instrument_groups:
+         hirs:
+           corrector_variables: [hirs_cos_sza, hirs_reportype]
+           channels: null  # default: the output variables prefixed "hirs_"
+
 *****************************
  Transport objective training
 *****************************

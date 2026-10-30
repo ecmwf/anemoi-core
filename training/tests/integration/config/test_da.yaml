@@ -1,0 +1,37 @@
+# Modifications for a DA forecaster ("task=da_forecaster") on top of the global or ensemble template.
+#
+# The test dataset has no observations, so the land-sea mask stands in for observation metadata:
+# it becomes a `corrector` variable (a model input zeroed in the forecast steps) that feeds an
+# MLP corrector of 2t. The DA blend then sees complete "observations"; the code path is what
+# this exercises.
+data:
+  datasets:
+    data:
+      forcing:
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
+      - "insolation"
+      - "sdor"
+      - "slor"
+      - "z"
+      corrector: ["lsm"]
+
+training:
+  corrector:
+    type: mlp
+    hidden_dim: 8
+    instrument_groups:
+      surface:
+        corrector_variables: ["lsm"]
+        channels: ["2t"]
+
+task:
+  da_cycles: 2
+  da_loss_weight: 0.5
+  checkpoint_steps: 1
