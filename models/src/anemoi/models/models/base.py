@@ -49,7 +49,6 @@ class BaseGraphModel(nn.Module):
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
-        dataset_metadata: Optional[dict] = None,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -63,8 +62,6 @@ class BaseGraphModel(nn.Module):
             Data statistics
         graph_data : HeteroData
             Graph definition
-        dataset_metadata : Optional[dict]
-            Per-dataset metadata (``metadata["dataset"]``), handed to the input transform
         """
         super().__init__()
         self._graph_data = graph_data
@@ -72,7 +69,6 @@ class BaseGraphModel(nn.Module):
         self.statistics = statistics
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
-        self.dataset_metadata = dataset_metadata
 
         self.dataset_names = list(data_indices.keys())
         self._graph_name_hidden = model_config.model.hidden_nodes_name
@@ -244,11 +240,7 @@ class BaseGraphModel(nn.Module):
         input_transform_config = model_config.get("input_transform") or {
             "_target_": "anemoi.models.layers.input_transform.FlattenInputTransform"
         }
-        self.input_transform = instantiate(
-            input_transform_config,
-            dataset_metadata=self.dataset_metadata,
-            _recursive_=False,
-        )
+        self.input_transform = instantiate(input_transform_config, _recursive_=False)
         assert isinstance(
             self.input_transform, BaseInputTransform
         ), f"input_transform must be a BaseInputTransform, got {type(self.input_transform).__name__}."
