@@ -21,7 +21,7 @@ def test_update_graph_creates_expected_nodes(mock_zarr_dataset_file):
         name="xarray_nodes",
     )
 
-    graph = xarray_nodes.update_graph(graph)
+    xarray_nodes.update_graph(graph)
 
     assert "xarray_nodes" in graph.node_types
     assert graph["xarray_nodes"].num_nodes == 25
@@ -45,4 +45,4 @@ def test_throws_error_with_invalid_lat(mock_zarr_dataset_file, lat_key, lon_key)
     )
 
     with pytest.raises(AssertionError):
-        graph = xarray_nodes.update_graph(graph)
+        xarray_nodes.update_graph(graph)
