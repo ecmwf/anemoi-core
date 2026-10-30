@@ -370,7 +370,7 @@ class GraphEnergyScoreLossSchema(GraphScoreLossSchema):
 class EnergyScoreLossSchema(EnsembleScoreLossSchema):
     target_: Literal["anemoi.training.losses.EnergyScoreLoss"] = Field(..., alias="_target_")
     fair: bool = True
-    norm_over: Literal["spatial", "variables", "spatial_and_variables"] = "spatial"
+    norm_over: Literal["spatial", "variables", "spatial_and_variables", "time", "time_and_variables"] = "spatial"
 
 
 class GraphVariogramScoreLossSchema(GraphScoreLossSchema):

@@ -9,6 +9,7 @@
 
 from contextlib import nullcontext
 from typing import Literal
+from typing import get_args
 
 import torch
 import torch.distributed as dist
@@ -24,17 +25,19 @@ from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 
-EnergyScoreNorm = Literal["spatial", "variables", "spatial_and_variables"]
+EnergyScoreNorm = Literal["spatial", "variables", "spatial_and_variables", "time", "time_and_variables"]
 
 
 class EnergyScoreLoss(BaseLoss):
-    """Energy score over space, variables, or their joint field.
+    """Energy score over space, variables, time, or their joint fields.
 
     ``norm_over="spatial"`` calculates a spatial norm independently for each
     variable. ``norm_over="variables"`` calculates a joint variable norm at
     every grid node. ``norm_over="spatial_and_variables"`` calculates one norm
-    over the complete field. Forecast output steps are scored separately and
-    then summed.
+    over the complete field. For these, forecast output steps are scored
+    separately and then summed. ``norm_over="time"`` calculates a norm over the
+    output steps at every grid node and variable, and ``norm_over="time_and_variables"``
+    a joint norm over output steps and variables at every grid node.
 
     When variables belong to the norm, the joint score is repeated for every
     selected variable for diagnostics. Each repeated value represents the same
@@ -49,10 +52,10 @@ class EnergyScoreLoss(BaseLoss):
         ignore_nans: bool = False,
     ) -> None:
         super().__init__(ignore_nans=ignore_nans)
-        if norm_over not in ("spatial", "variables", "spatial_and_variables"):
+        if norm_over not in get_args(EnergyScoreNorm):
             msg = (
                 f"Unknown energy score norm {norm_over!r}. Expected one of: "
-                "'spatial', 'variables', 'spatial_and_variables'."
+                f"{', '.join(repr(norm) for norm in get_args(EnergyScoreNorm))}."
             )
             raise ValueError(msg)
         self.fair = fair
@@ -63,11 +66,13 @@ class EnergyScoreLoss(BaseLoss):
     @property
     def norm_dimensions(self) -> tuple[int, ...]:
         """Return the tensor dimensions that form each multivariate outcome."""
-        if self.norm_over == "spatial":
-            return (int(TensorDim.GRID),)
-        if self.norm_over == "variables":
-            return (int(TensorDim.VARIABLE),)
-        return (int(TensorDim.GRID), int(TensorDim.VARIABLE))
+        return {
+            "spatial": (int(TensorDim.GRID),),
+            "variables": (int(TensorDim.VARIABLE),),
+            "spatial_and_variables": (int(TensorDim.GRID), int(TensorDim.VARIABLE)),
+            "time": (int(TensorDim.TIME),),
+            "time_and_variables": (int(TensorDim.TIME), int(TensorDim.VARIABLE)),
+        }[self.norm_over]
 
     @property
     def variables_are_joint(self) -> bool:
@@ -180,6 +185,8 @@ class EnergyScoreLoss(BaseLoss):
         outer_shape = list(target.shape)
         if int(TensorDim.GRID) in self.norm_dimensions:
             outer_shape[TensorDim.GRID] = 1
+        if int(TensorDim.TIME) in self.norm_dimensions:
+            outer_shape[TensorDim.TIME] = 1
         outer_weights = outer_scalers.scale_iteratively(
             target.new_ones(outer_shape),
             subset_indices=scaler_indices,
@@ -274,7 +281,7 @@ class EnergyScoreLoss(BaseLoss):
         scaled_abs = weighted_abs / safe_distance_max
         scaled_abs = torch.where(distance_max > 0, scaled_abs, torch.zeros_like(scaled_abs))
 
-        norm_squared = scaled_abs.square().sum(dim=norm_dimensions)
+        norm_squared = scaled_abs.square().sum(dim=norm_dimensions, keepdim=True)
         if group is not None:
             norm_squared = reduce_tensor(norm_squared, group)
 
@@ -285,17 +292,18 @@ class EnergyScoreLoss(BaseLoss):
             torch.sqrt(safe_norm_squared),
             torch.zeros_like(norm_squared),
         )
-
-        for dimension in sorted(norm_dimensions, reverse=True):
-            distance_max = distance_max.squeeze(dimension)
         norm = distance_max * norm
 
         if feature_valid is not None:
-            support = active.to(dtype=values.dtype).sum(dim=norm_dimensions)
+            support = active.to(dtype=values.dtype).sum(dim=norm_dimensions, keepdim=True)
             if group is not None:
                 support = reduce_tensor(support, group)
             norm = norm.masked_fill(support <= 0, torch.nan)
 
+        # Time precedes the ensemble dimension: keep it as size 1 so ENSEMBLE_DIM stays valid.
+        for dimension in sorted(norm_dimensions, reverse=True):
+            if dimension != TensorDim.TIME:
+                norm = norm.squeeze(dimension)
         return norm
 
     def _score_field(
@@ -410,5 +418,5 @@ class EnergyScoreLoss(BaseLoss):
         if self.ignore_nans:
             score = torch.where(torch.isnan(score), torch.zeros_like(score), score)
 
-        reduction_group = group if is_sharded and self.norm_over == "variables" else None
+        reduction_group = group if is_sharded and int(TensorDim.GRID) not in self.norm_dimensions else None
         return self.reduce(score, squash=squash, squash_mode=squash_mode, group=reduction_group)
