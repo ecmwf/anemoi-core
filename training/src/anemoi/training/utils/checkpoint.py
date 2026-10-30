@@ -21,6 +21,7 @@ from pytorch_lightning import Callback
 from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
+from anemoi.models.layers.categorical import extend_categorical_state_dict
 from anemoi.models.migrations import Migrator
 from anemoi.models.preprocessing.imputer import BaseImputer
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
@@ -122,8 +123,10 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     # Refresh processor stats from the current dataset if configured.
     model._update_checkpoint_state_dict_for_load(checkpoint)
 
-    # Filter out layers with size mismatch
+    # Filter out layers with size mismatch. Categorical embeddings whose vocabulary was
+    # appended to are padded first, so they keep their trained rows instead of being dropped.
     state_dict = checkpoint["state_dict"]
+    extend_categorical_state_dict(model, state_dict)
     _filter_state_dict_size_mismatches(state_dict, model.state_dict())
 
     # Runtime migration: the graph-provider permutation depends on instantiated provider state.
