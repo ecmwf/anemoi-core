@@ -47,15 +47,22 @@ LOGGER = logging.getLogger(__name__)
 _BLOSC = Blosc(cname="lz4", clevel=5, shuffle=Blosc.BITSHUFFLE)
 
 
+def decode_cache_array(data) -> np.ndarray:
+    """Decode an uncompressed .npy header followed by the blosc-compressed array data."""
+    view = memoryview(data)
+    # a version 1.0 .npy header: 6-byte magic string, 2-byte version, 2-byte header length
+    header_end = 10 + int.from_bytes(view[8:10], "little")
+    source = io.BytesIO(view[:header_end])
+    np.lib.format.read_magic(source)
+    shape, fortran_order, dtype = np.lib.format.read_array_header_1_0(source)
+    value = np.empty(shape, dtype=dtype, order="F" if fortran_order else "C")
+    _BLOSC.decode(view[header_end:], out=value)
+    return value
+
+
 def load_cache_array(path):
     """Read an uncompressed .npy header followed by the blosc-compressed array data."""
-    with path.open("rb") as source:
-        np.lib.format.read_magic(source)
-        shape, fortran_order, dtype = np.lib.format.read_array_header_1_0(source)
-        payload = source.read()
-    value = np.empty(shape, dtype=dtype, order="F" if fortran_order else "C")
-    _BLOSC.decode(payload, out=value)
-    return value
+    return decode_cache_array(path.read_bytes())
 
 
 def encode_cache_array(value: np.ndarray) -> bytes:
@@ -70,9 +77,21 @@ def save_cache_array(target, value):
     target.write(encode_cache_array(value))
 
 
+def cache_entry_path(entries_path, sequence, position, grid_id="all") -> Path:
+    return Path(entries_path) / grid_id / str(sequence) / f"{position}.npy.blosc"
+
+
 def read_cache_entry(entries_path, sequence, position, grid_id="all"):
-    entry = Path(entries_path) / grid_id / str(sequence) / f"{position}.npy.blosc"
+    entry = cache_entry_path(entries_path, sequence, position, grid_id)
     return load_cache_array(entry) if entry.exists() else None
+
+
+def read_cache_payload(entries_path, sequence, position, grid_id="all") -> bytes | None:
+    """Return the compressed bytes of a record, or None if it is not in the cache."""
+    try:
+        return cache_entry_path(entries_path, sequence, position, grid_id).read_bytes()
+    except FileNotFoundError:
+        return None
 
 
 def _is_capacity_error(error: OSError) -> bool:

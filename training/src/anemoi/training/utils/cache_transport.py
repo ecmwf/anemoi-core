@@ -9,13 +9,11 @@
 
 """ZeroMQ transport for node-local dataset cache entries."""
 
-import json
 import multiprocessing
 import os
 import threading
 from dataclasses import dataclass
 
-import numpy as np
 import zmq
 
 
@@ -43,19 +41,24 @@ class CacheKey:
 
 
 def _read(entries, request):
+    """Return the compressed bytes of each requested record, or None if one is missing.
+
+    The server does not decode the records. The client decodes them. Thus, the server uses less
+    CPU time, and the network moves the compressed size, not the full size of the arrays.
+    """
     # imported lazily: dataset_cache imports this module at load time
-    from anemoi.training.utils.dataset_cache import read_cache_entry
+    from anemoi.training.utils.dataset_cache import read_cache_payload
 
     entries_path = entries.get(request["dataset_id"])
     if entries_path is None or not request["positions"]:
         return None
-    arrays = [
-        read_cache_entry(entries_path, request["sequence"], position, request["grid_id"])
+    payloads = [
+        read_cache_payload(entries_path, request["sequence"], position, request["grid_id"])
         for position in request["positions"]
     ]
-    if any(array is None for array in arrays):
+    if any(payload is None for payload in payloads):
         return None
-    return np.stack(arrays)
+    return payloads
 
 
 def _worker(context, endpoint, entries):
@@ -63,14 +66,14 @@ def _worker(context, endpoint, entries):
     socket.connect(endpoint)
     while True:
         try:
-            value = _read(entries, socket.recv_json())
+            payloads = _read(entries, socket.recv_json())
         except Exception:
-            value = None
-        if value is None:
+            payloads = None
+        if payloads is None:
             socket.send(b"")
         else:
-            metadata = json.dumps({"dtype": value.dtype.str, "shape": value.shape}, separators=(",", ":"))
-            socket.send_multipart([metadata.encode(), memoryview(value)], copy=False)
+            # one frame for each record; a record is never empty, so an empty frame means a miss
+            socket.send_multipart(payloads, copy=False)
 
 
 def _serve(port, entries, ready):
@@ -109,11 +112,16 @@ class CacheClient:
                     "grid_id": key.grid_id,
                 },
             )
-            response = self.socket.recv_multipart()
-            if len(response) == 1:
+            response = self.socket.recv_multipart(copy=False)
+            if len(response) == 1 and len(response[0]) == 0:
                 raise RemoteCacheMiss(key)
-            metadata = json.loads(response[0])
-            return np.frombuffer(response[1], dtype=metadata["dtype"]).reshape(metadata["shape"])
+            if len(response) != len(positions):
+                msg = f"expected {len(positions)} records from {self.endpoint.host}, got {len(response)}"
+                raise RemoteCacheUnavailable(msg)
+            # imported lazily: dataset_cache imports this module at load time
+            from anemoi.training.utils.dataset_cache import decode_cache_array
+
+            return [decode_cache_array(frame.buffer) for frame in response]
         except RemoteCacheMiss:
             raise
         except zmq.ZMQError as error:

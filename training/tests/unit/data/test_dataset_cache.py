@@ -162,6 +162,24 @@ class TestProcessZMQCacheServerClient:
         for idx in range(5):
             np.testing.assert_array_equal(results[idx], cache_data[CacheKey("dataset", 0, idx)])
 
+    def test_request_for_several_positions(self, cache_data, running_server):
+        client = CacheClient(self.endpoint(running_server))
+        try:
+            result = client.request_shard(CacheKey("dataset", 0, 2), [2, 9, 4])
+            assert len(result) == 3
+            for value, position in zip(result, (2, 9, 4)):
+                np.testing.assert_array_equal(value, cache_data[CacheKey("dataset", 0, position)])
+        finally:
+            client.close()
+
+    def test_server_sends_the_compressed_file(self, cache_data, running_server):
+        from anemoi.training.utils.cache_transport import _read
+
+        key = CacheKey("dataset", 0, 5)
+        request = {"dataset_id": key.dataset_id, "sequence": 0, "positions": [5], "grid_id": key.grid_id}
+        (payload,) = _read(running_server.entries, request)
+        assert payload == encode_cache_array(cache_data[key])
+
     def test_ephemeral_port_and_clean_shutdown(self, cache_data, running_server):
         assert running_server.port > 0
         client = CacheClient(self.endpoint(running_server))
