@@ -229,6 +229,8 @@ class BaseModelSchema(PydanticBaseModel):
     "Model decoders schemas."
     residual: DatasetDict[ResidualConnectionSchema]
     "Residual connection schema."
+    input_transform: Optional[dict[str, Any]] = Field(default=None)
+    "Transform from raw input variables to encoder features, shared by all datasets. Omit to feed the raw values."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"
     recompile_limit: PositiveInt = 8
