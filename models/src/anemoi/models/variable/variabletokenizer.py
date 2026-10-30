@@ -112,36 +112,6 @@ class MultiHeadAttentionTransform(BaseVariableTokenizer):
 
         return self.output_projection(attn)
 
-    # def forward(self, x: torch.Tensor, variables: str | list[str]) -> torch.Tensor:
-    #     if isinstance(variables, str):
-    #         variables = [variables]
-
-    #     emb_variables = self.emb_variables_metadata(variables)
-    #     # maybe some einops ops here for getting the correct shape before mha
-    #     outputs = []
-    #     batch, time, ensemble, grid, num_vars = x.shape
-
-    #     for x_chunk in x.split(self.chunk_size, dim=-2):
-    #         if self.training:
-    #             out = checkpoint(self._forward_chunk, x_chunk, emb_variables, use_reentrant=False)
-    #         else:
-    #             out = self._forward_chunk(
-    #                 x_chunk,
-    #                 emb_variables,
-    #             )
-    #         outputs.append(out)
-    #     outputs = torch.cat(outputs, dim=0)
-
-    #     outputs = einops.rearrange(
-    #         outputs,
-    #         "(batch time ensemble grid) embedding_dim " "-> (batch ensemble grid) (time embedding_dim)",
-    #         batch=batch,
-    #         time=time,
-    #         ensemble=ensemble,
-    #         grid=grid,
-    #     )
-
-    #     return outputs
     def forward(
         self,
         x: torch.Tensor,
