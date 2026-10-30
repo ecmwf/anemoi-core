@@ -153,10 +153,11 @@ def test_multi_scale(
         edges_name=("src", "to", "dst"),
         edge_weight_attribute="edge_weight",
         row_normalize=False,
+        backend="torch",
     )
 
     mocker.patch(
-        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._build_smoothers",
         return_value=[None, smoothing_provider],
     )
 
@@ -376,9 +377,10 @@ def test_deepcopy_multiscale_loss_does_not_raise(mocker: MockerFixture) -> None:
         edges_name=("src", "to", "dst"),
         edge_weight_attribute="edge_weight",
         row_normalize=False,
+        backend="torch",
     )
     mocker.patch(
-        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._build_smoothers",
         return_value=[provider],
     )
     loss = MultiscaleLossWrapper(per_scale_loss=MSELoss(), weights=[1.0])

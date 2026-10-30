@@ -858,6 +858,7 @@ def test_spectral_crps_fft2d_projection(mocker: MockerFixture) -> None:
                 "transform": "fft2d",
                 "x_dim": x_dim,
                 "y_dim": y_dim,
+                "sparse_projector_backend": "torch",
                 "projection_config": {"matrix_path": "/path/to/projection_matrix.npz"},
                 "scalers": [],
             },
@@ -889,6 +890,7 @@ def test_spectral_loss_projection_actually_applied(mocker: MockerFixture) -> Non
         transform="fft2d",
         x_dim=x_dim,
         y_dim=y_dim,
+        sparse_projector_backend="torch",
         projection_config={"matrix_path": "/fake/path.npz"},
     )
 
@@ -988,6 +990,7 @@ def test_spectral_loss_projection_wrong_output_size_raises(mocker: MockerFixture
         transform="fft2d",
         x_dim=x_dim,
         y_dim=y_dim,
+        sparse_projector_backend="torch",
         projection_config={"matrix_path": "/fake/path.npz"},
     )
     pred = torch.randn(1, 1, 1, n_src, 2)
@@ -1049,6 +1052,7 @@ def test_spectral_crps_projection_applies_subgrid_before_projection(mocker: Mock
                 "x_dim": x_dim,
                 "y_dim": y_dim,
                 "subgrid": (0, projected_grid),
+                "sparse_projector_backend": "torch",
                 "projection_config": {"matrix_path": "/path/to/projection_matrix.npz"},
                 "scalers": [],
             },
@@ -1088,6 +1092,7 @@ def test_spectral_crps_projection_from_graph_config() -> None:
                 "transform": "fft2d",
                 "x_dim": x_dim,
                 "y_dim": y_dim,
+                "sparse_projector_backend": "torch",
                 "projection_config": {
                     "node_builder": {
                         "_target_": "anemoi.graphs.nodes.LatLonNodes",
@@ -1141,6 +1146,7 @@ def test_spectral_crps_projection_from_existing_edges() -> None:
                 "transform": "fft2d",
                 "x_dim": x_dim,
                 "y_dim": y_dim,
+                "sparse_projector_backend": "torch",
                 "projection_config": {
                     "edges_name": edges_name,
                     "edge_weight_attribute": "gauss_weight",
@@ -1256,3 +1262,23 @@ def test_regular_sht_loss_schema_and_subgrid(subgrid: tuple[int, int] | None) ->
             SpectralLossSchema.model_validate(config)
         with pytest.raises(ValueError, match="require the full grid"):
             SpectralCRPSLoss(transform="regular_sht", nlat=8, nlon=12, subgrid=subgrid)
+
+
+@pytest.mark.parametrize("backend", ["triton", "torch"])
+def test_spectral_loss_passes_its_backend_to_the_projection(mocker: MockerFixture, backend: str) -> None:
+    from scipy.sparse import csr_matrix
+
+    mocker.patch(
+        "anemoi.models.layers.graph_provider.load_npz",
+        return_value=csr_matrix(np.eye(8, 12, dtype=np.float32)),
+    )
+
+    loss = LogSpectralDistance(
+        transform="fft2d",
+        x_dim=4,
+        y_dim=2,
+        projection_config={"matrix_path": "/fake/path.npz"},
+        sparse_projector_backend=backend,
+    )
+
+    assert loss.projection_provider.backend == backend

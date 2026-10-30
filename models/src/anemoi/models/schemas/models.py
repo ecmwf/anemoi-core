@@ -27,6 +27,7 @@ from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import model_validator
 
+from anemoi.models.layers.projection_backend import ProjectionBackend
 from anemoi.models.layers.target_features import VALID_TARGET_FEATURES
 from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
@@ -82,6 +83,8 @@ class Model(BaseModel):
 class SparseProjectorSchema(BaseModel):
     num_chunks: PositiveInt = Field(default=1, examples=[1])
     "Number of chunks to use for sparse projection matmuls."
+    backend: ProjectionBackend = Field(default="triton")
+    "Sparse projection backend: 'triton' (GPU) or 'torch' (any device)."
 
 
 class TransportSourceConfig(BaseModel):

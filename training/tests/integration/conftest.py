@@ -376,20 +376,17 @@ def ensemble_graph_multiscale_config(
     use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    cfg.training.training_loss.datasets.data.weights = [1.0, 1.0, 1.0, 1.0, 1.0]
+    # On the O96 test grid, 128 neighbours reach about 0.11 rad, over twice the widest sigma.
+    cfg.training.training_loss.datasets.data.weights = [1.0, 1.0, 1.0, 1.0]
     cfg.training.training_loss.datasets.data.multiscale_config = {
-        "num_scales": 4,
-        "base_num_nearest_neighbours": 16,
-        "base_sigma": 0.01570,
-        "scale_factor": 2,
+        "num_nearest_neighbours": 128,
+        "sigmas": [0.0471, 0.0236, 0.0118],
     }
 
-    cfg.training.validation_metrics.datasets.data.multiscale.weights = [1.0, 1.0, 1.0, 1.0, 1.0]
+    cfg.training.validation_metrics.datasets.data.multiscale.weights = [1.0, 1.0, 1.0, 1.0]
     cfg.training.validation_metrics.datasets.data.multiscale.multiscale_config = {
-        "num_scales": 4,
-        "base_num_nearest_neighbours": 16,
-        "base_sigma": 0.01570,
-        "scale_factor": 2,
+        "num_nearest_neighbours": 128,
+        "sigmas": [0.0471, 0.0236, 0.0118],
     }
 
     cfg.diagnostics.plot.callbacks = []

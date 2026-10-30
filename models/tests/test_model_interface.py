@@ -29,6 +29,7 @@ def test_interface_passes_complete_graph_to_spatial_preprocessor() -> None:
                         "spatial_processor": {
                             "_target_": "anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector",
                             "edges_name": ["source", "to", "projected"],
+                            "backend": "torch",
                         },
                     }
                 },

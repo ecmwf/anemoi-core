@@ -9,6 +9,7 @@
 
 from enum import StrEnum
 from functools import partial
+from itertools import pairwise
 from typing import Annotated
 from typing import Any
 from typing import Literal
@@ -20,11 +21,13 @@ from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
+from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import Tag
 from pydantic import field_validator
 from pydantic import model_validator
 
+from anemoi.models.layers.projection_backend import ProjectionBackend
 from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
@@ -403,34 +406,23 @@ class MultiscaleConfigDiskSchema(BaseModel):
     "Scalers to apply to the wrapped loss (delegated to inner per_scale_loss)."
 
 
-class MultiscaleConfigOnTheFlySchema(BaseModel):
-    """On-the-fly multiscale config: smoothing subgraphs built from the main graph."""
+class MultiscaleConfigNeighbourListSchema(BaseModel):
+    """Multiscale config with a shared neighbour list and one Gaussian width per scale."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
-    num_scales: int | None = None
-    base_num_nearest_neighbours: int | None = None
-    base_sigma: float | None = None
-    scale_factor: int | None = None
-    smoothers: dict[str, dict] | None = None
+    num_nearest_neighbours: PositiveInt
+    "Neighbours per point, the point itself included."
+    sigmas: list[PositiveFloat] = Field(min_length=1)
+    "Gaussian width of each scale in radians, widest first. The unsmoothed field is added as the last scale."
 
-    @model_validator(mode="after")
-    def check_num_scales_or_smoothers(self) -> Self:
-        if self.smoothers is not None:
-            return self
-
-        if self.num_scales is None:
-            msg = "MultiscaleConfigOnTheFlySchema requires either 'num_scales' or 'smoothers'."
+    @field_validator("sigmas")
+    @classmethod
+    def check_widest_first(cls, sigmas: list[float]) -> list[float]:
+        if any(wider <= narrower for wider, narrower in pairwise(sigmas)):
+            msg = f"sigmas must go from the widest to the narrowest, got {sigmas}."
             raise ValueError(msg)
-
-        missing = [name for name in ("base_num_nearest_neighbours", "base_sigma") if getattr(self, name) is None]
-        if missing:
-            msg = (
-                "MultiscaleConfigOnTheFlySchema with 'num_scales' requires "
-                f"{', '.join(repr(name) for name in missing)}."
-            )
-            raise ValueError(msg)
-        return self
+        return sigmas
 
 
 class TimeAggregateLossWrapperSchema(BaseModel):
@@ -476,8 +468,12 @@ class MultiScaleLossSchema(BaseModel):
         | BaseLossSchema
     )
     weights: list[float]
-    multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
+    multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigNeighbourListSchema | None = None
     sparse_projector_num_chunks: PositiveInt = 1
+    sparse_projector_backend: ProjectionBackend = "triton"
+    "Smoothing backend: 'triton' (GPU) or 'torch' (any device)."
+    checkpoint_scales: bool = False
+    "Recompute each scale in the backward pass to save memory."
     # Deprecated: pass inside multiscale_config instead.
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
@@ -501,13 +497,13 @@ class MultiScaleLossSchema(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def check_no_deprecated_mixed_with_on_the_fly(self) -> Self:
-        if isinstance(self.multiscale_config, MultiscaleConfigOnTheFlySchema) and (
+    def check_no_deprecated_mixed_with_neighbour_list(self) -> Self:
+        if isinstance(self.multiscale_config, MultiscaleConfigNeighbourListSchema) and (
             self.loss_matrices is not None or self.loss_matrices_path is not None
         ):
             msg = (
                 "Deprecated top-level 'loss_matrices'/'loss_matrices_path' must not be combined "
-                "with an on-the-fly 'multiscale_config'. Move file-based keys inside a disk-mode "
+                "with a neighbour-list 'multiscale_config'. Move file-based keys inside a disk-mode "
                 "multiscale_config, or remove the deprecated fields."
             )
             raise ValueError(msg)
@@ -586,6 +582,8 @@ class SpectralLossSchema(BaseLossSchema):
     """Optional slice or string to select a subgrid before the transform."""
     projection_config: SpectralProjectionConfigSchema | None = None
     """Optional sparse projection applied to the data before the spectral transform."""
+    sparse_projector_backend: ProjectionBackend = "triton"
+    """Sparse projection backend: 'triton' (GPU) or 'torch' (any device)."""
     coefficient_magnitude: bool = False
     """For spectral CRPS, compare the moduli of the coefficients rather than their complex values."""
 

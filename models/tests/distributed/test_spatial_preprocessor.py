@@ -44,6 +44,7 @@ def _test_cross_grid_projector_returns_target_shards_rank(
         graph=graph,
         edges_name=("source", "to", "target"),
         row_normalize=False,
+        backend="torch",
     )
 
     full = torch.arange(source_grid_size * variables, dtype=torch.float32, device=device).reshape(
@@ -110,6 +111,7 @@ def _test_cross_grid_projector_fewer_vars_than_ranks_rank(
         graph=graph,
         edges_name=("source", "to", "target"),
         row_normalize=False,
+        backend="torch",
     )
 
     full = torch.arange(source_grid_size * variables, dtype=torch.float32, device=device).reshape(
@@ -178,6 +180,7 @@ def _build_overlapping_projector(source_grid_size: int, target_grid_size: int) -
         edges_name=("source", "to", "target"),
         edge_weight_attribute="edge_attr",
         row_normalize=True,
+        backend="torch",
     )
 
 

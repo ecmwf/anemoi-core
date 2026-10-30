@@ -62,6 +62,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             _recursive_=False,
             graph_data=self._graph_data,
             sparse_projector_num_chunks=model_config.get("sparse_projector", {}).get("num_chunks", 1),
+            sparse_projector_backend=model_config.get("sparse_projector", {}).get("backend", "triton"),
         )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:

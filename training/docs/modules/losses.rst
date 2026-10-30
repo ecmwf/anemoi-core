@@ -232,16 +232,13 @@ scale loss is computed on the *residual* between successive smoothing levels,
 so coarser scales capture large-scale errors and finer scales capture
 small-scale structure.
 
-The number of weights must equal the number of smoothing levels. A final
-``null`` entry in ``loss_matrices`` (or the implicit full-resolution
-scale appended when using on-the-fly generation) represents the
-unsmoothed field. The examples use equal weights so that no scale is preferred;
-these can be tuned for a specific application.
+There is one weight per scale. The last scale is always the unsmoothed field:
+the final ``null`` in ``loss_matrices``, or the scale added after the
+``sigmas`` in neighbour-list mode. The examples use equal weights.
 
-All smoothing configuration is provided through the single
-``multiscale_config`` key, which supports two modes:
+The smoothing is configured in ``multiscale_config``, in one of two modes.
 
-On-the-fly mode (builds smoothing matrices from the graph at runtime):
+Neighbour-list mode:
 
 .. code:: yaml
 
@@ -249,12 +246,11 @@ On-the-fly mode (builds smoothing matrices from the graph at runtime):
       datasets:
          your_dataset_name:
             _target_: anemoi.training.losses.MultiscaleLossWrapper
-            weights: [1.0, 1.0, 1.0, 1.0]   # num_scales + 1 entries
+            weights: [1.0, 1.0, 1.0, 1.0]   # one more than sigmas
             multiscale_config:
-               num_scales: 3                   # 3 smoothed + 1 full-res appended automatically
-               base_num_nearest_neighbours: 4
-               base_sigma: 0.1
-               scale_factor: 2                 # neighbours and sigma double each level
+               num_nearest_neighbours: 128
+               sigmas: [0.0157, 0.0078, 0.0039]   # widest first: 100, 50 and 25 km
+            sparse_projector_backend: triton      # or torch
             per_scale_loss:
                _target_: anemoi.training.losses.CRPS
                scalers: [pressure_level, general_variable, nan_mask_weights, node_weights, time_steps]
@@ -262,29 +258,10 @@ On-the-fly mode (builds smoothing matrices from the graph at runtime):
                no_autocast: True
                alpha: 0.95
 
-For direct control over each graph-based smoother, replace the compact
-geometric-progression settings with an explicit ``smoothers`` mapping. For an
-N320 grid, the following values provide a possible starting point and should be
-refined for the forecast grid and application:
-
-.. code:: yaml
-
-   multiscale_config:
-      # Define smoothers from finest to coarsest. The wrapper evaluates them
-      # in reverse order and appends the unsmoothed field as the final scale.
-      smoothers:
-         smooth_25km:
-            num_nearest_neighbours: 128
-            sigma: 0.0039
-         smooth_50km:
-            num_nearest_neighbours: 128
-            sigma: 0.0078
-         smooth_100km:
-            num_nearest_neighbours: 128
-            sigma: 0.0157
-
-Here, ``sigma`` is an angular distance: ``sigma * 6371 km``. It gives the
-approximate physical scale.
+Each scale is a Gaussian smoothing over the ``num_nearest_neighbours``
+nearest grid points, with its own width. ``sigma`` is in radians
+(``sigma * 6371 km`` gives the length scale) and the ``sigmas`` go from
+widest to narrowest. The values above are a starting point for N320.
 
 .. figure:: ../images/multiscale-knn-smoothers.png
    :alt: Normalized weights for the 25, 50, and 100 kilometre 128-nearest-neighbour smoothers
@@ -305,7 +282,27 @@ finest smoothing level:
    Example decomposition into the coarsest field, two differences between
    smoothing levels, and the finest residual.
 
-File-based mode (load precomputed ``.npz`` matrices from disk):
+Only the neighbour indices and the grid point positions are stored; the
+weights are computed on the fly for each ``sigma``. That is
+``4 * num_nearest_neighbours`` bytes per grid point, about 3.2 GiB for O1280
+with 128 neighbours, shared by all scales and by all multiscale losses with the
+same graph and ``num_nearest_neighbours``. File-based mode instead keeps one
+matrix per scale and loss.
+
+The Gaussian is cut off at the edge of the neighbourhood. On N320, 128
+neighbours reach about 200 km, twice the widest ``sigma`` above, where the
+weight is down to about 14%. A warning is logged if the neighbours reach less
+than twice the widest ``sigma``.
+
+``sparse_projector_backend`` is ``triton`` (default, GPU) or ``torch`` (any
+device, mainly for CPU tests).
+
+``checkpoint_scales: True`` recomputes each scale in the backward pass instead
+of keeping it, so the memory no longer grows with the number of scales, at the
+cost of extra smoothing passes. This works in both modes and helps for large
+ensembles on fine grids.
+
+File-based mode, for precomputed ``.npz`` matrices:
 
 .. code:: yaml
 
@@ -321,6 +318,7 @@ File-based mode (load precomputed ``.npz`` matrices from disk):
                   - filter_O96_w=gaussian_d=4.0x.npz
                   - filter_O96_w=gaussian_d=2.0x.npz
                   - null                                # full resolution (no smoothing)
+            sparse_projector_backend: triton           # or torch
             per_scale_loss:
                _target_: anemoi.training.losses.CRPS
                scalers: [pressure_level, general_variable, nan_mask_weights, node_weights, time_steps]
@@ -333,6 +331,10 @@ File-based mode (load precomputed ``.npz`` matrices from disk):
    The top-level ``loss_matrices_path`` and ``loss_matrices`` kwargs are
    still accepted for backward compatibility but are deprecated. Move
    them inside ``multiscale_config``.
+
+In file-based mode, ``triton`` converts each matrix into a padded table when it
+is loaded and applies it with GPU kernels; ``torch`` keeps the sparse matrix
+and uses ``torch.sparse.mm``.
 
 ****************************
  Graph Score Loss Functions
@@ -455,10 +457,8 @@ Any ensemble score supported as ``per_scale_loss`` can be used within
            _target_: anemoi.training.losses.MultiscaleLossWrapper
            weights: [1.0, 1.0, 1.0, 1.0]
            multiscale_config:
-             num_scales: 3
-             base_num_nearest_neighbours: 4
-             base_sigma: 0.1
-             scale_factor: 2
+             num_nearest_neighbours: 128
+             sigmas: [0.0157, 0.0078, 0.0039]
            per_scale_loss:
              _target_: anemoi.training.losses.EnergyScoreLoss
              fair: true
@@ -484,10 +484,8 @@ CRPS only for ``tp``:
              - _target_: anemoi.training.losses.MultiscaleLossWrapper
                weights: [1.0, 1.0, 1.0, 1.0]
                multiscale_config:
-                 num_scales: 3
-                 base_num_nearest_neighbours: 4
-                 base_sigma: 0.1
-                 scale_factor: 2
+                 num_nearest_neighbours: 128
+                 sigmas: [0.0157, 0.0078, 0.0039]
                per_scale_loss:
                  _target_: anemoi.training.losses.CRPS
                  alpha: 0.95
@@ -495,10 +493,8 @@ CRPS only for ``tp``:
              - _target_: anemoi.training.losses.MultiscaleLossWrapper
                weights: [1.0, 1.0, 1.0, 1.0]
                multiscale_config:
-                 num_scales: 3
-                 base_num_nearest_neighbours: 4
-                 base_sigma: 0.1
-                 scale_factor: 2
+                 num_nearest_neighbours: 128
+                 sigmas: [0.0157, 0.0078, 0.0039]
                per_scale_loss:
                  _target_: anemoi.training.losses.GraphEdgeCRPSLoss
                  alpha: 1.0
@@ -711,6 +707,11 @@ Gaussian-weighted nearest-neighbour weights.
            num_nearest_neighbours: 4
            sigma: 0.5
            row_normalize: false
+
+With ``sparse_projector_backend: triton`` (the default) the matrix is stored as
+a table padded to the longest row and applied with GPU kernels; the padding
+costs memory but no compute. Tables above 2**31 entries (16 GiB) are refused.
+``torch`` uses ``torch.sparse.mm`` and also runs on a CPU.
 
 Spectral kernel CRPS
 ====================

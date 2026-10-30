@@ -337,6 +337,7 @@ class BaseGraphModel(nn.Module):
         """Instantiate the per-dataset residual connection modules."""
         self.residual = torch.nn.ModuleDict()
         sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
+        sparse_projector_backend = sparse_projector_config.get("backend", "triton")
         for dataset_name, residual_config in residual_configs.items():
             assert residual_config is not None, f"Residual config for dataset '{dataset_name}' is None."
             self.residual[dataset_name] = instantiate(
@@ -347,6 +348,7 @@ class BaseGraphModel(nn.Module):
                 data_indices=self.data_indices[dataset_name],
                 dataset_name=dataset_name,
                 sparse_projector_num_chunks=sparse_projector_num_chunks,
+                sparse_projector_backend=sparse_projector_backend,
             )
 
     def _build_named_node_attributes_graph(self) -> HeteroData:

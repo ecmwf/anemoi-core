@@ -23,6 +23,7 @@ from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.projection_backend import ProjectionBackend
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
@@ -117,6 +118,8 @@ class TruncatedConnection(BaseResidualConnection):
         Whether to use automatic mixed precision for the projections.
     sparse_projector_num_chunks : int, default 1
         Number of chunks to use for sparse projection matmuls.
+    sparse_projector_backend : str, default "triton"
+        ``"triton"`` or ``"torch"``, see :class:`~anemoi.models.layers.sparse_projector.SparseProjector`.
     row_normalize : bool, optional
         Normalize projection weights per target node so each row sums to 1.
     truncation_up_file_path : str, optional
@@ -161,6 +164,7 @@ class TruncatedConnection(BaseResidualConnection):
         data_node_name: str = "data",
         autocast: bool = False,
         sparse_projector_num_chunks: int = 1,
+        sparse_projector_backend: ProjectionBackend = "triton",
         row_normalize: bool = False,
         # Deprecated: pass inside truncation_config instead.
         truncation_up_file_path: Optional[str] = None,
@@ -215,6 +219,7 @@ class TruncatedConnection(BaseResidualConnection):
             src_node_weight_attribute=src_node_weight_attribute,
             file_path=truncation_down_file_path,
             row_normalize=row_normalize,
+            backend=sparse_projector_backend,
         )
 
         self.provider_up = ProjectionGraphProvider(
@@ -224,6 +229,7 @@ class TruncatedConnection(BaseResidualConnection):
             src_node_weight_attribute=src_node_weight_attribute,
             file_path=truncation_up_file_path,
             row_normalize=row_normalize,
+            backend=sparse_projector_backend,
         )
 
         self.projector = SparseProjector(autocast=autocast, num_chunks=sparse_projector_num_chunks)
@@ -293,8 +299,8 @@ class TruncatedConnection(BaseResidualConnection):
         channel_shard_sizes = get_shard_sizes(x, -1, model_comm_group)
         if grid_shard_sizes is not None:  # grids sharding -> channel sharding
             x = all_to_all_transpose(x, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
-        x = self.projector(x, self.provider_down.get_edges(device=x.device))
-        x = self.projector(x, self.provider_up.get_edges(device=x.device))
+        x = self.projector(x, self.provider_down)
+        x = self.projector(x, self.provider_up)
         if grid_shard_sizes is not None:  # channel sharding -> grid sharding
             x = all_to_all_transpose(x, -2, grid_shard_sizes, -1, channel_shard_sizes, model_comm_group)
         x = einops.rearrange(x, "(batch ensemble) grid features -> batch ensemble grid features", batch=batch_size)
@@ -364,6 +370,14 @@ class ScalarOrnsteinConnection(BaseResidualConnection):
         Whether theta is a trainable parameter.
     regressors : list[str] | None
         Variable names to use as regressors.
+    graph : HeteroData | None
+        Unused; accepted so all residual connections share one signature.
+    statistics : dict | None
+        Dataset statistics, used to initialise theta.
+    data_indices
+        Data indices of the dataset. Required.
+    dataset_name : str | None
+        Name of the dataset.
     """
 
     def __init__(
@@ -454,6 +468,14 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
         ``truncate=True``).
     anti_aliasing : bool
         If True (and ``truncate=True``), use anti-aliasing blending in the filter.
+    graph : HeteroData | None
+        Graph with the data nodes; the grid shape is read from it.
+    statistics : dict | None
+        Dataset statistics, used to initialise theta.
+    data_indices
+        Data indices of the dataset. Required.
+    dataset_name : str | None
+        Name of the dataset.
     """
 
     def __init__(
