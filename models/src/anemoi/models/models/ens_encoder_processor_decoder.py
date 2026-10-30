@@ -36,6 +36,13 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     """Message passing graph neural network with ensemble functionality."""
 
+    # ``forward`` and ``_calculate_input_dim`` are overridden, which would otherwise make
+    # ``AnemoiModelEncProcDec.__init_subclass__`` clear these flags. The forward honours
+    # ``skip_input``, and the input width builds on ``super()._calculate_input_dim`` while the
+    # parent ``_assemble_input`` embeds the categorical columns, so opt back in explicitly.
+    supports_skip_input: bool = True
+    supports_categorical_embeddings: bool = True
+
     def __init__(
         self,
         *,
@@ -129,6 +136,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         *,
         fcstep: int = 0,
         model_comm_group: Optional[ProcessGroup] = None,
+        skip_input: Batch | None = None,
         **_kwargs,
     ) -> Batch:
         """Forward pass of the ensemble model.
@@ -146,6 +154,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             Forecast step to condition on, clamped to `min(1, fcstep)`.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group.
+        skip_input : Batch | None, optional
+            Per-dataset source of the additive skip connection, in place of ``batch``. Must
+            match ``batch`` in shape. The encoder still sees ``batch``.
 
         Returns
         -------
@@ -199,6 +210,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                     hidden_batch_sizes=hidden_batch_sizes,
                     shard_sizes_hidden=shard_sizes_hidden,
                     model_comm_group=model_comm_group,
+                    skip_input=self._dataset_skip_input(skip_input, batch, dataset_name),
                 )
                 source = self._condition_source(source, fcstep)
                 x_skip_dict[dataset_name] = source.x_skip

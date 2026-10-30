@@ -30,6 +30,7 @@ from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.bounding import build_boundings
+from anemoi.models.layers.categorical import build_categorical_embeddings
 from anemoi.models.layers.graph import NodeTrainableParameters
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
@@ -152,6 +153,16 @@ def load_existing_graph(
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
+    # Whether ``forward`` honours a ``skip_input`` batch as the source of the additive
+    # skip connection. ``forward`` swallows unknown kwargs, so callers check this rather
+    # than passing the batch into a model that ignores it.
+    supports_skip_input: bool = False
+
+    # Whether ``_assemble_input`` replaces ``model.categorical_embeddings`` columns with
+    # their embeddings. Models that build the encoder input differently must not silently
+    # feed raw codes, so they refuse the key instead.
+    supports_categorical_embeddings: bool = False
+
     def __init__(
         self,
         *,
@@ -225,6 +236,7 @@ class BaseGraphModel(nn.Module):
         self._build_encoder_routing(model_config.encoders)
         self._build_decoder_routing(model_config.decoders)
 
+        self._build_categorical_embeddings(model_config.get("categorical_embeddings"), data_indices)
         self._calculate_shapes_and_indices(data_indices)
 
         self._assert_model_routing()
@@ -370,12 +382,99 @@ class BaseGraphModel(nn.Module):
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
+        # Each embedded categorical variable swaps its one raw-code channel for embedding_dim channels.
+        # getattr: models built without __init__ (unpickled, or bare test stubs) lack the attribute.
+        extra_channels = getattr(self, "_categorical_extra_channels", {}).get(dataset_name, 0)
+        num_channels = self.num_input_channels[dataset_name] + extra_channels
         return (
-            time_steps_per_node(self, dataset_name, self.n_step_input) * self.num_input_channels[dataset_name]
+            time_steps_per_node(self, dataset_name, self.n_step_input) * num_channels
             + COORDS_DIM
             + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
             + self.dynamic_node_attribute_dims.get(dataset_name, 0)
         )
+
+    def _build_categorical_embeddings(self, config: DotDict | None, data_indices: dict) -> None:
+        """Build per-dataset embeddings for ``model.categorical_embeddings``.
+
+        Records, per dataset, the model-input positions of the categorical variables (in
+        config order) and of the remaining continuous variables.
+
+        Parameters
+        ----------
+        config : DotDict | None
+            ``{dataset: {variable: {codes, embedding_dim, unknown_prob}}}``, or ``None``.
+        data_indices : dict
+            Data indices per dataset.
+        """
+        self.categorical_embeddings = nn.ModuleDict()
+        self._categorical_extra_channels = {}
+        if not config:
+            return
+        if not self.supports_categorical_embeddings:
+            msg = f"model.categorical_embeddings is not supported by {type(self).__name__}."
+            raise NotImplementedError(msg)
+
+        for dataset_name, specs in config.items():
+            if dataset_name not in data_indices:
+                msg = (
+                    f"model.categorical_embeddings: unknown dataset '{dataset_name}', "
+                    f"expected one of {list(data_indices)}."
+                )
+                raise ValueError(msg)
+            if not specs:
+                continue
+            name_to_index = data_indices[dataset_name].model.input.name_to_index
+            missing = [name for name in specs if name not in name_to_index]
+            if missing:
+                msg = f"model.categorical_embeddings: {missing} are not model inputs of dataset '{dataset_name}'."
+                raise ValueError(msg)
+
+            embeddings = build_categorical_embeddings(specs)
+            categorical_idx = [name_to_index[name] for name in embeddings]
+            continuous_idx = [i for i in range(len(name_to_index)) if i not in set(categorical_idx)]
+            self.register_buffer(
+                f"_categorical_idx_{dataset_name}", torch.tensor(categorical_idx, dtype=torch.long), persistent=False
+            )
+            self.register_buffer(
+                f"_continuous_idx_{dataset_name}", torch.tensor(continuous_idx, dtype=torch.long), persistent=False
+            )
+            self.categorical_embeddings[dataset_name] = embeddings
+            self._categorical_extra_channels[dataset_name] = sum(e.embedding_dim - 1 for e in embeddings.values())
+            LOGGER.info(
+                "Dataset '%s': embedding categorical inputs %s",
+                dataset_name,
+                {name: (e.num_codes, e.embedding_dim, e.unknown_prob) for name, e in embeddings.items()},
+            )
+
+    def _embed_categorical_inputs(self, x: Tensor, dataset_name: str) -> Tensor:
+        """Replace the categorical columns of flat encoder rows with their embeddings.
+
+        Parameters
+        ----------
+        x : Tensor
+            Flat rows ``(nodes, time variables)``, as produced by ``Source.flatten``.
+        dataset_name : str
+            Dataset the rows belong to.
+
+        Returns
+        -------
+        Tensor
+            Rows ``(nodes, time features)``: per time step, the continuous columns in
+            model-input order, then each embedding in config order. Lookups run on the
+            float32 input, before any autocast Linear.
+        """
+        # getattr: models pickled before categorical embeddings existed lack the attribute.
+        embeddings = getattr(self, "categorical_embeddings", {})
+        if dataset_name not in embeddings:
+            return x
+        steps = time_steps_per_node(self, dataset_name, self.n_step_input)
+        x = x.reshape(x.shape[0], steps, -1)
+        categorical_idx = getattr(self, f"_categorical_idx_{dataset_name}")
+        continuous_idx = getattr(self, f"_continuous_idx_{dataset_name}")
+        parts = [x.index_select(-1, continuous_idx)]
+        for i, embedding in enumerate(embeddings[dataset_name].values()):
+            parts.append(embedding(x[..., categorical_idx[i]]).to(dtype=x.dtype))
+        return torch.cat(parts, dim=-1).reshape(x.shape[0], -1)
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""

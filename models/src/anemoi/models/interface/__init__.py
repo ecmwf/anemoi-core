@@ -18,6 +18,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sample import create_batched_struct
 from anemoi.models.data.sources import TabularSource
+from anemoi.models.layers.categorical import check_categorical_preprocessing
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -143,6 +144,8 @@ class AnemoiModelInterface(torch.nn.Module):
             n_step_output=self.n_step_output,
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
+        for dataset_name, embeddings in getattr(self.model, "categorical_embeddings", {}).items():
+            check_categorical_preprocessing(dataset_name, list(embeddings), self.pre_processors[dataset_name])
         # The model builds the graph from the graph config; spatial projectors read their edges from it.
         self.graph_data = self.model._graph_data
 

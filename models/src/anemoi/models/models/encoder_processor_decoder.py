@@ -147,6 +147,28 @@ def _edges_or_none(graph: HeteroData, edge_type: tuple[str, str, str]) -> EdgeSt
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
+    supports_skip_input: bool = True
+    supports_categorical_embeddings: bool = True
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        """Default subclasses that override ``forward`` to not supporting ``skip_input``.
+
+        ``forward`` threads ``skip_input`` to ``_assemble_input``; a subclass that replaces it
+        drops the batch via ``**kwargs`` unless it threads it too. Inheriting the parent's
+        ``True`` would advertise support that is not there. A subclass that does honour
+        ``skip_input`` opts back in by setting ``supports_skip_input = True`` in its own body.
+        The same holds for categorical embeddings, for a subclass that rebuilds the encoder
+        input or its width.
+        """
+        super().__init_subclass__(**kwargs)
+        if "supports_skip_input" not in cls.__dict__ and cls.forward is not AnemoiModelEncProcDec.forward:
+            cls.supports_skip_input = False
+        if "supports_categorical_embeddings" not in cls.__dict__ and (
+            cls._assemble_input is not AnemoiModelEncProcDec._assemble_input
+            or cls._calculate_input_dim is not BaseGraphModel._calculate_input_dim
+        ):
+            cls.supports_categorical_embeddings = False
+
     def _configure_dynamic_node_attributes(self, dynamic_node_config: DotDict) -> None:
         """Instantiate runtime timedelta encoders for dynamic dataset nodes."""
         timedelta_target = "anemoi.graphs.nodes.attributes.Timedeltas"
@@ -360,6 +382,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         batch_size: int,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
+        skip_input: "Source | None" = None,
     ) -> tuple[torch.Tensor, torch.Tensor, "Source", ShardSizes, tuple[int, ...] | None, torch.Tensor | None]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
@@ -368,8 +391,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         batch_sizes = gathered_batch_sizes(x_flat.batch_sizes, grid_shard_sizes)
 
         if dataset_name in self.residual:
+            # The encoder always sees ``x``. ``skip_input``, when given, replaces it as the
+            # source of the additive skip connection only.
             x_skip = self.residual[dataset_name](
-                x.data,
+                x.data if skip_input is None else skip_input.data,
                 grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
                 n_step_output=self.n_step_output[dataset_name],
@@ -377,7 +402,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         else:
             x_skip = None
 
-        inputs = [x_flat.data, latlons_to_sincos(x_flat.coordinates)]
+        # After the residual, which reads the raw columns: swap raw categorical codes for embeddings.
+        inputs = [self._embed_categorical_inputs(x_flat.data, dataset_name), latlons_to_sincos(x_flat.coordinates)]
         dynamic_node_attributes = self._encode_dynamic_node_attributes(dataset_name, x_flat)
         if dynamic_node_attributes is not None:
             inputs.append(dynamic_node_attributes.to(device=x_flat.data.device, dtype=x_flat.data.dtype))
@@ -558,17 +584,20 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         hidden_batch_sizes: tuple[int, ...],
         shard_sizes_hidden: ShardSizes,
         model_comm_group: ProcessGroup | None = None,
+        skip_input: "Source | None" = None,
     ) -> EncoderSource:
         """Assemble one source dataset and its encoder edges.
 
         A dataset without nodes in this batch is still returned, with zero rows and zero edges, so
         that the encoder still runs and contributes a latent (see ``_encoder_source_from_rows``).
+        ``skip_input`` replaces ``x`` as the source of the residual connection.
         """
         assembled = self._assemble_input(
             x,
             batch_size=batch_size,
             model_comm_group=model_comm_group,
             dataset_name=dataset_name,
+            **({} if skip_input is None else {"skip_input": skip_input}),
         )
         return self._encoder_source_from_rows(
             dataset_name,
@@ -708,6 +737,24 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             **(mapper_kwargs or {}),
         )
 
+    def _dataset_skip_input(self, skip_input: Batch | None, batch: Batch, dataset_name: str) -> "Source | None":
+        """Return the residual base of one dataset, checked against its input.
+
+        Indexed strictly for a dataset with a residual: a missing key means the caller believes
+        it supplied a residual base and did not, and silently falling back to the input would
+        restore the very tensor the override exists to replace.
+        """
+        if skip_input is None or dataset_name not in self.residual:
+            return None
+        source = skip_input[dataset_name]
+        expected = batch[dataset_name].data.shape
+        if source.data.shape != expected:
+            msg = (
+                f"skip_input[{dataset_name!r}] shape {tuple(source.data.shape)} must match the input {tuple(expected)}."
+            )
+            raise ValueError(msg)
+        return source
+
     def _encode_sources(
         self,
         encoder_name: str,
@@ -755,6 +802,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         target_template: dict[str, "BaseTemplate"],
         *,
         model_comm_group: Optional[ProcessGroup] = None,
+        skip_input: Batch | None = None,
         **kwargs,
     ) -> Batch:
         """Forward pass of the model.
@@ -773,6 +821,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             What to predict per decoded dataset: the output variables and target nodes.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None.
+        skip_input : Batch | None, optional
+            Per-dataset sources, shaped like ``batch``, replacing it as the source of the
+            additive skip connection. The encoder still sees ``batch``, so this decouples
+            what informs the prediction from what is added back to it. Already normalised
+            and sharded like ``batch``. ``None`` (the default) leaves the residual reading
+            ``batch``.
         **kwargs
             Additional keyword arguments forwarded to the mappers and processor.
 
@@ -834,6 +888,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                     hidden_batch_sizes=hidden_batch_sizes,
                     shard_sizes_hidden=shard_sizes_hidden,
                     model_comm_group=model_comm_group,
+                    skip_input=self._dataset_skip_input(skip_input, batch, dataset_name),
                 )
                 x_skip_dict[dataset_name] = source.x_skip
                 sources.append(source)

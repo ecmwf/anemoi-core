@@ -208,6 +208,23 @@ class DecodersSchema(BaseModel):
     )
 
 
+class CategoricalEmbeddingSchema(BaseModel):
+    codes: list[int] = Field(min_length=1)
+    "Known codes. List order defines the embedding rows: append new codes, never reorder."
+    embedding_dim: PositiveInt = 8
+    "Width of each embedding vector."
+    unknown_prob: float = Field(default=0.0, ge=0.0, lt=1.0)
+    "Training-only probability of replacing a known code with UNKNOWN, per sample and code."
+
+    @model_validator(mode="after")
+    def check_codes(self) -> CategoricalEmbeddingSchema:
+        # Lazy import keeps the schemas importable without torch.
+        from anemoi.models.layers.categorical import validate_codes
+
+        validate_codes(self.codes)
+        return self
+
+
 class BaseModelSchema(PydanticBaseModel):
     keep_batch_sharded: bool = Field(default=True)
     "Keep the input batch and the output of the model sharded"
@@ -224,6 +241,8 @@ class BaseModelSchema(PydanticBaseModel):
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
+    categorical_embeddings: Optional[dict[str, dict[str, CategoricalEmbeddingSchema]]] = None
+    "Learned embeddings for integer-coded inputs, keyed by dataset then variable. Variables need the `none` normaliser."
     latent_aggregator: AggregatorSchema
     "Latent aggregator schema."
     latent_aggregator: AggregatorSchema
