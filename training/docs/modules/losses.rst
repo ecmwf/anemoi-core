@@ -75,13 +75,17 @@ The following probabilistic loss functions are available by default:
      stable all-pairs formulation.
 -  ``EnergyScoreLoss``: Energy score with a configurable joint outcome.
    Set ``norm_over`` to ``spatial`` for one spatial score per variable,
-   ``variables`` for one joint variable score per grid node, or
-   ``spatial_and_variables`` for one score over the complete field.
+   ``variables`` for one joint variable score per grid node,
+   ``spatial_and_variables`` for one score over the complete field,
+   ``time`` for one score over the output steps per grid node and variable,
+   or ``time_and_variables`` for one joint score over output steps and
+   variables per grid node.
    Scalers on dimensions included in ``norm_over`` define the weighted norm
    ``sqrt(sum(weight * difference**2))``. Other scalers multiply the completed
    score directly, so the same scaler can have a different effective strength
-   when ``norm_over`` changes. In ``variables`` mode, node weights are applied
-   after the norm and should normally sum to one, as for pointwise losses.
+   when ``norm_over`` changes. In ``variables``, ``time`` and
+   ``time_and_variables`` modes, node weights are applied after the norm and
+   should normally sum to one, as for pointwise losses.
 -  ``WeightedMSELoss``: MSE with noise-level weights for EDM diffusion
    transport models.
 

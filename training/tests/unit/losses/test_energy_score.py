@@ -15,6 +15,7 @@ from pytest_mock import MockerFixture
 from torch.autograd import gradcheck
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.losses import CRPS
 from anemoi.training.losses import EnergyScoreLoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.energy_score import EnergyScoreNorm
@@ -88,18 +89,21 @@ def _energy_score_reference(
         "spatial": (-2,),
         "variables": (-1,),
         "spatial_and_variables": (-2, -1),
+        "time": (1,),
+        "time_and_variables": (1, -1),
     }[norm_over]
 
-    observation_term = torch.linalg.vector_norm(
-        weighted_pred - weighted_target,
-        dim=norm_dimensions,
-    ).mean(dim=2)
+    def norm(values: torch.Tensor) -> torch.Tensor:
+        # Keep the time dimension so that dimension 2 stays the ensemble.
+        result = torch.linalg.vector_norm(values, dim=norm_dimensions, keepdim=True)
+        return result.squeeze(tuple(dim for dim in norm_dimensions if dim != 1))
+
+    observation_term = norm(weighted_pred - weighted_target).mean(dim=2)
     ensemble_size = pred.shape[2]
     pair_distance_sum = torch.zeros_like(observation_term)
     for member in range(ensemble_size - 1):
-        pair_distance_sum += torch.linalg.vector_norm(
+        pair_distance_sum += norm(
             weighted_pred[:, :, member].unsqueeze(2) - weighted_pred[:, :, member + 1 :],
-            dim=norm_dimensions,
         ).sum(dim=2)
 
     pair_coefficient = 1.0 / (ensemble_size * (ensemble_size - 1)) if fair else 1.0 / (ensemble_size**2)
@@ -107,7 +111,7 @@ def _energy_score_reference(
 
 
 @pytest.mark.parametrize("fair", [True, False])
-@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables"])
+@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables", "time", "time_and_variables"])
 def test_energy_score_matches_reference(
     score_inputs: tuple[torch.Tensor, torch.Tensor],
     fair: bool,
@@ -123,14 +127,50 @@ def test_energy_score_matches_reference(
         fair=fair,
         norm_over=norm_over,
     )
-    if norm_over == "spatial":
+    if norm_over in ("spatial", "spatial_and_variables"):
         expected = expected.sum(dim=1).mean(dim=0)
-    elif norm_over == "variables":
-        expected = expected.sum(dim=(1, 2)).mean(dim=0)
     else:
-        expected = expected.sum(dim=1).mean(dim=0)
-    if norm_over != "spatial":
+        expected = expected.sum(dim=(1, 2)).mean(dim=0)
+    if norm_over in ("variables", "spatial_and_variables", "time_and_variables"):
         expected = expected.expand(pred.shape[-1])
+
+    torch.testing.assert_close(actual, expected)
+
+
+@pytest.mark.parametrize("fair", [True, False])
+def test_time_energy_score_with_one_step_is_crps(
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+    fair: bool,
+) -> None:
+    pred, target = score_inputs
+    pred, target = pred[:, :1], target[:, :1]
+    loss = EnergyScoreLoss(fair=fair, norm_over="time")
+    crps = CRPS(alpha=1.0 if fair else 0.0)
+
+    torch.testing.assert_close(loss(pred, target, squash=False), crps(pred, target, squash=False))
+
+
+def test_time_energy_score_applies_lead_time_weights_in_the_norm(
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+) -> None:
+    pred, target = score_inputs
+    time_weights = torch.tensor([0.4, 0.6], dtype=pred.dtype)
+    grid_weights = torch.tensor([0.2, 0.3, 0.5], dtype=pred.dtype)
+    variable_weights = torch.tensor([0.25, 0.75], dtype=pred.dtype)
+    loss = EnergyScoreLoss(norm_over="time")
+    loss.add_scaler(TensorDim.TIME, time_weights, name="time")
+    loss.add_scaler(TensorDim.GRID, grid_weights, name="grid")
+    loss.add_scaler(TensorDim.VARIABLE, variable_weights, name="variable")
+
+    actual = loss(pred, target, squash=False)
+    expected = _energy_score_reference(
+        pred,
+        target,
+        fair=True,
+        norm_over="time",
+        weights=time_weights.reshape(1, 2, 1, 1, 1).expand_as(target),
+    )
+    expected = (expected * grid_weights.reshape(1, 1, 3, 1)).sum(dim=(1, 2)).mean(dim=0) * variable_weights
 
     torch.testing.assert_close(actual, expected)
 
@@ -155,7 +195,7 @@ def test_spatial_energy_score_follows_standard_reduction(
     torch.testing.assert_close(summed, per_variable.sum())
 
 
-@pytest.mark.parametrize("norm_over", ["variables", "spatial_and_variables"])
+@pytest.mark.parametrize("norm_over", ["variables", "spatial_and_variables", "time_and_variables"])
 def test_variable_joint_energy_score_repeats_diagnostic_value(
     score_inputs: tuple[torch.Tensor, torch.Tensor],
     norm_over: EnergyScoreNorm,
@@ -174,7 +214,7 @@ def test_variable_joint_energy_score_repeats_diagnostic_value(
         loss(pred, target, squash_mode="sum")
 
 
-@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables"])
+@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables", "time_and_variables"])
 def test_energy_score_applies_weights_in_the_norm(
     score_inputs: tuple[torch.Tensor, torch.Tensor],
     norm_over: EnergyScoreNorm,
@@ -237,6 +277,8 @@ def test_energy_score_applies_weights_in_the_norm(
         ("variables", TensorDim.VARIABLE, -1, torch.tensor([0.25, 0.75], dtype=torch.float64)),
         ("spatial_and_variables", TensorDim.GRID, -2, torch.tensor([0.2, 0.3, 0.5], dtype=torch.float64)),
         ("spatial_and_variables", TensorDim.VARIABLE, -1, torch.tensor([0.25, 0.75], dtype=torch.float64)),
+        ("time", TensorDim.TIME, -4, torch.tensor([0.4, 0.6], dtype=torch.float64)),
+        ("time_and_variables", TensorDim.TIME, -4, torch.tensor([0.4, 0.6], dtype=torch.float64)),
     ],
 )
 def test_energy_score_resolves_negative_norm_dimensions(
@@ -265,6 +307,7 @@ def test_energy_score_resolves_negative_norm_dimensions(
         ("variables", -1, torch.tensor([-0.25, 0.75])),
         ("spatial_and_variables", -2, torch.tensor([-0.2, 0.3, 0.5])),
         ("spatial_and_variables", -1, torch.tensor([-0.25, 0.75])),
+        ("time", -4, torch.tensor([-0.4, 0.6])),
     ],
 )
 def test_energy_score_validates_negative_norm_dimensions(
@@ -297,7 +340,7 @@ def test_energy_score_requires_finite_real_norm_weights(weights: torch.Tensor) -
         loss.add_scaler(TensorDim.GRID, weights)
 
 
-@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables"])
+@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables", "time", "time_and_variables"])
 def test_energy_score_has_finite_gradients_at_zero(norm_over: EnergyScoreNorm) -> None:
     pred = torch.zeros(1, 1, 3, 3, 2, dtype=torch.float64, requires_grad=True)
     target = torch.zeros(1, 1, 1, 3, 2, dtype=torch.float64)
@@ -311,7 +354,7 @@ def test_energy_score_has_finite_gradients_at_zero(norm_over: EnergyScoreNorm) -
     assert torch.isfinite(pred.grad).all()
 
 
-@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables"])
+@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables", "time", "time_and_variables"])
 def test_energy_score_has_finite_gradients_for_large_values(norm_over: EnergyScoreNorm) -> None:
     pred = torch.tensor(
         [[[[[1.0e20, -1.0e20], [-1.0e20, 0.5e20]], [[1.5e20, 0.25e20], [-0.5e20, 1.0e20]]]]],
@@ -332,7 +375,7 @@ def test_energy_score_has_finite_gradients_for_large_values(norm_over: EnergySco
     assert torch.isfinite(pred.grad).all()
 
 
-@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables"])
+@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables", "time", "time_and_variables"])
 def test_energy_score_ignores_missing_features_with_finite_gradients(norm_over: EnergyScoreNorm) -> None:
     pred = torch.tensor(
         [[[[[0.0, 1.0], [1.0, 2.0]], [[2.0, 0.0], [3.0, 1.0]], [[1.0, 3.0], [2.0, 4.0]]]]],
@@ -351,7 +394,7 @@ def test_energy_score_ignores_missing_features_with_finite_gradients(norm_over: 
     assert torch.isfinite(pred.grad).all()
 
 
-@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables"])
+@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables", "time", "time_and_variables"])
 def test_energy_score_gradcheck(norm_over: EnergyScoreNorm) -> None:
     pred = torch.tensor(
         [[[[[0.1, 1.3], [0.5, 2.1]], [[2.2, -0.7], [1.4, 0.2]], [[1.1, 0.4], [-0.3, 1.7]]]]],
@@ -364,7 +407,7 @@ def test_energy_score_gradcheck(norm_over: EnergyScoreNorm) -> None:
     assert gradcheck(lambda value: loss(value, target), (pred,), eps=1e-6, atol=1e-4, rtol=1e-4)
 
 
-@pytest.mark.parametrize("norm_over", ["variables", "spatial_and_variables"])
+@pytest.mark.parametrize("norm_over", ["variables", "spatial_and_variables", "time_and_variables"])
 def test_filtered_variable_joint_energy_score_maps_repeated_value(norm_over: EnergyScoreNorm) -> None:
     data_indices = IndexCollection(
         DictConfig({"forcing": [], "diagnostic": [], "target": []}),
@@ -435,7 +478,7 @@ def test_energy_score_schemas_accept_direct_nested_and_combined_configs() -> Non
     assert combined.losses[0].target_ == "anemoi.training.losses.EnergyScoreLoss"
 
 
-@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables"])
+@pytest.mark.parametrize("norm_over", ["spatial", "variables", "spatial_and_variables", "time", "time_and_variables"])
 def test_energy_score_uses_mode_specific_sharding_contract(
     score_inputs: tuple[torch.Tensor, torch.Tensor],
     norm_over: EnergyScoreNorm,
@@ -479,7 +522,7 @@ def test_energy_score_uses_mode_specific_sharding_contract(
     assert all_to_all.call_count == (3 if norm_over == "spatial" else 0)
     assert gather.call_count == (1 if norm_over == "spatial" else 0)
     assert norm_reduce.call_count == (3 if norm_over == "spatial_and_variables" else 0)
-    assert final_reduce.call_count == (1 if norm_over == "variables" else 0)
+    assert final_reduce.call_count == (1 if norm_over in ("variables", "time", "time_and_variables") else 0)
     assert maximum.call_count == (3 if norm_over == "spatial_and_variables" else 0)
     assert loss.needs_shard_layout_info is (norm_over == "spatial")
 
