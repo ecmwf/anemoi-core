@@ -272,7 +272,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     logfft2d = "anemoi.training.losses.LogFFT2Distance"
     spectral_crps = "anemoi.training.losses.SpectralCRPSLoss"
     power_spectrum = "anemoi.training.losses.PowerSpectrumLoss"
-    spectral_band_score = "anemoi.training.losses.SpectralAMSELoss"
+    spectral_amse = "anemoi.training.losses.SpectralAMSELoss"
     dtcwt_2d = "anemoi.training.losses.DTCWT2DLoss"
 
 
