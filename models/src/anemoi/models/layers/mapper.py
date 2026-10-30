@@ -12,7 +12,6 @@ import logging
 import os
 from abc import ABC
 from abc import abstractmethod
-from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Optional
 
@@ -39,6 +38,7 @@ from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
+from anemoi.models.layers.graph_provider import BaseGraphProvider
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
@@ -51,9 +51,6 @@ LOGGER = logging.getLogger(__name__)
 # Number of chunks used in inference (https://github.com/ecmwf/anemoi-core/pull/406)
 NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
 NUM_CHUNKS_INFERENCE_MAPPER = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER", NUM_CHUNKS_INFERENCE))
-
-# Maximum number of graph topologies that each mapper keeps in its cache. Set to 0 to disable the cache.
-MAPPER_GRAPH_CACHE_SIZE = int(os.environ.get("ANEMOI_MAPPER_GRAPH_CACHE_SIZE", "8"))
 
 
 @dataclass(frozen=True)
@@ -129,6 +126,7 @@ class BaseMapper(nn.Module, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
+        graph_provider: Optional[BaseGraphProvider] = None,
         **kwargs,
     ) -> Tensor | PairTensor:
         """Forward pass of the mapper.
@@ -155,6 +153,10 @@ class BaseMapper(nn.Module, ABC):
             Edges from graph providers already are. Pass False for custom full-graph
             edges that are not ordered this way. If edges are already sharded, each rank
             is expected to already have the right edges for its local destination nodes.
+        graph_provider : BaseGraphProvider, optional
+            The provider of the edges. If given, the mapper asks it to keep the graph
+            partition (only a static graph keeps it). If None, the mapper builds the
+            graph partition on each call.
         **kwargs : dict
             Additional keyword arguments passed to the mapper implementation.
 
@@ -266,7 +268,6 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         self.emb_nodes_dst = Linear(self.in_channels_dst, self.hidden_dim)
 
         self.shard_strategy = shard_strategy
-        self._graph_plan_cache: OrderedDict[tuple, MapperGraphPlan] = OrderedDict()
 
         assert shard_strategy in ["heads", "edges"], (
             f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
@@ -281,21 +282,30 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         batch_size: int,
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
-        use_cache: bool = True,
+        graph_provider: Optional[BaseGraphProvider] = None,
     ) -> MapperGraphPlan:
-        """Return the graph plan for this graph from the cache, or build it.
+        """Return the graph plan for this graph from the graph provider, or build it.
 
-        The cache key contains only the tensor sizes and the shard sizes, so the
-        mapper graph and its edge order must not change between calls with the same
-        sizes. The cache keeps the most recently used ``MAPPER_GRAPH_CACHE_SIZE`` plans.
-        If use_cache is False, the plan is built and not kept.
+        The graph provider decides if it keeps the plan (see
+        ``BaseGraphProvider.cached_topology``). A static graph keeps the most recent plan
+        and returns it again while the key does not change. The key contains only the
+        sizes, thus the graph topology and its edge order must not change between calls.
+        If graph_provider is None, the plan is built and not kept.
 
         This function is not compiled, thus torch.compile does not make guards on
-        the cache contents.
+        the kept plan.
         """
         is_distributed = model_is_distributed(model_comm_group)
         num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
-        cache_key = (
+
+        def build_fn() -> MapperGraphPlan:
+            return self._build_graph_plan(x, shard_info, edge_index, num_chunks, model_comm_group)
+
+        if graph_provider is None:
+            return build_fn()
+
+        key = (
+            self.__class__.__name__,
             model_comm_group.size() if is_distributed else 1,
             torch.distributed.get_rank(group=model_comm_group) if is_distributed else 0,
             batch_size,
@@ -303,22 +313,26 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             str(edge_index.device),
             x[0].shape[0],
             x[1].shape[0],
-            edge_index.shape[1],
             tuple(shard_info.src_nodes) if shard_info.src_is_sharded() else None,
             tuple(shard_info.dst_nodes) if shard_info.dst_is_sharded() else None,
             tuple(shard_info.edges) if shard_info.edges_are_sharded() else None,
         )
+        return graph_provider.cached_topology(key, build_fn)
 
-        plan = self._graph_plan_cache.get(cache_key) if use_cache else None
-        if plan is not None:
-            self._graph_plan_cache.move_to_end(cache_key)
-            return plan
-
-        LOGGER.debug("Building graph plan for %s with key %s", self.__class__.__name__, cache_key)
+    def _build_graph_plan(
+        self,
+        x: PairTensor,
+        shard_info: BipartiteGraphShardInfo,
+        edge_index: Adj,
+        num_chunks: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> MapperGraphPlan:
+        """Build the graph plan (shard and chunk partitions) for this graph."""
+        LOGGER.debug("Building graph plan for %s", self.__class__.__name__)
 
         local_graph = None
         num_nodes = (x[0].shape[0], x[1].shape[0])
-        if is_distributed:
+        if model_is_distributed(model_comm_group):
             # build a GraphPartition for the distributed shard (across GPUs)
             shard_partition = build_graph_partition_from_shard_info(edge_index, x, shard_info, model_comm_group)
             local_graph = build_local_graph(shard_partition, edge_index, shard_info, model_comm_group)
@@ -332,18 +346,11 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             chunk_partition.materialise_topology(chunk_id, edge_index) for chunk_id in range(chunk_partition.num_parts)
         )
 
-        plan = MapperGraphPlan(
+        return MapperGraphPlan(
             local_graph=local_graph,
             chunk_partition=chunk_partition,
             chunk_topologies=chunk_topologies,
         )
-
-        if use_cache and MAPPER_GRAPH_CACHE_SIZE > 0:
-            self._graph_plan_cache[cache_key] = plan
-            while len(self._graph_plan_cache) > MAPPER_GRAPH_CACHE_SIZE:
-                self._graph_plan_cache.popitem(last=False)
-
-        return plan
 
     def prepare_edge_sharding_wrapper(
         self,
@@ -355,6 +362,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[tuple[Tensor, Tensor]] = None,
         edges_are_dst_sorted: bool = True,
+        graph_provider: Optional[BaseGraphProvider] = None,
     ):
         x_dst = x[1]
         num_dst = sum(shard_info.dst_nodes) if shard_info.dst_is_sharded() else x_dst.size(0)
@@ -367,10 +375,8 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             edges_are_dst_sorted=edges_are_dst_sorted,
         )
 
-        # Edges given in a different order with the same sizes would hit a cached plan with
-        # the wrong edge order, so only edges that are already dst-sorted use the cache.
         plan = self._get_or_build_graph_plan(
-            x, shard_info, batch_size, edge_index, model_comm_group, use_cache=edges_are_dst_sorted
+            x, shard_info, batch_size, edge_index, model_comm_group, graph_provider=graph_provider
         )
 
         if plan.local_graph is not None:
@@ -433,6 +439,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         keep_x_dst_sharded: bool = False,
         cond: Optional[tuple[Tensor, Tensor]] = None,
         edges_are_dst_sorted: bool = True,
+        graph_provider: Optional[BaseGraphProvider] = None,
         **kwargs,
     ) -> PairTensor:
         x_src, x_dst, edge_attr, shard_info, cond, plan = maybe_checkpoint(
@@ -446,6 +453,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             model_comm_group,
             cond,
             edges_are_dst_sorted,
+            graph_provider,
         )
 
         out_channels = self.out_channels_dst if self.out_channels_dst is not None else self.hidden_dim
@@ -541,6 +549,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
+        graph_provider: Optional[BaseGraphProvider] = None,
         **kwargs,
     ) -> PairTensor:
 
@@ -557,7 +566,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         }
 
         if self.shard_strategy == "edges":
-            return self.mapper_forward_with_edge_sharding(**kwargs_forward)
+            return self.mapper_forward_with_edge_sharding(**kwargs_forward, graph_provider=graph_provider)
         else:  # self.shard_strategy == "heads"
             return maybe_checkpoint(
                 self.mapper_forward_with_heads_sharding,
@@ -941,6 +950,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
+        graph_provider: Optional[BaseGraphProvider] = None,
         **kwargs,
     ) -> PairTensor:
         return maybe_checkpoint(
@@ -1239,6 +1249,7 @@ class PointWiseMapper(BaseMapper, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
+        graph_provider: Optional[BaseGraphProvider] = None,
         **kwargs,
     ) -> PairTensor:
         return maybe_checkpoint(
@@ -1501,6 +1512,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
+        graph_provider: Optional[BaseGraphProvider] = None,
         **kwargs,
     ) -> PairTensor:
         return maybe_checkpoint(

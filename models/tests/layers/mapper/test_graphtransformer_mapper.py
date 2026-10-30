@@ -21,6 +21,7 @@ from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
 from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.models.layers.mapper import GraphTransformerForwardMapper
+from anemoi.models.layers.mapper import MapperGraphPlan
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
@@ -238,56 +239,47 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         assert torch.allclose(x_src_sorted, x_src_unsorted, atol=1e-4)
         assert torch.allclose(x_dst_sorted, x_dst_unsorted, atol=1e-4)
 
-    def test_graph_plan_is_cached(self, mapper, pair_tensor, graph_provider):
-        x = pair_tensor
-        batch_size = 1
+    def _forward_inputs(self, pair_tensor, graph_provider):
         shard_info = BipartiteGraphShardInfo(
             src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
         )
-        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=1)
+        return pair_tensor, 1, shard_info, edge_attr, edge_index
+
+    def test_graph_plan_is_kept_by_static_graph_provider(self, mapper, pair_tensor, graph_provider):
+        inputs = self._forward_inputs(pair_tensor, graph_provider)
 
         with torch.no_grad():
-            out_first = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
-            assert len(mapper._graph_plan_cache) == 1
-            plan = next(iter(mapper._graph_plan_cache.values()))
+            out_first = mapper.forward(*inputs, graph_provider=graph_provider)
+            plan = graph_provider._topology_data
+            assert isinstance(plan, MapperGraphPlan)
 
-            out_second = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
-            assert len(mapper._graph_plan_cache) == 1
-            assert next(iter(mapper._graph_plan_cache.values())) is plan
+            out_second = mapper.forward(*inputs, graph_provider=graph_provider)
+            assert graph_provider._topology_data is plan
 
         assert torch.allclose(out_first[1], out_second[1], atol=1e-4)
 
-    def test_graph_plan_cache_is_bounded(self, mapper, pair_tensor, graph_provider, monkeypatch):
-        monkeypatch.setattr("anemoi.models.layers.mapper.MAPPER_GRAPH_CACHE_SIZE", 2)
-        x = pair_tensor
-        batch_size = 1
-        shard_info = BipartiteGraphShardInfo(
-            src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
-        )
-        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+    def test_graph_plan_is_replaced_when_key_changes(self, mapper, pair_tensor, graph_provider):
+        inputs = self._forward_inputs(pair_tensor, graph_provider)
 
         with torch.no_grad():
-            for num_chunks in (1, 2, 3):
-                mapper.num_chunks = num_chunks
-                mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
+            mapper.num_chunks = 1
+            mapper.forward(*inputs, graph_provider=graph_provider)
+            plan = graph_provider._topology_data
 
-        assert len(mapper._graph_plan_cache) == 2
-        # the least recently used plan (num_chunks=1) is removed
-        assert [plan.chunk_partition.num_parts for plan in mapper._graph_plan_cache.values()] == [2, 3]
+            mapper.num_chunks = 2
+            mapper.forward(*inputs, graph_provider=graph_provider)
 
-    def test_unsorted_edges_do_not_use_graph_plan_cache(self, mapper, pair_tensor, graph_provider):
-        x = pair_tensor
-        batch_size = 1
-        shard_info = BipartiteGraphShardInfo(
-            src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
-        )
-        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
-        perm = torch.randperm(edge_index.shape[1], device=edge_index.device)
+        assert graph_provider._topology_data is not plan
+        assert graph_provider._topology_data.chunk_partition.num_parts == 2
+
+    def test_graph_plan_is_not_kept_without_graph_provider(self, mapper, pair_tensor, graph_provider):
+        inputs = self._forward_inputs(pair_tensor, graph_provider)
 
         with torch.no_grad():
-            mapper.forward(x, batch_size, shard_info, edge_attr[perm], edge_index[:, perm], edges_are_dst_sorted=False)
+            mapper.forward(*inputs)
 
-        assert len(mapper._graph_plan_cache) == 0
+        assert graph_provider._topology_data is None
 
     def test_strategy(self, mapper, pair_tensor, graph_provider):
         x = pair_tensor

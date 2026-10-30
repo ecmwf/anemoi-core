@@ -7,13 +7,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import io
+from collections import OrderedDict
+
 import pytest
 import torch
 from scipy.sparse import csr_matrix
 from scipy.sparse import save_npz
 from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.graph_provider import DynamicGraphProvider
+from anemoi.models.layers.graph_provider import NoOpGraphProvider
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.graph_provider import StaticGraphProvider
 
 
 def test_projection_graph_provider_preserves_row_normalized_weights() -> None:
@@ -223,3 +229,114 @@ def test_projection_graph_provider_loads_npz_as_csr(tmp_path) -> None:
     edges = provider.get_edges()
     assert edges.layout == torch.sparse_csr
     assert torch.allclose(edges.to_dense(), expected)
+
+
+def _static_graph_provider(topology_cache_size: int = 0):
+    graph = HeteroData()
+    graph["src", "to", "dst"].edge_index = torch.tensor([[0, 1], [0, 1]])
+    graph["src", "to", "dst"].edge_attr = torch.ones(2, 1)
+    return StaticGraphProvider(
+        graph=graph["src", "to", "dst"],
+        edge_attributes=["edge_attr"],
+        src_size=2,
+        dst_size=2,
+        trainable_size=0,
+        topology_cache_size=topology_cache_size,
+    )
+
+
+@pytest.mark.parametrize("provider", [DynamicGraphProvider(edge_dim=1), NoOpGraphProvider()])
+def test_non_static_graph_provider_does_not_keep_topology(provider) -> None:
+    calls = []
+
+    def build_fn():
+        calls.append(1)
+        return object()
+
+    first = provider.cached_topology("key", build_fn)
+    second = provider.cached_topology("key", build_fn)
+
+    assert first is not second
+    assert len(calls) == 2
+
+
+def test_static_graph_provider_keeps_topology_for_same_key() -> None:
+    provider = _static_graph_provider()
+    calls = []
+
+    def build_fn():
+        calls.append(1)
+        return object()
+
+    first = provider.cached_topology("a", build_fn)
+    assert provider.cached_topology("a", build_fn) is first
+    assert len(calls) == 1
+
+    assert provider.cached_topology("b", build_fn) is not first
+    assert len(calls) == 2
+
+
+def test_static_graph_provider_does_not_pickle_topology() -> None:
+    provider = _static_graph_provider()
+    provider.cached_topology("a", lambda: torch.arange(3))
+
+    buffer = io.BytesIO()
+    torch.save(provider, buffer)
+    buffer.seek(0)
+    loaded = torch.load(buffer, weights_only=False)
+
+    assert provider._topology_data is not None
+    assert loaded._topology_key is None
+    assert loaded._topology_data is None
+
+
+def test_static_graph_provider_loads_pickle_without_topology_attributes() -> None:
+    provider = _static_graph_provider()
+    state = provider.__getstate__()
+    del state["_topology_key"]
+    del state["_topology_data"]
+
+    loaded = provider.__class__.__new__(provider.__class__)
+    loaded.__setstate__(state)
+
+    assert loaded.cached_topology("a", lambda: 1) == 1
+
+
+@pytest.fixture(autouse=True)
+def reset_topology_cache_state(monkeypatch):
+    """Start each test with no recorded graphs and no warning."""
+    monkeypatch.setattr(StaticGraphProvider, "_graphs_with_topology", OrderedDict())
+    monkeypatch.setattr(StaticGraphProvider, "_warned_no_topology_cache_size", False)
+
+
+def test_topology_cache_size_removes_least_recently_used() -> None:
+    providers = [_static_graph_provider(topology_cache_size=2) for _ in range(3)]
+
+    providers[0].cached_topology("a", lambda: 0)
+    providers[1].cached_topology("a", lambda: 1)
+    providers[0].cached_topology("a", lambda: 0)  # providers[1] is now the least recently used
+    providers[2].cached_topology("a", lambda: 2)
+
+    assert providers[0]._topology_data == 0
+    assert providers[1]._topology_data is None
+    assert providers[2]._topology_data == 2
+
+
+def test_topology_cache_size_warns_once_when_disabled(caplog) -> None:
+    providers = [_static_graph_provider() for _ in range(3)]
+
+    with caplog.at_level("WARNING", logger="anemoi.models.layers.graph_provider"):
+        for i, provider in enumerate(providers):
+            provider.cached_topology("a", lambda i=i: i)
+
+    assert [provider._topology_data for provider in providers] == [0, 1, 2]
+    assert sum("topology_cache_size" in record.message for record in caplog.records) == 1
+
+
+def test_topology_cache_size_does_not_warn_when_enabled(caplog) -> None:
+    provider = _static_graph_provider(topology_cache_size=4)
+
+    with caplog.at_level("WARNING", logger="anemoi.models.layers.graph_provider"):
+        provider.cached_topology("a", lambda: 0)
+
+    assert not any("topology_cache_size" in record.message for record in caplog.records)

@@ -319,6 +319,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 shard_info=enc_shard_info,
                 edge_attr=encoder_edge_attr,
                 edge_index=encoder_edge_index,
+                graph_provider=self.encoder_graph_provider[dataset_name],
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
@@ -384,6 +385,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 shard_info=us_shard_info,
                 edge_attr=upscale_edge_attr,
                 edge_index=upscale_edge_index,
+                graph_provider=self.upscale_graph_providers[src_hidden_name],
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
@@ -443,6 +445,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 shard_info=ds_shard_info,
                 edge_attr=downscale_edge_attr,
                 edge_index=downscale_edge_index,
+                graph_provider=self.downscale_graph_providers[dst_hidden_name],
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,
             )
@@ -498,6 +501,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 shard_info=dec_shard_info,
                 edge_attr=decoder_edge_attr,
                 edge_index=decoder_edge_index,
+                graph_provider=self.decoder_graph_provider[dataset_name],
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
             )

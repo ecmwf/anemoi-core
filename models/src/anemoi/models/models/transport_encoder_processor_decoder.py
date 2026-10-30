@@ -329,6 +329,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 shard_info=enc_shard_info,
                 edge_attr=encoder_edge_attr,
                 edge_index=encoder_edge_index,
+                graph_provider=self.encoder_graph_provider[dataset_name],
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 **fwd_mapper_kwargs[dataset_name],
@@ -388,6 +389,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 shard_info=dec_shard_info,
                 edge_attr=decoder_edge_attr,
                 edge_index=decoder_edge_index,
+                graph_provider=self.decoder_graph_provider[dataset_name],
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],
                 **bwd_mapper_kwargs[dataset_name],
