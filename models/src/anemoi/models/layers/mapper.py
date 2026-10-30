@@ -63,8 +63,11 @@ class BaseMapper(nn.Module, ABC):
         self.offload_layers(cpu_offload)
 
     def offload_layers(self, cpu_offload):
-        if cpu_offload:
-            self.proc = nn.ModuleList([offload_wrapper(x) for x in self.proc])
+        if cpu_offload and self.proc is not NotImplemented:
+            if isinstance(self.proc, nn.ModuleList):
+                self.proc = nn.ModuleList([offload_wrapper(x) for x in self.proc])
+            else:
+                self.proc = offload_wrapper(self.proc)
 
     def pre_process(self, x, shard_shapes, model_comm_group=None) -> tuple[Tensor, Tensor, tuple[int], tuple[int]]:
         """Pre-processing for the Mappers.

@@ -56,8 +56,11 @@ class BaseProcessor(nn.Module, ABC):
         ), f"Number of processor layers ({num_layers}) has to be divisible by the number of processor chunks ({num_chunks})."
 
     def offload_layers(self, cpu_offload):
-        if cpu_offload:
-            self.proc = nn.ModuleList([offload_wrapper(x) for x in self.proc])
+        if cpu_offload and self.proc is not NotImplemented:
+            if isinstance(self.proc, nn.ModuleList):
+                self.proc = nn.ModuleList([offload_wrapper(x) for x in self.proc])
+            else:
+                self.proc = offload_wrapper(self.proc)
 
     def build_layers(self, processor_chunk_class, *args, **kwargs) -> None:
         """Build Layers."""
