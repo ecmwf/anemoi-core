@@ -488,7 +488,7 @@ class AnemoiTrainer:
             self.model,
             datamodule=self.datamodule,
             #FIXME: force ckpt_path=None, otherwise error when usong mlflow offline logging
-            ckpt_path=None, # if (self.load_weights_only) else self.last_checkpoint,
+            ckpt_path=None, if (self.load_weights_only) else self.last_checkpoint,
         )
 
         if self.config.diagnostics.print_memory_summary:
