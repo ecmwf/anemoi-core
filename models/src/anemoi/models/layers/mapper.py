@@ -43,6 +43,7 @@ from anemoi.models.layers.spherical_rotary import build_spherical_rotary
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
+from anemoi.models.layers.utils import refuse_dropout_when_sharded
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -458,6 +459,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
 
         kwargs_forward = {
             "x": x,
@@ -858,6 +860,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
         return maybe_checkpoint(
             self.mapper_forward,
             self.gradient_checkpointing,
@@ -1156,6 +1159,7 @@ class PointWiseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
         return maybe_checkpoint(
             self.mapper_forward,
             self.gradient_checkpointing,
@@ -1433,6 +1437,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        refuse_dropout_when_sharded(self, model_comm_group)
         sharded = model_comm_group is not None and model_comm_group.size() > 1
         if self.split is not None and self.split.used(sharded):
             return self.forward_in_bands(
