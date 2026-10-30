@@ -269,14 +269,16 @@ class DatasetCache(pl.LightningDataModule):
         if not self.initialized or id(dataset) in self._datasets:
             return dataset
         for name, reader in dataset.data_readers.items():
+            # Use only fields that are the same in every process. Do not use the dataset metadata:
+            # for a cloned dataset, the dates can be invalid, and then the metadata changes from
+            # one process to the next. Each rank then gets a different dataset_id and cache.
             identity = {
                 "name": name,
-                "shape": tuple(reader.data.shape),
+                "shape": tuple(int(size) for size in reader.data.shape),
+                "dtype": str(reader.data.dtype),
                 "source": str(getattr(reader.data, "path", type(reader.data).__name__)),
                 "variables": list(reader.variables),
-                "frequency": str(reader.frequency),
                 "resolution": str(reader.resolution),
-                "metadata": reader.metadata,
             }
             digest = hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()[:16]
             dataset_id = f"{name}:{digest}"
@@ -339,6 +341,7 @@ class DatasetCache(pl.LightningDataModule):
         dist.barrier(group=self.proc_group)
         self.initialized = True
         self._dataset(self.ds.ds_train)
+        self._check_dataset_ids()
         if self.is_node_leader:
             entries = {name: str(namespace.entries_path) for name, namespace in self.namespaces.items()}
             self.server = CacheServer(entries)
@@ -346,6 +349,14 @@ class DatasetCache(pl.LightningDataModule):
         ports = [None] * self.world_size
         dist.all_gather_object(ports, self.server.port if self.is_node_leader else None, group=self.proc_group)
         self._ports = {node: ports[rank] for node, rank in self._leaders.items()}
+
+    def _check_dataset_ids(self):
+        """Make sure that all ranks use the same dataset_ids, else they cannot share records."""
+        dataset_ids = [None] * self.world_size
+        dist.all_gather_object(dataset_ids, sorted(self.namespaces), group=self.proc_group)
+        if any(ids != dataset_ids[0] for ids in dataset_ids):
+            msg = f"Ranks do not agree on the cached dataset_ids: {dataset_ids}"
+            raise RuntimeError(msg)
 
     def train_dataloader(self):
         return self.ds._get_dataloader(self.ds_train, "training")

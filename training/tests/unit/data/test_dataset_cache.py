@@ -316,6 +316,55 @@ class TestDatasetCacheNamespace:
         assert entry.stat().st_size < data[3].nbytes / 2
 
 
+class TestDatasetIdentity:
+    class FakeData:
+        shape = (4, 2, 1, 5)
+        dtype = np.dtype("float32")
+        path = "/data/dataset.zarr"
+
+    class FakeReader:
+        num_sequences = 1
+        variables = ("a", "b")
+        resolution = "o96"
+
+        def __init__(self, metadata):
+            self.data = TestDatasetIdentity.FakeData()
+            self.metadata = metadata
+            self.cache = None
+
+        def sequence_length(self, sequence=0):
+            return 4
+
+        def set_cache(self, cache, dataset_id):
+            self.cache = dataset_id
+
+    def dataset_id(self, tmp_path, metadata):
+        from types import SimpleNamespace
+
+        cache = DatasetCache(object(), tmp_path)
+        cache.initialized, cache.cache_path, cache.budget = True, tmp_path, None
+        reader = self.FakeReader(metadata)
+        cache._dataset(SimpleNamespace(data_readers={"data": reader}))
+        return reader.cache
+
+    def test_dataset_id_does_not_use_metadata(self, tmp_path):
+        # the metadata of a cloned dataset can change between processes (for example an invalid end_date)
+        first = self.dataset_id(tmp_path, {"end_date": "1970-01-01T00:00:00"})
+        second = self.dataset_id(tmp_path, {"end_date": "170884930401-06-20T02:29:53"})
+        assert first == second
+
+    def test_ranks_with_different_dataset_ids_are_rejected(self, tmp_path, monkeypatch):
+        cache = DatasetCache(object(), tmp_path)
+        cache.world_size, cache.proc_group, cache.namespaces = 2, None, {"data:aaaa": None}
+
+        def all_gather_object(output, value, group=None):
+            output[:] = [value, ["data:bbbb"]]
+
+        monkeypatch.setattr("anemoi.training.utils.dataset_cache.dist.all_gather_object", all_gather_object)
+        with pytest.raises(RuntimeError, match="do not agree"):
+            cache._check_dataset_ids()
+
+
 def test_check_cache_prefers_local(tmp_path, sample_data, monkeypatch):
     namespace = DatasetCacheNamespace(
         tmp_path,
