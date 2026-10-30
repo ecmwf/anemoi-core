@@ -23,7 +23,7 @@ import pandas as pd
 import pytest
 import torch
 from hydra import compose
-from hydra import initialize
+from hydra import initialize_config_module
 from omegaconf import OmegaConf
 from torch.testing import assert_close
 
@@ -41,6 +41,8 @@ torch.backends.cudnn.benchmark = False
 
 LOGGER = logging.getLogger(__name__)
 
+CONFIG_DIR = Path(__file__).parent / "config"
+
 
 @pytest.mark.mlflow
 @pytest.mark.slow
@@ -49,14 +51,14 @@ def test_accuracy(tmp_path: Path, mlflow_server: str, pytestconfig: pytest.Confi
     # compose leaves interpolations such as
     # system.input.graph = ${system.output.root}/... unresolved; they depend on
     # system.output.root, which is only set below, and we resolve afterwards.
-    # config_path is relative to this file; the autouse set_working_directory fixture
-    # (integration/conftest.py) chdirs to the repo root so Path.cwd() resolves the yaml.
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_accuracy"):
+    with initialize_config_module(
+        version_base=None,
+        config_module="anemoi.training.config",
+        job_name="test_accuracy",
+    ):
         template = compose(config_name="config", overrides=["model=graphtransformer"])
 
-    modifications = OmegaConf.load(
-        Path.cwd() / "training/tests/integration/config/accuracy_testing/test_global.yaml",
-    )
+    modifications = OmegaConf.load(CONFIG_DIR / "test_global.yaml")
     config = OmegaConf.merge(template, modifications)
 
     config.system.output.root = str(tmp_path)
@@ -76,7 +78,7 @@ def test_accuracy(tmp_path: Path, mlflow_server: str, pytestconfig: pytest.Confi
 
     client = AnemoiMlflowClient(mlflow_server, authentication=True)
 
-    # Record every change of reference_id in config/CHANGELOG.md.
+    # Record every change of reference_id in integration/CHANGELOG.md.
     reference_id: Final = "8e284859bf914877a406407b589862e6"
     metric: Final = "train_multi_dataset_loss_step"
     # Optional override (e.g. from workflow_dispatch) to try out a candidate reference.
