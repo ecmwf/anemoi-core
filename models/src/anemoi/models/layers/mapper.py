@@ -407,7 +407,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
     ) -> Tensor:
         # O(1) slicing with the cached topology of this chunk
         (x_src_chunk, x_dst_chunk), edge_attr_chunk, edge_index_chunk, cond_chunk = plan.chunk_partition.materialise(
-            chunk_id, x, edge_attr, edge_index=None, cond=cond, topology=plan.chunk_topologies[chunk_id]
+            chunk_id, x, edge_attr, plan.chunk_topologies[chunk_id], cond=cond
         )
         chunk_size = (x_src_chunk.shape[0], x_dst_chunk.shape[0])
 

@@ -86,9 +86,8 @@ class GraphPartition:
         partition_id: int,
         x: PairTensor,
         edge_attr: Tensor,
-        edge_index: Optional[Adj],
+        topology: tuple[Adj, Tensor],
         cond: Optional[PairTensor] = None,
-        topology: Optional[tuple[Adj, Tensor]] = None,
     ) -> tuple[PairTensor, Tensor, Adj, Tensor, Optional[PairTensor]]:
         """Materialise a single partition by slicing nodes, edges and conditioning.
 
@@ -103,13 +102,10 @@ class GraphPartition:
             Node features (src, dst).
         edge_attr : Tensor
             Edge attributes.
-        edge_index : Adj, optional
-            Edge indices (assumed dst-sorted). Not used if topology is given.
+        topology : tuple[Adj, Tensor]
+            The result of ``materialise_topology`` for this partition.
         cond : tuple[Tensor, Tensor], optional
             Conditioning tensors (cond_src, cond_dst).
-        topology : tuple[Adj, Tensor], optional
-            The result of ``materialise_topology`` for this partition. Give it to
-            use it again. If None, it is calculated.
 
         Returns
         -------
@@ -118,9 +114,6 @@ class GraphPartition:
             cond subset (or None).
         """
         x_src, x_dst = x
-
-        if topology is None:
-            topology = self.materialise_topology(partition_id, edge_index)
         edge_index_subset, src_ids = topology
 
         # slice edges and dst nodes for this partition
@@ -494,51 +487,6 @@ def apply_local_graph(
         cond_local = (cond_src_full[local_graph.src_ids], cond_dst)
 
     return (x_src_local, x_dst), edge_attr, cond_local
-
-
-def shard_graph_to_local(
-    partition: GraphPartition,
-    x: PairTensor,
-    edge_attr: Tensor,
-    edge_index: Adj,
-    shard_info: BipartiteGraphShardInfo,
-    model_comm_group: Optional[ProcessGroup] = None,
-    cond: Optional[PairTensor] = None,
-) -> tuple[PairTensor, Tensor, Adj, BipartiteGraphShardInfo, Optional[PairTensor]]:
-    """Shard graph tensors to the local rank using precomputed partition metadata.
-
-    Handles all communication (sync src, shard dst/edges) and returns
-    the local subgraph with updated shard metadata.
-
-    Parameters
-    ----------
-    partition : GraphPartition
-        Precomputed partition metadata.
-    x : PairTensor
-        Node features (src, dst).
-    edge_attr : Tensor
-        Edge attributes.
-    edge_index : Adj
-        Edge indices (assumed dst-sorted).
-    shard_info : BipartiteGraphShardInfo
-        Current shard metadata.
-    model_comm_group : ProcessGroup, optional
-        Model communication group.
-    cond : tuple[Tensor, Tensor], optional
-        Conditioning tensors (cond_src, cond_dst).
-
-    Returns
-    -------
-    tuple[PairTensor, Tensor, Adj, BipartiteGraphShardInfo, Optional[PairTensor]]
-        Sharded (x_src_local, x_dst), edge_attr, edge_index, updated shard_info,
-        cond subset (or None).
-    """
-    if not model_is_distributed(model_comm_group):
-        return x, edge_attr, edge_index, shard_info, cond
-
-    local_graph = build_local_graph(partition, edge_index, shard_info, model_comm_group)
-    x, edge_attr, cond = apply_local_graph(local_graph, x, edge_attr, shard_info, model_comm_group, cond=cond)
-    return x, edge_attr, local_graph.edge_index, local_graph.shard_info, cond
 
 
 def sort_edges_1hop_chunks(

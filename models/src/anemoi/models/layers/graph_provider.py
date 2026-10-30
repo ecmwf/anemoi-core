@@ -10,15 +10,12 @@
 
 import copy
 import logging
-import weakref
 from abc import ABC
 from abc import abstractmethod
-from collections import OrderedDict
 from collections.abc import Callable
 from collections.abc import Hashable
 from pathlib import Path
 from typing import Any
-from typing import ClassVar
 from typing import Optional
 from typing import Union
 
@@ -179,10 +176,6 @@ class StaticGraphProvider(BaseGraphProvider):
     _TRAINABLE_LAYOUT_VERSION = 1
     _TRAINABLE_LAYOUT_VERSION_KEY = "trainable_layout_version"
 
-    # Static graphs with a topology_cache_size that keep topology data, least recently used first.
-    _graphs_with_topology: ClassVar[OrderedDict[int, weakref.ref]] = OrderedDict()
-    _warned_no_topology_cache_size: ClassVar[bool] = False
-
     def __init__(
         self,
         graph: HeteroData,
@@ -190,7 +183,6 @@ class StaticGraphProvider(BaseGraphProvider):
         src_size: int,
         dst_size: int,
         trainable_size: int,
-        topology_cache_size: int = 0,
     ) -> None:
         """Initialize StaticGraphProvider.
 
@@ -206,10 +198,6 @@ class StaticGraphProvider(BaseGraphProvider):
             Destination grid size
         trainable_size : int
             Size of trainable edge parameters
-        topology_cache_size : int, optional
-            Maximum number of static graphs that keep topology data at the same time. If
-            more graphs keep data, the least recently used graph removes its data. 0 (the
-            default) disables the maximum, thus each static graph keeps its data.
         """
         super().__init__()
 
@@ -237,24 +225,14 @@ class StaticGraphProvider(BaseGraphProvider):
 
         self._edge_dim = edge_attr_tensor.shape[1] + trainable_size
 
-        self.topology_cache_size = topology_cache_size
-        self._topology_key: Optional[Hashable] = None
-        self._topology_data = None
+        self._topology_cache: Optional[tuple[Hashable, Any]] = None
 
     def __getstate__(self):
         # Do not pickle the kept topology data (for example, in the inference checkpoint).
         # It holds rank-specific device tensors that a layer can calculate again.
         state = super().__getstate__()
-        state["_topology_key"] = None
-        state["_topology_data"] = None
+        state["_topology_cache"] = None
         return state
-
-    def __setstate__(self, state):
-        # Models pickled before this attribute existed do not have it.
-        state.setdefault("topology_cache_size", 0)
-        state.setdefault("_topology_key", None)
-        state.setdefault("_topology_data", None)
-        super().__setstate__(state)
 
     @property
     def edge_dim(self) -> int:
@@ -268,10 +246,6 @@ class StaticGraphProvider(BaseGraphProvider):
         most recent result and returns it again while ``key`` does not change. If
         ``key`` changes, it calls ``build_fn`` and keeps the new result.
 
-        If ``topology_cache_size`` is more than 0, only that number of static graphs
-        keep their data. The least recently used graph removes its data
-        first, and calculates it again on its next call.
-
         Parameters
         ----------
         key : Hashable
@@ -284,45 +258,12 @@ class StaticGraphProvider(BaseGraphProvider):
         Any
             The kept data, or the result of ``build_fn``.
         """
-        if self._topology_key is None or key != self._topology_key:
-            self._topology_data = build_fn()
-            self._topology_key = key
-        self._record_topology_use()
-        return self._topology_data
-
-    def _record_topology_use(self) -> None:
-        """Record that this graph used its topology data, and apply the maximum."""
-        cls = StaticGraphProvider
-        if self.topology_cache_size <= 0:
-            if not cls._warned_no_topology_cache_size:
-                LOGGER.warning(
-                    "topology_cache_size is 0. Each static graph keeps its topology data "
-                    "(for example, the mapper graph partition) on the device, with no maximum."
-                )
-                cls._warned_no_topology_cache_size = True
-            return
-
-        graphs = cls._graphs_with_topology
-        provider_id = id(self)
-        if provider_id in graphs and graphs[provider_id]() is self:
-            graphs.move_to_end(provider_id)
-        else:
-
-            def _forget(ref: weakref.ref, provider_id: int = provider_id) -> None:
-                if graphs.get(provider_id) is ref:
-                    del graphs[provider_id]
-
-            graphs[provider_id] = weakref.ref(self, _forget)
-
-        while len(graphs) > self.topology_cache_size:
-            _, ref = graphs.popitem(last=False)
-            least_recent = ref()
-            if least_recent is not None:
-                least_recent._clear_topology()
-
-    def _clear_topology(self) -> None:
-        self._topology_key = None
-        self._topology_data = None
+        # models pickled before this attribute existed do not have it
+        cache = getattr(self, "_topology_cache", None)
+        if cache is None or cache[0] != key:
+            cache = (key, build_fn())
+            self._topology_cache = cache
+        return cache[1]
 
     def _expand_edges(self, edge_index: Adj, edge_inc: Tensor, batch_size: int) -> Adj:
         """Expand edge index.

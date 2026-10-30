@@ -251,11 +251,11 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
 
         with torch.no_grad():
             out_first = mapper.forward(*inputs, graph_provider=graph_provider)
-            plan = graph_provider._topology_data
+            plan = graph_provider._topology_cache[1]
             assert isinstance(plan, MapperGraphPlan)
 
             out_second = mapper.forward(*inputs, graph_provider=graph_provider)
-            assert graph_provider._topology_data is plan
+            assert graph_provider._topology_cache[1] is plan
 
         assert torch.allclose(out_first[1], out_second[1], atol=1e-4)
 
@@ -265,13 +265,13 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         with torch.no_grad():
             mapper.num_chunks = 1
             mapper.forward(*inputs, graph_provider=graph_provider)
-            plan = graph_provider._topology_data
+            plan = graph_provider._topology_cache[1]
 
             mapper.num_chunks = 2
             mapper.forward(*inputs, graph_provider=graph_provider)
 
-        assert graph_provider._topology_data is not plan
-        assert graph_provider._topology_data.chunk_partition.num_parts == 2
+        assert graph_provider._topology_cache[1] is not plan
+        assert graph_provider._topology_cache[1].chunk_partition.num_parts == 2
 
     def test_graph_plan_is_not_kept_without_graph_provider(self, mapper, pair_tensor, graph_provider):
         inputs = self._forward_inputs(pair_tensor, graph_provider)
@@ -279,7 +279,7 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         with torch.no_grad():
             mapper.forward(*inputs)
 
-        assert graph_provider._topology_data is None
+        assert graph_provider._topology_cache is None
 
     def test_strategy(self, mapper, pair_tensor, graph_provider):
         x = pair_tensor
