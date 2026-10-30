@@ -88,14 +88,19 @@ class CacheFullError(OSError):
 class NodeCacheBudget:
     """Size limit for the cache of one node, shared by all processes on the node.
 
-    The number of bytes in use is kept in a small file and changed under an flock, so every
-    rank and dataloader worker on the node reserves space from the same budget. Space is
-    reserved before a record is written, so concurrent writers cannot go over the limit.
+    A small file holds the number of bytes that the cache uses. Each change to this file
+    occurs under an flock. Thus, all ranks and dataloader workers on the node use the same
+    budget. A writer reserves space before it writes a record. Thus, concurrent writers
+    cannot go over the limit.
+
+    The budget also keeps ``min_free_bytes`` free on the disk. This limit includes files
+    that are not in the cache, for example checkpoints and logs.
     """
 
-    def __init__(self, path: Path, limit_bytes: int):
+    def __init__(self, path: Path, limit_bytes: int, min_free_bytes: int = 0):
         self.path = Path(path)
         self.limit_bytes = int(limit_bytes)
+        self.min_free_bytes = int(min_free_bytes)
 
     def reset(self) -> None:
         self.path.write_bytes((0).to_bytes(8, "little"))
@@ -118,12 +123,14 @@ class NodeCacheBudget:
             used = int.from_bytes(counter.read(8), "little")
             if limit and used + nbytes > self.limit_bytes:
                 return False
+            if limit and shutil.disk_usage(self.path.parent).free - nbytes < self.min_free_bytes:
+                return False
             counter.seek(0)
             counter.write(max(used + nbytes, 0).to_bytes(8, "little"))
             return True
 
     def reserve(self, nbytes: int) -> bool:
-        """Reserve ``nbytes``. Return False, and reserve nothing, if this would exceed the limit."""
+        """Reserve ``nbytes``. If this goes over a limit, reserve nothing and return False."""
         return self._add(nbytes, limit=True)
 
     def release(self, nbytes: int) -> None:
@@ -184,8 +191,8 @@ class DatasetCacheNamespace:
             payload = encode_cache_array(value)
             if self.budget is not None and not self.budget.reserve(len(payload)):
                 msg = (
-                    f"cache limit of {self.budget.limit_bytes / 1e9:.1f} GB reached, "
-                    f"cannot add {len(payload) / 1e9:.2f} GB"
+                    f"cache limit of {self.budget.limit_bytes / 1e9:.1f} GB or free-space limit of "
+                    f"{self.budget.min_free_bytes / 1e9:.1f} GB reached, cannot add {len(payload) / 1e9:.2f} GB"
                 )
                 raise CacheFullError(msg)
             entry.parent.mkdir(parents=True, exist_ok=True)
@@ -313,8 +320,11 @@ class DatasetCache(pl.LightningDataModule):
         self.is_node_leader = self.global_rank == self._leaders[self.node_id]
         self.hostnames = [name + self.hostname_suffix for name in hosts]
         self.cache_path = self.cache_root / f"cache-{hashlib.sha256(host.encode()).hexdigest()[:12]}"
+        self.cache_root.mkdir(parents=True, exist_ok=True)
         disk_bytes = shutil.disk_usage(self.cache_root).total
-        self.budget = NodeCacheBudget(self.cache_path / "usage", self.max_fraction * disk_bytes)
+        # the cache and all other files together must not use more than max_fraction of the disk
+        limit_bytes = int(self.max_fraction * disk_bytes)
+        self.budget = NodeCacheBudget(self.cache_path / "usage", limit_bytes, min_free_bytes=disk_bytes - limit_bytes)
         if self.is_node_leader:
             shutil.rmtree(self.cache_path, ignore_errors=True)
             self.cache_path.mkdir(parents=True)

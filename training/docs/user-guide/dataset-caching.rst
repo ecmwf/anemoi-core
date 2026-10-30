@@ -55,8 +55,11 @@ local cache or from the filesystem.
 
 -  The size of the cache on each node is limited to
    ``cache_max_fraction`` of the total size of the disk. All the
-   processes on the node use the same limit. When the cache gets to the
-   limit, or when the disk is full, the cache stops writing new records.
+   processes on the node use the same limit. The cache also keeps
+   ``1 - cache_max_fraction`` of the disk free. This limit includes
+   other files on the disk, for example checkpoints. When the cache
+   gets to a limit, or when the disk is full, the cache stops writing
+   new records.
    After this, the cache does not change until the end of the run. The
    cache does not remove old records.
 

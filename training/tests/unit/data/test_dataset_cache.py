@@ -190,6 +190,19 @@ class TestNodeCacheBudget:
         budget.release(30)
         assert budget.used() == 70
 
+    def test_reserve_keeps_free_space_on_the_disk(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from types import SimpleNamespace
+
+        disk = SimpleNamespace(total=1000, used=850, free=150)
+        monkeypatch.setattr("anemoi.training.utils.dataset_cache.shutil.disk_usage", lambda _path: disk)
+        budget = NodeCacheBudget(tmp_path / "usage", limit_bytes=900, min_free_bytes=100)
+        budget.reset()
+
+        assert budget.reserve(50)  # leaves 100 bytes free
+        disk.free = 100  # other files on the disk use the space
+        assert not budget.reserve(1)  # the cache limit allows this, but the disk would get too full
+        assert budget.used() == 50
+
     def test_budget_is_shared_between_processes(self, tmp_path: Path) -> None:
         budget = make_budget(tmp_path, limit_bytes=1000)
 
@@ -598,11 +611,11 @@ def test_setup_limits_the_cache_to_a_fraction_of_the_disk(tmp_path: Path, monkey
     monkeypatch.setattr("anemoi.training.utils.dataset_cache.shutil.disk_usage", lambda _path: disk)
     dist.init_process_group("gloo", init_method=f"file://{tmp_path}/store", rank=0, world_size=1)
     try:
-        cache = DatasetCache(FakeDatamodule(), tmp_path / "root", max_fraction=0.9)
-        (tmp_path / "root").mkdir()
-        cache.setup("fit")
+        cache = DatasetCache(FakeDatamodule(), tmp_path / "missing" / "root", max_fraction=0.9)
+        cache.setup("fit")  # creates the cache root
         try:
             assert cache.budget.limit_bytes == 900 * 10**9
+            assert cache.budget.min_free_bytes == 100 * 10**9
             assert cache.budget.used() == 0
             assert cache.budget.path.parent == cache.cache_path
         finally:
