@@ -1,0 +1,5 @@
+_target_: anemoi.models.variable.variabletokenizer.MultiHeadAttentionTransform
+emb_dim: 64
+out_dim: 128
+num_heads: 4
+chunk_size: 1024

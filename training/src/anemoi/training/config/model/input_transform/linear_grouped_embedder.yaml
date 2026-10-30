@@ -1,0 +1,3 @@
+_target_: anemoi.models.layers.embedder.LinearGroupedEmbedder
+out_dim: 64
+num_heads: 4
