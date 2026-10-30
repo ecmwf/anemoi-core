@@ -9,6 +9,7 @@
 
 from abc import abstractmethod
 from typing import Any
+from typing import Optional
 
 import einops
 import torch
@@ -21,11 +22,16 @@ from anemoi.models.variable.variablevocabular import VariableVocabulary
 
 
 class BaseVariableTokenizer(BaseInputTransform):
-    def __init__(self, emb_dim: int, out_dim: int, variables_metadata: dict, **kwargs: Any) -> None:
+    def __init__(self, emb_dim: int, out_dim: int, dataset_metadata: Optional[dict] = None, **kwargs: Any) -> None:
 
-        super().__init__()
+        super().__init__(dataset_metadata)
 
-        vocabulary = VariableVocabulary.from_foundation(variables_metadata)
+        if not dataset_metadata:
+            raise ValueError(f"{type(self).__name__} needs the datasets' metadata to build its vocabulary.")
+        # Built from the first dataset only, so variables that exist only in another dataset
+        # are not in the vocabulary yet.
+        first_dataset = next(iter(dataset_metadata.values()))
+        vocabulary = VariableVocabulary.from_foundation(first_dataset["variables_metadata"])
 
         assert isinstance(emb_dim, int), f"expecting emb_dim to be int, got {type(emb_dim)}"
         assert isinstance(out_dim, int), f"expecting out_dim to be int, got {type(out_dim)}"
@@ -59,12 +65,12 @@ class MultiHeadAttentionTransform(BaseVariableTokenizer):
         self,
         emb_dim: int,
         out_dim: int,
-        variables_metadata: dict,
+        dataset_metadata: Optional[dict] = None,
         num_heads: int = 8,
         chunk_size: int = 1024,
         **kwargs: Any,
     ) -> None:
-        super().__init__(emb_dim=emb_dim, out_dim=out_dim, variables_metadata=variables_metadata)
+        super().__init__(emb_dim=emb_dim, out_dim=out_dim, dataset_metadata=dataset_metadata)
 
         self.num_heads = num_heads
         self.chunk_size = chunk_size
@@ -187,8 +193,8 @@ class MultiHeadAttentionTransform(BaseVariableTokenizer):
 
 
 class MeanPoolingTransform(BaseVariableTokenizer):
-    def __init__(self, emb_dim: int, out_dim: int, variables_metadata: dict, **kwargs: Any) -> None:
-        super().__init__(emb_dim=emb_dim, out_dim=out_dim, variables_metadata=variables_metadata)
+    def __init__(self, emb_dim: int, out_dim: int, dataset_metadata: Optional[dict] = None, **kwargs: Any) -> None:
+        super().__init__(emb_dim=emb_dim, out_dim=out_dim, dataset_metadata=dataset_metadata)
 
     def forward(self, x: torch.Tensor, node_attributes_data: torch.Tensor, variables: str | list[str]) -> torch.Tensor:
         # shape [B, E, G, VAR]
@@ -209,8 +215,8 @@ class MeanPoolingTransform(BaseVariableTokenizer):
 
 
 class SumPoolingTransform(BaseVariableTokenizer):
-    def __init__(self, emb_dim: int, out_dim: int, variables_metadata: dict, **kwargs: Any) -> None:
-        super().__init__(emb_dim=emb_dim, out_dim=out_dim, variables_metadata=variables_metadata)
+    def __init__(self, emb_dim: int, out_dim: int, dataset_metadata: Optional[dict] = None, **kwargs: Any) -> None:
+        super().__init__(emb_dim=emb_dim, out_dim=out_dim, dataset_metadata=dataset_metadata)
 
     def forward(self, x: torch.Tensor, node_attributes_data: torch.Tensor, variables: str | list[str]) -> torch.Tensor:
         # shape [B, E, G, VAR]

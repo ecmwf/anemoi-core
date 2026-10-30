@@ -24,12 +24,19 @@ class BaseInputTransform(nn.Module, ABC):
     different embeddings can be compared without changing the model classes. One
     transform is shared by all datasets, so a variable gets the same representation in
     every domain; the variables of the current dataset are therefore passed on every call.
-    Anything a transform needs beyond that, such as variable metadata, comes from its own
-    configuration.
+
+    Parameters
+    ----------
+    dataset_metadata : dict, optional
+        Per-dataset metadata as stored by anemoi-training (``metadata["dataset"]``), for
+        transforms that describe variables by their physical meaning.
     """
 
     output_dim: Optional[int] = None
     """Feature width per input time step, or ``None`` to keep one feature per variable."""
+
+    def __init__(self, dataset_metadata: Optional[dict] = None) -> None:
+        super().__init__()
 
     @abstractmethod
     def forward(self, x: Tensor, node_attributes_data: Tensor, variables: list[str]) -> Tensor:
