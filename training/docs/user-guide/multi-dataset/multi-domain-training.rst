@@ -6,7 +6,7 @@ Multi-domain training enables a single model to be trained on several domains th
 
 A **domain** is the spatial structure of a dataset: its grid, resolution, geographical extent, and number of nodes. All domains are assumed to share the same variables, so variables do not distinguish one domain from another. A typical use case is a set of stretched-grid domains that share a global dataset but each combine it with a different regional dataset. Multi-domain training supports different spatial resolutions, grid structures, and geographical extents, making it useful for applications such as downscaling, combining global and regional datasets, and improving model generalisation across domains and resolutions.
 
-.. note:: 
+.. note::
     One can also configure multi-domain with only LAM or alternate between global grids at different resolutions and gridtypes.
 
 Overview
