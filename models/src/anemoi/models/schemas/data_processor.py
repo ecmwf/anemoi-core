@@ -232,10 +232,55 @@ class RemapperSchema(BaseModel):
     "Variables not to be remapped."
 
 
+class RandomSpatialDropoutSchema(BaseModel):
+    """Schema for RandomSpatialDropout."""
+
+    dropout_prob: float = Field(0.0, ge=0.0, le=1.0)
+    "Probability of dropping each valid input value."
+    dropout_variables: Union[list[str], None] = None
+    "Variables to apply dropout to; defaults to all non-forcing variables."
+    multi_step: Union[int, None] = Field(None, ge=1)
+    "Number of leading time steps of a gridded view dropout is applied to; None for all."
+
+
+class StructuredDropoutGroupSchema(BaseModel):
+    """Schema for one observing-system group of StructuredObsDropout."""
+
+    variables: list[str] = Field(..., min_length=1)
+    "fnmatch patterns of the group's input variables."
+    stream_prob: float = Field(0.0, ge=0.0, le=1.0)
+    "Per-sample probability of dropping the whole group."
+    cell_prob: float = Field(0.0, ge=0.0, le=1.0)
+    "Per-cell probability of dropping the group's whole column."
+    n_blocks: int = Field(0, ge=0)
+    "Number of random discs per sample in which the group is dropped."
+    block_radius_km: float = Field(0.0, ge=0.0)
+    "Radius of each disc in km."
+    allow_forcing: bool = False
+    "Allow the group to match forcing variables."
+
+
+class StructuredObsDropoutSchema(BaseModel):
+    """Schema for StructuredObsDropout."""
+
+    groups: dict[str, StructuredDropoutGroupSchema]
+    "Observing-system groups to drop."
+    multi_step: Union[int, None] = Field(None, ge=1)
+    "Number of leading time steps of a gridded view dropout is applied to; None for all."
+    max_streams_dropped: Union[int, None] = Field(None, ge=0)
+    "Maximum number of whole groups dropped per sample."
+    dropout_prob: float = Field(1.0, ge=0.0)
+    "Global multiplier on every group probability (scheduled by DropoutScheduler)."
+    coordinate_variables: Union[dict[str, str], None] = None
+    "Override names of the sin/cos latitude/longitude input columns used for block dropout."
+
+
 class PreprocessorTarget(str, Enum):
     normalizer = "anemoi.models.preprocessing.normalizer.InputNormalizer"
     imputer = "anemoi.models.preprocessing.imputer.InputImputer"
     const_imputer = "anemoi.models.preprocessing.imputer.ConstantImputer"
+    spatial_dropout = "anemoi.models.preprocessing.spatial_dropout.RandomSpatialDropout"
+    structured_dropout = "anemoi.models.preprocessing.structured_dropout.StructuredObsDropout"
     remapper = "anemoi.models.preprocessing.remapper.Remapper"
     postprocessor = "anemoi.models.preprocessing.postprocessor.Postprocessor"
     conditional_zero_postprocessor = "anemoi.models.preprocessing.postprocessor.ConditionalZeroPostprocessor"
@@ -247,6 +292,8 @@ target_to_schema = {
     PreprocessorTarget.normalizer: NormalizerSchema,
     PreprocessorTarget.imputer: ImputerSchema,
     PreprocessorTarget.const_imputer: ConstantImputerSchema,
+    PreprocessorTarget.spatial_dropout: RandomSpatialDropoutSchema,
+    PreprocessorTarget.structured_dropout: StructuredObsDropoutSchema,
     PreprocessorTarget.remapper: RemapperSchema,
     PreprocessorTarget.postprocessor: PostprocessorSchema,
     PreprocessorTarget.conditional_zero_postprocessor: ConditionalZeroPostprocessorSchema,
