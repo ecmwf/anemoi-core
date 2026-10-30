@@ -9,6 +9,7 @@
 
 from typing import Any
 from typing import Literal
+from typing import Optional
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
@@ -19,7 +20,10 @@ from pydantic import model_validator
 
 from .common_components import GNNModelComponent
 from .common_components import PointWiseModelComponent
+from .common_components import ProcessorNeighbourhoodSchema
+from .common_components import RotaryEmbeddingsSchema
 from .common_components import TransformerModelComponent
+from .common_components import check_neighbourhood_attention
 
 
 class NoOpProcessorSchema(PydanticBaseModel):
@@ -92,16 +96,16 @@ class TransformerProcessorSchema(TransformerModelComponent):
     "Attention implementation to use. Default to 'triton_attention'."
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
-    softcap: NonNegativeFloat = Field(example=0.0)
-    "Softcap value for attention. Default to 0.0."
-    use_alibi_slopes: bool = Field(example=False)
-    "Use alibi slopes for attention implementation. Default to False."
+    neighbourhood: Optional[ProcessorNeighbourhoodSchema] = Field(default=None)
+    "Grid and neighbourhood size for attention_implementation 'neighbourhood'. Default to None."
+    rotary_embeddings: Optional[RotaryEmbeddingsSchema] = Field(default=None)
+    "Rotary position embeddings from the positions of the nodes on the sphere; off when None. Default to None."
 
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:
         # Check for valid extra fields related to MultiHeadSelfAttention and MultiHeadCrossAttention
         # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
-        allowed_extras = {"use_rotary_embeddings": bool, "gradient_checkpointing": bool}
+        allowed_extras = {"gradient_checkpointing": bool}
         extras = getattr(self, "__pydantic_extra__", {}) or {}
         for extra_field, value in extras.items():
             if extra_field not in allowed_extras:
@@ -112,6 +116,10 @@ class TransformerProcessorSchema(TransformerModelComponent):
                 raise TypeError(msg)
 
         return self
+
+    @model_validator(mode="after")
+    def check_neighbourhood(self) -> Any:
+        return check_neighbourhood_attention(self)
 
 
 class PointWiseMLPProcessorSchema(PointWiseModelComponent):

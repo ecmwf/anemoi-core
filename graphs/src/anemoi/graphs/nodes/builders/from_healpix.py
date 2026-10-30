@@ -50,7 +50,7 @@ class HEALPixNodes(BaseNodeBuilder):
         self.resolution = resolution
         self.nest_ordering = nest_ordering
         super().__init__(name)
-        self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"resolution"}
+        self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"resolution", "nest_ordering"}
 
         assert isinstance(resolution, int), "Resolution must be an integer."
         assert resolution > 0, "Resolution must be positive."

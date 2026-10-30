@@ -48,10 +48,8 @@ processor:
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: 512
   dropout_p: 0.0
-  attention_implementation: triton_attention # Possible values:  flash_attention, triton_attention, scaled_dot_product_attention
+  attention_implementation: triton_attention # Possible values: triton_attention, flash_attention, scaled_dot_product_attention
   qk_norm: True # Transformer and GraphTransformer only
-  softcap: 0.0 # Transformer only
-  use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels:
@@ -66,6 +64,9 @@ processor:
       _target_: torch.nn.Linear # These reflect the defaults, but are shown here for clarity
     Activation:
       _target_: torch.nn.GELU
+  rotary_embeddings: # null to switch off
+    max_frequency: 10000 # shortest wavelength ~ 40,000 km / max_frequency = 4 km
+    backend: triton # triton (GPU kernel) or torch (PyTorch, any device)
 
 encoders:
   "0":

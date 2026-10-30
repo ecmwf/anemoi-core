@@ -70,6 +70,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 in_channels_src=encoder_in_channels_src[0],
                 in_channels_dst=self.input_dim_latent,
                 edge_dim=self.encoder_graph_provider[encoder_config.source_datasets[0]].edge_dim,
+                **self._node_coords(
+                    encoder_config.mapper,
+                    src_node_coords=encoder_config.source_datasets,
+                    dst_node_coords=[self._graph_name_hidden],
+                ),
             )
 
         # Latent aggregator: combines encoder outputs before the processor
@@ -88,6 +93,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             model_config.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             edge_dim=self.processor_graph_provider.edge_dim,
+            **self._node_coords(model_config.processor, node_coords=[self._graph_name_hidden]),
         )
 
         assert (
@@ -136,7 +142,36 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 in_channels_dst=decoder_in_channels_dst[0],
                 out_channels_dst=decoder_output_channels_dst[0],
                 edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
+                **self._node_coords(
+                    decoder_config.mapper,
+                    src_node_coords=[self._graph_name_hidden],
+                    dst_node_coords=decoder_config.target_datasets,
+                ),
             )
+
+    def _node_coords(self, component_config: DotDict, **node_names: list[str]) -> dict[str, Tensor]:
+        """Node coordinates for neighbourhood attention and rotary embeddings of a model component.
+
+        Each keyword maps to the graph nodes whose coordinates the component gets under that name.
+        Several names (datasets sharing an encoder or decoder) must be the same nodes.
+        """
+        uses_positions = (
+            component_config.get("attention_implementation") == "neighbourhood"
+            or component_config.get("rotary_embeddings") is not None
+        )
+        if not uses_positions:
+            return {}
+        node_coords = {}
+        for keyword, names in node_names.items():
+            coords = self._graph_data[names[0]].x
+            for name in names[1:]:
+                other = self._graph_data[name].x
+                if other.shape != coords.shape or not torch.equal(other, coords):
+                    raise ValueError(
+                        f"Nodes {list(names)} share a model component that uses node positions, so they must be the same nodes."
+                    )
+            node_coords[keyword] = coords
+        return node_coords
 
     def _assemble_input(
         self,
