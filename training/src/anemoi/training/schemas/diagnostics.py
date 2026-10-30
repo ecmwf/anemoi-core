@@ -219,8 +219,80 @@ class BatchOutputPlotSchema(PydanticBaseModel):
     "Region of interest to restrict plots to."
 
 
+class ReferenceZonalSchema(PydanticBaseModel):
+    """Zonal-mean dynamics options of :class:`ReferenceComparisonPlot`."""
+
+    model_config = {"extra": "forbid"}
+
+    sections: bool = True
+    "Latitude-pressure sections of [u] and [T], jet scalars."
+    rmse_sections: bool = True
+    "Zonal mean of the point-wise RMSE of u, v and T per level."
+    thermal_wind: bool = True
+    "Shear across ``tw_layer`` against thermal-wind balance."
+    streamfunction: bool = True
+    "Mean meridional mass streamfunction and Hadley-cell scalars."
+    eddy_fluxes: bool = True
+    "[v'T'] at ``vt_level`` and [u'v'] at ``uv_level``."
+    mask_below_ground: bool = True
+    "Drop points where the level pressure exceeds the reference surface pressure."
+    log_scores: bool = False
+    "Also log the zonal scalars as ``val_ref_zonal/*`` metrics."
+    tw_layer: tuple[int, int] = (850, 250)
+    "Pressure levels (hPa) bounding the thermal-wind layer."
+    vt_level: int = 850
+    "Pressure level (hPa) of the [v'T'] eddy flux."
+    uv_level: int = 250
+    "Pressure level (hPa) of the [u'v'] eddy flux and the jet."
+
+
+class ReferenceComparisonPlotSchema(PydanticBaseModel):
+    """Config schema for :class:`ReferenceComparisonPlot` (gridded datasets only)."""
+
+    model_config = {"populate_by_name": True}
+
+    target_: Literal["anemoi.training.diagnostics.callbacks.reference.ReferenceComparisonPlot"] = Field(
+        alias="_target_",
+    )
+    "ReferenceComparisonPlot object from anemoi training diagnostics callbacks."
+    reference_dataset: str | dict
+    "Reference anemoi dataset on the model grid: a path or an ``open_dataset`` config."
+    variables: list[str] | dict[str, str]
+    "Model output variables to compare, or a mapping of model output name to reference name."
+    dates: list[str]
+    "Validation anchor dates to plot and score."
+    steps: list[str] | None = None
+    "Task step labels (from ``task.get_metric_name``) to compare; None takes the last step."
+    every_n_epochs: int | None = None
+    "Epoch frequency to run at, by default every epoch."
+    dataset_name: str = "data"
+    "Gridded dataset to compare."
+    high_k: int = Field(default=60, ge=1)
+    "Total wavenumber above which ``highk_ratio`` is computed."
+    grid_tolerance_deg: float = Field(default=1e-3, gt=0)
+    "Tolerance (degrees) when matching the reference grid to the model grid."
+    score_dates: list[str] | None = None
+    "Extra anchor dates that are scored but not plotted."
+    bands: bool = False
+    "Also log RMSE and bias per latitude band (NH / Tropics / SH)."
+    band_variables: list[str] | None = None
+    "Variables scored per band; None scores every variable."
+    scores: list[Literal["rmse", "bias", "highk_ratio"]] | None = None
+    "Scores to log; None logs ``rmse`` only."
+    zonal: ReferenceZonalSchema | None = None
+    "Zonal-mean dynamics diagnostics; None turns them off."
+    mean_maps: bool = False
+    "Plot bias and RMSE maps over all dates."
+    surface_pressure_variable: str = "sp"
+    "Reference surface pressure (Pa) used to mask levels below ground."
+    level_pattern: str = r"^([uvt])_(\d+)$"
+    "Regular expression of pressure-level names: group 1 the parameter, group 2 the level in hPa."
+    zonal_parameters: dict[Literal["u", "v", "t"], str] | None = None
+    "Parameter names of the u, v and t roles, when they differ from ``u``, ``v`` and ``t``."
+
+
 PlotCallbacks = Annotated[
-    GraphFeaturePlotSchema | LossCurvePlotSchema | BatchOutputPlotSchema,
+    GraphFeaturePlotSchema | LossCurvePlotSchema | BatchOutputPlotSchema | ReferenceComparisonPlotSchema,
     Field(discriminator="target_"),
 ]
 
