@@ -75,6 +75,7 @@ class _MultiEncoderEnsModel(AnemoiEnsModelEncProcDec):
         grid_shard_sizes=None,
         model_comm_group=None,
         dataset_name: str | None = None,
+        skip_input=None,
     ):
         value = float(self.input_datasets.index(dataset_name) + 1)
         return torch.full((batch_ens_size, 4), value), None, None

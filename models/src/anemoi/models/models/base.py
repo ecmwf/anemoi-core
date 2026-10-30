@@ -38,6 +38,11 @@ LOGGER = logging.getLogger(__name__)
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
+    # Whether ``forward`` honours a ``skip_input`` tensor as the source of the
+    # additive skip connection. ``forward`` swallows unknown kwargs, so callers
+    # check this rather than passing the tensor into a model that ignores it.
+    supports_skip_input: bool = False
+
     def __init__(
         self,
         *,
@@ -385,6 +390,67 @@ class BaseGraphModel(nn.Module):
         """
         pass
 
+    def _normalize_skip_input(
+        self,
+        skip_input: dict[str, torch.Tensor | None],
+        x: dict[str, torch.Tensor],
+        pre_processors: nn.ModuleDict,
+        n_step_input: int,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> dict[str, torch.Tensor]:
+        """Normalize and (if needed) shard a raw skip-connection base for inference.
+
+        Training builds ``skip_input`` from the already-preprocessed batch, so it
+        arrives normalized, ensemble-expanded and sharded exactly like ``x``.
+        Inference holds raw 4-D input tensors, and its own pre-processors act on
+        state dictionaries rather than tensors, so the conversion has to happen
+        here. Each tensor is therefore given the same treatment ``x`` receives in
+        :meth:`predict_step` -- ensemble dimension, then sharding, then
+        pre-processing.
+
+        A ``None`` value means no background exists yet (the first DA cycle). It
+        becomes zeros *after* normalization, matching the ``torch.zeros_like`` that
+        training applies to an already-normalized ``x``. Passing a raw zeros tensor
+        instead would normalize to ``-mean/stdev`` and defeat the all-zero cold-start
+        base that a residual with ``missing_value=0.0`` relies on.
+
+        Parameters
+        ----------
+        skip_input : dict[str, torch.Tensor | None]
+            Raw per-dataset residual bases, each shape
+            ``(batch, n_step_input, grid, variables)``, or ``None`` for "no
+            background". Already-5-D tensors are passed through untouched.
+        x : dict[str, torch.Tensor]
+            The normalized (and sharded) model input, used as the shape reference
+            for ``None`` entries.
+        pre_processors : nn.ModuleDict
+            Pre-processing modules keyed by dataset name.
+        n_step_input : int
+            Number of input timesteps.
+        grid_shard_sizes : DatasetShardSizes, optional
+            Per-dataset grid shard sizes; ``None`` means replicated.
+        model_comm_group : ProcessGroup, optional
+            Model communication group used when sharding.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Normalized (and sharded) residual bases, one per dataset in ``x``.
+        """
+        normalized_si = {}
+        for ds_name in x:
+            si = skip_input.get(ds_name)
+            if si is None:
+                normalized_si[ds_name] = torch.zeros_like(x[ds_name])
+                continue
+            if si.ndim == 4:
+                si = si[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
+            if grid_shard_sizes is not None and grid_shard_sizes.get(ds_name) is not None:
+                si = shard_tensor(si, -2, grid_shard_sizes[ds_name], model_comm_group)
+            normalized_si[ds_name] = pre_processors[ds_name](si, in_place=False)
+        return normalized_si
+
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
@@ -451,6 +517,21 @@ class BaseGraphModel(nn.Module):
 
             for dataset_name in dataset_names:
                 x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
+
+            # Normalize a raw skip-connection base the same way as the inputs and shard
+            # it to match x. Training passes already-normalized/sharded tensors, so this
+            # branch only runs at inference time. Done after x has been sharded and
+            # pre-processed, since both are needed to match it.
+            skip_input = kwargs.pop("skip_input", None)
+            if skip_input is not None:
+                kwargs["skip_input"] = self._normalize_skip_input(
+                    skip_input,
+                    x,
+                    pre_processors,
+                    n_step_input,
+                    grid_shard_sizes=grid_shard_sizes,
+                    model_comm_group=model_comm_group,
+                )
 
             # Perform forward pass
             y_hat = self.forward(

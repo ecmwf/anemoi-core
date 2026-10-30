@@ -72,6 +72,7 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
         grid_shard_sizes=None,
         model_comm_group=None,
         dataset_name: str | None = None,
+        skip_input=None,
     ):
         value = float(self.input_datasets.index(dataset_name) + 1)
         return torch.full((1, 4), value), None, [1]
