@@ -77,30 +77,22 @@ def test_invalid_level_count(levels):
         DTCWT2D(J=levels)
 
 
-def test_invalid_backend_and_protected_options():
+def test_invalid_backend():
     with pytest.raises(ValueError, match="backend"):
         DTCWT2D(J=1, backend="invalid")
-    with pytest.raises(ValueError, match="cannot override"):
-        DTCWT2D(J=1, backend_kwargs={"strict_no_autograd": True})
-    with pytest.raises(ValueError, match="only supported"):
-        DTCWT2D(J=1, backend_kwargs={"compute_dtype": "float16"})
 
 
-@pytest.mark.parametrize(
-    "backend,module",
-    [("pytorch_wavelets", "pytorch_wavelets"), ("triton", "triton_dtcwt")],
-)
-def test_missing_optional_dependency_is_actionable(monkeypatch, backend, module):
+def test_missing_optional_dependency_is_actionable(monkeypatch):
     original = builtins.__import__
 
     def guarded(name, *args, **kwargs):
-        if name == module:
+        if name == "pytorch_wavelets":
             raise ImportError("dependency not installed")
         return original(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", guarded)
     with pytest.raises(ImportError, match="Install"):
-        DTCWT2D(J=1, backend=backend)
+        DTCWT2D(J=1)
 
 
 @pytest.mark.parametrize("bad_input", [torch.zeros(1, 4, 4), torch.zeros(0, 1, 4, 4)])
@@ -144,38 +136,3 @@ def test_prepare_moves_reference_filters():
     transform.prepare(torch.device("cpu"), (7, 9), dtype=torch.float64)
     assert all(buffer.dtype == torch.float64 for buffer in transform.buffers())
     assert transform(torch.ones(1, 1, 7, 9, dtype=torch.float64)).lowpass.dtype == torch.float64
-
-
-def test_triton_rejects_cpu_and_unsupported_filters():
-    pytest.importorskip("triton_dtcwt")
-    with pytest.raises(ValueError, match="CUDA/ROCm"):
-        DTCWT2D(J=1, backend="triton")(torch.ones(1, 1, 4, 4))
-    with pytest.raises((ValueError, NotImplementedError), match="near_sym"):
-        DTCWT2D(J=1, backend="triton", biort="near_sym_a")
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="Triton DTCWT requires a GPU")
-@pytest.mark.parametrize("shape", [(16, 20), (17, 19)])
-@pytest.mark.parametrize("levels", [1, 2])
-def test_real_triton_forward_backward_parity(shape, levels):
-    pytest.importorskip("triton_dtcwt")
-    pytest.importorskip("pytorch_wavelets")
-    x = torch.randn(2, 1, *shape, device="cuda", requires_grad=True)
-    expected = DTCWT2D(J=levels)(x)
-    transform = DTCWT2D(J=levels, backend="triton", backend_kwargs={"compute_dtype": "float32"})
-    transform.prepare(x.device, shape)
-    actual = transform(x)
-    for a, b in zip(
-        (actual.lowpass, *actual.highpasses),
-        (expected.lowpass, *expected.highpasses),
-        strict=True,
-    ):
-        torch.testing.assert_close(a, b, atol=3e-5, rtol=3e-4)
-    actual_energy = actual.lowpass.square().sum() + sum(h.square().sum() for h in actual.highpasses)
-    expected_energy = expected.lowpass.square().sum() + sum(h.square().sum() for h in expected.highpasses)
-    torch.testing.assert_close(
-        torch.autograd.grad(actual_energy, x)[0],
-        torch.autograd.grad(expected_energy, x)[0],
-        atol=1e-4,
-        rtol=5e-4,
-    )

@@ -7,10 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Backend-neutral dual-tree complex wavelet transforms."""
-
-from collections.abc import Mapping
-from typing import Any
 from typing import Literal
 from typing import NamedTuple
 from typing import Protocol
@@ -41,81 +37,36 @@ class DTCWT2D(nn.Module):
     J
         Positive number of decomposition levels.
     backend
-        ``pytorch_wavelets`` (CPU or GPU) or ``triton`` (CUDA/ROCm only).
+        The supported ``pytorch_wavelets`` implementation.
     biort, qshift
-        First-level and subsequent-level filters. The Triton backend currently
-        supports only ``near_sym_b`` and ``qshift_b``.
-    backend_kwargs
-        Backend-specific tuning, such as Triton's ``compute_dtype``. Core
-        transform options and gradient support cannot be overridden here.
+        First-level and subsequent-level filters.
 
     Notes
     -----
-    Imports are optional until construction. Inputs are float32 or float64
-    tensors; the Triton backend accepts float32 inputs and controls its internal
-    precision through ``compute_dtype``. Output tensors retain the input dtype.
+    The optional ``pytorch_wavelets`` dependency is imported when the transform
+    is constructed. Inputs must be float32 or float64 tensors, and outputs retain
+    the input dtype.
     """
 
     def __init__(
         self,
         J: int,
-        backend: Literal["pytorch_wavelets", "triton"] = "pytorch_wavelets",
+        backend: Literal["pytorch_wavelets"] = "pytorch_wavelets",
         biort: str = "near_sym_b",
         qshift: str = "qshift_b",
-        backend_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__()
         if isinstance(J, bool) or not isinstance(J, int) or J < 1:
             raise ValueError("J must be a positive integer")
-        if backend not in ("pytorch_wavelets", "triton"):
+        if backend != "pytorch_wavelets":
             raise ValueError(f"Unknown wavelet backend: {backend!r}")
-        options = dict(backend_kwargs or {})
-        protected = {
-            "J",
-            "biort",
-            "qshift",
-            "mode",
-            "strict_no_autograd",
-            "include_scale",
-            "skip_hps",
-            "o_dim",
-            "ri_dim",
-        }
-        if protected.intersection(options):
-            raise ValueError(f"backend_kwargs cannot override {sorted(protected.intersection(options))}")
         self.J = J
         self.backend = backend
-        if backend == "pytorch_wavelets":
-            if options:
-                raise ValueError("backend_kwargs are only supported by the Triton backend")
-            try:
-                from pytorch_wavelets import DTCWTForward
-            except ImportError as exc:
-                raise ImportError("Install anemoi-models[wavelet] to use the pytorch_wavelets backend") from exc
-            self.impl = DTCWTForward(J=J, biort=biort, qshift=qshift, mode="symmetric")
-        else:
-            try:
-                from triton_dtcwt import TritonDTCWTForward
-            except ImportError as exc:
-                raise ImportError("Install triton-dtcwt separately to use the Triton wavelet backend") from exc
-            dtype = options.get("compute_dtype", torch.float32)
-            if isinstance(dtype, str):
-                dtypes = {
-                    "float32": torch.float32,
-                    "float16": torch.float16,
-                    "bfloat16": torch.bfloat16,
-                }
-                if dtype not in dtypes:
-                    raise ValueError(f"Unsupported Triton compute_dtype: {dtype!r}")
-                options["compute_dtype"] = dtypes[dtype]
-            self.impl = TritonDTCWTForward(
-                J=J,
-                biort=biort,
-                qshift=qshift,
-                mode="symmetric",
-                strict_no_autograd=False,
-                **options,
-            )
+        try:
+            from pytorch_wavelets import DTCWTForward
+        except ImportError as exc:
+            raise ImportError("Install anemoi-models[wavelet] to use the pytorch_wavelets backend") from exc
+        self.impl = DTCWTForward(J=J, biort=biort, qshift=qshift, mode="symmetric")
 
     def prepare(
         self,
@@ -134,9 +85,7 @@ class DTCWT2D(nn.Module):
             raise ValueError("DTCWT2D expects a nonempty [N,C,H,W] tensor")
         if data.dtype not in (torch.float32, torch.float64):
             raise TypeError("DTCWT2D inputs must be float32 or float64")
-        if self.backend == "triton" and (data.device.type != "cuda" or data.dtype != torch.float32):
-            raise ValueError("The Triton wavelet backend requires CUDA/ROCm float32 inputs")
-        # This boundary stays eager: backend filters and lookup caches may be lazy.
+        # This boundary stays eager because wavelet filters may be initialized lazily.
         self.impl.to(device=data.device, dtype=data.dtype)
         output = self.impl(data)
         if isinstance(output, tuple) and len(output) == 2:
@@ -144,7 +93,7 @@ class DTCWT2D(nn.Module):
         elif isinstance(output, _BackendResult):
             lowpass, highpasses = output.yl, output.yh
         else:
-            raise TypeError("DTCWT backend must return (yl, yh) or an object with yl/yh attributes")
+            raise TypeError("pytorch_wavelets DTCWT must return (yl, yh) or an object with yl/yh attributes")
         if not isinstance(lowpass, torch.Tensor) or lowpass.ndim != 4 or lowpass.shape[:2] != data.shape[:2]:
             raise ValueError("DTCWT low-pass coefficients must have shape [N,C,H,W]")
         if not isinstance(highpasses, (list, tuple)) or len(highpasses) != self.J:

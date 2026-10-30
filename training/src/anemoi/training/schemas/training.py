@@ -401,10 +401,9 @@ class WaveletTransformSchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    backend: Literal["pytorch_wavelets", "triton"] = "pytorch_wavelets"
+    backend: Literal["pytorch_wavelets"] = "pytorch_wavelets"
     biort: str = "near_sym_b"
     qshift: str = "qshift_b"
-    backend_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
 class DTCWT2DLossSchema(BaseLossSchema):

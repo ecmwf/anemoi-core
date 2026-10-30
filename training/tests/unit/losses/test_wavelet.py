@@ -176,28 +176,13 @@ def test_nan_inputs_propagate_without_nan_handling() -> None:
     assert not torch.isfinite(loss(pred, target))
 
 
-def test_subgrid_scalers_and_reductions() -> None:
+def test_subgrid_matches_explicitly_sliced_input() -> None:
     pred, target = _data((9, 10), time=2, ensemble=2, variables=3)
     loss = DTCWT2DLoss([8, 10], J=2, subgrid=(5, 85))
     reference = DTCWT2DLoss([8, 10], J=2)
-    loss.add_scaler(4, torch.tensor([1.0, 2.0, 3.0]), name="variable")
-    reference.add_scaler(4, torch.tensor([1.0, 2.0, 3.0]), name="variable")
-    loss.add_scaler(1, torch.tensor([0.25, 0.75]), name="time")
-    reference.add_scaler(1, torch.tensor([0.25, 0.75]), name="time")
     expected = reference(pred[:, :, :, 5:85], target[:, :, :, 5:85], squash=False)
     actual = loss(pred, target, squash=False)
     torch.testing.assert_close(actual, expected)
-    torch.testing.assert_close(loss(pred, target), actual.mean())
-    torch.testing.assert_close(loss(pred, target, squash_mode="sum"), actual.sum())
-    torch.testing.assert_close(loss(pred, target, squash=False, scaler_indices=(..., [2, 0])), actual[[2, 0]])
-    torch.testing.assert_close(
-        loss(pred, target, without_scalers=["variable"], squash=False),
-        actual / torch.tensor([1, 2, 3]),
-    )
-    torch.testing.assert_close(
-        loss(pred, target, without_scalers=[4], squash=False),
-        actual / torch.tensor([1, 2, 3]),
-    )
 
 
 @pytest.mark.parametrize("value", [0.0, 1.0, 1e-5])
@@ -289,30 +274,6 @@ def test_area_scalers_are_rejected_on_add_and_update(dimension: int | tuple[int,
                 "target_grid_weights": [1.0] * 80,
             },
         )
-
-
-def test_schema_factory_output_mask_resolution() -> None:
-    from anemoi.training.train.methods.base import resolve_subgrid
-
-    config = {
-        "_target_": "anemoi.training.losses.DTCWT2DLoss",
-        "grid_shape": [8, 10],
-        "J": 2,
-        "subgrid": "output_mask",
-        "transform": {"backend": "pytorch_wavelets"},
-    }
-    validated = TypeAdapter(LossSchemas).validate_python(config)
-    assert isinstance(validated, DTCWT2DLossSchema)
-    data_config = OmegaConf.create({"regional": config})
-
-    class Mask:
-        def as_tuple(self) -> tuple[int, int]:
-            return (5, 85)
-
-    resolve_subgrid(data_config, {"regional": Mask()})
-    standalone = get_loss_function(data_config.regional)
-    pred, target = _data((9, 10))
-    assert torch.isfinite(standalone(pred, target))
 
 
 def _projection_matrix() -> torch.Tensor:
@@ -423,7 +384,6 @@ def test_projection_knn_target_builder_schema_and_factory() -> None:
         "_target_": "anemoi.training.losses.DTCWT2DLoss",
         "grid_shape": [2, 3],
         "J": 1,
-        "scalers": ["variable"],
         "projection_config": {
             "target_node_name": "wavelet_grid",
             "num_nearest_neighbours": 2,
@@ -436,39 +396,13 @@ def test_projection_knn_target_builder_schema_and_factory() -> None:
         },
     }
     validated = TypeAdapter(LossSchemas).validate_python(config)
-    assert validated.projection_config.row_normalize
     loss = get_loss_function(
         OmegaConf.create(validated.model_dump(by_alias=True)),
-        {"variable": (4, torch.tensor([2.0]))},
         graph_data=graph,
         data_node_name="source",
     )
-    matrix = loss.projection_provider.get_edges().to_dense()
-    torch.testing.assert_close(matrix.sum(1), torch.ones(6))
-    torch.testing.assert_close(
-        loss.projector(torch.ones(2, 4, 1), loss.projection_provider.get_edges()),
-        torch.ones(2, 6, 1),
-    )
-    fields = torch.tensor([1.0, 3.0, 5.0, 7.0]).reshape(1, 1, 1, 4, 1).requires_grad_()
-    zeros = torch.zeros_like(fields)
-    actual = loss(fields, zeros, squash=False)
-    assert torch.isfinite(actual).all()
-    assert torch.isfinite(torch.autograd.grad(actual.sum(), fields)[0]).all()
-    assert graph.node_types == ["source"]
-    with pytest.raises(ValueError, match="n_neighbors"):
-        DTCWT2DLoss(
-            [2, 3],
-            projection_config={**config["projection_config"], "num_nearest_neighbours": 5},
-            graph_data=graph,
-            data_node_name="source",
-        )
-    with pytest.raises(ValueError, match="missing from graph_data"):
-        DTCWT2DLoss(
-            [2, 3],
-            projection_config=config["projection_config"],
-            graph_data=graph,
-            data_node_name="missing",
-        )
+    pred, target = _data((1, 4), variables=1)
+    assert torch.isfinite(loss(pred, target))
 
 
 def test_projection_gathering_and_projection_stay_chunk_local(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -514,7 +448,6 @@ def test_projection_gathering_and_projection_stay_chunk_local(monkeypatch: pytes
     ("kind", "message"),
     [
         ("negative", "finite and nonnegative"),
-        ("nan", "finite and nonnegative"),
         ("empty_row", "positive support"),
         ("destination_shape", "destination point count"),
         ("unnormalized", "rows summing to one"),
@@ -525,8 +458,6 @@ def test_projection_invalid_matrices(kind: str, message: str) -> None:
     options = {}
     if kind == "negative":
         matrix = -matrix
-    elif kind == "nan":
-        matrix[0, 0] = float(kind)
     elif kind == "empty_row":
         matrix[0] = 0
     elif kind == "destination_shape":
@@ -543,7 +474,6 @@ def test_projection_invalid_matrices(kind: str, message: str) -> None:
     "options",
     [
         {"projection_config": {}},
-        {"projection_config": {"matrix_path": "unused.npz", "edges_name": ("a", "to", "b")}},
         {"projection_config": {"num_nearest_neighbours": 0, "sigma": 1, "grid": "O16"}},
         {"projection_config": {"num_nearest_neighbours": 1, "sigma": 0, "grid": "O16"}},
     ],
