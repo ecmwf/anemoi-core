@@ -44,7 +44,8 @@ def forward_backward(
     return out.detach(), x.grad
 
 
-@pytest.mark.parametrize(("n", "num_neighbours", "channels"), [(8, 9, 5), (24, 32, 70), (48, 128, 37), (16, 24, 130)])
+# At most 100 neighbours, the limit of pyg-lib's KNN on the GPU.
+@pytest.mark.parametrize(("n", "num_neighbours", "channels"), [(8, 9, 5), (24, 32, 70), (48, 64, 37), (16, 24, 130)])
 @pytest.mark.parametrize("sigma", [0.01, 0.05])
 def test_triton_matches_torch_in_float32(n: int, num_neighbours: int, channels: int, sigma: float) -> None:
     neighbours, unit_vectors = neighbour_tables(n, num_neighbours)

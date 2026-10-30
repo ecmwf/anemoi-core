@@ -15,15 +15,15 @@ training:
   training_loss:
     datasets:
       data:
-        # benchmark smoothing over a neighbour list built from the graph; on N320, 128 neighbours
-        # reach about 0.031 rad, twice the widest sigma
-        multiscale_config: {num_nearest_neighbours: 128, sigmas: [0.0157, 0.0078, 0.0039]}
+        # benchmark smoothing over a neighbour list built from the graph; 64 neighbours, as
+        # pyg-lib's KNN on the GPU allows at most 100
+        multiscale_config: {num_nearest_neighbours: 64, sigmas: [0.0157, 0.0078, 0.0039]}
         weights: [1.0, 1.0, 1.0, 4.0]
   validation_metrics:
     datasets:
       data:
         multiscale:
-          multiscale_config: {num_nearest_neighbours: 128, sigmas: [0.0157, 0.0078, 0.0039]}
+          multiscale_config: {num_nearest_neighbours: 64, sigmas: [0.0157, 0.0078, 0.0039]}
           weights: [1.0, 1.0, 1.0, 4.0]
 
 dataloader:

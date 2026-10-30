@@ -77,7 +77,8 @@ training:
         loss_weights: [0.6, 0.4]
         losses:
         - _target_: anemoi.training.losses.MultiscaleLossWrapper
-          multiscale_config: {num_nearest_neighbours: 128, sigmas: [0.0471, 0.0236, 0.0118]}  # null = single scale, no smoothing
+          # 64 neighbours, as pyg-lib's KNN on the GPU allows at most 100
+          multiscale_config: {num_nearest_neighbours: 64, sigmas: [0.0471, 0.0236, 0.0118]}  # null = single scale, no smoothing
           weights: [1.0, 1.0, 1.0, 4.0]
           per_scale_loss:
             _target_: anemoi.training.losses.CRPS

@@ -42,14 +42,16 @@ def uneven_provider(
 ) -> ProjectionGraphProvider:
     """Random weights with rows of 0 to ``longest_row`` entries."""
     rng = torch.Generator().manual_seed(seed)
-    lengths = torch.randint(0, longest_row + 1, (num_targets,), generator=rng)
-    targets = torch.repeat_interleave(torch.arange(num_targets), lengths)
-    sources = torch.cat([torch.randperm(num_sources, generator=rng)[:length] for length in lengths.tolist()])
+    lengths = torch.randint(0, longest_row + 1, (num_targets,), generator=rng, device="cpu")
+    targets = torch.repeat_interleave(torch.arange(num_targets, device="cpu"), lengths)
+    sources = torch.cat(
+        [torch.randperm(num_sources, generator=rng, device="cpu")[:length] for length in lengths.tolist()]
+    )
     graph = HeteroData()
     graph["source"].num_nodes = num_sources
     graph["target"].num_nodes = num_targets
     graph[("source", "to", "target")].edge_index = torch.stack([sources, targets])
-    graph[("source", "to", "target")].weight = torch.rand(len(sources), generator=rng)
+    graph[("source", "to", "target")].weight = torch.rand(len(sources), generator=rng, device="cpu")
     return ProjectionGraphProvider(
         graph=graph,
         edges_name=("source", "to", "target"),
@@ -69,6 +71,13 @@ PROVIDERS = {
 }
 
 
+def table_as_dense(provider: ProjectionGraphProvider) -> torch.Tensor:
+    """The matrix held in the padded table that the kernels read."""
+    columns, weights, _ = provider.get_table()
+    dense = torch.zeros(provider.shape, dtype=weights.dtype, device=weights.device)
+    return dense.scatter_add_(1, columns.long(), weights)
+
+
 def forward_backward(project, x: torch.Tensor, grad: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     x = x.detach().clone().requires_grad_(True)
     out = project(x)
@@ -85,7 +94,10 @@ def test_triton_matches_the_matrix(provider_name: str, channels: int, dtype: tor
     generator = torch.Generator(device="cuda").manual_seed(0)
     x = torch.randn(2, 3, num_sources, channels, device="cuda", dtype=dtype, generator=generator)
     grad = torch.randn(2, 3, num_targets, channels, device="cuda", dtype=dtype, generator=generator)
-    dense = PROVIDERS[provider_name]("torch").get_edges().to_dense().to(device="cuda", dtype=dtype)
+    # Compare against a matrix made from the weights the Triton kernel uses. A separately
+    # built matrix can differ in the last digit of its float32 weights, and that is
+    # already enough to fail the float64 comparison.
+    dense = table_as_dense(provider).to(device="cuda", dtype=dtype)
 
     out_t, grad_t = forward_backward(lambda x: SparseProjector()(x, provider), x, grad)
     out_r, grad_r = forward_backward(lambda x: torch.einsum("mn,...nc->...mc", dense, x), x, grad)
