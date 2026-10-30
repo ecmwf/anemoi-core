@@ -1,0 +1,44 @@
+---
+defaults:
+  - multi_scale
+  - _self_
+
+# Hydra replaces lists: include the three model edge groups and the corrector edges.
+edges:
+  - source_name: data
+    target_name: hidden
+    edge_builders:
+      - _target_: anemoi.graphs.edges.CutOffEdges
+        cutoff_factor: 0.6
+        source_mask_attr_name: null
+        target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+
+  - source_name: hidden
+    target_name: hidden
+    edge_builders:
+      - _target_: anemoi.graphs.edges.MultiScaleEdges
+        x_hops: 1
+        scale_resolutions: ${graph.nodes.hidden.node_builder.resolution}
+        source_mask_attr_name: null
+        target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+
+  - source_name: hidden
+    target_name: data
+    edge_builders:
+      - _target_: anemoi.graphs.edges.KNNEdges
+        num_nearest_neighbours: 3
+        source_mask_attr_name: null
+        target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+
+  # One bidirectional data graph shared by all instrument correctors in this dataset.
+  - source_name: data
+    target_name: data
+    edge_builders:
+      - _target_: anemoi.graphs.edges.KNNEdges
+        num_nearest_neighbours: 8
+      - _target_: anemoi.graphs.edges.ReversedKNNEdges
+        num_nearest_neighbours: 8
+    attributes: ${graph.attributes.edges}

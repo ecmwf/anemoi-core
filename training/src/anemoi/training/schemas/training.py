@@ -25,6 +25,8 @@ from pydantic import Tag
 from pydantic import field_validator
 from pydantic import model_validator
 
+from anemoi.models.schemas.processor import GNNProcessorSchema
+from anemoi.models.schemas.processor import GraphTransformerProcessorSchema
 from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
@@ -844,6 +846,77 @@ class TransportTrainingMethodSchema(BaseModel):
     "Hydra target for the transport training method."
 
 
+class DASingleTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.DASingleTraining"] = Field(..., alias="_target_")
+    "Hydra target for the DA single training method."
+
+
+class DAEnsembleTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.DAEnsembleTraining"] = Field(..., alias="_target_")
+    "Hydra target for the DA ensemble training method."
+
+
+class CorrectorGroupSchema(BaseModel):
+    """One instrument group for the training-time corrector."""
+
+    corrector_variables: list[str] = Field(..., min_length=1)
+    "Corrector variable names routed to this group's network."
+    channels: list[str] | None = None
+    "Explicit output channels to correct; if unset, output variables prefixed by the group name are used."
+
+
+class CorrectorSchema(BaseModel):
+    """Configuration for the training-time corrector networks."""
+
+    type: Literal["mlp", "processor"] = "mlp"
+    "Corrector backend: pointwise MLP or an embedded graph processor."
+    hidden_dim: PositiveInt = 64
+    "Embedding width for each instrument's network."
+    processor: (
+        Annotated[
+            GraphTransformerProcessorSchema | GNNProcessorSchema,
+            Field(discriminator="target_"),
+        ]
+        | None
+    ) = None
+    "Standard processor configuration, including graph features and layer kernels."
+    instrument_groups: dict[str, CorrectorGroupSchema]
+    "Mapping of instrument-group name to its corrector configuration."
+    categorical_embedding_dim: PositiveInt | None = None
+    "Embedding width for corrector variables in model.categorical_embeddings. None uses each variable's embedding_dim."
+    categorical_unknown_prob: float | None = Field(default=None, ge=0.0, lt=1.0)
+    "Training-only UNKNOWN replacement probability for those variables. None uses each variable's unknown_prob."
+
+    @model_validator(mode="after")
+    def check_processor(self) -> Self:
+        if self.type == "processor" and self.processor is None:
+            msg = "Corrector type 'processor' requires a processor configuration."
+            raise ValueError(msg)
+        if self.type == "mlp" and self.processor is not None:
+            msg = "A processor configuration requires corrector type 'processor'."
+            raise ValueError(msg)
+        if self.processor is not None:
+            processor = self.processor
+            if processor.num_layers < 1 or processor.num_chunks < 1:
+                msg = "Corrector processor num_layers and num_chunks must be positive."
+                raise ValueError(msg)
+            if processor.num_layers % processor.num_chunks:
+                msg = "Corrector processor num_layers must be divisible by num_chunks."
+                raise ValueError(msg)
+            if not processor.sub_graph_edge_attributes:
+                msg = "Corrector processors require sub_graph_edge_attributes."
+                raise ValueError(msg)
+            if getattr(processor, "num_channels", self.hidden_dim) != self.hidden_dim:
+                msg = "Corrector processor num_channels must equal training.corrector.hidden_dim."
+                raise ValueError(msg)
+            if isinstance(processor, GraphTransformerProcessorSchema):
+                attn_channels = getattr(processor, "attn_channels", None) or self.hidden_dim
+                if processor.num_heads < 1 or attn_channels % processor.num_heads:
+                    msg = "Corrector attention width must be divisible by a positive num_heads."
+                    raise ValueError(msg)
+        return self
+
+
 def _training_method_discriminator(v: Any) -> str:
     method = v.get("method", {}) if hasattr(v, "get") else getattr(v, "method", None)
     return method.get("_target_", "") if hasattr(method, "get") else getattr(method, "target_", "")
@@ -873,9 +946,25 @@ class TransportTrainingSchema(BaseTrainingSchema):
     "Transport training configuration."
 
 
+class DASingleTrainingSchema(BaseTrainingSchema):
+    method: DASingleTrainingMethodSchema
+    "Training method."
+    corrector: CorrectorSchema | None = None
+    "Optional training-time corrector networks applied to predictions for the loss."
+
+
+class DAEnsembleTrainingSchema(BaseTrainingSchema):
+    method: DAEnsembleTrainingMethodSchema
+    "Training method."
+    corrector: CorrectorSchema | None = None
+    "Optional training-time corrector networks applied to predictions for the loss."
+
+
 TrainingSchema = Annotated[
     Annotated[SingleTrainingSchema, Tag("anemoi.training.train.methods.SingleTraining")]
     | Annotated[EnsembleTrainingSchema, Tag("anemoi.training.train.methods.EnsembleTraining")]
-    | Annotated[TransportTrainingSchema, Tag("anemoi.training.train.methods.TransportTraining")],
+    | Annotated[TransportTrainingSchema, Tag("anemoi.training.train.methods.TransportTraining")]
+    | Annotated[DASingleTrainingSchema, Tag("anemoi.training.train.methods.DASingleTraining")]
+    | Annotated[DAEnsembleTrainingSchema, Tag("anemoi.training.train.methods.DAEnsembleTraining")],
     Discriminator(_training_method_discriminator),
 ]
