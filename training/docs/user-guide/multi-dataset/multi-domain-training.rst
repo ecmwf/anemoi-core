@@ -1,15 +1,20 @@
-###########################################
-Multi-Domain Training (Shared Architecture)
-###########################################
+#####################
+Multi-Domain Training
+#####################
 
-Multi-domain training enables multiple datasets to share a single encoder, processor, and decoder within one training workflow. Unlike the multiple encoder–decoder approach, in which each dataset has its own encoder and decoder, this setup uses shared model parameters across datasets. It supports training with different spatial resolutions, grid structures, and geographical domains, making it useful for applications such as downscaling, combining global and regional datasets, and improving model generalisation across domains and resolutions.
+Multi-domain training enables a single model to be trained on several domains that are loaded independently: each batch is drawn from one domain, and the same model parameters are updated across all domains.
+
+A **domain** is the spatial structure of a dataset: its grid, resolution, geographical extent, and number of nodes. All domains are assumed to share the same variables, so variables do not distinguish one domain from another. A typical use case is a set of stretched-grid domains that share a global dataset but each combine it with a different regional dataset. Multi-domain training supports different spatial resolutions, grid structures, and geographical extents, making it useful for applications such as downscaling, combining global and regional datasets, and improving model generalisation across domains and resolutions.
+
+.. note::
+    One can also configure multi-domain with only LAM or alternate between global grids at different resolutions and gridtypes.
 
 Overview
 ********
 
-In a shared encoder–decoder configuration, the same model processes datasets with different spatial grids and numbers of nodes. Each training iteration selects data from one of the configured datasets and uses its corresponding graph. The shared encoder maps the input to a latent representation, the shared processor operates on that representation, and the shared decoder produces predictions on the selected dataset's grid. All datasets contribute to updating the same model parameters, allowing the model to learn across different domains and resolutions.
+In multi-domain training, the same model processes datasets with different spatial grids and numbers of nodes. Each training iteration selects data from one of the configured datasets and uses its corresponding graph. The shared encoder maps the input to a latent representation, the shared processor operates on that representation, and the shared decoder produces predictions on the selected dataset's grid. All datasets contribute to updating the same model parameters, allowing the model to learn across different domains and resolutions.
 
-Datasets may cover different geographical regions and do not need to overlap spatially. They can also have dataset-specific readers, preprocessing settings, and normalisation statistics, provided the resulting inputs and outputs are compatible with the shared architecture.
+Domains may cover different geographical regions and do not need to overlap spatially, although stretched-grid domains typically share the same global dataset. They can also have dataset-specific readers, preprocessing settings, and normalisation statistics, provided the resulting inputs and outputs are compatible with the shared architecture.
 
 .. warning::
 
@@ -18,7 +23,7 @@ Datasets may cover different geographical regions and do not need to overlap spa
 Training Procedure
 ******************
 
-Multi-domain training aims to learn a shared representation across spatial domains and resolutions rather than training separate encoders and decoders for individual datasets. During training, data and the corresponding graph are selected from the configured datasets according to the sampling strategy. The shared encoder, processor, and decoder then process the batch, after which the loss is calculated and the shared parameters are updated. The selected grid, resolution, and number of spatial nodes may change between iterations, while the model parameters remain shared.
+Multi-domain training aims to learn a representation that generalises across spatial domains and resolutions. During training, data and the corresponding graph are selected from the configured datasets according to the sampling strategy. The shared encoder, processor, and decoder then process the batch, after which the loss is calculated and the shared parameters are updated. The selected grid, resolution, and number of spatial nodes may change between iterations, while the model parameters remain shared.
 
 The following illustration shows multi-domain training with datasets that differ in their spatial characteristics.
 
@@ -27,7 +32,7 @@ The following illustration shows multi-domain training with datasets that differ
    :width: 600px
    :align: center
 
-The animation below shows datasets passing through the shared encoder–decoder architecture during training.
+The animation below shows datasets passing through the model during training.
 
 .. image:: ../../images/multi-dataset/multi-domain.gif
    :alt: Animation showing multi-domain training with a shared encoder and decoder
@@ -39,63 +44,44 @@ Multi-domain models can be trained using deterministic objectives, probabilistic
 Dataset Configuration
 *********************
 
-The shared encoder–decoder approach follows the same general dataset reader structure as the multiple encoder–decoder approach. Each dataset is configured under ``dataloader.training.datasets``, where its data source, time range, and optional processing settings are specified. For example, a single ERA5 dataset can be configured as follows:
+The dataset reader configuration under ``dataloader.training.datasets`` is the same regardless of how the datasets are loaded, see :doc:`multiple-encoder-decoder`. The following example defines two stretched-grid domains, ``sg_1`` and ``sg_2``. Each cuts a different regional dataset into the same global dataset, so the domains differ only in their regional part:
 
 .. code-block:: yaml
 
    dataloader:
+       selected_variables: [...]
+       sg_1:
+           dataset:
+               cutout:
+               - dataset: /path/to/regional_1.zarr
+                 trim_edge: 50
+               - /path/to/global.zarr
+               adjust: all
+               min_distance_km: 0
+               statistics: /path/to/global.zarr
+           select: ${dataloader.selected_variables}
+       sg_2:
+           dataset:
+               cutout:
+               - dataset: /path/to/regional_2.zarr
+                 trim_edge: 50
+               - /path/to/global.zarr
+               adjust: all
+               min_distance_km: 0
+               statistics: /path/to/global.zarr
+           select: ${dataloader.selected_variables}
        training:
            datasets:
-               era5:
-                   dataset_config:
-                       dataset: ${system.input.dataset}
-                       frequency: ${data.frequency}
-                       drop: []
-                       select: []
-                       statistics: /path/to/statistics.zarr
-                   start: 1985
-                   end: 2020
-                   trajectory: null
+               sg_1:
+                   dataset_config: ${dataloader.sg_1}
+                   start: 2020-02-05
+                   end: 2023-12-31
+               sg_2:
+                   dataset_config: ${dataloader.sg_2}
+                   start: 2022-02-01
+                   end: 2023-12-31
 
-The ``dataset_config`` dictionary is passed to ``open_dataset`` to specify how the dataset is opened and processed. Conceptually, this corresponds to:
-
-.. code-block:: python
-
-   open_dataset({
-       "dataset": ...,
-       "frequency": ...,
-       "drop": ...,
-       "select": ...,
-       "statistics": ...,
-   })
-
-Additional datasets can be introduced by adding entries under ``dataloader.training.datasets``. Each entry can specify its own data source, temporal coverage, and preprocessing options while following the same configuration structure.
-
-**Example multi-dataset configuration**
-
-The following example illustrates two global ERA5 datasets on different grids, ``era5_o96`` (O96) and ``era5_n320`` (N320), with different date ranges:
-
-.. code-block:: yaml
-
-   dataloader:
-       training:
-           datasets:
-               era5_o96:
-                   dataset_config:
-                       dataset: /path/to/era5_o96.zarr
-                       frequency: ${data.frequency}
-                       drop: [u_600, z]
-                   start: 1985
-                   end: 2020
-               era5_n320:
-                   dataset_config:
-                       dataset: /path/to/era5_n320.zarr
-                       frequency: ${data.frequency}
-                       drop: ${dataloader.training.datasets.era5_o96.dataset_config.drop}
-                   start: 1979
-                   end: 2000
-
-The second dataset reuses the first dataset's ``drop`` setting through a configuration reference. This helps keep the variable selection consistent across datasets, even when their grids and time ranges differ.
+Each domain is defined once and referenced from the training, validation and test sections, and from the graph recipe (see below). The shared ``select`` list and the shared ``statistics`` source keep the variables, their order and their normalisation consistent across domains, while the date ranges may differ.
 
 Loading Policy and Model Configuration
 **************************************
@@ -120,35 +106,66 @@ The following constraints apply:
 Graph Creation
 **************
 
-Multi-domain training requires graph definitions that support the spatial structure of each dataset. Since datasets may differ in resolution, geographical domain, and number of spatial nodes, their graph structures can also vary. The graph recipe must define the data nodes associated with each dataset, using the dataset names to identify the corresponding nodes. For example, when training with ``era5_o96`` and ``era5_n320``, the graph configuration must define the data nodes, hidden meshes, and corresponding data-to-hidden, hidden-to-hidden, and hidden-to-data edges for both datasets.
+Each domain needs its own data nodes, named after the dataset, and its own hidden mesh, because the hidden mesh of a stretched-grid domain is refined around that domain's region. The graph recipe must therefore define, for every domain, the data nodes, the hidden mesh, and the corresponding data-to-hidden, hidden-to-hidden, and hidden-to-data edges. During training, the graph of the selected domain is used to encode and decode its spatial representation, while the encoder, processor, and decoder parameters remain shared. The hidden meshes may differ in size and structure, provided they are compatible with the shared model architecture.
 
-During training, the graph associated with the selected dataset is used to encode and decode its spatial representation, while the encoder, processor, and decoder parameters remain shared across the different graph structures.
-
-One of the key features of multi-domain training is its ability to support different hidden mesh sizes and structures, provided they are compatible with the shared model architecture. For example, training can alternate between batches from global datasets at O96 and N320 resolutions, each with its own hidden mesh resolution. This can be configured by defining separate data and hidden nodes for each dataset in the graph configuration file:
+For the stretched-grid domains ``sg_1`` and ``sg_2`` defined above, the data nodes are built from each domain's dataset reader and the hidden meshes are stretched around each domain's own regional area:
 
 .. code-block:: yaml
 
    nodes:
-       o96:
+       sg_1:
            node_builder:
                _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-               dataset: ${dataloader.data_o96}
+               dataset: ${dataloader.sg_1}
            attributes: ${graph.attributes.nodes}
-       hidden_o96:
+       sg_1_hidden:
            node_builder:
-               _target_: anemoi.graphs.nodes.TriNodes
-               resolution: 5
-       n320:
+               _target_: anemoi.graphs.nodes.StretchedTriNodes
+               lam_resolution: 10
+               global_resolution: 7
+               reference_node_name: sg_1
+               mask_attr_name: cutout_mask
+               margin_radius_km: 11
+       sg_2:
            node_builder:
                _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-               dataset: ${dataloader.data_n320}
+               dataset: ${dataloader.sg_2}
            attributes: ${graph.attributes.nodes}
-       hidden_n320:
+       sg_2_hidden:
            node_builder:
-               _target_: anemoi.graphs.nodes.TriNodes
-               resolution: 7
+               _target_: anemoi.graphs.nodes.StretchedTriNodes
+               lam_resolution: 10
+               global_resolution: 7
+               reference_node_name: sg_2
+               mask_attr_name: cutout_mask
+               margin_radius_km: 11
 
-This configuration creates separate data and hidden nodes for each grid, allowing the O96 and N320 datasets to use different hidden mesh resolutions. The corresponding hidden nodes must then be mapped to their respective datasets in the model configuration, located under ``config/model/`` (see the processor section):
+The ``cutout_mask`` node attribute, defined under ``graph.attributes.nodes`` with ``anemoi.graphs.nodes.attributes.CutOutMask``, marks the regional part of each domain. The edges are defined per domain; for ``sg_1``:
+
+.. code-block:: yaml
+
+   edges:
+   - source_name: sg_1
+     target_name: sg_1_hidden
+     edge_builders:
+     - _target_: anemoi.graphs.edges.KNNEdges
+       num_nearest_neighbours: 12
+     attributes: ${graph.attributes.edges}
+   - source_name: sg_1_hidden
+     target_name: sg_1_hidden
+     edge_builders:
+     - _target_: anemoi.graphs.edges.MultiScaleEdges
+       x_hops: 1
+       scale_resolutions: 5
+     attributes: ${graph.attributes.edges}
+   - source_name: sg_1_hidden
+     target_name: sg_1
+     edge_builders:
+     - _target_: anemoi.graphs.edges.KNNEdges
+       num_nearest_neighbours: 3
+     attributes: ${graph.attributes.edges}
+
+and analogously for ``sg_2``. The corresponding hidden nodes must then be mapped to their respective datasets in the model configuration, located under ``config/model/`` (see the processor section):
 
 .. code-block:: yaml
 
@@ -160,5 +177,5 @@ This configuration creates separate data and hidden nodes for each grid, allowin
        model:
            _target_: ...
            hidden_nodes_name:
-               o96: hidden_o96
-               n320: hidden_n320
+               sg_1: sg_1_hidden
+               sg_2: sg_2_hidden
