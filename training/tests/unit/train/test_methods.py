@@ -2979,8 +2979,8 @@ def test_residual_prediction_mode_accepts_residual_processors_for_every_target()
 
 @pytest.mark.parametrize(
     ("input_hours", "output_hours"),
-    [([0], [0, 6]), ([0, 6], [6, 12])],
-    ids=["different_count", "same_count_different_times"],
+    [([0], [0, 6]), ([0, 6], [6, 12]), ([0, 1, 3], [0, 1, 3])],
+    ids=["different_count", "same_count_different_times", "non_equidistant_offsets"],
 )
 def test_residual_prediction_mode_rejects_different_input_and_output_offsets(
     input_hours: list[int],
@@ -2991,5 +2991,5 @@ def test_residual_prediction_mode_rejects_different_input_and_output_offsets(
     module.task.get_input_offsets = lambda **_kw: [datetime.timedelta(hours=h) for h in input_hours]
     module.task.get_output_offsets = lambda **_kw: [datetime.timedelta(hours=h) for h in output_hours]
 
-    with pytest.raises(ValueError, match="input_offsets == output_offsets"):
+    with pytest.raises(ValueError, match="ResidualPredictionMode"):
         ResidualPredictionMode(module)

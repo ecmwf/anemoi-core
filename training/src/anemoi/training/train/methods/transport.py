@@ -24,6 +24,7 @@ from anemoi.training.train.methods.transport_base import PreparedPredictionTarge
 from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
+from anemoi.utils.dates import as_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
@@ -369,7 +370,7 @@ class ResidualPredictionMode(PredictionMode):
             raise NotImplementedError(msg)
 
     def _validate_offsets(self) -> None:
-        """Require ``input_offsets == output_offsets``.
+        """Require ``input_offsets == output_offsets``. Require equidistant offsets.
 
         The residual of output snapshot *i* is taken against input snapshot *i*,
         so both must refer to the same times.
@@ -383,6 +384,18 @@ class ResidualPredictionMode(PredictionMode):
                 f"output_offsets={[str(o) for o in output_offsets]}."
             )
             raise ValueError(msg)
+
+        if len(input_offsets) > 1:
+            deltas = [
+                (as_timedelta(input_offsets[i + 1]) - as_timedelta(input_offsets[i])).total_seconds()
+                for i in range(len(input_offsets) - 1)
+            ]
+            if len(set(deltas)) != 1:
+                msg = (
+                    "ResidualPredictionMode requires equidistant input/output offsets, got "
+                    f"input_offsets={[str(o) for o in input_offsets]}."
+                )
+                raise ValueError(msg)
 
     def _validate_residual_processors(self) -> None:
         """Require residual pre- and post-processors for every target at construction time."""
