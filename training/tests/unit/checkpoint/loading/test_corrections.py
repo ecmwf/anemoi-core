@@ -132,13 +132,26 @@ def test_none_checkpoint_is_returned_untouched() -> None:
     assert apply_checkpoint_corrections(None, _Outer(), _config(states=True)) is None
 
 
-def test_missing_config_disables_the_refresh() -> None:
-    """A context without a config (strategies driven in isolation) leaves the processors alone."""
+def test_missing_config_disables_the_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without config, the refresh step still runs but leaves the processors alone."""
     model = _Outer()
     checkpoint = _stale_checkpoint(model)
+    refresh_flags: list[dict[str, bool]] = []
+    refresh = loading_base.refresh_checkpoint_processors
+
+    def recording_refresh(
+        checkpoint: dict[str, Any],
+        inner_model: nn.Module,
+        **flags: bool,
+    ) -> None:
+        refresh_flags.append(flags)
+        refresh(checkpoint, inner_model, **flags)
+
+    monkeypatch.setattr(loading_base, "refresh_checkpoint_processors", recording_refresh)
 
     corrected = apply_checkpoint_corrections(checkpoint, model, None)
 
+    assert refresh_flags == [{"update_states": False, "update_tendencies": False, "update_residuals": False}]
     assert torch.all(corrected["state_dict"]["model.pre_processors.weight"] == 99.0)
 
 

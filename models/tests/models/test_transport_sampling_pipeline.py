@@ -50,10 +50,9 @@ def test_transport_conditioning_embedding_uses_compact_condition_width() -> None
         dtype=sigma.dtype,
     )
 
-    x = {"data": torch.empty(2, 2, 3, 7, 1)}
     condition = {"data": torch.zeros(2, 1, 3, 1, 1)}
 
-    fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = model._build_conditioning_kwargs(x, condition)
+    fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = model._build_conditioning_kwargs(["data"], condition)
 
     data_cond, hidden_cond = fwd_mapper_kwargs["data"]["cond"]
     hidden_back_cond, data_back_cond = bwd_mapper_kwargs["data"]["cond"]

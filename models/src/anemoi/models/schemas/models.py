@@ -66,6 +66,12 @@ class DefinedModels(str, Enum):
         "anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportTendModelEncProcDec"
     )
     ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiTransportTendModelEncProcDec"
+    ANEMOI_TRANSPORT_SPATIAL_DOWNSCALER_MODEL_ENC_PROC_DEC = (
+        "anemoi.models.models.transport_encoder_processor_decoder." "AnemoiTransportSpatialDownscalerModelEncProcDec"
+    )
+    ANEMOI_TRANSPORT_SPATIAL_DOWNSCALER_MODEL_ENC_PROC_DEC_SHORT = (
+        "anemoi.models.models.AnemoiTransportSpatialDownscalerModelEncProcDec"
+    )
 
 
 class Model(BaseModel):
@@ -162,8 +168,14 @@ class EncodersSchema(BaseModel):
 
     source_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the encoder is applicable."
-    dataset_fusing_strategy: Literal["not_supported"] = Field(default="not_supported")
-    "Dataset fusing strategy. Default to 'not_supported'."
+    dataset_fusing_strategy: Literal["not_supported", "concatenate_inputs_along_variable_dim"] = Field(
+        default="not_supported"
+    )
+    """How the source datasets are combined into one encoder input. Defaults to 'not_supported' (no fusing).
+
+    When fusing, the first source dataset is the anchor: the fused features live on its graph node set,
+    so the other source datasets must already be on its grid by the time they reach the encoder.
+    """
     mapper: Union[
         GNNEncoderSchema,
         GraphTransformerEncoderSchema,
@@ -338,6 +350,25 @@ class TransportTendModelSchema(TransportModelSchema):
     "Whether to condition the noise injection on the residual connection."
 
 
+class TransportSpatialDownscalerModelSchema(TransportModelSchema):
+    residual_reference: dict[str, str] = Field(..., min_length=1, examples=[{"out_hres": "in_lres"}])
+    """Residual baseline of each target dataset, as ``{target: reference}``.
+
+    The model predicts ``target - reference`` for prognostic variables, with the reference projected
+    onto the target grid. The target is encoded and decoded on its reference's encoder node set.
+    """
+
+    @model_validator(mode="after")
+    def validate_residual_reference(self) -> "TransportSpatialDownscalerModelSchema":
+        self_referencing = sorted(
+            target for target, reference in self.residual_reference.items() if target == reference
+        )
+        if self_referencing:
+            msg = f"residual_reference: {self_referencing} use themselves as their own residual baseline."
+            raise ValueError(msg)
+        return self
+
+
 class HierarchicalModelSchema(BaseModelSchema):
     enable_hierarchical_level_processing: bool = Field(default=False)
     "Toggle to do message passing at every downscaling and upscaling step"
@@ -387,4 +418,5 @@ ModelSchema = Union[
     HierarchicalModelSchema,
     TransportModelSchema,
     TransportTendModelSchema,
+    TransportSpatialDownscalerModelSchema,
 ]

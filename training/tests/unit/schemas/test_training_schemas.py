@@ -19,6 +19,8 @@ from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
 from anemoi.training.schemas.training import MultiScaleLossSchema
 from anemoi.training.schemas.training import OptimizerSchema
 from anemoi.training.schemas.training import TimeAggregateLossWrapperSchema
+from anemoi.training.schemas.training import TransportTrainingConfigSchema
+from anemoi.training.schemas.training import UpdateDsStatsOnCkptLoadSchema
 
 _TIME_AGG_CFG = {
     "_target_": "anemoi.training.losses.aggregate.TimeAggregateLossWrapper",
@@ -49,6 +51,11 @@ def test_ddp_strategy_schema_defaults_to_local_synchronization() -> None:
     )
 
     assert schema.use_local_synchronization is True
+
+
+def test_update_ds_stats_on_ckpt_load_refreshes_residual_statistics_by_default() -> None:
+    """Like tendencies, the residual statistics configured for the current run win over the checkpoint's."""
+    assert UpdateDsStatsOnCkptLoadSchema().residuals is True
 
 
 def _ddp_strategy(**kwargs: bool) -> BaseDDPStrategySchema:
@@ -273,6 +280,11 @@ def test_combined_loss_with_multiscale_mixed_mode_rejected() -> None:
                 ],
             },
         )
+
+
+def test_transport_rejects_residual_prediction_with_stochastic_interpolant() -> None:
+    with pytest.raises(ValidationError, match="only supports objective='edm_diffusion'"):
+        TransportTrainingConfigSchema(prediction_mode="residual", objective="stochastic_interpolant")
 
 
 def test_checkpoint_pipeline_schema_valid() -> None:

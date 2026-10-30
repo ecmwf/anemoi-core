@@ -58,6 +58,13 @@ class BaseTask(ABC):
         """Get the steps for the task."""
         return ({},)  # default is a single step with no kwargs
 
+    def validate_dataset_roles(self, input_datasets: list[str], target_datasets: list[str]) -> None:
+        """Check the task's dataset roles against those of the model.
+
+        Tasks that do not declare dataset roles accept any model.
+        """
+        del input_datasets, target_datasets
+
     @property
     def num_input_timesteps(self) -> int:
         """Number of input time steps."""

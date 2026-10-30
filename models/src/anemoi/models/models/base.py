@@ -35,9 +35,19 @@ from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
+#: Value of ``encoders.*.dataset_fusing_strategy`` that disables fusion.
+NO_ENCODER_FUSION = "not_supported"
+
+#: Strategies for combining the ``source_datasets`` of a single encoder.
+SUPPORTED_ENCODER_FUSING_STRATEGIES = (NO_ENCODER_FUSION, "concatenate_inputs_along_variable_dim")
+
 
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
+
+    supports_encoder_fusion: bool = False
+    # Set to ``True`` on models whose ``_assemble_input`` can combine several
+    # source datasets into one encoder input.
 
     def __init__(
         self,
@@ -80,6 +90,7 @@ class BaseGraphModel(nn.Module):
 
         self._build_encoder_routing(model_config.encoders)
         self._build_decoder_routing(model_config.decoders)
+        self._build_target_routing()
 
         self._calculate_shapes_and_indices(data_indices)
 
@@ -109,15 +120,94 @@ class BaseGraphModel(nn.Module):
         """Builds the dataset routing for encoders."""
         self.dataset2encoder: dict[str, str] = {}
         self.encoder2datasets: dict[str, list[str]] = {}
+        self.encoder2anchors: dict[str, list[str]] = {}
+        self.dataset2anchor: dict[str, str] = {}
         self.encoder_fusing_strategy: dict[str, str] = {}
         for encoder_name, encoder_config in encoders_config.items():
-            datasets_to_encode = encoder_config["source_datasets"]
+            datasets_to_encode = list(encoder_config["source_datasets"])
+            fusing_strategy = encoder_config.dataset_fusing_strategy
+            anchors = self._resolve_encoder_anchors(encoder_name, datasets_to_encode, fusing_strategy)
+
             self.encoder2datasets[encoder_name] = datasets_to_encode
+            self.encoder2anchors[encoder_name] = anchors
+            self.encoder_fusing_strategy[encoder_name] = fusing_strategy
+            fused = fusing_strategy != NO_ENCODER_FUSION
             for d in datasets_to_encode:
                 self.dataset2encoder[d] = encoder_name
-            self.encoder_fusing_strategy[encoder_name] = encoder_config.dataset_fusing_strategy
+                self.dataset2anchor[d] = anchors[0] if fused else d
+                if fused and d != anchors[0]:
+                    self._validate_same_grid(
+                        anchors[0], d, context=f"Encoder '{encoder_name}' fuses '{d}' onto anchor '{anchors[0]}'"
+                    )
 
-        self.input_datasets = list(self.dataset2encoder.keys())
+        # Only anchors are encoded in their own right; fused datasets ride along
+        # as extra features on their anchor's node set.
+        self.input_datasets = list(dict.fromkeys(d for anchors in self.encoder2anchors.values() for d in anchors))
+
+    @property
+    def inference_input_datasets(self) -> list[str]:
+        """Datasets whose data ``predict_step`` reads from the batch.
+
+        Every dataset an encoder consumes, fused or not — which is more than
+        ``input_datasets`` (the anchors) whenever an encoder fuses several
+        sources.
+        """
+        return list(dict.fromkeys(d for sources in self.encoder2datasets.values() for d in sources))
+
+    def _resolve_encoder_anchors(
+        self,
+        encoder_name: str,
+        source_datasets: list[str],
+        fusing_strategy: str,
+    ) -> list[str]:
+        """Return the datasets of ``encoder_name`` that own a graph node set.
+
+        Without fusion every source is its own anchor; with fusion the first
+        source is the anchor and the others ride along on its node set.
+        """
+        if fusing_strategy not in SUPPORTED_ENCODER_FUSING_STRATEGIES:
+            raise ValueError(
+                f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'. "
+                f"Supported strategies: {sorted(SUPPORTED_ENCODER_FUSING_STRATEGIES)}."
+            )
+
+        if fusing_strategy == NO_ENCODER_FUSION:
+            return list(source_datasets)
+
+        if not self.supports_encoder_fusion:
+            raise ValueError(
+                f"Encoder '{encoder_name}' requests dataset_fusing_strategy '{fusing_strategy}', "
+                f"which {type(self).__name__} does not support."
+            )
+        return [source_datasets[0]]
+
+    def _validate_same_grid(self, anchor: str, dataset_name: str, context: str) -> None:
+        """Raise unless ``dataset_name``'s graph nodes are ``anchor``'s, in the same order.
+
+        Parameters
+        ----------
+        anchor : str
+            Dataset whose graph node set the features of ``dataset_name`` are placed on.
+        dataset_name : str
+            Dataset that must share that node set.
+        context : str
+            Why the two must match, prefixed to the error message.
+        """
+        anchor_nodes = self.node_attributes.num_nodes[anchor]
+        dataset_nodes = self.node_attributes.num_nodes[dataset_name]
+        if anchor_nodes != dataset_nodes:
+            raise ValueError(
+                f"{context}: '{anchor}' has {anchor_nodes} nodes but '{dataset_name}' has {dataset_nodes}. "
+                "They must describe the same grid."
+            )
+
+        anchor_coords = self._graph_data[anchor].x.double()
+        dataset_coords = self._graph_data[dataset_name].x.double()
+        if not torch.allclose(anchor_coords, dataset_coords):
+            raise ValueError(
+                f"{context}: '{anchor}' and '{dataset_name}' have the same number of nodes but different "
+                "coordinates or node order. They must describe the same grid."
+            )
 
     def _build_decoder_routing(self, decoders_config: DotDict) -> None:
         """Builds the dataset routing for decoders."""
@@ -137,27 +227,28 @@ class BaseGraphModel(nn.Module):
 
         self.target_datasets = list(self.dataset2decoder.keys())
 
+    def _build_target_routing(self) -> None:
+        """Map each target to the anchor whose encoder-updated node features its decoder reads."""
+        self.target2anchor: dict[str, str] = {d: self.dataset2anchor.get(d, d) for d in self.target_datasets}
+
     def _assert_model_routing(self) -> None:
         """Asserts that the model routing is valid."""
-        not_input_datasets = set(self.input_datasets) - set(self.input_dim.keys())
-        assert all(
-            d in self.input_datasets for d in self.dataset2encoder.keys()
-        ), f"Datasets {not_input_datasets} are in input_datasets but not in data_indices provided to the model. "
+        not_input_datasets = sorted(set(self.input_datasets) - set(self.input_dim.keys()))
+        assert (
+            not not_input_datasets
+        ), f"Datasets {not_input_datasets} are encoder inputs but are not in the data_indices provided to the model. "
 
         not_target_datasets = set(self.target_datasets) - set(self.output_dim.keys())
         assert all(
             d in self.target_datasets for d in self.dataset2decoder.keys()
         ), f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
 
-        # Only one dataset is currently supported per encoder. Work in progress.
-        for encoder_name, datasets in self.encoder2datasets.items():
-            assert (
-                len(datasets) == 1
-            ), f"Encoder '{encoder_name}' must be associated with exactly one dataset for now. New dataset fusing strategies will be implemented soon."
-
-        for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
-            if fusing_strategy not in ("not_supported"):
-                raise ValueError(f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'.")
+        if not self.supports_encoder_fusion:
+            # Only one dataset is currently supported per encoder. Work in progress.
+            for encoder_name, datasets in self.encoder2datasets.items():
+                assert (
+                    len(datasets) == 1
+                ), f"Encoder '{encoder_name}' must be associated with exactly one dataset for now. New dataset fusing strategies will be implemented soon."
 
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():
@@ -203,6 +294,10 @@ class BaseGraphModel(nn.Module):
             self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 
+        # Second pass: a dimension hook may read the channel counts of datasets
+        # other than its own (e.g. an encoder fusing several source datasets),
+        # so every count must already be in place.
+        for dataset_name in data_indices:
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
             self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
@@ -303,7 +398,7 @@ class BaseGraphModel(nn.Module):
             if grid_shard_sizes is None:
                 in_out_sharded[dataset_name] = False
             else:
-                in_out_sharded[dataset_name] = grid_shard_sizes[dataset_name] is not None
+                in_out_sharded[dataset_name] = grid_shard_sizes.get(dataset_name) is not None
 
         return in_out_sharded
 
@@ -527,7 +622,28 @@ class BaseGraphModel(nn.Module):
 
         return y_hat
 
-    @abstractmethod
     def fill_metadata(self, md_dict) -> None:
-        """To be implemented in subclasses to fill model-specific metadata."""
-        pass
+        """Fill model-specific metadata.
+
+        Subclasses extend this with their own entries and must call
+        ``super().fill_metadata(md_dict)``.
+        """
+        self._fill_dataset_roles(md_dict)
+
+    def _fill_dataset_roles(self, md_dict) -> None:
+        """Record what each dataset is used for at inference time.
+
+        ``input`` datasets have to be retrieved and handed to the model,
+        ``output`` datasets are produced by it, and ``input_output`` datasets
+        are both — the usual case for a forecaster. Without this a runner
+        cannot tell the two sides of, say, a downscaler apart and has to be
+        told in its configuration.
+        """
+        inference_inputs = set(self.inference_input_datasets)
+        targets = set(self.target_datasets)
+
+        for dataset_name in dict.fromkeys([*self.inference_input_datasets, *self.target_datasets]):
+            is_input = dataset_name in inference_inputs
+            is_output = dataset_name in targets
+            role = "input_output" if is_input and is_output else "input" if is_input else "output"
+            md_dict["metadata_inference"].setdefault(dataset_name, {})["role"] = role

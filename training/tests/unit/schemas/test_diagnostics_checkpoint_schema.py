@@ -28,6 +28,14 @@ def test_init_hyperparameters_match_training_module_signature() -> None:
     assert init_args == INIT_HYPERPARAMETERS
 
 
+def test_residual_statistics_are_protected_for_inference_conversion() -> None:
+    """Residual normalisation statistics must survive checkpoint exclusion."""
+    assert "residual_statistics" in INIT_HYPERPARAMETERS
+    assert "residual_statistics" in REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION
+    with pytest.raises(ValidationError, match="needed by `anemoi-training checkpoint inference`"):
+        CheckpointSchema(exclude_hyperparameters=["residual_statistics"])
+
+
 def test_hyperparameter_sets_are_known_hyperparameters() -> None:
     assert HYPERPARAMETERS_FOR_RESUME <= INIT_HYPERPARAMETERS
     assert set(OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION) <= INIT_HYPERPARAMETERS

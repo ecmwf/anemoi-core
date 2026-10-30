@@ -24,6 +24,7 @@ from anemoi.training.train.methods.transport_base import PreparedPredictionTarge
 from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
+from anemoi.utils.dates import as_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,8 +32,32 @@ LOGGER = logging.getLogger(__name__)
 class PredictionMode:
     """Prepare either state targets or tendency targets for transport training."""
 
+    #: Whether the model learns residuals against ``model.residual_reference``.
+    predicts_residuals: bool = False
+
     def __init__(self, module: BaseTransportTraining) -> None:
         self.module = module
+        self._validate_model_residual_reference()
+
+    def _validate_model_residual_reference(self) -> None:
+        """Residual prediction and a model with a ``residual_reference`` only work together.
+
+        Otherwise a residual model would add its reference back at inference to a state it never
+        learned as a residual, or a residual target would have no reference.
+        """
+        has_residual_reference = bool(getattr(self.module.model.model, "residual_reference", None))
+        if has_residual_reference and not self.predicts_residuals:
+            msg = (
+                "The model predicts residuals against model.residual_reference, which requires "
+                "training.transport.prediction_mode 'residual'."
+            )
+            raise ValueError(msg)
+        if self.predicts_residuals and not has_residual_reference:
+            msg = (
+                "training.transport.prediction_mode 'residual' requires a model with a "
+                "model.residual_reference, e.g. AnemoiTransportSpatialDownscalerModelEncProcDec."
+            )
+            raise ValueError(msg)
 
     def prepare_target(
         self,
@@ -294,9 +319,190 @@ class TendencyPredictionMode(PredictionMode):
         }
 
 
+class ResidualPredictionMode(PredictionMode):
+    """Prediction mode for spatial downscaling: model predicts the residual y - interp(x_lres).
+
+    The batch enters this mode already normalized (like every other prediction mode).
+    ``prepare_target`` denormalizes the projected lres source and the target so the
+    residual can be computed in physical space, then renormalizes it with the residual
+    statistics from ``data.datasets.<target>.residual_statistics``. ``reconstruct_prediction``
+    is the inverse of that flow.
+    The reference dataset of each target is the model's ``residual_reference``, a
+    ``{target: reference}`` mapping set in ``model.residual_reference``.
+    Uses ``pre_processors_residual`` / ``post_processors_residual`` for residual
+    normalization. These hold only the target's normaliser; imputation is skipped
+    throughout, as the batch was already imputed by the state pre-processors.
+    Validation sets masked points back to NaN with the mask the target's imputer
+    recorded from the batch; inference has no such mask, see
+    :class:`~anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportSpatialDownscalerModelEncProcDec`.
+    Stochastic interpolant objective is not yet supported — raises ``NotImplementedError``.
+    """
+
+    predicts_residuals = True
+
+    def __init__(self, module: BaseTransportTraining) -> None:
+        super().__init__(module)
+        self._validate_objective()
+        self._validate_source_kind()
+        self._validate_offsets()
+        self._validate_residual_processors()
+
+    def _validate_objective(self) -> None:
+        objective_kind = getattr(self.module.config.training, "transport", {}).get("objective", "")
+        if objective_kind == "stochastic_interpolant":
+            error_msg = "ResidualPredictionMode does not yet support the stochastic_interpolant objective."
+            raise NotImplementedError(error_msg)
+
+    def _validate_source_kind(self) -> None:
+        """Reject ``source.kind == 'reference_state'`` for residual mode.
+
+        Until a suitable anchor for the sampler is implemented, the combination is rejected so
+        misconfigurations fail fast at training setup.
+        """
+        transport_source = getattr(self.module.model.model, "transport_source", None)
+        source_kind = getattr(transport_source, "kind", None)
+        if source_kind == "reference_state":
+            msg = (
+                "ResidualPredictionMode does not support transport.source.kind='reference_state'. "
+                "Use 'gaussian', 'zero', or 'default' instead — a residual-space equivalent of the "
+                "reference-state source has not been implemented yet."
+            )
+            raise NotImplementedError(msg)
+
+    def _validate_offsets(self) -> None:
+        """Require ``input_offsets == output_offsets``. Require equidistant offsets.
+
+        The residual of output snapshot *i* is taken against input snapshot *i*,
+        so both must refer to the same times.
+        """
+        input_offsets = list(self.module.task.get_input_offsets())
+        output_offsets = list(self.module.task.get_output_offsets())
+        if input_offsets != output_offsets:
+            msg = (
+                "ResidualPredictionMode requires input_offsets == output_offsets, got "
+                f"input_offsets={[str(o) for o in input_offsets]} and "
+                f"output_offsets={[str(o) for o in output_offsets]}."
+            )
+            raise ValueError(msg)
+
+        if len(input_offsets) > 1:
+            deltas = [
+                (as_timedelta(input_offsets[i + 1]) - as_timedelta(input_offsets[i])).total_seconds()
+                for i in range(len(input_offsets) - 1)
+            ]
+            if len(set(deltas)) != 1:
+                msg = (
+                    "ResidualPredictionMode requires equidistant input/output offsets, got "
+                    f"input_offsets={[str(o) for o in input_offsets]}."
+                )
+                raise ValueError(msg)
+
+    def _validate_residual_processors(self) -> None:
+        """Require residual pre- and post-processors for every target at construction time."""
+        for attribute in ("pre_processors_residual", "post_processors_residual"):
+            processors = getattr(self.module.model, attribute, None) or {}
+            for target_dataset_name in self.module.model.model.residual_reference:
+                if target_dataset_name not in processors:
+                    msg = (
+                        f"{attribute} for target dataset '{target_dataset_name}' is required for "
+                        f"residual-based transport models. Set data.datasets.{target_dataset_name}.residual_statistics "
+                        "to a .npz file of precomputed statistics."
+                    )
+                    raise ValueError(msg)
+
+    def prepare_target(
+        self,
+        batch: dict[str, torch.Tensor],
+        x: dict[str, torch.Tensor],
+    ) -> PreparedPredictionTarget:
+        """Compute the normalized residual target from an already-normalized batch.
+
+        The reference of each target is denormalized from the model input ``x`` by
+        :meth:`anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportSpatialDownscalerModelEncProcDec.reference_on_target_grid`,
+        the same call inference makes. The per-channel residual/state split is delegated to
+        :meth:`anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportSpatialDownscalerModelEncProcDec.compute_residual`.
+        Prognostic channels become normalized residuals; diagnostic channels are kept
+        as normalized state.
+        """
+        target_full = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
+        target_data_output = self.module.get_data_output_target(target_full)
+
+        x_ref_on_target_grid, reference_variable_name_to_column_index_by_target = (
+            self.module.model.model.reference_on_target_grid(x, self.module.model.post_processors)
+        )
+
+        # Delegate the residual / diagnostic split to the model.
+        model_residual_data_output = self.module.model.model.compute_residual(
+            y=target_data_output,
+            x_reference_denorm=x_ref_on_target_grid,
+            pre_processors_state=self.module.model.pre_processors,
+            pre_processors_residual=self.module.model.pre_processors_residual,
+            reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,
+            input_post_processor=self.module.model.post_processors,
+            skip_imputation=True,
+        )
+        model_residual = self.module.reduce_data_output_target_to_model_output(model_residual_data_output)
+
+        return PreparedPredictionTarget(
+            model_target=model_residual,
+            loss_target=model_residual_data_output,
+            loss_target_layout=IndexSpace.DATA_OUTPUT,
+            metric_target=target_full,
+            aux={
+                # store the denormalized reference projection and name→index mapping for reconstructing the state later
+                "x_ref_on_target_grid": x_ref_on_target_grid,
+                "reference_variable_name_to_column_index_by_target": reference_variable_name_to_column_index_by_target,
+            },
+        )
+
+    def reconstruct_prediction(
+        self,
+        prediction: dict[str, torch.Tensor],
+        prepared: PreparedPredictionTarget,
+    ) -> dict[str, torch.Tensor]:
+        """Turn a normalized residual prediction back into a normalized state.
+
+        Delegates to
+        :meth:`AnemoiTransportSpatialDownscalerModelEncProcDec.add_residual_to_state`;
+        passes ``output_pre_processor`` so the returned tensor lives in the
+        same normalized state space as ``metric_target``. Masked points of the
+        target are then set back to NaN, using the mask its imputer saved when
+        the batch was normalized.
+        """
+        x_ref_on_target_grid = prepared.aux["x_ref_on_target_grid"]
+        reference_variable_name_to_column_index_by_target = prepared.aux[
+            "reference_variable_name_to_column_index_by_target"
+        ]
+        states = self.module.model.model.add_residual_to_state(
+            x_reference_denorm=x_ref_on_target_grid,
+            residual=prediction,
+            pre_processors_state=self.module.model.pre_processors,
+            post_processors_state=self.module.model.post_processors,
+            post_processors_residual=self.module.model.post_processors_residual,
+            reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,
+            output_pre_processor=self.module.model.pre_processors,
+            skip_imputation=True,
+        )
+        return self._apply_imputer_inverse(states)
+
+    def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> dict[str, torch.Tensor]:
+        return self._apply_imputer_inverse(prepared.metric_target)
+
+    def _apply_imputer_inverse(self, states: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        return {
+            dataset_name: self.module.model.model._apply_imputer_inverse(
+                self.module.model.post_processors,
+                dataset_name,
+                state,
+            )
+            for dataset_name, state in states.items()
+        }
+
+
 PREDICTION_MODE_CLASSES = {
     "state": StatePredictionMode,
     "tendency": TendencyPredictionMode,
+    "residual": ResidualPredictionMode,
 }
 
 

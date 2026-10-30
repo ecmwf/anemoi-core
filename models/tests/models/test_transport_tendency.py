@@ -8,12 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 import numpy as np
+import pytest
 import torch
 from omegaconf import DictConfig
 
 import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportSpatialDownscalerModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
+from anemoi.models.models.transport_encoder_processor_decoder import normalise_delta
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.preprocessing.imputer import InputImputer
@@ -104,6 +107,27 @@ def _make_model() -> AnemoiTransportTendModelEncProcDec:
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     model.data_indices = {"data": _make_index_collection()}
     return model
+
+
+def test_normalise_delta_normalises_prognostics_as_delta_and_diagnostics_as_state() -> None:
+    indices = _make_index_collection()
+    prognostic = indices.model.output.prognostic
+    diagnostic = indices.model.output.diagnostic
+    target = torch.tensor([[[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]]])
+    target_before = target.clone()
+    reference = torch.tensor([[[1.0, 2.0], [3.0, 4.0]]])
+    state_proc = SequenceProcessor(100.0, [indices.data.output.diagnostic])
+    delta_proc = SequenceProcessor(10.0, [indices.data.output.prognostic])
+
+    out = normalise_delta(target, reference, state_proc, delta_proc, indices, skip_imputation=True)
+
+    expected = target.clone()
+    expected[..., prognostic] = target[..., prognostic] - reference + 10.0
+    expected[..., diagnostic] = target[..., diagnostic] + 100.0
+    assert torch.allclose(out, expected)
+    assert torch.equal(target, target_before)
+    assert state_proc.calls == 1
+    assert delta_proc.calls == 1
 
 
 def test_compute_tendency_uses_expected_indices() -> None:
@@ -219,7 +243,10 @@ def test_tendency_roundtrip_skips_imputation() -> None:
     assert torch.allclose(state, x_t1, equal_nan=True)
 
 
-def test_apply_imputer_inverse_reinserts_nans() -> None:
+@pytest.mark.parametrize(
+    "model_cls", [AnemoiTransportTendModelEncProcDec, AnemoiTransportSpatialDownscalerModelEncProcDec]
+)
+def test_apply_imputer_inverse_reinserts_nans(model_cls: type) -> None:
     imputer, data_indices = _make_imputer_settings()
 
     x_full = torch.tensor(
@@ -239,7 +266,7 @@ def test_apply_imputer_inverse_reinserts_nans() -> None:
     out = torch.ones((1, 1, 2, len(data_indices.data.output.full)), dtype=torch.float32)
     expected = imputer.inverse_transform(out, in_place=False)
 
-    model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
+    model = model_cls.__new__(model_cls)
     result = model._apply_imputer_inverse(post_processors, "data", out)
 
     assert torch.allclose(result, expected, equal_nan=True)

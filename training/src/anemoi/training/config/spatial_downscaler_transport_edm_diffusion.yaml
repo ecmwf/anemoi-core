@@ -1,0 +1,206 @@
+
+defaults:
+- data: zarr
+- dataloader: downscaling
+- diagnostics: evaluation
+- system: example
+- model: graphtransformer_transport_residual_edm
+- training: downscaling
+- graph: fused_downscaling
+- task: spatial_downscaler
+- _self_
+
+
+# set to true to switch on config validation
+config_validation: false
+
+diagnostics:
+  callbacks: []
+  plot:
+    # Only targets can be plotted. The input panel shows the low-res reference
+    # projected onto the target grid, so pred - input is the predicted residual.
+    datasets_to_plot: [out_hres]
+    parameters: [2t]
+    callbacks:
+      - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+        parameter_groups: {}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+        tag_infix: sample
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters: ${diagnostics.plot.parameters}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        with_auxiliary: true
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
+          _partial_: true
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+        tag_infix: spec
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters: ${diagnostics.plot.parameters}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn
+          _partial_: true
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+        tag_infix: histo
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters: ${diagnostics.plot.parameters}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn
+          _partial_: true
+  log:
+    mlflow:
+      tracking_uri: null
+
+
+data:
+  frequency: 1h
+  datasets:
+    in_lres:
+      forcing: []
+      diagnostic: []
+      spatial_processor:
+        _target_: anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector
+        file_path: ${system.input.truncation}
+        row_normalize: True
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            none:
+              - 2t
+    in_hres:
+      forcing:
+        - cos_julian_day
+        - cos_latitude
+        - cos_local_time
+        - cos_longitude
+        - lsm
+        - sin_julian_day
+        - sin_latitude
+        - sin_local_time
+        - sin_longitude
+      diagnostic: []
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: none
+    out_hres:
+      forcing: []
+      diagnostic: []
+      residual_statistics: ${system.input.residual_statistics}
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            none: []
+
+
+training:
+  transport:
+    prediction_mode: residual
+  max_epochs: 2
+
+# TODO clean up paths, for debugging only
+system:
+  input:
+    # HRES zarr (used for in_hres and out_hres).
+    dataset: ???
+    # LRES zarr (used for in_lres).
+    dataset_lres: ???
+    graph: lognorm35_100k_34788975_graph.pt
+    # Precomputed residual normalization statistics for out_hres or other target datasets,
+    # (.npz file with mean/minimum/maximum/stdev entries).
+    residual_statistics: ???
+    # LRES→HRES sparse projection matrix (.npz) used by CrossGridProjector.
+    truncation: ???
+    # HRES→LRES sparse projection matrix (.npz), reserved for InterpolationConnection.
+    truncation_inv: ???
+
+
+dataloader:
+  read_group_size: ${system.hardware.num_gpus_per_model}
+  limit_batches:
+    training: 3
+    validation: 3
+  training:
+    datasets:
+      in_lres:
+        dataset_config:
+          select: [2t]
+        start: 1900
+        end: '1900-10-31'
+      in_hres:
+        dataset_config:
+          select:
+            - cos_julian_day
+            - cos_latitude
+            - cos_local_time
+            - cos_longitude
+            - lsm
+            - sin_julian_day
+            - sin_latitude
+            - sin_local_time
+            - sin_longitude
+        start: 1900
+        end: '1900-10-31'
+      out_hres:
+        dataset_config:
+          select: [2t]
+        start: 1900
+        end: '1900-10-31'
+  validation:
+    datasets:
+      in_lres:
+        dataset_config:
+          select: [2t]
+        start: '1900-11-01'
+        end: '1900-12-31'
+      in_hres:
+        dataset_config:
+          select:
+            - cos_julian_day
+            - cos_latitude
+            - cos_local_time
+            - cos_longitude
+            - lsm
+            - sin_julian_day
+            - sin_latitude
+            - sin_local_time
+            - sin_longitude
+        start: '1900-11-01'
+        end: '1900-12-31'
+      out_hres:
+        dataset_config:
+          select: [2t]
+        start: '1900-11-01'
+        end: '1900-12-31'
+  test:
+    datasets:
+      in_lres:
+        dataset_config:
+          select: [2t]
+      in_hres:
+        dataset_config:
+          select:
+            - cos_julian_day
+            - cos_latitude
+            - cos_local_time
+            - cos_longitude
+            - lsm
+            - sin_julian_day
+            - sin_latitude
+            - sin_local_time
+            - sin_longitude
+      out_hres:
+        dataset_config:
+          select: [2t]

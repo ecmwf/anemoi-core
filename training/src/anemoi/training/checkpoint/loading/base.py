@@ -174,6 +174,10 @@ class LoadingStrategy(PipelineStage):
         LOGGER.error(msg)
         raise CheckpointLoadError(context.checkpoint_path or "<deferred to rank 0>", RuntimeError(msg))
 
+    def _refresh_checkpoint_processors(self, context: CheckpointContext) -> None:
+        """Apply the processor refresh that keeps checkpoint statistics in sync."""
+        self._apply_corrections(context)
+
     def _apply_corrections(self, context: CheckpointContext) -> None:
         """Run :func:`apply_checkpoint_corrections` on ``context.checkpoint_data``.
 
@@ -313,8 +317,9 @@ def apply_checkpoint_corrections(
         processor refresh reads its inner ``.model`` (the ``AnemoiModelInterface``),
         whose state-dict keys lack the leading ``model.`` that the refresh re-adds.
     config : Any
-        The run config; ``training.update_ds_stats_on_ckpt_load.{states,tendencies}``
-        is read defensively (a missing layer disables the refresh).
+        The run config; ``training.update_ds_stats_on_ckpt_load.{states,tendencies,residuals}``
+        controls the refresh. Missing refresh configuration disables it; a missing
+        ``residuals`` flag within that configuration defaults to ``True``.
 
     Returns
     -------
@@ -341,6 +346,7 @@ def apply_checkpoint_corrections(
         getattr(model, "model", None),
         update_states=bool(getattr(update_cfg, "states", False)),
         update_tendencies=bool(getattr(update_cfg, "tendencies", False)),
+        update_residuals=update_cfg is not None and bool(getattr(update_cfg, "residuals", True)),
     )
     return checkpoint
 
@@ -351,20 +357,22 @@ def refresh_checkpoint_processors(
     *,
     update_states: bool,
     update_tendencies: bool,
+    update_residuals: bool = True,
 ) -> None:
     """Replace stale pre/post-processor weights in ``checkpoint['state_dict']`` with the model's.
 
-    Honours ``training.update_ds_stats_on_ckpt_load.{states,tendencies}``: drops the
-    matching ``model.(pre|post)_processors[_tendencies].*`` keys and re-injects them
-    from ``model`` (plus any ``model_output_idx`` buffers). Mutates the state dict in
-    place. A no-op when neither flag is set or no state dict is present.
+    Honours ``training.update_ds_stats_on_ckpt_load.{states,tendencies,residuals}``:
+    drops the matching ``model.(pre|post)_processors[_tendencies|_residual].*`` keys
+    and re-injects them from ``model`` (plus any ``model_output_idx`` buffers).
+    Mutates the state dict in place. A no-op when no relevant flags are set or no
+    state dict is present.
 
     The drop and the re-injection are one operation: without a model to re-inject
     from, nothing is dropped either, so a checkpoint is never left missing the
     processor entries a strict load needs. Dropping entries the model cannot replace
     (a model without those processors) is legitimate and is logged as a warning.
     """
-    if not (update_states or update_tendencies):
+    if not (update_states or update_tendencies or update_residuals):
         return
     state_dict = checkpoint.get("state_dict") if checkpoint else None
     if not isinstance(state_dict, dict):
@@ -375,6 +383,8 @@ def refresh_checkpoint_processors(
         prefixes += ("model.pre_processors.", "model.post_processors.")
     if update_tendencies:
         prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
+    if update_residuals:
+        prefixes += ("model.pre_processors_residual.", "model.post_processors_residual.")
     if not prefixes:
         return
 
