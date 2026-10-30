@@ -30,8 +30,10 @@ class BaseInputDropout(BasePreprocessor):
 
     The dropout runs before the imputer, which fills the dropped values. It only acts on model
     inputs: target views are pre-processed with ``skip_imputation=True`` (they keep their missing
-    values for the loss), and are returned unchanged. Dropout follows ``self.training`` like
-    ``nn.Dropout``, so it is off in validation and inference.
+    values for the loss), and are returned unchanged. ``apply_dropout=True`` overrides that, for
+    observations that feed the model but must keep their missing values (the DA-cycle observations
+    a DA forecaster blends into its state). Dropout follows ``self.training`` like ``nn.Dropout``,
+    so it is off in validation and inference.
 
     ``dropout_prob`` and ``dropout_indices`` are what
     :class:`~anemoi.training.diagnostics.callbacks.dropout_scheduler.DropoutScheduler` drives.
@@ -92,8 +94,9 @@ class BaseInputDropout(BasePreprocessor):
         msg = f"Input dropout expects a {GRIDDED_NDIM}-D gridded or {TABULAR_NDIM}-D tabular tensor, got {x.ndim}-D."
         raise ValueError(msg)
 
-    def _active(self, x: torch.Tensor, skip_imputation: bool) -> bool:
-        return self.training and not skip_imputation and self.dropout_prob > 0 and x.numel() > 0
+    def _active(self, x: torch.Tensor, skip_imputation: bool, apply_dropout: bool | None) -> bool:
+        apply = not skip_imputation if apply_dropout is None else apply_dropout
+        return self.training and apply and self.dropout_prob > 0 and x.numel() > 0
 
     def _n_input(self, x: torch.Tensor) -> int:
         return x.shape[1] if self.multi_step is None else min(self.multi_step, x.shape[1])
@@ -176,6 +179,7 @@ class RandomSpatialDropout(BaseInputDropout):
         x: torch.Tensor,
         name_to_index: Optional[dict[str, int]] = None,
         skip_imputation: bool = False,
+        apply_dropout: Optional[bool] = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Drop random valid input values.
@@ -189,13 +193,15 @@ class RandomSpatialDropout(BaseInputDropout):
             Variable positions in ``x``.
         skip_imputation : bool, optional
             Set on target views, which are returned unchanged.
+        apply_dropout : bool, optional
+            Overrides whether the view gets dropout; by default only views that are imputed do.
 
         Returns
         -------
         torch.Tensor
             ``x`` with dropped values set to NaN (training), or unchanged.
         """
-        if not self._active(x, skip_imputation):
+        if not self._active(x, skip_imputation, apply_dropout):
             return x
         positions = self._positions({"dropout": self.dropout_names}, name_to_index)["dropout"]
         if not positions:

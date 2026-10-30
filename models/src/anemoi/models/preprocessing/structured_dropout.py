@@ -249,6 +249,7 @@ class StructuredObsDropout(BaseInputDropout):
         x: torch.Tensor,
         name_to_index: Optional[dict[str, int]] = None,
         skip_imputation: bool = False,
+        apply_dropout: Optional[bool] = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Apply structured dropout.
@@ -262,13 +263,15 @@ class StructuredObsDropout(BaseInputDropout):
             Variable positions in ``x``.
         skip_imputation : bool, optional
             Set on target views, which are returned unchanged.
+        apply_dropout : bool, optional
+            Overrides whether the view gets dropout; by default only views that are imputed do.
 
         Returns
         -------
         torch.Tensor
             ``x`` with the dropped groups set to NaN (training), or unchanged.
         """
-        if not self._active(x, skip_imputation):
+        if not self._active(x, skip_imputation, apply_dropout):
             return x
         positions = self._positions(self.group_variables, name_to_index)
         if not any(positions.values()):

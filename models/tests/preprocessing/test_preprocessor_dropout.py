@@ -144,6 +144,8 @@ def test_eval_and_target_views_are_untouched(data_indices) -> None:
     dropout = _structured(data_indices, _groups(radiosonde={"stream_prob": 1.0, "cell_prob": 1.0}))
     # Targets keep their missing values for the loss and are pre-processed with skip_imputation.
     assert not torch.isnan(_transform(dropout, _batch(), skip_imputation=True)).any()
+    # Observations that keep their missing values but feed the model still get dropout.
+    assert torch.isnan(_transform(dropout, _batch(), skip_imputation=True, apply_dropout=True)[:, :2, ..., SONDE]).all()
     dropout.eval()
     assert not torch.isnan(_transform(dropout, _batch())).any()
 
