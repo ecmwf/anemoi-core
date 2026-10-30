@@ -331,6 +331,13 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         grid_dim: int | None = None,
         **kwargs,
     ) -> torch.Tensor:
+        # Where the target is missing, prediction and target are set to 0 before smoothing, so both are
+        # averaged with the same weights, and the target is set back to NaN before scoring, so only observed
+        # cells are scored.
+        missing = torch.isnan(y)
+        y = y.masked_fill(missing, 0.0)
+        y_pred_ens = y_pred_ens.masked_fill(missing, 0.0)
+
         channel_shard_sizes_pred = None
         channel_shard_sizes_y = None
         is_model_sharded = grid_shard_sizes is not None
@@ -397,6 +404,8 @@ class MultiscaleLossWrapper(BaseLossWrapper):
 
             prev_y_pred_ens = current_y_pred_ens
             prev_y = current_y
+
+            y_tmp = y_tmp.masked_fill(missing, torch.nan)
 
             # sharding kwargs - only pass if the loss needs them
             sharding_kwargs = (

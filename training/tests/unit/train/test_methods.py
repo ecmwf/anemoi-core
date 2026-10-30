@@ -475,7 +475,12 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     )
 
     assert result.shape == ()
-    prepare_for_smoothing.assert_called_once_with(pred, target, group, grid_shard_sizes)
+    prepare_for_smoothing.assert_called_once()
+    called_pred, called_target, called_group, called_sizes = prepare_for_smoothing.call_args.args
+    torch.testing.assert_close(called_pred, pred)
+    torch.testing.assert_close(called_target, target)
+    assert called_group is group
+    assert called_sizes == grid_shard_sizes
 
 
 def test_validation_step_logs_loss_and_metrics() -> None:

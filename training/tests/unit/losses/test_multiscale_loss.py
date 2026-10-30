@@ -328,7 +328,12 @@ def test_multiscale_loss_uses_grid_shard_sizes_for_sharding(
         grid_shard_sizes=grid_shard_sizes,
     )
 
-    prepare.assert_called_once_with(pred, target, group, grid_shard_sizes)
+    prepare.assert_called_once()
+    called_pred, called_target, called_group, called_sizes = prepare.call_args.args
+    torch.testing.assert_close(called_pred, pred)
+    torch.testing.assert_close(called_target, target)
+    assert called_group is group
+    assert called_sizes == grid_shard_sizes
     # Two all_to_all_transpose calls: one for y_pred_ens_tmp, one for y_tmp
     assert a2a.call_count == 2
 
@@ -383,3 +388,64 @@ def test_deepcopy_multiscale_loss_does_not_raise(mocker: MockerFixture) -> None:
     )
     loss = MultiscaleLossWrapper(per_scale_loss=MSELoss(), weights=[1.0])
     copy.deepcopy(loss)  # must not raise NotImplementedError on CSR tensors
+
+
+def _mixing_smoother(num_nodes: int, self_weight: float) -> ProjectionGraphProvider:
+    """Smoother in which each node keeps ``self_weight`` of its own value and shares the rest evenly."""
+    graph = HeteroData()
+    graph["src"].num_nodes = num_nodes
+    graph["dst"].num_nodes = num_nodes
+    nodes = torch.arange(num_nodes)
+    src, dst = torch.meshgrid(nodes, nodes, indexing="ij")
+    graph[("src", "to", "dst")].edge_index = torch.stack([src.reshape(-1), dst.reshape(-1)])
+    weights = torch.where(src == dst, self_weight, (1.0 - self_weight) / (num_nodes - 1))
+    graph[("src", "to", "dst")].edge_weight = weights.reshape(-1)
+    return ProjectionGraphProvider(
+        graph=graph,
+        edges_name=("src", "to", "dst"),
+        edge_weight_attribute="edge_weight",
+        row_normalize=False,
+    )
+
+
+@pytest.fixture
+def two_smoother_multiscale_crps(mocker: MockerFixture) -> MultiscaleLossWrapper:
+    """CRPS at a wide scale, a narrower scale and full resolution, on 4 nodes."""
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        return_value=[_mixing_smoother(4, 0.25), _mixing_smoother(4, 0.5), None],
+    )
+    return MultiscaleLossWrapper(per_scale_loss=CRPS(ignore_nans=True), weights=[1.0, 1.0, 1.0])
+
+
+def test_multiscale_isolated_observation_matches_per_scale_loss(
+    two_smoother_multiscale_crps: MultiscaleLossWrapper,
+) -> None:
+    """A single observed node is scored once in total, as by the per-scale loss on its own."""
+    torch.manual_seed(0)
+    pred = torch.randn((1, 1, 4, 4, 1))
+    target = torch.full((1, 1, 1, 4, 1), torch.nan)
+    target[0, 0, 0, 0, 0] = 0.3
+
+    loss = two_smoother_multiscale_crps(pred, target)
+
+    torch.testing.assert_close(loss, CRPS(ignore_nans=True)(pred, target))
+
+
+def test_multiscale_ignores_prediction_where_target_is_missing(
+    two_smoother_multiscale_crps: MultiscaleLossWrapper,
+) -> None:
+    torch.manual_seed(0)
+    pred = torch.randn((1, 1, 3, 4, 2), requires_grad=True)
+    target = torch.randn((1, 1, 1, 4, 2))
+    target[0, 0, 0, 1:3, 0] = torch.nan
+
+    loss = two_smoother_multiscale_crps(pred, target)
+    loss.backward()
+
+    assert torch.isfinite(loss)
+    assert torch.all(pred.grad[..., 1:3, 0] == 0)
+    assert torch.any(pred.grad[..., 0] != 0)
+    changed = pred.detach().clone()
+    changed[..., 1:3, 0] += 5.0
+    torch.testing.assert_close(two_smoother_multiscale_crps(changed, target), loss.detach())

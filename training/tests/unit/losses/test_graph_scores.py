@@ -1076,11 +1076,11 @@ def test_combined_multiscale_crps_with_filtered_multiscale_edge_crps(
     }
 
     assert isinstance(loss, CombinedLoss)
-    assert isinstance(loss.losses[0], MultiscaleLossWrapper)
-    assert isinstance(loss.losses[0].loss, LossVariableMapper)
+    assert isinstance(loss.losses[0], LossVariableMapper)
+    assert isinstance(loss.losses[0].loss, MultiscaleLossWrapper)
     assert isinstance(loss.losses[0].loss.loss, CRPS)
-    assert isinstance(loss.losses[1], MultiscaleLossWrapper)
-    assert isinstance(loss.losses[1].loss, LossVariableMapper)
+    assert isinstance(loss.losses[1], LossVariableMapper)
+    assert isinstance(loss.losses[1].loss, MultiscaleLossWrapper)
     assert isinstance(loss.losses[1].loss.loss, GraphEdgeCRPSLoss)
 
     scalar_loss = loss(pred, target, **loss_kwargs)

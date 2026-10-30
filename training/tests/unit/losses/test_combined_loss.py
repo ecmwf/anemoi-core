@@ -295,7 +295,12 @@ def test_combined_loss_mixed_children_filter_shard_layout_kwargs(monkeypatch: py
     result = loss(pred, target, weights=weights, group=group, grid_shard_sizes=grid_shard_sizes, grid_dim=-2)
 
     assert result.shape == ()
-    prepare_for_smoothing.assert_called_once_with(pred, target, group, grid_shard_sizes)
+    prepare_for_smoothing.assert_called_once()
+    called_pred, called_target, called_group, called_sizes = prepare_for_smoothing.call_args.args
+    torch.testing.assert_close(called_pred, pred)
+    torch.testing.assert_close(called_target, target)
+    assert called_group is group
+    assert called_sizes == grid_shard_sizes
 
 
 def test_combined_loss_with_multiscale_child() -> None:
