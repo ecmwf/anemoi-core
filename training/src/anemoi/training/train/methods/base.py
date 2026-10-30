@@ -28,6 +28,7 @@ from anemoi.models.data import Batch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.preprocessing.normalizer import InputNormalizer
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
 from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
@@ -326,6 +327,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_indices[dataset_name],
                 graph_data=graph_data,
                 data_node_name=data_node_name,
+                normalizer=self._dataset_normalizer(dataset_name),
             )
 
             # Check unit compatibility between predicted and target variables
@@ -338,6 +340,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_indices=data_indices[dataset_name],
                 graph_data=graph_data,
                 data_node_name=data_node_name,
+                normalizer=self._dataset_normalizer(dataset_name),
             )
             self._initialise_updating_scalers(
                 scalers=dataset_scalers,
@@ -457,6 +460,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         data_indices: IndexCollection,
         graph_data: object | None = None,
         data_node_name: str = DEFAULT_DATASET_NAME,
+        normalizer: InputNormalizer | None = None,
     ) -> torch.nn.ModuleDict:
         return torch.nn.ModuleDict(
             {
@@ -466,10 +470,25 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     data_indices=data_indices,
                     graph_data=graph_data,
                     data_node_name=data_node_name,
+                    normalizer=normalizer,
                 )
                 for metric_name, val_metric_config in validation_metrics_configs.items()
             },
         )
+
+    def _dataset_normalizer(self, dataset_name: str) -> InputNormalizer | None:
+        """Return the input normaliser among a dataset's pre-processors, if any.
+
+        Passed to losses declaring ``LossFactoryContextKey.NORMALIZER``, e.g. to check that a
+        variable they read keeps its raw values.
+        """
+        pre_processors = getattr(getattr(self, "model", None), "pre_processors", None)
+        if pre_processors is None or dataset_name not in pre_processors:
+            return None
+        for processor in getattr(pre_processors[dataset_name], "processors", {}).values():
+            if isinstance(processor, InputNormalizer):
+                return processor
+        return None
 
     def forward(self, x: Batch | dict[str, torch.Tensor], **kwargs) -> Batch:
         """Forward method.

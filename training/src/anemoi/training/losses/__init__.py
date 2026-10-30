@@ -21,6 +21,7 @@ from .loss import get_loss_function
 from .mae import MAELoss
 from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
+from .obs_source_weighted import ObsSourceWeightedMSELoss
 from .rmse import RMSELoss
 from .spectral import FourierCorrelationLoss
 from .spectral import LogFFT2Distance
@@ -48,6 +49,7 @@ __all__ = [
     "MAELoss",
     "MSELoss",
     "MultiscaleLossWrapper",
+    "ObsSourceWeightedMSELoss",
     "PowerSpectrumLoss",
     "RMSELoss",
     "SpectralAMSELoss",

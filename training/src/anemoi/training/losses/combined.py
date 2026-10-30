@@ -33,7 +33,11 @@ class CombinedLoss(BaseLoss):
     # CombinedLoss builds child losses itself, so it needs the full scaler
     # set and data indices during construction.
     factory_context_keys = frozenset(
-        {LossFactoryContextKey.AVAILABLE_SCALERS, LossFactoryContextKey.DATA_INDICES},
+        {
+            LossFactoryContextKey.AVAILABLE_SCALERS,
+            LossFactoryContextKey.DATA_INDICES,
+            LossFactoryContextKey.NORMALIZER,
+        },
     )
     _initial_set_scaler: bool = False
 
@@ -44,6 +48,7 @@ class CombinedLoss(BaseLoss):
         losses: tuple[dict[str, Any] | Callable | BaseLoss] | None = None,
         available_scalers: dict[str, TENSOR_SPEC] | None = None,
         data_indices: IndexCollection | None = None,
+        normalizer: object | None = None,
         **kwargs,
     ):
         """Combined loss function.
@@ -77,6 +82,8 @@ class CombinedLoss(BaseLoss):
             All scaler tensors available. Passed through to child losses.
         data_indices : IndexCollection | None, optional
             Training data indices needed by child losses that perform variable mapping.
+        normalizer : object | None, optional
+            Dataset input normaliser, passed to child losses that request it.
         kwargs: Any
             Additional arguments to pass to the loss functions, if not Loss.
 
@@ -127,6 +134,7 @@ class CombinedLoss(BaseLoss):
                         data_indices=data_indices,
                         graph_data=kwargs.get("graph_data"),
                         data_node_name=kwargs.get("data_node_name"),
+                        normalizer=normalizer,
                     ),
                 )
             elif isinstance(loss, type):

@@ -541,6 +541,61 @@ class HuberLossSchema(BaseLossSchema):
     "Threshold for Huber loss."
 
 
+class ObservationSourceSchema(BaseModel):
+    """One observing system of ``ObsSourceWeightedMSELoss``."""
+
+    weight: NonNegativeFloat = 1.0
+    "Weight of the squared error of the target elements this source observed."
+    reportype_codes: list[float] = Field(default_factory=list)
+    "Report-type codes identifying the source in ``reportype_variable``."
+    requires: list[str] = Field(default_factory=list)
+    "Variable families the cell must report for the source to be inferred; empty for the fallback source."
+    requires_scope: Literal["level", "column"] = "level"
+    "Read ``requires`` at the weighted level only, or at any weighted level of the column."
+
+
+class ObsSourceWeightedMSELossSchema(BaseLossSchema):
+    """MSE weighted per element by the observing system of the target."""
+
+    target_: Literal["anemoi.training.losses.ObsSourceWeightedMSELoss"] = Field(..., alias="_target_")
+    "ObsSourceWeightedMSELoss target."
+    ignore_nans: bool = True
+    "Mask NaN targets (required for sparse observation targets)."
+    variables: list[str] = Field(default_factory=lambda: ["u", "v"])
+    "Variable families whose ``{family}_{level}`` model outputs are weighted."
+    sources: dict[str, ObservationSourceSchema] | None = None
+    "Observing systems in inference priority order. Defaults to sonde / aircraft / AMV."
+    weights: dict[str, NonNegativeFloat] | None = None
+    "Shorthand overriding the weight of named sources."
+    reportype_variable: str | None = None
+    "Per-cell report-type code (a loss-only ``target`` variable with normaliser ``none``)."
+    reportype_codes: dict[str, list[float]] | None = None
+    "Shorthand overriding the report-type codes of named sources."
+    level_pattern: str = r"^([A-Za-z0-9]+)_(\d+)$"
+    "Regular expression splitting a variable name into its family and level."
+    preserve_variable_share: bool = True
+    "Renormalise each weighted variable's weights to mean 1 over its valid elements."
+
+    @model_validator(mode="after")
+    def check_sources(self) -> Self:
+        if self.sources is not None:
+            fallbacks = [name for name, source in self.sources.items() if not source.requires]
+            if len(fallbacks) != 1:
+                msg = f"Exactly one source must have no `requires` (the fallback), got {fallbacks}."
+                raise ValueError(msg)
+            codes = [code for source in self.sources.values() for code in source.reportype_codes]
+            if len(codes) != len(set(codes)):
+                msg = "Report-type codes must identify one source each."
+                raise ValueError(msg)
+        names = set(self.sources) if self.sources is not None else {"sonde", "aircraft", "amv"}
+        for option in ("weights", "reportype_codes"):
+            unknown = sorted(set(getattr(self, option) or {}) - names)
+            if unknown:
+                msg = f"{option} names unknown sources {unknown}, expected {sorted(names)}."
+                raise ValueError(msg)
+        return self
+
+
 class SpectralProjectionConfigSchema(BaseModel):
     """Configuration for sparse projection applied before the spectral transform.
 
@@ -643,6 +698,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.PowerSpectrumLoss": "spectral",
     "anemoi.training.losses.SpectralAMSELoss": "spectral",
     "anemoi.training.losses.HuberLoss": "huber",
+    "anemoi.training.losses.ObsSourceWeightedMSELoss": "obs_source_weighted",
     "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
 }
 
@@ -669,6 +725,7 @@ class CombinedLossSchema(BaseLossSchema):
         Annotated[
             Annotated[BaseLossSchema, Tag("base")]
             | Annotated[HuberLossSchema, Tag("huber")]
+            | Annotated[ObsSourceWeightedMSELossSchema, Tag("obs_source_weighted")]
             | Annotated[CRPSSchema, Tag("crps")]
             | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
             | Annotated[EnergyScoreLossSchema, Tag("energy_score")]
@@ -728,6 +785,7 @@ class CombinedLossSchema(BaseLossSchema):
 LossSchemas = Annotated[
     Annotated[BaseLossSchema, Tag("base")]
     | Annotated[HuberLossSchema, Tag("huber")]
+    | Annotated[ObsSourceWeightedMSELossSchema, Tag("obs_source_weighted")]
     | Annotated[CombinedLossSchema, Tag("combined")]
     | Annotated[CRPSSchema, Tag("crps")]
     | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
