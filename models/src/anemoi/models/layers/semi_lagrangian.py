@@ -13,13 +13,17 @@ A sampler reads groups of channels at their departure points: where each value w
 from by moving backwards by its displacement. ``GridSampler`` does it on a regular
 latitude-longitude grid with ``F.grid_sample``, on tensors of shape (batch, local rows, nlon, ...);
 ``KNNSampler`` does it on the nodes of any graph, on tensors of shape (batch * local nodes, ...),
-reading from the nodes nearest to each departure point. Both work out the departure points the
-same way, and both get the node coordinates from the layout they are given, so neither holds a
-geometry of its own: ``anemoi.models.layers.geometry`` builds the one that fits.
+reading from the nodes nearest to each departure point, which ``NearestNodeSearch`` finds. Both
+work out the departure points the same way, and both get the node coordinates from the layout
+they are given, so neither holds a geometry of its own: ``anemoi.models.layers.geometry`` builds
+the one that fits.
 
 Both need the whole field, so they exchange the state between being split by node and being split
 by channel group (``Layout.to_field``), and exchange it back afterwards.
 """
+
+import logging
+from typing import Optional
 
 import einops
 import torch
@@ -33,6 +37,8 @@ from anemoi.models.layers.layout import LatLonLayout
 from anemoi.models.layers.layout import latlon_to_unit_vector
 from anemoi.models.layers.layout import unit_vector_to_latlon
 from anemoi.utils.config import DotDict
+
+LOGGER = logging.getLogger(__name__)
 
 # Smallest squared displacement treated as non-zero. Keeps the square root and its gradient finite
 # when a displacement is exactly zero.
@@ -218,13 +224,92 @@ def nearest_node_distance(position: Tensor, chunk_elements: int = 2**26) -> Tens
     return (position - position[nearest]).norm(dim=-1)
 
 
+KNN_BACKENDS = ("lookup", "brute_force")
+
+
+class NearestNodeSearch:
+    """Finds the nodes nearest to the departure points of one mesh.
+
+    ``backend="lookup"`` uses the exact lookup-table search of anemoi-graphs
+    (``anemoi.graphs.edges.builders.euclidean.lookup_knn``): the nodes are indexed once, on the
+    device they are first searched on, in a table over a latitude-longitude grid of cells that
+    holds, for each cell, every node that can be among the k nearest of a point in the cell. A
+    query then reads the few candidates of its cell -- a fused Triton kernel on CUDA -- instead of
+    comparing with every node, which makes the search about a thousand times faster than
+    ``knn_on_sphere`` on a global mesh. The table is built for ``k`` neighbours and rebuilt if more
+    are ever asked for. ``backend="brute_force"`` always uses ``knn_on_sphere``.
+
+    The table only fits a mesh that covers the globe roughly uniformly. For any other -- a limited
+    area, a strongly stretched grid -- and when the installed anemoi-graphs has no lookup table, the
+    search falls back to ``knn_on_sphere`` and says so once.
+
+    One search belongs to one mesh: the table on a device is built from the first nodes searched
+    on it and reused for every later query on that device.
+    """
+
+    def __init__(self, backend: str = "lookup") -> None:
+        if backend not in KNN_BACKENDS:
+            raise ValueError(f"knn_backend must be one of {KNN_BACKENDS}, got {backend!r}.")
+        self.backend = backend
+        # One table per device; None once the mesh was found not to fit a table.
+        self._tables: dict[torch.device, Optional[object]] = {}
+
+    def __call__(self, points: Tensor, queries: Tensor, k: int) -> Tensor:
+        """Indices, of shape (queries, k), of the k points nearest to each query, nearest first.
+
+        points (n, 3) and queries (q, 3) are 3D unit vectors on the same device.
+        """
+        if self.backend == "lookup":
+            table = self._table(points, k)
+            if table is not None:
+                with torch.no_grad():
+                    neighbours, distance = table.query(queries, k)
+                    # The table does not order the neighbours.
+                    return neighbours.gather(1, distance.argsort(dim=1))
+        return knn_on_sphere(points, queries, k)
+
+    def _table(self, points: Tensor, k: int):
+        table = self._tables.get(points.device, False)
+        if table is False or (table is not None and table.k < k):
+            table = self._build(points, k)
+            self._tables[points.device] = table
+        if table is not None and table.points.shape[0] != points.shape[0]:
+            raise ValueError(
+                f"The table on {points.device} indexes {table.points.shape[0]} nodes, but {points.shape[0]} "
+                "were given: a NearestNodeSearch belongs to one mesh."
+            )
+        return table
+
+    @staticmethod
+    def _build(points: Tensor, k: int):
+        try:
+            from anemoi.graphs.edges.builders.euclidean.lookup_knn import LookupKNN
+            from anemoi.graphs.edges.builders.euclidean.lookup_knn import LookupKNNNotSupported
+        except ImportError:
+            LOGGER.warning(
+                "The installed anemoi-graphs has no lookup-table nearest-neighbour search "
+                "(anemoi.graphs.edges.builders.euclidean.lookup_knn); the departure points are "
+                "searched by brute force."
+            )
+            return None
+        try:
+            return LookupKNN(points, k=k)
+        except LookupKNNNotSupported as error:
+            LOGGER.warning(
+                "The hidden mesh does not fit a lookup table (%s); the departure points are searched by brute force.",
+                error,
+            )
+            return None
+
+
 class KNNSampler(nn.Module):
     """Moves groups of channels along learned paths on the sphere, on the nodes of a graph.
 
     The graph counterpart of ``GridSampler``: the same displacements (local east and north
     angles, or 3D vectors with ``cartesian_displacement``) and the same departure points. The
-    value at a departure point is read from the ``num_neighbours`` nodes nearest to it, found with
-    ``knn_on_sphere``, with modified Shepard (Franke-Little) weights
+    value at a departure point is read from the ``num_neighbours`` nodes nearest to it, found by
+    the layout's geometry (``GraphLayout.nearest_nodes``: ``NearestNodeSearch``, a table lookup on
+    a global mesh), with modified Shepard (Franke-Little) weights
 
         w_j = (R - d_j)^2 / (d_j^2 + (smoothing * spacing)^2),    R = distance to the next nearest node,
 
@@ -299,10 +384,11 @@ class KNNSampler(nn.Module):
                 lat, lon = unit_vector_to_latlon(einops.rearrange(departure, "b g k n -> b g n k"))
                 self.diag_hook(self, layout, lat.flatten(0, 1), lon.flatten(0, 1))
 
-            # One query per (batch, head, node), all against the same nodes.
+            # One query per (batch, head, node), all against the same nodes. The nearest node
+            # is first; the last one is only there to set the reach of the weights.
             queries = einops.rearrange(departure, "b g k n -> (b g n) k")
             points = layout.position.to(queries.dtype)
-            neighbours = knn_on_sphere(points, queries, self.num_neighbours + 1)
+            neighbours = layout.nearest_nodes(queries, self.num_neighbours + 1)
             distance = (queries[:, None, :] - points[neighbours]).square().sum(-1)
             distance = distance.clamp_min(_MIN_SQUARED_ANGLE).sqrt()
             reach = distance[:, -1:]

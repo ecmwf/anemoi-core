@@ -321,6 +321,13 @@ class GraphLayout(Layout):
         """Distance from each node to its nearest other node, as a chord of the unit sphere."""
         return self.geometry.spacing
 
+    def nearest_nodes(self, queries: torch.Tensor, k: int) -> torch.Tensor:
+        """Indices, of shape (queries, k), of the k nodes nearest to each query, nearest first.
+
+        queries (q, 3) are 3D unit vectors. The geometry decides how they are searched.
+        """
+        return self.geometry.nearest_nodes(queries, k)
+
     def to_state(self, x: torch.Tensor) -> torch.Tensor:
         """The state stays on the nodes, so this does nothing."""
         return x

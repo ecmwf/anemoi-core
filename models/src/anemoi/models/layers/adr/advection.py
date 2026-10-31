@@ -99,8 +99,8 @@ class Advection(nn.Module):
     """Advection step: the state moves towards its advected version by a learned share per channel.
 
     On a mesh the number of neighbour searches is ``batch * num_velocity_fields * nodes``, so a
-    velocity field per advected channel, the default on a grid, is slow with the brute-force
-    search of ``KNNSampler``.
+    velocity field per advected channel, the default on a grid, costs the most in the search of
+    ``KNNSampler``; the lookup-table search of ``MeshGeometry`` keeps that cheap on a global mesh.
 
     Attributes
     ----------

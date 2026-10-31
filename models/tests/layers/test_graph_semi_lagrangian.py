@@ -20,6 +20,7 @@ from anemoi.models.layers.edge_stencil import EdgeDepthwiseConv
 from anemoi.models.layers.geometry import MeshGeometry
 from anemoi.models.layers.layout import GraphLayout
 from anemoi.models.layers.semi_lagrangian import KNNSampler
+from anemoi.models.layers.semi_lagrangian import NearestNodeSearch
 from anemoi.models.layers.semi_lagrangian import departure_from_local_angles
 from anemoi.models.layers.semi_lagrangian import knn_on_sphere
 from anemoi.models.layers.semi_lagrangian import latlon_to_unit_vector
@@ -56,6 +57,88 @@ def test_knn_on_sphere_finds_the_nearest_points():
     expected = torch.cdist(queries, points).topk(5, largest=False).indices
     # Small chunks, so that the search runs over several of them.
     torch.testing.assert_close(knn_on_sphere(points, queries, 5, chunk_elements=1000), expected)
+
+
+def _random_queries(num_queries: int) -> torch.Tensor:
+    torch.manual_seed(1)
+    return torch.nn.functional.normalize(torch.randn(num_queries, 3), dim=-1)
+
+
+def _assert_nearest_first(points: torch.Tensor, queries: torch.Tensor, neighbours: torch.Tensor, k: int) -> None:
+    """neighbours are the k nearest points of each query, nearest first.
+
+    Compared by distance, in float64: two points at (almost) the same distance from a query may
+    come in either order from the two searches, which round differently in float32.
+    """
+    assert neighbours.shape == (queries.shape[0], k)
+    distance = torch.cdist(queries.double(), points.double())
+    expected = distance.topk(k, largest=False).values
+    got = distance.gather(1, neighbours)
+    torch.testing.assert_close(got, expected, atol=1e-6, rtol=0)
+
+
+def test_the_lookup_search_finds_the_same_nodes_as_brute_force():
+    """The table is exact, and the neighbours come back nearest first, as ``knn_on_sphere`` gives them."""
+    lat, lon = fibonacci_nodes(3000)
+    points = latlon_to_unit_vector(lat, lon).float()
+    queries = _random_queries(5000)
+
+    search = NearestNodeSearch("lookup")
+    _assert_nearest_first(points, queries, search(points, queries, 5), 5)
+    assert len(search._tables) == 1
+    # Fewer neighbours reuse the table; more rebuild it.
+    _assert_nearest_first(points, queries, search(points, queries, 3), 3)
+    assert search._tables[points.device].k == 5
+    _assert_nearest_first(points, queries, search(points, queries, 7), 7)
+    assert search._tables[points.device].k == 7
+
+    # The layout searches through its geometry, with the same result.
+    _assert_nearest_first(points, queries, _layout(lat, lon).nearest_nodes(queries, 5), 5)
+
+
+def test_the_brute_force_backend_builds_no_table():
+    lat, lon = fibonacci_nodes(500)
+    points = latlon_to_unit_vector(lat, lon).float()
+    queries = _random_queries(200)
+    search = NearestNodeSearch("brute_force")
+    torch.testing.assert_close(search(points, queries, 5), knn_on_sphere(points, queries, 5))
+    assert not search._tables
+
+
+def test_a_limited_area_mesh_falls_back_to_brute_force(caplog):
+    """The table needs a mesh over the whole globe; any other is searched by brute force, and said so once."""
+    lat, lon = torch.meshgrid(torch.linspace(40, 50, 30).deg2rad(), torch.linspace(0, 10, 30).deg2rad(), indexing="ij")
+    points = latlon_to_unit_vector(lat.flatten().double(), lon.flatten().double()).float()
+    queries = _random_queries(100)
+    search = NearestNodeSearch("lookup")
+    with caplog.at_level(logging.WARNING, logger="anemoi.models.layers.semi_lagrangian"):
+        for _ in range(2):
+            torch.testing.assert_close(search(points, queries, 5), knn_on_sphere(points, queries, 5))
+    records = [r for r in caplog.records if r.name == "anemoi.models.layers.semi_lagrangian"]
+    assert len(records) == 1
+    assert "brute force" in records[0].message
+
+
+def test_unknown_knn_backend_is_rejected():
+    with pytest.raises(ValueError, match="knn_backend"):
+        NearestNodeSearch("kdtree")
+    lat, lon = fibonacci_nodes(50)
+    with pytest.raises(ValueError, match="knn_backend"):
+        _geometry(lat, lon, knn_backend="kdtree")
+
+
+def test_sampling_is_the_same_with_either_search():
+    torch.manual_seed(0)
+    lat, lon = fibonacci_nodes(1000)
+    heads = 2
+    layer = KNNSampler(num_heads=heads)
+    values = torch.randn(2 * 1000, heads, 3)
+    displacement = (torch.rand(2 * 1000, heads, 2) * 2 - 1) * 0.3
+    moved = {
+        backend: layer.sample(values, displacement, _layout(lat, lon, batch_size=2, knn_backend=backend))
+        for backend in ("lookup", "brute_force")
+    }
+    torch.testing.assert_close(moved["lookup"], moved["brute_force"])
 
 
 def test_nearest_node_distance_of_an_even_mesh():

@@ -44,6 +44,7 @@ from anemoi.models.layers.layout import latlon_grid_layout
 from anemoi.models.layers.layout import latlon_to_unit_vector
 from anemoi.models.layers.semi_lagrangian import GridSampler
 from anemoi.models.layers.semi_lagrangian import KNNSampler
+from anemoi.models.layers.semi_lagrangian import NearestNodeSearch
 from anemoi.models.layers.semi_lagrangian import SemiLagrangianWarp
 from anemoi.models.layers.semi_lagrangian import nearest_node_distance
 from anemoi.utils.config import DotDict
@@ -197,8 +198,12 @@ class MeshGeometry(LatentGeometry, HaloInfoCache):
 
     The mixer is a block over the edges (``mixer_block``, see ``GraphSpatialMixer``), the bias
     field is built from profiles evaluated at the node coordinates, and values are read at
-    departure points from the nearest nodes. ``bind`` prepares the edges once per forward: sorted
-    by destination node, split across GPUs, and with the halo exchange plan when the mixer is the
+    departure points from the ``num_neighbours`` nearest nodes. Those are found with
+    ``knn_backend``: ``"lookup"`` indexes the nodes once in the exact lookup table of anemoi-graphs
+    and reads each departure point's few candidates from it (see ``NearestNodeSearch``), falling
+    back to brute force on a mesh that does not cover the globe; ``"brute_force"`` compares every
+    departure point with every node. ``bind`` prepares the edges once per forward: sorted by
+    destination node, split across GPUs, and with the halo exchange plan when the mixer is the
     graph transformer.
     """
 
@@ -211,6 +216,7 @@ class MeshGeometry(LatentGeometry, HaloInfoCache):
         mixer_kwargs: Optional[dict] = None,
         num_neighbours: int = 4,
         smoothing: float = 0.01,
+        knn_backend: str = "lookup",
         bias_rank: int = 128,
         bias_base_maps: int = 8,
         bias_lat_degree: int = 32,
@@ -232,6 +238,7 @@ class MeshGeometry(LatentGeometry, HaloInfoCache):
         self.mixer_kwargs = dict(mixer_kwargs or {})
         self.num_neighbours = num_neighbours
         self.smoothing = smoothing
+        self.nearest_node_search = NearestNodeSearch(knn_backend)
         self.bias_rank = bias_rank
         self.bias_base_maps = bias_base_maps
         self.bias_lat_degree = bias_lat_degree
@@ -306,3 +313,11 @@ class MeshGeometry(LatentGeometry, HaloInfoCache):
             smoothing=self.smoothing,
             cartesian_displacement=cartesian_displacement,
         )
+
+    def nearest_nodes(self, queries: Tensor, k: int) -> Tensor:
+        """Indices, of shape (queries, k), of the k nodes nearest to each query, nearest first.
+
+        queries (q, 3) are 3D unit vectors on the device of the geometry; the nodes are indexed
+        on that device the first time they are searched there.
+        """
+        return self.nearest_node_search(self.position.to(queries.dtype), queries, k)

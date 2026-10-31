@@ -145,6 +145,8 @@ class MeshGeometrySchema(BaseModel):
     "Number of nearest nodes a value is read from at its departure point."
     smoothing: NonNegativeFloat = Field(default=0.01)
     "Sharpness of the interpolation weights at a node, relative to how close together the nodes are there."
+    knn_backend: Literal["lookup", "brute_force"] = Field(default="lookup")
+    "How the nearest nodes of a departure point are found: an exact lookup table built once from the nodes (falls back to brute force on a mesh that does not cover the globe), or a brute-force search over every node."
     bias_rank: PositiveInt = Field(default=128)
     "Number of latitude-longitude profile pairs in the learned bias fields."
     bias_base_maps: PositiveInt = Field(default=8)
