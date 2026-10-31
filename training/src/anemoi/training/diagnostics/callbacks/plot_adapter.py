@@ -63,8 +63,18 @@ class BasePlotAdapter(ABC):
         return batch
 
     @abstractmethod
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
-        """Yield (x, y_true, y_pred, tag_suffix) or (sample, recon, tag) per plot sample."""
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        steps: list[str] | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
+        """Yield (x, y_true, y_pred, tag_suffix) or (sample, recon, tag) per plot sample.
+
+        ``steps`` optionally restricts rollout tasks to the listed step labels
+        (``task.get_metric_name`` without the leading underscore, e.g. ``rstep7``);
+        adapters without a rollout ignore it.
+        """
         ...
 
 
@@ -80,7 +90,12 @@ class ForecasterPlotAdapter(BasePlotAdapter):
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         return self._task.num_input_timesteps + rollout_step * self._task.num_output_timesteps
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        steps: list[str] | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
         input_time_indices = self._task.get_batch_input_indices()
 
         input_data = data[input_time_indices, ...]
@@ -91,6 +106,8 @@ class ForecasterPlotAdapter(BasePlotAdapter):
             # Skip DA-assimilation cycles; plot only forecast steps.
             # No-op for non-DA tasks, where ``is_da`` is absent/False.
             if validation_step_kwargs.get("is_da", False):
+                continue
+            if steps is not None and self._task.get_metric_name(**validation_step_kwargs).lstrip("_") not in steps:
                 continue
             rollout_step = validation_step_kwargs["rollout_step"]
             output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
@@ -113,7 +130,12 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
     def get_init_step(self) -> int:
         return 0
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        steps: list[str] | None = None,  # noqa: ARG002
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
         input_time_indices = self._task.get_batch_input_indices()
         output_time_indices = self._task.get_batch_output_indices()
 
@@ -138,7 +160,12 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
 class AutoencoderPlotAdapter(BasePlotAdapter):
     """Plot Adapter for Autoencoder Task: single (sample, recon, tag) yield."""
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        steps: list[str] | None = None,  # noqa: ARG002
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
         sample = data[0, ...].squeeze()
         recon = output_tensor[0, ...].squeeze()
         yield sample, sample, recon, "recon"
@@ -196,5 +223,10 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
         """Return the batch for loss plotting."""
         return batch
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
-        yield from self._inner.iter_plot_samples(data, output_tensor)
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        steps: list[str] | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
+        yield from self._inner.iter_plot_samples(data, output_tensor, steps=steps)

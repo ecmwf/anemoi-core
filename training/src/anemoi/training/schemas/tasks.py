@@ -81,6 +81,11 @@ class DAForecasterSchema(BaseModel):
         "Number of leading grad-tracked steps (DA cycles first) whose model call is activation-checkpointed. "
         "Saves memory at the cost of recomputing those calls in backward; gradients are unchanged."
     )
+    validation_last_step_only: bool = Field(default=False, example=[False, True])
+    (
+        "Score only the final forecast step in validation: the validation loss and metrics come from that "
+        "step alone instead of averaging / logging every rollout step."
+    )
 
 
 class AutoencoderTaskSchema(BaseModel):

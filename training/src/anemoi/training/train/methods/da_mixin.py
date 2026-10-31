@@ -275,11 +275,18 @@ class DATrainingMixin:
 
         task_steps = self.task.steps("validation" if validation_mode else "training")
         n_forecast = max(1, sum(1 for step in task_steps if not step.get("is_da", False)))
+        # Validation may score only the final step: earlier steps still run to advance
+        # the state, but contribute no loss or metrics.
+        last_step_only = validation_mode and getattr(self.task, "validation_last_step_only", False)
+        if last_step_only:
+            n_forecast = 1
 
         for i, task_kwargs in enumerate(task_steps):
             is_da = task_kwargs.get("is_da", False)
             rollout_step = task_kwargs["rollout_step"]
             weight = self.task.da_loss_weight if is_da else 1.0
+            if last_step_only and i < len(task_steps) - 1:
+                weight = 0.0
 
             # Early DA cycles outside the last ``da_grad_cycles`` run as a no_grad
             # spin-up. no_grad (not inference_mode): their outputs feed the later

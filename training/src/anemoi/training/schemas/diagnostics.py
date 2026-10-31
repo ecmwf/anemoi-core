@@ -124,6 +124,8 @@ class LossCurvePlotSchema(PydanticBaseModel):
     "Batch frequency to plot at."
     plot_fn: LossPlotFnSchema | None = Field(default=None)
     "Hydra-instantiable plot function (use ``_partial_: true``). ``None`` uses the default."
+    steps: list[str] | None = Field(default=None, examples=[["rstep7"]])
+    "Forecast step labels to plot (e.g. ``rstep7``). ``None`` plots every forecast step."
 
 
 class PlotLossCorrectedSchema(PydanticBaseModel):
@@ -145,6 +147,8 @@ class PlotLossCorrectedSchema(PydanticBaseModel):
     "Batch frequency to plot at."
     plot_fn: LossPlotFnSchema | None = Field(default=None)
     "Hydra-instantiable plot function (use ``_partial_: true``). ``None`` uses the default."
+    steps: list[str] | None = Field(default=None, examples=[["rstep7"]])
+    "Forecast step labels to plot (e.g. ``rstep7``). ``None`` plots every forecast step."
 
 
 class MatplotlibColormapSchema(BaseModel):
@@ -234,6 +238,8 @@ class BatchOutputPlotSchema(PydanticBaseModel):
     "Batch frequency to plot at, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
     "Region of interest to restrict plots to."
+    steps: list[str] | None = Field(default=None, examples=[["rstep7"]])
+    "Forecast step labels to plot (e.g. ``rstep7``). ``None`` plots every forecast step."
 
 
 PlotCallbacks = Annotated[

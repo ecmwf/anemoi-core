@@ -659,6 +659,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
         dataset_names: list[str] | None = None,
         plot_fn: Any = None,
         plotting_settings: PlottingSettings | None = None,
+        steps: list[str] | None = None,
     ) -> None:
         """Initialise the LossCurvePlot callback.
 
@@ -675,12 +676,16 @@ class LossCurvePlot(BasePerBatchPlotCallback):
             (``_partial_: true``). Defaults to :attr:`default_plot_fn`.
         plotting_settings : PlottingSettings, optional
             Plotting configuration settings, by default None (uses defaults)
+        steps : list[str] | None, optional
+            Forecast step labels to plot (``task.get_metric_name`` without the
+            leading underscore, e.g. ``rstep7``). None plots every forecast step.
         """
         super().__init__(
             every_n_batches=every_n_batches,
             dataset_names=dataset_names,
             plotting_settings=plotting_settings,
         )
+        self.steps = [s.lstrip("_") for s in steps] if steps is not None else None
         self.parameter_groups = parameter_groups
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
         if self.parameter_groups is None:
@@ -716,7 +721,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
             for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
                 # Skip DA-assimilation cycles; plot only forecast steps.
                 # No-op for non-DA tasks, where ``is_da`` is absent/False.
-                if task_kwargs.get("is_da", False):
+                if task_kwargs.get("is_da", False) or not self._step_selected(pl_module, task_kwargs):
                     continue
                 y_hat = outputs.predictions[i][dataset_name]
                 y_true = pl_module.task.get_targets(
@@ -756,6 +761,10 @@ class LossCurvePlot(BasePerBatchPlotCallback):
                         f"{self.tag_prefix}_sample_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}"
                     ),
                 )
+
+    def _step_selected(self, pl_module: pl.LightningModule, task_kwargs: dict) -> bool:
+        """Whether a validation step is among the configured ``steps`` (all when unset)."""
+        return self.steps is None or pl_module.task.get_metric_name(**task_kwargs).lstrip("_") in self.steps
 
     def _prepare_batch(
         self,
@@ -814,7 +823,7 @@ class PlotLossCorrected(LossCurvePlot):
         correctors = getattr(pl_module, "corrector", {})
         adjusted = [dict(pred) for pred in predictions]
         for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
-            if task_kwargs.get("is_da", False):
+            if task_kwargs.get("is_da", False) or not self._step_selected(pl_module, task_kwargs):
                 continue
             for dataset_name in self.dataset_names:
                 # correctors may be an nn.ModuleDict (no .get()), so SIM401 does not apply here.
@@ -1027,6 +1036,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
         dataset_names: list[str] | None = None,
         focus_area: dict | None = None,
         plotting_settings: PlottingSettings | None = None,
+        steps: list[str] | None = None,
     ) -> None:
         """Initialise the BatchOutputPlot callback.
 
@@ -1050,6 +1060,9 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
             Ensemble members to select. Defaults to the plot adapter's default.
         every_n_batches, dataset_names, focus_area, plotting_settings
             See :class:`BasePlotAdditionalMetrics`.
+        steps : list[str] | None, optional
+            Forecast step labels to plot (``task.get_metric_name`` without the
+            leading underscore, e.g. ``rstep7``). None plots every forecast step.
         """
         super().__init__(
             sample_idx=sample_idx,
@@ -1064,6 +1077,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
         self.parameters = parameters
         self.with_auxiliary = with_auxiliary
         self._members = members
+        self.steps = [s.lstrip("_") for s in steps] if steps is not None else None
 
     def _get_process_members(self) -> int | list[int] | None:
         return self._members
@@ -1129,10 +1143,18 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
             if auxiliary_tensor is not None:
                 auxiliary_by_suffix = {
                     suffix: aux
-                    for _, _, aux, suffix in pl_module.plot_adapter.iter_plot_samples(data, auxiliary_tensor)
+                    for _, _, aux, suffix in pl_module.plot_adapter.iter_plot_samples(
+                        data,
+                        auxiliary_tensor,
+                        steps=self.steps,
+                    )
                 }
 
-            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(
+                data,
+                output_tensor,
+                steps=self.steps,
+            ):
                 fig = self.plot_fn(
                     **spatial_inputs,
                     x=x,
