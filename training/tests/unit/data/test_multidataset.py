@@ -9,12 +9,17 @@
 
 
 import re
+from datetime import timedelta
 
 import numpy as np
 import pytest
 import torch
 from pytest_mock import MockFixture
 
+from anemoi.models.data import BaseSample
+from anemoi.models.data import Batch
+from anemoi.models.data.sample import create_batched_struct
+from anemoi.training.data.multidataset import MixedFrequencyDataset
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.usable_indices import ReaderAnchors
 from anemoi.training.data.usable_indices import get_usable_indices
@@ -136,3 +141,71 @@ class TestMultiDataset:
 
         with pytest.raises(ValueError, match="No valid anchors found after intersection across all datasets"):
             MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
+
+
+def _mixed_reader(mocker: MockFixture, frequency_minutes: int, dates: np.ndarray) -> MockFixture:
+    reader = mocker.MagicMock()
+    reader.frequency = timedelta(minutes=frequency_minutes)
+    reader.sampling = {"stride": 1}
+    reader.data_type = "gridded"
+
+    def valid_anchors(relative_indices: list[int]) -> ReaderAnchors:
+        positions = get_usable_indices(set(), len(dates), relative_indices)
+        return ReaderAnchors(dates[positions], np.zeros_like(positions), positions)
+
+    def get_sample(_sequence: int, positions: list[int] | np.ndarray) -> BaseSample:
+        values = torch.as_tensor(np.atleast_1d(positions), dtype=torch.float32).reshape(-1, 1, 1, 1)
+        return create_batched_struct(
+            data_type="gridded",
+            data=values,
+            variables=["value"],
+            layout=("time", "ensemble", "grid", "variables"),
+            latitudes=[0.0],
+            longitudes=[0.0],
+        )
+
+    reader.valid_anchors.side_effect = valid_anchors
+    reader.get_sample.side_effect = get_sample
+    reader.measure_from_reference.side_effect = lambda sample, *_args: sample
+    return reader
+
+
+def test_mixed_frequency_dataset_returns_collatable_samples_with_causal_coarse_times(
+    mocker: MockFixture,
+) -> None:
+    start = np.datetime64("2020-01-01T00:00")
+    fine_dates = start + np.arange(145) * np.timedelta64(5, "m")
+    coarse_dates = start + np.arange(3) * np.timedelta64(6, "h")
+    fine = _mixed_reader(mocker, 5, fine_dates)
+    coarse = _mixed_reader(mocker, 360, coarse_dates)
+
+    dataset = MixedFrequencyDataset(
+        {"fine": fine, "coarse": coarse},
+        relative_date_indices=[0, 72],
+        frequency=timedelta(minutes=5),
+    )
+
+    sample = dataset[1]
+    assert coarse.get_sample.call_args.args[0] == 0
+    assert fine.get_sample.call_args.args[0] == 0
+    np.testing.assert_array_equal(coarse.get_sample.call_args.args[1], [0, 1])
+    np.testing.assert_array_equal(fine.get_sample.call_args.args[1], [1, 73])
+    batch = Batch.collate([dataset[0], sample])
+    assert batch["fine"].time_size == 2
+    assert batch["coarse"].time_size == 2
+
+
+def test_mixed_frequency_dataset_filters_anchors_without_a_prior_coarse_timestamp(mocker: MockFixture) -> None:
+    start = np.datetime64("2020-01-01T00:00")
+    fine_dates = start + np.arange(217) * np.timedelta64(5, "m")
+    coarse_dates = start + np.arange(1, 4) * np.timedelta64(6, "h")
+    dataset = MixedFrequencyDataset(
+        {
+            "fine": _mixed_reader(mocker, 5, fine_dates),
+            "coarse": _mixed_reader(mocker, 360, coarse_dates),
+        },
+        relative_date_indices=[0, 72],
+        frequency=timedelta(minutes=5),
+    )
+
+    assert dataset.anchors.times.min() == np.datetime64("2020-01-01T06:00")
