@@ -161,8 +161,11 @@ also filters variable-dependent scalers to the selected predictions.
 
 For a ``CombinedLoss``, configure the variables on the child loss to which the
 selection applies. For a ``MultiscaleLossWrapper``, configure them on its
-``per_scale_loss``. Pairing differently named variables also enables the
-compatibility checks described in :ref:`variable-compatibility-checks`.
+``per_scale_loss``, and for a ``TimeAggregateLossWrapper`` on its ``loss_fn``.
+The variable selection is then applied around the whole wrapper, so the
+wrapper only smooths or aggregates the selected variables. Pairing differently
+named variables also enables the compatibility checks described in
+:ref:`variable-compatibility-checks`.
 
 ******************************
  Time Aggregate Loss Functions
