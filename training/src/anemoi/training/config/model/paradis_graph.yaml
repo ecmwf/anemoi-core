@@ -27,7 +27,7 @@ processor:
   # Advection-diffusion-reaction processor from PARADIS (arXiv:2601.21151) on the nodes of the
   # hidden graph, for any hidden mesh (e.g. graph/multi_scale.yaml). The spatial mixers run over
   # the hidden-to-hidden edges, and the advection reads each value at its departure point from the
-  # nearest nodes with a brute-force neighbour search.
+  # nearest nodes, found in a lookup table built once from the nodes.
   # For a regular latitude-longitude hidden grid, see paradis.yaml.
   _target_: anemoi.models.layers.processor.ADRProcessor
   geometry:
@@ -38,6 +38,9 @@ processor:
     mixer_kwargs: {} # settings of the transformer or gnn block, e.g. num_heads, mlp_hidden_ratio
     num_neighbours: 4 # nearest nodes a value is read from at its departure point
     smoothing: 0.01 # sharpness of the interpolation weights at a node, relative to how close together the nodes are there
+    # lookup: exact table of candidate nodes per latitude-longitude cell, built once from the nodes (anemoi-graphs
+    # lookup_knn, Triton kernel on GPU); falls back to brute force on a mesh that does not cover the globe.
+    knn_backend: lookup # Options: "lookup", "brute_force"
     bias_rank: 128
     bias_base_maps: 8
     bias_lat_degree: 32
@@ -62,7 +65,7 @@ processor:
   advection:
     _target_: anemoi.models.layers.adr.Advection
     advection_channels: 768
-    num_velocity_fields: 64 # null gives one per advected channel, which is slow with the brute-force neighbour search
+    num_velocity_fields: 64 # null gives one per advected channel; each field is one neighbour search per node
     velocity_hidden_dim: 384
     cartesian_displacement: False # True: 3D velocities, which do not turn round across the poles
   diffusion:
