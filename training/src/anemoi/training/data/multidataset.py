@@ -11,14 +11,12 @@ import datetime
 import logging
 from functools import cached_property
 
-import torch
 from rich.console import Console
 from rich.tree import Tree
 from torch.utils.data import Dataset
 
-from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.training.data.data_reader import BaseAnemoiReader
+from anemoi.models.data import BaseSample
+from anemoi.training.data.readers import DataReader
 from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
@@ -30,14 +28,13 @@ LOGGER = logging.getLogger(__name__)
 class MultiDataset(Dataset):
     """Multi-dataset wrapper that returns synchronized samples from multiple data readers.
 
-    Each index refers to one valid (sequence, position) anchor shared by all data
-    readers. The dataloader's sampler decides which indices a rank loads and in
-    which order.
+    Each index refers to one valid anchor shared by all data readers. The
+    dataloader's sampler decides which indices a rank loads and in which order.
     """
 
     def __init__(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         relative_date_indices: dict[str, TimeIndices],
         fake_dataloading: bool = False,
     ) -> None:
@@ -45,7 +42,7 @@ class MultiDataset(Dataset):
 
         Parameters
         ----------
-        data_readers : dict[str, BaseAnemoiReader]
+        data_readers : dict[str, DataReader]
             Dictionary mapping dataset names to their data_readers
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
         relative_date_indices : dict[str, TimeIndices]
@@ -55,31 +52,24 @@ class MultiDataset(Dataset):
         """
         self.data_readers = data_readers
         self.dataset_names = list(data_readers.keys())
+        self.stride = self._sampling_stride(data_readers)
+
         self.fake_dataloading = fake_dataloading
-        self._fake_sample: dict[str, torch.Tensor] | None = None
+        self._fake_sample: dict[str, BaseSample] | None = None
         if self.fake_dataloading:
             LOGGER.info("Using fake dataloading")
 
-        # Guard against mixing single-sequence (NativeGridDataset, global time axis)
-        # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
-        # intersection would silently keep only sequence-0 samples and produce
-        # semantically meaningless alignment between the two encoders.
-        single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
-        multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
-        if single_seq and multi_seq:
-            msg = (
-                "Currently mixing single-sequence datasets (global time axis) with "
-                "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
-                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
-            )
-            raise ValueError(msg)
-
         self.set_relative_date_indices(relative_date_indices)
 
-        # Reader group info, set by the DDP strategies. Each rank in a reader group
-        # reads its own part of the grid.
-        self.reader_group_rank = 0
-        self.shard_sizes: dict[str, ShardSizes] | None = None
+    @staticmethod
+    def _sampling_stride(data_readers: dict[str, DataReader]) -> int | None:
+        """Return the anchor stride the readers agree on; stride 1 when none is configured."""
+        configured = {name: reader.sampling.get("stride") for name, reader in data_readers.items() if reader.sampling}
+        strides = set(configured.values())
+        if len(strides) > 1:
+            msg = f"Data readers disagree on the sampling stride: {configured}."
+            raise ValueError(msg)
+        return strides.pop() if strides else 1
 
     def set_relative_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
         """Set the time steps loaded for each sample, and the samples that provide them.
@@ -87,10 +77,12 @@ class MultiDataset(Dataset):
         Call this before the dataloader is created: the number of samples changes
         with the time steps, and the sampler reads it when it is constructed.
         """
-        # Compute valid (sequence, position) anchors; each dataset index refers to one anchor.
-        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
+        # Find the anchors (times every reader can sample) for the required time steps.
+        # Each reader gets its own (sequence, position) per anchor, so readers need not share
+        # a frequency or date range. Each dataset index refers to one anchor.
+        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices, stride=self.stride)
 
-        # Normalize the date indices to use slices where possible.
+        # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
@@ -123,11 +115,6 @@ class MultiDataset(Dataset):
         """Return combined variables from all data readers."""
         return self._collect("variables")
 
-    @property
-    def data(self) -> dict:
-        """Return data from all data readers as dictionary."""
-        return self._collect("data")
-
     @cached_property
     def name_to_index(self) -> dict[str, dict]:
         """Return combined name_to_index mapping from all data readers."""
@@ -149,42 +136,39 @@ class MultiDataset(Dataset):
             assert freq == freq_ref, f"Data reader '{name}' has different frequency than other data readers"
         return freq_ref
 
-    def set_reader_group_info(
-        self,
-        reader_group_rank: int,
-        shard_sizes: dict[str, ShardSizes],
-    ) -> None:
+    def set_reader_group_info(self, reader_group_rank: int, reader_group_size: int) -> None:
         """Set the reader group information, called by the DDP strategies.
+
+        Each rank in a reader group reads its own part of the data.
 
         Parameters
         ----------
         reader_group_rank : int
-            Reader group rank
-        shard_sizes : dict[str, ShardSizes]
-            Shard sizes for all datasets
+            Reader group rank.
+        reader_group_size : int
+            Reader group size.
         """
-        self.reader_group_rank = reader_group_rank
-        self.shard_sizes = shard_sizes
+        for reader in self.data_readers.values():
+            reader.set_reader_group_info(reader_group_rank, reader_group_size)
 
-    def get_sample(self, index: int) -> dict[str, torch.Tensor]:
-        sequence, position = (int(v) for v in self.anchors[index])
-        x = {}
-        for name, dataset in self.data_readers.items():
+    def get_sample(self, index: int) -> dict[str, BaseSample]:
+        """Return per-dataset samples for ``index``.
+
+        Each value is the reader's :class:`~anemoi.models.data.BaseSample`, so that
+        the dataloader's collate function can build a :class:`anemoi.models.data.Batch`.
+        Observation timedeltas are measured from the sample's reference time.
+        """
+        x: dict[str, BaseSample] = {}
+        for name, data_reader in self.data_readers.items():
+            sequence, position = (int(v) for v in self.anchors.rows[name][index])
             time_steps = offset_time_indices(position, self.relative_date_indices[name])
-            # self.shard_sizes is lazily initalised to None
-            # This if statement guards against the case where shard_sizes is not set
-            # (e.g. if set_reader_group_info hasn't been called yet)
-            if self.shard_sizes is not None and self.shard_sizes[name] is not None:
-                start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
-                grid_indices = slice(start, end)
-            else:
-                grid_indices = slice(None)
-            x[name] = dataset.get_sample(sequence, time_steps, grid_indices)
+            sample = data_reader.get_sample(sequence, time_steps)
+            x[name] = data_reader.measure_from_reference(sample, position, time_steps)
 
         return x
 
-    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
-        """Return the synchronized samples of all data readers for one anchor.
+    def __getitem__(self, index: int) -> dict[str, BaseSample]:
+        """Return ``{dataset_name: BaseSample}`` for one anchor.
 
         Parameters
         ----------
@@ -193,9 +177,8 @@ class MultiDataset(Dataset):
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Dictionary mapping dataset names to their tensor samples
-            Format: {"dataset_a": tensor_a, "dataset_b": tensor_b, ...}
+        dict[str, BaseSample]
+            One sample for each dataset.
         """
         if not self.fake_dataloading:
             return self.get_sample(index)
@@ -212,7 +195,7 @@ class MultiDataset(Dataset):
 
     def tree(self) -> Tree:
         tree = Tree(f"{self.__class__.__name__}")
-        for name, dataset in self.data_readers.items():
-            subtree = dataset.tree(prefix=name)
+        for name, reader in self.data_readers.items():
+            subtree = reader.tree(prefix=name)
             tree.add(subtree)
         return tree

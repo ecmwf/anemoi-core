@@ -19,8 +19,7 @@ from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
-    import torch
-
+    from anemoi.models.data import Batch
     from anemoi.training.train.step_output import TrainingStepOutput
 
 LOGGER = logging.getLogger(__name__)
@@ -31,19 +30,31 @@ class SingleTraining(BaseTrainingModule):
 
     def _step(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: Batch,
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Training / validation step."""
         step_losses, step_metrics, y_preds = [], [], []
 
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
+        x = self.preprocess_inputs(x)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
-        for i, task_kwargs in enumerate(task_steps):
-            y_pred = self(x)
+        for step_index, task_kwargs in enumerate(task_steps):
+            # the full target slice used for the loss, what the model predicts at the target nodes, and the
+            # output-time forcing variables that condition the decoder.
+            raw_targets, target_template, target_forcings = self.task.get_targets(
+                batch,
+                data_indices=self.data_indices,
+                **task_kwargs,
+            )
+            y = self.preprocess_targets(raw_targets)
 
-            y = self.task.get_targets(batch, **task_kwargs)
+            # the target forcings are consumed by the decoder, so they are model *inputs* and go through
+            # the input processors (so NaNs get imputed, etc.)
+            target_forcings = self.preprocess_inputs(target_forcings)
+
+            y_pred = self(x, target_forcings=target_forcings, target_template=target_template)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
@@ -56,16 +67,17 @@ class SingleTraining(BaseTrainingModule):
                 use_reentrant=False,
             )
 
-            # Advance input state for each dataset if another step follows
-            if i < len(task_steps) - 1:
+            # advance input state for each dataset, except on the final step
+            if step_index < len(task_steps) - 1:
                 x = self.task.advance_input(
                     x,
                     y_preds_next,
-                    batch,
+                    self.preprocess_inputs(raw_targets),
                     **task_kwargs,
                     data_indices=self.data_indices,
                     output_mask=self.output_mask,
-                    grid_shard_slice=self.grid_shard_slice,
+                    # The LAM boundary refill indexes the local grid shard.
+                    grid_shard_slice={name: self._grid_shard_slice(view) for name, view in x.items()},
                 )
 
             step_losses.append(loss_next)

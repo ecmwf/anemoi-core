@@ -28,9 +28,18 @@ LOGGER = logging.getLogger(__name__)
 class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
     """Base class for edge builders based on distance."""
 
+    #: Whether the neighbour search runs from the source nodes rather than from the target nodes, as
+    #: the ``Reversed*`` builders do. The coordinates are swapped before the search and the result is
+    #: left unflipped, so the edge index still comes back with (source, target) rows.
+    reversed_search: bool = False
+
     def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
         """Prepare keyword arguments."""
         return {}
+
+    def _use_pyg_lib(self) -> bool:
+        """Whether to compute the edges with pyg-lib rather than sklearn."""
+        return is_pyg_lib_available()
 
     @abstractmethod
     def _compute_edge_index_pyg(
@@ -43,9 +52,13 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
     ) -> np.ndarray: ...
 
     def compute_edge_index_from_coords(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor, skip_flip: bool = False, **kwargs
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor, **kwargs
     ) -> torch.Tensor:
         """Compute edge index using pyg-lib (if available) or sklearn.
+
+        This is the entry point for both :meth:`compute_edge_index` at graph-build time and
+        ``anemoi.models.layers.graph_provider.DynamicGraphProvider`` at runtime, which passes the
+        per-batch coordinates and no keyword arguments.
 
         Parameters
         ----------
@@ -53,37 +66,43 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
             Coordinates of source nodes of shape (num_source_nodes, 3) in unit sphere.
         target_coords : torch.Tensor
             Coordinates of target nodes of shape (num_target_nodes, 3) in unit sphere.
-        skip_flip : bool, optional
-            Whether to skip flipping the edge index, by default False. This flag is added to avoid double flipping when
-            using reversed edge builders.
+        **kwargs
+            Keyword arguments for the backends, overriding those from :meth:`prepare_method_kwargs`.
 
         Returns
         -------
         torch.Tensor
             Edge index tensor of shape (2, num_edges).
         """
-        # for an empty node set (an observation window with no points in this batch)
-        # there are no edges, return an empty edge index
-        if source_coords.shape[0] == 0 or target_coords.shape[0] == 0:
-            return torch.empty((2, 0), dtype=torch.long, device=source_coords.device)
-
         # guard against empty node sets (an obs dataset window with no points in this batch)
         # short-circuit to an empty (2, 0) edge index
         if source_coords.shape[0] == 0 or target_coords.shape[0] == 0:
             return torch.empty((2, 0), dtype=torch.long, device=source_coords.device)
 
-        if is_pyg_lib_available():
+        # Resolve before the swap below: prepare_method_kwargs must see the real source/target, as
+        # ReversedCutOffEdges derives its radius from the source nodes.
+        kwargs = self.prepare_method_kwargs(source_coords, target_coords) | kwargs
+
+        skip_flip = self.reversed_search
+        if skip_flip:
+            source_coords, target_coords = target_coords, source_coords
+
+        if self._use_pyg_lib():
             # pyg-lib's kernels install no device guard of their own; see cuda_device_of.
             with cuda_device_of(source_coords.device):
                 edge_index = self._compute_edge_index_pyg(source_coords, target_coords, skip_flip=skip_flip, **kwargs)
         else:
-            LOGGER.warning(PYG_INSTRUCTIONS)
+            if not is_pyg_lib_available():
+                LOGGER.warning(PYG_INSTRUCTIONS)
             adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords, **kwargs)
 
+            # scipy stores the indices as int32; edge indices are int64, as on the pyg-lib path.
             if skip_flip:
-                edge_index = torch.from_numpy(np.stack([adj_matrix.row, adj_matrix.col], axis=0))
+                edge_index = torch.from_numpy(np.stack([adj_matrix.row, adj_matrix.col], axis=0).astype(np.int64))
             else:
-                edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
+                edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0).astype(np.int64))
+            # sklearn runs on the CPU; return the edges on the coordinates' device, as the pyg-lib path does.
+            edge_index = edge_index.to(source_coords.device)
 
         return edge_index
 
@@ -103,7 +122,6 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
             Indices of source and target nodes connected by an edge.
         """
         source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)  # 3d coords
-        method_kwargs = self.prepare_method_kwargs(source_coords, target_coords)
-        edge_index = self.compute_edge_index_from_coords(source_coords, target_coords, **method_kwargs)
+        edge_index = self.compute_edge_index_from_coords(source_coords, target_coords)
         edge_index = self.undo_masking_edge_index(edge_index, source_nodes, target_nodes)
         return edge_index

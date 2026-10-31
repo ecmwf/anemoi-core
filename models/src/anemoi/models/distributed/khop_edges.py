@@ -183,7 +183,7 @@ def build_graph_partition(edge_index: Adj, num_parts: int, num_nodes: tuple[int,
 
     dst_splits = get_balanced_partition_sizes(n_dst, num_parts)
     degree_per_dst = degree(edge_index[1], num_nodes=n_dst, dtype=torch.long)
-    # use torch.split with dst_splits to match the balanced partitioning exactly
+    # use torch.split with dst_splits to match the balanced partitioning
     edge_splits = [chunk.sum().item() for chunk in torch.split(degree_per_dst, dst_splits)]
 
     return GraphPartition(
@@ -352,7 +352,8 @@ def shard_graph_to_local(
     model_comm_group : ProcessGroup, optional
         Model communication group.
     cond : tuple[Tensor, Tensor], optional
-        Conditioning tensors (cond_src, cond_dst).
+        Conditioning tensors (cond_src, cond_dst), with the same node ordering
+        and sharding as the corresponding source and destination features.
 
     Returns
     -------
@@ -406,7 +407,25 @@ def shard_graph_to_local(
     cond_local = None
     if cond is not None:
         cond_src, cond_dst = cond
-        cond_src_full = sync_tensor(cond_src, 0, shard_info.src_nodes, model_comm_group)
+        cond_src_full = sync_tensor(
+            cond_src,
+            0,
+            shard_info.src_nodes,
+            model_comm_group,
+            gather_in_fwd=shard_info.src_is_sharded(),
+        )
+        if cond_src_full.shape[0] != x_src_full.shape[0]:
+            raise ValueError(
+                f"Source conditioning has {cond_src_full.shape[0]} rows, "
+                f"but source node features have {x_src_full.shape[0]} rows."
+            )
+        if not shard_info.dst_is_sharded():
+            cond_dst = shard_tensor(cond_dst, 0, partition.dst_splits, model_comm_group)
+        if cond_dst.shape[0] != x_dst.shape[0]:
+            raise ValueError(
+                f"Destination conditioning has {cond_dst.shape[0]} rows, "
+                f"but destination node features have {x_dst.shape[0]} rows."
+            )
         cond_local = (cond_src_full[src_ids], cond_dst)
 
     updated_shard_info = BipartiteGraphShardInfo(

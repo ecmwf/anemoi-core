@@ -77,7 +77,7 @@ def test_accuracy(tmp_path: Path, mlflow_server: str, pytestconfig: pytest.Confi
     client = AnemoiMlflowClient(mlflow_server, authentication=True)
 
     # Record every change of reference_id in config/CHANGELOG.md.
-    reference_id: Final = "8e284859bf914877a406407b589862e6"
+    reference_id: Final = "92c0ba2d85114d00bff1dd0f7d37bb11"
     metric: Final = "train_multi_dataset_loss_step"
     # Optional override (e.g. from workflow_dispatch) to try out a candidate reference.
     compare_id: Final = pytestconfig.getoption("accuracy_reference_id") or reference_id

@@ -364,17 +364,17 @@ class CheckpointSchema(BaseModel):
     "Checkpointing by training step frequency."
     exclude_hyperparameters: list[str] = Field(default_factory=list)
     "Init arguments of the training module not to store as hyperparameters in the checkpoint. \
-            Only 'graph_data' can be excluded; converting the checkpoint with \
-            `anemoi-training checkpoint inference` then requires the graph through --graph."
+            Only those in OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION can be excluded; none at present. \
+            The graph is not a hyperparameter: the model builds it from the config."
 
     @field_validator("exclude_hyperparameters")
     @classmethod
     def check_exclude_hyperparameters(cls, names: list[str]) -> list[str]:
         unknown = sorted(set(names) - INIT_HYPERPARAMETERS)
         if unknown:
-            msg = (
-                f"Unknown hyperparameters {unknown} in exclude_hyperparameters. "
-                f"Choose from {sorted(OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION)}."
+            excludable = sorted(OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION)
+            msg = f"Unknown hyperparameters {unknown} in exclude_hyperparameters. " + (
+                f"Choose from {excludable}." if excludable else "No hyperparameter can be excluded at present."
             )
             raise ValueError(msg)
 

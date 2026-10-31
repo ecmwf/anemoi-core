@@ -35,7 +35,7 @@ First, let's take the model configuration ``transformer.yaml``:
    encoders:
      0:                        # user-defined group name (appears in the state-dict)
        source_datasets: [ "data" ]           # datasets encoded by this group
-       dataset_fusing_strategy: "not_supported"
+       dataset_fusing_strategy: "none"
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024
@@ -209,7 +209,8 @@ actual model (see :ref:`overview`).
    -  ``y_norm = model_interface.forward(x_norm)`` with ``x_in`` and
       ``y_pred`` are normalized.
    -  ``y = model_interface.predict_step(x)`` with ``x`` and ``y`` are
-      absolute values.
+      absolute values. Transport models additionally require a
+      ``target_template`` batch so sampling knows the output geometry.
 
 *******************
  The PyTorch Model

@@ -114,7 +114,6 @@ class BaseDDPStrategy(DDPStrategy):
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
         self.use_local_synchronization = use_local_synchronization
-        self.shard_sizes: dict | None = None
 
     @abstractmethod
     def _setup_communication_groups(self) -> int:
@@ -138,7 +137,6 @@ class BaseDDPStrategy(DDPStrategy):
 
         super().setup(trainer)
 
-        self.shard_sizes = self._setup_shard_sizes(trainer)
         seed_rnd(model_comm_group_id, self.global_rank)
 
     @property
@@ -186,7 +184,7 @@ class BaseDDPStrategy(DDPStrategy):
             self.read_group_size,
             self.global_rank,
         )
-        dataloader.dataset.set_reader_group_info(reader_group_rank, self.shard_sizes)
+        dataloader.dataset.set_reader_group_info(reader_group_rank, self.read_group_size)
 
         return dataloader
 
@@ -194,26 +192,6 @@ class BaseDDPStrategy(DDPStrategy):
         """Configure DDP with custom gradient hooks."""
         self.register_parameter_hooks()
         super().configure_ddp()
-
-    def _setup_shard_sizes(self, trainer: pl.Trainer) -> dict:
-        """Set up shard sizes for the dataloader.
-
-        Parameters
-        ----------
-        trainer : pl.Trainer
-            The PyTorch Lightning trainer.
-
-        Returns
-        -------
-        dict
-            A dictionary containing the shard sizes for each dataset.
-        """
-        # For training, the model is wrapped in DDP and the LightningModule is accessible via trainer.model.module
-        # For evaluation, the model is not wrapped in DDP and the LightningModule is accessible via trainer.model
-        model = getattr(trainer.model, "module", trainer.model)
-        shard_sizes = model.shard_sizes
-        assert shard_sizes is not None, "Shard shapes should be set after setup"
-        return shard_sizes
 
     def register_parameter_hooks(self) -> None:
         """Register parameter hooks for gradient reduction."""

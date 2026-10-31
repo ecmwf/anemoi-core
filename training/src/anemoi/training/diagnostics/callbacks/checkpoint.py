@@ -21,7 +21,6 @@ from pytorch_lightning.utilities import rank_zero_only
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from anemoi.training.utils.checkpoint import check_classes
-from anemoi.training.utils.checkpoint import clear_imputer_runtime_state
 from anemoi.utils.checkpoints import save_metadata
 
 LOGGER = logging.getLogger(__name__)
@@ -212,7 +211,6 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             inference_checkpoint_filepath = self._get_inference_checkpoint_filepath(lightning_checkpoint_filepath)
 
-            clear_imputer_runtime_state(model)
             torch.save(model, inference_checkpoint_filepath)
 
             save_metadata(inference_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)

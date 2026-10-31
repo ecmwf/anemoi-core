@@ -7,12 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from enum import IntEnum
+from enum import StrEnum
 
 
-class TensorDim(IntEnum):
-    BATCH_SIZE = 0
-    TIME = 1
-    ENSEMBLE_DIM = 2
-    GRID = 3
-    VARIABLE = 4
+class TensorDim(StrEnum):
+    BATCH_SIZE = "batch"
+    TIME = "time"
+    ENSEMBLE_DIM = "ensemble"
+    GRID = "grid"
+    VARIABLE = "variables"

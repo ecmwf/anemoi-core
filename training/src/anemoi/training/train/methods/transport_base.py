@@ -19,6 +19,8 @@ from anemoi.training.train.methods.base import BaseTrainingModule
 if TYPE_CHECKING:
     import torch
 
+    from anemoi.models.data import Batch
+    from anemoi.models.data.sources import Source
     from anemoi.training.train.methods.transport import TransportTraining
     from anemoi.training.utils.index_space import IndexSpace
 
@@ -51,13 +53,15 @@ class PreparedPredictionTarget:
 
     aux:
         Extra prediction-mode data needed later, such as the latest input state
-        for tendency reconstruction or a reference-state source for transport.
+        for tendency reconstruction. ``transport_reference_source``, when present,
+        is a zero-argument factory returning a dictionary of per-dataset tensors
+        or sparse sample lists. It is evaluated only for a reference-state source.
     """
 
-    model_target: dict[str, torch.Tensor]
-    loss_target: dict[str, torch.Tensor]
+    model_target: Batch
+    loss_target: Batch
     loss_target_layout: IndexSpace
-    metric_target: dict[str, torch.Tensor]
+    metric_target: Batch
     aux: dict[str, Any]
 
 
@@ -100,12 +104,12 @@ class PreparedTransportObjective:
         bridge state, and bridge time for validation reconstruction.
     """
 
-    conditioned_target: dict[str, torch.Tensor]
+    conditioned_target: Batch
     condition: dict[str, torch.Tensor]
-    loss_target: dict[str, torch.Tensor]
+    loss_target: Batch
     loss_target_layout: IndexSpace
     pred_layout: IndexSpace
-    weights: dict[str, torch.Tensor] | None
+    weights: dict[str, torch.Tensor | list[torch.Tensor]] | None
     aux: dict[str, Any]
 
 
@@ -123,32 +127,33 @@ class TransportObjective:
 
     def forward(
         self,
-        x: dict[str, torch.Tensor],
-        conditioned_target: dict[str, torch.Tensor],
+        x: Batch,
+        conditioned_target: Batch,
         condition: dict[str, torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
+        target_forcing: Batch | None = None,
+    ) -> Batch:
         raise NotImplementedError
 
     def reconstruct_endpoint(
         self,
-        prediction: dict[str, torch.Tensor],
+        prediction: Batch,
         objective: PreparedTransportObjective,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         del objective
         return prediction
 
     def prepare_loss_prediction(
         self,
-        prediction: dict[str, torch.Tensor],
+        prediction: Batch,
         objective: PreparedTransportObjective,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         del objective
         return prediction
 
     def compute_loss(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: Source,
+        y: Source,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
@@ -170,23 +175,34 @@ class TransportObjective:
         self,
         prepared: PreparedPredictionTarget,
         default_kind: str = "gaussian",
-    ) -> dict[str, torch.Tensor]:
-        def reference_source_factory() -> dict[str, torch.Tensor]:
-            reference = prepared.aux.get("transport_reference_source")
-            if reference is None:
+    ) -> Batch:
+        """Build the transport source field, as a batch shaped and described like the model target."""
+        transport_source = self.module.model.model.transport_source
+        kind = transport_source.resolve_kind(default_kind)
+        if kind == "reference_state":
+            sparse_datasets = [
+                dataset_name for dataset_name, source in prepared.model_target.items() if source.is_tabular
+            ]
+            if sparse_datasets:
+                msg = (
+                    "reference_state transport sources are not implemented for sparse datasets. "
+                    f"Use a non-reference source for: {sparse_datasets}."
+                )
+                raise NotImplementedError(msg)
+
+        def reference_source_factory() -> dict[str, torch.Tensor | list[torch.Tensor]]:
+            reference_factory = prepared.aux.get("transport_reference_source")
+            if reference_factory is None:
                 msg = "Transport source kind 'reference_state' requires a reference source in the prediction mode."
                 raise ValueError(msg)
-            if callable(reference):
-                # Materialise lazily built references only when reference_state is selected.
-                return reference()
-            return reference
+            return reference_factory()
 
-        request = TransportSourceRequest.from_tensors(
-            prepared.model_target,
+        # The model target describes the field to build, including its grid shard sizes.
+        request = TransportSourceRequest(
+            templates=prepared.model_target,
             default_kind=default_kind,
             custom_source_factories={"reference_state": reference_source_factory},
             model_comm_group=getattr(self.module, "model_comm_group", None),
-            grid_shard_sizes=getattr(self.module, "grid_shard_sizes", None),
             error_context="training",
         )
-        return self.module.model.model.transport_source.build(request)
+        return transport_source.build(request)

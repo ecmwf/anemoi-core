@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 import numpy as np
+import torch
 
 from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_trainable_modules
 from anemoi.training.diagnostics.evaluation.plotting.graph import get_node_trainable_tensors
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
 __all__ = [
     "extract_graph_inputs",
     "extract_loss_inputs",
+    "extract_node_coordinates",
     "extract_spatial_inputs",
     "unwrap_anemoi_model",
 ]
@@ -48,12 +50,28 @@ def unwrap_anemoi_model(pl_module: pl.LightningModule) -> Any:
     return pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
 
 
-def extract_graph_inputs(pl_module: pl.LightningModule, dataset_name: str) -> dict[str, Any]:
+def extract_node_coordinates(pl_module: pl.LightningModule) -> dict[str, torch.Tensor]:
+    """Return the (lat, lon) in radians of each graph node set, with longitudes wrapped to (-pi, pi].
+
+    Call this function on the main thread. The checkpoint callback sets the raw graph to ``None``
+    on the main thread while it saves a checkpoint, so a read from the asynchronous plot thread can fail.
+    """
+    graph = unwrap_anemoi_model(pl_module)._graph_data
+    return {name: torch.atan2(torch.sin(graph[name].x), torch.cos(graph[name].x)) for name in graph.node_types}
+
+
+def extract_graph_inputs(
+    pl_module: pl.LightningModule,
+    dataset_name: str,
+    node_coordinates: dict[str, torch.Tensor],
+) -> dict[str, Any]:
     """Return kwargs for a ``GraphFeaturePlot`` ``plot_fn``.
 
     Keys: ``dataset_name``, ``node_attributes``, ``node_trainable_tensors``,
-    ``edge_trainable_modules``. ``edge_trainable_modules`` is empty for
-    hierarchical models (they carry no trainable edge parameters).
+    ``edge_trainable_modules``, ``node_coordinates``. ``edge_trainable_modules`` is empty for
+    hierarchical models (they carry no trainable edge parameters). ``node_coordinates`` is the
+    output of :func:`extract_node_coordinates`. The function does not read the raw graph, thus
+    the asynchronous plot thread can call it safely.
     """
     model = unwrap_anemoi_model(pl_module)
     return {
@@ -61,6 +79,7 @@ def extract_graph_inputs(pl_module: pl.LightningModule, dataset_name: str) -> di
         "node_attributes": model.node_attributes,
         "node_trainable_tensors": get_node_trainable_tensors(model.node_attributes),
         "edge_trainable_modules": get_edge_trainable_modules(model, dataset_name),
+        "node_coordinates": node_coordinates,
     }
 
 
