@@ -26,8 +26,39 @@ LOGGER = logging.getLogger(__name__)
 CRPSBackend = Literal["naive", "stable"]
 
 
+def antithetic_cross_pairs(ens_size: int, device: torch.device | None = None) -> torch.Tensor:
+    """The ordered member pairs (i, j), i != j, that are not antithetic partners.
+
+    With noise centring, members (0, 1), (2, 3), ... are mirror images of each other (the noise injectors pair
+    global members ``2k`` and ``2k + 1``), so the distance between partners is not that of two independent members:
+    for a linear response it is sqrt(2) times larger. A last, unpaired member (odd ``ens_size``) pairs with all
+    others.
+
+    Parameters
+    ----------
+    ens_size : int
+        Number of ensemble members, in their global order.
+    device : torch.device, optional
+        Device of the returned mask.
+
+    Returns
+    -------
+    torch.Tensor
+        Boolean mask of shape (ens_size, ens_size), True for the pairs to use in the spread term.
+    """
+    index = torch.arange(ens_size, device=device)
+    cross = index[:, None] // 2 != index[None, :] // 2
+    if not cross.any():
+        msg = f"An ensemble of {ens_size} antithetic members has no independent pair for the spread term."
+        raise ValueError(msg)
+    return cross
+
+
 class CRPS(BaseLoss):
     """Kernel CRPS loss for ensemble predictions."""
+
+    # Also for subclasses that set up the CRPS attributes without calling this __init__ (e.g. SpectralCRPSLoss).
+    antithetic_pairs: bool = False
 
     def __init__(
         self,
@@ -35,12 +66,18 @@ class CRPS(BaseLoss):
         backend: CRPSBackend = "stable",
         no_autocast: bool = True,
         ignore_nans: bool = False,
+        antithetic_pairs: bool = False,
         **kwargs,  # noqa: ARG002
     ) -> None:
         """Latitude- and (inverse-)variance-weighted kernel CRPS loss.
 
         ``alpha`` controls the interpolation between standard CRPS and fair CRPS. ``alpha=0`` gives standard
         CRPS, ``alpha=1`` gives fair CRPS, and values between 0 and 1 give the almost fair CRPS formulation.
+
+        ``antithetic_pairs`` is for ensembles whose noise is centred (mirrored member pairs): the spread term then
+        averages the member distances over the pairs that are not partners (:func:`antithetic_cross_pairs`), so it
+        stays an estimate of the spread of independent members. The ``alpha`` blend is unchanged: the spread term
+        is ``(1 - (1 - alpha) / ens_size) / 2`` times the mean distance, as without pairs.
 
         Parameters
         ----------
@@ -55,6 +92,9 @@ class CRPS(BaseLoss):
             Deactivate autocast for the kernel CRPS calculation
         ignore_nans : bool, optional
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
+        antithetic_pairs : bool, optional
+            Members (0, 1), (2, 3), ... are antithetic partners: leave those pairs out of the spread term, by
+            default False
         """
         super().__init__(ignore_nans=ignore_nans)
 
@@ -63,6 +103,7 @@ class CRPS(BaseLoss):
         self.alpha = alpha
         self.backend = backend
         self.no_autocast = no_autocast
+        self.antithetic_pairs = bool(antithetic_pairs)
 
     @staticmethod
     def _validate_arguments(alpha: float, backend: CRPSBackend) -> None:
@@ -117,19 +158,31 @@ class CRPS(BaseLoss):
         assert ens_size > 1, "Ensemble size must be greater than 1."
 
         if backend == "naive":
-            return self._kernel_crps_naive(preds, targets, alpha)
+            return self._kernel_crps_naive(preds, targets, alpha, antithetic_pairs=self.antithetic_pairs)
         if backend == "stable":
-            return self._kernel_crps_stable(preds, targets, alpha)
+            return self._kernel_crps_stable(preds, targets, alpha, antithetic_pairs=self.antithetic_pairs)
 
         msg = f"Unknown CRPS backend {backend!r}. Expected one of: 'naive', 'stable'."
         raise ValueError(msg)
 
     @staticmethod
-    def _kernel_crps_naive(preds: torch.Tensor, targets: torch.Tensor, alpha: float) -> torch.Tensor:
+    def _kernel_crps_naive(
+        preds: torch.Tensor,
+        targets: torch.Tensor,
+        alpha: float,
+        antithetic_pairs: bool = False,
+    ) -> torch.Tensor:
         """CRPS formulation using a simple loop over unordered ensemble-member pairs."""
         ens_size = preds.shape[-1]
 
         mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
+        if antithetic_pairs:
+            pairs = torch.triu(antithetic_cross_pairs(ens_size), diagonal=1).nonzero().tolist()
+            spread = torch.zeros_like(mae)
+            for i, j in pairs:
+                spread += torch.abs(preds[..., i] - preds[..., j])
+            return mae - 0.5 * (1.0 - (1.0 - alpha) / ens_size) * spread / len(pairs)
+
         coef = -(alpha / (ens_size * (ens_size - 1)) + (1.0 - alpha) / (ens_size**2))
 
         ens_var = torch.zeros_like(mae)
@@ -139,13 +192,23 @@ class CRPS(BaseLoss):
         return mae + coef * ens_var
 
     @staticmethod
-    def _kernel_crps_stable(preds: torch.Tensor, targets: torch.Tensor, alpha: float) -> torch.Tensor:
+    def _kernel_crps_stable(
+        preds: torch.Tensor,
+        targets: torch.Tensor,
+        alpha: float,
+        antithetic_pairs: bool = False,
+    ) -> torch.Tensor:
         """CRPS formulation materializing pairwise tensors for the all-pairs formulation."""
         ens_size = preds.shape[-1]
 
         epsilon = (1.0 - alpha) / ens_size
 
         var = torch.abs(preds.unsqueeze(dim=-1) - preds.unsqueeze(dim=-2))
+        if antithetic_pairs:
+            cross = antithetic_cross_pairs(ens_size, preds.device)
+            mae = torch.abs(preds - targets.unsqueeze(dim=-1)).mean(dim=-1)
+            return mae - 0.5 * (1 - epsilon) * (var * cross).sum(dim=(-1, -2)) / cross.sum()
+
         diag = torch.eye(ens_size, dtype=torch.bool, device=preds.device)
         err_r = einops.repeat(
             torch.abs(preds - targets.unsqueeze(dim=-1)),

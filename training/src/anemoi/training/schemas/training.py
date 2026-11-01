@@ -319,6 +319,8 @@ class CRPSSchema(BaseLossSchema):
     "Backend used for the point-wise CRPS calculation."
     no_autocast: bool = True
     "Deactivate autocast for the kernel CRPS calculation"
+    antithetic_pairs: bool = False
+    "Members (0, 1), (2, 3), ... are antithetic partners (noise centring): leave those pairs out of the spread term."
 
 
 class GraphLossMatrixSchema(BaseModel):
