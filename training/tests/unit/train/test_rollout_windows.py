@@ -234,3 +234,22 @@ def test_validation_weighs_the_steps_as_training_does(wired: Wired) -> None:
     losses = [torch.tensor(float(i + 1)) for i in range(6)]  # validation may unroll more than the 4 trained steps
     output = module._combine_loss_and_metrics(losses, [{} for _ in losses], [])
     assert output.loss.item() == pytest.approx(3 / 8 * 1 + 3 / 8 * 2 + 1 / 8 * 3 + 1 / 8 * 4)
+
+
+def test_the_last_window_reaches_every_parameter() -> None:
+    """A parameter outside the loss's graph (as a first_step_only encoder in later windows) gets a zero gradient.
+
+    DDP averages gradients only for the parameters the synchronised backward pass reaches, so the last window's loss
+    must reach them all; the term must not change the loss or any gradient.
+    """
+    module = _module(rollout=1, windows=(1, (1.0,)))
+    module.unused = torch.nn.Parameter(torch.ones(3))  # not in the loss below
+    loss = (module.model.weight**2).sum() + module.model.bias.sum()
+
+    reached = module._reaching_every_parameter(loss)
+    reached.backward()
+
+    assert torch.equal(reached, loss)
+    assert torch.equal(module.unused.grad, torch.zeros(3))
+    torch.testing.assert_close(module.model.weight.grad, 2 * module.model.weight.detach())
+    torch.testing.assert_close(module.model.bias.grad, torch.ones_like(module.model.bias))

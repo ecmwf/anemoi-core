@@ -423,6 +423,18 @@ class EnsembleTraining(BaseTrainingModule):
 
         return total
 
+    def _reaching_every_parameter(self, loss: torch.Tensor) -> torch.Tensor:
+        """``loss`` plus zero times every trainable parameter, so that a backward pass reaches all of them.
+
+        DDP averages the gradients across ranks in the last window's backward pass only, and only for the
+        parameters that pass reaches; the earlier windows' gradients wait on each rank until then. An encoder that
+        runs at the first rollout step only (``first_step_only``) is in window 1's graph alone, so its gradients would
+        never be averaged: the ranks' copies would drift apart (or DDP would refuse the next step). The term adds
+        nothing to the loss or to any gradient.
+        """
+        parameters = [parameter for parameter in self.parameters() if parameter.requires_grad]
+        return loss + 0.0 * sum(parameter.sum() for parameter in parameters)
+
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         """Without rollout windows, the usual step. With them, one optimiser step after a backward pass per window.
 
@@ -440,6 +452,8 @@ class EnsembleTraining(BaseTrainingModule):
         block_sync = getattr(self.trainer.strategy, "block_backward_sync", contextlib.nullcontext)
 
         def backward(loss: torch.Tensor, last_window: bool) -> None:
+            if last_window:
+                loss = self._reaching_every_parameter(loss)
             with contextlib.nullcontext() if last_window else block_sync():
                 self.manual_backward(loss)
 
