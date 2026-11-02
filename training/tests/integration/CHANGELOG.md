@@ -5,8 +5,8 @@ Add a new entry at the top of the relevant section whenever a test or its refere
 
 ## Accuracy test
 
-Changes to the reference run (`reference_id` in `training/tests/integration/test_accuracy.py`)
-or to the accuracy test configuration (`accuracy_testing/`).
+Changes to the reference run (`reference_id` in `training/tests/integration/accuracy/test_accuracy.py`)
+or to the accuracy test configuration (`accuracy/config/`).
 A candidate reference can be checked first by dispatching the HPC integration workflow
 with `accuracy_reference_id` set to its run ID, before committing it.
 
