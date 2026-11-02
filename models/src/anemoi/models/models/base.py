@@ -10,28 +10,21 @@
 
 import logging
 from abc import abstractmethod
-from typing import Optional
 
 import torch
+from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
-from omegaconf import DictConfig
-from omegaconf import ListConfig
-from torch import Tensor
-from torch import nn
+from omegaconf import DictConfig, ListConfig
+from torch import Tensor, nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.graph import gather_tensor, shard_tensor
+from anemoi.models.distributed.shapes import DatasetShardSizes, ShardSizes, get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.target_features import DecodingTargetFeature
-from anemoi.models.layers.target_features import create_decoding_target_features
+from anemoi.models.layers.target_features import DecodingTargetFeature, create_decoding_target_features
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -278,7 +271,7 @@ class BaseGraphModel(nn.Module):
         batch_size: int,
         ensemble_size: int,
         in_out_sharded: bool,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> None:
         assert not (
             in_out_sharded and model_comm_group is None
@@ -317,7 +310,6 @@ class BaseGraphModel(nn.Module):
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the networks for the model."""
-        pass
 
     @abstractmethod
     def _assemble_input(
@@ -366,7 +358,7 @@ class BaseGraphModel(nn.Module):
         self,
         x: dict[str, Tensor],
         *,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:
@@ -390,14 +382,13 @@ class BaseGraphModel(nn.Module):
             Output of the model, with the same shape as the input (sharded if
             the corresponding input dataset is sharded).
         """
-        pass
 
     @staticmethod
     def _apply_spatial_preprocessor(
         tensors: tuple[Tensor, ...],
         dataset_name: str,
-        spatial_pre_processors: Optional[nn.ModuleDict],
-        model_comm_group: Optional[ProcessGroup],
+        spatial_pre_processors: nn.ModuleDict | None,
+        model_comm_group: ProcessGroup | None,
         grid_shard_sizes: DatasetShardSizes | None,
     ) -> tuple[tuple[Tensor, ...], DatasetShardSizes | None]:
         """Apply one dataset's spatial preprocessor to tensors sharing a source grid."""
@@ -431,9 +422,9 @@ class BaseGraphModel(nn.Module):
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
         n_step_input: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         gather_out: bool = True,
-        spatial_pre_processors: Optional[nn.ModuleDict] = None,
+        spatial_pre_processors: nn.ModuleDict | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Prediction step for the model.
@@ -530,4 +521,3 @@ class BaseGraphModel(nn.Module):
     @abstractmethod
     def fill_metadata(self, md_dict) -> None:
         """To be implemented in subclasses to fill model-specific metadata."""
-        pass

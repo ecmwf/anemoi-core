@@ -10,7 +10,6 @@
 
 import logging
 from abc import abstractmethod
-from typing import Optional
 
 import torch
 
@@ -31,8 +30,8 @@ class Postprocessor(BasePreprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         """Initialize the Postprocessor.
 
@@ -163,8 +162,8 @@ class NormalizedReluPostprocessor(Postprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
 
         self.statistics = statistics
@@ -213,8 +212,8 @@ class ConditionalPostprocessor(Postprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
@@ -249,7 +248,6 @@ class ConditionalPostprocessor(Postprocessor):
         Returns:
             torch.Tensor: A mask tensor indicating the locations for postprocessing of shape x.shape.
         """
-        pass
 
     def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
         """Set values in the output tensor."""

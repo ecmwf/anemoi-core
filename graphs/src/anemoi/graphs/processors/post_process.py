@@ -9,11 +9,9 @@
 
 
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from typing import Any
-from typing import Iterable
-from typing import Union
 
 import torch
 from hydra.utils import instantiate
@@ -21,8 +19,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.attributes import EdgeLength
-from anemoi.graphs.utils import NodesAxis
-from anemoi.graphs.utils import get_edge_attributes
+from anemoi.graphs.utils import NodesAxis, get_edge_attributes
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +37,7 @@ class BaseNodeMaskingProcessor(PostProcessor, ABC):
 
     def __init__(
         self,
-        nodes_name: Union[str, Iterable[str]],
+        nodes_name: str | Iterable[str],
         save_mask_indices_to_attr: str | None = None,
     ) -> None:
         self.nodes_names = (nodes_name,) if isinstance(nodes_name, str) else tuple(nodes_name)
@@ -151,7 +148,7 @@ class RemoveUnconnectedNodes(BaseNodeMaskingProcessor):
 
     def __init__(
         self,
-        nodes_name: Union[str, Iterable[str]],
+        nodes_name: str | Iterable[str],
         save_mask_indices_to_attr: str | None = None,
         ignore: str | None = None,
     ) -> None:
@@ -204,7 +201,7 @@ class SubsetNodesInArea(BaseNodeMaskingProcessor):
 
     def __init__(
         self,
-        nodes_name: Union[str, Iterable[str]],
+        nodes_name: str | Iterable[str],
         area: tuple[float, float, float, float],
         save_mask_indices_to_attr: str | None = None,
     ) -> None:

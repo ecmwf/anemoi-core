@@ -9,8 +9,7 @@
 
 """Halo metadata unit tests with mocked process groups and communication."""
 
-from dataclasses import dataclass
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from unittest.mock import Mock
 
 import pytest

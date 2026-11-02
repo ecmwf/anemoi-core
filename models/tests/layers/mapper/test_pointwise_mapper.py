@@ -7,17 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import dataclass, field
 
 import pytest
 import torch
+from anemoi.utils.config import DotDict
 
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.layers.mapper import PointWiseBackwardMapper
-from anemoi.models.layers.mapper import PointWiseForwardMapper
+from anemoi.models.layers.mapper import PointWiseBackwardMapper, PointWiseForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.config import DotDict
 
 
 @dataclass

@@ -10,15 +10,13 @@
 
 import logging
 import math
-from typing import Optional
 
+from anemoi.utils.config import DotDict
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
-
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -85,7 +83,7 @@ def maybe_checkpoint(func, enabled: bool, *args, **kwargs):
     return func(*args, **kwargs)
 
 
-def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool = True) -> DotDict["str" : nn.Module]:
+def load_layer_kernels(kernel_config: DotDict | None = None, instance: bool = True) -> DotDict["str" : nn.Module]:
     """Load layer kernels from the config.
 
     This function tries to load the layer kernels from the config. If the layer kernel is not supplied, it will fall back to the torch.nn implementation.

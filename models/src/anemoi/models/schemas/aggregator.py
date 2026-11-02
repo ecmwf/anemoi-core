@@ -7,14 +7,10 @@
 # nor does it submit to any jurisdiction.
 #
 
-from typing import Annotated
-from typing import Literal
-
-from pydantic import Field
-from pydantic import NonNegativeFloat
-from pydantic import PositiveInt
+from typing import Annotated, Literal
 
 from anemoi.utils.schemas import BaseModel
+from pydantic import Field, NonNegativeFloat, PositiveInt
 
 
 class SumAggregatorSchema(BaseModel):

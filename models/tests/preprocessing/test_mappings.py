@@ -10,18 +10,20 @@
 import pytest
 import torch
 
-from anemoi.models.preprocessing.mappings import affine_transform
-from anemoi.models.preprocessing.mappings import asinh_converter
-from anemoi.models.preprocessing.mappings import atanh_converter
-from anemoi.models.preprocessing.mappings import boxcox_converter
-from anemoi.models.preprocessing.mappings import displace_boundary_atoms
-from anemoi.models.preprocessing.mappings import inverse_affine_transform
-from anemoi.models.preprocessing.mappings import inverse_asinh_converter
-from anemoi.models.preprocessing.mappings import inverse_atanh_converter
-from anemoi.models.preprocessing.mappings import inverse_boxcox_converter
-from anemoi.models.preprocessing.mappings import inverse_displace_boundary_atoms
-from anemoi.models.preprocessing.mappings import inverse_power_transform
-from anemoi.models.preprocessing.mappings import power_transform
+from anemoi.models.preprocessing.mappings import (
+    affine_transform,
+    asinh_converter,
+    atanh_converter,
+    boxcox_converter,
+    displace_boundary_atoms,
+    inverse_affine_transform,
+    inverse_asinh_converter,
+    inverse_atanh_converter,
+    inverse_boxcox_converter,
+    inverse_displace_boundary_atoms,
+    inverse_power_transform,
+    power_transform,
+)
 
 
 @pytest.mark.parametrize("lambd", [0.0, 0.25, 0.75, 1.5])

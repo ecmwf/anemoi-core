@@ -13,12 +13,12 @@ from pathlib import Path
 
 import scipy.sparse as sp
 import torch
+from anemoi.utils.config import DotDict
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
 from anemoi.graphs.utils import load_graph_from_file
-from anemoi.utils.config import DotDict
 
 
 class GraphExporter:

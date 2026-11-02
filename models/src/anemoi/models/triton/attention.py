@@ -22,14 +22,11 @@ import os
 import torch
 from packaging import version
 
-from anemoi.models.triton.utils import is_blackwell
-from anemoi.models.triton.utils import is_hip
-from anemoi.models.triton.utils import supports_host_descriptor
-from anemoi.models.triton.utils import torch_dtype_to_triton
+from anemoi.models.triton.utils import is_blackwell, is_hip, supports_host_descriptor, torch_dtype_to_triton
 
 try:
     import triton
-    import triton.language as tl  # noqa: E402
+    import triton.language as tl
 except ImportError as e:
     raise ImportError(
         "The 'triton_attention' backend was selected but Triton is not installed. To use this backend please install Triton. Otherwise, select a different attention_implementation in the models config."
@@ -144,7 +141,7 @@ def _attn_fwd_inner(
     # the row maximum over keys whose scores are all lower (scores of -1e8 are reached once the
     # logits are large). It stays finite, so a row that has seen only hidden keys so far gives
     # (s - m) = 0 rather than NaN; those keys drop out once a visible key sets the maximum.
-    MINUS_INF: tl.constexpr = float(-1.0e38)
+    MINUS_INF: tl.constexpr = -1.0e38
 
     # Compute the starting offset of K and V
     iter_offset = iter_offset + lo
@@ -609,7 +606,7 @@ def _attn_bwd_dkdv_inner(
     MASKED: tl.constexpr,  # False when every pair in [lo, hi) is inside the window and the context, so no mask is applied
 ):
     """Inner loop of _attn_bwd_dkdv over the blocks of Q between lo and hi."""
-    MINUS_INF: tl.constexpr = float(-1.0e38)  # score of hidden keys, see _attn_fwd_inner
+    MINUS_INF: tl.constexpr = -1.0e38  # score of hidden keys, see _attn_fwd_inner
     offs_iter = tl.arange(0, BLOCK_ITER)
 
     # skip up to 'lo'
@@ -1001,7 +998,7 @@ def _attn_bwd_dq_inner(
     MASKED: tl.constexpr,  # False when every pair in [lo, hi) is inside the window and the context, so no mask is applied
 ):
     """Inner loop of _attn_bwd_dq over the blocks of K and V between lo and hi."""
-    MINUS_INF: tl.constexpr = float(-1.0e38)  # score of hidden keys, see _attn_fwd_inner
+    MINUS_INF: tl.constexpr = -1.0e38  # score of hidden keys, see _attn_fwd_inner
     offs_iter = tl.arange(0, BLOCK_ITER)
 
     # skip up to 'lo'
@@ -1521,7 +1518,7 @@ class TritonAttention(torch.autograd.Function):
             desc_q,
             desc_k,
             desc_v,
-            desc_o,  #
+            desc_o,
             o,  # raw output tensor (required for uneven ctx case to handle tail case where a smaller block size is needed to avoid overwriting neighbours data)
             N_CTX=n_ctx,  # context length,
             HEAD_DIM=HEAD_DIM_K,  # head dimension
@@ -1597,15 +1594,15 @@ class TritonAttention(torch.autograd.Function):
             o,
             M,
             inv_l,
-            delta,  #
+            delta,
             lam,
             ctx.sm_scale,
             Z=BATCH,
             H=N_HEAD,
-            N_CTX=N_CTX,  #
-            HEAD_DIM=HEAD_DIM,  #
-            CAUSAL=ctx.causal,  #
-            WINDOW=ctx.window,  #
+            N_CTX=N_CTX,
+            HEAD_DIM=HEAD_DIM,
+            CAUSAL=ctx.causal,
+            WINDOW=ctx.window,
             dtype=torch_dtype_to_triton(q.dtype),
             INPUT_PRECISION=ctx.input_precision,
             n_ctx_rounded=n_ctx_rounded,
@@ -1626,15 +1623,15 @@ class TritonAttention(torch.autograd.Function):
             dv,
             M,
             inv_l,
-            delta,  #
+            delta,
             lam,
             ctx.sm_scale,
             Z=BATCH,
             H=N_HEAD,
-            N_CTX=N_CTX,  #
-            HEAD_DIM=HEAD_DIM,  #
-            CAUSAL=ctx.causal,  #
-            WINDOW=ctx.window,  #
+            N_CTX=N_CTX,
+            HEAD_DIM=HEAD_DIM,
+            CAUSAL=ctx.causal,
+            WINDOW=ctx.window,
             dtype=torch_dtype_to_triton(q.dtype),
             INPUT_PRECISION=ctx.input_precision,
             n_ctx_rounded=n_ctx_rounded,
