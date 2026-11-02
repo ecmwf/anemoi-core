@@ -92,6 +92,5 @@ repos:
   - id: check-ci-approval
   - id: check-ci-result
 ci:
-  autofix_prs: false
   autoupdate_schedule: monthly
   autoupdate_commit_msg: "chore(deps): pre-commit.ci autoupdate"
