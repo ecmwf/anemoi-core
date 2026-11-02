@@ -39,9 +39,6 @@ LOGGER = logging.getLogger(__name__)
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
-    supports_shared_encoder_decoder = False
-    supports_multiple_hidden_meshes = False
-
     def __init__(
         self,
         *,
@@ -170,13 +167,7 @@ class BaseGraphModel(nn.Module):
         shared_modules = any(len(datasets) > 1 for datasets in self.encoder2datasets.values()) or any(
             len(datasets) > 1 for datasets in self.decoder2datasets.values()
         )
-        if shared_modules:
-            assert (
-                self.supports_shared_encoder_decoder
-            ), "This model does not support sharing an encoder or decoder across datasets."
-        if isinstance(self._graph_name_hidden, (dict, DictConfig)):
-            assert self.supports_multiple_hidden_meshes, "This model does not support multiple hidden meshes."
-        elif shared_modules:
+        if shared_modules and not isinstance(self._graph_name_hidden, (dict, DictConfig)):
             assert isinstance(
                 self._graph_name_hidden, str
             ), "Datasets sharing an encoder or decoder must be fused through one hidden node set."

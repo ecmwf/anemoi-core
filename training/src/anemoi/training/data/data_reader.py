@@ -21,6 +21,7 @@ from rich.tree import Tree
 from anemoi.datasets import open_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.time_indices import TimeIndices
+from anemoi.training.utils.time_indices import normalize_time_indices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -425,13 +426,18 @@ class TrajectoryDataset(BaseAnemoiReader):
     ) -> torch.Tensor:
         """Load forecast steps ``positions`` of initialisation ``sequence``."""
         if isinstance(positions, slice):
-            positions = list(range(*positions.indices(self.sequence_length(sequence))))
-        else:
-            positions = np.asarray(positions).tolist()
+            positions = range(*positions.indices(self.sequence_length(sequence)))
+        positions = normalize_time_indices(np.asarray(positions).tolist())
 
         # data[sequence] -> (variables, ensembles, steps, cells)
-        x = self.data[sequence]
-        x = x[:, :, positions, :]
+        if isinstance(positions, slice):
+            # Read only the requested steps instead of the whole forecast; with per-step chunking
+            # this avoids reading and decompressing unused steps. Only slices take this path: a list
+            # index on the step axis is not applied correctly by anemoi-datasets.
+            x = self.data[sequence, :, :, positions, :]
+        else:
+            x = self.data[sequence]
+            x = x[:, :, positions, :]
         if grid_shard_indices is not None:
             x = x[..., grid_shard_indices]
 

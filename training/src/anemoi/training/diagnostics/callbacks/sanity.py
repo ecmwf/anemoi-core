@@ -11,9 +11,7 @@ import logging
 
 import pytorch_lightning as pl
 
-from anemoi.training.data.iteration import CrossDatasetIteration
 from anemoi.training.losses.utils import check_loss_tree_variable_units
-from anemoi.training.utils.variables_metadata import check_datasets_variables_compatibility
 from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
 
 LOGGER = logging.getLogger(__name__)
@@ -51,9 +49,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+            Pytorch Lightning trainer.
+        pl_module : pl.LightningModule
+            Training module.
         """
         data_name_to_index = trainer.datamodule.ds_train.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
@@ -71,11 +69,10 @@ class CheckVariableOrder(pl.callbacks.Callback):
         """
         compat_options = dict(trainer.datamodule.config.training.check_variables_compatibility)
 
-        if isinstance(trainer.datamodule.ds_train.iteration, CrossDatasetIteration):
-            check_datasets_variables_compatibility(
-                {name: data.typed_variables for name, data in trainer.datamodule.ds_train.data.items()},
-                **compat_options,
-            )
+        trainer.datamodule.loading_policy.check_dataset_compatibility(
+            trainer.datamodule.ds_train,
+            **compat_options,
+        )
 
         for dataset_name in pl_module.target_dataset_names:
             check_loss_tree_variable_units(
@@ -96,9 +93,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+            Pytorch Lightning trainer.
+        pl_module : pl.LightningModule
+            Training module.
         """
         data_name_to_index = trainer.datamodule.ds_valid.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
@@ -110,9 +107,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+            Pytorch Lightning trainer.
+        pl_module : pl.LightningModule
+            Training module.
         """
         data_name_to_index = trainer.datamodule.ds_test.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)

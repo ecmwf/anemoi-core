@@ -50,6 +50,7 @@ def build_mock_config(
     config_dict = {
         "config_validation": False,
         "training": {
+            "seed": 42,
             "run_id": run_id,
             "fork_run_id": fork_run_id,
             "load_weights_only": False,

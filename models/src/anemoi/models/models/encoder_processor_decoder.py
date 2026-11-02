@@ -34,9 +34,6 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
-    supports_shared_encoder_decoder = True
-    supports_multiple_hidden_meshes = True
-
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
         # Encoder data -> hidden

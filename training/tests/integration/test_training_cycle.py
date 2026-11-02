@@ -7,8 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import hashlib
 import logging
-import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -18,15 +18,15 @@ import torch
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.train.evaluate import AnemoiEvaluator
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.training.utils.time_indices import normalize_time_indices
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
-
-os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -304,6 +304,75 @@ def test_training_cycle_ensemble(
     assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
+def _digest(tensor: torch.Tensor) -> str:
+    return hashlib.sha256(tensor.detach().float().cpu().contiguous().numpy().tobytes()).hexdigest()
+
+
+def _record_training_batches(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, int, str, str]]:
+    """Record epoch, batch number, loaded data and random state at the start of every training batch."""
+    records = []
+    seed_batch = BaseTrainingModule.on_train_batch_start
+
+    def seed_and_record(self: BaseTrainingModule, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
+        seed_batch(self, batch, batch_idx)
+        data = next(iter(batch.values()))
+        records.append((self.current_epoch, batch_idx, _digest(data), _digest(torch.get_rng_state())))
+
+    monkeypatch.setattr(BaseTrainingModule, "on_train_batch_start", seed_and_record)
+    return records
+
+
+@skip_if_offline
+@pytest.mark.slow
+@pytest.mark.parametrize("interrupt_after_steps", [4, 8], ids=["mid-first-epoch", "mid-second-epoch"])
+def test_resume_mid_epoch_matches_uninterrupted_training(
+    ensemble_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+    monkeypatch: pytest.MonkeyPatch,
+    interrupt_after_steps: int,
+) -> None:
+    """Training resumed from a mid-epoch checkpoint trains on the batches of an uninterrupted run.
+
+    Every resumed step loads the same data and starts from the same random state, so
+    the ensemble noise matches too. The weights are not compared, because training on
+    GPUs is not bitwise reproducible between runs.
+    """
+    cfg, url = ensemble_config
+    get_test_archive(url)
+    # Two epochs of 6 batches each.
+    cfg.dataloader.batch_size.training = 1
+    cfg.dataloader.limit_batches.training = 6
+    cfg.dataloader.limit_batches.validation = 1
+    cfg.diagnostics.plot.callbacks = []
+    cfg.training.seed = 42
+    checkpoints_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    records = _record_training_batches(monkeypatch)
+
+    AnemoiTrainer(deepcopy(cfg)).train()
+    uninterrupted = list(records)
+    records.clear()
+    (uninterrupted_dir,) = checkpoints_dir.iterdir()
+
+    interrupted_cfg = deepcopy(cfg)
+    interrupted_cfg.training.max_steps = interrupt_after_steps
+    interrupted_cfg.diagnostics.checkpoint.every_n_train_steps.save_frequency = interrupt_after_steps
+    interrupted_cfg.diagnostics.checkpoint.every_n_train_steps.num_models_saved = 1
+    AnemoiTrainer(interrupted_cfg).train()
+    (interrupted_dir,) = set(checkpoints_dir.iterdir()) - {uninterrupted_dir}
+    interrupted = torch.load(interrupted_dir / "last.ckpt", map_location="cpu", weights_only=False)
+    assert interrupted["global_step"] == interrupt_after_steps
+    assert interrupted["loops"]["fit_loop"]["state_dict"]["combined_loader"], "dataloader position not saved"
+
+    resumed_cfg = deepcopy(cfg)
+    resumed_cfg.training.run_id = interrupted_dir.name
+    # Without a seed in the config, the resumed run takes the checkpoint's seed.
+    resumed_cfg.training.seed = None
+    AnemoiTrainer(resumed_cfg).train()
+
+    assert len(uninterrupted) == 12
+    assert records == uninterrupted
+
+
 @skip_if_offline
 def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> None:
     cfg, _ = ensemble_config
@@ -337,6 +406,11 @@ def test_training_cycle_hierarchical(
 def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = hierarchical_config
     BaseSchema(**cfg)
+
+    cfg = deepcopy(cfg)
+    cfg.model.model.hidden_nodes_name = {"data": "hidden_1"}
+    with pytest.raises(ValueError, match="Hierarchical models do not support per-dataset hidden node mappings"):
+        BaseSchema(**cfg)
 
 
 @skip_if_offline
@@ -442,6 +516,16 @@ def test_training_cycle_edm_transport(
 def test_config_validation_edm_transport(edm_transport_config: tuple[DictConfig, str]) -> None:
     cfg, _ = edm_transport_config
     BaseSchema(**cfg)
+
+    cfg = deepcopy(cfg)
+    cfg.model.model.hidden_nodes_name = {"data": "hidden"}
+    with pytest.raises(ValueError, match="Transport models do not support per-dataset hidden node mappings"):
+        BaseSchema(**cfg)
+
+    cfg.model.model.hidden_nodes_name = "hidden"
+    next(iter(cfg.model.encoders.values())).source_datasets = ["data", "other"]
+    with pytest.raises(ValueError, match="Transport models do not support shared encoders or decoders"):
+        BaseSchema(**cfg)
 
 
 def test_config_validation_stochastic_interpolant(stochastic_interpolant_config: tuple[DictConfig, str]) -> None:
@@ -632,7 +716,11 @@ def test_restart_training_with_rollout(
     weights_only_trainer.train()
 
     assert weights_only_trainer.task.rollout.step == 4
-    assert weights_only_trainer.datamodule.ds_train.rollout == 4
+    ds_train = weights_only_trainer.datamodule.ds_train
+    expected_indices = compute_relative_date_indices(weights_only_trainer.task, ds_train.data_readers, mode="training")
+    assert ds_train.relative_date_indices == {
+        name: normalize_time_indices(indices) for name, indices in expected_indices.items()
+    }
 
     cfg.training.run_id = checkpoint_dir.name
     cfg.training.max_epochs = 4

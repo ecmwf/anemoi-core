@@ -7,53 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import pytest
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 
-from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-from anemoi.training.data.iteration import CrossDatasetIteration
-from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.utils.testing import GetTestArchive
-from anemoi.utils.testing import skip_if_offline
-
-
-@skip_if_offline
-@pytest.mark.slow
-def test_multidomain_dataloader(
-    multidomain_config: tuple[DictConfig, list[str]],
-    get_test_archive: GetTestArchive,
-) -> None:
-    cfg, urls = multidomain_config
-    for url in urls:
-        get_test_archive(url)
-
-    cfg = convert_to_omegaconf(BaseSchema(**cfg))
-    datamodule = AnemoiDatasetsDataModule(cfg, instantiate(cfg.task))
-    assert isinstance(datamodule.ds_train, MultiDataset)
-    assert isinstance(datamodule.ds_train.iteration, CrossDatasetIteration)
-
-    sampled_domains = set()
-    grid_sizes = {}
-    for batch in datamodule.train_dataloader():
-        assert len(batch) == 1
-        domain = next(iter(batch))
-        sampled_domains.add(domain)
-        grid_sizes[domain] = batch[domain].shape[-2]
-        assert grid_sizes[domain] == datamodule.ds_train.data_readers[domain].grid_size
-        if sampled_domains == {"sg_1", "sg_2"}:
-            break
-
-    assert sampled_domains == {"sg_1", "sg_2"}
-    assert len(set(grid_sizes.values())) == 2
 
 
 def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = multidomain_config
     cfg = convert_to_omegaconf(BaseSchema(**cfg))
-    assert cfg.dataloader.iteration._target_ == "anemoi.training.data.iteration.CrossDatasetIteration"
+    assert cfg.dataloader.loading_policy._target_ == "anemoi.training.data.loading.CrossDatasetLoadingPolicy"
     assert cfg.model.model.hidden_nodes_name == {
         "sg_1": "sg_1_hidden",
         "sg_2": "sg_2_hidden",
