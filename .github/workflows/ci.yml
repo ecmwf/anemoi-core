@@ -34,15 +34,13 @@ jobs:
 
   resolve:
     needs: ci-approval
-    runs-on: ubuntu-latest
-    container:
-      image: eccr.ecmwf.int/public-ci-images/ubuntu24.04-base:latest
+    runs-on: ubuntu-24.04
     outputs:
       # resolve-deps declares matrix-<kind> outputs only for some kinds; json holds them all.
       test-matrix: ${{ toJSON(fromJSON(steps.r.outputs.json).test) }}
     steps:
-      - name: Announce image
-        uses: ecmwf/ci-infrastructure/actions/announce-image@main
+      # No container: uv provides ci-infrastructure's Python.
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
       - id: mint
         uses: actions/create-github-app-token@v3
         with:
@@ -62,14 +60,12 @@ jobs:
     needs: [ci-approval, resolve]
     name: test (${{ matrix._resolved['job-name'] }})
     runs-on: ${{ matrix['runs-on'] }}
-    container:
-      image: ${{ matrix.container || '' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.resolve.outputs.test-matrix) }}
     steps:
-      - name: Announce image
-        uses: ecmwf/ci-infrastructure/actions/announce-image@main
+      # No container: uv provides the job script's Python and ci-infrastructure's.
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
       - id: mint
         uses: actions/create-github-app-token@v3
         with:
