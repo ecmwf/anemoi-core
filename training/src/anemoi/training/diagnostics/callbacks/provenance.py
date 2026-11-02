@@ -15,7 +15,10 @@ from anemoi.training.checkpoint.lineage import record_checkpoint_lineage
 
 
 class ParentUUIDCallback(Callback):
-    """A callback that appends a warm-start ckpt's parent uuid to the module's metadata, when Lightning loads the checkpoint."""
+    """A callback that appends a warm-start checkpoint's parent uuid to the module metadata.
+
+    Recorded when Lightning loads the checkpoint.
+    """
 
     def __init__(self) -> None:
         super().__init__()

@@ -12,13 +12,16 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
 
 from anemoi.training.checkpoint.lineage import record_checkpoint_lineage
 from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _LOADERS = "anemoi.training.checkpoint.loading.strategies"
 
