@@ -276,7 +276,6 @@ def check_categorical_preprocessing(
     """
     # Imported here: the preprocessing package imports the model layers.
     from anemoi.models.preprocessing.imputer import BaseImputer
-    from anemoi.models.preprocessing.imputer import ConstantImputer
     from anemoi.models.preprocessing.normalizer import InputNormalizer
 
     for processor_name, processor in getattr(processors, "processors", {}).items():
@@ -292,10 +291,7 @@ def check_categorical_preprocessing(
                 )
                 raise ValueError(msg)
         elif isinstance(processor, BaseImputer):
-            if isinstance(processor, ConstantImputer):
-                other = [v for v, method in methods.items() if method != "none" and float(method) != 0.0]
-            else:
-                other = [v for v, method in methods.items() if method != "none"]
+            other = [v for v, method in methods.items() if method != "none" and not _is_zero(method)]
             if other:
                 LOGGER.warning(
                     "Dataset '%s': imputer '%s' fills categorical variables %s with a non-zero value, "
@@ -304,3 +300,11 @@ def check_categorical_preprocessing(
                     processor_name,
                     other,
                 )
+
+
+def _is_zero(method: object) -> bool:
+    """Whether an imputer method is the constant 0 (a statistic name is not)."""
+    try:
+        return float(method) == 0.0
+    except (TypeError, ValueError):
+        return False

@@ -160,6 +160,58 @@ class ConstantImputer(BaseImputer):
         return data
 
 
+class InputOnlyImputer(BaseImputer):
+    """Imputes missing input values with a statistic or a constant, per variable.
+
+    Combines :class:`InputImputer` and :class:`ConstantImputer` in one configuration: a key is
+    either a statistic name or a number, mapping to the variables it fills::
+
+        default: "none"
+        mean:
+            - var1
+        0.0:
+            - var2
+
+    As every imputer, it only fills model inputs: the loss targets keep their missing values (they
+    are pre-processed with ``skip_imputation``). ``multi_step`` (the number of input time steps the
+    testeos version imputed, to keep target NaNs in a whole-sample tensor) is accepted for
+    compatibility and has no effect: each view the pre-processors see here is either all inputs or
+    all targets.
+    """
+
+    _STATISTICS = ("mean", "stdev", "minimum", "maximum")
+
+    @classmethod
+    def _process_config(cls, config):
+        config = dict(config or {})
+        if config.pop("multi_step", None) is not None:
+            LOGGER.info("%s: multi_step has no effect; inputs are imputed at every time step.", cls.__name__)
+        return super()._process_config(config)
+
+    def get_imputing_replacements(
+        self, name_to_index: dict[str, int], statistics: Optional[dict[str, torch.Tensor]] = None
+    ) -> dict[int, float]:
+        """Get the replacement values for imputation: a statistic of the variable or a constant."""
+        assert name_to_index is not None, f"{self.__class__.__name__} require name_to_index for imputation."
+        replacements: dict[int, float] = {}
+        for name, idx in name_to_index.items():
+            method = self.methods.get(name, self.default)
+            if method in ("none", None):
+                continue
+            if method in self._STATISTICS:
+                assert statistics is not None and method in statistics, f"{method} is not in the statistics"
+                replacements[idx] = float(statistics[method][idx])
+            else:
+                replacements[idx] = float(method)
+        return replacements
+
+    def impute(self, data: torch.Tensor, replacements: dict[int, float]) -> torch.Tensor:
+        for idx, value in replacements.items():
+            col = data[..., idx]
+            data[..., idx] = torch.where(torch.isnan(col), value, col)
+        return data
+
+
 class CopyImputer(BaseImputer):
     """Imputes missing values by copying from another variable.
 
