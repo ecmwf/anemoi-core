@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from collections.abc import Callable
+from typing import Any
 
 import pytest
 from omegaconf import DictConfig
@@ -16,6 +16,7 @@ from omegaconf import open_dict
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
+from tests.integration.helpers import assert_keys_exist
 
 
 @skip_if_offline
@@ -23,13 +24,13 @@ from anemoi.utils.testing import skip_if_offline
 def test_training_cycle_global(
     global_config: tuple[DictConfig, str, str],
     get_test_archive: GetTestArchive,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, url, _ = global_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_metadata_schema(trainer.metadata)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -51,14 +52,14 @@ def test_training_cycle_without_config_validation(
 def test_training_cycle_stretched(
     stretched_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, urls = stretched_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_metadata_schema(trainer.metadata)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -66,14 +67,14 @@ def test_training_cycle_stretched(
 def test_training_cycle_multidatasets(
     multidatasets_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, urls = multidatasets_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_metadata_schema(trainer.metadata)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -81,14 +82,14 @@ def test_training_cycle_multidatasets(
 def test_training_cycle_lam(
     lam_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, urls = lam_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_metadata_schema(trainer.metadata)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -108,13 +109,13 @@ def test_training_cycle_lam_with_existing_graph(
 def test_training_cycle_ensemble(
     ensemble_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, url = ensemble_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_metadata_schema(trainer.metadata)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -134,14 +135,14 @@ def test_training_cycle_hierarchical(
 def test_training_cycle_autoencoder(
     autoencoder_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, urls = autoencoder_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_metadata_schema(trainer.metadata)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -149,14 +150,14 @@ def test_training_cycle_autoencoder(
 def test_training_cycle_temporal_downscaler(
     temporal_downscaler_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     """Full training-cycle smoke-test for the temporal downscaler task."""
     cfg, url = temporal_downscaler_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_metadata_schema(trainer.metadata)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -164,13 +165,13 @@ def test_training_cycle_temporal_downscaler(
 def test_training_cycle_edm_transport(
     edm_transport_config: tuple[DictConfig, str],
     get_test_archive: callable,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, url = edm_transport_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_metadata_schema(trainer.metadata)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -224,14 +225,14 @@ def test_training_cycle_imerg_target(
 def test_training_cycle_multidatasets_edm_transport(
     multidatasets_edm_transport_config: tuple[DictConfig, list[str]],
     get_test_archive: callable,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, urls = multidatasets_edm_transport_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_metadata_schema(trainer.metadata)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -239,13 +240,13 @@ def test_training_cycle_multidatasets_edm_transport(
 def test_training_cycle_temporal_downscaler_ensemble(
     temporal_downscaler_ensemble_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, url = temporal_downscaler_ensemble_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_metadata_schema(trainer.metadata)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -253,13 +254,13 @@ def test_training_cycle_temporal_downscaler_ensemble(
 def test_training_cycle_offset_forecaster(
     offset_forecaster_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, url = offset_forecaster_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_metadata_schema(trainer.metadata)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -267,7 +268,7 @@ def test_training_cycle_offset_forecaster(
 def test_training_cycle_offset_forecaster_tendency_transport(
     offset_forecaster_tendency_transport_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     """Train the tendency transport path with irregular inputs and two forecast lead times."""
     cfg, url = offset_forecaster_tendency_transport_config
@@ -281,4 +282,4 @@ def test_training_cycle_offset_forecaster_tendency_transport(
     assert trainer.model.model.pre_processors_tendencies["data"].lead_times == ["6h", "12h"]
     assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["input_offsets"] == ["-12h", "0h"]
     assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["output_offsets"] == ["6h", "12h"]
-    assert_metadata_schema(trainer.metadata)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)

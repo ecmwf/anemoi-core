@@ -8,14 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from hydra import compose
 from hydra import initialize_config_module
-from omegaconf import DictConfig
 from omegaconf import OmegaConf
+
+from anemoi.utils.testing import GetTestData
+from tests.integration.helpers import handle_truncation_matrices
 
 CONFIG_DIR = Path(__file__).parent / "config"
 
@@ -41,7 +42,7 @@ CONFIG_DIR = Path(__file__).parent / "config"
 def benchmark_config(
     request: pytest.FixtureRequest,
     config_with_tempdir: OmegaConf,
-    handle_truncation_matrices: Callable[[DictConfig], DictConfig],
+    get_test_data: GetTestData,
 ) -> tuple[OmegaConf, str]:
     test_case = request.param
     base_config = "config"  # which config we start from in anemoi/training/configs/
@@ -84,5 +85,5 @@ def benchmark_config(
     OmegaConf.resolve(cfg)
 
     if test_case == "ensemble_crps":
-        cfg = handle_truncation_matrices(cfg)
+        cfg = handle_truncation_matrices(cfg, get_test_data)
     return cfg, test_case

@@ -8,9 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 import hashlib
-from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import pytest
 import pytorch_lightning as pl
@@ -26,6 +26,7 @@ from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.time_indices import normalize_time_indices
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
+from tests.integration.helpers import assert_keys_exist
 
 
 def get_single_checkpoint_dir(cfg: DictConfig) -> Path:
@@ -233,7 +234,7 @@ def test_restart_training_architectures(
 def test_inference_checkpoint_round_trips(
     gnn_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     """A training run's inference checkpoint loads back and carries the inference contract.
 
@@ -263,7 +264,7 @@ def test_inference_checkpoint_round_trips(
 
     # Carries the metadata anemoi-inference consumes (the consumption contract).
     metadata = load_metadata(inference_ckpt)
-    assert_metadata_schema(metadata)
+    assert_keys_exist(metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -422,14 +423,14 @@ def test_evaluator(
 def test_restart_training_with_rollout(
     gnn_config_with_rollout: tuple[DictConfig, str, str],
     get_test_archive: GetTestArchive,
-    assert_metadata_schema: Callable[[dict], None],
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, url = gnn_config_with_rollout
     get_test_archive(url)
     weights_only_cfg = deepcopy(cfg)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_metadata_schema(trainer.metadata)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
     # The rollout step should be incremented after each epoch, so after 2 epochs it should be 3
     assert (
         trainer.task.rollout.step == 3

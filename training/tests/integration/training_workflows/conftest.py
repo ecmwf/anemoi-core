@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +22,7 @@ from omegaconf import open_dict
 from anemoi.models.migrations import Migrator
 from anemoi.training.testing import GetTmpPath
 from anemoi.utils.testing import GetTestData
+from tests.integration.helpers import handle_truncation_matrices
 
 CONFIG_DIR = Path(__file__).parent / "config"
 
@@ -233,7 +233,7 @@ def lam_config_with_graph(
 def ensemble_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
-    handle_truncation_matrices: Callable[[DictConfig], DictConfig],
+    get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
     overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
 
@@ -253,7 +253,7 @@ def ensemble_config(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
 
-    cfg = handle_truncation_matrices(cfg)
+    cfg = handle_truncation_matrices(cfg, get_test_data)
     assert isinstance(cfg, DictConfig)
 
     cfg.task.multistep_input = 3
@@ -650,7 +650,7 @@ def mlflow_dry_run_config(gnn_config: tuple[DictConfig, str], mlflow_server: str
 def temporal_downscaler_ensemble_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
-    handle_truncation_matrices: Callable[[DictConfig], DictConfig],
+    get_test_data: GetTestData,
 ) -> tuple[DictConfig, str]:
 
     with initialize_config_module(
@@ -669,7 +669,7 @@ def temporal_downscaler_ensemble_config(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
 
-    cfg = handle_truncation_matrices(cfg)
+    cfg = handle_truncation_matrices(cfg, get_test_data)
     assert isinstance(cfg, DictConfig)
 
     return cfg, url_dataset
@@ -743,44 +743,6 @@ def offset_forecaster_tendency_transport_config(
     return cfg, url_dataset
 
 
-TASK_SPECIFIC_TIMESTEP_KEYS = {
-    "offset-forecaster": {"input_offsets", "output_offsets", "rollout_shift", "advance_map"},
-}
-
-
-def assert_keys_exist(data: dict, schema: dict, path: str = "root", skip_keys: set[str] | None = None) -> None:
-    """Recursively check that the metadata dictionary conforms to the expected schema.
-
-    This is a simplified schema validation that only checks for the presence of expected keys.
-    Note that this does not ensure that changes in anemoi-core do not break anemoi-inference.
-    """
-    if skip_keys is None:
-        task = data.get("metadata_inference", []).get("task")
-        assert task is not None, "metadata_inference.task must be populated"
-        all_task_keys = set().union(*TASK_SPECIFIC_TIMESTEP_KEYS.values())
-        skip_keys = all_task_keys - TASK_SPECIFIC_TIMESTEP_KEYS.get(task, set())
-
-    for key, subschema in schema.items():
-        if key == "__datasets__":
-            dataset_names = data.get("dataset_names", [])
-            for ds in dataset_names:
-                assert ds in data, f"{path}: dataset '{ds}' missing"
-                assert_keys_exist(data[ds], subschema, f"{path}.{ds}", skip_keys)
-            continue
-
-        if key in skip_keys:
-            continue
-
-        assert key in data, f"{path}: missing key '{key}'"
-
-        if isinstance(subschema, dict):
-            assert isinstance(data[key], dict), f"{path}.{key} should be dict"
-            assert_keys_exist(data[key], subschema, f"{path}.{key}", skip_keys)
-
-        if subschema is list:
-            assert isinstance(data[key], list), f"{path}.{key} should be list"
-
-
 @pytest.fixture(scope="session")
 def partial_metadata_schema() -> dict[str, Any]:
     """Defines the expected structure of the metadata dictionary produced by the trainer.
@@ -841,13 +803,3 @@ def partial_metadata_schema() -> dict[str, Any]:
             },
         },
     }
-
-
-@pytest.fixture(scope="session")
-def assert_metadata_schema(partial_metadata_schema: dict[str, Any]) -> Callable[[dict], None]:
-    """Return a function that checks metadata against the partial metadata schema."""
-
-    def _assert_metadata_schema(metadata: dict) -> None:
-        assert_keys_exist(metadata, partial_metadata_schema)
-
-    return _assert_metadata_schema
