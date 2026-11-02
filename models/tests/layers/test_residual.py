@@ -14,10 +14,12 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.models.layers.residual import ScalarOrnsteinConnection
-from anemoi.models.layers.residual import SkipConnection
-from anemoi.models.layers.residual import SpectralOrnsteinConnection
-from anemoi.models.layers.residual import TruncatedConnection
+from anemoi.models.layers.residual import (
+    ScalarOrnsteinConnection,
+    SkipConnection,
+    SpectralOrnsteinConnection,
+    TruncatedConnection,
+)
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 

@@ -13,11 +13,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import IncompatibleCheckpointException
-from anemoi.models.migrations import MigrationOp
-from anemoi.models.migrations import Migrator
-from anemoi.models.migrations import SaveCkpt
+from anemoi.models.migrations import CkptType, IncompatibleCheckpointException, MigrationOp, Migrator, SaveCkpt
 
 
 def test_run_all_migrations(old_migrator: Migrator, empty_ckpt: Path):

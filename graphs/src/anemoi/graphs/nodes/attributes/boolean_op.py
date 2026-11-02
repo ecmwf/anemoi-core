@@ -9,8 +9,7 @@
 
 
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import torch
 from torch_geometric.data.storage import NodeStorage

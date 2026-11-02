@@ -10,37 +10,33 @@
 
 import logging
 import os
-from abc import ABC
-from abc import abstractmethod
-from typing import Optional
+from abc import ABC, abstractmethod
 
 import torch
-from torch import Tensor
-from torch import nn
+from anemoi.utils.config import DotDict
+from torch import Tensor, nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.typing import Adj
-from torch_geometric.typing import PairTensor
+from torch_geometric.typing import Adj, PairTensor
 
-from anemoi.models.distributed.graph import ensure_sharded
-from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.khop_edges import GraphPartition
-from anemoi.models.distributed.khop_edges import build_graph_partition
-from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
-from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
-from anemoi.models.distributed.khop_edges import shard_edges_1hop
-from anemoi.models.distributed.khop_edges import shard_graph_to_local
+from anemoi.models.distributed.graph import ensure_sharded, gather_tensor
+from anemoi.models.distributed.khop_edges import (
+    GraphPartition,
+    build_graph_partition,
+    build_graph_partition_from_shard_info,
+    ensure_edges_are_dst_sorted,
+    shard_edges_1hop,
+    shard_graph_to_local,
+)
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.layers.block import GraphConvMapperBlock
-from anemoi.models.layers.block import GraphTransformerMapperBlock
-from anemoi.models.layers.block import TransformerMapperBlock
-from anemoi.models.layers.mlp import MLP
-from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.models.layers.utils import compute_mlp_hidden_dim
-from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.models.layers.utils import maybe_checkpoint
-from anemoi.models.layers.utils import refuse_dropout_when_sharded
-from anemoi.utils.config import DotDict
+from anemoi.models.layers.block import GraphConvMapperBlock, GraphTransformerMapperBlock, TransformerMapperBlock
+from anemoi.models.layers.mlp import MLP, MLPImplementation
+from anemoi.models.layers.utils import (
+    compute_mlp_hidden_dim,
+    load_layer_kernels,
+    maybe_checkpoint,
+    refuse_dropout_when_sharded,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,7 +58,7 @@ class BaseMapper(nn.Module, ABC):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
-        out_channels_dst: Optional[int] = None,
+        out_channels_dst: int | None = None,
         cpu_offload: bool = False,
         gradient_checkpointing: bool = True,
         layer_kernels: DotDict,
@@ -98,9 +94,9 @@ class BaseMapper(nn.Module, ABC):
         x: PairTensor,
         batch_size: int,
         shard_info: BipartiteGraphShardInfo,
-        edge_attr: Optional[Tensor] = None,
-        edge_index: Optional[Adj] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        edge_attr: Tensor | None = None,
+        edge_index: Adj | None = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
         **kwargs,
@@ -137,7 +133,6 @@ class BaseMapper(nn.Module, ABC):
         Tensor or PairTensor
             Mapper output tensor or tensor pair.
         """
-        pass
 
 
 class GraphTransformerBaseMapper(BaseMapper, ABC):
@@ -149,12 +144,12 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         in_channels_src: int,
         in_channels_dst: int,
         num_channels: int,
-        out_channels_dst: Optional[int] = None,
+        out_channels_dst: int | None = None,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: float,
         edge_dim: int,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
@@ -253,8 +248,8 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         batch_size: int,
         edge_attr: Tensor,
         edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
-        cond: Optional[tuple[Tensor, Tensor]] = None,
+        model_comm_group: ProcessGroup | None = None,
+        cond: tuple[Tensor, Tensor] | None = None,
         edges_are_dst_sorted: bool = True,
     ):
         x_dst = x[1]
@@ -306,8 +301,8 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         shard_info: BipartiteGraphShardInfo,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
-        cond: Optional[tuple[Tensor, Tensor]] = None,
+        model_comm_group: ProcessGroup | None = None,
+        cond: tuple[Tensor, Tensor] | None = None,
         **kwargs,
     ) -> Tensor:
         # O(1) slicing: extract subgraph for this chunk
@@ -340,9 +335,9 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         shard_info: BipartiteGraphShardInfo,
         edge_attr: Tensor,
         edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = False,
-        cond: Optional[tuple[Tensor, Tensor]] = None,
+        cond: tuple[Tensor, Tensor] | None = None,
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
@@ -393,7 +388,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         shard_info: BipartiteGraphShardInfo,
         edge_attr: Tensor,
         edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
         **kwargs,
@@ -450,7 +445,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         shard_info: BipartiteGraphShardInfo,
         edge_attr: Tensor,
         edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
         **kwargs,
@@ -488,12 +483,12 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         num_channels: int,
-        out_channels_dst: Optional[int] = None,
+        out_channels_dst: int | None = None,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: float,
         edge_dim: int,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
@@ -582,7 +577,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         shard_info: BipartiteGraphShardInfo,
         edge_attr: Tensor,
         edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = True,
         **kwargs,
     ) -> PairTensor:
@@ -608,12 +603,12 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         num_channels: int,
-        out_channels_dst: Optional[int] = None,
+        out_channels_dst: int | None = None,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: float,
         edge_dim: int,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         initialise_data_extractor_zero: bool = False,
@@ -724,7 +719,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         in_channels_src: int,
         in_channels_dst: int,
         num_channels: int,
-        out_channels_dst: Optional[int] = None,
+        out_channels_dst: int | None = None,
         num_chunks: int,
         mlp_extra_layers: int,
         edge_dim: int,
@@ -789,7 +784,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         shard_info: BipartiteGraphShardInfo,
         edge_attr: Tensor,
         edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
         **kwargs,
@@ -851,7 +846,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         shard_info: BipartiteGraphShardInfo,
         edge_attr: Tensor,
         edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
         **kwargs,
@@ -881,7 +876,7 @@ class GNNForwardMapper(GNNBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         num_channels: int,
-        out_channels_dst: Optional[int] = None,
+        out_channels_dst: int | None = None,
         num_chunks: int,
         mlp_extra_layers: int,
         edge_dim: int,
@@ -986,7 +981,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         num_channels: int,
-        out_channels_dst: Optional[int] = None,
+        out_channels_dst: int | None = None,
         num_chunks: int,
         mlp_extra_layers: int,
         edge_dim: int,
@@ -1079,7 +1074,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         shard_info: BipartiteGraphShardInfo,
         edge_attr: Tensor,
         edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
         **kwargs,
@@ -1126,7 +1121,7 @@ class PointWiseMapper(BaseMapper, ABC):
         x: PairTensor,
         batch_size: int,
         shard_info: BipartiteGraphShardInfo,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = False,
     ) -> PairTensor:
         x_src, x_dst = x
@@ -1148,9 +1143,9 @@ class PointWiseMapper(BaseMapper, ABC):
         x: PairTensor,
         batch_size: int,
         shard_info: BipartiteGraphShardInfo,
-        edge_attr: Optional[Tensor] = None,
-        edge_index: Optional[Adj] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        edge_attr: Tensor | None = None,
+        edge_index: Adj | None = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
         **kwargs,
@@ -1203,9 +1198,9 @@ class PointWiseForwardMapper(PointWiseMapper):
         x: PairTensor,
         batch_size: int,
         shard_info: BipartiteGraphShardInfo,
-        edge_attr: Optional[Tensor] = None,
-        edge_index: Optional[Adj] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        edge_attr: Tensor | None = None,
+        edge_index: Adj | None = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
         **kwargs,
@@ -1279,17 +1274,17 @@ class TransformerBaseMapper(BaseMapper, ABC):
         in_channels_src: int,
         in_channels_dst: int,
         num_channels: int,
-        out_channels_dst: Optional[int] = None,
+        out_channels_dst: int | None = None,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: float,
-        attn_channels: Optional[int] = None,
-        window_size: Optional[int] = None,
+        attn_channels: int | None = None,
+        window_size: int | None = None,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "scaled_dot_product_attention",
-        softcap: Optional[float] = None,
+        softcap: float | None = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
         cpu_offload: bool = False,
@@ -1372,9 +1367,9 @@ class TransformerBaseMapper(BaseMapper, ABC):
         x: PairTensor,
         batch_size: int,
         shard_info: BipartiteGraphShardInfo,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = False,
-        cond: Optional[tuple[Tensor, Tensor]] = None,
+        cond: tuple[Tensor, Tensor] | None = None,
     ) -> PairTensor:
         x_src, x_dst = x
         shard_sizes_src, shard_sizes_dst = shard_info.src_nodes, shard_info.dst_nodes
@@ -1411,9 +1406,9 @@ class TransformerBaseMapper(BaseMapper, ABC):
         x: PairTensor,
         batch_size: int,
         shard_info: BipartiteGraphShardInfo,
-        edge_attr: Optional[Tensor] = None,
-        edge_index: Optional[Adj] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        edge_attr: Tensor | None = None,
+        edge_index: Adj | None = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
         **kwargs,
@@ -1440,11 +1435,11 @@ class TransformerForwardMapper(TransformerBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         num_channels: int,
-        out_channels_dst: Optional[int] = None,
+        out_channels_dst: int | None = None,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: float,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         qk_norm: bool = False,
         dropout_p: float = 0.0,
         mlp_implementation: MLPImplementation = "mlp",
@@ -1452,7 +1447,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
         softcap: float = None,
         use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
-        window_size: Optional[int] = None,
+        window_size: int | None = None,
         use_rotary_embeddings: bool = False,
         layer_kernels: DotDict,
         **kwargs,  # accept not needed extra arguments like subgraph etc.
@@ -1535,9 +1530,9 @@ class TransformerForwardMapper(TransformerBaseMapper):
         x: PairTensor,
         batch_size: int,
         shard_info: BipartiteGraphShardInfo,
-        edge_attr: Optional[Tensor] = None,
-        edge_index: Optional[Adj] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        edge_attr: Tensor | None = None,
+        edge_index: Adj | None = None,
+        model_comm_group: ProcessGroup | None = None,
         keep_x_dst_sharded: bool = False,
         **kwargs,
     ) -> PairTensor:
@@ -1563,11 +1558,11 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         num_channels: int,
-        out_channels_dst: Optional[int] = None,
+        out_channels_dst: int | None = None,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: float,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         qk_norm: bool = False,
         dropout_p: float = 0.0,
         mlp_implementation: MLPImplementation = "mlp",
@@ -1575,7 +1570,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         softcap: float = None,
         use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
-        window_size: Optional[int] = None,
+        window_size: int | None = None,
         use_rotary_embeddings: bool = False,
         layer_kernels: DotDict,
         **kwargs,  # accept not needed extra arguments like subgraph etc.

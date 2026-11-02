@@ -15,8 +15,7 @@ from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
-from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid
-from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
+from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid, ICONMultiMesh
 
 LOGGER = logging.getLogger(__name__)
 

@@ -9,14 +9,13 @@
 
 
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
+from anemoi.datasets import open_dataset
 from torch_geometric.data.storage import NodeStorage
 
-from anemoi.datasets import open_dataset
 from anemoi.graphs.nodes.attributes.base_attributes import BooleanBaseNodeAttribute
 
 LOGGER = logging.getLogger(__name__)

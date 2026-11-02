@@ -7,15 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from dataclasses import asdict
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import asdict, dataclass, field
 
 import pytest
+from anemoi.utils.config import DotDict
 
 from anemoi.models.layers.processor import BaseProcessor
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.config import DotDict
 
 
 @dataclass

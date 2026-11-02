@@ -8,21 +8,17 @@
 # nor does it submit to any jurisdiction.
 
 
-from typing import List
-from typing import Optional
 
 import torch
 import torch.distributed as dist
 from torch import Tensor
-from torch.distributed.distributed_c10d import ProcessGroup
-from torch.distributed.distributed_c10d import _resolve_process_group
+from torch.distributed.distributed_c10d import ProcessGroup, _resolve_process_group
 
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import expand_shard_sizes_to_shapes
+from anemoi.models.distributed.shapes import ShardSizes, expand_shard_sizes_to_shapes
 from anemoi.models.distributed.utils import get_memory_format
 
 
-def _split(input_: Tensor, dim_: int, sizes_: ShardSizes, group: Optional[ProcessGroup] = None) -> Tensor:
+def _split(input_: Tensor, dim_: int, sizes_: ShardSizes, group: ProcessGroup | None = None) -> Tensor:
     """Split the tensor along dim and keep the relevant slice."""
     # Modified from
     # Copyright (c) 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -143,7 +139,7 @@ def _gather(
     input_: Tensor,
     dim_: int,
     sizes: ShardSizes,
-    group: Optional[ProcessGroup] = None,
+    group: ProcessGroup | None = None,
 ) -> Tensor:
     """Gather tensors and concatenate along the last dimension."""
     # Modified from
@@ -180,7 +176,7 @@ def _expand_sharded_tensor(
     input_: Tensor,
     dim_: int,
     sizes: ShardSizes,
-    group: Optional[ProcessGroup] = None,
+    group: ProcessGroup | None = None,
 ) -> Tensor:
     """Expand a local shard to the gathered shape without communication.
 
@@ -217,7 +213,7 @@ def _expand_sharded_tensor(
     return output
 
 
-def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup] = None) -> Tensor:
+def _reduce(input_: Tensor, use_fp32: bool = True, group: ProcessGroup | None = None) -> Tensor:
     """All-reduce the input tensor across model parallel group."""
     # Modified from
     # Copyright (c) 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -278,7 +274,7 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
         reqs = []
         rank = dist.get_rank(group=group)
         # Here we implement the linear shift algorithm from Hofmann and Ruenger, 2013
-        for i in range(0, comm_size):
+        for i in range(comm_size):
             j = (i - rank + comm_size) % comm_size
             if j != rank:
                 # exchange data with rank j
@@ -295,11 +291,11 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
 
 @torch.library.custom_op("anemoi_distributed::alltoall", mutates_args=())
 def _alltoall_op(
-    input_list: List[Tensor],
-    output_shapes_flat: List[int],
+    input_list: list[Tensor],
+    output_shapes_flat: list[int],
     ndim: int,
     group_name: str,
-) -> List[Tensor]:
+) -> list[Tensor]:
     """torch.compile-traceable wrapper around the list-based ``dist.all_to_all``.
 
     torch.compile() cannot trace ``dist.all_to_all`` with list inputs.
@@ -339,7 +335,7 @@ def _(
     return [ref.new_empty(shape) for shape in output_shapes]
 
 
-def _resolve_group_name(group: Optional[ProcessGroup]) -> str:
+def _resolve_group_name(group: ProcessGroup | None) -> str:
     if group is None:
         group = dist.distributed_c10d._get_default_group()
     return group.group_name
@@ -351,7 +347,7 @@ def _alltoall_transpose(
     split_sizes: list[int] | tuple[int, ...],
     dim_concat: int,
     concat_sizes: list[int] | tuple[int, ...],
-    group: Optional[ProcessGroup] = None,
+    group: ProcessGroup | None = None,
 ) -> Tensor:
     """Unified all-to-all distributed transpose along arbitrary dimensions.
 

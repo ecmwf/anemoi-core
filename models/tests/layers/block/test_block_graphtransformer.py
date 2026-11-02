@@ -12,14 +12,11 @@ import importlib
 
 import pytest
 import torch
-import torch.nn as nn
+from torch import nn
 
 import anemoi.models.layers.block
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.layers.block import MLP
-from anemoi.models.layers.block import GraphTransformerMapperBlock
-from anemoi.models.layers.block import GraphTransformerProcessorBlock
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, GraphShardInfo
+from anemoi.models.layers.block import MLP, GraphTransformerMapperBlock, GraphTransformerProcessorBlock
 from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import GatedMLPLayer
 from anemoi.models.layers.utils import load_layer_kernels

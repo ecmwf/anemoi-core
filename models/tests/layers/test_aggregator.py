@@ -10,10 +10,12 @@
 import pytest
 import torch
 
-from anemoi.models.layers.aggregator import ConcatAggregator
-from anemoi.models.layers.aggregator import MeanAggregator
-from anemoi.models.layers.aggregator import PointwiseCrossAttentionAggregator
-from anemoi.models.layers.aggregator import SumAggregator
+from anemoi.models.layers.aggregator import (
+    ConcatAggregator,
+    MeanAggregator,
+    PointwiseCrossAttentionAggregator,
+    SumAggregator,
+)
 
 
 def test_sum_and_mean_aggregators_accept_active_source_subsets() -> None:

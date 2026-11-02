@@ -7,19 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from abc import ABC
-from abc import abstractmethod
-from collections.abc import Mapping
-from collections.abc import Sequence
+from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
 
 import torch
-from torch import Tensor
-from torch import nn
+from anemoi.utils.config import DotDict
+from torch import Tensor, nn
 
 from anemoi.models.layers.attention import PointwiseMultiHeadCrossAttention
-from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.models.layers.utils import maybe_checkpoint
-from anemoi.utils.config import DotDict
+from anemoi.models.layers.utils import load_layer_kernels, maybe_checkpoint
 
 
 class BaseLatentAggregator(nn.Module, ABC):
