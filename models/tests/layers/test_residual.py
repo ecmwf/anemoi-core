@@ -14,6 +14,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.residual import ClimatologySkipConnection
 from anemoi.models.layers.residual import ScalarOrnsteinConnection
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.layers.residual import SpectralOrnsteinConnection
@@ -296,3 +297,89 @@ def test_spectral_ornstein_truncation_has_filter():
     assert hasattr(conn, "filter")
     assert hasattr(conn, "x_fsht")
     assert hasattr(conn, "x_isht")
+
+
+# ── ClimatologySkipConnection ──────────────────────────────────────────────
+
+
+def _write_climatology_npz(path, num_grid_points=2, variables=("var0", "var1")):
+    arrays = {name: np.full(num_grid_points, float(i + 1), dtype=np.float32) for i, name in enumerate(variables)}
+    np.savez(path, **arrays)
+    return arrays
+
+
+def test_climatology_skip_connection(tmp_path, flat_data):
+    npz_path = tmp_path / "clim.npz"
+    _write_climatology_npz(npz_path, num_grid_points=2, variables=("var0", "var2"))
+    conn = ClimatologySkipConnection(
+        climatology_path=str(npz_path),
+        data_indices=_make_data_indices(n_prognostic=3),
+    )
+    out = conn(flat_data)
+    assert out.shape == flat_data[:, -1, ...].shape
+    # var0 -> 1.0, var1 absent from file -> 0.0, var2 -> 2.0, everywhere on the grid
+    assert torch.all(out[..., 0] == 1.0)
+    assert torch.all(out[..., 1] == 0.0)
+    assert torch.all(out[..., 2] == 2.0)
+
+
+def test_climatology_skip_connection_fill_missing_only(tmp_path, flat_data):
+    npz_path = tmp_path / "clim.npz"
+    _write_climatology_npz(npz_path, num_grid_points=2, variables=("var0",))
+    conn = ClimatologySkipConnection(
+        climatology_path=str(npz_path),
+        data_indices=_make_data_indices(n_prognostic=3),
+        missing_value=0.0,
+        fill_missing_only=True,
+    )
+    x = flat_data.clone()
+    x[0, -1] = 0.0  # sample (0, 0): all-zero cold-start base -> pure climatology
+    x[1, -1, 0, 0, 0] = 0.0  # isolated exact zero in a complete state -> kept
+    out = conn(x)
+    assert torch.equal(out[0, 0, :, 0], torch.ones(2))
+    assert torch.all(out[0, 0, :, 1:] == 0.0)  # variables absent from the file
+    assert out[1, 0, 0, 0] == 0.0
+    # Every other sample is passed through untouched.
+    assert torch.equal(out[1:], x[1:, -1])
+
+
+def test_climatology_skip_connection_normalized(tmp_path, flat_data):
+    npz_path = tmp_path / "clim.npz"
+    _write_climatology_npz(npz_path, num_grid_points=2, variables=("var0",))
+    statistics = {
+        "mean": np.array([0.5, 0.0, 0.0]),
+        "stdev": np.array([0.25, 1.0, 1.0]),
+        "minimum": np.zeros(3),
+        "maximum": np.ones(3),
+    }
+    data_indices = _make_data_indices(n_prognostic=3)
+    data_indices.data.input.name_to_index = {"var0": 0, "var1": 1, "var2": 2}
+    conn = ClimatologySkipConnection(
+        climatology_path=str(npz_path),
+        data_indices=data_indices,
+        normalize_climatology=True,
+        statistics=statistics,
+    )
+    out = conn(flat_data)
+    # (1.0 - 0.5) / 0.25 = 2.0
+    assert torch.allclose(out[..., 0], torch.tensor(2.0))
+
+
+def test_climatology_skip_connection_sharded_slice(tmp_path, monkeypatch):
+    npz_path = tmp_path / "clim.npz"
+    num_grid_points = 5
+    arrays = {"var0": np.arange(num_grid_points, dtype=np.float32)}
+    np.savez(npz_path, **arrays)
+    conn = ClimatologySkipConnection(
+        climatology_path=str(npz_path),
+        data_indices=_make_data_indices(n_prognostic=3),
+    )
+    monkeypatch.setattr("anemoi.models.layers.residual.dist.get_rank", lambda group=None: 1)
+    local = conn._local_climatology(grid_shard_sizes=[2, 3], model_comm_group=None)
+    assert local.shape == (3, 3)
+    assert torch.equal(local[:, 0], torch.tensor([2.0, 3.0, 4.0]))
+    # forward on the rank-local shard of x must broadcast against the sliced buffer
+    x_shard = torch.randn(2, 4, 1, 3, 3)
+    out = conn(x_shard, grid_shard_sizes=[2, 3])
+    assert out.shape == (2, 1, 3, 3)
+    assert torch.equal(out[0, 0, :, 0], torch.tensor([2.0, 3.0, 4.0]))

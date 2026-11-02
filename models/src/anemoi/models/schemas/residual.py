@@ -142,9 +142,41 @@ class SpectralOrnsteinConnectionSchema(BaseModel):
     )
 
 
+class ClimatologySkipConnectionSchema(BaseModel):
+    """Schema for climatology-based skip connections."""
+
+    target_: Literal["anemoi.models.layers.residual.ClimatologySkipConnection"] = Field(..., alias="_target_")
+    # Hydra merges `step` from the default SkipConnection config when _target_ is overridden; ignore it.
+    step: int = Field(-1, exclude=True)
+    climatology_path: str = Field(
+        ...,
+        description="Path to a .npz file mapping variable names to 1-D per-grid-point climatology arrays.",
+    )
+    missing_value: float = Field(
+        0.0,
+        description="Value marking a residual base with no background when fill_missing_only is enabled. "
+        "Only a base equal to it at every point counts.",
+    )
+    fill_missing_only: bool = Field(
+        False,
+        description="If true, return the latest input, or climatology for any sample whose latest input "
+        "equals missing_value everywhere (the DA cold-start base), instead of climatology everywhere.",
+    )
+    normalize_climatology: bool = Field(
+        False,
+        description="If true, normalize the loaded climatology with dataset statistics before use.",
+    )
+    normalize_method: dict | None = Field(
+        None,
+        description="Normalization method config, same structure as the preprocessor normalizer "
+        '(e.g. {"default": "mean-std", "min-max": ["tp"]}). Only used when normalize_climatology is true.',
+    )
+
+
 ResidualConnectionSchema = Annotated[
     SkipConnectionSchema
     | TruncatedConnectionSchema
+    | ClimatologySkipConnectionSchema
     | ScalarOrnsteinConnectionSchema
     | SpectralOrnsteinConnectionSchema,
     Field(discriminator="target_"),

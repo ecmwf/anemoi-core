@@ -22,6 +22,7 @@ from omegaconf import OmegaConf
 # Imported for their side effect: __subclasses__() only sees classes whose module has been imported.
 import anemoi.models.models.hierarchical  # noqa: F401
 import anemoi.models.models.transport_encoder_processor_decoder  # noqa: F401
+from anemoi.models.data import Batch
 from anemoi.models.layers.categorical import check_categorical_preprocessing
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
@@ -233,3 +234,64 @@ def test_preprocessing_check(caplog: pytest.LogCaptureFixture) -> None:
         "grid", ["f"], processors({"default": "mean-std", "none": ["f"]}, {"default": "none", 5.0: ["f"]})
     )
     assert "non-zero value" in caplog.text
+
+
+# ── inference: predict_step prepares a raw residual base like the input ──
+
+
+class _Shift(torch.nn.Module):
+    """Stands in for a dataset's pre-processors: a shift makes the zero base detectable."""
+
+    def forward(self, source, in_place: bool = True, **_kwargs):  # noqa: ARG002, FBT001, FBT002
+        return source.map_data(lambda t: t * 2.0 + 1.0)
+
+
+class _Identity(torch.nn.Module):
+    def forward(self, source, in_place: bool = True, **_kwargs):  # noqa: ARG002, FBT001, FBT002
+        return source
+
+
+def _predict(model, batches: dict, **kwargs):
+    processors = torch.nn.ModuleDict({"grid": _Shift(), "obs": _Shift()})
+    return model.predict_step(
+        batches["x"],
+        {name: source.template() for name, source in batches["noisy_target"].items()},
+        processors,
+        torch.nn.ModuleDict({"grid": _Identity(), "obs": _Identity()}),
+        batches["target_forcing"],
+        **kwargs,
+    )
+
+
+def _prepared(batch):
+    return batch.with_sources({name: _Shift()(source) for name, source in batch.items()})
+
+
+def test_predict_step_normalises_the_raw_residual_base() -> None:
+    model = _build()
+    batches = _synthetic_batches(model)
+    raw_background = _with_grid_data(batches["x"], batches["x"]["grid"].data + 1.0)
+    out = _predict(model, batches, skip_input=Batch({"grid": raw_background["grid"]}))
+    with torch.no_grad():
+        expected = _forward(
+            model,
+            {**batches, "x": _prepared(batches["x"]), "target_forcing": _prepared(batches["target_forcing"])},
+            skip_input=_prepared(raw_background),
+        )
+    torch.testing.assert_close(out["grid"].data, expected["grid"].data)
+
+
+def test_predict_step_cold_start_base_is_zero_after_normalisation() -> None:
+    model = _build()
+    batches = _synthetic_batches(model)
+    out = _predict(model, batches, skip_input=Batch({}))
+    x = _prepared(batches["x"])
+    with torch.no_grad():
+        expected = _forward(
+            model,
+            {**batches, "x": x, "target_forcing": _prepared(batches["target_forcing"])},
+            skip_input=x.map_data(torch.zeros_like),
+        )
+        default = _forward(model, {**batches, "x": x, "target_forcing": _prepared(batches["target_forcing"])})
+    torch.testing.assert_close(out["grid"].data, expected["grid"].data)
+    assert not torch.allclose(out["grid"].data, default["grid"].data)

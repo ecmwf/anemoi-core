@@ -732,6 +732,58 @@ class BaseGraphModel(nn.Module):
 
         return processed_batch, processed_forcing
 
+    def _prepare_skip_input(
+        self,
+        skip_input: Batch,
+        processed_batch: Batch,
+        pre_processors: nn.ModuleDict,
+        model_comm_group: Optional[ProcessGroup] = None,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
+    ) -> Batch:
+        """Prepare a raw residual base for inference, as the input is prepared.
+
+        Training builds ``skip_input`` from the already pre-processed state; inference holds raw
+        values, which get the input's sharding, spatial projection and normalisation here. A dataset
+        of the input that ``skip_input`` leaves out has no background yet (a DA cold start): its base
+        is all zero *after* normalisation, as in training, which a
+        ``ClimatologySkipConnection(missing_value=0.0, fill_missing_only=True)`` replaces by
+        climatology. A raw zero base would instead normalise to ``-mean/stdev``.
+
+        Parameters
+        ----------
+        skip_input : Batch
+            Raw residual bases, shaped like the raw input of their datasets.
+        processed_batch : Batch
+            The prepared input.
+        pre_processors : nn.ModuleDict
+            Pre-processing modules keyed by dataset name.
+        model_comm_group : Optional[ProcessGroup]
+            Model communication group.
+        spatial_pre_processors : Optional[nn.ModuleDict]
+            Spatial preprocessors keyed by dataset name.
+
+        Returns
+        -------
+        Batch
+            One prepared residual base per dataset of the input.
+        """
+        if not self.supports_skip_input:
+            msg = f"{type(self).__name__} does not support skip_input."
+            raise ValueError(msg)
+        prepared, _ = self._prepare_prediction_inputs(
+            skip_input,
+            None,
+            pre_processors,
+            model_comm_group=model_comm_group,
+            spatial_pre_processors=spatial_pre_processors,
+        )
+        return processed_batch.with_sources(
+            {
+                name: prepared[name] if name in prepared else source.map_data(torch.zeros_like)
+                for name, source in processed_batch.items()
+            },
+        )
+
     def predict_step(
         self,
         x: Batch,
@@ -770,7 +822,8 @@ class BaseGraphModel(nn.Module):
             Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector).
             Applied after grid sharding and before normalisation, as in training.
         **kwargs
-            Additional arguments.
+            Additional arguments. ``skip_input`` (a raw :class:`Batch`) replaces the input as the
+            residual base, see :meth:`_prepare_skip_input`.
 
         Returns
         -------
@@ -778,6 +831,7 @@ class BaseGraphModel(nn.Module):
             Model output (after post-processing), built from the target information.
         ```
         """
+        skip_input = kwargs.pop("skip_input", None)
         with torch.no_grad():
             target_template = self._shard_target_template(target_template, model_comm_group)
             processed_batch, processed_target = self._prepare_prediction_inputs(
@@ -788,6 +842,14 @@ class BaseGraphModel(nn.Module):
                 spatial_pre_processors=spatial_pre_processors,
                 **kwargs,
             )
+            if skip_input is not None:
+                kwargs["skip_input"] = self._prepare_skip_input(
+                    skip_input,
+                    processed_batch,
+                    pre_processors,
+                    model_comm_group=model_comm_group,
+                    spatial_pre_processors=spatial_pre_processors,
+                )
 
             # Perform forward pass
             y_hat = self.forward(

@@ -15,6 +15,7 @@ from typing import Optional
 import einops
 import numpy as np
 import torch
+import torch.distributed as dist
 from torch import nn
 from torch.nn import Parameter
 from torch_geometric.data import HeteroData
@@ -83,6 +84,227 @@ class SkipConnection(BaseResidualConnection):
     ) -> torch.Tensor:
         """Return one of the input steps."""
         x_skip = x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
+        return self._expand_time(x_skip, n_step_output)
+
+
+def _parse_normalize_methods(normalize_method) -> tuple[str, dict[str, str]]:
+    """Parse normalize_method config into (default, {var_name: method}).
+
+    Accepts the same dict structure as the preprocessor normalizer config:
+    ``{"default": "mean-std", "min-max": ["var1", "var2"], ...}``.
+    """
+    if not normalize_method:
+        return "mean-std", {}
+    normalize_method = dict(normalize_method)
+    default = normalize_method.get("default", "mean-std")
+    methods: dict[str, str] = {}
+    for key, value in normalize_method.items():
+        if key == "default":
+            continue
+        if isinstance(value, (list, tuple)):
+            for var in value:
+                methods[str(var)] = key
+        elif isinstance(value, str):
+            methods[value] = key
+    return default, methods
+
+
+def _apply_climatology_normalization(
+    climatology: np.ndarray,
+    feature_names: list,
+    statistics: dict,
+    normalize_method,
+    data_name_to_idx: dict,
+) -> None:
+    """Normalize climatology columns in-place using dataset statistics.
+
+    Parameters
+    ----------
+    climatology : np.ndarray
+        Shape ``(num_grid_points, num_features)``, modified in-place.
+    feature_names : list
+        ``feature_names[col]`` gives the variable name for column ``col``,
+        or ``None`` to skip that column.
+    statistics : dict
+        Dataset statistics with keys ``"mean"``, ``"stdev"``, ``"minimum"``,
+        ``"maximum"`` — each a 1-D array indexed by data input index.
+    normalize_method : dict | None
+        Method config with the same structure as the preprocessor normalizer:
+        ``{"default": "mean-std", "min-max": ["var1"], ...}``.
+    data_name_to_idx : dict
+        Mapping from variable name to data input index (used to index statistics).
+    """
+    default_method, var_methods = _parse_normalize_methods(normalize_method)
+    for col, var_name in enumerate(feature_names):
+        if var_name is None or var_name not in data_name_to_idx:
+            continue
+        method = var_methods.get(var_name, default_method)
+        if method == "none":
+            continue
+        d_idx = data_name_to_idx[var_name]
+        col_data = climatology[:, col]
+        if method == "mean-std":
+            climatology[:, col] = (col_data - statistics["mean"][d_idx]) / statistics["stdev"][d_idx]
+        elif method == "std":
+            climatology[:, col] = col_data / statistics["stdev"][d_idx]
+        elif method == "min-max":
+            lo, hi = statistics["minimum"][d_idx], statistics["maximum"][d_idx]
+            climatology[:, col] = (col_data - lo) / (hi - lo)
+        elif method == "max":
+            climatology[:, col] = col_data / statistics["maximum"][d_idx]
+        else:
+            raise ValueError(f"Unknown normalization method {method!r} for variable {var_name!r}.")
+
+
+class ClimatologySkipConnection(BaseResidualConnection):
+    """Skip connection that returns a fixed climatological field as the residual.
+
+    Instead of returning zeros (NoSkipConnection) or the raw input (SkipConnection),
+    this class returns pre-computed climatological values so the model predicts
+    departures from climatology.
+
+    The climatology is loaded from a NumPy ``.npz`` file whose keys are variable
+    names and values are 1-D arrays of shape ``(num_grid_points,)``. Variables
+    present in the file are slotted into the corresponding feature index; variables
+    absent from the file default to zero (equivalent to NoSkipConnection for those
+    channels).
+
+    The loaded climatology is registered as a buffer so it is saved in the model
+    checkpoint and the ``.npz`` file is **not** required at inference time.
+
+    Parameters
+    ----------
+    climatology_path : str
+        Path to a ``.npz`` file. Keys are variable names, values are 1-D numpy
+        arrays of shape ``(num_grid_points,)`` in un-normalized or normalized space
+        depending on ``normalize_climatology``.
+    graph : HeteroData, optional
+        The graph data (unused, accepted for the shared residual factory kwargs).
+    data_indices : object, optional
+        Index collection providing ``model.input.name_to_index``.
+    missing_value : float, optional
+        Value that marks a residual base with no background (the DA cold start)
+        when ``fill_missing_only=True``. Only a base that equals it at *every*
+        point counts; see ``fill_missing_only``.
+    fill_missing_only : bool, optional
+        If ``True``, return the latest input, or climatology for any (batch,
+        ensemble) sample whose latest input equals ``missing_value`` at every grid
+        point and feature. This is the all-zero step-0 base that
+        ``DAForecaster.build_skip_input`` passes before any background exists.
+        Testing whole fields rather than single points matters because
+        ``missing_value=0.0`` is also a valid normalized value (the training mean),
+        which a complete state hits at isolated points.
+    group_variables : list, optional
+        When instantiated inside :class:`PerVariableGroupResidual`, the group's
+        variable names; the buffer is then built for the group's feature dimension.
+    normalize_climatology : bool, optional
+        If ``True``, normalize the loaded climatology using ``statistics`` before
+        storing the buffer. If ``False`` (default), the npz values are used as-is
+        and are assumed to already be in normalized space.
+    normalize_method : dict | None, optional
+        Normalization method config. Uses the same structure as the preprocessor
+        normalizer config: ``{"default": "mean-std", "min-max": ["var1"], ...}``.
+        Only used when ``normalize_climatology=True``. Defaults to ``mean-std``
+        for all variables.
+    statistics : dict | None, optional
+        Dataset statistics dict with keys ``"mean"``, ``"stdev"``, ``"minimum"``,
+        ``"maximum"``. Required when ``normalize_climatology=True``.
+    """
+
+    def __init__(
+        self,
+        climatology_path: str,
+        graph: Optional[HeteroData] = None,
+        data_indices=None,
+        missing_value: float = 0.0,
+        fill_missing_only: bool = False,
+        group_variables: Optional[list] = None,
+        normalize_climatology: bool = False,
+        normalize_method=None,
+        statistics: Optional[dict] = None,
+        **_,
+    ) -> None:
+        super().__init__()
+        assert (
+            data_indices is not None
+        ), "ClimatologySkipConnection requires data_indices to map variable names to feature indices."
+
+        self._missing_value = missing_value
+        self._fill_missing_only = fill_missing_only
+
+        name_to_index = dict(data_indices.model.input.name_to_index)
+
+        # If called from PerVariableGroupResidual, only build buffer for the group's variables
+        if group_variables is not None:
+            feature_names = list(group_variables)
+        else:
+            feature_names = list(name_to_index.keys())
+        num_features = len(feature_names)
+
+        clim_data = np.load(climatology_path)
+
+        # Infer grid size from the first array in the file
+        first_key = next(iter(clim_data.files))
+        num_grid_points = clim_data[first_key].shape[0]
+
+        # Build the climatology tensor: (grid, features)
+        climatology = np.zeros((num_grid_points, num_features), dtype=np.float32)
+
+        for feat_idx, var_name in enumerate(feature_names):
+            if var_name in clim_data:
+                arr = clim_data[var_name]
+                assert arr.shape == (num_grid_points,), (
+                    f"ClimatologySkipConnection: variable {var_name!r} has shape {arr.shape}, "
+                    f"expected ({num_grid_points},)."
+                )
+                climatology[:, feat_idx] = arr.astype(np.float32)
+
+        if normalize_climatology:
+            assert statistics is not None, "ClimatologySkipConnection: normalize_climatology=True requires statistics."
+            _apply_climatology_normalization(
+                climatology,
+                feature_names,
+                statistics,
+                normalize_method,
+                dict(data_indices.data.input.name_to_index),
+            )
+
+        self.register_buffer("_climatology", torch.from_numpy(climatology))
+
+    def _local_climatology(self, grid_shard_sizes, model_comm_group) -> torch.Tensor:
+        """Return the climatology buffer, sliced to this rank's grid partition when sharded."""
+        clim = self._climatology
+        if grid_shard_sizes is None:
+            return clim
+        assert sum(grid_shard_sizes) == clim.shape[0], (
+            f"ClimatologySkipConnection: shard sizes sum to {sum(grid_shard_sizes)} "
+            f"but climatology covers {clim.shape[0]} grid points."
+        )
+        rank = dist.get_rank(group=model_comm_group)
+        offset = sum(grid_shard_sizes[:rank])
+        return clim.narrow(0, offset, grid_shard_sizes[rank])
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_sizes=None,
+        model_comm_group=None,
+        n_step_output: int | None = None,
+    ) -> torch.Tensor:
+        """Return climatology, or the latest input with cold-start samples replaced by climatology."""
+        batch, _time, ensemble, _grid, _features = x.shape
+        clim = self._local_climatology(grid_shard_sizes, model_comm_group)
+        # clim shape: (grid, features) -> broadcast to (batch, ensemble, grid, features)
+        clim = clim.unsqueeze(0).unsqueeze(0).expand(batch, ensemble, -1, -1)
+        if self._fill_missing_only:
+            x_last = x[:, -1, ...]  # (batch, ensemble, grid, features)
+            # Per sample, never per point: an exact missing_value inside a complete
+            # state is a valid value, not a gap. When sharded, every rank's shard of a
+            # cold-start base is uniform too, so the local test agrees across ranks.
+            cold_start = (x_last == self._missing_value).all(dim=-1, keepdim=True).all(dim=-2, keepdim=True)
+            x_skip = torch.where(cold_start, clim, x_last)
+        else:
+            x_skip = clim
         return self._expand_time(x_skip, n_step_output)
 
 

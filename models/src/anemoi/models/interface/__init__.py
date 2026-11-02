@@ -280,6 +280,7 @@ class AnemoiModelInterface(torch.nn.Module):
         target_forcing: dict[str, dict] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
+        skip_input: dict[str, dict | None] | None = None,
         **kwargs,
     ) -> dict[str, dict]:
         """Prediction step for the model.
@@ -302,6 +303,10 @@ class AnemoiModelInterface(torch.nn.Module):
             Model communication group, specifies which GPUs work together.
         gather_out : bool, optional
             Whether to gather the output, by default True.
+        skip_input : dict[str, dict | None], optional
+            Residual base replacing the input in the skip connection (a DA forecaster's model
+            background), as raw input payloads per dataset. A dataset given ``None`` or left out
+            has no background yet: its base is zero after normalisation. By default the input.
         **kwargs
             Additional keyword arguments for the model's ``predict_step``.
 
@@ -339,6 +344,10 @@ class AnemoiModelInterface(torch.nn.Module):
             predict_kwargs["statistics_tendencies"] = self.statistics_tendencies
         if getattr(self, "spatial_pre_processors", None):
             predict_kwargs["spatial_pre_processors"] = self.spatial_pre_processors
+
+        if skip_input is not None:
+            payloads = {name: payload for name, payload in skip_input.items() if payload is not None}
+            predict_kwargs["skip_input"] = self._get_batch(payloads) if payloads else Batch({})
 
         pred_batch = self.model.predict_step(**predict_kwargs, **kwargs)
         return self.unwrap_batch(pred_batch)
