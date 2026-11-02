@@ -54,7 +54,7 @@ jobs:
 
       - name: Install packages
         run: |
-          uv pip install \
+          uv pip install --torch-backend cpu \
             "torch==${{ matrix.torch-version }}" \
             -e "./training[all,tests]" \
             -e "./graphs[all,tests]" \
