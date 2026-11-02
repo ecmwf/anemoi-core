@@ -33,6 +33,7 @@ from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.categorical import build_categorical_embeddings
 from anemoi.models.layers.graph import NodeTrainableParameters
 from anemoi.models.models.target_features import DecodingTargetFeature
+from anemoi.models.models.target_features import TargetForcingsFeature
 from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.models.models.target_features import time_steps_per_node
 from anemoi.models.utils.config import COORDS_DIM
@@ -337,6 +338,19 @@ class BaseGraphModel(nn.Module):
         for target_features in self.decoders_target_input.values():
             target_features.validate()
 
+        # Decoder forcings reach the model only through the decoder's target forcings.
+        for dataset_name, decoder_name in self.dataset2decoder.items():
+            only_decoder_forcings = set(getattr(self.data_indices[dataset_name], "decoder_forcing", None) or ()) - set(
+                self.data_indices[dataset_name].forcing
+            )
+            features = getattr(self.decoders_target_input[decoder_name], "features", [])
+            if only_decoder_forcings and not any(isinstance(f, TargetForcingsFeature) for f in features):
+                msg = (
+                    f"Dataset '{dataset_name}' has decoder forcings {sorted(only_decoder_forcings)}, but decoder "
+                    f"'{decoder_name}' does not use them: add 'target_forcings' to its target_node_features."
+                )
+                raise ValueError(msg)
+
     def _build_latent_aggregator(self, aggregator_config: DotDict) -> None:
         """Build the latent aggregator."""
         latent_aggregator_channels = {
@@ -358,6 +372,7 @@ class BaseGraphModel(nn.Module):
         self.num_output_channels = {}
         self.num_input_channels_prognostic = {}
         self.num_input_channels_forcings = {}
+        self.num_target_forcing_channels = {}
         self.num_input_channels_decoding_forcings = {}
         self._internal_input_idx = {}
         self._internal_output_idx = {}
@@ -374,6 +389,8 @@ class BaseGraphModel(nn.Module):
 
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
             self.num_input_channels_forcings[dataset_name] = len(dataset_indices.model.input.forcing)
+            # The decoder's target forcings: the forcings and the decoder forcings, at the output times.
+            self.num_target_forcing_channels[dataset_name] = len(dataset_indices.data.input.target_forcing)
             self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 

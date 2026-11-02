@@ -102,6 +102,7 @@ def test_dataindices_todict(data_indices) -> None:
             "full": torch.Tensor([0, 1, 4, 5, 6]).to(torch.int),
             "target": torch.Tensor([]).to(torch.int),
             "corrector": torch.Tensor([]).to(torch.int),
+            "decoder_forcing": torch.Tensor([]).to(torch.int),
             "forcing": torch.Tensor([0, 4]).to(torch.int),
             "diagnostic": torch.Tensor([2, 3]).to(torch.int),
             "prognostic": torch.Tensor([1, 5, 6]).to(torch.int),
@@ -111,6 +112,7 @@ def test_dataindices_todict(data_indices) -> None:
             "full": torch.Tensor([1, 2, 3, 5, 6]).to(torch.int),
             "target": torch.Tensor([]).to(torch.int),
             "corrector": torch.Tensor([]).to(torch.int),
+            "decoder_forcing": torch.Tensor([]).to(torch.int),
             "forcing": torch.Tensor([0, 4]).to(torch.int),
             "diagnostic": torch.Tensor([2, 3]).to(torch.int),
             "prognostic": torch.Tensor([1, 5, 6]).to(torch.int),
@@ -133,6 +135,7 @@ def test_modelindices_todict(data_indices) -> None:
             "full": torch.Tensor([0, 1, 2, 3, 4]).to(torch.int),
             "target": torch.Tensor([]).to(torch.int),
             "corrector": torch.Tensor([]).to(torch.int),
+            "decoder_forcing": torch.Tensor([]).to(torch.int),
             "forcing": torch.Tensor([0, 2]).to(torch.int),
             "diagnostic": torch.Tensor([]).to(torch.int),
             "prognostic": torch.Tensor([1, 3, 4]).to(torch.int),
@@ -142,6 +145,7 @@ def test_modelindices_todict(data_indices) -> None:
             "full": torch.Tensor([0, 1, 2, 3, 4]).to(torch.int),
             "target": torch.Tensor([]).to(torch.int),
             "corrector": torch.Tensor([]).to(torch.int),
+            "decoder_forcing": torch.Tensor([]).to(torch.int),
             "forcing": torch.Tensor([]).to(torch.int),
             "diagnostic": torch.Tensor([1, 2]).to(torch.int),
             "prognostic": torch.Tensor([0, 3, 4]).to(torch.int),
@@ -330,8 +334,48 @@ def test_data_indices_todict_contains_corrector(data_indices_with_corrector) -> 
 def test_tensor_index_setstate_backcompat(data_indices) -> None:
     # simulate unpickling a checkpoint written before the corrector category existed
     index = data_indices.data.input
-    state = {k: v for k, v in index.__dict__.items() if k != "corrector"}
+    state = {k: v for k, v in index.__dict__.items() if k not in ("corrector", "decoder_forcing", "target_forcing")}
     restored = object.__new__(type(index))
     restored.__setstate__(state)
     assert restored.corrector.numel() == 0
+    assert restored.decoder_forcing.numel() == 0
+    assert torch.equal(restored.target_forcing, index.forcing)
     assert restored == index
+
+
+@pytest.fixture()
+def data_indices_with_decoder_forcing():
+    config = DictConfig(
+        {
+            "data": {
+                "forcing": ["x", "e"],
+                "diagnostic": ["z"],
+                # "x" is both a forcing and a decoder forcing (allowed); "df" is a decoder forcing only.
+                "decoder_forcing": ["x", "df"],
+            },
+        },
+    )
+    name_to_index = {"x": 0, "y": 1, "z": 2, "df": 3, "e": 4, "other": 5}
+    return IndexCollection(config.data, name_to_index=name_to_index)
+
+
+def test_data_indices_with_decoder_forcing(data_indices_with_decoder_forcing) -> None:
+    di = data_indices_with_decoder_forcing
+    # decoder-forcing-only variables are neither prognostic nor model inputs or outputs
+    assert di.prognostic == ["y", "other"]
+    assert set(di.data.input.includes) == {"x", "e", "y", "other"}
+    assert set(di.data.output.includes) == {"z", "y", "other"}
+    assert "df" not in di.model.input.name_to_index
+    # the indices address the full data
+    assert di.data.input.decoder_forcing.tolist() == [0, 3]
+    # the decoder's target forcings: the forcings and the decoder forcings
+    assert di.data.input.target_forcing.tolist() == [0, 3, 4]
+    assert di.data.input.forcing.tolist() == [0, 4]
+
+
+@pytest.mark.parametrize("category", ["diagnostic", "target", "corrector"])
+def test_data_indices_decoder_forcing_overlap_rejected(category) -> None:
+    data = {"forcing": [], "diagnostic": [], "target": [], "corrector": [], "decoder_forcing": ["x"]}
+    data[category] = ["x"]
+    with pytest.raises(AssertionError):
+        IndexCollection(DictConfig({"data": data}).data, name_to_index={"x": 0, "y": 1})

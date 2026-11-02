@@ -24,6 +24,7 @@ class BaseTensorIndex:
         name_to_index: dict[str, int],
         target: list[str] = [],
         corrector: list[str] = [],
+        decoder_forcing: list[str] = [],
     ) -> None:
         """Initialize indexing tensors from includes using name_to_index.
 
@@ -44,6 +45,10 @@ class BaseTensorIndex:
         corrector : optional, list[str]
             List of corrector variable. These are model inputs (like forcings)
             but are never part of the model output.
+        decoder_forcing : optional, list[str]
+            List of decoder-forcing variable. These condition the decoder at the
+            output times, with the forcings (``target_forcing`` = both); they may
+            also be forcings.
         """
         self.name_to_index = name_to_index
         self.includes = sorted(includes)
@@ -55,6 +60,8 @@ class BaseTensorIndex:
         self.forcing = self._build_idx_from_list(forcing)
         self.target = self._build_idx_from_list(target)
         self.corrector = self._build_idx_from_list(corrector)
+        self.decoder_forcing = self._build_idx_from_list(decoder_forcing)
+        self.target_forcing = self._build_idx_from_list(forcing + decoder_forcing)
         self.full = self._build_idx_from_list(includes)
         self.excludes = sorted(list(set(self.name_to_index.keys()) - set(self.includes)))
         self.full_index_to_name = {int(index): name for name, index in self.name_to_index.items()}
@@ -72,6 +79,10 @@ class BaseTensorIndex:
         self.__dict__.update(state)
         if "corrector" not in state:
             self.corrector = torch.tensor([], dtype=torch.int)
+        if "decoder_forcing" not in state:
+            self.decoder_forcing = torch.tensor([], dtype=torch.int)
+        if "target_forcing" not in state:
+            self.target_forcing = self.forcing
 
     def positions_for_names(self, names: list[str]) -> list[int]:
         """Resolve variable names to positions in this index-space `.full` tensor."""
@@ -101,6 +112,7 @@ class BaseTensorIndex:
             and torch.allclose(self.forcing, other.forcing)
             and torch.allclose(self.target, other.target)
             and torch.allclose(self.corrector, other.corrector)
+            and torch.allclose(self.decoder_forcing, other.decoder_forcing)
             and torch.allclose(self.full, other.full)
             and self.includes == other.includes
             and self.excludes == other.excludes
@@ -116,6 +128,7 @@ class BaseTensorIndex:
             "forcing": self.forcing,
             "target": self.target,
             "corrector": self.corrector,
+            "decoder_forcing": self.decoder_forcing,
             "full": self.full,
             "name_to_index": self.name_to_index,
         }
@@ -138,6 +151,7 @@ class InputTensorIndex(BaseTensorIndex):
         name_to_index: dict[str, int],
         target: list[str] = [],
         corrector: list[str] = [],
+        decoder_forcing: list[str] = [],
     ) -> None:
         super().__init__(
             prognostic=prognostic,
@@ -145,6 +159,7 @@ class InputTensorIndex(BaseTensorIndex):
             forcing=forcing,
             target=target,
             corrector=corrector,
+            decoder_forcing=decoder_forcing,
             includes=includes,
             name_to_index=name_to_index,
         )

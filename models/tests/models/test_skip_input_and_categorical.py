@@ -17,12 +17,14 @@ from functools import partial
 
 import pytest
 import torch
+from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
 # Imported for their side effect: __subclasses__() only sees classes whose module has been imported.
 import anemoi.models.models.hierarchical  # noqa: F401
 import anemoi.models.models.transport_encoder_processor_decoder  # noqa: F401
 from anemoi.models.data import Batch
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.categorical import check_categorical_preprocessing
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
@@ -31,9 +33,11 @@ from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.imputer import ConstantImputer
 from anemoi.models.preprocessing.normalizer import InputNormalizer
 from tests.distributed.test_model_sharding_gradients import DTYPE
+from tests.distributed.test_model_sharding_gradients import GRID_VARIABLES
 from tests.distributed.test_model_sharding_gradients import NUM_GRID_POINTS
 from tests.distributed.test_model_sharding_gradients import _data_indices
 from tests.distributed.test_model_sharding_gradients import _graph_config
+from tests.distributed.test_model_sharding_gradients import _gridded
 from tests.distributed.test_model_sharding_gradients import _model_config
 from tests.distributed.test_model_sharding_gradients import _points_on_sphere
 from tests.distributed.test_model_sharding_gradients import _statistics
@@ -42,17 +46,24 @@ from tests.distributed.test_model_sharding_gradients import _synthetic_batches
 CODES = [3, 7, 11]
 
 
-def _build(model_class: type = AnemoiModelEncProcDec, categorical: dict | None = None) -> torch.nn.Module:
+def _build(
+    model_class: type = AnemoiModelEncProcDec,
+    categorical: dict | None = None,
+    data_indices: dict | None = None,
+    grid_target_features: list[str] | None = None,
+) -> torch.nn.Module:
     generator = torch.Generator().manual_seed(0)
     latitudes, longitudes = _points_on_sphere(NUM_GRID_POINTS, generator)
     config = _model_config(model_class, obs_predicted=True)
     if categorical is not None:
         config.categorical_embeddings = OmegaConf.create(categorical)
+    if grid_target_features is not None:
+        config.decoders.grid.target_node_features = grid_target_features
     torch.manual_seed(1)
     model = model_class(
         model_config=config,
         model_graph_config=_graph_config(latitudes, longitudes, max_obs_neighbours=4096),
-        data_indices=_data_indices(),
+        data_indices=data_indices or _data_indices(),
         statistics=_statistics(),
         data_types={"grid": "gridded", "obs": "tabular"},
         n_step_input={"grid": 2, "obs": 2},
@@ -295,3 +306,38 @@ def test_predict_step_cold_start_base_is_zero_after_normalisation() -> None:
         default = _forward(model, {**batches, "x": x, "target_forcing": _prepared(batches["target_forcing"])})
     torch.testing.assert_close(out["grid"].data, expected["grid"].data)
     assert not torch.allclose(out["grid"].data, default["grid"].data)
+
+
+# ── decoder forcings ─────────────────────────────────────────────────────
+
+
+def _decoder_forcing_indices() -> dict:
+    """The grid's "b" conditions the decoder at the output times only; "f" is a forcing."""
+    indices = _data_indices()
+    indices["grid"] = IndexCollection(
+        DictConfig({"forcing": ["f"], "diagnostic": ["d"], "target": [], "decoder_forcing": ["b"]}),
+        {name: index for index, name in enumerate(GRID_VARIABLES)},
+    )
+    return indices
+
+
+def test_decoder_forcings_widen_the_target_forcings(monkeypatch: pytest.MonkeyPatch) -> None:
+    plain = _build()
+    model = _build(data_indices=_decoder_forcing_indices())
+    # "b" is no longer an encoder input, but one more target-forcing channel of the decoder
+    assert model.num_input_channels["grid"] == plain.num_input_channels["grid"] - 1
+    assert model.num_target_forcing_channels["grid"] == plain.num_target_forcing_channels["grid"] + 1
+
+    monkeypatch.setattr("tests.distributed.test_model_sharding_gradients._data_indices", _decoder_forcing_indices)
+    batches = _synthetic_batches(model)
+    coordinates = batches["target_forcing"]["grid"].coordinates
+    forcings = _gridded(["b", "f"], torch.randn(1, 1, 1, NUM_GRID_POINTS, 2, dtype=DTYPE), coordinates)
+    batches["target_forcing"] = batches["target_forcing"].replace("grid", forcings)
+    with torch.no_grad():
+        out = _forward(model, batches)
+    assert torch.isfinite(out["grid"].data).all()
+
+
+def test_decoder_forcings_need_the_target_forcings_feature() -> None:
+    with pytest.raises(ValueError, match="target_forcings"):
+        _build(data_indices=_decoder_forcing_indices(), grid_target_features=["encoded_data"])

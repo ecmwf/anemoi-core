@@ -46,18 +46,22 @@ class BaseIndex:
 class DataIndex(BaseIndex):
     """Indexing for data variables."""
 
-    def __init__(self, diagnostic, forcing, name_to_index, target=[], corrector=[]) -> None:
+    def __init__(self, diagnostic, forcing, name_to_index, target=[], corrector=[], decoder_forcing=[]) -> None:
         self._diagnostic = diagnostic
         self._forcing = forcing
         self._target = target
         self._corrector = corrector
-        self._prognostic = [v for v in name_to_index.keys() if v not in set(forcing + diagnostic + target + corrector)]
+        self._decoder_forcing = decoder_forcing
+        self._prognostic = [
+            v for v in name_to_index.keys() if v not in set(forcing + diagnostic + target + corrector + decoder_forcing)
+        ]
         self._name_to_index = name_to_index
         self.input = InputTensorIndex(
             includes=forcing + self._prognostic + corrector,
             forcing=forcing,
             target=target,
             corrector=corrector,
+            decoder_forcing=decoder_forcing,
             diagnostic=diagnostic,
             prognostic=self._prognostic,
             name_to_index=name_to_index,
@@ -68,6 +72,7 @@ class DataIndex(BaseIndex):
             forcing=forcing,
             target=target,
             corrector=corrector,
+            decoder_forcing=decoder_forcing,
             diagnostic=diagnostic,
             prognostic=self._prognostic,
             name_to_index=name_to_index,
@@ -88,13 +93,17 @@ class ModelIndex(BaseIndex):
         name_to_index_model_output,
         target=[],
         corrector=[],
+        decoder_forcing=[],
     ) -> None:
         self._diagnostic = diagnostic
         self._forcing = forcing
         self._target = target
         self._corrector = corrector
+        self._decoder_forcing = decoder_forcing
         self._prognostic = [
-            v for v in name_to_index_model_input.keys() if v not in set(forcing + diagnostic + target + corrector)
+            v
+            for v in name_to_index_model_input.keys()
+            if v not in set(forcing + diagnostic + target + corrector + decoder_forcing)
         ]
         self._name_to_index_model_input = name_to_index_model_input
         self._name_to_index_model_output = name_to_index_model_output
@@ -103,6 +112,7 @@ class ModelIndex(BaseIndex):
             forcing=forcing,
             target=target,
             corrector=corrector,
+            decoder_forcing=decoder_forcing,
             diagnostic=diagnostic,
             prognostic=self._prognostic,
             name_to_index=name_to_index_model_input,
@@ -113,6 +123,7 @@ class ModelIndex(BaseIndex):
             forcing=forcing,
             target=target,
             corrector=corrector,
+            decoder_forcing=decoder_forcing,
             diagnostic=diagnostic,
             prognostic=self._prognostic,
             name_to_index=name_to_index_model_output,

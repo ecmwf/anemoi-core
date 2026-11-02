@@ -43,6 +43,14 @@ def time_steps_per_node(model: "BaseGraphModel", dataset_name: str, n_steps: dic
     return n_steps[dataset_name] if is_static else 1
 
 
+def _num_target_forcing_channels(model: "BaseGraphModel", dataset_name: str) -> int:
+    """Width of a dataset's target forcings per time step (the forcings, for models predating decoder forcings)."""
+    channels = getattr(model, "num_target_forcing_channels", None)
+    if channels is None:
+        return model.num_input_channels_forcings[dataset_name]
+    return channels[dataset_name]
+
+
 TARGET_FEATURE_REGISTRY: dict[str, type[DecodingTargetFeature]] = {}
 
 
@@ -195,14 +203,14 @@ class InputForcingsFeature(DecodingTargetFeature):
 
 @register_target_feature("target_forcings")
 class TargetForcingsFeature(DecodingTargetFeature):
-    """Forcing variables over the output timestep window."""
+    """Forcing and decoder-forcing variables over the output timestep window."""
 
     needs_sharding = False
 
     def validate(self) -> None:
         num_trainable_params = {}
         for dataset_name in self.datasets_names:
-            num_trainable_params[dataset_name] = self.model.num_input_channels_forcings[dataset_name]
+            num_trainable_params[dataset_name] = _num_target_forcing_channels(self.model, dataset_name)
 
         assert len(set(num_trainable_params.values())) == 1, (
             f"Forcings feature must have the same dimension across all datasets decoded with the same decoder. "
@@ -213,7 +221,7 @@ class TargetForcingsFeature(DecodingTargetFeature):
     def dim(self) -> int:
         dataset_name = self.datasets_names[0]
         steps = time_steps_per_node(self.model, dataset_name, self.model.n_step_output)
-        return steps * self.model.num_input_channels_forcings[dataset_name]
+        return steps * _num_target_forcing_channels(self.model, dataset_name)
 
     def _compute(
         self,

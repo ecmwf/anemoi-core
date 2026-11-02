@@ -61,7 +61,20 @@ class IndexCollection:
             if data_config.get("corrector", None) is None
             else OmegaConf.to_container(data_config.corrector, resolve=True)
         )
-        defined_variables = set.union(set(self.forcing), set(self.diagnostic), set(self.target), set(self.corrector))
+        # Decoder forcings condition the decoder at the output times. They may also be forcings (the
+        # same variable read at the input times by the encoder); the others are not model inputs.
+        self.decoder_forcing = (
+            []
+            if data_config.get("decoder_forcing", None) is None
+            else OmegaConf.to_container(data_config.decoder_forcing, resolve=True)
+        )
+        defined_variables = set.union(
+            set(self.forcing),
+            set(self.diagnostic),
+            set(self.target),
+            set(self.corrector),
+            set(self.decoder_forcing),
+        )
         self.prognostic = [v for v in self.name_to_index.keys() if v not in defined_variables]
 
         assert set(self.diagnostic).isdisjoint(self.forcing), (
@@ -77,6 +90,12 @@ class IndexCollection:
             assert not overlap, (
                 f"Corrector and {category} variables overlap: {overlap}. ",
                 "A variable can only belong to one category.",
+            )
+        for category in ("diagnostic", "target", "corrector"):
+            overlap = set(self.decoder_forcing).intersection(getattr(self, category))
+            assert not overlap, (
+                f"Decoder-forcing and {category} variables overlap: {overlap}. ",
+                "A decoder forcing can only also be a forcing.",
             )
         name_to_index_model_input = {
             name: i
@@ -97,6 +116,7 @@ class IndexCollection:
             forcing=self.forcing,
             target=self.target,
             corrector=self.corrector,
+            decoder_forcing=self.decoder_forcing,
             name_to_index=self.name_to_index,
         )
         self.model = ModelIndex(
@@ -104,6 +124,7 @@ class IndexCollection:
             forcing=self.forcing,
             target=self.target,
             corrector=self.corrector,
+            decoder_forcing=self.decoder_forcing,
             name_to_index_model_input=name_to_index_model_input,
             name_to_index_model_output=name_to_index_model_output,
         )
