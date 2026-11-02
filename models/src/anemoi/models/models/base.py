@@ -340,9 +340,10 @@ class BaseGraphModel(nn.Module):
 
         # Decoder forcings reach the model only through the decoder's target forcings.
         for dataset_name, decoder_name in self.dataset2decoder.items():
-            only_decoder_forcings = set(getattr(self.data_indices[dataset_name], "decoder_forcing", None) or ()) - set(
-                self.data_indices[dataset_name].forcing
-            )
+            decoder_forcings = set(getattr(self.data_indices[dataset_name], "decoder_forcing", None) or ())
+            if not decoder_forcings:
+                continue
+            only_decoder_forcings = decoder_forcings - set(self.data_indices[dataset_name].forcing)
             features = getattr(self.decoders_target_input[decoder_name], "features", [])
             if only_decoder_forcings and not any(isinstance(f, TargetForcingsFeature) for f in features):
                 msg = (
@@ -389,8 +390,12 @@ class BaseGraphModel(nn.Module):
 
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
             self.num_input_channels_forcings[dataset_name] = len(dataset_indices.model.input.forcing)
-            # The decoder's target forcings: the forcings and the decoder forcings, at the output times.
-            self.num_target_forcing_channels[dataset_name] = len(dataset_indices.data.input.target_forcing)
+            # The decoder's target forcings: the forcings and the decoder forcings, at the output times
+            # (just the forcings for indices without the decoder-forcing category).
+            target_forcing = getattr(dataset_indices.data.input, "target_forcing", None)
+            self.num_target_forcing_channels[dataset_name] = (
+                self.num_input_channels_forcings[dataset_name] if target_forcing is None else len(target_forcing)
+            )
             self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 
