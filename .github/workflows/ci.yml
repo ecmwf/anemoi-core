@@ -32,20 +32,9 @@ jobs:
     steps:
       - uses: ecmwf/ci-infrastructure/actions/require-ci-approval@main
 
-  pre-commit:
-    needs: ci-approval
-    # ubuntu-slim has one CPU: installing the hook environments on a cache miss took up to 11 min.
-    runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-      SKIP: no-commit-to-branch
-    steps:
-      - uses: ecmwf/ci-infrastructure/actions/checkout-under-test@main
-      - uses: ecmwf/ci-infrastructure/actions/pre-commit@main
-
   resolve:
     needs: ci-approval
-    runs-on: arc-runner-normal
+    runs-on: ubuntu-latest
     container:
       image: eccr.ecmwf.int/public-ci-images/ubuntu24.04-base:latest
     outputs:
@@ -136,7 +125,7 @@ jobs:
   ci-result:
     name: collect results
     if: always()
-    needs: [ci-approval, pre-commit, resolve, test]
+    needs: [ci-approval, resolve, test]
     runs-on: ubuntu-slim
     permissions:
       statuses: write

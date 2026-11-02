@@ -43,7 +43,7 @@ packages = ["anemoi-graphs", "anemoi-models", "anemoi-training"]
 
 [matrix.test.defaults]
 job-script = "./.ci/test.sh.j2"
-runs-on = "arc-runner-normal"
+runs-on = "ubuntu-latest"
 container = "eccr.ecmwf.int/public-ci-images/ubuntu24.04-base:latest"
 platform = "ubuntu-24.04"
 extras = "all,tests"

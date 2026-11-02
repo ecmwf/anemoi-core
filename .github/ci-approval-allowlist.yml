@@ -12,6 +12,10 @@ exempt:
   # Posts a commit status from the event's labels; no checkout.
   - workflow: pr-label-expensive-tests.yml
     jobs: [gate]
+  # GitHub-hosted runners only: quality calls ecmwf/reusable-workflows on
+  # ubuntu-latest, and pytest's runs-on is the matrix platform, always ubuntu-latest.
+  - workflow: python-pull-request.yml
+    jobs: [quality, pytest]
   # Under pull_request_target, actions/checkout without a ref takes the base
   # branch; the job only diffs it and edits the description with the docs links.
   - workflow: readthedocs-pr-update.yml
