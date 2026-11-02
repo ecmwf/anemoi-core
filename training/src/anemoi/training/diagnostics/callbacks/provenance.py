@@ -8,17 +8,14 @@
 # nor does it submit to any jurisdiction.
 
 
-import logging
-
 import pytorch_lightning as pl
-import torch
 from pytorch_lightning.callbacks import Callback
 
-LOGGER = logging.getLogger(__name__)
+from anemoi.training.checkpoint.lineage import record_checkpoint_lineage
 
 
 class ParentUUIDCallback(Callback):
-    """A callback that retrieves the parent UUID for a model, if it is a child model."""
+    """A callback that appends a warm-start ckpt's parent uuid to the module's metadata, when Lightning loads the checkpoint."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -27,7 +24,7 @@ class ParentUUIDCallback(Callback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        checkpoint: torch.nn.Module,
+        checkpoint: dict,
     ) -> None:
         del trainer  # unused
-        pl_module.hparams["metadata"]["parent_uuid"] = checkpoint["hyper_parameters"]["metadata"]["uuid"]
+        record_checkpoint_lineage(pl_module, checkpoint, "warm_start")
