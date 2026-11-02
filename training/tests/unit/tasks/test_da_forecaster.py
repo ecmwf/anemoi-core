@@ -249,3 +249,16 @@ def test_skip_input_zero_base_then_background_after_a_blend() -> None:
     assert torch.equal(base["data"].data[:, 0], advanced["data"].data[:, 0])
 
     assert task.build_skip_input(advanced, y_pred, data_indices=indices, rollout_step=1, is_da=False) is None
+
+
+def test_target_forcings_include_the_decoder_forcings() -> None:
+    """Decoder forcings condition the decoder at the output times, with the forcings; they are no inputs."""
+    indices = IndexCollection(
+        OmegaConf.create({"forcing": ["f"], "diagnostic": [], "decoder_forcing": ["b"]}),
+        NAME_TO_INDEX,
+    )
+    task = _task(da_cycles=0)
+    batch = _gridded(torch.randn(1, 3, 1, GRID, 4), list(NAME_TO_INDEX))
+    _, _, target_forcings = task.get_targets(batch, data_indices={"data": indices}, rollout_step=0)
+    assert target_forcings["data"].variables == ["b", "f"]
+    assert "b" not in task.get_inputs(batch, data_indices={"data": indices})["data"].variables

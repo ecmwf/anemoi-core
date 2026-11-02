@@ -308,6 +308,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 "forcing": [input_index_to_name[int(index)] for index in input_data_indices["forcing"]],
                 "target": [input_index_to_name[int(index)] for index in input_data_indices["target"]],
                 "corrector": [input_index_to_name[int(index)] for index in input_data_indices["corrector"]],
+                "decoder_forcing": [input_index_to_name[int(index)] for index in input_data_indices["decoder_forcing"]],
                 "prognostic": [input_index_to_name[int(index)] for index in input_data_indices["prognostic"]],
                 "diagnostic": [input_index_to_name[int(index)] for index in input_data_indices["diagnostic"]],
             }

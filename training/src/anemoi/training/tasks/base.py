@@ -236,8 +236,9 @@ class BaseTask(ABC):
         for dataset_name, selected_source in target_tensors.items():
             LOGGER.debug("Selected targets: x[%s] = %s", dataset_name, selected_source)
 
+        # The decoder is conditioned on the forcings and the decoder forcings at the output times.
         var_indices = {
-            dataset_name: data_indices[dataset_name].data.input.forcing for dataset_name in batch.dataset_names
+            dataset_name: data_indices[dataset_name].data.input.target_forcing for dataset_name in batch.dataset_names
         }
         target_forcing = target_tensors.select(variables=var_indices)
 

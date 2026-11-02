@@ -37,6 +37,12 @@ class DatasetDataSchema(PydanticBaseModel):
         "forcings, and zeroed during the forecast phase of a DA forecaster. "
         "Must be disjoint from forcing, diagnostic and target variables."
     )
+    decoder_forcing: list[str] = Field(default_factory=list)
+    (
+        "Features that condition the decoder at the output times, with the forcings (the decoder needs "
+        "'target_forcings' in its target_node_features). They may also be forcings (read by the encoder "
+        "at the input times); the others are not model inputs. Disjoint from diagnostic, target and corrector."
+    )
 
     processors: dict[str, PreprocessorSchema]
     "Layers of model performing computation on latent space. \
