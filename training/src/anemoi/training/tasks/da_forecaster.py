@@ -292,8 +292,9 @@ class DAForecaster(Forecaster):
         flow-dependent, and observations reach the output only through the encoder.
 
         Before the first step (``y_pred=None``) no background exists, and every position is zero,
-        standing for "nothing known here": with a plain ``SkipConnection`` the zero base disables
-        the residual of the first DA cycle. After a forecast step the input is already a raw
+        standing for "nothing known here": a ``ClimatologySkipConnection(missing_value=0.0,
+        fill_missing_only=True)`` then returns climatology for the first DA cycle, a plain
+        ``SkipConnection`` no residual. After a forecast step the input is already a raw
         prediction, so ``None`` (no override) is returned.
 
         Parameters

@@ -28,6 +28,9 @@ datasets:
     # observation metadata (e.g. viewing geometry, report type): model inputs zeroed in the
     # forecast steps of a DA forecaster, which feed the training-time correctors
     # corrector: []
+    # features that condition the decoder at the output times, with the forcings (the decoder
+    # needs 'target_forcings' in its target_node_features); they may also be forcings
+    # decoder_forcing: []
 
     # const_imputer:
     #   default: "none"

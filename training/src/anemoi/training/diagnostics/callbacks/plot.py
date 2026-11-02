@@ -36,6 +36,7 @@ from anemoi.models.data import Source
 from anemoi.models.data import TabularSource
 from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.evaluation.plotting.graph import graph_plot_fn as _default_graph_plot_fn
+from anemoi.training.diagnostics.evaluation.plotting.loss import loss_contribution_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as _default_loss_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_graph_inputs
 from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_loss_inputs
@@ -48,6 +49,7 @@ from anemoi.training.diagnostics.evaluation.plotting.protocols import validate_p
 from anemoi.training.diagnostics.evaluation.plotting.settings import init_plot_settings
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
+from anemoi.training.train.corrector import apply_correctors
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -434,6 +436,21 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         del pl_module, output
         return {}
 
+    def _adjust_predictions(
+        self,
+        pl_module: pl.LightningModule,
+        predictions: list[dict[str, Source]],
+        batch: Batch,
+    ) -> list[dict[str, Source]]:
+        """Hook to transform the gathered predictions before plotting. Identity by default.
+
+        Runs on the training thread, before the plot is handed to the executor: anything that
+        calls into the model (e.g. a corrector forward) must happen here rather than in
+        :meth:`_plot`, which may run asynchronously.
+        """
+        del pl_module, batch
+        return predictions
+
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -473,6 +490,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 {dataset_name: _allgather_view(pl_module, dataset_pred) for dataset_name, dataset_pred in pred.items()}
                 for pred in preds
             ]
+            gathered_predictions = self._adjust_predictions(pl_module, gathered_predictions, batch)
             # When running in Async mode, it might happen that in the last epoch these tensors
             # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
             # but internal ones would be on the cpu), The lines below allow to address this problem.
@@ -823,6 +841,11 @@ class LossCurvePlot(BasePerBatchPlotCallback):
     :func:`anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn`.
     """
 
+    #: Prefix of the logged figure tags.
+    tag_prefix = "loss"
+    #: Plot function used when the configuration gives none.
+    default_plot_fn = staticmethod(_default_loss_plot_fn)
+
     def __init__(
         self,
         parameter_groups: dict[str, list[str]],
@@ -853,8 +876,8 @@ class LossCurvePlot(BasePerBatchPlotCallback):
         )
         self.parameter_groups = parameter_groups if parameter_groups is not None else {}
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
-        self.plot_fn = plot_fn if plot_fn is not None else _default_loss_plot_fn
-        validate_plot_fn(self.plot_fn, LossPlotFn, "LossCurvePlot")
+        self.plot_fn = plot_fn if plot_fn is not None else type(self).default_plot_fn
+        validate_plot_fn(self.plot_fn, LossPlotFn, type(self).__name__)
 
     def _plot(
         self,
@@ -875,7 +898,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
                 LOGGER.warning("Loss function must be a subclass of BaseLoss, or provide `squash`.")
             loss_inputs = extract_loss_inputs(pl_module, dataset_name, self.parameter_groups)
 
-            for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
+            for i, task_kwargs in self._plotted_steps(pl_module):
                 y_hat = outputs.predictions[i][dataset_name]
                 # Pass the full target batch; index the per-dataset Source afterwards.
                 batch_obj = batch
@@ -909,9 +932,15 @@ class LossCurvePlot(BasePerBatchPlotCallback):
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"loss_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
-                    exp_log_tag=f"loss_sample_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
+                    tag=f"{self.tag_prefix}_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
+                    exp_log_tag=(
+                        f"{self.tag_prefix}_sample_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}"
+                    ),
                 )
+
+    def _plotted_steps(self, pl_module: pl.LightningModule) -> list[tuple[int, dict]]:
+        """The validation steps to plot, with their index in the predictions."""
+        return list(enumerate(pl_module.task.steps("validation")))
 
     def on_validation_batch_end(
         self,
@@ -930,6 +959,52 @@ class LossCurvePlot(BasePerBatchPlotCallback):
                 pl_module.plot_adapter.prepare_loss_batch(batch),
                 batch_idx,
             )
+
+
+class PlotLossCorrected(LossCurvePlot):
+    """Per-variable loss plot with the training-time correctors applied to the predictions.
+
+    Identical to :class:`LossCurvePlot`, except that for the datasets with a corrector
+    (``pl_module.corrector``, see ``training.corrector``) the raw prediction is corrected before the
+    per-variable loss, which matches the loss the model trains against. Without a corrector it
+    behaves like :class:`LossCurvePlot`. Steps of a DA forecaster's assimilation cycles are not
+    plotted.
+
+    Defaults to
+    :func:`anemoi.training.diagnostics.evaluation.plotting.loss.loss_contribution_plot_fn`,
+    which shows each group's and variable's share of the total loss.
+    """
+
+    tag_prefix = "loss_corrected"
+    default_plot_fn = staticmethod(loss_contribution_plot_fn)
+
+    def _adjust_predictions(
+        self,
+        pl_module: pl.LightningModule,
+        predictions: list[dict[str, Source]],
+        batch: Batch,
+    ) -> list[dict[str, Source]]:
+        """Apply the correctors to the gathered predictions, on the training thread of rank 0."""
+        correctors = getattr(pl_module, "corrector", None)
+        # Only rank 0 plots, so skip the corrector forward elsewhere.
+        if not correctors or rank_zero_only.rank != 0:
+            return predictions
+
+        adjusted = [dict(pred) for pred in predictions]
+        for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
+            if task_kwargs.get("is_da", False):
+                continue
+            targets, _, _ = pl_module.task.get_targets(batch, data_indices=pl_module.data_indices, **task_kwargs)
+            targets = pl_module.preprocess_targets(targets)
+            # Gathered full-grid sources: no communication group. Plot-only: no autograd graph.
+            with torch.no_grad():
+                corrected = apply_correctors(correctors, Batch(predictions[i]), targets, pl_module.data_indices)
+            adjusted[i].update({name: corrected[name] for name in predictions[i]})
+        return adjusted
+
+    def _plotted_steps(self, pl_module: pl.LightningModule) -> list[tuple[int, dict]]:
+        """The forecast steps only: a DA forecaster's assimilation cycles are not plotted."""
+        return [(i, kw) for i, kw in super()._plotted_steps(pl_module) if not kw.get("is_da", False)]
 
 
 class BatchOutputPlot(BasePlotAdditionalMetrics):

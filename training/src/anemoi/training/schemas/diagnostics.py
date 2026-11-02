@@ -130,6 +130,17 @@ class LossCurvePlotSchema(PydanticBaseModel):
     "Hydra-instantiable plot function (use ``_partial_: true``). ``None`` uses the default."
 
 
+class PlotLossCorrectedSchema(LossCurvePlotSchema):
+    """Config schema for :class:`PlotLossCorrected`.
+
+    Mirrors :class:`LossCurvePlotSchema`: the callback subclasses ``LossCurvePlot`` and only
+    changes how the prediction is scored (with the training-time correctors).
+    """
+
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLossCorrected"] = Field(alias="_target_")
+    "PlotLossCorrected object from anemoi training diagnostics callbacks."
+
+
 class MatplotlibColormapSchema(BaseModel):
     target_: Literal["anemoi.training.utils.custom_colormaps.MatplotlibColormap"] = Field(..., alias="_target_")
     "CustomColormap object from anemoi training utils."
@@ -292,7 +303,11 @@ class ReferenceComparisonPlotSchema(PydanticBaseModel):
 
 
 PlotCallbacks = Annotated[
-    GraphFeaturePlotSchema | LossCurvePlotSchema | BatchOutputPlotSchema | ReferenceComparisonPlotSchema,
+    GraphFeaturePlotSchema
+    | LossCurvePlotSchema
+    | PlotLossCorrectedSchema
+    | BatchOutputPlotSchema
+    | ReferenceComparisonPlotSchema,
     Field(discriminator="target_"),
 ]
 

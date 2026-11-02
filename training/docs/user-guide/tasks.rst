@@ -73,7 +73,10 @@ The five built-in tasks are:
    * ``da_flow_dependent_skip`` hands the model the pre-blend
      background as the residual base after a blend, so the skip
      connection does not stamp sparse observations into the output
-     (needs a model supporting ``skip_input``).
+     (needs a model supporting ``skip_input``). Before the first cycle
+     the base is all zero: pair it with a
+     ``ClimatologySkipConnection`` (``missing_value: 0.0``,
+     ``fill_missing_only: true``) to start from climatology.
    * ``checkpoint_steps`` activation-checkpoints the model call of the
      first training steps, DA cycles first.
 
