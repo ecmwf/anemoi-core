@@ -7,8 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from collections.abc import Sequence
 from contextlib import nullcontext
-from typing import Literal
 from typing import get_args
 
 import torch
@@ -23,21 +23,30 @@ from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.scaler_tensor import ScaleTensor
+from anemoi.training.utils.enums import EnergyScoreDimension
 from anemoi.training.utils.enums import TensorDim
 
-EnergyScoreNorm = Literal["spatial", "variables", "spatial_and_variables", "time", "time_and_variables"]
+_TENSOR_DIMENSIONS = {
+    "time": int(TensorDim.TIME),
+    "grid": int(TensorDim.GRID),
+    "variables": int(TensorDim.VARIABLE),
+}
 
 
 class EnergyScoreLoss(BaseLoss):
-    """Energy score over space, variables, time, or their joint fields.
+    """Energy score whose multivariate outcome spans the chosen dimensions.
 
-    ``norm_over="spatial"`` calculates a spatial norm independently for each
-    variable. ``norm_over="variables"`` calculates a joint variable norm at
-    every grid node. ``norm_over="spatial_and_variables"`` calculates one norm
-    over the complete field. For these, forecast output steps are scored
-    separately and then summed. ``norm_over="time"`` calculates a norm over the
-    output steps at every grid node and variable, and ``norm_over="time_and_variables"``
-    a joint norm over output steps and variables at every grid node.
+    ``norm_over`` lists the dimensions that form one outcome, any non-empty
+    combination of ``"time"``, ``"grid"`` and ``"variables"``. For example,
+    ``["grid"]`` scores each variable's field at each output step,
+    ``["variables"]`` scores the joint variable vector at every grid node and
+    step, and ``["time", "grid", "variables"]`` scores all output steps of one
+    model call as a single outcome. Dimensions outside the norm are scored
+    separately and then summed or averaged as for pointwise losses.
+
+    ``"time"`` covers the output steps the model predicts in one call. Rollout
+    steps are separate calls that are scored one by one and then averaged, so
+    a time norm never spans them.
 
     When variables belong to the norm, the joint score is repeated for every
     selected variable for diagnostics. Each repeated value represents the same
@@ -47,32 +56,24 @@ class EnergyScoreLoss(BaseLoss):
     def __init__(
         self,
         fair: bool = True,
-        norm_over: EnergyScoreNorm = "spatial",
+        norm_over: Sequence[EnergyScoreDimension] = ("grid",),
         no_autocast: bool = True,
         ignore_nans: bool = False,
     ) -> None:
         super().__init__(ignore_nans=ignore_nans)
-        if norm_over not in get_args(EnergyScoreNorm):
+        norm_over = tuple(norm_over)
+        if not norm_over or len(set(norm_over)) != len(norm_over) or not set(norm_over) <= _TENSOR_DIMENSIONS.keys():
             msg = (
-                f"Unknown energy score norm {norm_over!r}. Expected one of: "
-                f"{', '.join(repr(norm) for norm in get_args(EnergyScoreNorm))}."
+                f"Invalid energy score norm {list(norm_over)!r}. Expected a non-empty list of distinct "
+                f"dimensions from: {', '.join(repr(dimension) for dimension in get_args(EnergyScoreDimension))}."
             )
             raise ValueError(msg)
         self.fair = fair
-        self.norm_over = norm_over
+        # Kept in tensor order so the same set of dimensions always gives the same name.
+        self.norm_over = tuple(sorted(norm_over, key=_TENSOR_DIMENSIONS.__getitem__))
+        self.norm_dimensions = tuple(_TENSOR_DIMENSIONS[dimension] for dimension in self.norm_over)
         self.no_autocast = no_autocast
         self.supports_sharding = True
-
-    @property
-    def norm_dimensions(self) -> tuple[int, ...]:
-        """Return the tensor dimensions that form each multivariate outcome."""
-        return {
-            "spatial": (int(TensorDim.GRID),),
-            "variables": (int(TensorDim.VARIABLE),),
-            "spatial_and_variables": (int(TensorDim.GRID), int(TensorDim.VARIABLE)),
-            "time": (int(TensorDim.TIME),),
-            "time_and_variables": (int(TensorDim.TIME), int(TensorDim.VARIABLE)),
-        }[self.norm_over]
 
     @property
     def variables_are_joint(self) -> bool:
@@ -80,14 +81,27 @@ class EnergyScoreLoss(BaseLoss):
         return int(TensorDim.VARIABLE) in self.norm_dimensions
 
     @property
+    def grid_is_joint(self) -> bool:
+        """Whether grid nodes belong to the energy score norm."""
+        return int(TensorDim.GRID) in self.norm_dimensions
+
+    @property
+    def scores_across_time(self) -> bool:
+        return int(TensorDim.TIME) in self.norm_dimensions
+
+    @property
     def name(self) -> str:
         prefix = "f" if self.fair else ""
-        return f"{prefix}energy_score_{self.norm_over}"
+        return f"{prefix}energy_score_{'_'.join(self.norm_over)}"
 
     @property
     def needs_shard_layout_info(self) -> bool:
-        """Spatial norms transpose grid sharding into variable sharding."""
-        return self.norm_over == "spatial"
+        """Whether the loss needs the grid shard sizes.
+
+        Grid norms that keep variables separate regroup the data so that each GPU
+        holds whole fields for some of the variables.
+        """
+        return self.grid_is_joint and not self.variables_are_joint
 
     @staticmethod
     def _resolve_scaler_dimensions(dimension: int | tuple[int, ...]) -> tuple[int, ...]:
@@ -182,11 +196,17 @@ class EnergyScoreLoss(BaseLoss):
             subset_indices=scaler_indices,
             grid_shard_slice=grid_shard_slice,
         )
+        # Scalers on dimensions outside the norm are used to weight the energy
+        # score values after they have been calculated, so their weights need the
+        # shape of those values: size one along every norm dimension. For example,
+        # norm_over=[time, grid] with a target of shape (batch, time, 1, grid,
+        # variables) gives weights of shape (batch, 1, 1, 1, variables). The
+        # variable dimension keeps its size even when it is in the norm, because
+        # the joint value is then repeated for every variable.
         outer_shape = list(target.shape)
-        if int(TensorDim.GRID) in self.norm_dimensions:
-            outer_shape[TensorDim.GRID] = 1
-        if int(TensorDim.TIME) in self.norm_dimensions:
-            outer_shape[TensorDim.TIME] = 1
+        for dimension in self.norm_dimensions:
+            if dimension != TensorDim.VARIABLE:
+                outer_shape[dimension] = 1
         outer_weights = outer_scalers.scale_iteratively(
             target.new_ones(outer_shape),
             subset_indices=scaler_indices,
@@ -300,10 +320,6 @@ class EnergyScoreLoss(BaseLoss):
                 support = reduce_tensor(support, group)
             norm = norm.masked_fill(support <= 0, torch.nan)
 
-        # Time precedes the ensemble dimension: keep it as size 1 so ENSEMBLE_DIM stays valid.
-        for dimension in sorted(norm_dimensions, reverse=True):
-            if dimension != TensorDim.TIME:
-                norm = norm.squeeze(dimension)
         return norm
 
     def _score_field(
@@ -326,7 +342,7 @@ class EnergyScoreLoss(BaseLoss):
             feature_valid,
             self.norm_dimensions,
             group,
-        ).mean(dim=TensorDim.ENSEMBLE_DIM)
+        ).mean(dim=TensorDim.ENSEMBLE_DIM, keepdim=True)
 
         ensemble_size = pred.shape[TensorDim.ENSEMBLE_DIM]
         pair_distance_sum = torch.zeros_like(observation_term)
@@ -338,7 +354,7 @@ class EnergyScoreLoss(BaseLoss):
                 feature_valid,
                 self.norm_dimensions,
                 group,
-            ).sum(dim=TensorDim.ENSEMBLE_DIM)
+            ).sum(dim=TensorDim.ENSEMBLE_DIM, keepdim=True)
 
         pair_coefficient = 1.0 / (ensemble_size * (ensemble_size - 1)) if self.fair else 1.0 / (ensemble_size**2)
         return observation_term - pair_coefficient * pair_distance_sum
@@ -360,6 +376,12 @@ class EnergyScoreLoss(BaseLoss):
     ) -> torch.Tensor:
         """Calculate the energy score over the selected dimensions."""
         self._validate_input_shapes(pred, target)
+        if self.scores_across_time and pred.shape[TensorDim.TIME] < 2:
+            msg = (
+                f"EnergyScoreLoss with norm_over={list(self.norm_over)} needs at least two output steps, "
+                f"got {pred.shape[TensorDim.TIME]}."
+            )
+            raise ValueError(msg)
         if self.variables_are_joint and squash and squash_mode == "sum":
             msg = "squash_mode='sum' is not defined when variables are part of the joint energy score."
             raise ValueError(msg)
@@ -379,13 +401,13 @@ class EnergyScoreLoss(BaseLoss):
             if group is None:
                 msg = "EnergyScoreLoss requires a process group for spatially sharded inputs."
                 raise ValueError(msg)
-            if self.norm_over == "spatial" and (grid_dim is None or grid_shard_sizes is None):
+            if self.needs_shard_layout_info and (grid_dim is None or grid_shard_sizes is None):
                 msg = (
-                    "EnergyScoreLoss with norm_over='spatial' requires grid_dim and "
+                    f"EnergyScoreLoss with norm_over={list(self.norm_over)} requires grid_dim and "
                     "grid_shard_sizes for spatially sharded inputs."
                 )
                 raise ValueError(msg)
-            if self.norm_over == "spatial":
+            if self.needs_shard_layout_info:
                 assert grid_dim is not None
                 assert grid_shard_sizes is not None
                 pred, target, norm_weights, variable_shard_sizes = self._transpose_grid_to_variables(
@@ -397,26 +419,22 @@ class EnergyScoreLoss(BaseLoss):
                     grid_shard_sizes,
                 )
 
-        norm_group = group if is_sharded and self.norm_over == "spatial_and_variables" else None
+        norm_group = group if is_sharded and self.grid_is_joint and self.variables_are_joint else None
         context = torch.amp.autocast(device_type=pred.device.type, enabled=False) if self.no_autocast else nullcontext()
         with context:
             score = self._score_field(pred, target, norm_weights, norm_group)
 
-        if is_sharded and self.norm_over == "spatial":
+        if variable_shard_sizes is not None:
             assert group is not None
-            assert variable_shard_sizes is not None
             score = gather_tensor(score, -1, variable_shard_sizes, group)
 
         if self.variables_are_joint:
             # Show the joint variable score beside each selected variable.
-            score = score.unsqueeze(-1).expand(*score.shape, num_variables)
+            score = score.expand(*score.shape[:-1], num_variables)
 
-        score = score.unsqueeze(TensorDim.ENSEMBLE_DIM)
-        if int(TensorDim.GRID) in self.norm_dimensions:
-            score = score.unsqueeze(TensorDim.GRID)
         score = score * outer_weights
         if self.ignore_nans:
             score = torch.where(torch.isnan(score), torch.zeros_like(score), score)
 
-        reduction_group = group if is_sharded and int(TensorDim.GRID) not in self.norm_dimensions else None
+        reduction_group = group if is_sharded and not self.grid_is_joint else None
         return self.reduce(score, squash=squash, squash_mode=squash_mode, group=reduction_group)
