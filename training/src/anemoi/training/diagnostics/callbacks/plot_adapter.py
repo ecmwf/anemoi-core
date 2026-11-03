@@ -81,7 +81,12 @@ class BasePlotAdapter(ABC):
         return batch
 
     @abstractmethod
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        dataset_name: str | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
         """Yield (x, y_true, y_pred, tag_suffix) or (sample, recon, tag) per plot sample."""
         ...
 
@@ -98,20 +103,39 @@ class ForecasterPlotAdapter(BasePlotAdapter):
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         return self._task.num_input_timesteps + rollout_step * self._task.num_output_timesteps
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
-        input_time_indices = self._task.get_batch_input_indices()
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        dataset_name: str | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
+        if dataset_name in self._task.dataset_time_maps:
+            input_time_indices = [
+                self._task._sample_batch_position(dataset_name, value)
+                for value in self._task._requested_input_relative_times(dataset_name)
+            ]
+        else:
+            input_time_indices = self._task.get_batch_input_indices()
 
+        if not input_time_indices:
+            return
         input_data = self.select_time(data, input_time_indices)
 
         x = input_data[self.get_init_step(), ...].squeeze()
 
         for validation_step_kwargs in self._task.steps("validation"):
             rollout_step = validation_step_kwargs["rollout_step"]
-            output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
+            if dataset_name in self._task.dataset_time_maps:
+                output_time_indices = [
+                    self._task._sample_batch_position(dataset_name, value)
+                    for value in self._task._requested_output_relative_times(dataset_name, rollout_step=rollout_step)
+                ]
+            else:
+                output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
 
             output_data = self.select_time(data, output_time_indices)
 
-            for out_step in range(self._task.num_output_timesteps):
+            for out_step in range(len(output_time_indices)):
                 y_true = output_data[out_step, ...].squeeze()
                 y_pred = output_tensor[rollout_step, out_step, ...]
                 y_pred = y_pred.squeeze() if hasattr(y_pred, "squeeze") else y_pred
@@ -127,7 +151,12 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
     def get_init_step(self) -> int:
         return 0
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        dataset_name: str | None = None,  # noqa: ARG002
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
         input_time_indices = self._task.get_batch_input_indices()
         output_time_indices = self._task.get_batch_output_indices()
 
@@ -152,7 +181,12 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
 class AutoencoderPlotAdapter(BasePlotAdapter):
     """Plot Adapter for Autoencoder Task: single (sample, recon, tag) yield."""
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        dataset_name: str | None = None,  # noqa: ARG002
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
         sample = data[0, ...].squeeze()
         recon = output_tensor[0, ...].squeeze()
         yield sample, sample, recon, "recon"
@@ -221,5 +255,10 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
         """Return the batch for loss plotting."""
         return batch
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
-        yield from self._inner.iter_plot_samples(data, output_tensor)
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        dataset_name: str | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
+        yield from self._inner.iter_plot_samples(data, output_tensor, dataset_name=dataset_name)

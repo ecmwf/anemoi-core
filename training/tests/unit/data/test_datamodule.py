@@ -35,6 +35,7 @@ class SampleIndexDataset(Dataset):
     def __init__(self, size: int = 1) -> None:
         self.size = size
         self.data_readers: dict = {}
+        self.relative_date_indices_are_native = True
 
     def __len__(self) -> int:
         return self.size
@@ -121,6 +122,19 @@ def test_forecaster_uses_cumulative_tendency_statistics_for_each_output_step(moc
     assert [call.args[0] for call in reader.statistics_tendencies.call_args_list] == ["6h", "12h", "18h"]
 
 
+def test_mixed_frequency_tendency_statistics_follow_dataset_targets(mocker: MockFixture) -> None:
+    task = Forecaster(multistep_input=1, multistep_output=12, timestep="5m")
+    task.model_timestep = task.timestep
+    task.dataset_target_relative_times_by_dataset_by_step = {"data": [[12]]}
+    datamodule = _make_datamodule(task)
+    reader = _attach_statistics_reader(datamodule, mocker)
+
+    statistics = datamodule.statistics_tendencies
+
+    assert statistics == {"data": {"1h": {"delta": "1h"}, "lead_times": ["1h"]}}
+    reader.statistics_tendencies.assert_called_once_with("1h")
+
+
 def test_temporal_downscaler_uses_cumulative_tendency_statistics_per_lead_time(mocker: MockFixture) -> None:
     """TemporalDownscaler uses per-lead-time cumulative tendency statistics."""
     task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
@@ -175,16 +189,14 @@ def test_set_epoch_updates_all_constructed_datasets(mocker: MockFixture) -> None
 
     ds_train = mocker.Mock()
     ds_train.data_readers = {"data": object()}
+    ds_train.relative_date_indices_are_native = True
     ds_valid = mocker.Mock()
     ds_valid.data_readers = {"data": object()}
     ds_test = mocker.Mock()
     ds_test.data_readers = {"data": object()}
     datamodule.__dict__.update(ds_train=ds_train, ds_valid=ds_valid, ds_test=ds_test)
-
-    mocker.patch(
-        "anemoi.training.data.datamodule.compute_relative_date_indices",
-        side_effect=lambda _task, _data_readers, mode: {"data": [mode]},
-    )
+    datamodule.__dict__["loading_policy"] = mocker.Mock()
+    datamodule.loading_policy.relative_date_indices.side_effect = lambda _task, _readers, mode: {"data": [mode]}
 
     datamodule.set_epoch(5)
 
@@ -202,10 +214,7 @@ def test_get_dataset_loads_time_steps_of_current_rollout(mocker: MockFixture) ->
 
     data_reader = object()
     create_reader = mocker.patch("anemoi.training.data.datamodule.create_reader", return_value=data_reader)
-    mocker.patch(
-        "anemoi.training.data.datamodule.compute_relative_date_indices",
-        return_value={"data": [0, 1]},
-    )
+    datamodule.loading_policy.relative_date_indices.return_value = {"data": [0, 1]}
 
     datamodule._get_dataset({"data": object()}, label="validation")
 
@@ -350,7 +359,6 @@ def _fit(
     ckpt_path: Path | None = None,
 ) -> list[tuple[int, list[int]]]:
     """Train two epochs as the second of two sample groups and return the samples of every batch."""
-    mocker.patch("anemoi.training.data.datamodule.compute_relative_date_indices", return_value={})
     datamodule = _make_datamodule(_fixed_rollout_task(), batch_size=3, num_workers=2, persistent_workers=True)
     datamodule.__dict__.update(ds_train=SampleIndexDataset(40), ds_valid=SampleIndexDataset(6))
     mocker.patch.object(datamodule, "_sample_groups", return_value={"num_replicas": 2, "rank": 1})

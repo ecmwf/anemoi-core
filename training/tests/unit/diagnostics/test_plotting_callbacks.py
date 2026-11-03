@@ -1255,7 +1255,7 @@ def test_ensemble_plot_adapter_delegates_to_inner():
     data = np.zeros((5, 100, 10))
     output = np.zeros((3, 100, 10))
     list(adapter.iter_plot_samples(data, output))
-    inner.iter_plot_samples.assert_called_once_with(data, output)
+    inner.iter_plot_samples.assert_called_once_with(data, output, dataset_name=None)
 
 
 def test_base_adapter_select_members_is_noop():
