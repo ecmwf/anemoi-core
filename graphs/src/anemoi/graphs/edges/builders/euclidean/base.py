@@ -28,7 +28,7 @@ LOGGER = logging.getLogger(__name__)
 
 class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
     """Base class for edge builders based on distance.
-    
+
     Attributes
     ----------
     reversed_search : bool, optional
