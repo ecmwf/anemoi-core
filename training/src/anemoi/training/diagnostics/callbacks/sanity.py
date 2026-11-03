@@ -56,9 +56,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+            Pytorch Lightning trainer.
+        pl_module : pl.LightningModule
+            Training module.
         """
         data_name_to_index = trainer.datamodule.ds_train.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
@@ -99,9 +99,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+            Pytorch Lightning trainer.
+        pl_module : pl.LightningModule
+            Training module.
         """
         data_name_to_index = trainer.datamodule.ds_valid.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
@@ -113,9 +113,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+            Pytorch Lightning trainer.
+        pl_module : pl.LightningModule
+            Training module.
         """
         data_name_to_index = trainer.datamodule.ds_test.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
