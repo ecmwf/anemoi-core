@@ -513,10 +513,11 @@ class TabularSource(Source):
         )
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "TabularSource":
-        """Return a new view restricted to the given variable indices.
+        """Return a new view with only the variables at ``indices``.
 
-        Indexes along ``layout.variables`` for both gridded and sparse
-        datasets. Coordinates / timedeltas / boundaries are unchanged.
+        Each sample's tensor is indexed along ``layout.variables``, together with
+        ``variables`` and ``statistics``. Coordinates, timedeltas, boundaries, shard sizes
+        and ``metadata`` are unchanged.
         """
         new_data = [self._index_vars(t, indices) for t in self.data]
         return self.clone(data=new_data, **self._select_variable_metadata(indices))

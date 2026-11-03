@@ -338,10 +338,10 @@ class GriddedSource(Source):
         return self.clone(data=gathered_data, coordinates=gathered_coords, shard_sizes=None)
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "GriddedSource":
-        """Return a new view restricted to the given variable indices.
+        """Return a new view with only the variables at ``indices``.
 
-        Indexes along ``layout.variables`` for both gridded and sparse
-        datasets. Coordinates / timedeltas / boundaries are unchanged.
+        The data tensor is indexed along ``layout.variables``, together with ``variables``
+        and ``statistics``. Coordinates, shard sizes and ``metadata`` are unchanged.
         """
         new_data = self._index_vars(self.data, indices)
         return self.clone(data=new_data, **self._select_variable_metadata(indices))

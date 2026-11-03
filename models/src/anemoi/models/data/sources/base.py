@@ -149,7 +149,9 @@ class Source(ABC):
         but torch tensors are accepted.
     metadata : Mapping[str, Any], optional
         Free-form per-source metadata (e.g. ``dataset.metadata``, per-variable
-        metadata). Not interpreted here.
+        metadata). Not interpreted here, and kept unchanged by every transformation,
+        including those that change the variables (:meth:`select_variables`,
+        :meth:`select`): per-variable entries are the caller's to update.
     """
 
     name: str
@@ -347,7 +349,11 @@ class Source(ABC):
 
     @abstractmethod
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "Source":
-        """Return a new view restricted to the given variable indices."""
+        """Return a new view with only the variables at ``indices``.
+
+        The data, ``variables`` and ``statistics`` are indexed together; ``metadata`` is
+        kept unchanged (see :class:`Source`).
+        """
         pass
 
     @abstractmethod
@@ -551,7 +557,9 @@ class BaseTemplate(ABC):
         Per-statistic arrays over ``variables``. Not needed to decode; carried along for
         whoever needs them afterwards, e.g. to un-normalise the prediction.
     metadata : Mapping[str, Any], optional
-        Free-form per-source metadata, passed on to the built source.
+        Free-form per-source metadata, passed on to the built source. Kept unchanged by
+        :meth:`select_variables` and :meth:`with_variables`: per-variable entries are the
+        caller's to update.
     """
 
     name: str
@@ -581,7 +589,10 @@ class BaseTemplate(ABC):
         }
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "BaseTemplate":
-        """Return the same nodes with only the variables at ``indices`` (and their statistics)."""
+        """Return the same nodes with only the variables at ``indices``.
+
+        ``variables`` and ``statistics`` are indexed together; ``metadata`` is kept unchanged.
+        """
         index = _index_list(indices, self.n_variables)
         variables = [self.variables[i] for i in index]
         statistics = {key: value[index] for key, value in self.statistics.items()}
@@ -590,7 +601,9 @@ class BaseTemplate(ABC):
     def with_variables(self, variables: list[str], statistics: Mapping[str, Any] | None = None) -> "BaseTemplate":
         """Return the same nodes with other variables to decode.
 
-        ``statistics`` should cover exactly ``variables``; it defaults to none.
+        ``statistics`` should cover exactly ``variables``; it defaults to none. ``metadata``
+        is kept unchanged, so any per-variable entries in it must be replaced by the caller,
+        e.g. with :func:`dataclasses.replace`.
         """
         return replace(self, variables=list(variables), statistics={} if statistics is None else statistics)
 
