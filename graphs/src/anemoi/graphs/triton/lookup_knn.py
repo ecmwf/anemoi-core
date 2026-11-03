@@ -45,9 +45,7 @@ try:
 
     HAS_TRITON = True
 except ImportError as e:  # pragma: no cover - triton ships with CUDA builds of torch
-    LOGGER.debug(
-        "Triton failed to import, the lookup KNN query falls back to torch: %s", e
-    )
+    LOGGER.debug("Triton failed to import, the lookup KNN query falls back to torch: %s", e)
     triton = DummyModule()
     tl = DummyModule()
     libdevice = DummyModule()
@@ -57,9 +55,7 @@ except ImportError as e:  # pragma: no cover - triton ships with CUDA builds of 
 @triton.jit
 def cell_index(qx, qy, qz, nlat, nlon, lat0, dlat, dlon):
     """Cell of each query on the latitude/longitude grid, in float32."""
-    rad2deg: tl.constexpr = (
-        57.29577951308232  # a jitted function may not read a plain module global
-    )
+    rad2deg: tl.constexpr = 57.29577951308232  # a jitted function may not read a plain module global
     lat = libdevice.asin(tl.minimum(tl.maximum(qz, -1.0), 1.0)) * rad2deg
     lon = libdevice.atan2(qy, qx) * rad2deg
     ilat = tl.floor((lat - lat0) / dlat).to(tl.int32)
@@ -70,9 +66,7 @@ def cell_index(qx, qy, qz, nlat, nlon, lat0, dlat, dlon):
     return ilat * nlon + ilon
 
 
-def cells_reference(
-    q: torch.Tensor, nlat: int, nlon: int, lat0: float, dlat: float, dlon: float
-) -> torch.Tensor:
+def cells_reference(q: torch.Tensor, nlat: int, nlon: int, lat0: float, dlat: float, dlon: float) -> torch.Tensor:
     """``cell_index`` in torch, for queries on the CPU or without Triton. Kept equal to it by a test."""
     lat = torch.rad2deg(torch.asin(q[:, 2].clamp(-1, 1)))
     lon = torch.rad2deg(torch.atan2(q[:, 1], q[:, 0]))

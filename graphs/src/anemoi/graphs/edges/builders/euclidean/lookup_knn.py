@@ -54,6 +54,7 @@ LOGGER = logging.getLogger(__name__)
 # squared differences directly, so the error is a few float32 ulps of the coordinates (~1e-7); 1e-6 leaves headroom.
 FP32_SLACK = 1e-6
 
+
 class LookupKNNNotSupported(ValueError):
     """The point set is not one the lookup table is built for (see the module docstring)."""
 
