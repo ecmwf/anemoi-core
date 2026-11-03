@@ -32,6 +32,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
+    # The distributed tests spawn their own ranks: no xdist workers with -n logical (pytest.ini).
+    if config.getoption("--distributed"):
+        return 0
+    return None
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     if not config.getoption("--distributed"):
         _skip_distributed_tests(items)

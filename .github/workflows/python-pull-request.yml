@@ -13,6 +13,8 @@ on:
 
 env:
   UV_SYSTEM_PYTHON: 1
+  # CUDA torch only where uv finds a GPU, which the runners lack; as torch-backend in .ci/.
+  UV_TORCH_BACKEND: auto
 
 jobs:
   quality:
@@ -54,7 +56,7 @@ jobs:
 
       - name: Install packages
         run: |
-          uv pip install --torch-backend cpu \
+          uv pip install \
             "torch==${{ matrix.torch-version }}" \
             -e "./training[all,tests]" \
             -e "./graphs[all,tests]" \

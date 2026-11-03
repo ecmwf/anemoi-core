@@ -28,9 +28,9 @@ own_wheels=()
 {% for p in ci_packages %}
 own_wheels+=("$(ls "$CI_INSTALL_ROOT/{{ p }}/wheels"/*.whl){{ ('[' ~ extras ~ ']') if extras | default('') else '' }}")
 {% endfor %}
-# CPU torch: the runners have no GPU, and the CUDA wheels are several GB.
 # One resolve, so the deps' wheels win over the same packages from the index.
-uv pip install --torch-backend cpu "torch=={{ torch_version }}" ${dep_wheels[@]+"${dep_wheels[@]}"} "${own_wheels[@]}" pytest
+# Which torch build (CPU on a runner without a GPU) follows the leg's torch-backend.
+uv pip install "torch=={{ torch_version }}" ${dep_wheels[@]+"${dep_wheels[@]}"} "${own_wheels[@]}" pytest
 {% endblock %}
 
 {% block test %}
