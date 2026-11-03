@@ -137,17 +137,20 @@ class TabularSource(Source):
             layout = self.layout.normalized(self.layout.ndim)
             for sample, sample_coords in zip(self.data, self.coordinates, strict=True):
                 if tuple(sample_coords.shape) != (sample.shape[self.layout.grid], 2):
-                    raise ValueError(f"Source {self.name!r} requires one latitude/longitude pair per node.")
+                    msg = f"Source {self.name!r} requires one latitude/longitude pair per node."
+                    raise ValueError(msg)
 
                 num_channels = sample.shape[layout.variables]
                 if num_channels != len(self.variables):
-                    raise ValueError(
+                    msg = (
                         f"{self.__class__.__name__} {self.name!r} has {num_channels} variable channels "
                         f"but {len(self.variables)} names."
                     )
+                    raise ValueError(msg)
 
         if self.data and any(sample.dtype != self.data[0].dtype for sample in self.data):
-            raise ValueError(f"{self.__class__.__name__} {self.name!r} requires the same dtype for every sample.")
+            msg = f"{self.__class__.__name__} {self.name!r} requires the same dtype for every sample."
+            raise ValueError(msg)
 
     @property
     def grid_size(self) -> None:
@@ -320,23 +323,26 @@ class TabularSource(Source):
 
     def pairwise(self, other: Source, func: Callable[..., torch.Tensor], *args, **kwargs) -> torch.Tensor:
         if not isinstance(other, TabularSource):
-            raise TypeError(f"Other source must be a TabularSource; got {type(other).__name__}.")
+            msg = f"Other source must be a TabularSource; got {type(other).__name__}."
+            raise TypeError(msg)
 
         if self.layout != other.layout:
-            raise ValueError(f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}.")
+            msg = f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}."
+            raise ValueError(msg)
 
         if len(self.data) != len(other.data):
-            raise ValueError(
-                f"Both sources must have the same number of samples; got {len(self.data)} and {len(other.data)}."
-            )
+            msg = f"Both sources must have the same number of samples; got {len(self.data)} and {len(other.data)}."
+            raise ValueError(msg)
 
         per_sample_kwargs = kwargs.pop("per_sample_kwargs", None) or {}
         if kwargs.keys() & per_sample_kwargs.keys():
-            raise ValueError("Loss arguments cannot be both shared and per-sample.")
+            msg = "Loss arguments cannot be both shared and per-sample."
+            raise ValueError(msg)
 
         for name, values in per_sample_kwargs.items():
             if len(values) != len(self.data):
-                raise ValueError(f"Loss argument {name!r} requires one value per sample ({len(self.data)}).")
+                msg = f"Loss argument {name!r} requires one value per sample ({len(self.data)})."
+                raise ValueError(msg)
 
         losses = []
         non_empty = []
@@ -377,7 +383,8 @@ class TabularSource(Source):
             non_empty.append(pred_sample.shape[self.layout.grid] > 0)
 
         if not losses:
-            raise ValueError("Cannot apply a loss to an empty sparse source view.")
+            msg = "Cannot apply a loss to an empty sparse source view."
+            raise ValueError(msg)
 
         stacked = torch.stack(losses)
         return stacked.sum(dim=0) / max(sum(non_empty), 1)

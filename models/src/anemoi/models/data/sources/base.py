@@ -165,7 +165,8 @@ class Source(ABC):
     def __post_init__(self) -> None:
         """Validate the metadata and the payload it describes."""
         if self.variables is None or len(set(self.variables)) != len(self.variables):
-            raise ValueError(f"Source {self.name!r} requires unique variable names.")
+            msg = f"Source {self.name!r} requires unique variable names."
+            raise ValueError(msg)
 
         if self.data is None:
             msg = (
@@ -281,9 +282,8 @@ class Source(ABC):
             elif dim == "variables":
                 source = source.select_variables(indices)
             else:
-                raise ValueError(
-                    f"Unsupported dimension for selection: {dim!r}. Supported dimensions are 'time' and 'variables'."
-                )
+                msg = f"Unsupported dimension for selection: {dim!r}. Supported dimensions are 'time' and 'variables'."
+                raise ValueError(msg)
         return source
 
     def to(
@@ -444,7 +444,8 @@ class Source(ABC):
         """Raise when ``others`` do not share this source's gridded/tabular structure."""
         for other in others:
             if other.is_tabular != self.is_tabular:
-                raise TypeError("Cannot combine gridded and tabular transport data.")
+                msg = "Cannot combine gridded and tabular transport data."
+                raise TypeError(msg)
 
     @abstractmethod
     def shard(self, group: ProcessGroup | None) -> "Source":
@@ -561,7 +562,8 @@ class BaseTemplate(ABC):
 
     def __post_init__(self) -> None:
         if self.variables is None or len(set(self.variables)) != len(self.variables):
-            raise ValueError(f"{self.__class__.__name__} {self.name!r} requires unique variable names.")
+            msg = f"{self.__class__.__name__} {self.name!r} requires unique variable names."
+            raise ValueError(msg)
 
     @property
     def n_variables(self) -> int:

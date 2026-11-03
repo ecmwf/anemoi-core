@@ -96,9 +96,12 @@ class BaseSample(ABC):
         ``kwargs`` holds the common fields as for :meth:`from_validated`, plus the dataset
         ``name``, the ``batch_size``, ``ensemble_size`` and ``time_size`` of the batch to
         decode, and the arguments specific to this kind. The default passes them on
-        unchanged; a kind whose template describes its geometry differently converts them.
+        unchanged, except for the per-sample ``layout``, which becomes the layout of the
+        collated source as in :meth:`collate`; a kind whose template describes its geometry
+        differently converts them.
         """
         del n_points, device
+        kwargs["layout"] = cls._collate_layout(kwargs["layout"])
         return cls.template_type(**kwargs)
 
     # The :class:`Source` subclass this kind collates into.

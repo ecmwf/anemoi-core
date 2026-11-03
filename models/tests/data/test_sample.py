@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import dataclasses
+
 import pytest
 import torch
 
@@ -14,39 +16,27 @@ from anemoi.models.data import Batch
 from anemoi.models.data import GriddedSample
 from anemoi.models.data import TabularSample
 from anemoi.models.data import TensorLayout
-from anemoi.models.data import create_batched_struct
 from anemoi.models.data.sample import sample_registry
 from anemoi.models.data.sources import GriddedTemplate
 from anemoi.models.data.sources import TabularTemplate
+from tests.sample_builders import gridded_sample
+from tests.sample_builders import latitudes
+from tests.sample_builders import longitudes
+from tests.sample_builders import tabular_sample
 
-LATS = [0.0, 45.0, 90.0]
-LONS = [0.0, 90.0, 180.0]
+# The validation tests below match messages that name these sizes ("3 coordinates",
+# "2 variables", "extend past the 3 points"), so the samples here pin them.
+N_POINTS = 3
+LATS = latitudes(N_POINTS)
+LONS = longitudes(N_POINTS)
 
 
 def _gridded(**overrides):
-    kwargs = {
-        "data_type": "gridded",
-        "data": torch.zeros(2, 1, 3, 2),
-        "variables": ["a", "b"],
-        "layout": ("time", "ensemble", "grid", "variables"),
-        "latitudes": LATS,
-        "longitudes": LONS,
-    }
-    return create_batched_struct(**(kwargs | overrides))
+    return gridded_sample(n_points=N_POINTS, n_variables=2, **overrides)
 
 
 def _tabular(**overrides):
-    kwargs = {
-        "data_type": "tabular",
-        "data": torch.zeros(1, 3, 1),
-        "variables": ["a"],
-        "layout": ("ensemble", "grid", "variables"),
-        "latitudes": LATS,
-        "longitudes": LONS,
-        "timedeltas": [0.0, 0.0, 3600.0],
-        "boundaries": [(0, 2), (2, 3)],
-    }
-    return create_batched_struct(**(kwargs | overrides))
+    return tabular_sample(n_points=N_POINTS, n_variables=1, **overrides)
 
 
 def test_gridded_converts_layout_and_degrees():
@@ -207,3 +197,53 @@ def test_collate_accepts_samples_sharing_statistics():
 def test_tabular_layout_without_batch_axis():
     source = Batch.collate([{"obs": _tabular()}, {"obs": _tabular()}])["obs"]
     assert source.layout == TensorLayout(ensemble=0, grid=1, variables=2)
+
+
+def _assert_same_field(actual, expected, path):
+    if isinstance(expected, torch.Tensor):
+        assert isinstance(actual, torch.Tensor), f"{path}: expected a tensor, got {type(actual).__name__}"
+        assert actual.dtype == expected.dtype, f"{path}: dtype {actual.dtype} != {expected.dtype}"
+        assert actual.device == expected.device, f"{path}: device {actual.device} != {expected.device}"
+        assert torch.equal(actual, expected), f"{path}: values differ"
+    elif isinstance(expected, (list, tuple)):
+        assert type(actual) is type(expected), f"{path}: {type(actual).__name__} != {type(expected).__name__}"
+        assert len(actual) == len(expected), f"{path}: length {len(actual)} != {len(expected)}"
+        for i, (a, e) in enumerate(zip(actual, expected, strict=True)):
+            _assert_same_field(a, e, f"{path}[{i}]")
+    elif isinstance(expected, dict):
+        assert actual.keys() == expected.keys(), f"{path}: keys {actual.keys()} != {expected.keys()}"
+        for key in expected:
+            _assert_same_field(actual[key], expected[key], f"{path}[{key!r}]")
+    else:
+        assert actual == expected, f"{path}: {actual!r} != {expected!r}"
+
+
+def _assert_same_template(actual, expected):
+    assert type(actual) is type(expected)
+    for template_field in dataclasses.fields(expected):
+        name = template_field.name
+        _assert_same_field(getattr(actual, name), getattr(expected, name), name)
+
+
+# A template is derived from a collated source in training (Source.template) and built
+# from a payload without data in inference (create_batched_struct(data=None)). Both must
+# describe the same batch when given the same geometry.
+@pytest.mark.parametrize("batch_size", [1, 2])
+@pytest.mark.parametrize(
+    ("build", "sharding", "sizes"),
+    [
+        pytest.param(_gridded, {}, {"ensemble_size": 1, "time_size": 2}, id="gridded"),
+        pytest.param(_gridded, {"shard_sizes": [3, 2]}, {"ensemble_size": 1, "time_size": 2}, id="gridded-sharded"),
+        pytest.param(_tabular, {}, {"ensemble_size": 1}, id="tabular"),
+        pytest.param(_tabular, {"shard_sizes": [[1, 1], [1, 0]]}, {"ensemble_size": 1}, id="tabular-sharded"),
+    ],
+)
+def test_template_from_source_matches_template_from_payload(build, sharding, sizes, batch_size):
+    statistics = {"mean": torch.arange(len(build().variables), dtype=torch.float32)}
+    payload = sharding | {"statistics": statistics}
+
+    source = Batch.collate([{"ds": build(**payload)} for _ in range(batch_size)])["ds"]
+    from_source = source.template()
+    from_payload = build(data=None, name="ds", batch_size=batch_size, **sizes, **payload)
+
+    _assert_same_template(from_payload, from_source)

@@ -154,7 +154,8 @@ class TensorLayout:
         """Return a layout with physical axes resolved against the tensor rank."""
         positions = {name: self.axis(name, ndim=ndim) for name in self.AXES if self.has_axis(name)}
         if len(positions) != ndim or set(positions.values()) != set(range(ndim)):
-            raise ValueError(f"Layout {self!r} must describe each of the {ndim} tensor axes exactly once.")
+            msg = f"Layout {self!r} must describe each of the {ndim} tensor axes exactly once."
+            raise ValueError(msg)
         return TensorLayout(**positions)
 
     def __repr__(self) -> str:
