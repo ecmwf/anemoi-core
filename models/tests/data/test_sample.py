@@ -247,3 +247,43 @@ def test_template_from_source_matches_template_from_payload(build, sharding, siz
     from_payload = build(data=None, name="ds", batch_size=batch_size, **sizes, **payload)
 
     _assert_same_template(from_payload, from_source)
+
+
+# Samples built directly skip create_batched_struct's rank check, so collate checks it too.
+def _direct_gridded(data: torch.Tensor) -> GriddedSample:
+    n_points = data.shape[2]
+    return GriddedSample(
+        data=data,
+        variables=["a", "b"],
+        layout=TensorLayout(time=0, ensemble=1, grid=2, variables=3),
+        coordinates=torch.zeros(n_points, 2),
+        grid_size=n_points,
+    )
+
+
+def _direct_tabular(data: torch.Tensor) -> TabularSample:
+    n_points = data.shape[1]
+    return TabularSample(
+        data=data,
+        variables=["a", "b"],
+        layout=TensorLayout(ensemble=0, grid=1, variables=2),
+        coordinates=torch.zeros(n_points, 2),
+        timedeltas=torch.zeros(n_points),
+        boundaries=(slice(0, n_points),),
+    )
+
+
+def test_collate_rejects_gridded_data_with_an_extra_axis():
+    with pytest.raises(ValueError, match="describes 5 axes but the collated data has 6 dimensions"):
+        Batch.collate([{"ds": _direct_gridded(torch.zeros(2, 1, 3, 2, 7))}])
+
+
+def test_collate_rejects_a_tabular_sample_with_an_extra_axis():
+    samples = [{"obs": _direct_tabular(torch.zeros(1, 3, 2))}, {"obs": _direct_tabular(torch.zeros(1, 3, 2, 7))}]
+    with pytest.raises(ValueError, match="describes 3 axes but sample 1 of the collated data has 4 dimensions"):
+        Batch.collate(samples)
+
+
+def test_collate_rejects_gridded_data_with_a_missing_axis():
+    with pytest.raises(ValueError, match="describes 5 axes but the collated data has 4 dimensions"):
+        Batch.collate([{"ds": _direct_gridded(torch.zeros(2, 1, 3, 2)[..., 0])}])
