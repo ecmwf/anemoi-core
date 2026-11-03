@@ -59,7 +59,5 @@ torch-version = "2.8.*"
 python-version = "3.13"
 torch-version = "2.*"
 
-# A pull request without a downstream-CI label runs every consumer, as with
-# run-downstream-ci:all; a label, also downstream-ci-not-needed, still decides.
 [downstream]
 run-default = "all"
