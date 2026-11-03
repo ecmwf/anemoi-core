@@ -184,10 +184,10 @@ def build_halo_info(
     my_rank = torch.distributed.get_rank(group=model_comm_group)
     num_parts = model_comm_group.size()
 
-    assert (
-        partition.num_parts == num_parts
-    ), f"Partition num_parts ({partition.num_parts}) != comm group size ({num_parts})"
-    assert partition.src_splits is not None, "Halo exchange needs sharded source nodes (partition.src_splits is None)"
+    if partition.num_parts != num_parts:
+        raise ValueError(f"Partition num_parts ({partition.num_parts}) != comm group size ({num_parts})")
+    if partition.src_splits is None:
+        raise ValueError("Halo exchange needs sharded source nodes (partition.src_splits is None)")
 
     if edge_shard_sizes is not None:
         local_edge_index = edge_index
