@@ -2,7 +2,7 @@
 Multi-Domain Training
 #####################
 
-Multi-domain training enables a single model to be trained on several domains that are loaded independently: each batch is drawn from one domain, and the same model parameters are updated across all domains.
+Multi-domain training alternates domain-homogeneous batches within one training workflow: each batch is drawn from one domain, the active spatial grid and graph can change between batches, and the same model parameters are updated across all domains.
 
 A **domain** is the spatial structure of a dataset: its grid, resolution, geographical extent, and number of nodes. All domains are assumed to share the same variables, so variables do not distinguish one domain from another. A typical use case is a set of stretched-grid domains that share a global dataset but each combine it with a different regional dataset. Multi-domain training supports different spatial resolutions, grid structures, and geographical extents, making it useful for applications such as downscaling, combining global and regional datasets, and improving model generalisation across domains and resolutions.
 
@@ -12,7 +12,7 @@ A **domain** is the spatial structure of a dataset: its grid, resolution, geogra
 Overview
 ********
 
-In multi-domain training, the same model processes datasets with different spatial grids and numbers of nodes. Each training iteration selects data from one of the configured datasets and uses its corresponding graph. The shared encoder maps the input to a latent representation, the shared processor operates on that representation, and the shared decoder produces predictions on the selected dataset's grid. All datasets contribute to updating the same model parameters, allowing the model to learn across different domains and resolutions.
+In multi-domain training, the same model processes datasets with different spatial grids and numbers of nodes. Each training iteration selects data from one of the configured datasets and uses its corresponding graph. The shared encoder maps the input to a latent representation, the shared processor operates on that representation, and the shared decoder produces predictions on the selected dataset's grid. All datasets contribute to updating the same model parameters, allowing the model to learn across different domains and resolutions. Sharing an encoder between compatible datasets is not unique to multi-domain training; the defining difference is that multi-domain loading presents one domain per batch rather than loading all datasets synchronously.
 
 Domains may cover different geographical regions and do not need to overlap spatially, although stretched-grid domains typically share the same global dataset. They can also have dataset-specific readers, preprocessing settings, and normalisation statistics, provided the resulting inputs and outputs are compatible with the shared architecture.
 
@@ -44,7 +44,7 @@ Multi-domain models can be trained using deterministic objectives, probabilistic
 Dataset Configuration
 *********************
 
-The dataset reader configuration under ``dataloader.training.datasets`` is the same regardless of how the datasets are loaded, see :doc:`multiple-encoder-decoder`. The following example defines two stretched-grid domains, ``sg_1`` and ``sg_2``. Each cuts a different regional dataset into the same global dataset, so the domains differ only in their regional part:
+The dataset reader configuration under ``dataloader.training.datasets`` is the same regardless of how the datasets are loaded, see :ref:`multi-dataset-reader-configuration`. The following example defines two stretched-grid domains, ``sg_1`` and ``sg_2``. Each cuts a different regional dataset into the same global dataset, so the domains differ only in their regional part:
 
 .. code-block:: yaml
 

@@ -9,6 +9,8 @@ There are two ways of training a model with multiple datasets, selected by the d
 
 - **Multi-domain loading:** each batch is drawn from a single dataset, a 'domain', i.e. the spatial structure of a dataset (its grid, resolution and extent). The same model is therefore trained on different domains in different iterations, across different spatial resolutions, grid structures, and geographical extents. All domains must share the same variables, with a consistent variable ordering. See :doc:`multi-dataset/multi-domain-training`.
 
+The loading policy is independent of how datasets are assigned to encoder and decoder groups: synchronized loading can also use one encoder for several datasets with compatible variables.
+
 .. toctree::
    :maxdepth: 1
    :hidden:
