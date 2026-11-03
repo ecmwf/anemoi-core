@@ -43,6 +43,7 @@ def test_interface_passes_complete_graph_to_spatial_preprocessor() -> None:
     model_interface.statistics = {}
     model_interface.statistics_tendencies = None
     model_interface.data_indices = {}
+    model_interface.metadata = {"dataset": {"data": {"variables_metadata": {}}}}
     model_interface.n_step_input = 1
     model_interface.n_step_output = 1
 

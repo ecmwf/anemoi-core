@@ -303,3 +303,40 @@ def test_predict_step_skips_input_only_datasets(monkeypatch):
 
     assert set(out) == {"data"}
     assert torch.equal(out["data"], torch.ones(1, 1, 1, 4, 1))
+
+
+def test_base_graph_model_builds_configured_input_transform() -> None:
+    model_config = OmegaConf.create(
+        {
+            "node_trainable_parameters": {"data": 0, "hidden": 0},
+            "model": {"hidden_nodes_name": "hidden", "latent_skip": False},
+            "encoders": {
+                0: {"source_datasets": ["data"], "dataset_fusing_strategy": "not_supported", "mapper": {}},
+            },
+            "decoders": {
+                0: {"target_datasets": ["data"], "target_node_features": ["coordinates"], "mapper": {}},
+            },
+            "residual": {"datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}}},
+            "bounding": {"datasets": {"data": []}},
+            "input_transform": {
+                "_target_": "anemoi.models.variable.variabletokenizer.MultiHeadAttentionTransform",
+                "emb_dim": 8,
+                "out_dim": 6,
+                "num_heads": 2,
+            },
+        },
+    )
+    variable_metadata = {"var": {"mars": {"levtype": "sfc", "param": "2t", "time": 0, "step": 0}}}
+
+    model = DummyGraphModel(
+        model_config=model_config,
+        data_indices=_make_data_indices(),
+        statistics={"data": None},
+        n_step_input=2,
+        n_step_output=1,
+        graph_data=_make_graph(),
+        variable_metadata=variable_metadata,
+    )
+
+    assert model.input_transform.output_dim == 6
+    assert model.input_dim["data"] == 2 * 6 + model.node_attributes.attr_ndims["data"]

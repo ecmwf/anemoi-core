@@ -695,15 +695,9 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         else:
             self.emb_nodes_src = nn.Identity()
 
-        if self.out_channels_dst is not None:
-            self.node_data_extractor = nn.Sequential(
-                nn.LayerNorm(self.hidden_dim),
-                nn.Linear(self.hidden_dim, self.out_channels_dst),
-            )
-        else:
-            self.node_data_extractor = nn.LayerNorm(self.hidden_dim)
-            self.out_channels_dst = self.hidden_dim
-
+        self.node_data_extractor = nn.Sequential(
+            nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
+        )
         if initialise_data_extractor_zero:
             for module in self.node_data_extractor.modules():
                 if isinstance(module, nn.Linear):
@@ -1649,8 +1643,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         )
 
         self.node_data_extractor = nn.Sequential(
-            nn.LayerNorm(self.hidden_dim),
-            nn.Linear(self.hidden_dim, self.out_channels_dst),
+            nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
         )
 
     def pre_process(self, x):

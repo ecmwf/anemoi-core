@@ -345,12 +345,11 @@ class VariableVocabulary:
     @classmethod
     def from_foundation(
         cls,
-        data_indices: Any,
         metadata: dict[str, dict[str, Any]],
     ) -> "VariableVocabulary":
         """Construct the variable vocabulary for foundation training.
 
-        Builds the vocabulary from the union of model input and output variables.
+        Builds the vocabulary from every variable described in ``metadata``.
         Categorical metadata values are assigned stable foundation indices that
         define the embedding tables used by the model.
 
@@ -361,8 +360,6 @@ class VariableVocabulary:
 
         Parameters
         ----------
-        data_indices : Any
-            Anemoi data indices describing the model input and output variables.
         metadata : dict[str, dict[str, Any]]
             Dataset metadata indexed by variable name.
 
@@ -377,21 +374,7 @@ class VariableVocabulary:
         all_vertical_types: set[str] = set()
         all_temporal_operators: set[str] = set()
 
-        names: set[str] = set()
-
-        # Foundation vocabulary is the union of model input/output fields.
-        for io in ["input", "output"]:
-            current_data_indices = getattr(
-                data_indices.model,
-                io,
-            )
-
-            names.update(current_data_indices.name_to_index.keys())
-
-        for name in sorted(names):
-            if name not in metadata:
-                raise KeyError(f"Missing metadata for variable {name}")
-
+        for name in sorted(metadata):
             spec = cls.make_specification(
                 name=name,
                 metadata=metadata,
