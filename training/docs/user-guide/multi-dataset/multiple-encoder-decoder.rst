@@ -1,6 +1,6 @@
-####################################
- Synchronized multi-dataset training
-####################################
+##########################
+ Multiple encoder-decoder
+##########################
 
 Since `anemoi-training=0.4`, The framework supports training with multiple datasets
 simultaneously. This enables use cases such as downscaling, or leveraging diverse
@@ -10,9 +10,9 @@ data sources to improve model generalisation.
  Overview
 **********
 
-With synchronized loading, every sample contains all configured datasets:
+When multiple datasets are configured:
 
-#. Each dataset can have its own encoder and decoder, allowing dataset-specific input and output representations. Compatible datasets can instead be assigned to the same encoder or decoder group.
+#. Each dataset has its own encoder and decoder, allowing dataset-specific input and output representations.
 
 #. Encoded representations from all datasets are combined in a shared latent space.
 
@@ -75,8 +75,6 @@ now becomes:
 
 Each dataset is identified by a unique name, and all configuration that applies specifically to that dataset is defined within its block.
 
-
-.. _multi-dataset-reader-configuration:
 
 *********************************************
  Dataloader Dataset Reader Configuration

@@ -3,13 +3,13 @@ Multi-Dataset Training
 
 Since ``anemoi-training`` version 0.4, the framework supports training with multiple datasets within a single training workflow. This enables applications such as downscaling, combining global and regional datasets, and leveraging diverse data sources to improve model generalisation.
 
-There are two ways to load multiple datasets during training:
+Two multi-dataset architectures are supported:
 
-- **Synchronized multi-dataset training:** Every sample contains all configured datasets. Datasets may use separate encoder and decoder groups, or compatible datasets may use the same group. Their encoded representations are combined in the latent space before processing.
+- **Multiple Encoders and Decoders:** Each dataset has its own encoder and decoder, allowing dataset-specific input and output representations. The encoded representations are combined in a shared latent space and processed by a common processor. This approach supports datasets with different variables and preprocessing requirements.
 
-- **Multi-domain training:** Every batch contains samples from one domain. Training alternates domain-homogeneous batches, allowing the active grid and graph to change between batches while the model parameters remain shared.
+- **Multi-Domain Training (Shared Architecture):** Multiple datasets with common variables (i.e. 'domains') share the same encoder, processor, and decoder. This approach enables training across different spatial resolutions, grid structures, and geographical domains while using shared model parameters. Datasets must have compatible input and output variable definitions and consistent variable ordering.
 
-The loading policy is independent of how datasets are assigned to encoder and decoder groups. In particular, synchronized loading can also use one encoder for multiple datasets with compatible variables. The following sections describe both loading modes and their configuration requirements.
+Both approaches enable learning from multiple datasets, but differ in how dataset-specific information is encoded, processed, and decoded. The following sections describe their architectures, training procedures, and configuration requirements.
 
 .. toctree::
    :maxdepth: 1
