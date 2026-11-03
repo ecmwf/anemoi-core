@@ -80,10 +80,13 @@ Multi-Domain
 ------------
 
 ``MultiDomainLoadingPolicy`` builds one independently indexed
-``MultiDataset`` per domain. Its batch sampler visits domains in a random (seeded)
-order and keeps every batch domain-homogeneous, including when the configured
-batch size is greater than one. The readers may use different grids and date
-ranges.
+``MultiDataset`` per domain. A domain is the spatial structure of a dataset
+(grid, resolution, geographical extent); all domains share the same variables,
+and a typical case is a set of stretched-grid domains that share a global
+dataset and add different regional ones. Its batch sampler visits domains in a
+random (seeded) order and keeps every batch domain-homogeneous, including when
+the configured batch size is greater than one. The readers may use different
+grids and date ranges.
 
 Select it in the dataloader configuration::
 
