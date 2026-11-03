@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from typing import Literal
 
 import numpy as np
 import torch
@@ -30,8 +31,9 @@ class BaseKNNEdges(BaseDistanceEdgeBuilders):
         num_nearest_neighbours: int,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
+        backend: Literal["auto", "sklearn"] = "auto",
     ) -> None:
-        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
+        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name, backend=backend)
         assert isinstance(num_nearest_neighbours, int), "Number of nearest neighbours must be an integer."
         assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive."
         self.num_nearest_neighbours = num_nearest_neighbours
@@ -215,8 +217,9 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         reversed_num_nearest_neighbours: int | None = None,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
+        backend: Literal["auto", "sklearn"] = "auto",
     ) -> None:
-        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
+        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name, backend=backend)
         assert isinstance(num_nearest_neighbours, int), "Number of nearest neighbours must be an integer."
         assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive."
 
