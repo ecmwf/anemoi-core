@@ -198,10 +198,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         fcstep = min(1, fcstep)
         # Process each dataset through its corresponding encoder
-        active_hidden_names = list(dict.fromkeys(self.dataset2hidden[dataset_name] for dataset_name in dataset_names))
-        if len(active_hidden_names) != 1:
-            raise ValueError(f"All datasets in a batch must use the same hidden mesh, got {active_hidden_names}.")
-        hidden_name = active_hidden_names[0]
+        hidden_name = self._get_active_hidden_name(dataset_names)
         dataset_latents = {}
         x_skip_dict = {}
         x_data_latent_dict = {}
@@ -266,16 +263,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             model_comm_group=model_comm_group,
         )
 
-        processor_graph_provider = (
-            self.processor_graph_provider[hidden_name]
-            if self._multiple_hidden_meshes
-            else self.processor_graph_provider
-        )
         (
             processor_edge_attr,
             processor_edge_index,
             proc_edge_shard_sizes,
-        ) = processor_graph_provider.get_edges(
+        ) = self.processor_graph_provider[hidden_name].get_edges(
             batch_size=batch_ens_size,
             model_comm_group=model_comm_group,
         )

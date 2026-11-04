@@ -15,7 +15,6 @@ from typing import Optional
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-from omegaconf import ListConfig
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -70,23 +69,7 @@ class BaseGraphModel(nn.Module):
         self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
-        self._graph_name_hidden = model_config.model.hidden_nodes_name
-        self._multiple_hidden_meshes = isinstance(self._graph_name_hidden, (dict, DictConfig))
-        if isinstance(self._graph_name_hidden, (dict, DictConfig)):
-            self.dataset2hidden = dict(self._graph_name_hidden)
-            missing_datasets = set(self.dataset_names) - set(self.dataset2hidden)
-            unknown_datasets = set(self.dataset2hidden) - set(self.dataset_names)
-            assert not missing_datasets, f"Hidden node names are missing for datasets {sorted(missing_datasets)}."
-            assert (
-                not unknown_datasets
-            ), f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
-            assert all(
-                isinstance(name, str) for name in self.dataset2hidden.values()
-            ), "Hidden node names must be strings."
-        elif isinstance(self._graph_name_hidden, str):
-            self.dataset2hidden = dict.fromkeys(self.dataset_names, self._graph_name_hidden)
-        else:
-            self.dataset2hidden = None
+        self._build_hidden_node_routing(model_config.model.hidden_nodes_name)
 
         self.latent_skip = model_config.model.latent_skip
 
@@ -101,7 +84,7 @@ class BaseGraphModel(nn.Module):
 
         self._assert_model_routing()
         self._assert_matching_indices(data_indices)
-        self._assert_hidden_nodes_name(self._graph_name_hidden)
+        self._assert_hidden_nodes_name()
 
         # build networks
         self._build_networks(model_config)
@@ -120,6 +103,25 @@ class BaseGraphModel(nn.Module):
             data_indices=self.data_indices,
             statistics=self.statistics,
         )
+
+    def _build_hidden_node_routing(self, hidden_nodes_name: str | dict[str, str] | DictConfig) -> None:
+        """Determine which hidden mesh each dataset is encoded into."""
+        if isinstance(hidden_nodes_name, str):
+            hidden_nodes_name = dict.fromkeys(self.dataset_names, hidden_nodes_name)
+
+        if not isinstance(hidden_nodes_name, (dict, DictConfig)):
+            raise TypeError(
+                f"Hidden nodes name must be a string or a dataset mapping, got {type(hidden_nodes_name)}",
+            )
+
+        self.dataset2hidden = dict(hidden_nodes_name)
+        missing_datasets = set(self.dataset_names) - set(self.dataset2hidden)
+        unknown_datasets = set(self.dataset2hidden) - set(self.dataset_names)
+        assert not missing_datasets, f"Hidden node names are missing for datasets {sorted(missing_datasets)}."
+        assert (
+            not unknown_datasets
+        ), f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
+        self.hidden_names = list(dict.fromkeys(self.dataset2hidden.values()))
 
     def _build_encoder_routing(self, encoders_config: DotDict) -> None:
         """Builds the dataset routing for encoders."""
@@ -163,14 +165,6 @@ class BaseGraphModel(nn.Module):
         assert all(
             d in self.target_datasets for d in self.dataset2decoder.keys()
         ), f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
-
-        shared_modules = any(len(datasets) > 1 for datasets in self.encoder2datasets.values()) or any(
-            len(datasets) > 1 for datasets in self.decoder2datasets.values()
-        )
-        if shared_modules and not isinstance(self._graph_name_hidden, (dict, DictConfig)):
-            assert isinstance(
-                self._graph_name_hidden, str
-            ), "Datasets sharing an encoder or decoder must be fused through one hidden node set."
 
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
             if fusing_strategy not in ("not_supported"):
@@ -224,28 +218,8 @@ class BaseGraphModel(nn.Module):
             self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 
-    @staticmethod
-    def _as_hidden_node_names(
-        hidden_nodes_name: str | list[str] | dict[str, str] | ListConfig | DictConfig,
-    ) -> list[str]:
-        if isinstance(hidden_nodes_name, str):
-            return [hidden_nodes_name]
-
-        if isinstance(hidden_nodes_name, (list, ListConfig)):
-            return list(hidden_nodes_name)
-
-        if isinstance(hidden_nodes_name, (dict, DictConfig)):
-            return list(dict.fromkeys(hidden_nodes_name.values()))
-
-        raise TypeError(
-            f"Hidden nodes name must be a string, a list of strings, or a dataset mapping, got {type(hidden_nodes_name)}",
-        )
-
-    def _assert_hidden_nodes_name(
-        self,
-        hidden_nodes_name: str | list[str] | dict[str, str] | ListConfig | DictConfig,
-    ) -> None:
-        for hidden_name in self._as_hidden_node_names(hidden_nodes_name):
+    def _assert_hidden_nodes_name(self) -> None:
+        for hidden_name in self.hidden_names:
             assert (
                 hidden_name in self._graph_data.node_types
             ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
@@ -256,18 +230,14 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
-        if isinstance(self._graph_name_hidden, (dict, DictConfig)):
-            hidden_dims = {
-                hidden_name: self.node_attributes.attr_ndims[hidden_name]
-                for hidden_name in self._as_hidden_node_names(self._graph_name_hidden)
-            }
-            assert (
-                len(set(hidden_dims.values())) == 1
-            ), f"All hidden meshes must have the same node attribute dimension, got {hidden_dims}."
-            return next(iter(hidden_dims.values()))
-
-        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return self.node_attributes.attr_ndims[nodes_name]
+        hidden_dims = {
+            hidden_name: self.node_attributes.attr_ndims[hidden_name]
+            for hidden_name in dict.fromkeys(self.dataset2hidden.values())
+        }
+        assert (
+            len(set(hidden_dims.values())) == 1
+        ), f"All hidden meshes must have the same node attribute dimension, got {hidden_dims}."
+        return next(iter(hidden_dims.values()))
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         """Calculate the decoder target input dimension for a given dataset.
@@ -347,6 +317,13 @@ class BaseGraphModel(nn.Module):
 
         return dim_sizes[0]
 
+    def _get_active_hidden_name(self, dataset_names: list[str]) -> str:
+        """Return the single hidden mesh used by the datasets in the batch."""
+        active_hidden_names = list(dict.fromkeys(self.dataset2hidden[dataset_name] for dataset_name in dataset_names))
+        if len(active_hidden_names) != 1:
+            raise ValueError(f"All datasets in a batch must use the same hidden mesh, got {active_hidden_names}.")
+        return active_hidden_names[0]
+
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the networks for the model."""
@@ -388,7 +365,7 @@ class BaseGraphModel(nn.Module):
             node_attributes_graph[dataset_name].x = self._graph_data[dataset_name].x
             node_attributes_graph[dataset_name].num_nodes = self._graph_data[dataset_name].num_nodes
 
-        for hidden_name in self._as_hidden_node_names(self._graph_name_hidden):
+        for hidden_name in self.hidden_names:
             node_attributes_graph[hidden_name].x = self._graph_data[hidden_name].x
             node_attributes_graph[hidden_name].num_nodes = self._graph_data[hidden_name].num_nodes
 

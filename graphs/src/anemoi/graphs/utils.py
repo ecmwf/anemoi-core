@@ -52,9 +52,10 @@ You can install it using:
 LOGGER = logging.getLogger(__name__)
 
 
-def load_graph_from_file(graph_filename: Path | str) -> HeteroData:
-    """Load a serialized graph on the currently active distributed device."""
-    map_location = get_distributed_device()
+def load_graph_from_file(graph_filename: Path | str, map_location: str | torch.device | None = None) -> HeteroData:
+    """Load a serialized graph on the given device (default: the currently active distributed device)."""
+    if map_location is None:
+        map_location = get_distributed_device()
     LOGGER.info("Loading graph data (%s) from %s", map_location, graph_filename)
     return torch.load(graph_filename, map_location=map_location, weights_only=False)
 

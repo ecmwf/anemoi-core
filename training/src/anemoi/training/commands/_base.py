@@ -39,9 +39,9 @@ class HydraCommand(Command, ABC):
         """
         argv = Path(sys.argv[0])
 
-        # turns "/env/bin/anemoi-training <cmd>" into "/env/bin/.anemoi-training-<cmd>"
-        # the dot at the beginning is intentional to not interfere with autocomplete
-        modified_sysargv = str(argv.with_name(f".{argv.name}-{args.command}"))
+        # turns "/env/bin/anemoi-training <cmd>" into "/env/bin/_anemoi-training-<cmd>"
+        # the underscore at the beginning is intentional to not interfere with autocomplete
+        modified_sysargv = str(argv.with_name(f"_{argv.name}-{args.command}"))
 
         if hasattr(args, "subcommand"):
             modified_sysargv += f"-{args.subcommand}"
