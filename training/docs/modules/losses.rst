@@ -611,10 +611,8 @@ axis ahead of ``l, m`` when passing the forward wrapper's output to the inverse.
 .. note::
 
    ``ReducedSHT`` and ``OctahedralSHT`` both perform a spherical harmonic transform on a reduced Gaussian grid.
-   By default, longitude rings of equal length are transformed together using batched PyTorch FFTs
-   and explicit backward formulas. Optional CUDA graphs can be enabled by setting
-   ``use_graphed_rfft=True`` in the section of the config file corresponding to your spectral loss. This can provide
-   significant speedups, but may not be supported on all devices and can have higher memory usage.
+   The Fourier transforms along the latitude rings use Bluestein's padding trick: rings of different
+   lengths share a few FFT lengths, so all rings go through a few batched FFTs together.
 
 .. note::
 
