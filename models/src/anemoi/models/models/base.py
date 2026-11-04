@@ -410,8 +410,8 @@ class BaseGraphModel(nn.Module):
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
         hidden_dims = {
-            hidden_name: self.node_attributes.attr_ndims[hidden_name]
-            for hidden_name in dict.fromkeys(self.dataset2hidden.values())
+            hidden_name: COORDS_DIM + self.node_attributes.num_trainable_parameters.get(hidden_name, 0)
+            for hidden_name in self.hidden_names
         }
         assert (
             len(set(hidden_dims.values())) == 1
@@ -451,12 +451,6 @@ class BaseGraphModel(nn.Module):
         raise TypeError(
             f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}",
         )
-
-    def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
-        for hidden_name in self._as_hidden_node_names(hidden_nodes_name):
-            assert (
-                hidden_name in self._graph_data.node_types
-            ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset

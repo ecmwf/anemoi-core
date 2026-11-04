@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import inspect
+from collections import defaultdict
 from types import SimpleNamespace
 
 import pytest
@@ -49,6 +50,9 @@ def _transport_model_stub() -> AnemoiTransportModelEncProcDec:
     torch.nn.Module.__init__(model)
     model.transport_source = TransportSourceBuilder()
     model.dynamic_node_attributes = {}
+    # Single hidden mesh: every dataset routes to "hidden".
+    model.hidden_names = ["hidden"]
+    model.dataset2hidden = defaultdict(lambda: "hidden")
     return model
 
 
@@ -431,6 +435,8 @@ def test_second_blocks_recovers_the_rows_joined_second() -> None:
 
 def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual_conditioning() -> None:
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
+    model.hidden_names = ["hidden"]
+    model.dataset2hidden = defaultdict(lambda: "hidden")
     model.node_attributes = _EmptyNodeAttributes()
     model.dynamic_node_attributes = {}
     model.condition_on_residual = True
@@ -494,6 +500,8 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
 
 def test_tendency_transport_assemble_input_rejects_sparse_obs() -> None:
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
+    model.hidden_names = ["hidden"]
+    model.dataset2hidden = defaultdict(lambda: "hidden")
     model.node_attributes = _EmptyNodeAttributes()
     model.condition_on_residual = False
 
@@ -519,6 +527,8 @@ def test_tendency_transport_forward_network_uses_dense_source_view_override() ->
     The encoder rows hold the history and the noisy target, and each mapper receives its own conditioning.
     """
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
+    model.hidden_names = ["hidden"]
+    model.dataset2hidden = defaultdict(lambda: "hidden")
     torch.nn.Module.__init__(model)
     model._graph_name_hidden = "hidden"
     model.node_attributes = _EmptyNodeAttributes()
@@ -537,7 +547,7 @@ def test_tendency_transport_forward_network_uses_dense_source_view_override() ->
     model.decoders_target_input = {
         "data": SimpleNamespace(features=[SimpleNamespace(name="encoded_data")]),
     }
-    model._hidden_coordinates = lambda: torch.zeros(5, 2)
+    model._hidden_coordinates = lambda hidden_name=None: torch.zeros(5, 2)
     encoder_cond, processor_cond, decoder_cond = object(), object(), object()
     model._build_conditioning_kwargs = lambda *_args, **_kwargs: (
         {"data": {"cond": encoder_cond}},
@@ -594,7 +604,7 @@ def test_tendency_transport_forward_network_uses_dense_source_view_override() ->
     model.latent_aggregator = SumAggregator(input_channels=4, source_channels={"data": 4})
     model.decoder = {"data": _Decoder()}
     model.encoder_graph_provider = {"data": _GraphProvider()}
-    model.processor_graph_provider = _GraphProvider()
+    model.processor_graph_provider = {"hidden": _GraphProvider()}
     model.decoder_graph_provider = {"data": _GraphProvider()}
 
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
@@ -674,7 +684,7 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
     model._resolve_in_out_sharded = lambda batch: {dataset_name: False for dataset_name in batch.keys()}
     model._assert_valid_sharding = lambda *_args, **_kwargs: None
     model._build_conditioning_kwargs = lambda *_args, **_kwargs: ({"obs": {}}, {}, {"obs": {}})
-    model._hidden_coordinates = lambda: torch.zeros(5, 2)
+    model._hidden_coordinates = lambda hidden_name=None: torch.zeros(5, 2)
     # The encoder rows are the 3 history nodes followed by the 3 noisy-target nodes.
     model._assemble_transport_input = lambda *_args, **_kwargs: (
         torch.zeros(6, 2),
@@ -730,7 +740,7 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
     model.latent_aggregator = SumAggregator(input_channels=4, source_channels={"obs": 4})
     model.decoder = {"obs": decoder}
     model.encoder_graph_provider = {"obs": _GraphProvider()}
-    model.processor_graph_provider = _GraphProvider()
+    model.processor_graph_provider = {"hidden": _GraphProvider()}
     model.decoder_graph_provider = {"obs": _GraphProvider()}
 
     layout = TensorLayout(grid=0, variables=1)
@@ -1076,6 +1086,8 @@ def test_tendency_sparse_sampling_rejects_sparse_obs(monkeypatch: pytest.MonkeyP
             )
 
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
+    model.hidden_names = ["hidden"]
+    model.dataset2hidden = defaultdict(lambda: "hidden")
     model.transport_source = TransportSourceBuilder()
     model.transport_model_objective = EDMDiffusionModelObjective()
     model.inference_defaults = {
@@ -1087,7 +1099,7 @@ def test_tendency_sparse_sampling_rejects_sparse_obs(monkeypatch: pytest.MonkeyP
     model.num_output_channels = {"obs": 1}
     model._graph_name_hidden = "hidden"
     model.node_attributes = _EmptyNodeAttributes()
-    model._hidden_coordinates = lambda: torch.zeros(5, 2)
+    model._hidden_coordinates = lambda hidden_name=None: torch.zeros(5, 2)
     model._get_consistent_dim = lambda _batch, dim: 2 if dim == 0 else 1
     model._resolve_in_out_sharded = lambda batch: {dataset_name: False for dataset_name in batch.keys()}
     model._assert_valid_sharding = lambda *_args, **_kwargs: None
@@ -1292,6 +1304,8 @@ def test_transport_source_builder_postprocesses_reference_source(monkeypatch: py
 
 def test_tendency_sampling_source_can_use_reference_state() -> None:
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
+    model.hidden_names = ["hidden"]
+    model.dataset2hidden = defaultdict(lambda: "hidden")
     model.transport_source = TransportSourceBuilder(TransportSourceSettings(kind="reference_state"))
     model.target_datasets = ["ds_a"]
     model.n_step_output = {"ds_a": 2}
