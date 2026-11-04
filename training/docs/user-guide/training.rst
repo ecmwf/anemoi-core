@@ -914,9 +914,15 @@ to be used by PyTorch. For example:
    training:
       precision: bf16-mixed
       preferred_blas_backend: "cublas"
+      float32_matmul_precision: high
 
-Note that both entries are optional and can be left unspecified. The default precision is ``f16-mixed`` while the BLAS backend will fall back to the
+Note that all entries are optional and can be left unspecified. The default precision is ``f16-mixed`` while the BLAS backend will fall back to the
 default selection of PyTorch.
+
+``float32_matmul_precision`` is passed to ``torch.set_float32_matmul_precision`` and applies to the matrix products
+that run in float32, for example in losses that turn autocast off. It is one of ``highest``, ``high`` (the default)
+or ``medium``. ``high`` lets them use TF32 where the GPU has it, which is faster but keeps only about three
+significant digits. Set it to ``highest`` for full float32.
 
 ******************
  Weight Averaging
