@@ -29,6 +29,7 @@ from .spectral import PowerSpectrumLoss
 from .spectral import SpectralAMSELoss
 from .spectral import SpectralCRPSLoss
 from .variable_mapper import LossVariableMapper
+from .wavelet import WaveletEnergyScoreLoss
 from .weighted_mse import WeightedMSELoss
 
 __all__ = [
@@ -53,6 +54,7 @@ __all__ = [
     "SpectralAMSELoss",
     "SpectralCRPSLoss",
     "TimeAggregateLossWrapper",
+    "WaveletEnergyScoreLoss",
     "WeightedMSELoss",
     "get_loss_function",
 ]
