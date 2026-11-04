@@ -96,9 +96,12 @@ class BaseSample(ABC):
         ``kwargs`` holds the common fields as for :meth:`from_validated`, plus the dataset
         ``name``, the ``batch_size``, ``ensemble_size`` and ``time_size`` of the batch to
         decode, and the arguments specific to this kind. The default passes them on
-        unchanged; a kind whose template describes its geometry differently converts them.
+        unchanged, except for the per-sample ``layout``, which becomes the layout of the
+        collated source as in :meth:`collate`; a kind whose template describes its geometry
+        differently converts them.
         """
         del n_points, device
+        kwargs["layout"] = cls._collate_layout(kwargs["layout"])
         return cls.template_type(**kwargs)
 
     # The :class:`Source` subclass this kind collates into.
@@ -214,12 +217,25 @@ def _same_metadata(value: Any, expected: Any) -> bool:
 
 
 def validate_layout_against(name: str, layout: TensorLayout, data: torch.Tensor | list[torch.Tensor]) -> None:
-    """Check every non-None axis position is a valid axis of the collated tensor.
+    """Check that ``layout`` describes the collated tensor, or each tensor of a list.
 
-    Catches reader-side mistakes early instead of letting them surface as cryptic
-    errors deep inside model code.
+    Every tensor must have exactly as many dimensions as the layout has axes, and every
+    non-None axis position must be a valid axis of it. Catches reader-side mistakes
+    early instead of letting them surface as cryptic errors deep inside model code.
     """
-    ref = data[0] if isinstance(data, list) else data
+    tensors = data if isinstance(data, list) else [data]
+    for i, tensor in enumerate(tensors):
+        if tensor.ndim != layout.ndim:
+            where = f"sample {i} of the collated data" if isinstance(data, list) else "the collated data"
+            msg = (
+                f"TensorLayout for dataset {name!r} describes {layout.ndim} axes but {where} has "
+                f"{tensor.ndim} dimensions (shape={tuple(tensor.shape)}). Layout: {layout!r}."
+            )
+            raise ValueError(msg)
+
+    if not tensors:
+        return
+    ref = tensors[0]
     ndim = ref.ndim
     for axis_name in TensorLayout.AXES:
         pos = getattr(layout, axis_name)

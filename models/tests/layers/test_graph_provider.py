@@ -375,7 +375,11 @@ def test_dynamic_graph_provider_keeps_coordinate_attributes_working() -> None:
     source_nodes.x = src_coords
     target_nodes = NodeStorage()
     target_nodes.x = dst_coords
-    expected = EdgeLength(norm=None)(
+    # anemoi-graphs attribute builders compute on the device picked when they are created
+    # (a GPU if one is visible). Pin the reference to the input device, as the provider does.
+    reference = EdgeLength(norm=None)
+    reference.device = src_coords.device
+    expected = reference(
         x=(source_nodes, target_nodes),
         edge_index=edge_index,
     )

@@ -52,27 +52,36 @@ class FlatSource:
 
     def __post_init__(self):
         if self.data is not None and self.data.ndim != 2:
-            raise ValueError(f"{self.__class__} data must be 2-dimensional, got {self.data.ndim} dimensions.")
+            msg = f"{self.__class__} data must be 2-dimensional, got {self.data.ndim} dimensions."
+            raise ValueError(msg)
 
         if self.coordinates.ndim != 2:
-            raise ValueError(
-                f"{self.__class__.__name__} coordinates must be 2-dimensional, got {self.coordinates.ndim} dimensions."
+            msg = (
+                f"{self.__class__.__name__} coordinates must be 2-dimensional, "
+                f"got {self.coordinates.ndim} dimensions."
             )
+            raise ValueError(msg)
 
         if self.coordinates.shape[1] != 2:
-            raise ValueError(
-                f"{self.__class__.__name__} coordinates must have a shape of (nodes, 2), got {self.coordinates.shape}."
+            msg = (
+                f"{self.__class__.__name__} coordinates must have a shape of (nodes, 2), "
+                f"got {self.coordinates.shape}."
             )
+            raise ValueError(msg)
 
         if self.data is not None and self.data.device != self.device:
-            raise ValueError(
-                f"{self.__class__.__name__} data must be on the same device as the source, got {self.data.device} and {self.device}."
+            msg = (
+                f"{self.__class__.__name__} data must be on the same device as the source, "
+                f"got {self.data.device} and {self.device}."
             )
+            raise ValueError(msg)
 
         if self.coordinates.device != self.device:
-            raise ValueError(
-                f"{self.__class__.__name__} coordinates must be on the same device as the source, got {self.coordinates.device} and {self.device}."
+            msg = (
+                f"{self.__class__.__name__} coordinates must be on the same device as the source, "
+                f"got {self.coordinates.device} and {self.device}."
             )
+            raise ValueError(msg)
 
     def to(self, device: torch.device) -> "FlatSource":
         """Return a copy of this view with all tensors moved to the given device."""

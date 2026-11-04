@@ -77,10 +77,11 @@ class GriddedSource(Source):
             # If data is provided, check that the number of channels matches the number of variable names.
             num_channels = self.data.shape[self.layout.variables]
             if num_channels != len(self.variables):
-                raise ValueError(
+                msg = (
                     f"{self.__class__.__name__} {self.name!r} has {num_channels} variable channels "
                     f"but {len(self.variables)} names."
                 )
+                raise ValueError(msg)
 
     @property
     def coordinates_are_static(self) -> bool:
@@ -110,7 +111,8 @@ class GriddedSource(Source):
     def batch_size(self) -> int:
         """Number of samples (batch size) in this source."""
         if self.layout.batch is None:
-            raise ValueError(f"{self.__class__.__name__}.batch_size requires a layout with a batch axis.")
+            msg = f"{self.__class__.__name__}.batch_size requires a layout with a batch axis."
+            raise ValueError(msg)
 
         return self.data.shape[self.layout.batch]
 
@@ -126,7 +128,8 @@ class GriddedSource(Source):
     def time_size(self) -> int:
         """Number of time steps in this source."""
         if self.layout.time is None:
-            raise ValueError(f"{self.__class__.__name__}.time_size requires a layout with a time axis.")
+            msg = f"{self.__class__.__name__}.time_size requires a layout with a time axis."
+            raise ValueError(msg)
 
         return self.data.shape[self.layout.time]
 
@@ -175,7 +178,8 @@ class GriddedSource(Source):
     @property
     def condition_shape(self) -> tuple[int, int, int, int, int]:
         if self.data.ndim != 5:
-            raise ValueError(f"Expected dense transport data to be 5D, got shape {tuple(self.data.shape)}.")
+            msg = f"Expected dense transport data to be 5D, got shape {tuple(self.data.shape)}."
+            raise ValueError(msg)
         return self.batch_size, 1, self.ensemble_size, 1, 1
 
     def zip_map_data(self, fn: Callable[..., torch.Tensor], *others: Source) -> "GriddedSource":
@@ -208,13 +212,16 @@ class GriddedSource(Source):
 
     def pairwise(self, other: Source, func: Callable[..., torch.Tensor], *args, **kwargs) -> torch.Tensor:
         if not isinstance(other, GriddedSource):
-            raise TypeError(f"Other source must be a GriddedSource; got {type(other).__name__}.")
+            msg = f"Other source must be a GriddedSource; got {type(other).__name__}."
+            raise TypeError(msg)
 
         if kwargs.pop("per_sample_kwargs", None) is not None:
-            raise ValueError("Gridded losses take batched arguments; per_sample_kwargs is only for tabular sources.")
+            msg = "Gridded losses take batched arguments; per_sample_kwargs is only for tabular sources."
+            raise ValueError(msg)
 
         if self.layout != other.layout:
-            raise ValueError(f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}.")
+            msg = f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}."
+            raise ValueError(msg)
 
         # torch.equal returns a data-dependent Python bool, which breaks fullgraph compilation of the loss
         if not torch.compiler.is_compiling():
@@ -331,10 +338,10 @@ class GriddedSource(Source):
         return self.clone(data=gathered_data, coordinates=gathered_coords, shard_sizes=None)
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "GriddedSource":
-        """Return a new view restricted to the given variable indices.
+        """Return a new view with only the variables at ``indices``.
 
-        Indexes along ``layout.variables`` for both gridded and sparse
-        datasets. Coordinates / timedeltas / boundaries are unchanged.
+        The data tensor is indexed along ``layout.variables``, together with ``variables``
+        and ``statistics``. Coordinates, shard sizes and ``metadata`` are unchanged.
         """
         new_data = self._index_vars(self.data, indices)
         return self.clone(data=new_data, **self._select_variable_metadata(indices))

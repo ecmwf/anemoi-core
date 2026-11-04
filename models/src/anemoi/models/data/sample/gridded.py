@@ -27,16 +27,32 @@ from anemoi.models.distributed.shapes import ShardSizes
 @sample_registry.register("gridded")
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class GriddedSample(BaseSample):
-    """A sample on a grid that every sample of the dataset shares.
+    """One gridded dataset's contribution to one sample.
 
-    ``data`` is ``(time, ensemble, grid, variables)``, and every sample has the same shape.
+    A gridded dataset has a single, fixed grid: the grid belongs to the dataset, not to
+    the sample. Every sample a reader returns for that dataset holds the fields at the
+    sample's time steps on that same grid, so the samples share their ``coordinates``,
+    ``variables``, ``statistics`` and ``shard_sizes``, differ only in ``data``, and stack
+    into the single tensor of one :class:`~anemoi.models.data.sources.GriddedSource`.
+    Collation checks that the shared fields agree. Points that change from sample to
+    sample are tabular data instead (:class:`TabularSample`).
+
+    ``data`` has a ``time``, an ``ensemble``, a ``grid`` and a ``variables`` axis, e.g.
+    ``(time, ensemble, grid, variables)`` in the order given by :attr:`layout`.
+
+    When the grid is sharded across a reader group, each rank's sample holds only its
+    shard: ``data`` and ``coordinates`` cover the rank's points, and ``shard_sizes``
+    gives every rank's share of the full grid.
 
     Parameters
     ----------
     grid_size : int or None, optional
-        Full grid size before any distributed sharding.
+        Number of points in the dataset's full grid, before sharding.
+        :func:`~anemoi.models.data.sample.create_batched_struct` defaults it to the
+        number of coordinates, or the sum of ``shard_sizes``, and rejects any other value.
     shard_sizes : ShardSizes, optional
-        Read-time sharding descriptor over the grid axis.
+        Number of grid points held by each rank of the reader group, one entry per rank;
+        ``None`` when the sample holds the whole grid.
     """
 
     grid_size: int | None = None

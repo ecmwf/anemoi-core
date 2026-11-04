@@ -142,6 +142,7 @@ class TabularSample(BaseSample):
         """
         del time_size
         timedeltas, boundaries = cls._validate_time_windows(n_points, device, timedeltas, boundaries)
+        common["layout"] = cls._collate_layout(common["layout"])
         return cls.template_type(
             **common,
             coordinates=[coordinates] * batch_size,
