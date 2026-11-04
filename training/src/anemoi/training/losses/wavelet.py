@@ -69,9 +69,10 @@ class WaveletEnergyScoreLoss(BaseLoss):
       the field for all of them, so the score stays proper.
 
     The loss is the energy score of v over the members at each point, added over the scales with their
-    weights, then scaled and reduced like the CRPS. It asks for the right amount of structure at each scale,
-    lined up the right way, but not for the exact position of each crest. The transforms need the whole grid:
-    on a sharded grid the fields are spread over the variables for the transforms and back afterwards.
+    weights, then scaled and reduced like the CRPS. It rewards the right amount of structure at each scale,
+    lined up the right way, and tolerates small shifts in the position of each crest. The transforms need the
+    whole grid: on a sharded grid the fields are spread over the variables for the transforms and back
+    afterwards.
 
     The finest scale lies mostly beyond the truncation; give it weight 0.
 
@@ -246,7 +247,7 @@ class WaveletEnergyScoreLoss(BaseLoss):
             if grid_dim is not None and grid_dim % y_pred.ndim != grid_axis:
                 msg = f"WaveletEnergyScoreLoss grid_dim={grid_dim} does not match the source layout {layout!r}."
                 raise ValueError(msg)
-            # Spread the fields over the variables instead of the grid, so each rank holds whole fields.
+            # Spread the fields over the variables, so each rank holds whole fields.
             variable_shard_sizes = get_shard_sizes(y_pred, variable_axis, group)
             if variable_shard_sizes != get_shard_sizes(y_target, variable_axis, group):
                 msg = "WaveletEnergyScoreLoss needs equal prediction and target variable shard sizes."
