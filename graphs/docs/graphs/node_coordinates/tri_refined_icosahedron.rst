@@ -91,3 +91,44 @@ to the icosahedron outside and inside the area of interest respectively.
 
    This class will require the `trimesh <https://trimesh.org>`_ package
    to be installed. You can install it with `pip install trimesh`.
+
+************************************
+ Orography-adaptive stretched graph
+************************************
+
+The class `AdaptiveOrographyTriNodes` builds the same mesh as
+`StretchedTriNodes` and then adds nodes over steep terrain inside the
+area of interest. It computes the orographic slope at each node of the
+area of interest from a NetCDF orography file, and for every edge of the
+``lam_resolution`` icosahedron whose two end nodes are among the
+steepest, it adds a node at the edge midpoint. This halves the local
+node spacing over complex terrain without refining the whole area of
+interest.
+
+.. code:: yaml
+
+   nodes:
+     hidden: # name of the nodes
+       node_builder:
+         _target_: anemoi.graphs.nodes.AdaptiveOrographyTriNodes
+         global_resolution: 7
+         lam_resolution: 10
+         reference_node_name: data
+         orography_path: /path/to/orography.nc
+         gradient_threshold_percentile: 75  # optional, refines the steepest 25%
+         mask_attr_name: cutout_mask  # optional
+         margin_radius_km: 100  # optional
+       attributes: ...
+
+The orography file must contain a 2-D field on a regular latitude and
+longitude grid, named one of ``orog``, ``z``, ``orography``, ``hsurf``,
+``topography`` or ``fi``. Geopotential is converted to metres.
+
+The added nodes are vertices of the ``lam_resolution + 1`` icosahedron,
+so the nodes support `MultiScaleEdges` with ``scale_resolutions:
+lam_resolution + 1``. Flat terrain is never refined.
+
+.. warning::
+
+   This class will require the `trimesh <https://trimesh.org>`_ and
+   `xarray <https://xarray.dev>`_ packages to be installed.

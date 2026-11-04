@@ -521,3 +521,115 @@ class AnemoiDatasetVariableWeights(BaseNodeAttribute):
         ], f"{self.__class__.__name__} can only be used with AnemoiDatasetNodes."
         data = torch.from_numpy(self._read_data(nodes))
         return self.post_process(data)
+
+
+class OrogElevationAttribute(BaseNodeAttribute):
+    """Per-node elevation interpolated from a NetCDF orography file.
+
+    Linearly interpolates the elevation field (metres) of a regular lat/lon orography
+    file to the node coordinates. Nodes outside the orography grid get 0. Useful as a
+    static node feature that can be copied onto edges with
+    :class:`~anemoi.graphs.edges.attributes.FloatAttributeFromSourceNode` or
+    :class:`~anemoi.graphs.edges.attributes.FloatAttributeFromTargetNode`.
+
+    Attributes
+    ----------
+    orography_path : str
+        Path to the NetCDF orography file.
+    norm : str | None
+        Normalisation applied after interpolation. Defaults to ``"unit-max"``.
+    dtype : str
+        Data type of the attribute. Defaults to ``"float32"``.
+    """
+
+    def __init__(self, orography_path: str, norm: str | None = "unit-max", dtype: str = "float32") -> None:
+        super().__init__(norm=norm, dtype=dtype)
+        self.orography_path = orography_path
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        from anemoi.graphs.generate.utils import compute_orography_elevation
+
+        elevation = compute_orography_elevation(self.orography_path, nodes.x.cpu().numpy())
+        return torch.from_numpy(elevation.astype(np.float32))
+
+
+class OrogGradientAttribute(BaseNodeAttribute):
+    """Per-node orographic slope, normalised to [0, 1].
+
+    Computes ``clip(|grad z| / p, 0, 1)``, where ``p`` is the ``percentile_clip``
+    percentile of the positive slopes over the nodes. Flat nodes get 0 and the
+    steepest ``100 - percentile_clip`` % of nodes get 1. Nodes outside the
+    orography grid get 0.
+
+    Attributes
+    ----------
+    orography_path : str
+        Path to the NetCDF orography file.
+    percentile_clip : float
+        Percentile of the slope distribution that maps to 1. Defaults to 95.
+    norm : str | None
+        Additional normalisation. Defaults to None.
+    dtype : str
+        Data type of the attribute. Defaults to ``"float32"``.
+    """
+
+    def __init__(
+        self,
+        orography_path: str,
+        percentile_clip: float = 95.0,
+        norm: str | None = None,
+        dtype: str = "float32",
+    ) -> None:
+        super().__init__(norm=norm, dtype=dtype)
+        assert 0 < percentile_clip <= 100, f"percentile_clip must be in (0, 100], got {percentile_clip}"
+        self.orography_path = orography_path
+        self.percentile_clip = percentile_clip
+
+    def normalised_gradient(self, nodes: NodeStorage) -> np.ndarray:
+        from anemoi.graphs.generate.utils import compute_orography_gradient
+
+        gradient = compute_orography_gradient(self.orography_path, nodes.x.cpu().numpy())
+        positive = gradient[gradient > 0]
+        p_clip = float(np.percentile(positive, self.percentile_clip)) if positive.size else 1.0
+        return np.clip(gradient / max(p_clip, 1e-10), 0.0, 1.0)
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        return torch.from_numpy(self.normalised_gradient(nodes).astype(np.float32))
+
+
+class OrogGradientWeights(OrogGradientAttribute):
+    """Per-node weights that grow with the orographic slope.
+
+    Computes ``1 + alpha * g``, where ``g`` is the normalised slope of
+    :class:`OrogGradientAttribute`. Flat nodes get 1 and the steepest nodes get
+    ``1 + alpha``, e.g. to upweight the loss over complex terrain.
+
+    Attributes
+    ----------
+    orography_path : str
+        Path to the NetCDF orography file.
+    alpha : float
+        Amplification for the steepest nodes. Defaults to 2.
+    percentile_clip : float
+        Percentile of the slope distribution that maps to ``1 + alpha``. Defaults to 95.
+    norm : str | None
+        Additional normalisation. Defaults to None.
+    dtype : str
+        Data type of the attribute. Defaults to ``"float32"``.
+    """
+
+    def __init__(
+        self,
+        orography_path: str,
+        alpha: float = 2.0,
+        percentile_clip: float = 95.0,
+        norm: str | None = None,
+        dtype: str = "float32",
+    ) -> None:
+        super().__init__(orography_path, percentile_clip=percentile_clip, norm=norm, dtype=dtype)
+        assert alpha >= 0, f"alpha must be non-negative, got {alpha}"
+        self.alpha = alpha
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        weights = 1.0 + self.alpha * self.normalised_gradient(nodes)
+        return torch.from_numpy(weights.astype(np.float32))

@@ -188,3 +188,33 @@ the decoder:
         comes_from_cutout: # Assigned name to the edge attribute, can be different than node_attr_name
           _target_: anemoi.graphs.edges.attributes.AttributeFromTargetNode
           node_attr_name: cutout
+
+Float values from source or target
+==================================
+
+``AttributeFromSourceNode`` and ``AttributeFromTargetNode`` copy boolean
+attributes. To copy a continuous node attribute, such as the elevation
+from ``OrogElevationAttribute``, use ``FloatAttributeFromSourceNode`` or
+``FloatAttributeFromTargetNode``. Both accept an optional ``norm``.
+Example usage for giving the encoder the elevation of each data node and
+the decoder the elevation of each node it reconstructs:
+
+.. code:: yaml
+
+   edges:
+     # Encoder
+   - source_name: data
+     target_name: hidden
+     edge_builders: ...
+     attributes:
+       src_z_orog:
+         _target_: anemoi.graphs.edges.attributes.FloatAttributeFromSourceNode
+         node_attr_name: z_orog
+     # Decoder
+   - source_name: hidden
+     target_name: data
+     edge_builders: ...
+     attributes:
+       dst_z_orog:
+         _target_: anemoi.graphs.edges.attributes.FloatAttributeFromTargetNode
+         node_attr_name: z_orog

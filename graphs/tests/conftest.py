@@ -200,3 +200,29 @@ def config_file(tmp_path) -> tuple[str, str]:
         yaml.dump(cfg, file)
 
     return tmp_path, file_name
+
+
+def _write_orography(path, lats, lons, values, name="orog") -> str:
+    import xarray as xr
+
+    ds = xr.Dataset({name: (("latitude", "longitude"), values)}, coords={"latitude": lats, "longitude": lons})
+    ds.to_netcdf(path)
+    return str(path)
+
+
+@pytest.fixture
+def orography_file(tmp_path) -> str:
+    """NetCDF with a 3000 m Gaussian mountain centred at (46N, 8E) on a 0.05 deg grid."""
+    lats = np.arange(44.0, 48.0001, 0.05)
+    lons = np.arange(6.0, 10.0001, 0.05)
+    lat_g, lon_g = np.meshgrid(lats, lons, indexing="ij")
+    orog = 3000.0 * np.exp(-((lat_g - 46.0) ** 2 + (lon_g - 8.0) ** 2) / (2 * 0.4**2))
+    return _write_orography(tmp_path / "orography.nc", lats, lons, orog)
+
+
+@pytest.fixture
+def flat_orography_file(tmp_path) -> str:
+    """NetCDF with a flat 500 m plateau on the same grid as ``orography_file``."""
+    lats = np.arange(44.0, 48.0001, 0.05)
+    lons = np.arange(6.0, 10.0001, 0.05)
+    return _write_orography(tmp_path / "flat.nc", lats, lons, np.full((len(lats), len(lons)), 500.0))
