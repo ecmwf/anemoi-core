@@ -508,6 +508,7 @@ def test_energy_score_rejects_invalid_norm(norm_over: list[str]) -> None:
     with pytest.raises(ValueError, match="Invalid energy score norm"):
         EnergyScoreLoss(norm_over=norm_over)  # type: ignore[arg-type]
 
+
 @pytest.mark.parametrize("fair", [True, False])
 def test_energy_score_with_one_dimensional_outcome_is_crps(score_inputs, fair: bool) -> None:
     # check that ES reduces to CRPS for one-dimensional outcomes (tested here with 1 variable)
