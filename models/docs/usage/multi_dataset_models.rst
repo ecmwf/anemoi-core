@@ -81,7 +81,8 @@ choose stable, descriptive names.
 
 ``dataset_fusing_strategy``
    How multiple datasets within a single group are combined if passed during the
-   same forward pass: ``"none"`` (default) or ``"sequential"``. See below.
+   same forward pass: ``"none"`` (default) or ``"sequential"`` (see
+   :ref:`usage-multi-dataset-shared-groups`).
 
 ``num_channels``
    Note that ``num_channels`` is configured **per mapper** (and on the
@@ -92,20 +93,65 @@ choose stable, descriptive names.
    All datasets encoded by the same encoder group must produce latents
    with consistent shapes (see the target-feature validation below).
 
-***************************************************
- Encoding multiple datasets with the same encoder
-***************************************************
+.. _usage-multi-dataset-shared-groups:
 
-A different strategy can be chosen for each encoder by setting the ``dataset_fusing_strategy`` field, which supports
-the following values:
+*************************************************************
+ Sharing an encoder or decoder between datasets
+*************************************************************
 
-``none``
-   No fusion (default). The natural choice for a single-source encoder. With several source datasets, each is encoded
-   separately and they must share an input dimension.
+Several datasets can be listed in the same encoder (``source_datasets``) or
+decoder (``target_datasets``) group. They then share the mapper weights, while
+each dataset keeps its own graph edges.
 
-``sequential``
-   One encoder pass per source dataset, in the order listed in ``source_datasets``, with shared encoder weights. The
-   resulting latents are combined by the latent aggregator.
+When several datasets of a group are present in the same batch, each is encoded
+separately with the shared weights and the latents are merged by the
+:ref:`latent aggregator <usage-latent-aggregator>`. Together with
+``MultiDomainLoadingPolicy`` (one domain per batch) this lets domains with
+different grids be trained with one set of weights.
+
+.. _usage-multi-dataset-hidden-nodes:
+
+********************
+ Hidden node names
+********************
+
+``model.hidden_nodes_name`` defines the hidden mesh(es) of the model and
+accepts three forms:
+
+``str``
+   One hidden mesh used by all datasets.
+
+``list[str]``
+   The hidden meshes of the levels of a hierarchical model.
+
+``dict[str, str]``
+   A hidden mesh per dataset. Several datasets may point to the same mesh. Only
+   valid for multi-domain models, where a different hidden mesh is considered
+   at each step.
+
+   .. code:: yaml
+
+      model:
+        model:
+          hidden_nodes_name:
+            era5_o96: hidden
+            cerra: hidden_cerra
+
+The following rules apply to the mapping form:
+
+- Every dataset of the model must be listed, and no other names may appear.
+- All datasets present in one batch must resolve to the same hidden mesh, so a
+  batch may not mix datasets with different meshes (use
+  ``MultiDomainLoadingPolicy``, which keeps every batch to one domain).
+- All hidden meshes must have the same node attribute dimension, because the
+  processor weights are shared.
+- Hierarchical models do not support the mapping.
+
+The processor graph provider of flat models holds one entry per hidden mesh, so the hidden
+mesh names appear in the model ``state_dict`` (and therefore in checkpoints), in
+the same way as the encoder and decoder group names.
+
+.. _usage-latent-aggregator:
 
 *******************
  Latent aggregator

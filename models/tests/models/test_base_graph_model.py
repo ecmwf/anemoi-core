@@ -19,6 +19,7 @@ import anemoi.models.data.sources.gridded as gridded_module
 import anemoi.models.preprocessing.spatial as spatial_module
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
+from anemoi.models.models import AnemoiModelEncProcDecHierarchical
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from tests.batch_builders import build_batch
@@ -36,6 +37,10 @@ class DummyGraphModel(BaseGraphModel):
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError
+
+
+class DummyHierarchicalGraphModel(DummyGraphModel):
+    _build_hidden_node_routing = AnemoiModelEncProcDecHierarchical._build_hidden_node_routing
 
 
 class _IndexGroup(SimpleNamespace):
@@ -175,7 +180,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists(monkeypatch: pytes
         data_types={"data": "gridded"},
     )
 
-    assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
+    assert model.hidden_levels == ["hidden_1", "hidden_2", "hidden_3"]
     assert model._graph_data["hidden_3"].num_nodes == 1
 
 

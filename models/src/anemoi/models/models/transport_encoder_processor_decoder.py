@@ -343,24 +343,23 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         data_shard_sizes: ShardSizes = None,
         edge_conditioning: bool = False,
     ) -> tuple[torch.Tensor, ...]:
+        hidden_name = self.dataset2hidden[dataset_name]
 
         c_data = self._noise_emb_over_view(noise_cond, data_view, data_shard_sizes)
-        c_hidden = self._make_noise_emb(noise_cond, repeat=self._graph_data[self._graph_name_hidden].num_nodes)
+        c_hidden = self._make_noise_emb(noise_cond, repeat=self._graph_data[hidden_name].num_nodes)
 
         if edge_conditioning:  # currently unused, but available if graph edges need conditioning later
             c_data_to_hidden = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(dataset_name, "to", self._graph_name_hidden)]["edge_length"].shape[0],
+                repeat=self._graph_data[(dataset_name, "to", hidden_name)]["edge_length"].shape[0],
             )
             c_hidden_to_data = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(self._graph_name_hidden, "to", dataset_name)]["edge_length"].shape[0],
+                repeat=self._graph_data[(hidden_name, "to", dataset_name)]["edge_length"].shape[0],
             )
             c_hidden_to_hidden = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)]["edge_length"].shape[
-                    0
-                ],
+                repeat=self._graph_data[(hidden_name, "to", hidden_name)]["edge_length"].shape[0],
             )
         else:
             c_data_to_hidden = None
@@ -499,16 +498,17 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         )
 
         # Process each dataset through its corresponding encoder
+        hidden_name = self._get_active_hidden_name(dataset_names)
         dataset_latents = {}
         x_skip_dict: dict[str, torch.Tensor | None] = {}
         x_data_latent_dict = {}
 
-        hidden_coordinates = self._hidden_coordinates().to(batch.device)
+        hidden_coordinates = self._hidden_coordinates(hidden_name).to(batch.device)
         hidden_coordinates_batched = einops.repeat(hidden_coordinates, "n f -> (repeat n) f", repeat=bse)
         hidden_batch_sizes = (hidden_coordinates.shape[0],) * bse
         x_hidden_latent = latlons_to_sincos(hidden_coordinates)
         x_hidden_latent = einops.repeat(x_hidden_latent, "n f -> (repeat n) f", repeat=bse)
-        hidden_trainable_parameters = self.node_attributes(self._graph_name_hidden, batch_size=bse)
+        hidden_trainable_parameters = self.node_attributes(hidden_name, batch_size=bse)
         if hidden_trainable_parameters is not None:
             x_hidden_latent = torch.cat([x_hidden_latent, hidden_trainable_parameters], dim=-1)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group=model_comm_group)
@@ -583,7 +583,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             processor_edge_attr,
             processor_edge_index,
             proc_edge_shard_sizes,
-        ) = self.processor_graph_provider.get_edges(
+        ) = self.processor_graph_provider[hidden_name].get_edges(
             src_coords=hidden_coordinates,
             dst_coords=hidden_coordinates,
             batch_size=bse,

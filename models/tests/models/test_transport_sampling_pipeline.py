@@ -204,7 +204,7 @@ def _sparse_target_template(
 
 def test_transport_conditioning_embedding_uses_compact_condition_width() -> None:
     model = _transport_model_stub()
-    model._graph_name_hidden = "hidden"
+    model.dataset2hidden = {"data": "hidden"}
     model._graph_data = {"data": SimpleNamespace(num_nodes=4), "hidden": SimpleNamespace(num_nodes=5)}
     cond_dim = 8
     model._embed_noise_conditioning = lambda sigma: torch.ones(

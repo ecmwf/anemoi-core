@@ -1047,6 +1047,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.target_dataset_names:
+            if dataset_name not in y:
+                continue
             if dataset_name not in y_pred:
                 err_msg = (
                     f"Your model is not predicting dataset '{dataset_name}' (not included in any decoder) but "
