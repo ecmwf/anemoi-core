@@ -510,7 +510,10 @@ def test_energy_score_rejects_invalid_norm(norm_over: list[str]) -> None:
 
 
 @pytest.mark.parametrize("fair", [True, False])
-def test_energy_score_with_one_dimensional_outcome_is_crps(score_inputs, fair: bool) -> None:
+def test_energy_score_with_one_dimensional_outcome_is_crps(
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+    fair: bool,
+) -> None:
     # check that ES reduces to CRPS for one-dimensional outcomes (tested here with 1 variable)
     pred, target = score_inputs
     pred, target = pred[..., :1], target[..., :1]
