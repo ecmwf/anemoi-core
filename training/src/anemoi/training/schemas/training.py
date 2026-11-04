@@ -392,6 +392,45 @@ class GraphEdgeEnergyScoreLossSchema(GraphScoreLossSchema):
     fair: bool = True
 
 
+class WaveletEnergyScoreLossSchema(EnsembleScoreLossSchema):
+    """Energy score of the local structure at wavelet scales, see ``WaveletEnergyScoreLoss``."""
+
+    target_: Literal["anemoi.training.losses.WaveletEnergyScoreLoss"] = Field(..., alias="_target_")
+    transform: Literal["reduced_sht", "octahedral_sht", "regular_sht"]
+    "Layout of the data grid; all use Gaussian latitudes."
+    scale_weights: list[NonNegativeFloat]
+    "Weight of each wavelet scale, from the largest; scales with weight 0 are not computed."
+    truncation: PositiveInt | None = None
+    "Highest total wavenumber. Defaults to nlat // 2 - 1."
+    smoothing_octaves: NonNegativeInt = 3
+    "How many octaves below its own scale each structure tensor is smoothed."
+    direction_floor: float = Field(default=0.01, gt=0.0)
+    "Floor under the local energy in the direction entries, relative to the field's mean energy."
+    fair: bool = True
+    "Use the fair (unbiased) energy score."
+    grid: Literal["n320", "N320"] | None = None
+    "Name of the reduced Gaussian grid, for ``reduced_sht``."
+    nlat: PositiveInt | None = None
+    "Number of latitudes, for ``octahedral_sht`` and ``regular_sht``."
+    nlon: PositiveInt | None = None
+    "Number of longitudes, for ``regular_sht``. Defaults to 2 * nlat."
+    ignore_nans: Literal[False] = False
+    "The transforms cannot handle missing values."
+    no_autocast: Literal[True] = True
+    "The transforms and the score run in float32. For best results also set training.float32_matmul_precision: highest."
+
+    @model_validator(mode="after")
+    def check_scales_and_grid(self) -> Self:
+        if not any(weight > 0.0 for weight in self.scale_weights):
+            msg = "WaveletEnergyScoreLoss needs at least one scale weight above 0."
+            raise ValueError(msg)
+        needs = {"reduced_sht": "grid", "octahedral_sht": "nlat", "regular_sht": "nlat"}[self.transform]
+        if getattr(self, needs) is None:
+            msg = f"WaveletEnergyScoreLoss with transform '{self.transform}' needs '{needs}'."
+            raise ValueError(msg)
+        return self
+
+
 class MultiscaleConfigDiskSchema(BaseModel):
     """File-based multiscale config: smoothing matrices loaded from .npz files."""
 
@@ -621,6 +660,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.PowerSpectrumLoss": "spectral",
     "anemoi.training.losses.SpectralAMSELoss": "spectral",
     "anemoi.training.losses.HuberLoss": "huber",
+    "anemoi.training.losses.WaveletEnergyScoreLoss": "wavelet_energy_score",
     "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
 }
 
@@ -653,6 +693,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[GraphVariogramScoreLossSchema, Tag("graph_variogram_score")]
             | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
             | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
+            | Annotated[WaveletEnergyScoreLossSchema, Tag("wavelet_energy_score")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
@@ -713,6 +754,7 @@ LossSchemas = Annotated[
     | Annotated[GraphVariogramScoreLossSchema, Tag("graph_variogram_score")]
     | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
     | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
+    | Annotated[WaveletEnergyScoreLossSchema, Tag("wavelet_energy_score")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],

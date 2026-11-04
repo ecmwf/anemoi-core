@@ -82,6 +82,8 @@ The following probabilistic loss functions are available by default:
    score directly, so the same scaler can have a different effective strength
    when ``norm_over`` changes. In ``variables`` mode, node weights are applied
    after the norm and should normally sum to one, as for pointwise losses.
+-  ``WaveletEnergyScoreLoss``: Energy score of the local amount and
+   direction of structure at wavelet scales, see below.
 -  ``WeightedMSELoss``: MSE with noise-level weights for EDM diffusion
    transport models.
 
@@ -102,6 +104,51 @@ deterministic:
 The ensemble examples below use the standard global ensemble scaler set. Adapt
 the list when the selected training scaler configuration defines different
 scalers.
+
+Wavelet energy score
+====================
+
+``WaveletEnergyScoreLoss`` asks for the right amount of structure at each
+scale, lined up the right way, around each point, without asking for the
+exact position of each crest. See ``WaveletEnergyScoreLoss`` and
+``RieszStructureTensor`` for how it is computed.
+
+-  The fields are split into dyadic wavelet scales in total wavenumber:
+   scale ``j`` covers ``2^(j - 1) < l < 2^(j + 1)``.
+-  ``scale_weights`` has one weight per scale, from the largest. Scales with
+   weight 0 are not computed.
+-  The finest scale lies mostly beyond the truncation; give it weight 0.
+-  For best results, train with full float32 matrix products:
+   ``training.float32_matmul_precision: highest``. With the default
+   ``high`` (TF32), the gradient of this loss is about 1 % off on real
+   fields, and 13 % for precipitation (measured at O640).
+
+The transforms need the whole grid, which must be a Gaussian grid
+(``octahedral_sht`` with ``nlat``, ``reduced_sht`` with ``grid: n320``, or
+``regular_sht`` with ``nlat`` and optionally ``nlon``).
+
+-  The fields must have no missing values. Leave variables with missing
+   values out of this loss: a scaler such as ``nan_mask_weights`` cannot
+   help, because a missing value spreads through the transforms first.
+-  The truncation defaults to ``nlat // 2 - 1``.
+-  The grid must hold the products of the finest scale with a weight
+   above 0. With ``L`` its top degree and ``Ls`` its smoothing degree,
+   ``2 (L + 1) + 5 Ls`` must be at most ``2 nlat - 1``, and on a regular
+   grid below ``nlon``. Other settings are rejected.
+
+For example, on O1280 (``nlat: 2560``, 12 scales up to T1279), scales 8 to
+10 cover ``128 < l <= 1279`` and scale 11 only ``1024 < l <= 1279``:
+
+.. code:: yaml
+
+   training_loss:
+      datasets:
+         your_dataset_name:
+            _target_: anemoi.training.losses.WaveletEnergyScoreLoss
+            transform: octahedral_sht
+            nlat: 2560
+            scale_weights: [0, 0, 0, 0, 0, 0, 0, 0, 1.0, 1.0, 1.0, 0]
+            scalers: [pressure_level, general_variable, node_weights, time_steps]
 
 ************************
  Combined Loss Functions
