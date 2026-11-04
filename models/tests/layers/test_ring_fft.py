@@ -172,6 +172,29 @@ def test_fields_in_several_groups(fft_device, monkeypatch):
     compare_value_and_vjp(RingFFT(lengths).irfft(z), reference_irfft(z, lengths), z, torch.float64)
 
 
+def test_chirp_data_is_built_once_and_reused(fft_device):
+    lengths = [9, 4, 7, 4, 9]
+    fft = RingFFT(lengths)
+    x = torch.randn(3, sum(lengths), device=fft_device, dtype=torch.float64, requires_grad=True)
+
+    def run():
+        spectrum = fft.rfft(x, 4)
+        values = fft.irfft(spectrum)
+        (grad,) = torch.autograd.grad(values.square().sum(), x)
+        return spectrum.detach(), values.detach(), grad
+
+    first = run()
+    groups = [group for plan in fft._plans.values() for group in plan[0]]
+    kept = [dict(group.cache) for group in groups]
+    assert all(kept)
+    second = run()
+    for before, group in zip(kept, groups):
+        assert group.cache.keys() == before.keys()
+        assert all(group.cache[key] is value for key, value in before.items())
+    for a, b in zip(first, second):
+        assert torch.equal(a, b)
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
 def test_long_rings_keep_float32_accuracy():
     """O640 rings of up to 2576 points: the chirp phases stay exact, so float32 keeps its accuracy."""
