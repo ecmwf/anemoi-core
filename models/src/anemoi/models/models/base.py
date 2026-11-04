@@ -10,6 +10,7 @@
 
 import logging
 from abc import abstractmethod
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Optional
 
@@ -53,10 +54,36 @@ SUPPORTED_FUSING_STRATEGIES = {"none", "sequential"}
 PROJECTING_FUSING_STRATEGIES = {"sequential"}
 
 
+def hidden_node_names(hidden_nodes_name: str | list[str] | Mapping[str, str]) -> list[str]:
+    """Names of the hidden meshes, in order and without repeats.
+
+    Parameters
+    ----------
+    hidden_nodes_name : str, list of str or mapping of str to str
+        One hidden mesh, the levels of a hierarchical model, or a mapping from dataset
+        name to the hidden mesh it is encoded into.
+
+    Returns
+    -------
+    list[str]
+        The hidden mesh names.
+    """
+    if isinstance(hidden_nodes_name, str):
+        return [hidden_nodes_name]
+    if isinstance(hidden_nodes_name, Mapping):
+        return list(dict.fromkeys(hidden_nodes_name.values()))
+    if isinstance(hidden_nodes_name, (list, tuple, ListConfig)):
+        return list(dict.fromkeys(hidden_nodes_name))
+    msg = (
+        "Hidden nodes name must be a string, a list of strings, or a dataset mapping, " f"got {type(hidden_nodes_name)}"
+    )
+    raise TypeError(msg)
+
+
 def split_graph_config(
     graph_config: DotDict,
     is_dataset_static: dict[str, bool],
-    hidden_nodes_name: str | list[str],
+    hidden_nodes_name: str | list[str] | Mapping[str, str],
 ) -> tuple[DotDict, DotDict]:
     """This function creates the static graph structure and returns the dictionary for the dynamic graph configuration.
 
@@ -66,21 +93,17 @@ def split_graph_config(
         Graph configuration.
     is_dataset_static : dict[str, bool]
         Dictionary indicating whether each dataset is static (e.g., static grid) or not.
-    hidden_nodes_name : str or list of str
-        Name(s) of the hidden nodes in the graph. They are considered to be static.
+    hidden_nodes_name : str, list of str or mapping of str to str
+        Name(s) of the hidden nodes in the graph, or a mapping from dataset name to hidden
+        nodes name. The hidden nodes are considered to be static.
 
     Returns
     -------
     tuple[DotDict, DotDict]
         Static graph configuration and dynamic graph configuration.
     """
-    if isinstance(hidden_nodes_name, str):
-        is_dataset_static[hidden_nodes_name] = True
-    elif isinstance(hidden_nodes_name, list):
-        for hidden_name in hidden_nodes_name:
-            is_dataset_static[hidden_name] = True
-    else:
-        raise TypeError(f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}")
+    for hidden_name in hidden_node_names(hidden_nodes_name):
+        is_dataset_static[hidden_name] = True
 
     static_graph_config, dynamic_graph_config = {"nodes": {}, "edges": []}, {"nodes": {}, "edges": {}}
     for nodes_name, nodes_config in graph_config.nodes.items():
@@ -107,7 +130,7 @@ def split_graph_config(
 def load_existing_graph(
     graph_path: str | Path | None,
     is_dataset_static: dict[str, bool],
-    hidden_nodes_name: str | list[str],
+    hidden_nodes_name: str | list[str] | Mapping[str, str],
 ) -> tuple[HeteroData, DotDict]:
     """Load a pre-built static graph and return it with an empty dynamic graph configuration.
 
@@ -120,8 +143,9 @@ def load_existing_graph(
         Path to the serialised graph.
     is_dataset_static : dict[str, bool]
         Dictionary indicating whether each dataset is static. The hidden nodes are added as static.
-    hidden_nodes_name : str or list of str
-        Name(s) of the hidden nodes in the graph.
+    hidden_nodes_name : str, list of str or mapping of str to str
+        Name(s) of the hidden nodes in the graph, or a mapping from dataset name to hidden
+        nodes name.
 
     Returns
     -------
@@ -139,8 +163,7 @@ def load_existing_graph(
         )
         raise NotImplementedError(msg)
 
-    hidden_names = [hidden_nodes_name] if isinstance(hidden_nodes_name, str) else list(hidden_nodes_name)
-    for hidden_name in hidden_names:
+    for hidden_name in hidden_node_names(hidden_nodes_name):
         is_dataset_static[hidden_name] = True
 
     graph = load_graph_from_file(Path(graph_path))
@@ -250,6 +273,28 @@ class BaseGraphModel(nn.Module):
             statistics=self.statistics,
         )
 
+    def __setstate__(self, state: dict) -> None:
+        """Fill in the hidden-mesh routing of models pickled before it existed.
+
+        Inference checkpoints pickle the whole model, so unpickling skips ``__init__``.
+        Models pickled before the hidden mesh was routed per dataset have neither
+        ``hidden_names`` nor ``dataset2hidden``, and a single processor graph provider
+        instead of one per hidden mesh.
+
+        Parameters
+        ----------
+        state : dict
+            The pickled ``__dict__`` of the model.
+        """
+        super().__setstate__(state)
+        if "dataset2hidden" in self.__dict__:
+            return
+        self._build_hidden_node_routing()
+        provider = self._modules.get("processor_graph_provider")
+        if isinstance(self._graph_name_hidden, str) and isinstance(provider, nn.Module):
+            if not isinstance(provider, nn.ModuleDict):
+                self._modules["processor_graph_provider"] = nn.ModuleDict({self._graph_name_hidden: provider})
+
     def _configure_dynamic_node_attributes(self, dynamic_node_config: DotDict) -> None:
         """Configure runtime node attributes for models that support them."""
         del dynamic_node_config
@@ -274,8 +319,9 @@ class BaseGraphModel(nn.Module):
             ), f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
             self.hidden_names = list(dict.fromkeys(self.dataset2hidden.values()))
         elif isinstance(hidden_nodes_name, (list, ListConfig)):
-            self.dataset2hidden = None
+            # Hierarchical levels: every dataset is encoded into the first level.
             self.hidden_names = list(hidden_nodes_name)
+            self.dataset2hidden = dict.fromkeys(self.dataset_names, self.hidden_names[0])
         else:
             raise TypeError(
                 f"Hidden nodes name must be a string, a list of strings, or a dataset mapping, got {type(hidden_nodes_name)}",
@@ -408,10 +454,13 @@ class BaseGraphModel(nn.Module):
         )
 
     def _calculate_input_dim_latent(self) -> int:
-        """Calculate the latent input dimension."""
+        """Calculate the latent input dimension of the hidden meshes the datasets are encoded into.
+
+        Hierarchical models size their deeper levels themselves, so only the first level counts there.
+        """
         hidden_dims = {
             hidden_name: COORDS_DIM + self.node_attributes.num_trainable_parameters.get(hidden_name, 0)
-            for hidden_name in self.hidden_names
+            for hidden_name in dict.fromkeys(self.dataset2hidden.values())
         }
         assert (
             len(set(hidden_dims.values())) == 1
@@ -440,17 +489,9 @@ class BaseGraphModel(nn.Module):
 
     @staticmethod
     def _as_hidden_node_names(
-        hidden_nodes_name: str | list[str] | ListConfig,
+        hidden_nodes_name: str | list[str] | ListConfig | Mapping[str, str],
     ) -> list[str]:
-        if isinstance(hidden_nodes_name, str):
-            return [hidden_nodes_name]
-
-        if isinstance(hidden_nodes_name, (list, ListConfig)):
-            return list(hidden_nodes_name)
-
-        raise TypeError(
-            f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}",
-        )
+        return hidden_node_names(hidden_nodes_name)
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset

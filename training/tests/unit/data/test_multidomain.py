@@ -74,6 +74,24 @@ class TestMultiDomain:
         relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}
         return MultiDomainLoadingPolicy().build_dataset(data_readers, relative_date_indices)
 
+    def test_exposes_the_dataset_metadata_of_all_domains(self, data_readers: dict, multi_domain: ConcatDataset) -> None:
+        """The trainer and datamodule read these per-dataset mappings, as from a single MultiDataset."""
+        for name, reader in data_readers.items():
+            reader.variables = [f"{name}_var"]
+            reader.resolution = f"{name}_res"
+
+        assert multi_domain.dataset_names == ["dataset_a", "dataset_b"]
+        assert multi_domain.variables == {"dataset_a": ["dataset_a_var"], "dataset_b": ["dataset_b_var"]}
+        assert multi_domain.resolution == {"dataset_a": "dataset_a_res", "dataset_b": "dataset_b_res"}
+        assert multi_domain.name_to_index == {"dataset_a": {"10u": 0}, "dataset_b": {"10u": 0}}
+        assert set(multi_domain.metadata) == set(multi_domain.statistics) == {"dataset_a", "dataset_b"}
+
+    def test_reader_group_info_reaches_every_reader(self, data_readers: dict, multi_domain: ConcatDataset) -> None:
+        multi_domain.set_reader_group_info(1, 4)
+
+        for reader in data_readers.values():
+            reader.set_reader_group_info.assert_called_once_with(1, 4)
+
     def test_independent_domain_anchors(self, multi_domain: ConcatDataset) -> None:
         domains = dict(zip(("dataset_a", "dataset_b"), multi_domain.datasets, strict=True))
 

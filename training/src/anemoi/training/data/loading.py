@@ -13,13 +13,14 @@ from collections import Counter
 from collections.abc import Iterator
 
 import numpy as np
+from rich.console import Console
+from rich.tree import Tree
 from torch.utils.data import ConcatDataset
 from torch.utils.data import Dataset
 from torch.utils.data import Sampler
 from torchdata.stateful_dataloader.sampler import BatchSampler
 from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
 
-from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.readers import DataReader
 from anemoi.training.utils.seeding import SeedContext
@@ -161,33 +162,47 @@ class SynchronizedLoadingPolicy(DataLoadingPolicy):
 
 
 class MultiDomainDataset(ConcatDataset):
-    """Concatenated domains exposing the dataset metadata used by Anemoi."""
+    """Concatenated domains, each a :class:`MultiDataset`, exposing the dataset metadata used by Anemoi.
+
+    Every domain reads its own datasets, so the per-dataset properties below are the union of the
+    domains' readers, the same mappings a single :class:`MultiDataset` over all readers would give.
+    """
 
     def __init__(self, datasets: list[MultiDataset]) -> None:
         super().__init__(datasets)
         self.data_readers = {name: reader for dataset in datasets for name, reader in dataset.data_readers.items()}
+        self.dataset_names = list(self.data_readers)
 
-    # TODO(dieter): the properties below duplicate MultiDataset's reader-collecting properties;
-    # extract them into a mixin shared by MultiDataset and MultiDomainDataset.
+    def _collect(self, attr_name: str) -> dict:
+        return {name: getattr(reader, attr_name) for name, reader in self.data_readers.items()}
+
     @property
     def statistics(self) -> dict:
-        return {name: reader.statistics for name, reader in self.data_readers.items()}
+        return self._collect("statistics")
 
     @property
     def metadata(self) -> dict:
-        return {name: reader.metadata for name, reader in self.data_readers.items()}
+        return self._collect("metadata")
 
     @property
     def supporting_arrays(self) -> dict:
-        return {name: reader.supporting_arrays for name, reader in self.data_readers.items()}
+        return self._collect("supporting_arrays")
 
     @property
     def data(self) -> dict:
-        return {name: reader.data for name, reader in self.data_readers.items()}
+        return self._collect("data")
+
+    @property
+    def variables(self) -> dict[str, list[str]]:
+        return self._collect("variables")
 
     @property
     def name_to_index(self) -> dict:
-        return {name: reader.name_to_index for name, reader in self.data_readers.items()}
+        return self._collect("name_to_index")
+
+    @property
+    def resolution(self) -> dict[str, str]:
+        return self._collect("resolution")
 
     def set_relative_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
         for dataset in self.datasets:
@@ -196,9 +211,21 @@ class MultiDomainDataset(ConcatDataset):
             )
         self.cumulative_sizes = self.cumsum(self.datasets)
 
-    def set_reader_group_info(self, reader_group_rank: int, shard_sizes: dict[str, ShardSizes]) -> None:
+    def set_reader_group_info(self, reader_group_rank: int, reader_group_size: int) -> None:
         for dataset in self.datasets:
-            dataset.set_reader_group_info(reader_group_rank, shard_sizes)
+            dataset.set_reader_group_info(reader_group_rank, reader_group_size)
+
+    def __repr__(self) -> str:
+        console = Console(record=True, width=120)
+        with console.capture() as capture:
+            console.print(self.tree())
+        return capture.get()
+
+    def tree(self) -> Tree:
+        tree = Tree(self.__class__.__name__)
+        for dataset in self.datasets:
+            tree.add(dataset.tree())
+        return tree
 
 
 class MultiDomainLoadingPolicy(DataLoadingPolicy):
