@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources import GriddedSource
 from anemoi.models.layers.ring_fft import shared_ring_fft
-from anemoi.models.layers.spectral_transforms import OctahedralSHT
+from anemoi.models.layers.spectral_transforms import octahedral_lons_per_lat
 from anemoi.training.losses import SpectralCRPSLoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.schemas.training import LossSchemas
@@ -66,7 +66,7 @@ def test_spectral_fft_config_matches_native_loss_and_gradient(backend: str, grap
     assert validated.fft_backend == backend
     loss = get_loss_function(DictConfig(config)).to(device)
     reference = SpectralCRPSLoss(transform="octahedral_sht", nlat=8, truncation=2).to(device)
-    points = sum(OctahedralSHT(nlat=8, truncation=2).lons_per_lat)
+    points = sum(octahedral_lons_per_lat(8))
     torch.manual_seed(5)
     pred = torch.randn(1, 1, 3, points, 2, device=device, requires_grad=True)
     target = torch.randn(1, 1, 1, points, 2, device=device)

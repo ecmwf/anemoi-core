@@ -16,7 +16,8 @@ import torch
 
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources import GriddedSource
-from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
+from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
+from anemoi.models.layers.spectral_transforms import octahedral_lons_per_lat
 from anemoi.training.losses.spectral import PowerSpectrumLoss
 from anemoi.training.losses.spectral import SpectralCRPSLoss
 
@@ -44,7 +45,7 @@ def fields(members: int, seed: int, size: float) -> torch.Tensor:
     coefficients = torch.randn(members, 2, TRUNCATION + 1, TRUNCATION + 1, dtype=torch.complex128, generator=generator)
     coefficients = coefficients.tril()
     coefficients[..., 0] = coefficients[..., 0].real
-    inverse = InverseOctahedralSHT(nlat=NLAT, truncation=TRUNCATION)
+    inverse = InverseSphericalHarmonicTransform(octahedral_lons_per_lat(NLAT), TRUNCATION)
     grid = inverse(coefficients).movedim(1, -1)
     return grid * torch.tensor([1.0, size], dtype=torch.float64)
 
