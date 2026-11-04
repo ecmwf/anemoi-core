@@ -1,0 +1,60 @@
+# Stretched grid graph with two domains `data` and `data_2`.
+# Nodes and attributes are inherited from stretched_grid; each domain has its own
+# data nodes, hidden mesh and graph edges.
+defaults:
+  - stretched_grid
+  - _self_
+
+nodes:
+  data_2:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${dataloader.training.datasets.data_2.dataset_config}
+    attributes: ${graph.attributes.nodes}
+  hidden_2:
+    node_builder:
+      _target_: anemoi.graphs.nodes.StretchedTriNodes
+      lam_resolution: 8
+      global_resolution: 5
+      reference_node_name: data_2
+      mask_attr_name: cutout_mask
+      margin_radius_km: 11
+
+edges:
+- source_name: data
+  target_name: hidden
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 12
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+- source_name: hidden
+  target_name: hidden
+  edge_builders:
+  - _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
+    scale_resolutions: ${graph.nodes.hidden.node_builder.lam_resolution}
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+- source_name: hidden
+  target_name: data
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 3
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+- source_name: data_2
+  target_name: hidden_2
+  edge_builders: ${graph.edges.0.edge_builders}
+  attributes: ${graph.attributes.edges}
+- source_name: hidden_2
+  target_name: hidden_2
+  edge_builders: ${graph.edges.1.edge_builders}
+  attributes: ${graph.attributes.edges}
+- source_name: hidden_2
+  target_name: data_2
+  edge_builders: ${graph.edges.2.edge_builders}
+  attributes: ${graph.attributes.edges}

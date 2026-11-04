@@ -103,6 +103,10 @@ def test_on_epoch(
     callback.on_validation_start(fake_trainer, fake_pl_module)
     callback.on_test_start(fake_trainer, fake_pl_module)
 
+    fake_trainer.datamodule.loading_policy.check_dataset_compatibility.assert_called_once_with(
+        fake_trainer.datamodule.ds_train,
+    )
+
     assert (
         fake_trainer.datamodule.data_indices["data"].compare_variables(
             fake_pl_module._ckpt_model_name_to_index,
