@@ -48,9 +48,9 @@ def reference_irfft(x, lengths):
 
 
 def tolerances(dtype):
-    # Small FFTs: float64 checks are close to machine precision; float32 allows
-    # rounding from applying normalization after the batched FFT.
-    return dict(rtol=2e-6, atol=2e-6) if dtype == torch.float32 else dict(rtol=2e-13, atol=2e-13)
+    # Small FFTs: float64 checks are close to machine precision. In float32, two fields share each complex FFT,
+    # so each takes on the rounding of the larger of the two.
+    return dict(rtol=4e-6, atol=4e-6) if dtype == torch.float32 else dict(rtol=2e-13, atol=2e-13)
 
 
 def compare_value_and_vjp(actual, expected, x, dtype):
