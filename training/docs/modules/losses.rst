@@ -74,14 +74,27 @@ The following probabilistic loss functions are available by default:
    - ``stable``: materializes pairwise tensors and uses the numerically
      stable all-pairs formulation.
 -  ``EnergyScoreLoss``: Energy score with a configurable joint outcome.
-   Set ``norm_over`` to ``spatial`` for one spatial score per variable,
-   ``variables`` for one joint variable score per grid node, or
-   ``spatial_and_variables`` for one score over the complete field.
+   ``norm_over`` lists the dimensions that form one outcome, any non-empty
+   combination of ``time``, ``grid`` and ``variables``. For example,
+   ``[grid]`` gives one spatial score per variable and output step,
+   ``[variables]`` one joint variable score per grid node and output step,
+   ``[grid, variables]`` one score over the complete field at each output
+   step, ``[time]`` one score over the output steps per grid node and
+   variable, and ``[time, grid, variables]`` one score over all output steps
+   of one model call. Rollout steps are separate model calls, scored one by
+   one and then averaged, so ``time`` never spans them. Norms over ``time``
+   need at least two output steps, so they cannot be used inside
+   ``TimeAggregateLossWrapper`` and are left out of per-timestep validation
+   metrics.
    Scalers on dimensions included in ``norm_over`` define the weighted norm
    ``sqrt(sum(weight * difference**2))``. Other scalers multiply the completed
    score directly, so the same scaler can have a different effective strength
-   when ``norm_over`` changes. In ``variables`` mode, node weights are applied
-   after the norm and should normally sum to one, as for pointwise losses.
+   when ``norm_over`` changes. When ``grid`` is not in the norm, node weights
+   are applied after the norm and should normally sum to one, as for
+   pointwise losses. When ``time`` is in the norm, output-step weights act
+   inside it. With step weights that sum to one, an error that is the same
+   at every step gives the same score as scoring each step separately and
+   averaging.
 -  ``WeightedMSELoss``: MSE with noise-level weights for EDM diffusion
    transport models.
 
@@ -123,7 +136,7 @@ scalers.
              alpha: 0.95
            - _target_: anemoi.training.losses.EnergyScoreLoss
              fair: true
-             norm_over: spatial
+             norm_over: [grid]
 
 ********************************
  Selecting and Pairing Variables
@@ -413,7 +426,7 @@ low weight energy score anchor over the complete spatial field for each variable
                  row_normalize: true
              - _target_: anemoi.training.losses.EnergyScoreLoss
                fair: true
-               norm_over: spatial
+               norm_over: [grid]
                scalers: [pressure_level, general_variable, nan_mask_weights, node_weights, time_steps]
 
 Edge scores
@@ -462,7 +475,7 @@ Any ensemble score supported as ``per_scale_loss`` can be used within
            per_scale_loss:
              _target_: anemoi.training.losses.EnergyScoreLoss
              fair: true
-             norm_over: spatial_and_variables
+             norm_over: [grid, variables]
              scalers: [pressure_level, general_variable, nan_mask_weights, node_weights, time_steps]
 
 Example: multiscale CRPS with an edge CRPS for one variable
