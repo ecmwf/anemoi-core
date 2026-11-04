@@ -10,6 +10,7 @@
 import logging
 from pathlib import Path
 
+import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
@@ -88,6 +89,15 @@ def test_config_validation_stretched(stretched_config: tuple[DictConfig, list[st
 def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = multidatasets_config
     BaseSchema(**cfg)
+
+
+def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, list[str]]) -> None:
+    cfg, _ = multidomain_config
+    BaseSchema(**cfg)
+
+    cfg.model.model.hidden_nodes_name = ["hidden", "hidden_2"]
+    with pytest.raises(ValueError, match="Only hierarchical models take a list of hidden node names"):
+        BaseSchema(**cfg)
 
 
 def test_config_validation_lam(lam_config: DictConfig) -> None:
