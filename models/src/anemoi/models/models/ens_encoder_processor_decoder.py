@@ -150,7 +150,6 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         )
 
         if self.condition_on_residual:
-
             if self.variable_tokenizer is not None:
                 # [B, T, E, G, V] -> [B, 1, E, G, V]
                 x_skip_cond = x_skip_cond[:, :1]
@@ -158,7 +157,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             else:
                 # [B, T, E, G, V] -> [B, E, G, V]
                 x_skip_cond = x_skip[:, 0] if x_skip.ndim == 5 else x_skip
-                x_skip_cond = einops.rearrange(x_skip_cond, "bse grid vars -> (bse grid) vars")
+                x_skip_cond = x_skip_cond[..., self._internal_input_idx[dataset_name]]
+                x_skip_cond = einops.rearrange(
+                    x_skip_cond,
+                    "batch ensemble grid vars -> (batch ensemble grid) vars",
+                )
             x_data_latent = torch.cat(
                 (x_data_latent, x_skip_cond),
                 dim=-1,
