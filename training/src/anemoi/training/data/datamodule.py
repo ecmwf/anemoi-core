@@ -218,7 +218,41 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     def train_dataloader(self) -> DataLoader:
         """Return training dataloader."""
+        self.ds_train.persistent_workers = self._use_persistent_workers
+        self._skip_trained_batches()
         return self._get_dataloader(self.ds_train, "training")
+
+    def _skip_trained_batches(self) -> None:
+        """On a job resumed part-way through an epoch, leave out the batches it has already trained on.
+
+        Lightning restores the epoch and the count of its batches done, but its DataLoader starts the epoch again: the
+        resumed job would train on the epoch's first batches twice and never on the rest. The dataloader is requested
+        after the checkpoint is restored, so the count is known here. A checkpoint saved at the end of a batch counts
+        that batch as processed but not yet completed.
+
+        A checkpoint saved at the end of an epoch's last batch, before its validation and its end: Lightning counts
+        the epoch as finished on resume without running its end (``on_train_epoch_end``), and trains the next epoch on
+        the dataloader made here. So the epoch's end is made here instead, as ``on_train_epoch_end`` would: the
+        task's (the rollout step) and the next epoch for the data.
+        """
+        trainer = getattr(self, "trainer", None)
+        if trainer is None or not trainer.fit_loop.epoch_loop.restarting:
+            return
+        progress = trainer.fit_loop.epoch_loop.batch_progress
+        done = progress.current.processed
+        if trainer.fit_loop.epoch_progress.current.processed == trainer.fit_loop.epoch_progress.current.started:
+            return  # saved during the epoch's end: Lightning finishes it and starts the next epoch afresh
+        if progress.is_last_batch and progress.current.completed == done - 1:
+            LOGGER.info(
+                "Resuming at the end of epoch %d (saved after its last batch, before its end): ending it here.",
+                self.epoch,
+            )
+            self.task.on_train_epoch_end(current_epoch=self.epoch)
+            self.set_epoch(self.epoch + 1)
+            return
+        if done > 0:
+            LOGGER.info("Resuming epoch %d after its first %d batches: those are left out of it.", self.epoch, done)
+            self.ds_train.skip_trained_batches(self.epoch, done, self.config.dataloader.batch_size["training"])
 
     def val_dataloader(self) -> DataLoader:
         """Return validation dataloader."""

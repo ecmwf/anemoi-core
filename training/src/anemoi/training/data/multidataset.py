@@ -76,6 +76,10 @@ class MultiDataset(IterableDataset):
         self.fake_dataloading = fake_dataloading
         if self.fake_dataloading:
             LOGGER.info("Using fake dataloading")
+        # Set by the datamodule (see skip_trained_batches and the persistent_workers note in per_worker_init).
+        self.persistent_workers = False
+        self._trained_batches = (None, 0, 1)  # (epoch, batches already trained on in it, batch size)
+        self._resume_pass = None  # (chunk index range, samples to skip) for the first pass of a resumed epoch
 
         # Guard against mixing single-sequence (NativeGridDataset, global time axis)
         # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
@@ -293,6 +297,14 @@ class MultiDataset(IterableDataset):
             self.sample_comm_num_groups,
         )
 
+    def skip_trained_batches(self, epoch: int, batches: int, batch_size: int) -> None:
+        """Leave out the first ``batches`` batches of ``epoch``: a job resumed part-way through it has trained on them.
+
+        Called before the DataLoader starts its workers. The other epochs are not affected, so the resumed job
+        trains on exactly the batches an uninterrupted one would.
+        """
+        self._trained_batches = (epoch, batches, batch_size)
+
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         """Initialize all data readers for this worker."""
         self.worker_id = worker_id
@@ -322,13 +334,42 @@ class MultiDataset(IterableDataset):
         base_seed = get_base_seed()
         # The datamodule checkpoints this epoch and restores it before new workers
         # start, so resuming from an epoch checkpoint derives the same seed.
-        seed = derive_seed(base_seed, SeedContext.DATALOADER, self.epoch)
+        # Persistent workers start once, at epoch 0, and shuffle each later epoch
+        # with the next draw of the same generator: workers started for a resumed
+        # epoch take the generator from epoch 0 and make the draws of the epochs
+        # before it, so they shuffle as an uninterrupted job's workers would.
+        stream_start = 0 if self.persistent_workers else self.epoch
+        seed = derive_seed(base_seed, SeedContext.DATALOADER, stream_start)
 
         torch.manual_seed(seed)
         random.seed(seed)
         self.seed = seed
         self.rng = np.random.default_rng(seed=seed)
         sanity_rnd = self.rng.random(1)[0]
+        if self.shuffle:
+            for _ in range(self.epoch - stream_start):
+                self.rng.choice(self.valid_date_indices, size=len(self.valid_date_indices), replace=False)
+
+        # A resumed epoch: the DataLoader takes batch i of an epoch from worker i % n_workers, its (i // n_workers)-th
+        # batch, and a new DataLoader starts again at worker 0. So for the first pass this worker takes over the chunk
+        # of the worker whose batch comes next in turn, from where that worker had got to.
+        trained_epoch, trained_batches, batch_size = self._trained_batches
+        self._resume_pass = None
+        if trained_epoch == self.epoch and trained_batches > 0:
+            turn = (trained_batches + worker_id) % n_workers
+            low, high = get_balanced_partition_range(shard_size, n_workers, turn, offset=shard_start)
+            skip = batch_size * ((trained_batches + worker_id) // n_workers)
+            self._resume_pass = (np.arange(low, high, dtype=np.uint32), skip)
+            LOGGER.info(
+                "Worker %d (%s): resuming epoch %d after its first %d batches, so this pass continues worker %d's "
+                "samples after its first %d",
+                worker_id,
+                self.label,
+                self.epoch,
+                trained_batches,
+                turn,
+                skip,
+            )
         LOGGER.info(
             ("Worker %d (%s, pid %d, epoch %d, rollout %d, seed %d, sanity rnd %f)"),
             worker_id,
@@ -368,14 +409,18 @@ class MultiDataset(IterableDataset):
         """
         # Get the shuffled indices from the primary dataset
         # All data readers will use the same shuffled indices for synchronization
+        # Only the first pass of a resumed epoch differs (a persistent worker makes the next epochs too).
+        chunk_index_range, skip = self._resume_pass or (self.chunk_index_range, 0)
+        self._resume_pass = None
         if self.shuffle:
             shuffled_chunk_indices = self.rng.choice(
                 self.valid_date_indices,
                 size=len(self.valid_date_indices),
                 replace=False,
-            )[self.chunk_index_range]
+            )[chunk_index_range]
         else:
-            shuffled_chunk_indices = self.valid_date_indices[self.chunk_index_range]
+            shuffled_chunk_indices = self.valid_date_indices[chunk_index_range]
+        shuffled_chunk_indices = shuffled_chunk_indices[skip:]
 
         LOGGER.debug(
             "%s worker pid %d, worker id %d, using synchronized indices[0:10]: %s",

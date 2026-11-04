@@ -239,3 +239,72 @@ def test_state_dict_restores_dataloader_epoch() -> None:
 
     assert state == {"epoch": 4}
     assert resumed_datamodule.epoch == 4
+
+
+def _restored_trainer(
+    *,
+    processed: int,
+    completed: int,
+    is_last_batch: bool = False,
+    epoch_ended: bool = False,
+    restarting: bool = True,
+) -> SimpleNamespace:
+    """A trainer as Lightning leaves it after restoring a checkpoint, before it asks for the dataloader."""
+    batch_progress = SimpleNamespace(
+        current=SimpleNamespace(processed=processed, completed=completed),
+        is_last_batch=is_last_batch,
+    )
+    epoch_progress = SimpleNamespace(current=SimpleNamespace(started=1, processed=1 if epoch_ended else 0))
+    epoch_loop = SimpleNamespace(restarting=restarting, batch_progress=batch_progress)
+    return SimpleNamespace(fit_loop=SimpleNamespace(epoch_loop=epoch_loop, epoch_progress=epoch_progress))
+
+
+def _resumed_datamodule(mocker: MockFixture, trainer: SimpleNamespace | None) -> AnemoiDatasetsDataModule:
+    datamodule = _make_datamodule(mocker.Mock())
+    datamodule.epoch = 3
+    datamodule.trainer = trainer
+    datamodule.__dict__["ds_train"] = mocker.Mock()
+    datamodule.set_epoch = mocker.Mock()
+    return datamodule
+
+
+def test_a_job_resumed_mid_epoch_leaves_out_the_batches_trained_on(mocker: MockFixture) -> None:
+    """Saved at the end of its third batch: those three are left out of the resumed epoch."""
+    datamodule = _resumed_datamodule(mocker, _restored_trainer(processed=3, completed=2))
+
+    datamodule._skip_trained_batches()
+
+    datamodule.ds_train.skip_trained_batches.assert_called_once_with(3, 3, 1)
+    datamodule.task.on_train_epoch_end.assert_not_called()
+    datamodule.set_epoch.assert_not_called()
+
+
+def test_a_job_resumed_after_an_epochs_last_batch_ends_that_epoch(mocker: MockFixture) -> None:
+    """Saved after the epoch's last batch, before its end: Lightning will not run the end, so it is run here."""
+    datamodule = _resumed_datamodule(mocker, _restored_trainer(processed=4, completed=3, is_last_batch=True))
+
+    datamodule._skip_trained_batches()
+
+    datamodule.task.on_train_epoch_end.assert_called_once_with(current_epoch=3)
+    datamodule.set_epoch.assert_called_once_with(4)
+    datamodule.ds_train.skip_trained_batches.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "trainer",
+    [
+        None,
+        _restored_trainer(processed=0, completed=0, restarting=False),  # a new job
+        _restored_trainer(processed=3, completed=2, restarting=False),
+        _restored_trainer(processed=4, completed=4, is_last_batch=True, epoch_ended=True),  # saved in the epoch's end
+    ],
+)
+def test_nothing_is_left_out_otherwise(mocker: MockFixture, trainer: SimpleNamespace | None) -> None:
+    """A new job, or one Lightning resumes at the start of an epoch, trains on the whole epoch."""
+    datamodule = _resumed_datamodule(mocker, trainer)
+
+    datamodule._skip_trained_batches()
+
+    datamodule.ds_train.skip_trained_batches.assert_not_called()
+    datamodule.task.on_train_epoch_end.assert_not_called()
+    datamodule.set_epoch.assert_not_called()

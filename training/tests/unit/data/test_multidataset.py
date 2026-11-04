@@ -115,6 +115,79 @@ class TestMultiDataset:
 
         assert resumed_order == uninterrupted_order
 
+    @staticmethod
+    def _one_epoch(multi_dataset: MultiDataset, n_workers: int) -> list[int]:
+        """What a DataLoader yields in one epoch: a pass of every worker, one batch from each in turn from worker 0."""
+        passes = []
+        for worker_id in range(n_workers):
+            multi_dataset.per_worker_init(n_workers=n_workers, worker_id=worker_id)
+            passes.append(list(multi_dataset))
+        rounds = min(len(p) for p in passes)  # before any worker runs out (an epoch limited by limit_batches)
+        return [p[i] for i in range(rounds) for p in passes]
+
+    @pytest.mark.parametrize("trained", [1, 2, 3, 4, 5])
+    def test_a_resumed_epoch_continues_after_the_batches_already_trained_on(
+        self,
+        multi_dataset: MultiDataset,
+        mocker: MockFixture,
+        trained: int,
+    ) -> None:
+        """New workers for a resumed epoch yield the batches an uninterrupted epoch had still to yield, in order."""
+        mocker.patch("anemoi.training.data.multidataset.get_base_seed", return_value=1000)
+        mocker.patch.object(multi_dataset, "get_sample", side_effect=lambda index: int(index))
+        multi_dataset.set_epoch(5)
+        uninterrupted = self._one_epoch(multi_dataset, n_workers=3)
+
+        multi_dataset.skip_trained_batches(5, trained, batch_size=1)
+        resumed = self._one_epoch(multi_dataset, n_workers=3)
+
+        remaining = uninterrupted[trained:]
+        assert remaining
+        assert resumed[: len(remaining)] == remaining
+
+    def test_only_the_resumed_epochs_first_pass_leaves_batches_out(
+        self,
+        multi_dataset: MultiDataset,
+        mocker: MockFixture,
+    ) -> None:
+        """A later epoch, and a persistent worker's next pass, yield what an uninterrupted job's would."""
+        mocker.patch("anemoi.training.data.multidataset.get_base_seed", return_value=1000)
+        mocker.patch.object(multi_dataset, "get_sample", side_effect=lambda index: int(index))
+        multi_dataset.set_epoch(6)
+        epoch_6 = self._one_epoch(multi_dataset, n_workers=3)
+
+        multi_dataset.skip_trained_batches(5, 2, batch_size=1)
+        assert self._one_epoch(multi_dataset, n_workers=3) == epoch_6
+
+        multi_dataset.persistent_workers = True
+        multi_dataset.set_epoch(0)
+        multi_dataset.per_worker_init(n_workers=3, worker_id=1)
+        list(multi_dataset)
+        uninterrupted_next_pass = list(multi_dataset)
+        multi_dataset.skip_trained_batches(0, 2, batch_size=1)
+        multi_dataset.per_worker_init(n_workers=3, worker_id=1)
+        list(multi_dataset)
+        assert list(multi_dataset) == uninterrupted_next_pass
+
+    def test_persistent_workers_started_for_a_later_epoch_shuffle_as_uninterrupted_ones(
+        self,
+        multi_dataset: MultiDataset,
+        mocker: MockFixture,
+    ) -> None:
+        """Persistent workers shuffle each epoch with the next draw: new ones for epoch e make e draws first."""
+        mocker.patch("anemoi.training.data.multidataset.get_base_seed", return_value=1000)
+        mocker.patch.object(multi_dataset, "get_sample", side_effect=lambda index: int(index))
+        multi_dataset.persistent_workers = True
+        multi_dataset.set_epoch(0)
+        multi_dataset.per_worker_init(n_workers=2, worker_id=1)
+        uninterrupted = [list(multi_dataset) for _ in range(4)]  # epochs 0-3, one persistent worker
+        assert uninterrupted[2] != uninterrupted[3]
+
+        multi_dataset.set_epoch(2)
+        multi_dataset.per_worker_init(n_workers=2, worker_id=1)
+
+        assert [list(multi_dataset) for _ in range(2)] == uninterrupted[2:]
+
     def test_fake_dataloading_reuses_first_batch(
         self,
         multi_dataset: MultiDataset,
