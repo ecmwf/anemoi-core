@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import itertools
+import logging
 from abc import ABC
 from abc import abstractmethod
 from collections.abc import Iterator
@@ -23,6 +25,8 @@ from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.variables_metadata import check_datasets_variables_compatibility
+
+LOGGER = logging.getLogger(__name__)
 
 
 class DataLoadingPolicy(ABC):
@@ -324,6 +328,163 @@ class CrossDatasetBatchSampler(Sampler[list[int]]):
         for sampler, sampler_state in zip(
             self._domain_samplers,
             state_dict["domain_samplers"],
+            strict=True,
+        ):
+            sampler.load_state_dict(sampler_state)
+        self._batches_yielded = self._next_batches_yielded = state_dict["batches_yielded"]
+
+    @property
+    def sampler(self) -> "CrossDatasetBatchSampler":
+        """Expose the epoch setter under the same interface as torchdata's BatchSampler."""
+        return self
+
+
+class MixedDatasetLoadingPolicy(DataLoadingPolicy):
+    """Combining multi-domain and multi-dataset loading policies.
+
+    Each sample contains multiple domains, but
+    they are shuffled between iterations with the iteration_mapping option.
+    """
+
+    def __init__(self, iteration_mapping: list):
+        self.iteration_mapping = iteration_mapping
+
+    def build_dataset(
+        self,
+        data_readers: dict[str, BaseAnemoiReader],
+        relative_date_indices: dict[str, TimeIndices],
+        *,
+        fake_dataloading: bool = False,
+    ) -> ConcatDataset:
+        # Generate the groups here and create a one multi-dataset per group
+        groups = list(itertools.product(*self.iteration_mapping))
+        self.groups_dict = {"group_" + str(i): group for i, group in enumerate(groups)}
+        self.group_labels = list(self.groups_dict.keys())
+
+        domains = []
+        for datasets in self.groups_dict.values():
+            if all(dataset not in data_readers for dataset in datasets):
+                pass
+            readers_per_group = {dataset: data_readers[dataset] for dataset in datasets}
+            relative_date_indices_group = {dataset: relative_date_indices[dataset] for dataset in datasets}
+            domain = MultiDataset(
+                readers_per_group,
+                relative_date_indices_group,
+                fake_dataloading=fake_dataloading,
+            )
+            domains.append(domain)
+
+        return CrossDataset(domains)
+
+    def build_batch_sampler(
+        self,
+        dataset: ConcatDataset,
+        *,
+        num_replicas: int,
+        rank: int,
+        shuffle: bool,
+        seed: int,
+        batch_size: int,
+        drop_last: bool,
+    ) -> "CrossDatasetBatchSampler":
+        return MixedDatasetBatchSampler(
+            dataset,
+            num_replicas=num_replicas,
+            rank=rank,
+            shuffle=shuffle,
+            seed=seed,
+            batch_size=batch_size,
+            drop_last=drop_last,
+        )
+
+    def check_dataset_compatibility(self, dataset: CrossDataset, **options: object) -> None:
+        check_datasets_variables_compatibility(
+            {name: data.typed_variables for name, data in dataset.data.items()},
+            **options,
+        )
+
+
+class MixedDatasetBatchSampler(Sampler[list[int]]):
+    """Randomly interleave whole, domain-homogeneous batches of independently sampled domains.
+
+    The domain order is a shuffle of every domain's batches that depends only on the seed and the
+    epoch, so all ranks visit the same domain at each step.
+    """
+
+    def __init__(
+        self,
+        dataset: ConcatDataset,
+        *,
+        num_replicas: int,
+        rank: int,
+        shuffle: bool,
+        seed: int,
+        batch_size: int,
+        drop_last: bool,
+    ) -> None:
+        self.batch_size = batch_size
+        self.seed = seed
+        self.shuffle = shuffle
+        self._epoch = 0
+        self._group_offsets = [0, *dataset.cumulative_sizes[:-1]]
+        self._group_samplers = [
+            StatefulDistributedSampler(
+                group,
+                num_replicas=num_replicas,
+                rank=rank,
+                shuffle=shuffle,
+                seed=seed,
+                drop_last=drop_last,
+            )
+            for group in dataset.datasets
+        ]
+        self._batches_yielded = 0
+        self._next_batches_yielded = 0
+
+    def _group_order(self) -> list[int]:
+        """Domain of each batch of the epoch, shuffled reproducibly from the seed and the epoch."""
+        order = np.repeat(np.arange(len(self._group_samplers)), self._group_batch_counts())
+        if self.shuffle:
+            np.random.default_rng([self.seed, self._epoch]).shuffle(order)
+        return order.tolist()
+
+    def _group_batch_counts(self) -> list[int]:
+        return [-(-len(sampler) // self.batch_size) for sampler in self._group_samplers]
+
+    def __iter__(self) -> Iterator[list[int]]:
+        group_batches = [
+            iter(BatchSampler(sampler, batch_size=self.batch_size, drop_last=False)) for sampler in self._group_samplers
+        ]
+        # Resume position from load_state_dict applies to the first iteration only; an iteration
+        # abandoned part-way (like in sanity validation) must not leak its position into the next one.
+        self._batches_yielded = self._next_batches_yielded
+        self._next_batches_yielded = 0
+        for group_index in self._group_order()[self._batches_yielded :]:
+            local_batch = next(group_batches[group_index])
+            self._batches_yielded += 1
+            offset = self._group_offsets[group_index]
+            for index in local_batch:
+                yield [offset + index for index in local_batch]
+        self._batches_yielded = 0
+
+    def __len__(self) -> int:
+        return sum(self._group_batch_counts())
+
+    def set_epoch(self, epoch: int) -> None:
+        for sampler in self._group_samplers:
+            sampler.set_epoch(epoch)
+        self._epoch = epoch
+
+    def state_dict(self) -> dict:
+        return {
+            "group_samplers": [sampler.state_dict() for sampler in self._group_samplers],
+            "batches_yielded": self._batches_yielded,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        for sampler, sampler_state in zip(
+            self._group_samplers,
+            state_dict["group_samplers"],
             strict=True,
         ):
             sampler.load_state_dict(sampler_state)
