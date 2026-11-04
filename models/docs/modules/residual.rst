@@ -48,6 +48,26 @@ above (the model output is added externally by the architecture).
    :no-undoc-members:
    :show-inheritance:
 
+********************
+ No Skip Connection
+********************
+
+Adds nothing to the output:
+
+.. math::
+
+   \text{residual}(x) = 0
+
+It returns zeros as a broadcast view, so no input is processed and no
+memory is allocated. Input-only datasets (datasets that are encoded but
+have no decoder) never add their residual to an output, so they use this
+connection by default when no residual is configured for them.
+
+.. autoclass:: anemoi.models.layers.residual.NoSkipConnection
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
 **********************
  Truncated Connection
 **********************

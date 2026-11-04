@@ -15,6 +15,8 @@ from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 import anemoi.models.models.base as base_model_module
+from anemoi.models.layers.residual import NoSkipConnection
+from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.models.base import BaseGraphModel
 
 
@@ -303,3 +305,69 @@ def test_predict_step_skips_input_only_datasets(monkeypatch):
 
     assert set(out) == {"data"}
     assert torch.equal(out["data"], torch.ones(1, 1, 1, 4, 1))
+
+
+# ---------------------------------------------------------------------------
+# residual defaults
+# ---------------------------------------------------------------------------
+
+
+def _make_input_only_model(residual_datasets: dict) -> DummyGraphModel:
+    """Return a DummyGraphModel where `forcing` is encoded but has no decoder."""
+    model_config = OmegaConf.create(
+        {
+            "node_trainable_parameters": {"data": 0, "forcing": 0, "hidden": 0},
+            "model": {"hidden_nodes_name": "hidden", "latent_skip": False},
+            "encoders": {
+                0: {
+                    "source_datasets": ["data"],
+                    "dataset_fusing_strategy": "not_supported",
+                    "mapper": {},
+                },
+                1: {
+                    "source_datasets": ["forcing"],
+                    "dataset_fusing_strategy": "not_supported",
+                    "mapper": {},
+                },
+            },
+            "decoders": {
+                0: {
+                    "target_datasets": ["data"],
+                    "target_node_features": ["coordinates"],
+                    "mapper": {},
+                },
+            },
+            "residual": {"datasets": residual_datasets},
+            "bounding": {"datasets": {"data": [], "forcing": []}},
+        }
+    )
+    graph = _make_graph()
+    graph["forcing"].x = torch.zeros(3, 2)
+    graph["forcing"].num_nodes = 3
+    data_indices = _make_data_indices()
+    return DummyGraphModel(
+        model_config=model_config,
+        data_indices={"data": data_indices["data"], "forcing": data_indices["data"]},
+        statistics={"data": None, "forcing": None},
+        n_step_input=1,
+        n_step_output=1,
+        graph_data=graph,
+    )
+
+
+def test_input_only_dataset_defaults_to_no_skip_connection() -> None:
+    model = _make_input_only_model({"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}})
+
+    assert isinstance(model.residual["data"], SkipConnection)
+    assert isinstance(model.residual["forcing"], NoSkipConnection)
+
+
+def test_input_only_dataset_keeps_configured_residual() -> None:
+    model = _make_input_only_model(
+        {
+            "data": {"_target_": "anemoi.models.layers.residual.SkipConnection"},
+            "forcing": {"_target_": "anemoi.models.layers.residual.SkipConnection"},
+        }
+    )
+
+    assert isinstance(model.residual["forcing"], SkipConnection)

@@ -87,6 +87,28 @@ class SkipConnection(BaseResidualConnection):
         return self._expand_time(x_skip, n_step_output)
 
 
+class NoSkipConnection(BaseResidualConnection):
+    """Residual connection that adds nothing to the output.
+
+    Returns zeros with the same shape as ``SkipConnection``, as a broadcast view,
+    so no memory is allocated and no input is processed.
+
+    This is the default for input-only datasets (datasets without a decoder),
+    whose residual is never added to an output.
+    """
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_sizes=None,
+        model_comm_group=None,
+        n_step_output: int | None = None,
+    ) -> torch.Tensor:
+        """Return zeros shaped like the latest input step."""
+        x_skip = x.new_zeros(()).expand_as(x[:, -1, ...])  # x shape: (batch, time, ens, nodes, features)
+        return self._expand_time(x_skip, n_step_output)
+
+
 class TruncatedConnection(BaseResidualConnection):
     """Truncated skip connection.
 

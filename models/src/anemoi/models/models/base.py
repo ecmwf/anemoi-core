@@ -28,6 +28,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.residual import NoSkipConnection
 from anemoi.models.layers.target_features import DecodingTargetFeature
 from anemoi.models.layers.target_features import create_decoding_target_features
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -334,9 +335,16 @@ class BaseGraphModel(nn.Module):
         pass
 
     def _build_residual(self, residual_configs: dict[str, DotDict], sparse_projector_config: DotDict) -> None:
-        """Instantiate the per-dataset residual connection modules."""
+        """Instantiate the per-dataset residual connection modules.
+
+        Input-only datasets (encoded but not decoded) never add their residual to an
+        output, so they default to ``NoSkipConnection`` when no residual is configured.
+        """
         self.residual = torch.nn.ModuleDict()
         sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
+        for dataset_name in self.input_datasets:
+            if dataset_name not in self.target_datasets and dataset_name not in residual_configs:
+                self.residual[dataset_name] = NoSkipConnection()
         for dataset_name, residual_config in residual_configs.items():
             assert residual_config is not None, f"Residual config for dataset '{dataset_name}' is None."
             self.residual[dataset_name] = instantiate(
