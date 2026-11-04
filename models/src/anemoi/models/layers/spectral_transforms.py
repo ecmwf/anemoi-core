@@ -359,7 +359,6 @@ class ReducedSHT(SHT):
         self,
         grid: str,
         truncation: int | None = None,
-        use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
         """SHT on a reduced Gaussian grid.
@@ -370,9 +369,6 @@ class ReducedSHT(SHT):
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
-        use_graphed_rfft : bool
-            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices.
         """
         super().__init__()
 
@@ -403,7 +399,6 @@ class ReducedSHT(SHT):
         self._sht = SphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
-            use_graphed_rfft=use_graphed_rfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -425,7 +420,6 @@ class OctahedralSHT(SHT):
         self,
         nlat: int,
         truncation: int | None = None,
-        use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
         """SHT on an octahedral reduced grid.
@@ -437,8 +431,6 @@ class OctahedralSHT(SHT):
             on the octahedral grid structure.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
-        use_graphed_rfft : bool
-            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices.
         """
         super().__init__()
         self.nlat = nlat
@@ -447,7 +439,6 @@ class OctahedralSHT(SHT):
         self._sht = SphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
-            use_graphed_rfft=use_graphed_rfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -526,7 +517,6 @@ class InverseReducedSHT(InverseSpectralTransform):
         self,
         grid: str,
         truncation: int | None = None,
-        use_graphed_irfft: bool = False,
         **kwargs,
     ) -> None:
         """Inverse SHT on a reduced Gaussian grid.
@@ -537,9 +527,6 @@ class InverseReducedSHT(InverseSpectralTransform):
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
-        use_graphed_irfft : bool
-            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices.
         """
         super().__init__()
 
@@ -570,7 +557,6 @@ class InverseReducedSHT(InverseSpectralTransform):
         self._isht = InverseSphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
-            use_graphed_irfft=use_graphed_irfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -584,7 +570,6 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         self,
         nlat: int,
         truncation: int | None = None,
-        use_graphed_irfft: bool = False,
         **kwargs,
     ) -> None:
         """Inverse SHT on an octahedral reduced grid.
@@ -595,9 +580,6 @@ class InverseOctahedralSHT(InverseSpectralTransform):
             Number of latitudes.
         truncation : int | None
             Spectral truncation. Defaults to nlat // 2 - 1.
-        use_graphed_irfft : bool
-            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices.
         **kwargs : dict
             Additional keyword arguments (ignored).
         """
@@ -608,7 +590,6 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         self._isht = InverseSphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
-            use_graphed_irfft=use_graphed_irfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
