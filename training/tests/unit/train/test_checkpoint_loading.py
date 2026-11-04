@@ -8,12 +8,16 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import warnings
+from functools import cached_property
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Never
+from unittest.mock import MagicMock
 
 import pytest
 import torch
+from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
@@ -132,7 +136,6 @@ class DummyGraphModel(torch.nn.Module):
 
 
 class DummyTrainingModule(BaseTrainingModule):
-
     def __init__(self) -> None:
         pass
 
@@ -169,6 +172,7 @@ def test_on_load_checkpoint_rebuilds_tendency_processors_for_fewer_steps() -> No
         "hyper_parameters": _resume_hyper_parameters(),
     }
 
+    module = _make_dummy_module(new_model, update_states=False, update_tendencies=True)
 
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 

@@ -68,7 +68,11 @@ def _gather_into_tensor(
     out_shape[dim_] = sum(sizes)  # expand shard sizes in dim_ to summed shape
 
     output = torch.empty(
-        out_shape, dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
+        out_shape,
+        dtype=input_.dtype,
+        layout=input_.layout,
+        device=input_.device,
+        memory_format=input_format,
     )
 
     dist.all_gather_into_tensor(output, input_, group=group)
@@ -92,7 +96,11 @@ def _gather_with_padding(
 
     tensor_list = [
         torch.empty(
-            padded_shape, dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
+            padded_shape,
+            dtype=input_.dtype,
+            layout=input_.layout,
+            device=input_.device,
+            memory_format=input_format,
         )
         for _ in range(len(sizes))
     ]
@@ -270,7 +278,6 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
 
     # cant call dist.get_backend(group) in torch.compile() so we check is_compiling first
     if (not torch.compiler.is_compiling()) and dist.get_backend(group) == "gloo":
-
         # Need to check torch version here bc the syntax for dist.send/recv changed in torch v2.6
         torch_version = torch.__version__.split(".")
         torch_major_version = int(torch_version[0])
@@ -498,7 +505,11 @@ def _halo_exchange_bwd(
     # receive grads for inner nodes we sent in the forward pass
     send_counts = [idx.size(0) for idx in send_indices]
     recv_list = [
-        torch.empty((count, *grad_output.shape[1:]), dtype=grad_output.dtype, device=grad_output.device)
+        torch.empty(
+            (count, *grad_output.shape[1:]),
+            dtype=grad_output.dtype,
+            device=grad_output.device,
+        )
         for count in send_counts
     ]
     send_list = [g.contiguous() for g in halo_grads]

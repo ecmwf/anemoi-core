@@ -30,7 +30,6 @@ def load_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
         return SimpleNamespace(model=SimpleNamespace(metadata={"uuid": "abc"}, config=object()))
 
     monkeypatch.setattr(BaseTrainingModule, "load_from_checkpoint", fake_load_from_checkpoint)
-    monkeypatch.setattr(checkpoint_utils, "instantiate", lambda _config: "task")
     return calls
 
 
