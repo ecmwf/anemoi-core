@@ -6,7 +6,7 @@ Multi-domain training is an additional option to the default multi-dataset train
 
 Multi-domain training alternates domain-homogeneous batches within one training workflow: each batch is drawn from one domain, the active spatial grid and graph can change between batches, and the same model parameters are updated across all domains.
 
-A **domain** is the spatial structure of a dataset: its grid, resolution, geographical extent, and number of nodes. All domains are assumed to share the same variables, so variables do not distinguish one domain from another. A typical use case is a set of stretched-grid domains that share a global dataset but each combine it with a different regional dataset. Multi-domain training supports different spatial resolutions, grid structures, and geographical extents, making it useful for applications such as downscaling, combining global and regional datasets, and improving model generalisation across domains and resolutions.
+A **domain** is the spatial structure of a dataset: its grid, resolution, geographical extent, and number of nodes. Domains normally share the same ordered variables. With a variable-aware input transform, they may instead expose different subsets of a common vocabulary. A typical use case is a set of stretched-grid domains that share a global dataset but each combine it with a different regional dataset. Multi-domain training supports different spatial resolutions, grid structures, and geographical extents, making it useful for applications such as downscaling, combining global and regional datasets, and improving model generalisation across domains and resolutions.
 
 .. note::
     Multi-domain training can be used in a variety of settings: forecasting or temporal downscaling, with deterministic, probabilistic (e.g. CRPS ensemble) or transport (e.g. EDM diffusion) objectives, and with global, limited-area (LAM) or stretched-grid domains.
@@ -18,9 +18,9 @@ In multi-domain training, the same model processes datasets with different spati
 
 Domains may cover different geographical regions and do not need to overlap spatially, although stretched-grid domains typically share the same global dataset. They can also have dataset-specific readers, preprocessing settings, and normalisation statistics, provided the resulting inputs and outputs are compatible with the shared architecture.
 
-.. warning::
+.. note::
 
-   Datasets must use compatible input and output variable definitions and consistent variable ordering. Dataset-specific preprocessing and normalisation do not remove this requirement.
+   Positional encoders and shared decoders still require compatible ordered variables. Heterogeneous input variables require a variable tokenizer. If output variables differ, configure dataset-specific decoder groups; each dataset's loss then includes only the variables produced for that dataset.
 
 Training Procedure
 ******************
@@ -57,12 +57,22 @@ Multi-domain training is enabled by selecting the multi-domain loading policy, w
        loading_policy:
            _target_: anemoi.training.data.loading.MultiDomainLoadingPolicy
 
+By default the policy verifies identical variable ordering. A variable-aware model can allow different domain subsets explicitly:
+
+.. code-block:: yaml
+
+   dataloader:
+       loading_policy:
+           _target_: anemoi.training.data.loading.MultiDomainLoadingPolicy
+           allow_heterogeneous_variables: true
+
 The graph must define the data nodes (named after the dataset), the hidden mesh and the connecting edges of every domain. The model must then name the hidden mesh of each dataset under ``model.model.hidden_nodes_name`` and list the datasets that share an encoder or decoder group under ``source_datasets`` and ``target_datasets``. The configuration is described in :doc:`/modules/data`, and a complete example is the top-level ``multidomain`` configuration.
 
 The following constraints apply:
 
 - Hierarchical models do not support per-dataset hidden meshes.
-- All datasets must have the same variables in the same order, because the shared encoder and decoder weights are tied to the variable position.
+- Datasets sharing a positional encoder or decoder must have the same variables in the same order.
+- Heterogeneous input sets require ``allow_heterogeneous_variables: true`` and a variable tokenizer. Heterogeneous output sets require dataset-specific decoder groups.
 - Hidden node and edge feature dimensions must match across the hidden meshes, because the weights are shared.
 - Trainable node and edge parameters must be set to 0, because the active graph-specific parameters would change between batches.
 

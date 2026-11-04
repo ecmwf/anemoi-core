@@ -9,7 +9,6 @@
 
 
 import logging
-from typing import Optional
 
 import einops
 import torch
@@ -47,7 +46,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         graph_data: HeteroData,
         n_step_input: int,
         n_step_output: int,
-        variable_metadata: Optional[dict] = None,
+        variable_metadata: dict | None = None,
     ) -> None:
         self.condition_on_residual = DotDict(model_config).condition_on_residual
         super().__init__(
@@ -118,21 +117,18 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             n_step_output=self.n_step_output,
         )
 
-        variable_names = list(self.data_indices[dataset_name].model.input.name_to_index.keys())
-
-        assert x.shape[-1] == len(variable_names)
-
         x_skip_cond = x_skip
-        if self.variable_dropout is not None:
-            x, x_skip, x_skip_cond, variable_names = self._apply_variable_dropout(
-                x=x,
-                x_skip=x_skip,
-                variable_names=variable_names,
-                dataset_name=dataset_name,
-            )
-            assert x.shape[-1] == len(variable_names)
-
         if self.variable_tokenizer is not None:
+            variable_names = list(self.data_indices[dataset_name].model.input.name_to_index.keys())
+            assert x.shape[-1] == len(variable_names)
+            if self.variable_dropout is not None:
+                x, x_skip, x_skip_cond, variable_names = self._apply_variable_dropout(
+                    x=x,
+                    x_skip=x_skip,
+                    variable_names=variable_names,
+                    dataset_name=dataset_name,
+                )
+                assert x.shape[-1] == len(variable_names)
             x = self.variable_tokenizer(x, variables=variable_names)
         else:
             x = einops.rearrange(
@@ -145,7 +141,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         # add data positional info (lat/lon)
         x_data_latent = torch.cat(
-            (x, node_attributes_data, torch.full((x.shape[0], 1), fcstep, dtype=x.dtype, device=x.device)),
+            (
+                x,
+                node_attributes_data,
+                torch.full((x.shape[0], 1), fcstep, dtype=x.dtype, device=x.device),
+            ),
             dim=-1,  # feature dimension
         )
 
@@ -213,7 +213,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x: dict[str, torch.Tensor],
         *,
         fcstep: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:
@@ -268,12 +268,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_hidden_latent = self.node_attributes(hidden_name, batch_size=batch_ens_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
-        for dataset_name in x.keys():
+        for dataset_name, dataset_x in x.items():
             if dataset_name not in self.input_datasets:
                 continue
 
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
-                x[dataset_name],
+                dataset_x,
                 fcstep=fcstep,
                 batch_ens_size=batch_ens_size,
                 grid_shard_sizes=grid_shard_sizes,

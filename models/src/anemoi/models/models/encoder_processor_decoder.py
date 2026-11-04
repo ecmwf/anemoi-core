@@ -9,7 +9,6 @@
 
 
 import logging
-from typing import Optional
 
 import einops
 import torch
@@ -53,8 +52,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if tokenizer_config:
             from anemoi.models.variable.variablevocabular import VariableVocabulary
 
-            self.variable_vocabulary = VariableVocabulary.from_foundation(
-                data_indices=self.data_indices[self.dataset_names[0]],
+            self.variable_vocabulary = VariableVocabulary.from_datasets(
+                data_indices=self.data_indices,
                 metadata=self.variable_metadata,
             )
 
@@ -68,7 +67,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             raise NotImplementedError("Detokenizer is currently not implemented")
 
         if dropout_config:
-            raise NotImplementedError("variable dropout is currently not implemented")
+            if self.variable_tokenizer is None:
+                raise ValueError("variable_dropout requires variable_tokenizer to keep the encoder width fixed")
+            self.variable_dropout = instantiate(dropout_config)
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
@@ -259,20 +260,17 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             n_step_output=self.n_step_output,
         )
 
-        variable_names = list(self.data_indices[dataset_name].model.input.name_to_index.keys())
-
-        assert x.shape[-1] == len(variable_names)
-
-        if self.variable_dropout is not None:
-            x, x_skip, variable_names, _ = self._apply_variable_dropout(
-                x=x,
-                x_skip=x_skip,
-                variable_names=variable_names,
-                dataset_name=dataset_name,
-            )
-            assert x.shape[-1] == len(variable_names)
-
         if self.variable_tokenizer is not None:
+            variable_names = list(self.data_indices[dataset_name].model.input.name_to_index.keys())
+            assert x.shape[-1] == len(variable_names)
+            if self.variable_dropout is not None:
+                x, x_skip, variable_names, _ = self._apply_variable_dropout(
+                    x=x,
+                    x_skip=x_skip,
+                    variable_names=variable_names,
+                    dataset_name=dataset_name,
+                )
+                assert x.shape[-1] == len(variable_names)
             x = self.variable_tokenizer(x, variables=variable_names)
         else:
             x = einops.rearrange(
@@ -401,7 +399,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         batch_size: int,
         ensemble_size: int,
         in_out_sharded: bool,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> None:
         assert not (
             in_out_sharded and model_comm_group is None
@@ -420,7 +418,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self,
         x: dict[str, Tensor],
         *,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:
@@ -472,12 +470,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
 
-        for dataset_name in x.keys():
+        for dataset_name, dataset_x in x.items():
             if dataset_name not in self.input_datasets:
                 continue
 
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
-                x[dataset_name],
+                dataset_x,
                 batch_size=batch_size,
                 grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
@@ -593,7 +591,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         return x_out_dict
 
     def fill_metadata(self, md_dict) -> None:
-        for dataset in self.input_dim.keys():
+        for dataset in self.input_dim:
             shapes = {
                 "variables": self.input_dim[dataset],
                 "input_timesteps": self.n_step_input,
