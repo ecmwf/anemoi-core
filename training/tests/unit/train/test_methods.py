@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from typing import Any
@@ -41,6 +42,8 @@ from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObj
 from anemoi.training.train.methods.ensemble import EnsembleTraining
 from anemoi.training.train.methods.single import SingleTraining
 from anemoi.training.train.methods.stochastic_interpolant import StochasticInterpolantTransportObjective
+from anemoi.training.train.methods.transport import PredictionMode
+from anemoi.training.train.methods.transport import ResidualPredictionMode
 from anemoi.training.train.methods.transport import StatePredictionMode
 from anemoi.training.train.methods.transport import TendencyPredictionMode
 from anemoi.training.train.methods.transport import TransportTraining
@@ -324,6 +327,7 @@ def test_after_batch_transfer_replaces_source_grid_shard_metadata() -> None:
             super().__init__()
             self.spatial_pre_processors = torch.nn.ModuleDict({"data": RegriddingSpatialProcessor()})
             self.pre_processors = torch.nn.ModuleDict({"data": Processors([])})
+            self.model = SimpleNamespace(target2anchor={"data": "data"})
 
     comm_group = object()
     module = SingleTraining.__new__(SingleTraining)
@@ -341,6 +345,49 @@ def test_after_batch_transfer_replaces_source_grid_shard_metadata() -> None:
     assert result["data"].shape[-2] == 2
     assert module.grid_shard_sizes == {"data": target_grid_shard_sizes}
     assert module.grid_shard_slice == {"data": slice(2, 4)}
+
+
+def _module_with_attached_target(target_grid_shard_sizes: list[int]) -> SingleTraining:
+    """``out`` is decoded on the nodes of ``in_lres``, which is projected from [4, 4] to [2, 2] shards."""
+
+    class RegriddingSpatialProcessor(torch.nn.Module):
+        def forward(self, x: torch.Tensor, **_kwargs: Any) -> tuple[torch.Tensor, list[int]]:
+            return x[..., :2, :], [2, 2]
+
+    model = torch.nn.Module()
+    model.spatial_pre_processors = torch.nn.ModuleDict({"in_lres": RegriddingSpatialProcessor()})
+    model.pre_processors = torch.nn.ModuleDict({"in_lres": Processors([]), "out": Processors([])})
+    model.model = SimpleNamespace(target2anchor={"out": "in_lres"})
+
+    module = SingleTraining.__new__(SingleTraining)
+    pl.LightningModule.__init__(module)
+    module.model = model
+    module.model_comm_group = object()
+    module.model_comm_group_rank = 0
+    module.grid_shard_sizes = {"in_lres": [4, 4], "out": target_grid_shard_sizes}
+    module.grid_shard_slice = {"in_lres": slice(0, 4), "out": slice(0, target_grid_shard_sizes[0])}
+    module._setup_batch_sharding = lambda batch: batch
+    module._prepare_loss_scalers = lambda: None
+    return module
+
+
+def _attached_target_batch() -> dict[str, torch.Tensor]:
+    return {"in_lres": torch.zeros(1, 1, 1, 4, 1), "out": torch.zeros(1, 1, 1, 2, 1)}
+
+
+def test_after_batch_transfer_accepts_a_target_sharded_like_its_anchor() -> None:
+    module = _module_with_attached_target([2, 2])
+
+    module.on_after_batch_transfer(_attached_target_batch(), 0)
+
+    assert module.grid_shard_sizes == {"in_lres": [2, 2], "out": [2, 2]}
+
+
+def test_after_batch_transfer_rejects_a_target_sharded_unlike_its_anchor() -> None:
+    module = _module_with_attached_target([3, 1])
+
+    with pytest.raises(RuntimeError, match=r"'out'.*'in_lres'"):
+        module.on_after_batch_transfer(_attached_target_batch(), 0)
 
 
 def _allgather_module(reader_group_size: int = 2) -> SingleTraining:
@@ -2116,6 +2163,7 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
     forecaster = TransportTraining.__new__(TransportTraining)
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
+    forecaster.model = SimpleNamespace(model=SimpleNamespace())
     objective = _DummyTransportObjective()
     forecaster._prediction_mode = StatePredictionMode(forecaster)
     forecaster._transport_objective = objective
@@ -2699,3 +2747,249 @@ def test_single_compute_metrics_produces_per_step_key_suffix(
     assert "rmse_metric/data/z500/2" in metrics_step1
     # Keys must be distinct across steps
     assert set(metrics_step0.keys()).isdisjoint(set(metrics_step1.keys()))
+
+
+# ── ResidualPredictionMode ────────────────────────────────────────────────────
+#
+# Additive processors make the residual arithmetic easy to verify numerically.
+
+
+class _AdditiveProcessor:
+    """Toy processor that adds ``offset`` and records the kwargs of each call."""
+
+    def __init__(self, offset: float) -> None:
+        self.offset = offset
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(self, x: torch.Tensor, in_place: bool = True, **kwargs: Any) -> torch.Tensor:
+        assert in_place is False, "ResidualPredictionMode must call processors with in_place=False."
+        self.calls.append({"kwargs": kwargs})
+        return x + self.offset
+
+
+def _make_residual_module(
+    *,
+    state_offset: float = 0.0,
+    residual_offset: float = 0.0,
+) -> SimpleNamespace:
+    """Minimal training module for ResidualPredictionMode with target ``out`` and reference ``in_lres``.
+
+    Pre-processors add the offset and post-processors subtract it. ``model.model`` is a
+    real downscaler shell so ``compute_residual`` / ``add_residual_to_state`` are exercised.
+    """
+    from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportSpatialDownscalerModelEncProcDec
+
+    lres_name, target_name = "in_lres", "out"
+    name_to_index = {"v0": 0, "v1": 1}
+    data_indices = {name: _make_minimal_index_collection(name_to_index) for name in (lres_name, target_name)}
+
+    task = SimpleNamespace(
+        target_datasets=[target_name],
+        input_datasets=[lres_name],
+        get_targets=lambda batch, **_kw: {target_name: batch[target_name]},
+        get_input_offsets=lambda **_kw: [datetime.timedelta(0)],
+        get_output_offsets=lambda **_kw: [datetime.timedelta(0)],
+    )
+
+    def _get_data_output_target(target_full: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        return {
+            name: tensor.index_select(-1, data_indices[name].data.output.full.to(device=tensor.device))
+            for name, tensor in target_full.items()
+        }
+
+    downscaler_model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
+        AnemoiTransportSpatialDownscalerModelEncProcDec,
+    )
+    downscaler_model.data_indices = data_indices
+    downscaler_model.target_datasets = [target_name]
+    downscaler_model.target_anchors = {target_name: lres_name}
+    downscaler_model.transport_source = SimpleNamespace(kind="default")
+
+    return SimpleNamespace(
+        model=SimpleNamespace(
+            model=downscaler_model,
+            spatial_pre_processors={lres_name: object()},
+            pre_processors={name: _AdditiveProcessor(state_offset) for name in (lres_name, target_name)},
+            post_processors={name: _AdditiveProcessor(-state_offset) for name in (lres_name, target_name)},
+            pre_processors_residual={target_name: _AdditiveProcessor(residual_offset)},
+            post_processors_residual={target_name: _AdditiveProcessor(-residual_offset)},
+        ),
+        data_indices=data_indices,
+        task=task,
+        n_step_input=1,
+        n_step_output=1,
+        get_data_output_target=_get_data_output_target,
+        reduce_data_output_target_to_model_output=dict,
+        config=SimpleNamespace(
+            training=SimpleNamespace(transport={"objective": "edm_diffusion"}),
+        ),
+    )
+
+
+def _bare_residual_mode(module: SimpleNamespace) -> ResidualPredictionMode:
+    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
+    mode.module = module
+    return mode
+
+
+def test_residual_prediction_mode_prepare_target_builds_the_normalized_residual_against_the_model_input() -> None:
+    """The reference comes from ``x``, as at inference, not from the full batch, and skips imputation."""
+    module = _make_residual_module(state_offset=100.0, residual_offset=10.0)
+    mode = _bare_residual_mode(module)
+
+    b, t, e, g = 2, 1, 1, 4
+    x_lres = torch.full((b, t, e, g, 2), fill_value=5.0)
+    target_tensor = torch.full((b, t, e, g, 2), fill_value=8.0)
+    batch = {"in_lres": torch.full((b, t, e, g, 2), 99.0), "out": target_tensor}
+
+    prepared = mode.prepare_target(batch, x={"in_lres": x_lres})
+
+    torch.testing.assert_close(prepared.aux["x_ref_on_target_grid"]["out"], x_lres - 100.0)
+    (reference_call,) = module.model.post_processors["in_lres"].calls
+    assert reference_call["kwargs"]["skip_imputation"] is True
+    assert "transport_reference_source" not in prepared.aux
+
+    # (8 - 100) - (5 - 100) = 3, normalized with the residual pre-processor: 3 + 10 = 13
+    expected_residual = torch.full_like(target_tensor, 13.0)
+    assert prepared.loss_target_layout == IndexSpace.DATA_OUTPUT
+    torch.testing.assert_close(prepared.loss_target["out"], expected_residual)
+    torch.testing.assert_close(prepared.model_target["out"], expected_residual)
+    torch.testing.assert_close(prepared.metric_target["out"], target_tensor)
+
+
+def test_residual_prediction_mode_reconstruct_prediction_inverts_prepare_target() -> None:
+    mode = _bare_residual_mode(_make_residual_module(state_offset=100.0, residual_offset=10.0))
+
+    b, t, e, g = 2, 1, 1, 4
+    lres_tensor = torch.full((b, t, e, g, 2), fill_value=5.0)
+    target_tensor = torch.full((b, t, e, g, 2), fill_value=8.0)
+
+    prepared = mode.prepare_target({"in_lres": lres_tensor, "out": target_tensor}, x={"in_lres": lres_tensor})
+    reconstructed = mode.reconstruct_prediction(prepared.model_target, prepared)
+
+    torch.testing.assert_close(reconstructed["out"], target_tensor)
+
+
+def _spy_on_imputer_inverse(module: SimpleNamespace) -> list[dict[str, Any]]:
+    """Replace the model's imputer inverse with one that marks its output and records each call."""
+    calls: list[dict[str, Any]] = []
+
+    def _imputer_inverse(post_processors: dict, dataset_name: str, x: torch.Tensor) -> torch.Tensor:
+        calls.append({"post_processors": post_processors, "dataset_name": dataset_name, "x": x.clone()})
+        return x + 1000.0
+
+    module.model.model._apply_imputer_inverse = _imputer_inverse
+    return calls
+
+
+def test_residual_prediction_mode_prepare_metric_target_applies_imputer_inverse() -> None:
+    """Masked points of the target become NaN again, as for the tendency mode."""
+    module = _make_residual_module(state_offset=1.0, residual_offset=1.0)
+    calls = _spy_on_imputer_inverse(module)
+    mode = _bare_residual_mode(module)
+
+    target_tensor = torch.randn(1, 1, 1, 2, 2)
+    prepared = PreparedPredictionTarget(
+        model_target={},
+        loss_target={},
+        loss_target_layout=IndexSpace.DATA_OUTPUT,
+        metric_target={"out": target_tensor},
+        aux={},
+    )
+    metric_target = mode.prepare_metric_target(prepared)
+
+    (call,) = calls
+    assert call["dataset_name"] == "out"
+    assert call["post_processors"] is module.model.post_processors
+    torch.testing.assert_close(call["x"], target_tensor)
+    torch.testing.assert_close(metric_target["out"], target_tensor + 1000.0)
+
+
+def test_residual_prediction_mode_reconstruct_prediction_applies_imputer_inverse_to_the_state() -> None:
+    """The imputer inverse runs on the reconstructed normalized state, not on the residual."""
+    module = _make_residual_module(state_offset=100.0, residual_offset=10.0)
+    mode = _bare_residual_mode(module)
+
+    b, t, e, g = 2, 1, 1, 4
+    lres_tensor = torch.full((b, t, e, g, 2), fill_value=5.0)
+    target_tensor = torch.full((b, t, e, g, 2), fill_value=8.0)
+    prepared = mode.prepare_target({"in_lres": lres_tensor, "out": target_tensor}, x={"in_lres": lres_tensor})
+    calls = _spy_on_imputer_inverse(module)
+
+    reconstructed = mode.reconstruct_prediction(prepared.model_target, prepared)
+
+    (call,) = calls
+    assert call["dataset_name"] == "out"
+    assert call["post_processors"] is module.model.post_processors
+    torch.testing.assert_close(call["x"], target_tensor)
+    torch.testing.assert_close(reconstructed["out"], target_tensor + 1000.0)
+
+
+def test_residual_prediction_mode_rejects_stochastic_interpolant_objective() -> None:
+    module = _make_residual_module()
+    module.config = SimpleNamespace(
+        training=SimpleNamespace(transport={"objective": "stochastic_interpolant"}),
+    )
+    with pytest.raises(NotImplementedError, match="stochastic_interpolant"):
+        ResidualPredictionMode(module)
+
+
+def test_residual_prediction_mode_requires_a_model_with_a_residual_reference() -> None:
+    module = _make_residual_module()
+    module.model.model = SimpleNamespace(transport_source=SimpleNamespace(kind="default"))
+
+    with pytest.raises(ValueError, match="residual_reference"):
+        ResidualPredictionMode(module)
+
+
+@pytest.mark.parametrize("mode_cls", [StatePredictionMode, TendencyPredictionMode])
+def test_non_residual_prediction_modes_reject_a_model_with_a_residual_reference(
+    mode_cls: type[PredictionMode],
+) -> None:
+    """Otherwise the model would add the reference back at inference to a state it never learned as a residual."""
+    module = _make_residual_module()
+
+    with pytest.raises(ValueError, match="prediction_mode 'residual'"):
+        mode_cls(module)
+
+
+def test_residual_prediction_mode_rejects_reference_state_source_kind() -> None:
+    module = _make_residual_module()
+    module.model.model.transport_source = SimpleNamespace(kind="reference_state")
+    with pytest.raises(NotImplementedError, match=r"reference_state"):
+        ResidualPredictionMode(module)
+
+
+@pytest.mark.parametrize("attribute", ["pre_processors_residual", "post_processors_residual"])
+@pytest.mark.parametrize("missing", [{}, None], ids=["no_entry_for_target", "attribute_unset"])
+def test_residual_prediction_mode_raises_eagerly_when_residual_processors_missing(
+    attribute: str,
+    missing: dict | None,
+) -> None:
+    """Missing residual processors for a target must fail at construction time, not on first use."""
+    module = _make_residual_module()
+    setattr(module.model, attribute, missing)
+    with pytest.raises(ValueError, match=rf"{attribute}.*'out'.*data\.datasets\.out\.residual_statistics"):
+        ResidualPredictionMode(module)
+
+
+def test_residual_prediction_mode_accepts_residual_processors_for_every_target() -> None:
+    ResidualPredictionMode(_make_residual_module())
+
+
+@pytest.mark.parametrize(
+    ("input_hours", "output_hours"),
+    [([0], [0, 6]), ([0, 6], [6, 12]), ([0, 1, 3], [0, 1, 3])],
+    ids=["different_count", "same_count_different_times", "non_equidistant_offsets"],
+)
+def test_residual_prediction_mode_rejects_different_input_and_output_offsets(
+    input_hours: list[int],
+    output_hours: list[int],
+) -> None:
+    """The residual pairs output snapshot *i* with input snapshot *i*, so the offsets must match."""
+    module = _make_residual_module()
+    module.task.get_input_offsets = lambda **_kw: [datetime.timedelta(hours=h) for h in input_hours]
+    module.task.get_output_offsets = lambda **_kw: [datetime.timedelta(hours=h) for h in output_hours]
+
+    with pytest.raises(ValueError, match="ResidualPredictionMode"):
+        ResidualPredictionMode(module)

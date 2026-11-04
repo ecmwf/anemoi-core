@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
 import pytorch_lightning as pl
 import torch
@@ -136,6 +137,51 @@ def test_temporal_downscaler_uses_cumulative_tendency_statistics_per_lead_time(m
         },
     }
     assert [call.args[0] for call in reader.statistics_tendencies.call_args_list] == ["2h", "4h"]
+
+
+def test_residual_statistics_loads_npz_only_for_configured_datasets(mocker: MockFixture, tmp_path: Path) -> None:
+    """``residual_statistics`` loads a dataset's npz only when it sets ``data.datasets.<name>.residual_statistics``.
+
+    Only the prognostic variables need an entry; ``tp`` is diagnostic and absent from the file.
+    """
+    path = tmp_path / "residuals.npz"
+    np.savez(
+        path,
+        mean=np.array({"2t": 0.5}),
+        minimum=np.array({"2t": -1.0}),
+        maximum=np.array({"2t": 1.0}),
+        stdev=np.array({"2t": 2.0}),
+    )
+
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    datamodule = _make_datamodule(task)
+    datamodule.config.data = DictConfig({"datasets": {"out_hres": {"residual_statistics": str(path)}, "in_lres": {}}})
+    datamodule.__dict__["ds_train"] = SimpleNamespace(
+        data_readers={
+            "out_hres": mocker.Mock(variables=["2t", "tp"]),
+            "in_lres": mocker.Mock(variables=["2t"]),
+        },
+    )
+    datamodule.__dict__["data_indices"] = {
+        "out_hres": SimpleNamespace(prognostic=["2t"]),
+        "in_lres": SimpleNamespace(prognostic=["2t"]),
+    }
+
+    statistics = datamodule.residual_statistics
+
+    assert list(statistics.keys()) == ["out_hres"]
+    np.testing.assert_allclose(statistics["out_hres"]["mean"], [0.5, 0.0])
+    np.testing.assert_allclose(statistics["out_hres"]["stdev"], [2.0, 1.0])
+
+
+def test_residual_statistics_is_none_when_no_dataset_configures_it(mocker: MockFixture) -> None:
+    """``residual_statistics`` returns ``None`` when no dataset sets ``residual_statistics``."""
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    datamodule = _make_datamodule(task)
+    datamodule.config.data = DictConfig({"datasets": {"data": {}}})
+    datamodule.__dict__["ds_train"] = SimpleNamespace(data_readers={"data": mocker.Mock(variables=["2t"])})
+
+    assert datamodule.residual_statistics is None
 
 
 @pytest.mark.parametrize(

@@ -20,6 +20,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -27,6 +28,8 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.models.base import NO_ENCODER_FUSION
+from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.transport import EdmSettings
@@ -34,6 +37,7 @@ from anemoi.models.transport import NoiseConditioningSettings
 from anemoi.models.transport import StochasticInterpolantSettings
 from anemoi.models.transport import TransportSourceBuilder
 from anemoi.models.transport import TransportSourceRequest
+from anemoi.models.transport import TransportSourceSpec
 from anemoi.models.transport import get_transport_model_objective
 from anemoi.models.transport import reference_state_sampling_source
 from anemoi.models.transport import sampling_source_specs
@@ -42,6 +46,57 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 SamplingData = tuple[dict[str, torch.Tensor], ...]
+
+
+def normalise_delta(
+    target: torch.Tensor,
+    reference_prognostic: torch.Tensor,
+    pre_processor_state: Callable,
+    pre_processor_delta: Callable,
+    data_indices: IndexCollection,
+    skip_imputation: bool = False,
+) -> torch.Tensor:
+    """Split a denormalized target into a normalized delta on prognostics and a normalized state on diagnostics.
+
+    Shared by the tendency (reference: latest input state) and residual (reference:
+    projected dataset) models.
+
+    Parameters
+    ----------
+    target : torch.Tensor
+        Denormalized target in model-output variable order.
+    reference_prognostic : torch.Tensor
+        Denormalized reference, holding the target's prognostic variables in model-output order.
+    pre_processor_state : Callable
+        State pre-processor, applied to the diagnostic variables.
+    pre_processor_delta : Callable
+        Delta (tendency or residual) pre-processor, applied to ``target - reference`` on prognostics.
+    data_indices : IndexCollection
+        Data indices of the target dataset.
+    skip_imputation : bool, optional
+        Skip imputation in both pre-processors, by default False.
+
+    Returns
+    -------
+    torch.Tensor
+        Normalized delta/state tensor in model-output variable order.
+    """
+    prognostic = data_indices.model.output.prognostic
+    diagnostic = data_indices.model.output.diagnostic
+    delta = target.clone()
+    delta[..., prognostic] = pre_processor_delta(
+        target[..., prognostic] - reference_prognostic,
+        in_place=False,
+        data_index=data_indices.data.output.prognostic,
+        skip_imputation=skip_imputation,
+    )
+    delta[..., diagnostic] = pre_processor_state(
+        target[..., diagnostic],
+        in_place=False,
+        data_index=data_indices.data.output.diagnostic,
+        skip_imputation=skip_imputation,
+    )
+    return delta
 
 
 class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
@@ -61,6 +116,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         model_config = DotDict(model_config)
 
         transport_params = model_config.model.transport
+        self.target_anchors: dict[str, str] = self._target_anchors_from_config(model_config)
         self.noise_conditioning = NoiseConditioningSettings.from_config(transport_params)
         self.edm = EdmSettings.from_config(transport_params)
         self.stochastic_interpolant = StochasticInterpolantSettings.from_config(transport_params)
@@ -83,11 +139,83 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self.noise_embedder = instantiate(transport_params.noise_embedder)
         self.noise_cond_mlp = self._create_noise_conditioning_mlp()
 
+    def _target_anchors_from_config(self, model_config: DotDict) -> dict[str, str]:
+        """Return ``{target: source}`` for targets encoded on another source's node set.
+
+        Called before the network is built. By default every target is encoded on its own node set.
+        """
+        del model_config
+        return {}
+
+    def _build_target_routing(self) -> None:
+        """Resolve ``target_anchors`` to the anchor node set each target is encoded and decoded on."""
+        undecoded = sorted(set(self.target_anchors) - set(self.target_datasets))
+        if undecoded:
+            raise ValueError(
+                f"{undecoded} are attached to an encoder source (e.g. by model.residual_reference), but no "
+                f"decoder produces them (decoded targets: {self.target_datasets})."
+            )
+
+        self.target2anchor = {}
+        for target_name in self.target_datasets:
+            attached_to = self.target_anchors.get(target_name, target_name)
+            if attached_to not in self.dataset2encoder:
+                raise ValueError(
+                    f"Target '{target_name}' is attached to '{attached_to}', which is not a source dataset of any "
+                    f"encoder. Add it to the source_datasets of an encoder."
+                )
+            if attached_to != target_name and target_name in self.dataset2encoder:
+                raise ValueError(
+                    f"Target '{target_name}' is attached to '{attached_to}' and must not also be a source dataset "
+                    f"of encoder '{self.dataset2encoder[target_name]}'."
+                )
+
+            anchor = self.dataset2anchor[attached_to]
+            self._validate_same_grid(
+                anchor, target_name, context=f"Target '{target_name}' is decoded from anchor '{anchor}'"
+            )
+            self.target2anchor[target_name] = anchor
+
+    def _anchor_of_target(self, target_name: str) -> str:
+        # Checkpoints pickled before target2anchor existed decode every target from itself.
+        return getattr(self, "target2anchor", {}).get(target_name, target_name)
+
+    @staticmethod
+    def _apply_imputer_inverse(
+        post_processors: dict[str, nn.Module],
+        dataset_name: str,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        """Set the points the imputer filled in the last normalized batch back to NaN."""
+        processors = post_processors[dataset_name]
+        if not hasattr(processors, "processors"):
+            return x
+        for processor in processors.processors.values():
+            if getattr(processor, "supports_skip_imputation", False):
+                x = processor(x, in_place=False, inverse=True, skip_imputation=False)
+        return x
+
+    def _targets_on_anchor(self, anchor: str) -> list[str]:
+        """Targets whose noised state is encoded on ``anchor``'s node set."""
+        return [name for name in self.target_datasets if self._anchor_of_target(name) == anchor]
+
+    def _encoder_input_datasets(self, anchor: str) -> list[str]:
+        """Datasets whose input history is encoded on ``anchor``'s node set, in ``source_datasets`` order."""
+        encoder_name = self.dataset2encoder[anchor]
+        if self.encoder_fusing_strategy[encoder_name] == NO_ENCODER_FUSION:
+            return [anchor]
+        return list(self.encoder2datasets[encoder_name])
+
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        base_input_dim = super()._calculate_input_dim(dataset_name)
-        output_dim = super()._calculate_output_dim(dataset_name)
-        input_dim = base_input_dim + output_dim  # input history plus corrupted target
-        return input_dim
+        if dataset_name not in self.input_datasets:
+            # Fused sources and decoder-only targets own no encoder, so this width is unused.
+            return super()._calculate_input_dim(dataset_name)
+
+        history_dim = self.n_step_input * sum(
+            self.num_input_channels[name] for name in self._encoder_input_datasets(dataset_name)
+        )
+        noised_target_dim = sum(self._calculate_output_dim(name) for name in self._targets_on_anchor(dataset_name))
+        return history_dim + noised_target_dim + self.node_attributes.attr_ndims[dataset_name]
 
     def _create_noise_conditioning_mlp(self) -> nn.Sequential:
         mlp = nn.Sequential()
@@ -98,8 +226,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _assemble_input(
         self,
-        x: torch.Tensor,
-        y_noised: torch.Tensor,
+        x: dict[str, torch.Tensor],
+        y_noised: dict[str, torch.Tensor],
         bse: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -112,13 +240,17 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
-        # Combine input history, corrupted target, and node position features
+        # Input history of every fused source, then the corrupted targets, then node position features
+        features = [x[name] for name in self._encoder_input_datasets(dataset_name)]
+        features += [y_noised[name] for name in self._targets_on_anchor(dataset_name)]
         x_data_latent = torch.cat(
-            (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+            [
+                *(
+                    einops.rearrange(feature, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
+                    for feature in features
+                ),
                 node_attributes_data,
-            ),
+            ],
             dim=-1,  # feature dimension
         )
 
@@ -202,22 +334,21 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _build_conditioning_kwargs(
         self,
-        x: dict[str, torch.Tensor],
+        dataset_names: list[str],
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[dict[str, dict], dict[str, torch.Tensor], dict[str, dict]]:
         self._assert_condition_shapes(condition)
-        dataset_names = list(x.keys())
 
         # Transport assumes one noise level or bridge time per sample and
         # ensemble member, shared across datasets. The training objectives build
-        # the condition that way, so we can read it from the first dataset,
-        # embed it once, and repeat it over each dataset's graph nodes below.
-        condition_base = condition[dataset_names[0]][:, 0, :, 0]
+        # the condition that way, so we can read it from any dataset, embed it
+        # once, and repeat it over each dataset's graph nodes below.
+        condition_base = next(iter(condition.values()))[:, 0, :, 0]
         noise_cond_base = self._embed_noise_conditioning(condition_base)
 
         fwd_mapper_kwargs, bwd_mapper_kwargs = {}, {}
-        for dataset_name in x:
+        for dataset_name in dataset_names:
             # The same transport noise/time embedding is shared across all output steps.
             noise_cond = noise_cond_base[:, None, :, None, :]
             c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
@@ -262,24 +393,27 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        # Multi-dataset case
-        dataset_names = list(x.keys())
+        # Datasets the network touches. ``x`` and ``conditioned_target`` need not
+        # share keys: a downscaler reads its inputs from ``x`` only and writes its
+        # target from ``conditioned_target`` only.
+        routed_datasets = list(dict.fromkeys([*self.input_datasets, *self.target_datasets]))
 
         # Extract and validate batch & ensemble sizes across datasets
-        batch_size = self._get_consistent_dim(x, 0)
-        ensemble_size = self._get_consistent_dim(x, 2)
+        shape_sources = {**x, **conditioned_target}
+        batch_size = self._get_consistent_dim(shape_sources, 0)
+        ensemble_size = self._get_consistent_dim(shape_sources, 2)
 
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = self._resolve_in_out_sharded(
-            dataset_names=dataset_names,
+            dataset_names=routed_datasets,
             grid_shard_sizes=grid_shard_sizes,
         )
-        for dataset_name in dataset_names:
+        for dataset_name in routed_datasets:
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
         # Embed the current noise level or bridge time and pass it to the conditional layers.
         fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = self._build_conditioning_kwargs(
-            x, condition, model_comm_group=model_comm_group
+            routed_datasets, condition, model_comm_group=model_comm_group
         )
 
         # Process each dataset through its corresponding encoder
@@ -291,13 +425,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group=model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
-        for dataset_name in x.keys():
-            if dataset_name not in self.input_datasets:
-                continue
-
+        for dataset_name in self.input_datasets:
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
-                x[dataset_name],
-                conditioned_target[dataset_name],
+                x,
+                conditioned_target,
                 bse,
                 grid_shard_sizes,
                 model_comm_group,
@@ -365,6 +496,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         # Decoder
         x_out_dict = {}
         for dataset_name in self.target_datasets:
+            anchor = self._anchor_of_target(dataset_name)
             # Compute decoder edges using updated latent representation
             (
                 decoder_edge_attr,
@@ -377,13 +509,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden,
-                dst_nodes=shard_sizes_data_dict[dataset_name],  # None if not sharded
+                dst_nodes=shard_sizes_data_dict[anchor],  # None if not sharded
                 edges=dec_edge_shard_sizes,
             )
 
             decoder_name = self.dataset2decoder[dataset_name]
             x_out = self.decoder[decoder_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                (x_latent_proc, x_data_latent_dict[anchor]),
                 batch_size=bse,
                 shard_info=dec_shard_info,
                 edge_attr=decoder_edge_attr,
@@ -394,10 +526,44 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
-                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype
+                x_out,
+                x_skip_dict[anchor],
+                batch_size,
+                ensemble_size,
+                conditioned_target[dataset_name].dtype,
             )
 
         return x_out_dict
+
+    def _sampling_input_datasets(self, batch: dict[str, torch.Tensor]) -> list[str]:
+        """Datasets that ``_before_sampling`` reads from ``batch``."""
+        return list(batch)
+
+    def _prepare_sampling_inputs(
+        self,
+        tensors: tuple[torch.Tensor, ...],
+        dataset_name: str,
+        pre_processors: dict[str, nn.Module],
+        model_comm_group: Optional[ProcessGroup],
+        spatial_pre_processors: Optional[nn.ModuleDict],
+        grid_shard_sizes: DatasetShardSizes | None,
+    ) -> tuple[tuple[torch.Tensor, ...], DatasetShardSizes | None]:
+        """Shard tensors on one dataset's source grid, project them, then normalise them."""
+        if model_comm_group is not None:
+            assert grid_shard_sizes is not None
+            shard_sizes = get_shard_sizes(tensors[0], -2, model_comm_group=model_comm_group)
+            grid_shard_sizes[dataset_name] = shard_sizes
+            tensors = tuple(shard_tensor(tensor, -2, shard_sizes, model_comm_group) for tensor in tensors)
+
+        tensors, grid_shard_sizes = self._apply_spatial_preprocessor(
+            tensors,
+            dataset_name,
+            spatial_pre_processors,
+            model_comm_group,
+            grid_shard_sizes,
+        )
+        tensors = tuple(pre_processors[dataset_name](tensor, in_place=False) for tensor in tensors)
+        return tensors, grid_shard_sizes
 
     def _before_sampling(
         self,
@@ -437,28 +603,17 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         if model_comm_group is not None:
             grid_shard_sizes = {}
 
-        for dataset_name, x in batch.items():
+        for dataset_name in self._sampling_input_datasets(batch):
             # Dimensions are batch, timesteps, grid, variables
-            x = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
-
-            if model_comm_group is not None:
-                shard_sizes = get_shard_sizes(x, -2, model_comm_group=model_comm_group)
-                assert grid_shard_sizes is not None
-                grid_shard_sizes[dataset_name] = shard_sizes
-                x = shard_tensor(x, -2, shard_sizes, model_comm_group)
-
-            # Spatial preprocessing: applied after grid sharding, before normalisation.
-            (x,), grid_shard_sizes = self._apply_spatial_preprocessor(
+            x = batch[dataset_name][:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
+            (xs[dataset_name],), grid_shard_sizes = self._prepare_sampling_inputs(
                 (x,),
                 dataset_name,
-                spatial_pre_processors,
+                pre_processors,
                 model_comm_group,
+                spatial_pre_processors,
                 grid_shard_sizes,
             )
-
-            x = pre_processors[dataset_name](x, in_place=False)
-
-            xs[dataset_name] = x
 
         return (xs,), grid_shard_sizes
 
@@ -659,16 +814,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             **kwargs,
         )
 
-    def fill_metadata(self, md_dict) -> None:
-        for dataset in self.input_dim.keys():
-            shapes = {
-                "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input,
-                "ensemble": 1,
-                "grid": None,  # grid size is dynamic
-            }
-            md_dict["metadata_inference"][dataset]["shapes"] = shapes
-
 
 class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     """Transport model that predicts tendencies and converts them back to state fields."""
@@ -701,36 +846,24 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             input_dim += len(self.data_indices[dataset_name].model.input.prognostic) * self.n_step_output
         return input_dim
 
-    @staticmethod
-    def _apply_imputer_inverse(
-        post_processors: dict[str, nn.Module],
-        dataset_name: str,
-        x: torch.Tensor,
-    ) -> torch.Tensor:
-        processors = post_processors[dataset_name]
-        if not hasattr(processors, "processors"):
-            return x
-        for processor in processors.processors.values():
-            if getattr(processor, "supports_skip_imputation", False):
-                x = processor(x, in_place=False, inverse=True, skip_imputation=False)
-        return x
-
     def _assemble_input(
         self,
-        x: torch.Tensor,
-        y_noised: torch.Tensor,
+        x: dict[str, torch.Tensor],
+        y_noised: dict[str, torch.Tensor],
         bse: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None, ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+        x_dataset = x[dataset_name]
+        y_noised_dataset = y_noised[dataset_name]
         node_attributes_data = self.node_attributes(dataset_name, batch_size=bse)
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
-        x_skip = self.residual[dataset_name](x, grid_shard_sizes, model_comm_group, n_step_output=self.n_step_output)[
-            ..., self._internal_input_idx[dataset_name]
-        ]
+        x_skip = self.residual[dataset_name](
+            x_dataset, grid_shard_sizes, model_comm_group, n_step_output=self.n_step_output
+        )[..., self._internal_input_idx[dataset_name]]
         assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
         x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
 
@@ -741,8 +874,10 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         # Combine input history, corrupted target, and node position features
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                einops.rearrange(x_dataset, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                einops.rearrange(
+                    y_noised_dataset, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"
+                ),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -808,23 +943,14 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                     skip_imputation=skip_imputation,
                 )
 
-            tendency = x_t1[dataset_name].clone()
-            tendency[..., self.data_indices[dataset_name].model.output.prognostic] = pre_processors_tendencies[
-                dataset_name
-            ](
-                x_t1[dataset_name][..., self.data_indices[dataset_name].model.output.prognostic] - x_t0[dataset_name],
-                in_place=False,
-                data_index=self.data_indices[dataset_name].data.output.prognostic,
+            tendencies[dataset_name] = normalise_delta(
+                x_t1[dataset_name],
+                x_t0[dataset_name],
+                pre_processors_state[dataset_name],
+                pre_processors_tendencies[dataset_name],
+                self.data_indices[dataset_name],
                 skip_imputation=skip_imputation,
             )
-            # Diagnostic variables are kept as normalized full fields from x_t1.
-            tendency[..., self.data_indices[dataset_name].model.output.diagnostic] = pre_processors_state[dataset_name](
-                x_t1[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic],
-                in_place=False,
-                data_index=self.data_indices[dataset_name].data.output.diagnostic,
-                skip_imputation=skip_imputation,
-            )
-            tendencies[dataset_name] = tendency
 
         return tendencies
 
@@ -920,33 +1046,20 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         if model_comm_group is not None:
             grid_shard_sizes = {}
 
-        for dataset_name, x in batch.items():
+        for dataset_name in self._sampling_input_datasets(batch):
+            x = batch[dataset_name]
             # Dimensions are batch, timesteps, grid, variables
             x_in = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
             x_t0 = x[:, -1:, None, ...]  # keep time dim and add dummy ensemble dimension
 
-            if model_comm_group is not None:
-                shard_sizes = get_shard_sizes(x_in, -2, model_comm_group=model_comm_group)
-                assert grid_shard_sizes is not None
-                grid_shard_sizes[dataset_name] = shard_sizes
-                x_in = shard_tensor(x_in, -2, shard_sizes, model_comm_group)
-                shard_sizes = get_shard_sizes(x_t0, -2, model_comm_group=model_comm_group)
-                x_t0 = shard_tensor(x_t0, -2, shard_sizes, model_comm_group)
-
-            # Spatial preprocessing: applied after grid sharding, before normalisation.
-            (x_in, x_t0), grid_shard_sizes = self._apply_spatial_preprocessor(
+            (xs[dataset_name], x_t0s[dataset_name]), grid_shard_sizes = self._prepare_sampling_inputs(
                 (x_in, x_t0),
                 dataset_name,
-                spatial_pre_processors,
+                pre_processors,
                 model_comm_group,
+                spatial_pre_processors,
                 grid_shard_sizes,
             )
-
-            x_in = pre_processors[dataset_name](x_in, in_place=False)
-            x_t0 = pre_processors[dataset_name](x_t0, in_place=False)
-
-            xs[dataset_name] = x_in
-            x_t0s[dataset_name] = x_t0
 
         return (xs, x_t0s), grid_shard_sizes
 
@@ -1081,3 +1194,523 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             x_skips[dataset_name] = x_skip[..., self.data_indices[dataset_name].model.input.prognostic]
 
         return x_skips
+
+
+class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncProcDec):
+    """Transport model for spatial downscaling that predicts residuals relative to a low res dataset.
+
+    ``model.residual_reference`` pairs each target with its residual reference. The target is
+    not an encoder source: its noised state is encoded on the reference's anchor.
+
+    The residual processors hold only the target's normaliser, with the residual statistics;
+    imputers and post-processors are left out (post-processors act on the rebuilt state) and
+    any other processor is rejected when the interface is built.
+
+    Known limitations with missing data (imputers):
+
+    - The target's NaN mask is recorded by its imputer during training only and is not
+      stored in the checkpoint. At inference the target is never pre-processed, so the
+      output is not set back to NaN at masked points; it keeps the generated values.
+    - Diagnostic variables are never set back to NaN at inference either.
+    - The reference is projected before it is normalised and imputed, and the projector
+      has no NaN handling: a NaN on the source grid spreads to every target point that
+      draws on it. The reference's imputer then records this widened mask, not the true
+      mask of the target grid.
+    - The imputer keeps one mask per sample, taken from the first time step.
+    """
+
+    #: Inputs are concatenated onto the target grid and encoded together, so one
+    #: encoder owns several source datasets.
+    supports_encoder_fusion: bool = True
+
+    @property
+    def residual_reference(self) -> dict[str, str]:
+        """``{target: reference}``: the dataset each target is predicted as a residual against."""
+        return self.target_anchors
+
+    def _target_anchors_from_config(self, model_config: DotDict) -> dict[str, str]:
+        """Attach each target to its residual reference."""
+        return dict(model_config.get("residual_reference") or {})
+
+    def fill_metadata(self, md_dict) -> None:
+        """Record the input shapes of each input dataset on its own, and none for output-only datasets.
+
+        The inherited ``input_dim`` is the encoder width: for a fused anchor it also counts the
+        other sources and the noised targets, for every other dataset no encoder uses it.
+        """
+        super().fill_metadata(md_dict)
+        inference_inputs = set(self.inference_input_datasets)
+        for dataset_name in self.input_dim:
+            dataset_md = md_dict["metadata_inference"][dataset_name]
+            if dataset_name in inference_inputs:
+                dataset_md["shapes"]["variables"] = BaseGraphModel._calculate_input_dim(self, dataset_name)
+            else:
+                dataset_md.pop("shapes", None)
+
+    def _build_target_routing(self) -> None:
+        self._validate_residual_reference()
+        super()._build_target_routing()
+
+    def _validate_residual_reference(self) -> None:
+        """Require a distinct residual reference with matching prognostic variables for every target."""
+        if not self.residual_reference:
+            msg = (
+                "AnemoiTransportSpatialDownscalerModelEncProcDec requires model.residual_reference to pair "
+                "each target dataset with its residual reference, e.g. {out_hres: in_lres}."
+            )
+            raise ValueError(msg)
+
+        missing = [name for name in self.target_datasets if name not in self.residual_reference]
+        if missing:
+            msg = f"Targets {missing} have no residual reference in residual_reference {self.residual_reference}."
+            raise ValueError(msg)
+
+        self_referencing = sorted(name for name, reference in self.residual_reference.items() if name == reference)
+        if self_referencing:
+            msg = f"residual_reference: {self_referencing} use themselves as their own residual baseline."
+            raise ValueError(msg)
+
+        self._validate_prognostics_match()
+
+    def _validate_prognostics_match(self) -> None:
+        """Require the set of prognostic variables in the target and its reference to match exactly."""
+        errors: list[str] = []
+        for target_name in self.target_datasets:
+            reference_name = self.residual_reference[target_name]
+            target_prognostic_names = set(self.data_indices[target_name].prognostic)
+            reference_prognostic_names = set(self.data_indices[reference_name].prognostic)
+            if target_prognostic_names == reference_prognostic_names:
+                continue
+
+            only_in_target = sorted(target_prognostic_names - reference_prognostic_names)
+            only_in_reference = sorted(reference_prognostic_names - target_prognostic_names)
+            errors.append(
+                f"target '{target_name}' vs reference '{reference_name}': prognostic variable "
+                f"sets differ (only in target: {only_in_target}; only in reference: "
+                f"{only_in_reference}).",
+            )
+        if errors:
+            bullets = "\n  - ".join(errors)
+            msg = (
+                "residual_reference: residual prediction requires the set of prognostic "
+                "variables in each target dataset to match its reference dataset exactly:\n  - " + bullets
+            )
+            raise ValueError(msg)
+
+    # ── residual math (mirror of tendency model's compute_tendency pair) ─────
+
+    def _reference_prognostic_column_indices(
+        self,
+        target_dataset_name: str,
+        reference_variable_name_to_column_index_by_target: dict[str, dict[str, int]],
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Return the reference dataset column indices aligned with the target's prognostic outputs.
+        The reference tensor lives in the reference dataset's raw DATA_FULL layout, which
+        need not share variable positions with the target dataset.  For each
+        target prognostic variable we look up its column in the reference tensor by
+        name, so the two datasets only need to agree on the *names* of the
+        prognostic variables — not on their positions.
+        """
+        reference_variable_name_to_column_index = reference_variable_name_to_column_index_by_target[target_dataset_name]
+        target_prognostic_names = self.data_indices[target_dataset_name].prognostic
+        return torch.tensor(
+            [reference_variable_name_to_column_index[name] for name in target_prognostic_names],
+            dtype=torch.long,
+            device=device,
+        )
+
+    def compute_residual(
+        self,
+        y: dict[str, torch.Tensor],
+        x_reference_denorm: dict[str, torch.Tensor],
+        pre_processors_state: dict[str, Callable],
+        pre_processors_residual: dict[str, Callable],
+        reference_variable_name_to_column_index_by_target: dict[str, dict[str, int]],
+        input_post_processor: dict[str, Callable | None] | None = None,
+        skip_imputation: bool = False,
+    ) -> dict[str, torch.Tensor]:
+        """Compute the normalized model target for spatial downscaling.
+
+        Prognostic channels become normalized residuals against the projected reference,
+        diagnostic channels normalized state.
+        """
+        assert set(y.keys()) == set(x_reference_denorm.keys()), "y and x_reference_denorm must share dataset keys."
+
+        residuals: dict[str, torch.Tensor] = {}
+        for dataset_name in y.keys():
+            input_post_proc = input_post_processor[dataset_name] if input_post_processor is not None else None
+            y_denorm = y[dataset_name]
+            if input_post_proc is not None:
+                y_denorm = input_post_proc(
+                    y_denorm,
+                    in_place=False,
+                    skip_imputation=skip_imputation,
+                )
+
+            # Match each target prognostic variable to the corresponding column
+            # in the reference tensor by name (reference layout may differ from target).
+            reference_prog_col_idx = self._reference_prognostic_column_indices(
+                dataset_name,
+                reference_variable_name_to_column_index_by_target,
+                device=y_denorm.device,
+            )
+            residuals[dataset_name] = normalise_delta(
+                y_denorm,
+                x_reference_denorm[dataset_name].index_select(-1, reference_prog_col_idx),
+                pre_processors_state[dataset_name],
+                pre_processors_residual[dataset_name],
+                self.data_indices[dataset_name],
+                skip_imputation=skip_imputation,
+            )
+
+        return residuals
+
+    def add_residual_to_state(
+        self,
+        x_reference_denorm: dict[str, torch.Tensor],
+        residual: dict[str, torch.Tensor],
+        pre_processors_state: dict[str, Callable],
+        post_processors_state: dict[str, Callable],
+        post_processors_residual: dict[str, Callable],
+        reference_variable_name_to_column_index_by_target: dict[str, dict[str, int]],
+        output_pre_processor: dict[str, Callable | None] | None = None,
+        skip_imputation: bool = False,
+    ) -> dict[str, torch.Tensor]:
+        """Convert a predicted residual back to a state field.
+
+        Prognostic channels are denormalized with the residual post-processor and the
+        projected reference is added back; diagnostic channels are kept as normalized
+        state. The target's state post-processors, including any clamping
+        post-processors, then run once on the full rebuilt state.
+        """
+        state_outp: dict[str, torch.Tensor] = {}
+        for dataset_name in residual.keys():
+            indices = self.data_indices[dataset_name]
+            prog_model_idx = indices.model.output.prognostic
+
+            # Match each target prognostic to its reference column by name (layouts may differ).
+            reference_prog_col_idx = self._reference_prognostic_column_indices(
+                dataset_name,
+                reference_variable_name_to_column_index_by_target,
+                device=residual[dataset_name].device,
+            )
+            prognostic_state = post_processors_residual[dataset_name](
+                residual[dataset_name][..., prog_model_idx],
+                in_place=False,
+                data_index=indices.data.output.prognostic,
+                skip_imputation=skip_imputation,
+            ) + x_reference_denorm[dataset_name].index_select(-1, reference_prog_col_idx)
+
+            # The prognostics are normalised again (they were just denormalised) so that the state
+            # post-processors, e.g. clamping, act once on the full rebuilt state and not on the residual.
+            outp = residual[dataset_name].clone()
+            outp[..., prog_model_idx] = pre_processors_state[dataset_name](
+                prognostic_state,
+                in_place=False,
+                data_index=indices.data.output.prognostic,
+                skip_imputation=skip_imputation,
+            )
+            outp = post_processors_state[dataset_name](outp, in_place=False, skip_imputation=skip_imputation)
+
+            output_pre_proc = output_pre_processor[dataset_name] if output_pre_processor is not None else None
+            if output_pre_proc is not None:
+                outp = output_pre_proc(
+                    outp,
+                    in_place=False,
+                    data_index=indices.data.output.full,
+                    skip_imputation=skip_imputation,
+                )
+            state_outp[dataset_name] = outp
+
+        return state_outp
+
+    def reference_on_target_grid(
+        self,
+        x: dict[str, torch.Tensor],
+        post_processors: dict[str, Callable],
+    ) -> tuple[dict[str, torch.Tensor], dict[str, dict[str, int]]]:
+        """Denormalize the residual reference of each target from the model input.
+
+        Shared by training and inference so both build the reference identically.
+        Imputed values are kept (``skip_imputation=True``), so the reference carries the
+        imputer's fill values at masked points, never NaN.
+
+        Parameters
+        ----------
+        x : dict[str, torch.Tensor]
+            Normalized model inputs in model-input layout, already projected onto the target grid.
+        post_processors : dict[str, Callable]
+            State post-processors keyed by dataset name.
+
+        Returns
+        -------
+        tuple[dict[str, torch.Tensor], dict[str, dict[str, int]]]
+            Per target, the denormalized reference and the mapping from the reference's
+            variable names to its columns.
+        """
+        references: dict[str, torch.Tensor] = {}
+        columns: dict[str, dict[str, int]] = {}
+        for target_name in self.target_datasets:
+            reference_name = self.residual_reference[target_name]
+            reference_indices = self.data_indices[reference_name]
+            # Imputed values are kept: re-inserting NaNs would poison the residual.
+            references[target_name] = post_processors[reference_name](
+                x[reference_name],
+                in_place=False,
+                data_index=reference_indices.data.input.full,
+                skip_imputation=True,
+            )
+            columns[target_name] = reference_indices.model.input.name_to_index
+        return references, columns
+
+    def _sampling_input_datasets(self, batch: dict[str, torch.Tensor]) -> list[str]:
+        """Read only ``inference_input_datasets``; the targets are sampled, so other entries are ignored."""
+        input_dataset_names = self.inference_input_datasets
+        missing = [name for name in input_dataset_names if name not in batch]
+        if missing:
+            msg = (
+                f"Missing input dataset(s) {missing} in the batch. The downscaler reads "
+                f"{input_dataset_names} and samples {self.target_datasets}."
+            )
+            raise ValueError(msg)
+
+        unused = [name for name in batch if name not in input_dataset_names]
+        if unused:
+            LOGGER.debug("Ignoring batch entries the model does not read: %s.", unused)
+        return input_dataset_names
+
+    # ── sampling hooks ────────────────────────────────────────────────────────
+
+    def _before_sampling(
+        self,
+        batch: dict[str, torch.Tensor],
+        pre_processors: dict[str, nn.Module],
+        n_step_input: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        spatial_pre_processors: dict[str, nn.Module] | None = None,
+        post_processors: dict[str, nn.Module] | None = None,
+        **kwargs,
+    ) -> tuple[SamplingData, DatasetShardSizes | None]:
+        """Prepare the batch for sampling in the same order as training.
+
+        The inherited loop shards each input on its source grid, projects it (``in_lres``
+        onto the target grid) and normalizes it, matching
+        :meth:`BaseTrainingModule.on_after_batch_transfer`. On top of that, the
+        denormalized reference of each target is built with
+        :meth:`reference_on_target_grid`, the same call training makes.
+        """
+        del kwargs
+
+        (xs,), grid_shard_sizes = super()._before_sampling(
+            batch,
+            pre_processors,
+            n_step_input,
+            model_comm_group,
+            spatial_pre_processors=spatial_pre_processors,
+        )
+
+        assert (
+            post_processors is not None
+        ), "Downscaler _before_sampling needs post_processors to denormalize the projected reference."
+        x_ref_on_target_grid_by_target, reference_variable_name_to_column_index_by_target = (
+            self.reference_on_target_grid(xs, post_processors)
+        )
+
+        # The decoder writes each target onto its anchor's nodes, so the target must be
+        # split across ranks exactly like the (projected) anchor.
+        if grid_shard_sizes is not None:
+            for target_name in self.target_datasets:
+                grid_shard_sizes[target_name] = grid_shard_sizes[self._anchor_of_target(target_name)]
+
+        return (
+            xs,
+            x_ref_on_target_grid_by_target,
+            reference_variable_name_to_column_index_by_target,
+        ), grid_shard_sizes
+
+    def _after_sampling(
+        self,
+        out: dict[str, torch.Tensor],
+        post_processors: dict[str, nn.Module],
+        before_sampling_data: SamplingData,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        gather_out: bool = True,
+        pre_processors: Optional[dict[str, nn.Module]] = None,
+        post_processors_residual: Optional[dict[str, nn.Module]] = None,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Turn the sampled normalized residual into a denormalized state prediction.
+
+        Prognostic channels receive the low-res source added back; the target's state
+        post-processors then run on the full state. Masked points are not set back to NaN:
+        the target's imputer has no mask at inference.
+        """
+        del kwargs
+
+        assert isinstance(before_sampling_data, tuple) and len(before_sampling_data) >= 3, (
+            "Downscaler _after_sampling expects _before_sampling to return "
+            "(xs, x_ref_on_target_grid_by_target, reference_variable_name_to_column_index_by_target)."
+        )
+        x_ref_on_target_grid_by_target = before_sampling_data[1]
+        reference_variable_name_to_column_index_by_target = before_sampling_data[2]
+
+        assert post_processors_residual is not None and len(post_processors_residual) > 0, (
+            "Residual downscaler _after_sampling requires post_processors_residual "
+            "(built from data.datasets.<target>.residual_statistics)."
+        )
+        assert pre_processors is not None, "Residual downscaler _after_sampling requires the state pre_processors."
+
+        state = self.add_residual_to_state(
+            x_reference_denorm=x_ref_on_target_grid_by_target,
+            residual=out,
+            pre_processors_state=pre_processors,
+            post_processors_state=post_processors,
+            post_processors_residual=post_processors_residual,
+            reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,
+            output_pre_processor=None,
+            skip_imputation=True,
+        )
+        out = dict(state)
+
+        for dataset_name in list(out.keys()):
+            if gather_out and model_comm_group is not None:
+                assert grid_shard_sizes is not None
+                out[dataset_name] = gather_tensor(
+                    out[dataset_name],
+                    -2,
+                    grid_shard_sizes[dataset_name],
+                    model_comm_group,
+                )
+
+        return out
+
+    def _target_sampling_source_specs(
+        self,
+        x: dict[str, torch.Tensor],
+        grid_shard_sizes: DatasetShardSizes | None = None,
+    ) -> dict[str, TransportSourceSpec]:
+        """Describe the field to sample for each target, without a target tensor.
+
+        The target is not part of the batch at inference, so its shape comes
+        from the model itself: the node count of its graph node set and the
+        number of output channels. Batch and ensemble sizes, device and dtype
+        follow the target's reference input, which the projector has already
+        placed on the target grid.
+        """
+        specs: dict[str, TransportSourceSpec] = {}
+        for target_name in self.target_datasets:
+            reference = x[self.residual_reference[target_name]]
+            num_nodes = self.node_attributes.num_nodes[target_name]
+            target_shard_sizes = grid_shard_sizes.get(target_name) if grid_shard_sizes is not None else None
+            if target_shard_sizes is None:
+                assert reference.shape[-2] == num_nodes, (
+                    f"The reference of target '{target_name}' has {reference.shape[-2]} grid points but the "
+                    f"target grid has {num_nodes}. The spatial pre-processor must project onto the target grid."
+                )
+            specs[target_name] = TransportSourceSpec(
+                shape=(
+                    reference.shape[0],
+                    self.n_step_output,
+                    reference.shape[2],
+                    num_nodes,
+                    self.num_output_channels[target_name],
+                ),
+                device=reference.device,
+                dtype=reference.dtype,
+                grid_shard_sizes=target_shard_sizes,
+            )
+        return specs
+
+    def build_sampling_source(
+        self,
+        x: dict[str, torch.Tensor],
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        default_kind: str = "gaussian",
+    ) -> dict[str, torch.Tensor]:
+        """Build the sampling source only for the target datasets."""
+        request = TransportSourceRequest(
+            specs=self._target_sampling_source_specs(x, grid_shard_sizes),
+            default_kind=default_kind,
+            custom_source_factories={},
+            model_comm_group=model_comm_group,
+            error_context="spatial downscaling",
+        )
+        return self.transport_source.build(request)
+
+    def predict_step(
+        self,
+        batch: dict[str, torch.Tensor],
+        pre_processors: dict[str, nn.Module],
+        post_processors: dict[str, nn.Module],
+        n_step_input: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        gather_out: bool = True,
+        schedule_params: Optional[dict] = None,
+        sampler_params: Optional[dict] = None,
+        pre_processors_residual: Optional[dict[str, nn.Module]] = None,
+        post_processors_residual: Optional[dict[str, nn.Module]] = None,
+        spatial_pre_processors: Optional[dict[str, nn.Module]] = None,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Run downscaling inference.
+
+        Accepts ``spatial_pre_processors`` (forwarded by ``AnemoiModelInterface``)
+        and threads them through ``_before_sampling`` so ``in_lres`` is projected
+        onto the target grid before normalization — matching the training flow.
+
+        ``batch`` only has to carry the datasets in ``inference_input_datasets``;
+        the targets are sampled from a field sized by the model.
+        """
+        # Ignore any tendency-processor kwargs forwarded by generic callers —
+        # residual downscaling does not use per-lead-time tendency stats.
+        kwargs.pop("pre_processors_tendencies", None)
+        kwargs.pop("post_processors_tendencies", None)
+
+        with torch.no_grad():
+            assert isinstance(batch, dict), "Input batch must be a dictionary!"
+            for dataset_name, dataset_tensor in batch.items():
+                assert len(dataset_tensor.shape) == 4, (
+                    f'The input tensor "{dataset_name}" has an incorrect shape: expected a 4-dimensional '
+                    f"tensor, got {dataset_tensor.shape}!"
+                )
+
+            before_sampling_data, grid_shard_sizes = self._before_sampling(
+                batch,
+                pre_processors,
+                n_step_input,
+                model_comm_group,
+                spatial_pre_processors=spatial_pre_processors,
+                post_processors=post_processors,
+                **kwargs,
+            )
+
+            x = before_sampling_data[0]
+
+            out = self.sample(
+                x,
+                model_comm_group,
+                grid_shard_sizes=grid_shard_sizes,
+                schedule_params=schedule_params,
+                sampler_params=sampler_params,
+                **kwargs,
+            )
+            for target_name in self.target_datasets:
+                # The target is not in the batch; its reference input carries the input dtype.
+                out[target_name] = out[target_name].to(batch[self.residual_reference[target_name]].dtype)
+
+            out = self._after_sampling(
+                out,
+                post_processors,
+                before_sampling_data,
+                model_comm_group,
+                grid_shard_sizes,
+                gather_out,
+                pre_processors=pre_processors,
+                post_processors_residual=post_processors_residual,
+                **kwargs,
+            )
+
+        return out

@@ -20,6 +20,7 @@ import pytest
 import torch
 
 from anemoi.training.diagnostics.callbacks.plot import BatchOutputPlot
+from anemoi.training.diagnostics.callbacks.plot import GraphFeaturePlot
 from anemoi.training.diagnostics.callbacks.plot import LossCurvePlot
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
@@ -1179,7 +1180,11 @@ def test_ensemble_plot_adapter_delegates_to_inner():
     data = np.zeros((5, 100, 10))
     output = np.zeros((3, 100, 10))
     list(adapter.iter_plot_samples(data, output))
-    inner.iter_plot_samples.assert_called_once_with(data, output)
+    inner.iter_plot_samples.assert_called_once_with(data, output, input_data=None)
+
+    pl_module, batch, post_processors = MagicMock(), {}, {}
+    adapter.prepare_plot_input(pl_module, "data", batch, post_processors)
+    inner.prepare_plot_input.assert_called_once_with(pl_module, "data", batch, post_processors)
 
 
 def test_base_adapter_select_members_is_noop():
@@ -1200,6 +1205,32 @@ def test_base_adapter_prepare_loss_batch_is_noop():
 
     result = inner.prepare_loss_batch(batch)
     assert torch.equal(result["data"], batch["data"])
+
+
+class _UnplottableAdapter(ForecasterPlotAdapter):
+    supports_plotting = False
+
+
+@pytest.mark.parametrize(
+    "make_callback",
+    [
+        partial(PlotSample, sample_idx=0, parameters=["a"], accumulation_levels_plot=[0.5]),
+        partial(LossCurvePlot, parameter_groups={}),
+        GraphFeaturePlot,
+    ],
+    ids=["batch_output", "loss_curve", "graph_feature"],
+)
+@pytest.mark.parametrize("ensemble", [False, True], ids=["deterministic", "ensemble"])
+def test_plot_callbacks_fail_at_fit_start_for_tasks_without_plotting_support(make_callback, ensemble):
+    """Fail before training starts rather than at the first plotting step."""
+    task = MagicMock()
+    task.name = "unplottable"
+    adapter = _UnplottableAdapter(task)
+    pl_module = MagicMock()
+    pl_module.plot_adapter = EnsemblePlotAdapterWrapper(adapter) if ensemble else adapter
+
+    with pytest.raises(NotImplementedError, match=r"unplottable.*diagnostics\.plot\.callbacks"):
+        make_callback().on_fit_start(MagicMock(), pl_module)
 
 
 def test_ensemble_plot_ens_sample_instantiation():

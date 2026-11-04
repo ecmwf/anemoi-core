@@ -615,6 +615,8 @@ The graph can be left out of the training checkpoints with
 
 The default is an empty list, which stores everything. ``graph_data`` is
 the only hyperparameter that is currently allowed to be excluded.
+Dataset statistics, including ``residual_statistics`` for residual downscalers,
+must be retained so that inference conversion can rebuild the normalisers.
 
 Resuming training, loading the weights, and transfer learning do not
 need the graph in the checkpoint, as the graph is rebuilt or loaded from

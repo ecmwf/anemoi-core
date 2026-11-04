@@ -772,6 +772,8 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
     "Rebuild state pre/post-processing statistics from the current dataset."
     tendencies: bool = Field(default=True, example=True)
     "Rebuild tendency pre/post-processing statistics from the current dataset."
+    residuals: bool = Field(default=True, example=True)
+    "Rebuild residual pre/post-processing statistics from the current ``data.datasets.<target>.residual_statistics``."
 
 
 class CheckpointPipelineSchema(BaseModel):
@@ -892,10 +894,17 @@ class EnsembleTrainingSchema(BaseTrainingSchema):
 
 
 class TransportTrainingConfigSchema(BaseModel):
-    prediction_mode: Literal["state", "tendency"] = "state"
+    prediction_mode: Literal["state", "tendency", "residual"] = "state"
     "Endpoint semantics for the transport objective."
     objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
     "Transport objective used to perturb targets and train the model."
+
+    @model_validator(mode="after")
+    def validate_residual_objective(self) -> "TransportTrainingConfigSchema":
+        if self.prediction_mode == "residual" and self.objective != "edm_diffusion":
+            msg = f"prediction_mode='residual' only supports objective='edm_diffusion', got '{self.objective}'."
+            raise ValueError(msg)
+        return self
 
 
 class TransportTrainingSchema(BaseTrainingSchema):

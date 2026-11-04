@@ -9,6 +9,7 @@
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
@@ -37,27 +38,30 @@ class _IndexGroup(SimpleNamespace):
         return len(self.prognostic)
 
 
-def _make_data_indices() -> dict:
-    dataset_indices = SimpleNamespace(
-        model=SimpleNamespace(
-            input=_IndexGroup(prognostic=[0], forcing=[]),
-            output=_IndexGroup(prognostic=[0], full=[0], diagnostic=[], name_to_index={"var": 0}),
-            _forcing=[],
-        ),
-        data=SimpleNamespace(
-            input=SimpleNamespace(
-                name_to_index={"var": 0},
+def _make_data_indices(dataset_names: tuple[str, ...] = ("data",)) -> dict:
+    def _indices() -> SimpleNamespace:
+        return SimpleNamespace(
+            model=SimpleNamespace(
+                input=_IndexGroup(prognostic=[0], forcing=[]),
+                output=_IndexGroup(prognostic=[0], full=[0], diagnostic=[], name_to_index={"var": 0}),
+                _forcing=[],
             ),
-        ),
-        name_to_index={"var": 0},
-    )
-    return {"data": dataset_indices}
+            data=SimpleNamespace(
+                input=SimpleNamespace(
+                    name_to_index={"var": 0},
+                ),
+            ),
+            name_to_index={"var": 0},
+        )
+
+    return {name: _indices() for name in dataset_names}
 
 
-def _make_graph() -> HeteroData:
+def _make_graph(dataset_names: tuple[str, ...] = ("data",)) -> HeteroData:
     graph = HeteroData()
-    graph["data"].x = torch.zeros(2, 2)
-    graph["data"].num_nodes = 2
+    for name in dataset_names:
+        graph[name].x = torch.zeros(2, 2)
+        graph[name].num_nodes = 2
     graph["hidden"].x = torch.zeros(1, 2)
     graph["hidden"].num_nodes = 1
     return graph
@@ -162,6 +166,186 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
 
     assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
     assert model.node_attributes.num_nodes["hidden_3"] == 1
+
+
+# ---------------------------------------------------------------------------
+# encoder routing and dataset fusion
+# ---------------------------------------------------------------------------
+
+
+class FusingGraphModel(DummyGraphModel):
+    supports_encoder_fusion = True
+
+
+class CrossDatasetInputDimModel(DummyGraphModel):
+    """Sizes every encoder from the channel counts of *all* datasets."""
+
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        return sum(self.num_input_channels.values())
+
+
+def _build_dummy_model(
+    *,
+    source_datasets: tuple[str, ...] = ("data",),
+    fusing_strategy: str = "not_supported",
+    model_cls: type[BaseGraphModel] = DummyGraphModel,
+    graph_data: HeteroData | None = None,
+) -> BaseGraphModel:
+    encoder_config: dict = {
+        "source_datasets": list(source_datasets),
+        "dataset_fusing_strategy": fusing_strategy,
+        "mapper": {},
+    }
+
+    model_config = OmegaConf.create(
+        {
+            "node_trainable_parameters": {name: 0 for name in (*source_datasets, "hidden")},
+            "model": {"hidden_nodes_name": "hidden", "latent_skip": False},
+            "encoders": {0: encoder_config},
+            "decoders": {
+                0: {
+                    "target_datasets": [source_datasets[0]],
+                    "target_node_features": ["coordinates"],
+                    "mapper": {},
+                },
+            },
+            "residual": {
+                "datasets": {
+                    name: {"_target_": "anemoi.models.layers.residual.SkipConnection"} for name in source_datasets
+                },
+            },
+            "bounding": {"datasets": {name: [] for name in source_datasets}},
+        },
+    )
+    return model_cls(
+        model_config=model_config,
+        data_indices=_make_data_indices(source_datasets),
+        statistics={name: None for name in source_datasets},
+        n_step_input=1,
+        n_step_output=1,
+        graph_data=graph_data if graph_data is not None else _make_graph(source_datasets),
+    )
+
+
+# "not" is a substring of "not_supported", so it slips through a membership test against the bare string.
+@pytest.mark.parametrize("fusing_strategy", ["not", "concatenate"])
+def test_rejects_unsupported_fusing_strategy(fusing_strategy: str) -> None:
+    with pytest.raises(ValueError, match="unsupported fusing strategy"):
+        _build_dummy_model(fusing_strategy=fusing_strategy)
+
+
+def test_fusion_is_rejected_by_model_classes_that_do_not_implement_it() -> None:
+    with pytest.raises(ValueError, match="does not support"):
+        _build_dummy_model(
+            source_datasets=("data", "extra"),
+            fusing_strategy="concatenate_inputs_along_variable_dim",
+        )
+
+
+def test_fusion_routes_every_source_dataset_through_the_anchor_node_set() -> None:
+    model = _build_dummy_model(
+        source_datasets=("data", "extra"),
+        fusing_strategy="concatenate_inputs_along_variable_dim",
+        model_cls=FusingGraphModel,
+    )
+
+    # Only the anchor owns encoder edges and an encoder input dimension.
+    assert model.encoder2anchors == {0: ["data"]}
+    assert model.input_datasets == ["data"]
+    # Every fused dataset still resolves to the encoder, on the anchor's node set.
+    assert model.encoder2datasets == {0: ["data", "extra"]}
+    assert model.dataset2encoder == {"data": 0, "extra": 0}
+    assert model.dataset2anchor == {"data": "data", "extra": "data"}
+
+
+def test_fusion_anchors_the_encoder_at_its_first_source_dataset() -> None:
+    model = _build_dummy_model(
+        source_datasets=("extra", "data"),
+        fusing_strategy="concatenate_inputs_along_variable_dim",
+        model_cls=FusingGraphModel,
+    )
+
+    assert model.encoder2anchors == {0: ["extra"]}
+    assert model.dataset2anchor == {"extra": "extra", "data": "extra"}
+
+
+def test_fusion_rejects_a_source_with_a_different_number_of_nodes_than_its_anchor() -> None:
+    graph = _make_graph(("data", "extra"))
+    graph["extra"].x = torch.zeros(3, 2)
+    graph["extra"].num_nodes = 3
+
+    with pytest.raises(ValueError, match=r"fuses 'extra'.*2 nodes.*3"):
+        _build_dummy_model(
+            source_datasets=("data", "extra"),
+            fusing_strategy="concatenate_inputs_along_variable_dim",
+            model_cls=FusingGraphModel,
+            graph_data=graph,
+        )
+
+
+def test_fusion_rejects_a_source_whose_nodes_differ_from_its_anchor() -> None:
+    """Fused features are concatenated node by node, so the same node count is not enough."""
+    graph = _make_graph(("data", "extra"))
+    graph["data"].x = torch.tensor([[0.0, 0.0], [1.0, 1.0]])
+    graph["extra"].x = torch.tensor([[1.0, 1.0], [0.0, 0.0]])
+
+    with pytest.raises(ValueError, match="different coordinates"):
+        _build_dummy_model(
+            source_datasets=("data", "extra"),
+            fusing_strategy="concatenate_inputs_along_variable_dim",
+            model_cls=FusingGraphModel,
+            graph_data=graph,
+        )
+
+
+def test_without_fusion_every_source_dataset_is_its_own_anchor() -> None:
+    model = _build_dummy_model(source_datasets=("data", "extra"), model_cls=FusingGraphModel)
+
+    assert model.encoder2anchors == {0: ["data", "extra"]}
+    assert model.dataset2anchor == {"data": "data", "extra": "extra"}
+
+
+def test_each_target_is_decoded_from_its_own_anchor_by_default() -> None:
+    model = _build_dummy_model(
+        source_datasets=("data", "extra"),
+        fusing_strategy="concatenate_inputs_along_variable_dim",
+        model_cls=FusingGraphModel,
+    )
+
+    assert model.target2anchor == {"data": "data"}
+
+
+# ---------------------------------------------------------------------------
+# inference input datasets and dataset roles in the metadata
+# ---------------------------------------------------------------------------
+
+
+def test_inference_input_datasets_covers_every_encoder_source() -> None:
+    """Fused sources carry data too, even though only the anchor owns a mapper."""
+    model = _build_dummy_model(
+        source_datasets=("data", "extra"),
+        fusing_strategy="concatenate_inputs_along_variable_dim",
+        model_cls=FusingGraphModel,
+    )
+
+    assert model.input_datasets == ["data"]
+    assert model.inference_input_datasets == ["data", "extra"]
+
+
+def test_fill_metadata_records_the_role_of_each_dataset() -> None:
+    """The runner reads the role to decide what to retrieve and what to write."""
+    model = _build_dummy_model(
+        source_datasets=("data", "extra"),
+        fusing_strategy="concatenate_inputs_along_variable_dim",
+        model_cls=FusingGraphModel,
+    )
+    md_dict = {"metadata_inference": {"data": {}, "extra": {}}}
+
+    model.fill_metadata(md_dict)
+
+    # 'data' has a decoder, 'extra' is an encoder source only.
+    assert md_dict["metadata_inference"]["data"]["role"] == "input_output"
+    assert md_dict["metadata_inference"]["extra"]["role"] == "input"
 
 
 # ---------------------------------------------------------------------------

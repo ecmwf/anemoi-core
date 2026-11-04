@@ -31,6 +31,7 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
 from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
@@ -190,6 +191,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         data_indices: dict[str, IndexCollection],
         metadata: dict,
         supporting_arrays: dict,
+        residual_statistics: dict | None = None,
     ) -> None:
         """Initialize graph neural network forecaster.
 
@@ -211,6 +213,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Provenance information
         supporting_arrays : dict
             Supporting NumPy arrays to store in the checkpoint
+        residual_statistics : dict, optional
+            Precomputed residual normalization statistics, keyed by dataset name.
 
         """
         super().__init__()
@@ -236,6 +240,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.model = AnemoiModelInterface(
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
+            residual_statistics=residual_statistics,
             data_indices=data_indices,
             metadata=metadata,
             n_step_input=self.n_step_input,
@@ -243,6 +248,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
             config=config,
+        )
+        self.task.validate_dataset_roles(
+            input_datasets=self.model.model.inference_input_datasets,
+            target_datasets=self.model.model.target_datasets,
         )
         self.config = config
 
@@ -933,14 +942,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # Spatial preprocessing (e.g. CrossGridProjector for downscaling).
         # Owned by the model; applied before normalization so projectors see raw values.
-        for ds_name, projector in self.model.spatial_pre_processors.items():
+        for ds_name in self.model.spatial_pre_processors:
             if ds_name in batch:
-                batch[ds_name], output_grid_shard_sizes = projector(
-                    batch[ds_name],
-                    model_comm_group=self.model_comm_group,
-                    grid_shard_sizes=self.grid_shard_sizes[ds_name],
+                (batch[ds_name],), self.grid_shard_sizes = BaseGraphModel._apply_spatial_preprocessor(
+                    (batch[ds_name],),
+                    ds_name,
+                    self.model.spatial_pre_processors,
+                    self.model_comm_group,
+                    self.grid_shard_sizes,
                 )
-                self.grid_shard_sizes[ds_name] = output_grid_shard_sizes
+                output_grid_shard_sizes = self.grid_shard_sizes[ds_name]
                 if output_grid_shard_sizes is None:
                     self.grid_shard_slice[ds_name] = None
                 else:
@@ -949,6 +960,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                         partition_id=self.model_comm_group_rank,
                     )
                     self.grid_shard_slice[ds_name] = slice(start, end)
+        self._check_targets_sharded_like_their_anchors()
 
         # Batch normalization
         batch = self._normalize_batch(batch)
@@ -957,6 +969,22 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self._prepare_loss_scalers()
 
         return batch
+
+    def _check_targets_sharded_like_their_anchors(self) -> None:
+        """Require a target decoded onto another dataset's nodes to be split across ranks like that dataset.
+
+        The reader shards a target by its own grid while the projector shards its output
+        grid independently; the decoder relies on both splits being identical.
+        """
+        for target_name, anchor_name in getattr(self.model.model, "target2anchor", {}).items():
+            if target_name == anchor_name:
+                continue
+            if self.grid_shard_sizes[target_name] != self.grid_shard_sizes[anchor_name]:
+                msg = (
+                    f"Target '{target_name}' is sharded as {self.grid_shard_sizes[target_name]} but it is decoded "
+                    f"onto the nodes of '{anchor_name}', sharded as {self.grid_shard_sizes[anchor_name]}."
+                )
+                raise RuntimeError(msg)
 
     def _setup_batch_sharding(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Setup batch sharding before every step.
