@@ -337,8 +337,12 @@ class BaseGraphModel(nn.Module):
         sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
         for dataset_name, residual_config in residual_configs.items():
             assert residual_config is not None, f"Residual config for dataset '{dataset_name}' is None."
+            # _recursive_=False so composite residuals (e.g. PerVariableGroupResidual)
+            # receive their nested sub-residual configs unresolved and can instantiate
+            # them with the shared kwargs forwarded here.
             self.residual[dataset_name] = instantiate(
                 residual_config,
+                _recursive_=False,
                 graph=self._graph_data,
                 data_node_name=dataset_name,
                 statistics=self.statistics[dataset_name],
