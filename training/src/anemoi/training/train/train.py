@@ -71,9 +71,6 @@ class AnemoiTrainer(ABC):
             Config object from Hydra.
 
         """
-        # Allow for lower internal precision of float32 matrix multiplications.
-        # This can increase performance (and TensorCore usage, where available).
-        torch.set_float32_matmul_precision("high")
         # Resolve the config to avoid shenanigans with lazy loading
 
         if config.config_validation:
@@ -88,6 +85,9 @@ class AnemoiTrainer(ABC):
             LOGGER.info("Skipping config validation.")
 
         self.config = convert_to_omegaconf(self.config)
+
+        # "high" lets float32 matrix products use TF32 where the hardware has it, which is faster but less exact.
+        torch.set_float32_matmul_precision(self.config.training.get("float32_matmul_precision", "high"))
 
         # Optionally override the torch default BLAS backend.
         _blas_backend = self.config.training.get("preferred_blas_backend", None)
