@@ -11,21 +11,13 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from torch_geometric.data import HeteroData
 
 from anemoi.training.train.methods.base import BaseTrainingModule
-from anemoi.training.utils import checkpoint as checkpoint_utils
 from anemoi.training.utils.checkpoint import load_and_prepare_model
 
 CKPT_PATH = "training.ckpt"
-
-
-def _graph(*node_types: str) -> HeteroData:
-    graph = HeteroData()
-    for node_type in node_types:
-        graph[node_type].x = torch.zeros(2, 1)
-    return graph
 
 
 @pytest.fixture
@@ -42,80 +34,42 @@ def load_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     return calls
 
 
-def _set_hyper_parameters(monkeypatch: pytest.MonkeyPatch, hyper_parameters: dict) -> None:
-    config = hyper_parameters["config"]
-    OmegaConf.update(
-        config,
-        "training.method._target_",
-        "anemoi.training.train.methods.base.BaseTrainingModule",
-        force_add=True,
+def _set_hyper_parameters(monkeypatch: pytest.MonkeyPatch) -> DictConfig:
+    """Store a minimal training config (graph built from nodes) as the checkpoint hyperparameters."""
+    config = OmegaConf.create(
+        {
+            "training": {"method": {"_target_": "anemoi.training.train.methods.base.BaseTrainingModule"}},
+            "task": {"_target_": "types.SimpleNamespace", "name": "forecaster"},
+            "system": {"input": {"graph": None}},
+            "graph": {"nodes": {"data": {}, "hidden": {}}, "edges": []},
+        },
     )
+    OmegaConf.set_struct(config, True)
+    hyper_parameters = {"config": config, "data_indices": {"data": None}}
     monkeypatch.setattr(torch, "load", lambda *_a, **_k: {"hyper_parameters": hyper_parameters})
+    return config
 
 
-def test_stored_graph_is_used_by_default(monkeypatch: pytest.MonkeyPatch, load_calls: list[dict]) -> None:
-    config = OmegaConf.create({"task": {}, "system": {"input": {"graph": "stored.pt"}}})
-    _set_hyper_parameters(monkeypatch, {"config": config, "data_indices": {"data": None}})
+def test_graph_is_built_from_the_config_by_default(monkeypatch: pytest.MonkeyPatch, load_calls: list[dict]) -> None:
+    _set_hyper_parameters(monkeypatch)
 
     _, metadata = load_and_prepare_model(CKPT_PATH)
 
     assert metadata == {"uuid": "abc"}
-    assert "config" not in load_calls[0]
-    assert load_calls[0]["task"] == "task"
+    assert set(load_calls[0]) == {"weights_only", "task"}  # the stored config is used as is
+    # the task is not stored with the hyperparameters: it is built from config.task
+    assert load_calls[0]["task"] == SimpleNamespace(name="forecaster")
 
 
-def test_graph_argument_overrides_stored_graph(monkeypatch: pytest.MonkeyPatch, load_calls: list[dict]) -> None:
-    graph = _graph("data")
-    config = OmegaConf.create({"task": {}, "system": {"input": {"graph": "stored.pt"}}})
-    _set_hyper_parameters(monkeypatch, {"config": config, "data_indices": {"data": None}})
-    monkeypatch.setattr(checkpoint_utils, "load_graph_from_file", lambda _path: graph)
+def test_graph_argument_loads_the_graph_from_file(monkeypatch: pytest.MonkeyPatch, load_calls: list[dict]) -> None:
+    stored_config = _set_hyper_parameters(monkeypatch)
 
     load_and_prepare_model(CKPT_PATH, graph_path="graph.pt")
 
-    assert load_calls[0]["config"].system.input.graph == "graph.pt"
-    assert config.system.input.graph == "stored.pt"
-
-
-def test_graph_argument_replaces_missing_stored_graph(monkeypatch: pytest.MonkeyPatch, load_calls: list[dict]) -> None:
-    graph = _graph("data")
-    config = OmegaConf.create({"task": {}, "system": {"input": {}}})
-    _set_hyper_parameters(monkeypatch, {"config": config, "data_indices": {"data": None}})
-    monkeypatch.setattr(checkpoint_utils, "load_graph_from_file", lambda _path: graph)
-
-    load_and_prepare_model(CKPT_PATH, graph_path="graph.pt")
-
-    assert load_calls[0]["config"].system.input.graph == "graph.pt"
-
-
-def test_graph_argument_with_fused_datasets(monkeypatch: pytest.MonkeyPatch, load_calls: list[dict]) -> None:
-    graph = _graph("era", "cerra", "hidden")
-    config = OmegaConf.create({"task": {}, "system": {"input": {}}})
-    _set_hyper_parameters(monkeypatch, {"config": config, "data_indices": {"era": None, "cerra": None}})
-    monkeypatch.setattr(checkpoint_utils, "load_graph_from_file", lambda _path: graph)
-
-    load_and_prepare_model(CKPT_PATH, graph_path="graph.pt")
-
-    assert load_calls[0]["config"].system.input.graph == "graph.pt"
-
-
-def test_missing_graph_uses_stored_dynamic_graph_config(
-    monkeypatch: pytest.MonkeyPatch,
-    load_calls: list[dict],
-) -> None:
-    config = OmegaConf.create({"task": {}, "graph": {"nodes": {"hidden": {}}}})
-    _set_hyper_parameters(monkeypatch, {"config": config, "data_indices": {"data": None}})
-
-    load_and_prepare_model(CKPT_PATH)
-
-    assert "config" not in load_calls[0]
-
-
-def test_graph_without_required_dataset_nodes_raises(monkeypatch: pytest.MonkeyPatch, load_calls: list[dict]) -> None:
-    config = OmegaConf.create({"task": {}, "system": {"input": {}}})
-    _set_hyper_parameters(monkeypatch, {"config": config, "data_indices": {"era": None, "cerra": None}})
-    monkeypatch.setattr(checkpoint_utils, "load_graph_from_file", lambda _path: _graph("era", "hidden"))
-
-    with pytest.raises(ValueError, match="missing dataset node types"):
-        load_and_prepare_model(CKPT_PATH, graph_path="graph.pt")
-
-    assert not load_calls
+    config = load_calls[0]["config"]
+    assert load_calls[0]["task"] == SimpleNamespace(name="forecaster")
+    assert config.system.input.graph == "graph.pt"
+    assert config.graph.nodes is None  # existing-graph mode: the model loads system.input.graph
+    # the stored config is not modified
+    assert stored_config.system.input.graph is None
+    assert set(stored_config.graph.nodes) == {"data", "hidden"}

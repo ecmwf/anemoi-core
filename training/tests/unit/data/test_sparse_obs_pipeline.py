@@ -53,53 +53,19 @@ def test_make_anemoi_reader(monkeypatch: pytest.MonkeyPatch) -> None:
     assert sample.statistics is dataset.statistics
 
 
-def test_factory_handles_validated_observation_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    dataset = _make_obs_reader(_make_obs_payload()).data
-    dataset.dates = np.array(["2020-01-01T00", "2020-01-01T12", "2020-01-02T00"], dtype="datetime64[h]")
-    monkeypatch.setattr("anemoi.training.data.readers.base.open_dataset", lambda _config: dataset)
-    config = NativeDatasetSchema(
-        dataset_config=DatasetConfigSchema(
-            dataset="test-observations",
-            frequency="12h",
-            window="(-3h,+0h]",
-        ),
-        start="2020-01-01T00:00:00",
-        end="2020-01-01T12:00:00",
-        max_rows_per_window=3,
-    )
+def test_get_sample_coordinates_are_rounded_once() -> None:
+    """Radians are converted from the float64 degrees, as for gridded data.
 
-    reader = create_reader(config)
+    Rounding the degrees to float32 first changes the last bit of some radians.
+    """
+    payload = _make_obs_payload(n=3, v=1, n_times=1)
+    payload.latitudes = np.array([12.3456789, -45.6789012, 67.8901234])
+    payload.longitudes = np.array([123.456789, 234.567890, 345.678901])
 
-    assert isinstance(reader, TabularDataReader)
-    assert reader.max_rows_per_window == 3
-    np.testing.assert_array_equal(reader.dates, dataset.dates[:2])
+    sample = _make_obs_reader(payload).get_sample(0, slice(0, 1))
 
-
-def test_tabular_reader_concatenates_consecutive_stores(monkeypatch: pytest.MonkeyPatch) -> None:
-    datasets = []
-    for date in ("2020-01-01T00", "2020-01-01T03"):
-        dataset = _make_obs_reader(_make_obs_payload(n=2, v=3, n_times=1)).data
-        dataset.dates = np.array([date], dtype="datetime64[h]")
-        dataset.frequency = datetime.timedelta(hours=3)
-        dataset.window = "(-3h,+0h]"
-        datasets.append(dataset)
-    monkeypatch.setattr("anemoi.datasets.open_dataset", MagicMock(side_effect=datasets))
-
-    reader = TabularDataReader(
-        dataset_config={
-            "dataset": [
-                {"dataset": "observations-1", "end": "2020-01-01T00:00:00"},
-                {"dataset": "observations-2", "start": "2020-01-01T03:00:00"},
-            ],
-            "frequency": "3h",
-            "window": "(-3h,+0h]",
-        },
-    )
-    sample = reader.get_sample(0, slice(0, 2))
-
-    np.testing.assert_array_equal(reader.dates, np.array(["2020-01-01T00", "2020-01-01T03"], dtype="datetime64[h]"))
-    assert sample.data.shape == (1, 4, 3)
-    assert sample.boundaries == (slice(0, 2), slice(2, 4))
+    expected = torch.deg2rad(torch.from_numpy(np.stack([payload.latitudes, payload.longitudes], axis=-1)))
+    assert torch.equal(sample.coordinates, expected.to(torch.float32))
 
 
 def test_batch_collate_and_to() -> None:

@@ -95,7 +95,9 @@ def resolve_subgrid_node(node: object, output_mask: object, dataset_name: str) -
 def resolve_subgrid(config: Mapping, output_mask: Mapping) -> None:
     """Resolve ``subgrid: output_mask`` placeholders for every dataset in ``config``."""
     for dataset_name, dataset_config in config.items():
-        if dataset_config is not None:
+        # Loss configs may name datasets the model does not have (e.g. a default ``data`` entry
+        # merged into a multi-dataset config); no loss is built for those, so skip them.
+        if dataset_config is not None and dataset_name in output_mask:
             resolve_subgrid_node(dataset_config, output_mask[dataset_name], dataset_name)
 
 
@@ -256,11 +258,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # `task` holds runtime objects that cannot be deepcopied by Lightning's
         # `save_hyperparameters` and are not meaningful to persist in the
         # checkpoint hyperparameters anyway.
-        exclude_hyperparameters = list(config.diagnostics.checkpoint.exclude_hyperparameters)
-        if "task" not in exclude_hyperparameters:
-            exclude_hyperparameters.append("task")
         self.save_hyperparameters(
-            ignore=exclude_hyperparameters,
+            ignore=["task", *config.diagnostics.checkpoint.exclude_hyperparameters],
         )
 
         self.statistics_tendencies = statistics_tendencies
@@ -1033,6 +1032,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.target_dataset_names:
+            if dataset_name not in y:
+                continue
             if dataset_name not in y_pred:
                 err_msg = (
                     f"Your model is not predicting dataset '{dataset_name}' (not included in any decoder) but "

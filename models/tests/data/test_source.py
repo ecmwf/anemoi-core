@@ -7,8 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import functools
-from dataclasses import replace
 
 import pytest
 import torch
@@ -22,42 +20,11 @@ from anemoi.models.data.sources.gridded import GriddedTemplate
 from anemoi.models.data.sources.tabular import TabularSource
 from anemoi.models.data.sources.tabular import TabularTemplate
 from tests.batch_builders import build_batch
+from tests.sample_builders import gridded_sample
+from tests.sample_builders import tabular_sample
 
 GRIDDED_LAYOUT = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
 TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2)
-
-# One statistics object per dataset, shared by its samples as a reader does
-# (BaseSample.collate checks the statistics by identity).
-TABULAR_STATISTICS = {"mean": torch.tensor([1.0, 2.0])}
-
-
-@functools.cache
-def gridded_statistics(n_vars: int) -> dict[str, torch.Tensor]:
-    return {"mean": torch.arange(n_vars, dtype=torch.float32)}
-
-
-def gridded_payload(variables: list[str] = ["a", "b", "c"]) -> GriddedSample:
-    n_vars = len(variables)
-    return GriddedSample(
-        data=torch.arange(2 * 1 * 4 * n_vars, dtype=torch.float32).reshape(2, 1, 4, n_vars),
-        variables=variables,
-        statistics=gridded_statistics(n_vars),
-        layout=GRIDDED_LAYOUT,
-        coordinates=torch.zeros(4, 2),
-        grid_size=4,
-    )
-
-
-def tabular_payload(n_points: int = 4) -> TabularSample:
-    return TabularSample(
-        data=torch.ones(1, n_points, 2),
-        variables=["t2m", "sp"],
-        statistics=TABULAR_STATISTICS,
-        layout=TABULAR_LAYOUT,
-        coordinates=torch.zeros(n_points, 2),
-        timedeltas=torch.zeros(n_points),
-        boundaries=(slice(0, n_points // 2), slice(n_points // 2, n_points)),
-    )
 
 
 def gridded_batch(variables: list[str] = ["a", "b", "c"]) -> Batch:
@@ -102,7 +69,7 @@ class TestSourceMetadata:
 
     @pytest.mark.parametrize(
         ("payload", "expected_type"),
-        [(gridded_payload, GriddedTemplate), (tabular_payload, TabularTemplate)],
+        [(gridded_sample, GriddedTemplate), (tabular_sample, TabularTemplate)],
     )
     def test_template_keeps_everything_but_the_data(self, payload, expected_type) -> None:
         view = Batch.collate([{"src": payload()}])["src"]
@@ -120,7 +87,7 @@ class TestSourceMetadata:
         )
         assert template.coordinates_are_static == view.coordinates_are_static
 
-    @pytest.mark.parametrize("payload", [gridded_payload, tabular_payload])
+    @pytest.mark.parametrize("payload", [gridded_sample, tabular_sample])
     def test_template_unflatten_inverts_flatten(self, payload) -> None:
         view = Batch.collate([{"src": payload()}, {"src": payload()}])["src"]
         rebuilt = view.template().unflatten(view.flatten().data)
@@ -130,7 +97,7 @@ class TestSourceMetadata:
         data, expected = (rebuilt.data, view.data) if isinstance(view.data, list) else ([rebuilt.data], [view.data])
         assert all(torch.equal(a, b) for a, b in zip(data, expected, strict=True))
 
-    @pytest.mark.parametrize("payload", [gridded_payload, tabular_payload])
+    @pytest.mark.parametrize("payload", [gridded_sample, tabular_sample])
     def test_template_flatten_matches_the_source_nodes(self, payload) -> None:
         view = Batch.collate([{"src": payload()}])["src"]
         flat, nodes = view.flatten(), view.template().flatten()
@@ -140,7 +107,7 @@ class TestSourceMetadata:
         assert nodes.batch_sizes == flat.batch_sizes
         assert nodes.shard_sizes == flat.shard_sizes
 
-    @pytest.mark.parametrize("payload", [gridded_payload, tabular_payload])
+    @pytest.mark.parametrize("payload", [gridded_sample, tabular_sample])
     def test_template_unflatten_rejects_a_wrong_shape(self, payload) -> None:
         template = Batch.collate([{"src": payload()}])["src"].template()
         with pytest.raises(ValueError, match="expects flat data of shape"):
@@ -157,11 +124,11 @@ class TestSourceMetadata:
         assert out.data.shape[out.layout.variables] == 1
 
     def test_template_with_ensemble_size_tiles_the_members(self) -> None:
-        template = Batch.collate([{"obs": tabular_payload()}])["obs"].template().with_ensemble_size(3)
+        template = Batch.collate([{"obs": tabular_sample()}])["obs"].template().with_ensemble_size(3)
         assert template.ensemble_size == 3
         assert template.flatten().batch_sizes == (4, 4, 4)
 
-    @pytest.mark.parametrize("payload", [gridded_payload, tabular_payload])
+    @pytest.mark.parametrize("payload", [gridded_sample, tabular_sample])
     def test_sources_require_data(self, payload) -> None:
         view = Batch.collate([{"src": payload()}])["src"]
         with pytest.raises(ValueError, match="requires data"):
@@ -198,6 +165,18 @@ class TestSourceTransformations:
         assert selected.variables == ["c"]
         assert selected.statistics["mean"].tolist() == [2.0]
 
+    @pytest.mark.parametrize(
+        ("indices", "shares_memory"),
+        [([0, 1, 2], True), (torch.tensor([1, 2]), True), ([0, 2], False), ([2, 1], False)],
+    )
+    def test_select_variables_copies_only_scattered_indices(self, indices, shares_memory) -> None:
+        # All variables in order and contiguous blocks avoid a copy, as the loss variable mapper relies on.
+        view = gridded_batch()["grid"]
+        selected = view.select(variables=indices)
+        index = torch.as_tensor(indices if isinstance(indices, list) else indices.tolist())
+        torch.testing.assert_close(selected.data, view.data.index_select(view.layout.variables, index))
+        assert (selected.data.untyped_storage().data_ptr() == view.data.untyped_storage().data_ptr()) is shares_memory
+
     @pytest.mark.parametrize("indices", [1, slice(1, 2), [1], torch.tensor([1])])
     def test_select_time_keeps_the_time_axis(self, indices) -> None:
         view = gridded_batch()["grid"]
@@ -207,16 +186,16 @@ class TestSourceTransformations:
         torch.testing.assert_close(selected.data, view.data.narrow(time_axis, 1, 1))
 
     def test_select_time_on_a_tabular_source(self) -> None:
-        view = Batch.collate([{"obs": tabular_payload()}])["obs"]
+        view = Batch.collate([{"obs": tabular_sample()}])["obs"]
         selected = view.select(time=slice(1, None))
         assert selected.time_size == 1
         assert selected.boundaries == [(slice(0, 2),)]
 
     def test_select_variables_on_a_tabular_source(self) -> None:
-        view = Batch.collate([{"obs": tabular_payload()}])["obs"]
+        view = Batch.collate([{"obs": tabular_sample()}])["obs"]
         selected = view.select(variables=[1])
-        assert selected.variables == ["sp"]
-        assert selected.statistics["mean"].tolist() == [2.0]
+        assert selected.variables == ["b"]
+        assert selected.statistics["mean"].tolist() == [1.0]
         assert all(sample.shape[selected.layout.variables] == 1 for sample in selected.data)
 
     def test_map_data_applies_a_tensor_function_and_keeps_metadata(self) -> None:
@@ -234,7 +213,7 @@ class TestSourceTransformations:
         assert view.map_data(lambda t: t).data is view.data
 
     def test_map_data_applies_per_sample_on_a_tabular_source(self) -> None:
-        view = Batch.collate([{"obs": tabular_payload(4)}, {"obs": tabular_payload(6)}])["obs"]
+        view = Batch.collate([{"obs": tabular_sample(n_points=4)}, {"obs": tabular_sample(n_points=6)}])["obs"]
         seen = []
         mapped = view.map_data(lambda t: seen.append(tuple(t.shape)) or t * 2)
         assert seen == [(1, 4, 2), (1, 6, 2)]
@@ -245,7 +224,7 @@ class TestSourceTransformations:
 
 class TestCollate:
     def test_unsharded_tabular_samples_collate_to_replicated(self) -> None:
-        batch = Batch.collate([{"obs": tabular_payload()}, {"obs": tabular_payload()}])
+        batch = Batch.collate([{"obs": tabular_sample()}, {"obs": tabular_sample()}])
         assert batch["obs"].shard_sizes is None
         # replicated sources are returned unchanged by allgather and flatten without shard sizes
         assert batch["obs"].allgather(None) is batch["obs"]
@@ -253,25 +232,25 @@ class TestCollate:
 
     def test_sharded_tabular_samples_keep_per_sample_shard_sizes(self) -> None:
         sizes = [[1, 1], [1, 1]]
-        sample = replace(tabular_payload(), shard_sizes=sizes)
+        sample = tabular_sample(shard_sizes=sizes)
         batch = Batch.collate([{"obs": sample}])
         assert batch["obs"].shard_sizes == [sizes]
 
     def test_mixed_sharded_and_unsharded_samples_are_rejected(self) -> None:
-        sharded = replace(tabular_payload(), shard_sizes=[[1, 1], [1, 1]])
+        sharded = tabular_sample(shard_sizes=[[1, 1], [1, 1]])
         with pytest.raises(ValueError, match="mixes sharded and unsharded"):
-            Batch.collate([{"obs": sharded}, {"obs": tabular_payload()}])
+            Batch.collate([{"obs": sharded}, {"obs": tabular_sample()}])
 
     @pytest.mark.parametrize(
         ("payload", "expected_type"),
-        [(gridded_payload, GriddedSource), (tabular_payload, TabularSource)],
+        [(gridded_sample, GriddedSource), (tabular_sample, TabularSource)],
     )
     def test_sample_class_decides_the_source_type(self, payload, expected_type) -> None:
         assert isinstance(Batch.collate([{"src": payload()}])["src"], expected_type)
 
     def test_mixed_sample_kinds_are_rejected(self) -> None:
         with pytest.raises(TypeError, match="single BaseSample subclass"):
-            Batch.collate([{"src": gridded_payload()}, {"src": tabular_payload()}])
+            Batch.collate([{"src": gridded_sample()}, {"src": tabular_sample()}])
 
     def test_plain_dicts_are_rejected(self) -> None:
         with pytest.raises(TypeError, match="single BaseSample subclass"):
@@ -317,12 +296,12 @@ class TestAllgather:
             view.allgather(None)
 
     def test_replicated_observations_are_returned_unchanged(self) -> None:
-        view = Batch.collate([{"obs": tabular_payload()}])["obs"]
+        view = Batch.collate([{"obs": tabular_sample()}])["obs"]
         assert view.allgather(None) is view
 
     def test_single_rank_observations_drop_their_shard_sizes(self) -> None:
         # One entry per time window, each sized for a single rank.
-        sample = replace(tabular_payload(), shard_sizes=[[2], [2]])
+        sample = tabular_sample(shard_sizes=[[2], [2]])
         view = Batch.collate([{"obs": sample}])["obs"]
         gathered = view.allgather(None)
         assert gathered.shard_sizes is None
@@ -330,13 +309,13 @@ class TestAllgather:
 
     def test_single_rank_observations_must_hold_their_shard_sizes(self) -> None:
         # The second window holds 2 observations, its sizes say 3.
-        sample = replace(tabular_payload(), shard_sizes=[[2], [3]])
+        sample = tabular_sample(shard_sizes=[[2], [3]])
         view = Batch.collate([{"obs": sample}])["obs"]
         with pytest.raises(ValueError, match=r"window 1\) holds 2 observations"):
             view.allgather(None)
 
     def test_observation_shard_sizes_for_another_group_are_rejected(self) -> None:
-        sample = replace(tabular_payload(), shard_sizes=[[1, 1], [1, 1]])
+        sample = tabular_sample(shard_sizes=[[1, 1], [1, 1]])
         view = Batch.collate([{"obs": sample}])["obs"]
         with pytest.raises(ValueError, match="shard_sizes has 2 entries"):
             view.allgather(None)

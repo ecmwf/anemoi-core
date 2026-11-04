@@ -1,9 +1,11 @@
-# Anemobs test config for the EDM diffusion transport model
-# (AnemoiTransportModelEncProcDec, TransportTraining). Derived from test_anemobs_ens_afcrps.yaml: same data,
-# single hidden mesh and GraphTransformer model. Two datasets, both encoded and decoded: ERA5 (`era`) and
-# conventional surface observations (`combined_surface`, without `reportype`). State prediction with the
-# `edm_diffusion` objective; inference samples with Heun, 50 steps.
-#   anemoi-training train --config-name=test_anemobs_edm_diffusion
+# Anemobs test config for a CRPS-optimised ensemble (AnemoiEnsModelEncProcDec, EnsembleTraining).
+# Derived from test_anemobs_hierarchical.yaml (data, dataloader, diagnostics, task, training) and
+# test_anemobs_single.yaml (single hidden mesh, GraphTransformer model). Two datasets, both encoded and
+# decoded: ERA5 (`era`) and conventional surface observations (`combined_surface`, without `reportype`).
+# Noise enters through NoiseConditioning and the processor's ConditionalLayerNorm. Training loss: almost-fair
+# CRPS (alpha = 0.95); validation metric: fair CRPS. ensemble_size_per_device = 2 members per GPU, and an
+# ensemble spans all GPUs of the node (system.hardware.num_gpus_per_ensemble).
+#   anemoi-training train --config-name=test_anemobs_ens_afcrps
 data:
   format: zarr
   frequency: 12h
@@ -86,6 +88,10 @@ data:
 dataloader:
   prefetch_factor: 2
   pin_memory: true
+  persistent_workers: false
+  fake_dataloading: false
+  loading_policy:
+    _target_: anemoi.training.data.loading.SynchronizedLoadingPolicy
   read_group_size: ${system.hardware.num_gpus_per_model}
   num_workers:
     training: 4
@@ -269,7 +275,7 @@ diagnostics:
       project_name: AIFS
       system: false
       terminal: true
-      run_name: 'test-anemobs-edm-diffusion'
+      run_name: 'test-anemobs-ens-afcrps'
       prefix: ''
       log_hyperparams: true
       on_resume_create_child: true
@@ -282,7 +288,14 @@ diagnostics:
     interval: 100
     wandb:
       enabled: false
+      _target_: pytorch_lightning.loggers.wandb.WandbLogger
+      offline: false
+      log_model: false
+      project: Anemoi
       entity: null
+      gradients: false
+      parameters: false
+      interval: ${diagnostics.log.interval}
   debug:
     anomaly_detection: false
   enable_checkpointing: true
@@ -296,6 +309,7 @@ diagnostics:
     every_n_train_steps:
       save_frequency: null
       num_models_saved: 0
+    exclude_hyperparameters: []
   enable_progress_bar: true
   progress_bar:
     _target_: pytorch_lightning.callbacks.TQDMProgressBar
@@ -304,7 +318,7 @@ diagnostics:
   print_memory_summary: false
 system:
   output:
-    root: ${oc.env:SCRATCH}/anemobs-test/edm_diffusion/
+    root: ${oc.env:SCRATCH}/anemobs-test/ens_afcrps/
     logs:
       root: logs
       wandb: wandb
@@ -328,6 +342,9 @@ system:
     num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE,1}}
     num_nodes: ${oc.decode:${oc.env:SLURM_NNODES,1}}
     num_gpus_per_model: 1
+    # GPUs each ensemble spans (all GPUs of the node). Members = training.ensemble_size_per_device *
+    # num_gpus_per_ensemble / num_gpus_per_model.
+    num_gpus_per_ensemble: ${system.hardware.num_gpus_per_node}
 graph:
   overwrite: true
   nodes:
@@ -409,43 +426,29 @@ model:
   cpu_offload: false
   keep_batch_sharded: false
   model:
-    _target_: anemoi.models.models.AnemoiTransportModelEncProcDec
+    _target_: anemoi.models.models.AnemoiEnsModelEncProcDec
     hidden_nodes_name: hidden
     latent_skip: true
-    transport:
-      objective: edm_diffusion
-      sigma_data: 1.0
-      noise_channels: 32
-      noise_cond_dim: 16
-      sigma_max: 100.0
-      sigma_min: 0.02
-      rho: 7.0
-      noise_embedder:
-        _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
-        num_channels: ${model.model.transport.noise_channels}
-        max_period: 1000
-      training_condition:
-        distribution: karras
-        sigma_max: ${model.model.transport.sigma_max}
-        sigma_min: ${model.model.transport.sigma_min}
-        rho: ${model.model.transport.rho}
-      inference_defaults:
-        sampling_schedule:
-          schedule_type: karras
-          sigma_max: 100.0
-          sigma_min: 0.02
-          rho: 7.0
-          num_steps: 50
-        sampler:
-          sampler: heun
-  # The noise level (EDM) or bridge time (SI) conditions every layer norm: encoders, processor, decoders.
+  # Ensemble noise. NoiseConditioning leaves the latent untouched and hands the noise to the processor as
+  # `cond`; the processor's ConditionalLayerNorm (processor.layer_kernels) consumes it. Without that
+  # override the noise is ignored and every member is identical.
+  noise_injector:
+    _target_: anemoi.models.layers.ensemble.NoiseConditioning
+    noise_std: 1
+    noise_channels_dim: 4
+    noise_mlp_hidden_dim: 32
+    noise_matrix: null
+    noise_edges_name: null
+    edge_weight_attribute: null
+    row_normalize_noise_matrix: false
+    autocast: false
+    layer_kernels:
+      Activation:
+        _target_: torch.nn.GELU
+  condition_on_residual: false
   layer_kernels:
     LayerNorm:
-      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
-      normalized_shape: ${model.processor.num_channels}
-      condition_shape: ${model.model.transport.noise_cond_dim}
-      zero_init: true
-      autocast: false
+      _target_: torch.nn.LayerNorm
     Linear:
       _target_: torch.nn.Linear
     Activation:
@@ -468,7 +471,23 @@ model:
     qk_norm: false
     cpu_offload: ${model.cpu_offload}
     gradient_checkpointing: true
-    layer_kernels: ${model.layer_kernels}
+    layer_kernels:
+      LayerNorm:
+        _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
+        normalized_shape: ${model.processor.num_channels}
+        condition_shape: ${model.noise_injector.noise_channels_dim}
+        zero_init: true
+        autocast: false
+      Linear:
+        _target_: torch.nn.Linear
+      Activation:
+        _target_: torch.nn.GELU
+      QueryNorm:
+        _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+        bias: false
+      KeyNorm:
+        _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+        bias: false
     graph_attention_backend: triton
     edge_pre_mlp: false
   obs_encoder:
@@ -551,10 +570,11 @@ model:
         shard_strategy: edges
         graph_attention_backend: triton
         edge_pre_mlp: false
-  # Transport models take no bounding.
   bounding:
     datasets:
-      era: []
+      era:
+      - _target_: anemoi.models.layers.bounding.ReluBounding
+        variables: [tp]
       combined_surface: []
   residual:
     datasets:
@@ -631,6 +651,15 @@ training:
     lr: 6.25e-05
     pl_lr_scheduler:
       interval: step
+  # fixed, so reruns of this test draw the same batches (replaces the removed ANEMOI_BASE_SEED)
+  seed: 12345678
+  update_ds_stats_on_ckpt_load:
+    states: false
+    tendencies: true
+  check_variables_compatibility:
+    ignore_units: false
+    ignore_processing_period: false
+  allow_variable_subset: false
   deterministic: false
   precision: bf16-mixed
   accum_grad_batches: 1
@@ -639,12 +668,12 @@ training:
     val: 1.0
     algorithm: norm
   method:
-    _target_: anemoi.training.train.methods.TransportTraining
-  transport:
-    prediction_mode: state
-    objective: edm_diffusion
+    _target_: anemoi.training.train.methods.EnsembleTraining
+  # Members generated per device; the input is tiled this many times along the ensemble axis.
+  ensemble_size_per_device: 2
   strategy:
-    _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+    _target_: anemoi.training.distributed.strategy.DDPEnsGroupStrategy
+    num_gpus_per_ensemble: ${system.hardware.num_gpus_per_ensemble}
     num_gpus_per_model: ${system.hardware.num_gpus_per_model}
     read_group_size: ${dataloader.read_group_size}
     use_local_synchronization: true
@@ -654,29 +683,38 @@ training:
   loss_gradient_scaling: false
   max_epochs: 100
   max_steps: 75000
-  # EDM-weighted MSE (noise-level loss weights).
+  # Almost-fair CRPS (AFCRPS): `alpha` interpolates between standard (0) and fair (1) CRPS.
   training_loss:
     datasets:
       era:
-        _target_: anemoi.training.losses.WeightedMSELoss
+        _target_: anemoi.training.losses.CRPS
         scalers: ["general_variable", "pressure_level", "node_weights"]
         ignore_nans: true
+        no_autocast: true
+        alpha: 0.95
       combined_surface:
-        _target_: anemoi.training.losses.WeightedMSELoss
+        _target_: anemoi.training.losses.CRPS
         scalers: ["general_variable"]
         ignore_nans: true
+        no_autocast: true
+        alpha: 0.95
+  # Fair CRPS (alpha = 1): a score, so no variable weights.
   validation_metrics:
     datasets:
       era:
-        mse:
-          _target_: anemoi.training.losses.MSELoss
+        fkcrps:
+          _target_: anemoi.training.losses.CRPS
           scalers: ["node_weights"]
           ignore_nans: true
+          no_autocast: true
+          alpha: 1.0
       combined_surface:
-        mse:
-          _target_: anemoi.training.losses.MSELoss
+        fkcrps:
+          _target_: anemoi.training.losses.CRPS
           scalers: []
           ignore_nans: true
+          no_autocast: true
+          alpha: 1.0
   variable_groups:
     datasets:
       era:

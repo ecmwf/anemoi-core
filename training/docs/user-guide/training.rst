@@ -599,24 +599,25 @@ interrupted; `Resuming a run`_ lists the conditions.
 
 A training checkpoint stores the arguments used to build the training
 module (the Lightning *hyperparameters*), so that it can be restored
-without re-creating them: the config, the data indices, the metadata,
-the dataset types and statistics, and the supporting arrays. The graph is
-rebuilt or loaded from the stored training config and is not a training-module
-hyperparameter.
+without re-creating them: the config, the data indices, the data types
+of the datasets, the metadata, the dataset statistics and the supporting
+arrays. The graph is not among them: the model builds it from the
+training config when it is created, either from the nodes and edges in
+``config.graph`` or, if the graph config defines no nodes, by loading the
+pre-built graph in ``config.system.input.graph``.
 
-``config.diagnostics.checkpoint.exclude_hyperparameters`` defaults to an
-empty list. All current hyperparameters are required to resume training or
-convert the training checkpoint, so none can currently be excluded.
+``config.diagnostics.checkpoint.exclude_hyperparameters`` lists
+hyperparameters to leave out of the training checkpoints. The default is
+an empty list, which stores everything, and at present no hyperparameter
+can be excluded: all of them are needed to resume training or to convert
+the checkpoint.
 
-.. code:: yaml
-
-   diagnostics:
-     checkpoint:
-       exclude_hyperparameters: []
-
-When converting a training checkpoint into an inference checkpoint,
-``anemoi-training checkpoint inference`` uses the graph path from the stored
-config. The path can be replaced with the ``--graph`` argument:
+Converting a training checkpoint into an inference checkpoint with
+``anemoi-training checkpoint inference`` rebuilds the model from the
+stored hyperparameters, and so builds the graph from the stored config.
+If the datasets the graph is built from are not available, a pre-built
+graph can be supplied with the ``--graph`` argument instead. The model
+then loads that graph (only for gridded datasets):
 
 .. code:: bash
 

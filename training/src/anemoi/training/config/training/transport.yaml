@@ -16,8 +16,6 @@ update_ds_stats_on_ckpt_load:
   states: False
   tendencies: True
 
-allow_variable_subset: False
-
 deterministic: False
 precision: bf16-mixed
 accum_grad_batches: 1

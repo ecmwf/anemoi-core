@@ -150,5 +150,9 @@ def create_batched_struct(
 
 
 def _as_radians(degrees: Any, device: torch.device | None) -> torch.Tensor:
-    """Return ``degrees`` as a flat float32 tensor in radians."""
-    return torch.deg2rad(torch.as_tensor(degrees, dtype=torch.float32, device=device).reshape(-1))
+    """Return ``degrees`` as a flat float32 tensor in radians.
+
+    Converted in float64 and rounded once to float32, as the graph builders do.
+    """
+    radians = torch.deg2rad(torch.as_tensor(degrees, dtype=torch.float64, device=device).reshape(-1))
+    return radians.to(torch.float32)

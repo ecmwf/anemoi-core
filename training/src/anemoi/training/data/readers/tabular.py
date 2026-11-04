@@ -230,8 +230,8 @@ class TabularDataReader(BaseAnemoiReader):
         # the leading time axis is intentionally absent — per-time
         # structure is recoverable through ``boundaries``.
         values = np.asarray(x.data, dtype=np.float32)
-        latitudes_array = np.asarray(x.latitudes, dtype=np.float32)
-        longitudes_array = np.asarray(x.longitudes, dtype=np.float32)
+        latitudes_array = np.asarray(x.latitudes, dtype=np.float64)
+        longitudes_array = np.asarray(x.longitudes, dtype=np.float64)
         timedeltas_array = np.asarray(x.timedeltas, dtype=np.float32)
         boundaries = list(x.boundaries)
 

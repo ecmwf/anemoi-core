@@ -5,10 +5,17 @@ Add a new entry at the top of the relevant section whenever a test or its refere
 
 ## Accuracy test
 
-Changes to the reference run (`reference_id` in `training/tests/integration/test_accuracy.py`)
-or to the accuracy test configuration (`accuracy_testing/`).
+Changes to the reference run (`reference_id` in `training/tests/integration/accuracy/test_accuracy.py`)
+or to the accuracy test configuration (`accuracy/config/`).
 A candidate reference can be checked first by dispatching the HPC integration workflow
 with `accuracy_reference_id` set to its run ID, before committing it.
+
+### 2026-10-26 - richer batch ([#1435](https://github.com/ecmwf/anemoi-core/pull/1435))
+
+- Reference run: `92c0ba2d85114d00bff1dd0f7d37bb11`
+- Reason: sin/cos computed on the GPU in every forward pass (e.g. latlobs\_to\_sincos, encoder\_processor\_decoder.py:380).
+  Previously they were computed once on CPU during init. CPU and CUDA versions differ in the last bit for about 35% of values,
+  even from identical inputs.
 
 ### 2026-10-16 — exact resume and per-batch seeding ([#1433](https://github.com/ecmwf/anemoi-core/pull/1433))
 
@@ -46,6 +53,14 @@ with `accuracy_reference_id` set to its run ID, before committing it.
 ## Benchmark tests
 
 Changes to the benchmark tests (`test_benchmark.py`) and their configurations (`benchmark/`). Also documents performance changes from underlying model optimisations.
+
+### 2026-10-26 - richer batch ([#1435](https://github.com/ecmwf/anemoi-core/pull/1435))
+
+- Commit: 985d7c8d1e0a1ba3238f267dd567cfd6af269d5e
+- Benchmark changed: Yes
+- Performance change: Memory usage increased for ensemble models.
+- Reason: Switching from `ignore_nans: False` to `ignore_nans: True` requires the nans to be masked. This masking creates full-size copies of the preds and targets in two places.
+  Improving this is future work and tracked under [this issue](https://github.com/ecmwf/anemoi-core/issues/1502).
 
 ### 2026-10-14 — Improved loss and data reader performance ([#1469](https://github.com/ecmwf/anemoi-core/pull/1469))
 

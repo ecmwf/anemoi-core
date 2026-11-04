@@ -1,9 +1,9 @@
-# Anemobs test config for the stochastic-interpolant (SI) transport model
+# Anemobs test config for the EDM diffusion transport model
 # (AnemoiTransportModelEncProcDec, TransportTraining). Derived from test_anemobs_ens_afcrps.yaml: same data,
 # single hidden mesh and GraphTransformer model. Two datasets, both encoded and decoded: ERA5 (`era`) and
 # conventional surface observations (`combined_surface`, without `reportype`). State prediction with the
-# `stochastic_interpolant` objective; inference samples with Heun, 50 steps.
-#   anemoi-training train --config-name=test_anemobs_transport_stochastic_interpolant
+# `edm_diffusion` objective; inference samples with Heun, 50 steps.
+#   anemoi-training train --config-name=test_anemobs_edm_diffusion
 data:
   format: zarr
   frequency: 12h
@@ -86,6 +86,10 @@ data:
 dataloader:
   prefetch_factor: 2
   pin_memory: true
+  persistent_workers: false
+  fake_dataloading: false
+  loading_policy:
+    _target_: anemoi.training.data.loading.SynchronizedLoadingPolicy
   read_group_size: ${system.hardware.num_gpus_per_model}
   num_workers:
     training: 4
@@ -269,7 +273,7 @@ diagnostics:
       project_name: AIFS
       system: false
       terminal: true
-      run_name: 'test-anemobs-transport-si'
+      run_name: 'test-anemobs-edm-diffusion'
       prefix: ''
       log_hyperparams: true
       on_resume_create_child: true
@@ -282,7 +286,14 @@ diagnostics:
     interval: 100
     wandb:
       enabled: false
+      _target_: pytorch_lightning.loggers.wandb.WandbLogger
+      offline: false
+      log_model: false
+      project: Anemoi
       entity: null
+      gradients: false
+      parameters: false
+      interval: ${diagnostics.log.interval}
   debug:
     anomaly_detection: false
   enable_checkpointing: true
@@ -296,6 +307,7 @@ diagnostics:
     every_n_train_steps:
       save_frequency: null
       num_models_saved: 0
+    exclude_hyperparameters: []
   enable_progress_bar: true
   progress_bar:
     _target_: pytorch_lightning.callbacks.TQDMProgressBar
@@ -304,7 +316,7 @@ diagnostics:
   print_memory_summary: false
 system:
   output:
-    root: ${oc.env:SCRATCH}/anemobs-test/transport_si/
+    root: ${oc.env:SCRATCH}/anemobs-test/edm_diffusion/
     logs:
       root: logs
       wandb: wandb
@@ -413,7 +425,7 @@ model:
     hidden_nodes_name: hidden
     latent_skip: true
     transport:
-      objective: stochastic_interpolant
+      objective: edm_diffusion
       sigma_data: 1.0
       noise_channels: 32
       noise_cond_dim: 16
@@ -425,14 +437,16 @@ model:
         num_channels: ${model.model.transport.noise_channels}
         max_period: 1000
       training_condition:
-        distribution: uniform_time
-      # The source kind applies to every dataset; reference_state (the packaged SI default) is not
-      # implemented for observation datasets, so the bridge starts from Gaussian noise.
-      source:
-        kind: gaussian
+        distribution: karras
+        sigma_max: ${model.model.transport.sigma_max}
+        sigma_min: ${model.model.transport.sigma_min}
+        rho: ${model.model.transport.rho}
       inference_defaults:
         sampling_schedule:
-          schedule_type: unit_time
+          schedule_type: karras
+          sigma_max: 100.0
+          sigma_min: 0.02
+          rho: 7.0
           num_steps: 50
         sampler:
           sampler: heun
@@ -629,6 +643,15 @@ training:
     lr: 6.25e-05
     pl_lr_scheduler:
       interval: step
+  # fixed, so reruns of this test draw the same batches (replaces the removed ANEMOI_BASE_SEED)
+  seed: 12345678
+  update_ds_stats_on_ckpt_load:
+    states: false
+    tendencies: true
+  check_variables_compatibility:
+    ignore_units: false
+    ignore_processing_period: false
+  allow_variable_subset: false
   deterministic: false
   precision: bf16-mixed
   accum_grad_batches: 1
@@ -640,7 +663,7 @@ training:
     _target_: anemoi.training.train.methods.TransportTraining
   transport:
     prediction_mode: state
-    objective: stochastic_interpolant
+    objective: edm_diffusion
   strategy:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
     num_gpus_per_model: ${system.hardware.num_gpus_per_model}
@@ -652,14 +675,15 @@ training:
   loss_gradient_scaling: false
   max_epochs: 100
   max_steps: 75000
+  # EDM-weighted MSE (noise-level loss weights).
   training_loss:
     datasets:
       era:
-        _target_: anemoi.training.losses.MSELoss
+        _target_: anemoi.training.losses.WeightedMSELoss
         scalers: ["general_variable", "pressure_level", "node_weights"]
         ignore_nans: true
       combined_surface:
-        _target_: anemoi.training.losses.MSELoss
+        _target_: anemoi.training.losses.WeightedMSELoss
         scalers: ["general_variable"]
         ignore_nans: true
   validation_metrics:

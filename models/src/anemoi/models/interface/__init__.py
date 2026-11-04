@@ -198,13 +198,31 @@ class AnemoiModelInterface(torch.nn.Module):
             }
         )
 
-    def _get_template(self, x: dict[str, dict], ensemble_size: int = 1, batch_size: int = 1) -> Batch:
-        """Build a template batch with the given ensemble size, batch size, and number of target timesteps."""
+    def _get_template(
+        self,
+        x: dict[str, dict],
+        ensemble_size: int = 1,
+        batch_size: int = 1,
+        device: Optional[torch.device] = None,
+    ) -> Batch:
+        """Build a template batch with the given ensemble size, batch size, and number of target timesteps.
+
+        A template has no data to take a device from, so its geometry (coordinates and, for tabular
+        templates, timedeltas) is placed on ``device``, the device of the input batch.
+        """
+        geometry_keys = ("latitudes", "longitudes", "timedeltas")
         return {
             name: create_batched_struct(
                 name=name,
                 statistics=self._statistics_for(name, payload["variables"]),
-                **payload,
+                **{
+                    key: (
+                        torch.as_tensor(value, device=device)
+                        if device is not None and key in geometry_keys and value is not None
+                        else value
+                    )
+                    for key, value in payload.items()
+                },
                 ensemble_size=ensemble_size,
                 batch_size=batch_size,
                 time_size=self.n_step_output[name],
@@ -297,7 +315,9 @@ class AnemoiModelInterface(torch.nn.Module):
         x = self._get_batch(x)
         target_forcing = self._get_batch(target_forcing)
 
-        target = self._get_template(target_template, ensemble_size=x.ensemble_size, batch_size=x.batch_size)
+        target = self._get_template(
+            target_template, ensemble_size=x.ensemble_size, batch_size=x.batch_size, device=x.device
+        )
 
         # Prepare kwargs for model's predict_step
         predict_kwargs = {

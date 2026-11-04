@@ -34,7 +34,8 @@ class Checkpoint(Command):
         inference.add_argument(
             "--graph",
             metavar="graph.pt",
-            help="Graph file to use instead of system.input.graph in the stored training config.",
+            help="Graph file to load the model's graph from, instead of building it from the training config "
+            "(e.g. when the datasets the config builds the graph from are not available). Gridded datasets only.",
         )
 
     @staticmethod

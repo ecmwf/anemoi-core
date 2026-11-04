@@ -477,14 +477,17 @@ def test_batch_repr_summarises_per_dataset() -> None:
 
 
 def test_batch_collate_rejects_invalid_layout_position() -> None:
-    """Layouts that point at a non-existent axis must be rejected by collate."""
+    """Layouts that point at a non-existent axis are rejected, at the latest by collate."""
     from anemoi.models.data import TensorLayout
+
+    with pytest.raises(ValueError, match="out of range for a layout of 3 axes"):
+        TensorLayout(time=0, grid=1, variables=5)
 
     samples = [
         {
             "a": GriddedSample(
                 data=torch.zeros(1, 2, 3),
-                layout=TensorLayout(time=0, grid=1, variables=5),
+                layout=TensorLayout(time=0, ensemble=1, grid=2, variables=3),
                 variables=["x", "y", "z"],
                 coordinates=torch.zeros(2, 2),
             ),

@@ -56,9 +56,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+            Pytorch Lightning trainer.
+        pl_module : pl.LightningModule
+            Training module.
         """
         data_name_to_index = trainer.datamodule.ds_train.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
@@ -67,18 +67,24 @@ class CheckVariableOrder(pl.callbacks.Callback):
 
     @staticmethod
     def _check_variable_units(trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        """Check unit compatibility between checkpoint and current dataset.
+        """Check variable compatibility required by the configured training run.
 
         Raises
         ------
         ValueError
-            If variables have incompatible units between checkpoint and dataset.
+            If variables have incompatible metadata.
         """
         ckpt_variables_metadata = getattr(pl_module, "_ckpt_variables_metadata", None)
         compat_cfg = trainer.datamodule.config.training.get("check_variables_compatibility", {})
         compat_options = (
             OmegaConf.to_container(compat_cfg, resolve=True) if OmegaConf.is_config(compat_cfg) else (compat_cfg or {})
         )
+
+        trainer.datamodule.loading_policy.check_dataset_compatibility(
+            trainer.datamodule.ds_train,
+            **compat_options,
+        )
+
         allow_subset = bool(trainer.datamodule.config.training.get("allow_variable_subset", False))
         check_variables_metadata_compatibility(
             ckpt_variables_metadata,
@@ -93,9 +99,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+            Pytorch Lightning trainer.
+        pl_module : pl.LightningModule
+            Training module.
         """
         data_name_to_index = trainer.datamodule.ds_valid.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
@@ -107,9 +113,9 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+            Pytorch Lightning trainer.
+        pl_module : pl.LightningModule
+            Training module.
         """
         data_name_to_index = trainer.datamodule.ds_test.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)

@@ -30,7 +30,42 @@ LOGGER = logging.getLogger(__name__)
 
 
 class BaseAnemoiReader(ABC):
-    """Generic anemoi data reader."""
+    """Base class for readers of one ``anemoi.datasets`` store.
+
+    A reader opens one dataset of the dataloader configuration with
+    :func:`anemoi.datasets.open_dataset` and serves it one sample at a time, as the
+    :class:`~anemoi.models.data.sample.BaseSample` that :meth:`Batch.collate
+    <anemoi.models.data.Batch.collate>` turns into a source. It implements the
+    :class:`~anemoi.training.data.readers.protocol.DataReader` protocol, which is all
+    that :class:`~anemoi.training.data.multidataset.MultiDataset`, the anchor
+    computation and the training methods rely on.
+
+    :func:`~anemoi.training.data.readers.create_reader` picks the subclass from the
+    dataset configuration:
+
+    - :class:`~anemoi.training.data.readers.GriddedDataReader` (``data_type = "gridded"``)
+      reads fields on a fixed grid;
+    - :class:`~anemoi.training.data.readers.TabularDataReader` (``data_type = "tabular"``)
+      reads observations whose points change from one time window to the next;
+    - :class:`~anemoi.training.data.readers.TrajectoryDataReader` reads gridded forecast
+      trajectories, one sequence per initialisation date.
+
+    A dataset is read as sequences of positions in time. This base class reads a single
+    sequence, anchored on the dataset's own :attr:`dates`; a reader with several
+    sequences overrides :meth:`valid_anchors`, and :meth:`_open_options` when ``start``
+    and ``end`` apply to something other than the dates.
+
+    Subclasses define :attr:`data_type`, :attr:`grid_size`, :attr:`layout`,
+    :attr:`supporting_arrays` and :meth:`get_sample`, which builds its sample through
+    :func:`~anemoi.models.data.sample.create_batched_struct`. A reader whose points carry
+    their own times also overrides :meth:`measure_from_reference`. Dataset properties
+    (dates, variables, statistics, frequency, ...) are read from the opened store.
+
+    With a reader group of more than one rank, each rank keeps only its own part of
+    each sample: its share of the grid, or of each time window's observations. The DDP
+    strategy sets the group through :meth:`set_reader_group_info`; until then the
+    reader returns every sample whole.
+    """
 
     #: Kind of sample the reader produces, as registered in ``anemoi.models.data.sample.sample_registry``.
     data_type: ClassVar[str]
@@ -44,7 +79,28 @@ class BaseAnemoiReader(ABC):
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
     ) -> None:
-        """Initialize Anemoi data reader."""
+        """Open the dataset, restricted to ``[start, end]``.
+
+        The reader starts outside any reader group (rank 0 of 1) and returns every sample
+        whole until :meth:`set_reader_group_info` is called.
+
+        Parameters
+        ----------
+        dataset_config : str or dict
+            The dataset to open. A string is the dataset's path or name. A dict holds the
+            :func:`anemoi.datasets.open_dataset` options, with the dataset itself under
+            ``dataset``; options set to ``None`` are dropped. Dates are restricted through
+            ``start`` and ``end`` only.
+        start : datetime.datetime or int, optional
+            First date to read, or a year. ``None`` keeps the dataset's first date.
+        end : datetime.datetime or int, optional
+            Last date to read, or a year. ``None`` keeps the dataset's last date.
+
+        Raises
+        ------
+        ValueError
+            If a dict ``dataset_config`` has no ``dataset``, or sets ``start`` or ``end``.
+        """
         source = _normalize_dataset_config(dataset_config)
         self.data = open_dataset(self._open_options(source, start, end))
 

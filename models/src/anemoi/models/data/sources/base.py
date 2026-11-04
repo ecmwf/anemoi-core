@@ -149,7 +149,9 @@ class Source(ABC):
         but torch tensors are accepted.
     metadata : Mapping[str, Any], optional
         Free-form per-source metadata (e.g. ``dataset.metadata``, per-variable
-        metadata). Not interpreted here.
+        metadata). Not interpreted here, and kept unchanged by every transformation,
+        including those that change the variables (:meth:`select_variables`,
+        :meth:`select`): per-variable entries are the caller's to update.
     """
 
     name: str
@@ -165,7 +167,8 @@ class Source(ABC):
     def __post_init__(self) -> None:
         """Validate the metadata and the payload it describes."""
         if self.variables is None or len(set(self.variables)) != len(self.variables):
-            raise ValueError(f"Source {self.name!r} requires unique variable names.")
+            msg = f"Source {self.name!r} requires unique variable names."
+            raise ValueError(msg)
 
         if self.data is None:
             msg = (
@@ -281,9 +284,8 @@ class Source(ABC):
             elif dim == "variables":
                 source = source.select_variables(indices)
             else:
-                raise ValueError(
-                    f"Unsupported dimension for selection: {dim!r}. Supported dimensions are 'time' and 'variables'."
-                )
+                msg = f"Unsupported dimension for selection: {dim!r}. Supported dimensions are 'time' and 'variables'."
+                raise ValueError(msg)
         return source
 
     def to(
@@ -347,7 +349,11 @@ class Source(ABC):
 
     @abstractmethod
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "Source":
-        """Return a new view restricted to the given variable indices."""
+        """Return a new view with only the variables at ``indices``.
+
+        The data, ``variables`` and ``statistics`` are indexed together; ``metadata`` is
+        kept unchanged (see :class:`Source`).
+        """
         pass
 
     @abstractmethod
@@ -444,7 +450,8 @@ class Source(ABC):
         """Raise when ``others`` do not share this source's gridded/tabular structure."""
         for other in others:
             if other.is_tabular != self.is_tabular:
-                raise TypeError("Cannot combine gridded and tabular transport data.")
+                msg = "Cannot combine gridded and tabular transport data."
+                raise TypeError(msg)
 
     @abstractmethod
     def shard(self, group: ProcessGroup | None) -> "Source":
@@ -492,16 +499,27 @@ class Source(ABC):
         pass
 
     def _index_vars(self, tensor: torch.Tensor, indices: Sequence[int] | torch.Tensor | slice) -> torch.Tensor:
-        """Return a new tensor indexed along the variable axis."""
+        """Index ``tensor`` along the variable axis.
+
+        Selecting all variables in order returns ``tensor`` itself and a contiguous block of indices is
+        a view, so neither copies; any other selection is an ``index_select`` copy.
+        """
         var_dim = self.layout.axis("variables", ndim=tensor.ndim)
         if isinstance(indices, slice):
             slicer: list[Any] = [slice(None)] * tensor.ndim
             slicer[var_dim] = indices
             return tensor[tuple(slicer)]
-        idx = torch.as_tensor(
-            list(indices) if not isinstance(indices, torch.Tensor) else indices, dtype=torch.long, device=tensor.device
-        )
-        return tensor.index_select(var_dim, idx)
+        if isinstance(indices, torch.Tensor):
+            if indices.device.type != "cpu":
+                # Inspecting device indices on the host would sync, so always copy.
+                return tensor.index_select(var_dim, indices.to(device=tensor.device, dtype=torch.long))
+            indices = indices.tolist()
+        positions = list(indices)
+        if positions and positions == list(range(positions[0], positions[0] + len(positions))):
+            if positions[0] == 0 and len(positions) == tensor.shape[var_dim]:
+                return tensor
+            return tensor.narrow(var_dim, positions[0], len(positions))
+        return tensor.index_select(var_dim, torch.as_tensor(positions, dtype=torch.long, device=tensor.device))
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
@@ -539,7 +557,9 @@ class BaseTemplate(ABC):
         Per-statistic arrays over ``variables``. Not needed to decode; carried along for
         whoever needs them afterwards, e.g. to un-normalise the prediction.
     metadata : Mapping[str, Any], optional
-        Free-form per-source metadata, passed on to the built source.
+        Free-form per-source metadata, passed on to the built source. Kept unchanged by
+        :meth:`select_variables` and :meth:`with_variables`: per-variable entries are the
+        caller's to update.
     """
 
     name: str
@@ -550,7 +570,8 @@ class BaseTemplate(ABC):
 
     def __post_init__(self) -> None:
         if self.variables is None or len(set(self.variables)) != len(self.variables):
-            raise ValueError(f"{self.__class__.__name__} {self.name!r} requires unique variable names.")
+            msg = f"{self.__class__.__name__} {self.name!r} requires unique variable names."
+            raise ValueError(msg)
 
     @property
     def n_variables(self) -> int:
@@ -568,7 +589,10 @@ class BaseTemplate(ABC):
         }
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "BaseTemplate":
-        """Return the same nodes with only the variables at ``indices`` (and their statistics)."""
+        """Return the same nodes with only the variables at ``indices``.
+
+        ``variables`` and ``statistics`` are indexed together; ``metadata`` is kept unchanged.
+        """
         index = _index_list(indices, self.n_variables)
         variables = [self.variables[i] for i in index]
         statistics = {key: value[index] for key, value in self.statistics.items()}
@@ -577,7 +601,9 @@ class BaseTemplate(ABC):
     def with_variables(self, variables: list[str], statistics: Mapping[str, Any] | None = None) -> "BaseTemplate":
         """Return the same nodes with other variables to decode.
 
-        ``statistics`` should cover exactly ``variables``; it defaults to none.
+        ``statistics`` should cover exactly ``variables``; it defaults to none. ``metadata``
+        is kept unchanged, so any per-variable entries in it must be replaced by the caller,
+        e.g. with :func:`dataclasses.replace`.
         """
         return replace(self, variables=list(variables), statistics={} if statistics is None else statistics)
 

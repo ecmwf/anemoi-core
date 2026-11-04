@@ -10,6 +10,7 @@
 
 import asyncio
 import copy
+import functools
 import logging
 import threading
 import traceback
@@ -38,6 +39,7 @@ from anemoi.training.diagnostics.evaluation.plotting.graph import graph_plot_fn 
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as _default_loss_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_graph_inputs
 from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_loss_inputs
+from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_node_coordinates
 from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_spatial_inputs
 from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn
 from anemoi.training.diagnostics.evaluation.plotting.protocols import GraphPlotFn
@@ -68,7 +70,8 @@ _UNSET_MEMBERS: Any = _Unset()
 
 def _unwrap_plot_fn(plot_fn: Any) -> Any:
     """Return the underlying function of a (possibly functools.partial) plot_fn."""
-    while hasattr(plot_fn, "func"):
+    # isinstance, not hasattr(plot_fn, "func"): objects with dynamic attributes (e.g. mocks) would loop forever
+    while isinstance(plot_fn, functools.partial):
         plot_fn = plot_fn.func
     return plot_fn
 
@@ -476,7 +479,13 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             # The refactored preprocessors are stateless (no per-instance ``nan_locations`` buffer to gather),
             # so only the device move is required here.
             self.post_processors = copy.deepcopy(pl_module.model.post_processors)
-            for dataset_name in self.post_processors:
+            for dataset_name in batch:
+                for post_processor in self.post_processors[dataset_name].processors.values():
+                    if isinstance(getattr(post_processor, "nan_locations", None), torch.Tensor):
+                        post_processor.nan_locations = pl_module.allgather_batch(
+                            post_processor.nan_locations,
+                            pl_module.grid_shard_sizes[dataset_name],
+                        )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
             plot_kwargs = self._plot_kwargs_from_output(pl_module, output)
@@ -485,10 +494,11 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 metrics=output.metrics,
                 predictions=gathered_predictions,
             )
+            # A batch may hold only some datasets (e.g. one domain with MultiDomainLoadingPolicy).
             self.plot(
                 trainer,
                 pl_module,
-                self.dataset_names,
+                [dataset_name for dataset_name in self.dataset_names if dataset_name in batch],
                 output,
                 batch,
                 batch_idx,
@@ -1236,6 +1246,13 @@ class GraphFeaturePlot(BasePerEpochPlotCallback):
         self.q_extreme_limit = q_extreme_limit
         self.plot_fn = plot_fn if plot_fn is not None else _default_graph_plot_fn
         validate_plot_fn(self.plot_fn, GraphPlotFn, "GraphFeaturePlot")
+        self._node_coordinates: dict[str, torch.Tensor] | None = None
+
+    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        super().on_fit_start(trainer, pl_module)
+        # The graph is static. Read it here on the main thread, because the asynchronous
+        # plot thread can see it as None while the checkpoint callback saves a checkpoint.
+        self._node_coordinates = extract_node_coordinates(pl_module)
 
     def _plot(
         self,
@@ -1246,7 +1263,7 @@ class GraphFeaturePlot(BasePerEpochPlotCallback):
     ) -> None:
         _ = epoch
         for dataset_name in dataset_names:
-            graph_inputs = extract_graph_inputs(pl_module, dataset_name)
+            graph_inputs = extract_graph_inputs(pl_module, dataset_name, self._node_coordinates)
             for fig, tag in self.plot_fn(
                 **graph_inputs,
                 q_extreme_limit=self.q_extreme_limit,

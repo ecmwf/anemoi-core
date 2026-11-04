@@ -166,3 +166,49 @@ For example:
 .. code:: bash
 
    anemoi-training mlflow sync -s /log/path -d http://server.com -r 123-run-id -e my-experiment
+
+Syncing while the training runs
+===============================
+
+The sync above copies a run into a new server run on every call, so it
+is meant to be run once, after the training. With ``--incremental``,
+every call updates the same server run and only sends what is new, so
+the command can be run at any time, also while the training is still
+running, for example to follow a long training on a machine without
+internet access:
+
+.. code:: bash
+
+   anemoi-training mlflow sync -s /log/path -d http://server.com -r 123-run-id -e my-experiment --incremental
+
+-  The server run is created by the first call and found again by the
+   tag ``sync.offline_run_id``, which holds the offline run id. Later
+   calls add the new params, tags, metric points and artifacts.
+
+-  The server run stays ``RUNNING`` until the offline run ends, then
+   takes its status. ``--status FINISHED|FAILED|KILLED`` sets the final
+   status instead, for example when a job was killed by the scheduler
+   and the offline run was left ``RUNNING``.
+
+-  If the parent of a resumed run, or the source of a forked run, is not
+   on the server yet, it is synced first. It may also have been synced
+   without ``--incremental``.
+
+-  The command fails if the sync fails, so it can be retried.
+
+-  ``--incremental`` does not need the ``mlflow-export-import`` package.
+   The source must be an offline log directory, not a tracking server.
+
+.. warning::
+
+   Sync each run either with or without ``--incremental``, not both:
+   the two modes would create one server run each.
+
+For example, to sync every 15 minutes during a training:
+
+.. code:: bash
+
+   while true; do
+      anemoi-training mlflow sync -s /log/path -d http://server.com -r 123-run-id -e my-experiment --incremental
+      sleep 900
+   done

@@ -60,7 +60,7 @@ def test_base_loss_pairwise_checks_gridded_layout_and_coordinates() -> None:
     pred = _grid(torch.ones(1, 1, 1, 3, 2))
     other_layout = _grid(
         torch.zeros(1, 1, 1, 3, 2),
-        layout=TensorLayout(batch=-5, time=-4, ensemble=-3, grid=-2, variables=-1),
+        layout=TensorLayout(batch=0, time=2, ensemble=1, grid=3, variables=4),
     )
     with pytest.raises(ValueError, match="same layout"):
         apply_pairwise(pred, other_layout, lambda p, t, **_: (p - t).sum())

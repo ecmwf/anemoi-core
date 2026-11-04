@@ -823,7 +823,10 @@ class BaseTrainingSchema(BaseModel):
     update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
     "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
     checkpoint: CheckpointPipelineSchema | None = Field(default=None)
-    "Checkpoint source, loading strategy, and ordered modifiers. None configures a fresh run."
+    "Checkpoint pipeline configuration consumed by build_checkpoint_pipeline: an"
+    " acquisition source under `source`, a loading strategy under `loading`, and/or an"
+    " ordered list of model `modifiers`, each a Hydra `_target_` block. None configures"
+    " no checkpoint pipeline (a fresh run)."
     deterministic: bool = Field(default=False)
     "This flag sets torch.backends.cudnn.deterministic. It may reduce nondeterminism, but does not guarantee exact"
     " reproducibility."

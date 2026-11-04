@@ -64,6 +64,22 @@ def test_reader_sample_coordinates_in_radians(mocker: MockFixture) -> None:
     np.testing.assert_allclose(sample.coordinates[:, 1].numpy(), np.deg2rad(reader.longitudes), rtol=1e-6)
 
 
+def test_reader_sample_coordinates_are_rounded_once(mocker: MockFixture) -> None:
+    """Radians are converted from the float64 degrees, as the graph builders do.
+
+    Rounding the degrees to float32 first changes the last bit of some radians.
+    """
+    reader = _make_reader(grid=3, mocker=mocker)
+    reader.data.latitudes = np.array([12.3456789, -45.6789012, 67.8901234])
+    reader.data.longitudes = np.array([123.456789, 234.567890, 345.678901])
+    reader.data.variables = ["x"]
+    reader.data.statistics = {}
+    reader.get_data = lambda *_: torch.zeros(1, 1, 3, 1)
+    sample = reader.get_sample(0, slice(0, 1))
+    expected = torch.deg2rad(torch.from_numpy(np.stack([reader.data.latitudes, reader.data.longitudes], axis=-1)))
+    assert torch.equal(sample.coordinates, expected.to(torch.float32))
+
+
 def test_sharded_reader_sample_keeps_full_grid_size(mocker: MockFixture) -> None:
     reader = _make_reader(grid=8, mocker=mocker)
     reader.data.variables = ["x"]
@@ -80,7 +96,8 @@ def test_reader_get_latlons_full_grid(mocker: MockFixture) -> None:
     reader = _make_reader(grid=5, mocker=mocker)
     latitudes, longitudes = reader.get_latlons()
     assert latitudes.shape == longitudes.shape == (5,)
-    assert latitudes.dtype == longitudes.dtype == torch.float32
+    # degrees stay float64: the conversion to radians rounds to float32 once
+    assert latitudes.dtype == longitudes.dtype == torch.float64
     np.testing.assert_allclose(latitudes.numpy(), reader.latitudes)
     np.testing.assert_allclose(longitudes.numpy(), reader.longitudes)
 
