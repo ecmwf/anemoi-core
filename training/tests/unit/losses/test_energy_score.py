@@ -18,6 +18,7 @@ from pytest_mock import MockerFixture
 from torch.autograd import gradcheck
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.losses import CRPS
 from anemoi.training.losses import EnergyScoreLoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
@@ -506,3 +507,13 @@ def test_energy_score_name_follows_tensor_order() -> None:
 def test_energy_score_rejects_invalid_norm(norm_over: list[str]) -> None:
     with pytest.raises(ValueError, match="Invalid energy score norm"):
         EnergyScoreLoss(norm_over=norm_over)  # type: ignore[arg-type]
+
+@pytest.mark.parametrize("fair", [True, False])
+def test_energy_score_with_one_dimensional_outcome_is_crps(score_inputs, fair: bool) -> None:
+    # check that ES reduces to CRPS for one-dimensional outcomes (tested here with 1 variable)
+    pred, target = score_inputs
+    pred, target = pred[..., :1], target[..., :1]
+    loss = EnergyScoreLoss(fair=fair, norm_over=["variables"])
+    crps = CRPS(alpha=1.0 if fair else 0.0)
+
+    torch.testing.assert_close(loss(pred, target, squash=False), crps(pred, target, squash=False))
