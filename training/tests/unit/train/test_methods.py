@@ -2826,6 +2826,52 @@ def test_da_single_training_skips_targets_for_unweighted_da_steps(monkeypatch: p
     assert target_steps == [2, 3]
 
 
+@pytest.mark.parametrize(
+    ("validation_mode", "scored_steps", "expected_loss"),
+    [(True, [4], 4.0), (False, [2, 3], 2.5)],
+)
+def test_da_single_training_validation_last_step_only(
+    monkeypatch: pytest.MonkeyPatch,
+    validation_mode: bool,
+    scored_steps: list[int],
+    expected_loss: float,
+) -> None:
+    """validation_last_step_only scores just the final validation step; training is unchanged."""
+    data_indices = _data_indices_single()
+    task = DAForecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+        validation_rollout=3,
+        da_cycles=2,
+        validation_last_step_only=True,
+    )
+    module = _make_da_single_training(task, data_indices)
+    module.grid_shard_slice = {"data": slice(1, 3)}
+    module.output_mask = {"data": NoOutputMask()}
+
+    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+    loss_steps: list[int] = []
+
+    def _compute_loss_metrics(*_a: Any, rollout_step: int = 0, **_kw: Any) -> tuple:
+        loss_steps.append(rollout_step)
+        return torch.tensor(float(rollout_step)), {f"metric/{rollout_step + 1}": torch.tensor(0.0)}, dummy_y
+
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(module, "compute_loss_metrics", _compute_loss_metrics)
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+
+    batch = {"data": torch.randn(1, 2, 1, 4, len(_NAME_TO_INDEX))}
+    output = module._step(batch, validation_mode=validation_mode)
+
+    assert loss_steps == scored_steps
+    assert output.loss.item() == pytest.approx(expected_loss)
+    assert sorted(output.metrics) == [f"metric/{step + 1}" for step in scored_steps]
+    # Every step still yields a prediction, so plot callbacks stay index-aligned.
+    assert len(output.predictions) == len(task.steps("validation" if validation_mode else "training"))
+
+
 def test_da_single_training_corrector_runs_without_outer_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     """_apply_corrector calls the corrector directly and gradients reach its parameters."""
     name_to_index = {"hirs_1": 0, "hirs_sza": 1, "t": 2}

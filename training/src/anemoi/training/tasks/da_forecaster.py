@@ -51,6 +51,7 @@ class DAForecaster(Forecaster):
         da_flow_dependent_skip: bool = False,
         da_grad_cycles: int | None = None,
         checkpoint_steps: int = 0,
+        validation_last_step_only: bool = False,
         **kwargs,
     ) -> None:
         self.da_cycles = da_cycles
@@ -68,6 +69,9 @@ class DAForecaster(Forecaster):
         # activation-checkpointed: only inputs are kept and the call is recomputed in
         # backward. Trades compute for memory without changing gradients.
         self.checkpoint_steps = checkpoint_steps
+        # Validation scores only the final forecast step (loss and metrics), so a long
+        # validation rollout reports the lead time of interest rather than an average.
+        self.validation_last_step_only = validation_last_step_only
         super().__init__(
             multistep_input,
             multistep_output,

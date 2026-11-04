@@ -292,6 +292,11 @@ class DATrainingMixin:
 
         task_steps = self.task.steps("validation" if validation_mode else "training")
         n_forecast = max(1, sum(1 for step in task_steps if not step.get("is_da", False)))
+        # Validation may score only the final step: earlier steps still run to advance
+        # the state, but contribute no loss or metrics.
+        last_step_only = validation_mode and getattr(self.task, "validation_last_step_only", False)
+        if last_step_only:
+            n_forecast = 1
 
         # Dataset dropout is drawn once per batch and reused for all DA cycles and
         # rollout steps so the same datasets are dropped within this sequence.
@@ -303,6 +308,8 @@ class DATrainingMixin:
             is_da = task_kwargs.get("is_da", False)
             rollout_step = task_kwargs["rollout_step"]
             weight = self.task.da_loss_weight if is_da else 1.0
+            if last_step_only and i < len(task_steps) - 1:
+                weight = 0.0
 
             current_dropped, current_decoder_dropped = self._dropout_for_step(
                 i,
