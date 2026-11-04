@@ -7,12 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Compare grouped FFTs and their explicit adjoints with PyTorch's own autograd."""
+"""Compare the padded ring FFTs and their explicit adjoints with per-ring torch.fft calls and their autograd."""
 
 import pytest
 import torch
 from torch.nn import functional as F
 
+from anemoi.models.layers import ring_fft as ring_fft_module
 from anemoi.models.layers.ring_fft import RingFFT
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
@@ -66,7 +67,7 @@ def compare_value_and_vjp(actual, expected, x, dtype):
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 @pytest.mark.parametrize("batch_shape", [(), (2, 3)])
 def test_rfft_matches_torch(fft_device, lengths, dtype, batch_shape):
-    fft = RingFFT(lengths).to(fft_device)
+    fft = RingFFT(lengths)
     x = torch.randn(*batch_shape, 2 * sum(lengths), device=fft_device, dtype=dtype)[..., ::2].requires_grad_()
     actual = fft.rfft(x)
     compare_value_and_vjp(actual, reference_rfft(x, lengths), x, dtype)
@@ -79,7 +80,7 @@ def test_rfft_matches_torch(fft_device, lengths, dtype, batch_shape):
 @pytest.mark.parametrize("batch_shape", [(), (2, 3)])
 @pytest.mark.parametrize("width", ["dc", "short", "full", "extra"])
 def test_irfft_matches_torch(fft_device, lengths, dtype, batch_shape, width):
-    fft = RingFFT(lengths).to(fft_device)
+    fft = RingFFT(lengths)
     modes = {"dc": 1, "short": fft.modes - 1, "full": fft.modes, "extra": fft.modes + 3}[width]
     cdtype = torch.complex64 if dtype == torch.float32 else torch.complex128
     x = torch.randn(*batch_shape, len(lengths), 2 * modes, device=fft_device, dtype=cdtype)[..., ::2].requires_grad_()
@@ -95,7 +96,7 @@ def test_irfft_matches_torch(fft_device, lengths, dtype, batch_shape, width):
 def test_rfft_backward_each_mode(fft_device, component):
     """Check each Jacobian row, including padded modes and imaginary endpoints."""
     lengths = [1, 2, 5, 6, 5]
-    fft = RingFFT(lengths).to(fft_device)
+    fft = RingFFT(lengths)
     x = torch.randn(sum(lengths), dtype=torch.float64, device=fft_device, requires_grad=True)
     actual, expected = fft.rfft(x), reference_rfft(x, lengths)
     for ring in range(len(lengths)):
@@ -113,7 +114,7 @@ def test_rfft_backward_each_mode(fft_device, component):
 
 @pytest.mark.parametrize("direction", ["rfft", "irfft"])
 def test_gradcheck(fft_device, direction):
-    fft = RingFFT([3, 4, 3]).to(fft_device)
+    fft = RingFFT([3, 4, 3])
     shape = (fft.points,) if direction == "rfft" else (fft.nlat, fft.modes + 1)
     dtype = torch.float64 if direction == "rfft" else torch.complex128
     x = torch.randn(shape, device=fft_device, dtype=dtype, requires_grad=True)
@@ -123,7 +124,7 @@ def test_gradcheck(fft_device, direction):
 
 
 def test_roundtrip_without_saved_activations(fft_device):
-    fft = RingFFT([5, 6, 5]).to(fft_device)
+    fft = RingFFT([5, 6, 5])
     x = torch.randn(2, fft.points, device=fft_device, dtype=torch.float64, requires_grad=True)
     saved = []
 
@@ -139,18 +140,50 @@ def test_roundtrip_without_saved_activations(fft_device):
     assert not saved
 
 
-def test_metadata_follows_module_conversion(fft_device):
-    """Moving an initialized SHT must move FFT metadata without rounding its scales."""
+def test_sht_keeps_no_grid_state_and_follows_the_input(fft_device):
+    """The ring tables are built for the device and precision of the input, and nothing is checkpointed."""
     lengths = [5, 8, 8, 5]
-    direct = SphericalHarmonicTransform(lengths, truncation=2).cpu()
-    inverse = InverseSphericalHarmonicTransform(lengths, truncation=2).cpu()
+    direct = SphericalHarmonicTransform(lengths, truncation=2)
+    inverse = InverseSphericalHarmonicTransform(lengths, truncation=2)
     for module in (direct, inverse):
         module.float().to(fft_device).double()
-        assert not module.state_dict()  # Grid metadata is recomputed, not checkpointed.
+        assert not module.state_dict()
     x = torch.randn(sum(lengths), device=fft_device, dtype=torch.float64, requires_grad=True)
-    compare_value_and_vjp(direct.rfft_rings(x), reference_rfft(x, lengths), x, torch.float64)
+    compare_value_and_vjp(direct.rfft_rings(x), reference_rfft(x, lengths)[..., :3], x, torch.float64)
     z = torch.randn(len(lengths), 5, device=fft_device, dtype=torch.complex128, requires_grad=True)
     compare_value_and_vjp(inverse.irfft_rings(z), reference_irfft(z, lengths), z, torch.float64)
+
+
+@pytest.mark.parametrize("modes", [1, 3, 7])
+def test_rfft_gives_the_orders_asked_for(fft_device, modes):
+    lengths = [1, 2, 5, 6, 5, 2, 1]
+    x = torch.randn(2, sum(lengths), device=fft_device, dtype=torch.float64, requires_grad=True)
+    expected = F.pad(reference_rfft(x, lengths), (0, max(0, modes - 4)))[..., :modes]
+    compare_value_and_vjp(RingFFT(lengths).rfft(x, modes), expected, x, torch.float64)
+
+
+def test_fields_in_several_groups(fft_device, monkeypatch):
+    """With a small buffer limit the fields go through in groups, with the same result."""
+    monkeypatch.setattr(ring_fft_module, "_MAX_BUFFER_VALUES", 64)
+    lengths = [9, 4, 7, 4, 9]
+    x = torch.randn(5, sum(lengths), device=fft_device, dtype=torch.float64, requires_grad=True)
+    compare_value_and_vjp(RingFFT(lengths).rfft(x), reference_rfft(x, lengths), x, torch.float64)
+    z = torch.randn(5, len(lengths), 5, device=fft_device, dtype=torch.complex128, requires_grad=True)
+    compare_value_and_vjp(RingFFT(lengths).irfft(z), reference_irfft(z, lengths), z, torch.float64)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
+def test_long_rings_keep_float32_accuracy():
+    """O640 rings of up to 2576 points: the chirp phases stay exact, so float32 keeps its accuracy."""
+    north = [20 + 4 * ring for ring in range(640)]
+    lengths = north + north[::-1]
+    fft = RingFFT(lengths)
+    x = torch.randn(2, sum(lengths), device="cuda")
+    expected = reference_rfft(x.double(), lengths)[..., :640]
+    torch.testing.assert_close(fft.rfft(x, 640).to(torch.complex128), expected, rtol=0, atol=1e-6)
+    z = torch.randn(2, len(lengths), 640, device="cuda", dtype=torch.complex64)
+    expected = reference_irfft(z.to(torch.complex128), lengths)
+    torch.testing.assert_close(fft.irfft(z).double(), expected, rtol=0, atol=2e-6 * expected.abs().max().item())
 
 
 @pytest.mark.parametrize("lengths", [[], [0, 4], [-1, 4], [2.5, 4]])
@@ -175,34 +208,6 @@ def test_invalid_input(direction, shape, dtype, error):
     fft = RingFFT([3, 5])
     with pytest.raises(error):
         getattr(fft, direction)(torch.zeros(shape, dtype=dtype))
-
-
-@pytest.mark.parametrize("direction", ["rfft", "irfft"])
-@pytest.mark.parametrize("requires_grad", [False, True])
-@pytest.mark.parametrize("lengths", [[3, 8], [3, 5, 8, 8, 5, 3]])
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
-@pytest.mark.parametrize("autocast", [False, True])
-def test_graphed_fft_matches_torch(direction, requires_grad, lengths, dtype, autocast):
-    if not torch.cuda.is_available():
-        pytest.skip("CUDA is unavailable")
-    if direction == "rfft":
-        transform = SphericalHarmonicTransform(lengths, truncation=1, use_graphed_rfft=True).cuda()
-        fn, reference = transform.rfft_rings, reference_rfft
-        shape, input_dtype = (2, sum(lengths)), dtype
-    else:
-        transform = InverseSphericalHarmonicTransform(lengths, truncation=1, use_graphed_irfft=True).cuda()
-        fn, reference = transform.irfft_rings, reference_irfft
-        shape = (2, len(lengths), max(lengths) // 2 + 3)
-        input_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
-    # Replays use fresh values, so stale outputs/gradients cannot pass.
-    for _ in range(3):
-        x = torch.randn(shape, device="cuda", dtype=input_dtype, requires_grad=requires_grad)
-        with torch.autocast("cuda", enabled=autocast):
-            actual, expected = fn(x), reference(x, lengths)
-        if requires_grad:
-            compare_value_and_vjp(actual, expected, x, dtype)
-        else:
-            torch.testing.assert_close(actual, expected, **tolerances(dtype))
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
@@ -232,7 +237,7 @@ def test_sht_matches_torch_fft_pipeline(fft_device, dtype, direction, lengths):
 @pytest.mark.parametrize("direction", ["rfft", "irfft"])
 def test_autocast_matches_torch(fft_device, dtype, direction):
     lengths = [5, 8, 8, 5]
-    fft = RingFFT(lengths).to(fft_device)
+    fft = RingFFT(lengths)
     if direction == "rfft":
         x = torch.randn(2, fft.points, device=fft_device, dtype=dtype, requires_grad=True)
         reference = reference_rfft
