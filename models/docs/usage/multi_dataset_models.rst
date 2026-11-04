@@ -81,7 +81,8 @@ choose stable, descriptive names.
 
 ``dataset_fusing_strategy``
    How multiple datasets within a single group are combined if passed during the
-   same forward pass: ``"none"`` (default) or ``"sequential"``. See below.
+   same forward pass: ``"none"`` (default), ``"sequential"`` or ``"joint"``. See
+   below.
 
 ``num_channels``
    Note that ``num_channels`` is configured **per mapper** (and on the
@@ -106,6 +107,14 @@ the following values:
 ``sequential``
    One encoder pass per source dataset, in the order listed in ``source_datasets``, with shared encoder weights. The
    resulting latents are combined by the latent aggregator.
+
+``joint``
+   A single encoder pass over the union of all source nodes, so each hidden node attends to every source dataset at
+   once. The per-dataset encoder edges are merged into one bipartite graph, and the encoder contributes one latent,
+   keyed by the encoder name, to the latent aggregator. Gridded and tabular sources can be mixed, and sources of
+   differing widths go through per-dataset projections, as for ``sequential``. The encoder graphs must have edges
+   (edge-less and sparse-projection mappers are not supported), and an encoder with ``shard_strategy: heads`` needs
+   the same merged node count in every batch element, so ragged (tabular) sources need ``shard_strategy: edges``.
 
 *******************
  Latent aggregator

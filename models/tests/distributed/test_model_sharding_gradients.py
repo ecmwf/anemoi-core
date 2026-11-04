@@ -21,6 +21,10 @@ combined the way training combines them: the strategy's hooks multiply every gra
 except those of parameters named ``trainable`` or ``no_gradscaling``, and DDP then averages over the
 ranks.
 
+Joint variants encode the grid and the observations through one encoder with
+``dataset_fusing_strategy: joint``, so a single mapper pass sees the merged gridded and tabular source
+nodes; sharded and whole runs must still agree.
+
 A further deterministic model reads and predicts the observations only. Observation windows can be
 empty, so every model also runs with empty input windows, an empty target window, or both, and with
 windows smaller than the group, where some ranks hold no rows. ``test_whole_model_with_empty_observations``
@@ -74,6 +78,8 @@ MODELS = {
     "edm_transport": {"model_class": AnemoiTransportModelEncProcDec, "obs_predicted": True},
     "edm_transport_obs_input_only": {"model_class": AnemoiTransportModelEncProcDec, "obs_predicted": False},
     "edm_tendency_obs_input_only": {"model_class": AnemoiTransportTendModelEncProcDec, "obs_predicted": False},
+    "deterministic_joint": {"model_class": AnemoiModelEncProcDec, "obs_predicted": True, "joint": True},
+    "edm_transport_joint": {"model_class": AnemoiTransportModelEncProcDec, "obs_predicted": True, "joint": True},
 }
 # Observation rows per input window and in the target window.
 OBS_ROWS = {
@@ -87,6 +93,7 @@ OBS_ROWS = {
 EMPTY_OBS_ROWS = [name for name in OBS_ROWS if name != "observed"]
 # Whole-model tests only: a sharded tabular source supports a single ensemble member.
 ENSEMBLE_MODEL = {"model_class": AnemoiEnsModelEncProcDec, "obs_predicted": True}
+ENSEMBLE_MODELS = {"ensemble": ENSEMBLE_MODEL, "ensemble_joint": {**ENSEMBLE_MODEL, "joint": True}}
 # Observation rows (per input window, target) of the two samples of a mixed batch.
 MIXED_BATCHES = {
     "both_observed": (OBS_ROWS["observed"], OBS_ROWS["observed"]),
@@ -165,7 +172,7 @@ def _graph_config(
     return config
 
 
-def _model_config(model_class: type, obs_predicted: bool, with_grid: bool = True) -> DictConfig:
+def _model_config(model_class: type, obs_predicted: bool, with_grid: bool = True, joint: bool = False) -> DictConfig:
     transport = issubclass(model_class, AnemoiTransportModelEncProcDec)
     tendency = issubclass(model_class, AnemoiTransportTendModelEncProcDec)
     ensemble = issubclass(model_class, AnemoiEnsModelEncProcDec)
@@ -292,6 +299,16 @@ def _model_config(model_class: type, obs_predicted: bool, with_grid: bool = True
     if not obs_predicted:
         del config["decoders"]["obs"]
         del config["bounding"]["datasets"]["obs"]
+    if joint:
+        # One encoder over the merged grid and observation nodes. Its edge width must match across
+        # sources, and the dynamic observation graph has no trainable edge parameters.
+        config["encoders"] = {
+            "shared": {
+                "source_datasets": ["grid", "obs"],
+                "dataset_fusing_strategy": "joint",
+                "mapper": mapper("GraphTransformerForwardMapper", 0, shard_strategy="edges"),
+            },
+        }
     if not with_grid:
         for section in (config["encoders"], config["decoders"], config["bounding"]["datasets"]):
             del section["grid"]
@@ -326,14 +343,14 @@ def _statistics() -> dict[str, dict[str, np.ndarray]]:
 
 
 def _build_model(
-    model_class: type, obs_predicted: bool, max_obs_neighbours: int, with_grid: bool = True
+    model_class: type, obs_predicted: bool, max_obs_neighbours: int, with_grid: bool = True, joint: bool = False
 ) -> torch.nn.Module:
     generator = torch.Generator().manual_seed(0)
     latitudes, longitudes = _points_on_sphere(NUM_GRID_POINTS, generator)
     datasets = ["grid", "obs"] if with_grid else ["obs"]
     torch.manual_seed(1)
     model = model_class(
-        model_config=_model_config(model_class, obs_predicted, with_grid),
+        model_config=_model_config(model_class, obs_predicted, with_grid, joint),
         model_graph_config=_graph_config(latitudes, longitudes, max_obs_neighbours, with_grid),
         data_indices={name: index for name, index in _data_indices().items() if name in datasets},
         statistics={name: stats for name, stats in _statistics().items() if name in datasets},
@@ -528,7 +545,11 @@ def _run_whole_model(model: dict, obs_rows: dict, max_obs_neighbours: int) -> tu
     """Forward and backward on the whole batch; returns the outputs and the parameters left without a gradient."""
     transport = issubclass(model["model_class"], AnemoiTransportModelEncProcDec)
     network = _build_model(
-        model["model_class"], model["obs_predicted"], max_obs_neighbours, model.get("with_grid", True)
+        model["model_class"],
+        model["obs_predicted"],
+        max_obs_neighbours,
+        model.get("with_grid", True),
+        model.get("joint", False),
     )
     outputs = _forward(network, _synthetic_batches(network, **obs_rows), transport, group=None)
     generator = torch.Generator().manual_seed(3)
@@ -552,7 +573,11 @@ def _check_sharded_model(
     max_obs_neighbours = neighbour_search["max_obs_neighbours"]
     transport = issubclass(model["model_class"], AnemoiTransportModelEncProcDec)
     reference_model = _build_model(
-        model["model_class"], model["obs_predicted"], max_obs_neighbours, model.get("with_grid", True)
+        model["model_class"],
+        model["obs_predicted"],
+        max_obs_neighbours,
+        model.get("with_grid", True),
+        model.get("joint", False),
     )
     sharded_model = deepcopy(reference_model)
     batches = _synthetic_batches(reference_model, **obs_rows)
@@ -749,7 +774,9 @@ def _assert_gradients_add_up(joined: dict, parts: list[dict]) -> None:
 
 
 @pytest.mark.parametrize("batch_rows", list(MIXED_BATCHES))
-@pytest.mark.parametrize("model", ["deterministic", "deterministic_obs_only", "ensemble"])
+@pytest.mark.parametrize(
+    "model", ["deterministic", "deterministic_obs_only", "deterministic_joint", "ensemble", "ensemble_joint"]
+)
 def test_mixed_batch_matches_single_samples(model, batch_rows) -> None:
     """Samples without observations do not change the outputs or gradients of their batch-mates.
 
@@ -758,17 +785,18 @@ def test_mixed_batch_matches_single_samples(model, batch_rows) -> None:
     wrong sample; the batch gradient must be the sum of the single-sample gradients.
     """
     os.environ["ANEMOI_GRAPHS_FORCE_CPU"] = "1"
-    spec = ENSEMBLE_MODEL if model == "ensemble" else MODELS[model]
+    spec = ENSEMBLE_MODELS.get(model) or MODELS[model]
     network = _build_model(
         spec["model_class"],
         spec["obs_predicted"],
         NEIGHBOUR_SEARCH["pyg_all_neighbours"]["max_obs_neighbours"],
         spec.get("with_grid", True),
+        spec.get("joint", False),
     )
 
     def single_sample(obs_rows: dict, shift: float) -> dict[str, Batch]:
         batches = _shifted(_synthetic_batches(network, **obs_rows), shift)
-        if model == "ensemble":  # two members that differ
+        if model in ENSEMBLE_MODELS:  # two members that differ
             batches = _join(batches, _shifted(batches, 0.25), axis="member")
         return batches
 
@@ -787,8 +815,9 @@ def test_mixed_batch_matches_single_samples(model, batch_rows) -> None:
     _assert_gradients_add_up(joint_grads, [first_grads, second_grads])
 
 
+@pytest.mark.parametrize("model", list(ENSEMBLE_MODELS))
 @pytest.mark.parametrize("obs_rows", list(OBS_ROWS))
-def test_ensemble_members_match_single_members(obs_rows) -> None:
+def test_ensemble_members_match_single_members(obs_rows, model) -> None:
     """The members of an ensemble are encoded and decoded independently, also with empty observations.
 
     Without noise, each member of a two-member run must get the outputs of a one-member run on its
@@ -797,7 +826,10 @@ def test_ensemble_members_match_single_members(obs_rows) -> None:
     """
     os.environ["ANEMOI_GRAPHS_FORCE_CPU"] = "1"
     network = _build_model(
-        ENSEMBLE_MODEL["model_class"], True, NEIGHBOUR_SEARCH["pyg_all_neighbours"]["max_obs_neighbours"]
+        ENSEMBLE_MODEL["model_class"],
+        True,
+        NEIGHBOUR_SEARCH["pyg_all_neighbours"]["max_obs_neighbours"],
+        joint=ENSEMBLE_MODELS[model].get("joint", False),
     )
     first = _synthetic_batches(network, **OBS_ROWS[obs_rows])
     second = _shifted(first, 0.25)

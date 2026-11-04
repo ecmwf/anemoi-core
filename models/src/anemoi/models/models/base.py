@@ -47,11 +47,12 @@ LOGGER = logging.getLogger(__name__)
 #   are only accepted if they share an input dimension, and each is encoded independently.
 # - "sequential": one encoder pass per source dataset with shared weights; the per-dataset
 #   latents are combined by the latent aggregator.
-SUPPORTED_FUSING_STRATEGIES = {"none", "sequential"}
+# - "joint": a single encoder pass over the union of all source nodes, yielding one latent.
+SUPPORTED_FUSING_STRATEGIES = {"none", "sequential", "joint"}
 
 # Strategies for which per-dataset "thin" source projections are built, so that source
 # datasets of differing feature widths (channel counts) can share one encoder.
-PROJECTING_FUSING_STRATEGIES = {"sequential"}
+PROJECTING_FUSING_STRATEGIES = {"sequential", "joint"}
 
 
 def split_graph_config(
@@ -297,6 +298,16 @@ class BaseGraphModel(nn.Module):
 
         self.input_datasets = list(self.dataset2encoder.keys())
 
+        # A joint encoder's latent is keyed by its name, which must not clash with another source's key.
+        for encoder_name, strategy in self.encoder_fusing_strategy.items():
+            owner = self.dataset2encoder.get(encoder_name, encoder_name)
+            if strategy == "joint" and owner != encoder_name:
+                msg = (
+                    f"Joint encoder '{encoder_name}' contributes its latent under its own name, which is "
+                    f"also a source dataset of encoder '{owner}'. Rename one of them."
+                )
+                raise ValueError(msg)
+
     def _build_decoder_routing(self, decoders_config: DotDict) -> None:
         """Builds the dataset routing for decoders."""
         self.dataset2decoder: dict[str, str] = {}
@@ -352,10 +363,19 @@ class BaseGraphModel(nn.Module):
                 )
                 raise ValueError(msg)
 
+    def _latent_key(self, dataset_name: str) -> str:
+        """Key of the latent a source dataset contributes to the latent aggregator.
+
+        A ``joint`` encoder encodes all its sources in one pass and contributes one latent, keyed by
+        the encoder name; every other encoder contributes one latent per source, keyed by dataset name.
+        """
+        encoder_name = self.dataset2encoder[dataset_name]
+        return encoder_name if self.encoder_fusing_strategy[encoder_name] == "joint" else dataset_name
+
     def _build_latent_aggregator(self, aggregator_config: DotDict) -> None:
         """Build the latent aggregator."""
         latent_aggregator_channels = {
-            dataset_name: self.encoder[self.dataset2encoder[dataset_name]].hidden_dim
+            self._latent_key(dataset_name): self.encoder[self.dataset2encoder[dataset_name]].hidden_dim
             for dataset_name in self.input_datasets
         }
 
