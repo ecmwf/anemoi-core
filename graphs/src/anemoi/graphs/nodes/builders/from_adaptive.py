@@ -22,6 +22,69 @@ from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 LOGGER = logging.getLogger(__name__)
 
+_EARTH_RADIUS_M = 6_371_000.0
+# Accepted nodes are added to the BallTree in batches of this size; until then they are
+# checked by brute force.
+_TREE_REBUILD_INTERVAL = 1000
+
+
+def _haversine_rad(coord: np.ndarray, others: np.ndarray) -> np.ndarray:
+    """Great-circle distance (radians) from one [lat, lon] point to an array of points."""
+    dlat = others[:, 0] - coord[0]
+    dlon = others[:, 1] - coord[1]
+    a = np.sin(dlat / 2) ** 2 + np.cos(coord[0]) * np.cos(others[:, 0]) * np.sin(dlon / 2) ** 2
+    return 2 * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))
+
+
+def _poisson_disk_sample(
+    candidates: np.ndarray,
+    reference_coords: np.ndarray,
+    n_target: int,
+    min_dist_rad: float,
+) -> np.ndarray:
+    """Accept candidates, in order, that keep a minimum distance to all other nodes.
+
+    A candidate is accepted only if it is farther than ``min_dist_rad`` from every
+    node in ``reference_coords`` and from every candidate accepted before it.
+
+    Parameters
+    ----------
+    candidates : np.ndarray, shape (M, 2)
+        Candidate coordinates [lat, lon] in radians, in order of priority.
+    reference_coords : np.ndarray, shape (N, 2)
+        Existing node coordinates [lat, lon] in radians. N can be 0.
+    n_target : int
+        Stop after accepting this many nodes.
+    min_dist_rad : float
+        Minimum allowed distance in radians.
+
+    Returns
+    -------
+    np.ndarray, shape (K, 2)
+        Accepted coordinates, K <= n_target.
+    """
+    reference_coords = np.asarray(reference_coords, dtype=float).reshape(-1, 2)
+    tree_points = [reference_coords]
+    tree = BallTree(reference_coords, metric="haversine") if len(reference_coords) else None
+    accepted: list[np.ndarray] = []
+    pending: list[np.ndarray] = []  # accepted but not yet in the tree
+
+    for coord in candidates:
+        if len(accepted) >= n_target:
+            break
+        if tree is not None and tree.query(coord.reshape(1, -1), k=1)[0][0, 0] <= min_dist_rad:
+            continue
+        if pending and _haversine_rad(coord, np.asarray(pending)).min() <= min_dist_rad:
+            continue
+        accepted.append(coord)
+        pending.append(coord)
+        if len(pending) >= _TREE_REBUILD_INTERVAL:
+            tree_points.append(np.asarray(pending))
+            pending = []
+            tree = BallTree(np.concatenate(tree_points), metric="haversine")
+
+    return np.array(accepted, dtype=np.float32) if accepted else np.empty((0, 2), dtype=np.float32)
+
 
 class BaseOrographyNodeBuilder(BaseNodeBuilder):
     """Base class for node builders driven by an orography field and a LAM domain.
@@ -277,3 +340,244 @@ class AdaptiveOrographyTriNodes(BaseOrographyNodeBuilder):
             len(adaptive_coords),
         )
         return self._snap_and_record_ordering(combined)
+
+
+class ProbabilisticOrographyIcosahedralNodes(BaseOrographyNodeBuilder):
+    """Stretched icosahedral mesh with extra nodes over the steepest terrain.
+
+    Starts from the same mesh as :class:`StretchedTriNodes` and adds
+    ``extra_nodes_percent`` % more nodes inside the limited area. Candidates come from
+    a 0.02 deg lat/lon grid over the limited area and are taken from the steepest to
+    the flattest, each accepted only if it is at least ``min_dist_factor`` times the
+    ``lam_resolution`` node spacing away from all other nodes.
+
+    Unlike :class:`AdaptiveOrographyTriNodes`, the extra nodes are not placed at edge
+    midpoints, so they follow the terrain more closely but do not lie on an
+    icosahedron and do not support ``MultiScaleEdges``. The result is deterministic.
+
+    Parameters
+    ----------
+    global_resolution : int
+        Icosphere subdivision level for nodes outside the LAM domain.
+    lam_resolution : int
+        Icosphere subdivision level for the base LAM mesh.
+    reference_node_name : str
+        Name of the reference node set used to define the LAM boundary.
+    orography_path : str
+        Path to a NetCDF file with a 2-D orography field.
+    name : str
+        Key for the node set in the HeteroData graph.
+    extra_nodes_percent : float, optional
+        Extra nodes as a percentage of the LAM base nodes. Default 10.
+    min_dist_factor : float, optional
+        Minimum distance between nodes as a fraction of the ``lam_resolution`` node
+        spacing. Default 0.5.
+    mask_attr_name : str or None, optional
+        Node attribute to use as the LAM boundary mask.
+    margin_radius_km : float, optional
+        Buffer (km) around the reference nodes when building the LAM mask.
+    """
+
+    candidate_resolution_deg: float = 0.02
+
+    def __init__(
+        self,
+        global_resolution: int,
+        lam_resolution: int,
+        reference_node_name: str,
+        orography_path: str,
+        name: str,
+        extra_nodes_percent: float = 10.0,
+        min_dist_factor: float = 0.5,
+        mask_attr_name: str | None = None,
+        margin_radius_km: float = 100.0,
+    ) -> None:
+        super().__init__(name, orography_path, reference_node_name, mask_attr_name, margin_radius_km)
+        assert extra_nodes_percent >= 0, f"extra_nodes_percent must be non-negative, got {extra_nodes_percent}"
+        assert min_dist_factor > 0, f"min_dist_factor must be positive, got {min_dist_factor}"
+        self.global_resolution = global_resolution
+        self.lam_resolution = lam_resolution
+        self.extra_nodes_percent = extra_nodes_percent / 100.0
+        self.min_dist_factor = min_dist_factor
+
+    def get_coordinates(self) -> torch.Tensor:
+        """Build the stretched mesh plus the extra terrain-following nodes.
+
+        Returns
+        -------
+        torch.Tensor, shape (num_nodes, 2)
+            Node coordinates in radians [lat, lon].
+        """
+        _, all_coords, ordering = create_stretched_tri_nodes(
+            base_resolution=self.global_resolution,
+            lam_resolution=self.lam_resolution,
+            area_mask_builder=self.area_mask_builder,
+        )
+        base_coords = all_coords[ordering]
+        lam_base_coords = base_coords[self.area_mask_builder.get_mask(base_coords).cpu().numpy()]
+
+        n_extra = int(len(lam_base_coords) * self.extra_nodes_percent)
+        LOGGER.info(
+            "%s: %d LAM base nodes, adding up to %d extra nodes",
+            self.__class__.__name__,
+            len(lam_base_coords),
+            n_extra,
+        )
+        if n_extra == 0 or len(lam_base_coords) == 0:
+            return torch.tensor(base_coords, dtype=torch.float32)
+
+        pad = np.deg2rad(0.5)
+        candidates = _regular_grid(
+            (lam_base_coords[:, 0].min() - pad, lam_base_coords[:, 0].max() + pad),
+            (lam_base_coords[:, 1].min() - pad, lam_base_coords[:, 1].max() + pad),
+            self.candidate_resolution_deg,
+        )
+        candidates = candidates[self.area_mask_builder.get_mask(candidates).cpu().numpy()]
+
+        gradients = compute_orography_gradient(self.orography_path, candidates)
+        steep_first = np.argsort(-gradients, kind="stable")
+        candidates = candidates[steep_first][gradients[steep_first] > 0]
+
+        min_dist = self.min_dist_factor * np.sqrt(4 * np.pi / (10 * 4**self.lam_resolution))
+        extra = _poisson_disk_sample(candidates, base_coords, n_extra, min_dist)
+        LOGGER.info("%s: placed %d/%d extra nodes", self.__class__.__name__, len(extra), n_extra)
+
+        return torch.tensor(np.concatenate([base_coords, extra], axis=0), dtype=torch.float32)
+
+
+class ProbabilisticOrographyNodes(BaseOrographyNodeBuilder):
+    """Free-form mesh whose node density follows the orography.
+
+    Places ``num_nodes_lam`` nodes inside the limited area and ``num_nodes_global``
+    outside it, with no icosahedron. Candidates come from a 0.02 deg grid over the
+    limited area and a 0.25 deg global grid. Each region's candidates are visited in a
+    random order weighted by ``(slope + 1e-6) ** (1 / compression)``, and each is
+    accepted if it is at least ``min_dist_m`` from all nodes placed so far. The
+    limited area is filled first.
+
+    A small ``compression`` concentrates nodes on steep terrain (e.g. 0.1 gives
+    weights proportional to slope**10); a large one (e.g. 10) gives a nearly uniform
+    distribution. Weights above the 99th percentile are clipped, so the steepest
+    candidates do not take the whole budget. Outside the orography file the slope is
+    0, so the global nodes are spread uniformly.
+
+    Parameters
+    ----------
+    name : str
+        Key for the node set in the HeteroData graph.
+    orography_path : str
+        Path to a NetCDF file with a 2-D orography field.
+    reference_node_name : str
+        Name of the reference node set used to define the LAM boundary.
+    num_nodes_global : int
+        Number of nodes to place outside the LAM domain.
+    num_nodes_lam : int
+        Number of nodes to place inside the LAM domain.
+    compression_global : float
+        Compression for the global nodes. Large values give a uniform distribution.
+    compression_lam : float
+        Compression for the LAM nodes. Small values follow the terrain more closely.
+    min_dist_m : float, optional
+        Minimum distance between any two nodes, in metres. Default 5 000 m.
+    random_seed : int, optional
+        Seed of the random ordering, so the same configuration gives the same mesh.
+        Default 42.
+    mask_attr_name : str or None, optional
+        Node attribute to use as the LAM boundary mask.
+    margin_radius_km : float, optional
+        Buffer (km) around the reference nodes when building the LAM mask.
+    """
+
+    global_candidate_resolution_deg: float = 0.25
+    lam_candidate_resolution_deg: float = 0.02
+
+    def __init__(
+        self,
+        name: str,
+        orography_path: str,
+        reference_node_name: str,
+        num_nodes_global: int,
+        num_nodes_lam: int,
+        compression_global: float,
+        compression_lam: float,
+        min_dist_m: float = 5_000.0,
+        random_seed: int = 42,
+        mask_attr_name: str | None = None,
+        margin_radius_km: float = 100.0,
+    ) -> None:
+        super().__init__(name, orography_path, reference_node_name, mask_attr_name, margin_radius_km)
+        assert num_nodes_global >= 0 and num_nodes_lam >= 0, "Number of nodes must be non-negative."
+        assert compression_global > 0 and compression_lam > 0, "Compression must be positive."
+        assert min_dist_m > 0, f"min_dist_m must be positive, got {min_dist_m}"
+        self.num_nodes_global = num_nodes_global
+        self.num_nodes_lam = num_nodes_lam
+        self.compression_global = compression_global
+        self.compression_lam = compression_lam
+        self.min_dist_rad = min_dist_m / _EARTH_RADIUS_M
+        self.random_seed = random_seed
+
+    @staticmethod
+    def _weighted_random_order(log_weights: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        """Random permutation where higher weights tend to come first (Gumbel top-k)."""
+        return np.argsort(-(log_weights + rng.gumbel(size=len(log_weights))))
+
+    @staticmethod
+    def _priority_log_weights(gradients: np.ndarray, compression: float) -> np.ndarray:
+        """Log of ``(gradient + 1e-6) ** (1 / compression)``, clipped at its 99th percentile.
+
+        Working in log space keeps small slopes distinguishable: with compression 0.1
+        the weights themselves underflow to the same tiny value for most terrain.
+        """
+        log_weights = np.log(gradients + 1e-6) / compression
+        return np.minimum(log_weights, np.percentile(log_weights, 99))
+
+    def get_coordinates(self) -> torch.Tensor:
+        """Build the free-form mesh.
+
+        Returns
+        -------
+        torch.Tensor, shape (num_nodes, 2)
+            Node coordinates in radians [lat, lon].
+        """
+        rng = np.random.default_rng(self.random_seed)
+
+        global_grid = _regular_grid((-np.pi / 2, np.pi / 2), (-np.pi, np.pi), self.global_candidate_resolution_deg)
+        in_lam = self.area_mask_builder.get_mask(global_grid).cpu().numpy()
+        global_candidates = global_grid[~in_lam]
+
+        lam_coarse = global_grid[in_lam]
+        if len(lam_coarse) > 0:
+            pad = np.deg2rad(0.5)
+            lam_grid = _regular_grid(
+                (lam_coarse[:, 0].min() - pad, lam_coarse[:, 0].max() + pad),
+                (lam_coarse[:, 1].min() - pad, lam_coarse[:, 1].max() + pad),
+                self.lam_candidate_resolution_deg,
+            )
+            lam_candidates = lam_grid[self.area_mask_builder.get_mask(lam_grid).cpu().numpy()]
+        else:
+            LOGGER.warning("No LAM candidates found, check reference_node_name and mask_attr_name.")
+            lam_candidates = np.empty((0, 2))
+
+        nodes = np.empty((0, 2), dtype=np.float32)
+        for candidates, target_count, compression, label in [
+            (lam_candidates, self.num_nodes_lam, self.compression_lam, "LAM"),
+            (global_candidates, self.num_nodes_global, self.compression_global, "global"),
+        ]:
+            if len(candidates) == 0 or target_count == 0:
+                continue
+            gradients = compute_orography_gradient(self.orography_path, candidates)
+            order = self._weighted_random_order(self._priority_log_weights(gradients, compression), rng)
+            accepted = _poisson_disk_sample(candidates[order], nodes, target_count, self.min_dist_rad)
+            LOGGER.info("%s %s: placed %d/%d nodes", self.__class__.__name__, label, len(accepted), target_count)
+            nodes = np.concatenate([nodes, accepted], axis=0)
+
+        return torch.tensor(nodes, dtype=torch.float32)
+
+
+def _regular_grid(lat_range: tuple[float, float], lon_range: tuple[float, float], res_deg: float) -> np.ndarray:
+    """Regular [lat, lon] grid in radians over the given ranges, spaced ``res_deg`` degrees."""
+    res = np.deg2rad(res_deg)
+    lats = np.arange(lat_range[0], lat_range[1] + res * 0.5, res)
+    lons = np.arange(lon_range[0], lon_range[1] + res * 0.5, res)
+    lon_g, lat_g = np.meshgrid(lons, lats)
+    return np.stack([lat_g.ravel(), lon_g.ravel()], axis=-1)

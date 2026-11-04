@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from .builders.euclidean.cutoff import CutOffEdges
+from .builders.euclidean.cutoff import RandomSampledCutOffEdges
 from .builders.euclidean.cutoff import ReversedCutOffEdges
 from .builders.euclidean.knn import KNNEdges
 from .builders.euclidean.knn import MutualKNNEdges
@@ -24,6 +25,7 @@ __all__ = [
     "CutOffEdges",
     "HEALPixMultiScaleEdges",
     "MultiScaleEdges",
+    "RandomSampledCutOffEdges",
     "ReversedCutOffEdges",
     "ReversedKNNEdges",
     "ICONTopologicalProcessorEdges",
