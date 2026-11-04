@@ -192,12 +192,16 @@ def _interpolate_to_coords(
     """Linearly interpolate a lat/lon field to node coordinates, 0 outside the grid."""
     from scipy.interpolate import RegularGridInterpolator
 
-    query = np.rad2deg(np.asarray(coords_rad, dtype=float)).reshape(-1, 2)
-    # Match the longitude convention of the grid ([0, 360) or [-180, 180)).
+    # Keep the dtype of the coordinates (node coordinates are float32), so that the
+    # interpolated values do not depend on how the caller stored them.
+    query = np.rad2deg(np.asarray(coords_rad)).reshape(-1, 2).copy()
+    # Match the longitude convention of the grid ([0, 360) or [-180, 180)). Only the
+    # longitudes outside that convention are shifted, the others stay bit-identical.
+    lon = query[:, 1]
     if lon_vals.max() > 180.0:
-        query[:, 1] = np.mod(query[:, 1], 360.0)
+        lon[lon < 0.0] += 360.0
     else:
-        query[:, 1] = (query[:, 1] + 180.0) % 360.0 - 180.0
+        lon[lon >= 180.0] -= 360.0
 
     interp = RegularGridInterpolator((lat_vals, lon_vals), field, method="linear", bounds_error=False, fill_value=0.0)
     return interp(query)
