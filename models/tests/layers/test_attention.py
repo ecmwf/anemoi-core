@@ -237,7 +237,7 @@ def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_d
     assert x.grad.shape == x.shape
 
 
-def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
+def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels, request):
     """Test that SDPA with window_size produces valid output and attends only within the window."""
     num_heads = 4
     embed_dim = 32
@@ -247,6 +247,8 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch.set_default_device(device)
+    # Put the default device back afterwards, so later tests create their tensors on the CPU again.
+    request.addfinalizer(lambda: torch.set_default_device(None))
 
     mhsa = MultiHeadSelfAttention(
         num_heads,
