@@ -26,6 +26,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
+from anemoi.models.layers.categorical import build_categorical_embeddings
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.target_features import DecodingTargetFeature
 from anemoi.models.layers.target_features import create_decoding_target_features
@@ -42,6 +43,11 @@ class BaseGraphModel(nn.Module):
     # additive skip connection. ``forward`` swallows unknown kwargs, so callers
     # check this rather than passing the tensor into a model that ignores it.
     supports_skip_input: bool = False
+
+    # Whether ``_assemble_input`` replaces ``model.categorical_embeddings`` columns
+    # with their embeddings. Models that build the encoder input differently must not
+    # silently feed raw codes, so they refuse the key instead.
+    supports_categorical_embeddings: bool = False
 
     def __init__(
         self,
@@ -85,6 +91,7 @@ class BaseGraphModel(nn.Module):
         self._build_encoder_routing(model_config.model.encoders)
         self._build_decoder_routing(model_config.model.decoders)
 
+        self._build_categorical_embeddings(model_config.model.get("categorical_embeddings"), data_indices)
         self._calculate_shapes_and_indices(data_indices)
 
         self._assert_model_routing()
@@ -205,6 +212,71 @@ class BaseGraphModel(nn.Module):
             self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        """Calculate the encoder input dimension for a given dataset."""
+        # Each embedded categorical variable swaps its one raw-code channel for embedding_dim channels.
+        num_channels = self.num_input_channels[dataset_name] + self._categorical_extra_channels.get(dataset_name, 0)
+        return self.n_step_input * num_channels + self.node_attributes.attr_ndims[dataset_name]
+
+    def _build_categorical_embeddings(self, config: DictConfig | None, data_indices: dict) -> None:
+        """Build per-dataset embeddings for ``model.categorical_embeddings``.
+
+        Records, per dataset, the model-input positions of the categorical variables
+        (in config order) and of the remaining continuous variables.
+        """
+        self.categorical_embeddings = nn.ModuleDict()
+        self._categorical_extra_channels = {}
+        if not config:
+            return
+        if not self.supports_categorical_embeddings:
+            msg = f"model.categorical_embeddings is not supported by {type(self).__name__}."
+            raise NotImplementedError(msg)
+
+        for dataset_name, specs in config.items():
+            if dataset_name not in data_indices:
+                msg = f"model.categorical_embeddings: unknown dataset '{dataset_name}', expected one of {list(data_indices)}."
+                raise ValueError(msg)
+            if not specs:
+                continue
+            name_to_index = data_indices[dataset_name].model.input.name_to_index
+            missing = [name for name in specs if name not in name_to_index]
+            if missing:
+                msg = f"model.categorical_embeddings: {missing} are not model inputs of dataset '{dataset_name}'."
+                raise ValueError(msg)
+
+            embeddings = build_categorical_embeddings(specs)
+            categorical_idx = [name_to_index[name] for name in embeddings]
+            continuous_idx = [i for i in range(len(name_to_index)) if i not in set(categorical_idx)]
+            self.register_buffer(
+                f"_categorical_idx_{dataset_name}", torch.tensor(categorical_idx, dtype=torch.long), persistent=False
+            )
+            self.register_buffer(
+                f"_continuous_idx_{dataset_name}", torch.tensor(continuous_idx, dtype=torch.long), persistent=False
+            )
+            self.categorical_embeddings[dataset_name] = embeddings
+            self._categorical_extra_channels[dataset_name] = sum(e.embedding_dim - 1 for e in embeddings.values())
+            LOGGER.info(
+                "Dataset '%s': embedding categorical inputs %s",
+                dataset_name,
+                {name: (e.num_codes, e.embedding_dim, e.unknown_prob) for name, e in embeddings.items()},
+            )
+
+    def _embed_categorical_inputs(self, x: Tensor, dataset_name: str) -> Tensor:
+        """Replace categorical columns of ``x`` (..., vars) with their embeddings.
+
+        Continuous columns come first, in model-input order, then each embedding in
+        config order. Lookups run on the float32 input, before any autocast Linear.
+        """
+        embeddings = self.categorical_embeddings
+        if dataset_name not in embeddings:
+            return x
+        categorical_idx = getattr(self, f"_categorical_idx_{dataset_name}")
+        continuous_idx = getattr(self, f"_continuous_idx_{dataset_name}")
+        parts = [x.index_select(-1, continuous_idx)]
+        for i, embedding in enumerate(embeddings[dataset_name].values()):
+            parts.append(embedding(x[..., categorical_idx[i]]).to(dtype=x.dtype))
+        return torch.cat(parts, dim=-1)
+
     @staticmethod
     def _as_hidden_node_names(
         hidden_nodes_name: str | list[str] | ListConfig,
@@ -224,10 +296,6 @@ class BaseGraphModel(nn.Module):
             assert (
                 hidden_name in self._graph_data.node_types
             ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
-
-    def _calculate_input_dim(self, dataset_name: str) -> int:
-        """Calculate the encoder input dimension for a given dataset."""
-        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
