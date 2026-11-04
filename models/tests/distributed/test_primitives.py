@@ -211,6 +211,9 @@ def _test_reduce_rank(
 ) -> None:
     if dtype == torch.float32:
         base = torch.arange(torch.Size(shape).numel(), dtype=dtype, device=device).reshape(shape)
+    elif dtype == torch.float64:
+        # Values that float32 cannot hold exactly, so a sum done in float32 would not match.
+        base = torch.linspace(0, 1, torch.Size(shape).numel(), dtype=dtype, device=device).reshape(shape)
     else:
         # Keep low-precision values bounded: large arange values overflow float16
         # and are heavily quantized in bfloat16. Build in float32, then cast so
@@ -226,7 +229,7 @@ def _test_reduce_rank(
     rank_offsets = torch.arange(world_size, dtype=dtype, device=device).reshape(world_size, *([1] * base.ndim))
     inputs = base.unsqueeze(0) + rank_offsets
     if use_fp32:
-        expected = torch.sum(inputs.float(), dim=0).to(dtype)
+        expected = torch.sum(inputs.to(torch.promote_types(dtype, torch.float32)), dim=0).to(dtype)
     else:
         expected = torch.sum(inputs, dim=0)
 
@@ -240,6 +243,7 @@ def _test_reduce_rank(
 @pytest.mark.parametrize(
     ("shape", "dtype", "use_fp32"),
     [
+        pytest.param((1024, 1024), torch.float64, True, id="float64_fp32_path_keeps_precision_1m"),
         pytest.param((1024, 1024), torch.float32, True, id="float32_fp32_path_1m"),
         pytest.param((1024, 1024), torch.float32, False, id="float32_native_path_1m"),
         pytest.param((64, 128, 129), torch.float32, True, id="float32_fp32_path_3d_1m"),

@@ -243,7 +243,10 @@ def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup]
     input_format = get_memory_format(input_)
     if use_fp32:
         dtype = input_.dtype
-        inputf_ = input_.float().contiguous(memory_format=input_format)
+        # Sum in at least float32: half-precision inputs are raised to float32,
+        # float64 inputs keep their precision.
+        reduce_dtype = torch.promote_types(dtype, torch.float32)
+        inputf_ = input_.to(reduce_dtype).contiguous(memory_format=input_format)
         dist.all_reduce(inputf_, group=group)
         input_ = inputf_.to(dtype)
     else:
