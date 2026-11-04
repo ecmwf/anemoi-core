@@ -41,7 +41,7 @@ def _transport_model_stub() -> AnemoiTransportModelEncProcDec:
 
 def test_transport_conditioning_embedding_uses_compact_condition_width() -> None:
     model = _transport_model_stub()
-    model._graph_name_hidden = "hidden"
+    model.dataset2hidden = {"data": "hidden"}
     model.node_attributes = SimpleNamespace(num_nodes={"data": 4, "hidden": 5})
     cond_dim = 8
     model._embed_noise_conditioning = lambda sigma: torch.ones(

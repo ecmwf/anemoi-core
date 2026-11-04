@@ -71,8 +71,10 @@ class DefinedModels(str, Enum):
 class Model(BaseModel):
     target_: DefinedModels = Field(..., alias="_target_")
     "Model object defined in anemoi.models.model."
-    hidden_nodes_name: str | list[str] = Field(examples=["hidden", ["hidden1", "hidden2"]])
-    "Name of the hidden nodes. If the model is hierarchical, it can be a list of names for each level."
+    hidden_nodes_name: str | list[str] | dict[str, str] = Field(
+        examples=["hidden", ["hidden1", "hidden2"], {"dataset1": "hidden1", "dataset2": "hidden2"}]
+    )
+    "Name of the hidden nodes, per-dataset names, or names for each level of a hierarchical model."
     latent_skip: bool = Field(default=True)
     "Add skip connection in latent space before/after processor."
     convert_: str = Field("none", alias="_convert_")
@@ -245,6 +247,27 @@ class BaseModelSchema(PydanticBaseModel):
                 elif isinstance(data[field], DictConfig):
                     data[field] = OmegaConf.create({str(k): v for k, v in data[field].items()})
         return data
+
+    # Checked here rather than in HierarchicalModelSchema: a hierarchical config also validates as
+    # BaseModelSchema, so a check that only HierarchicalModelSchema runs would be skipped.
+    @model_validator(mode="after")
+    def validate_hidden_nodes_name(self) -> "BaseModelSchema":
+        hierarchical_models = {
+            DefinedModels.ANEMOI_MODEL_HIER_ENC_PROC_DEC,
+            DefinedModels.ANEMOI_MODEL_HIER_ENC_PROC_DEC_SHORT,
+        }
+        hidden_nodes_name = self.model.hidden_nodes_name
+        if self.model.target_ in hierarchical_models:
+            if not isinstance(hidden_nodes_name, list) or not hidden_nodes_name:
+                msg = "Hierarchical models need a non-empty list of hidden node names, one per level."
+                raise ValueError(msg)
+        elif isinstance(hidden_nodes_name, list):
+            msg = (
+                "Only hierarchical models take a list of hidden node names. "
+                "Use a single name, or a mapping from dataset to hidden node name."
+            )
+            raise ValueError(msg)
+        return self
 
 
 class NoOpNoiseInjectorSchema(BaseModel):
