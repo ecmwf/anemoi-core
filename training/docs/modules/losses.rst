@@ -108,9 +108,9 @@ scalers.
 Wavelet energy score
 ====================
 
-``WaveletEnergyScoreLoss`` asks for the right amount of structure at each
-scale, lined up the right way, around each point, without asking for the
-exact position of each crest. See ``WaveletEnergyScoreLoss`` and
+``WaveletEnergyScoreLoss`` rewards the right amount of structure at each
+scale around each point, lined up the right way, and tolerates small shifts
+in the position of each crest. See ``WaveletEnergyScoreLoss`` and
 ``RieszStructureTensor`` for how it is computed.
 
 -  The fields are split into dyadic wavelet scales in total wavenumber:

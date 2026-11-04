@@ -64,9 +64,10 @@ class WaveletEnergyScoreLoss(BaseLoss):
       the field for all of them, so the score stays proper.
 
     The loss is the energy score of v over the members at each point, added over the scales with their
-    weights, then scaled and reduced like the CRPS. It asks for the right amount of structure at each scale,
-    lined up the right way, but not for the exact position of each crest. The transforms need the whole grid:
-    on a sharded grid the fields are spread over the variables for the transforms and back afterwards.
+    weights, then scaled and reduced like the CRPS. It rewards the right amount of structure at each scale,
+    lined up the right way, and tolerates small shifts in the position of each crest. The transforms need the
+    whole grid: on a sharded grid the fields are spread over the variables for the transforms and back
+    afterwards.
 
     The finest scale lies mostly beyond the truncation; give it weight 0.
 
@@ -224,7 +225,7 @@ class WaveletEnergyScoreLoss(BaseLoss):
             if grid_shard_sizes is None or group is None:
                 msg = "WaveletEnergyScoreLoss on a sharded grid needs grid_shard_sizes and the process group."
                 raise ValueError(msg)
-            # Spread the fields over the variables instead of the grid, so each rank holds whole fields.
+            # Spread the fields over the variables, so each rank holds whole fields.
             grid_dim = TensorDim.GRID if grid_dim is None else grid_dim
             variable_shard_sizes = get_shard_sizes(y_pred, TensorDim.VARIABLE, group)
             y_pred, y_target = (
