@@ -76,6 +76,8 @@ now becomes:
 Each dataset is identified by a unique name, and all configuration that applies specifically to that dataset is defined within its block.
 
 
+.. _multi-dataset-reader-configuration:
+
 *********************************************
  Dataloader Dataset Reader Configuration
 *********************************************
