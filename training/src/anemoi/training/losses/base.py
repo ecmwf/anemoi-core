@@ -374,6 +374,11 @@ class BaseLoss(nn.Module, ABC):
         """Whether the loss needs explicit shard-layout metadata beyond grid_shard_slice/group."""
         return False
 
+    @property
+    def scores_across_time(self) -> bool:
+        """Whether one score spans several output steps, so the loss needs the whole time window."""
+        return False
+
     @abstractmethod
     def forward(
         self,
@@ -464,6 +469,11 @@ class BaseLossWrapper(BaseLoss):
     def needs_shard_layout_info(self) -> bool:
         """Delegate to the wrapped loss."""
         return getattr(self.loss, "needs_shard_layout_info", False)
+
+    @property
+    def scores_across_time(self) -> bool:
+        """Delegate to the wrapped loss."""
+        return self.loss.scores_across_time
 
     def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
         """Yield leaf losses from the wrapped loss."""

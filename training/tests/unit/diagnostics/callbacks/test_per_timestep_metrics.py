@@ -144,6 +144,9 @@ class TestPerTimestepMetrics:
 
         # Should be called TIME times (once per timestep)
         assert pl_module.calculate_val_metrics.call_count == TIME
+        # A single step leaves nothing for metrics that span output steps.
+        for call in pl_module.calculate_val_metrics.call_args_list:
+            assert call.kwargs["skip_metrics_across_time"] is True
 
     def test_logs_per_timestep_metrics(self, callback: PerTimestepMetrics) -> None:
         """Callback should log metrics for each timestep and variable group."""

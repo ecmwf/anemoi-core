@@ -26,6 +26,7 @@ from pydantic import field_validator
 from pydantic import model_validator
 
 from anemoi.models.schemas.schema_utils import DatasetDict
+from anemoi.training.utils.enums import EnergyScoreDimension
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
 
@@ -363,7 +364,7 @@ class GraphEnergyScoreLossSchema(GraphScoreLossSchema):
 class EnergyScoreLossSchema(EnsembleScoreLossSchema):
     target_: Literal["anemoi.training.losses.EnergyScoreLoss"] = Field(..., alias="_target_")
     fair: bool = True
-    norm_over: Literal["spatial", "variables", "spatial_and_variables"] = "spatial"
+    norm_over: list[EnergyScoreDimension] = Field(default=["grid"], min_length=1)
 
 
 class GraphVariogramScoreLossSchema(GraphScoreLossSchema):
