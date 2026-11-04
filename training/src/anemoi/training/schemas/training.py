@@ -275,6 +275,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     spectral_crps = "anemoi.training.losses.SpectralCRPSLoss"
     power_spectrum = "anemoi.training.losses.PowerSpectrumLoss"
     spectral_amse = "anemoi.training.losses.SpectralAMSELoss"
+    nan_aware_mse = "anemoi.training.losses.NaNAwareMSELoss"
 
 
 class CheckVariablesCompatibilitySchema(BaseModel):
@@ -609,6 +610,25 @@ class SpectralLossSchema(BaseLossSchema):
         extra = "allow"
 
 
+class GraphSmoothnessLossSchema(BaseLossSchema):
+    """Schema for GraphLaplacianSmoothnessLoss."""
+
+    target_: Literal["anemoi.training.losses.GraphLaplacianSmoothnessLoss"] = Field(..., alias="_target_")
+    "Graph Laplacian smoothness loss target."
+    ignore_nans: bool = True
+    "Allow nans; this penalty operates on predictions only and ignores target NaNs."
+    penalty_weight: float = 1.0
+    "Weight of the smoothness penalty."
+    graph_path: str | None = None
+    "Optional path to a saved graph .pt file; by default edges come from the training graph."
+    src_nodes_name: str | None = None
+    "Source node name in the graph; defaults to the dataset node name."
+    dst_nodes_name: str | None = None
+    "Destination node name in the graph; defaults to the dataset node name."
+    edge_index_path: str | None = None
+    "Optional path to a file containing an edge_index tensor."
+
+
 _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.combined.CombinedLoss": "combined",
     "anemoi.training.losses.MultiscaleLossWrapper": "multiscale",
@@ -624,6 +644,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.SpectralCRPSLoss": "spectral",
     "anemoi.training.losses.PowerSpectrumLoss": "spectral",
     "anemoi.training.losses.SpectralAMSELoss": "spectral",
+    "anemoi.training.losses.GraphLaplacianSmoothnessLoss": "graph_smoothness",
     "anemoi.training.losses.HuberLoss": "huber",
     "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
 }
@@ -658,6 +679,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
             | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
+            | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
             Discriminator(_loss_discriminator),
@@ -718,6 +740,7 @@ LossSchemas = Annotated[
     | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
     | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
+    | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),
