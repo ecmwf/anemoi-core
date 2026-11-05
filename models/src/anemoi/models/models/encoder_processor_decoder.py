@@ -132,7 +132,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 continue
 
             decoder_config = model_config.decoders[self.dataset2decoder[dataset_name]]
-            hidden_name = self.dataset2hidden[dataset_name]
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=(
                     self._graph_data if file_graph else self._graph_data[(self._graph_name_hidden, "to", dataset_name)]
