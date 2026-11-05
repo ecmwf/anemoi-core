@@ -37,8 +37,10 @@ from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.spectral_transforms import DCT2D
 from anemoi.models.layers.spectral_transforms import FFT2D
+from anemoi.models.layers.spectral_transforms import Cartesian2DTransform
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import ReducedSHT
+from anemoi.models.layers.spectral_transforms import RegularSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
@@ -96,6 +98,7 @@ class SpectralLoss(BaseLoss):
         self,
         transform: Literal[
             "fft2d",
+            "regular_sht",
             "reduced_sht",
             "octahedral_sht",
             "dct2d",
@@ -150,7 +153,7 @@ class SpectralLoss(BaseLoss):
         # subgrid selects a contiguous block of the grid before the transform. This only makes
         # sense for the Cartesian transforms (FFT2D/DCT2D); spherical harmonic transforms need the
         # whole domain to compute the spectra, so reject an explicit subgrid for them.
-        if subgrid is not None and transform in ("reduced_sht", "octahedral_sht"):
+        if subgrid is not None and transform in ("regular_sht", "reduced_sht", "octahedral_sht"):
             msg = (
                 f"subgrid is not supported for the '{transform}' transform: "
                 "spherical harmonic transforms require the full grid"
@@ -171,6 +174,9 @@ class SpectralLoss(BaseLoss):
         elif transform == "dct2d":
             LOGGER.info("Using DCT2D spectral transform in spectral loss.")
             self.transform = DCT2D(**kwargs)
+        elif transform == "regular_sht":
+            LOGGER.info("Using regular-grid SHT spectral transform in spectral loss.")
+            self.transform = RegularSHT(**kwargs)
         elif transform == "reduced_sht":
             # expected additional args: grid
             # optional args: truncation, use_graphed_rfft
@@ -332,12 +338,14 @@ class SpectralAMSELoss(SpectralLoss):
     The physical interpretation of :math:`L` and :math:`M` depends on the
     spectral transform:
 
-    - ``octahedral_sht`` / ``reduced_sht``: :math:`L` is the total wavenumber
+    - ``regular_sht`` / ``octahedral_sht`` / ``reduced_sht``: :math:`L` is the total wavenumber
       and :math:`M` is the zonal wavenumber, consistent with the original paper.
       The sum over :math:`M` gives per-total-wavenumber power spectra.
-    - ``fft2d`` / ``dct2d``: currently not supported. These transforms require
-      implementations of ``power_spectral_density()`` and
-      ``cross_spectral_density()`` compatible with the AMSE formulation.
+    - ``fft2d`` / ``dct2d``: the ``(ky, kx)`` spectral plane is binned into integer
+      radial-wavenumber bands :math:`L = \mathrm{round}(\sqrt{k_y^2 + k_x^2})`, and the
+      sum is taken over each band. :math:`L` is then the radial wavenumber; the per-band
+      terms have a slightly different physical meaning than under the SHT but the
+      formulation is unchanged. Patch-wise FFT2D (``patch_size`` set) is not supported.
     """
 
     def __init__(self, *args, eps: float = 1e-8, **kwargs) -> None:
@@ -349,6 +357,13 @@ class SpectralAMSELoss(SpectralLoss):
         assert hasattr(self.transform, "cross_spectral_density") and callable(
             self.transform.cross_spectral_density,
         ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a cross-spectrum method"
+        # Patch-wise FFT2D yields a per-patch (ky, kx) plane that breaks the per-L contract.
+        assert (
+            getattr(self.transform, "patch_size", None) is None
+        ), "SpectralAMSELoss does not support patch-wise FFT2D; set patch_size=None"
+        # AMSE uses the Cartesian PSD/CSD path, which needs the radial-band index.
+        if isinstance(self.transform, Cartesian2DTransform):
+            self.transform.register_radial_bands()
         self.eps = eps
 
     def forward(
@@ -439,6 +454,11 @@ class PowerSpectrumLoss(SpectralLoss):
     .. math::
         \mathcal{L} = \sum_l \bigl( \sum_m |\hat{F}_{lm}|^2
                                    - \sum_m |F_{lm}|^2 \bigr)^2 .
+
+    With the 2D Cartesian transforms (``fft2d``, ``dct2d``), the ``(ky, kx)`` plane is
+    binned into radial-wavenumber bands :math:`l = \mathrm{round}(\sqrt{k_y^2 + k_x^2})`
+    and the power is summed per band. Patch-wise FFT2D (``patch_size`` set) is not
+    supported.
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -446,6 +466,13 @@ class PowerSpectrumLoss(SpectralLoss):
         assert hasattr(self.transform, "power_spectral_density") and callable(
             self.transform.power_spectral_density,
         ), "spectral transform used in PowerSpectrumLoss must contain a power_spectral_density method"
+        # Patch-wise FFT2D yields a per-patch (ky, kx) plane that breaks the per-L contract.
+        assert (
+            getattr(self.transform, "patch_size", None) is None
+        ), "PowerSpectrumLoss does not support patch-wise FFT2D; set patch_size=None"
+        # The Cartesian PSD sums |coeff|^2 per radial band, which needs the band index.
+        if isinstance(self.transform, Cartesian2DTransform):
+            self.transform.register_radial_bands()
 
     def forward(
         self,
@@ -636,6 +663,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
     Works with:
       - FFT2D
       - DCT2D
+      - Regular SHT (Gaussian or equiangular latitudes)
       - Reduced SHT
       - Octahedral SHT
     """
@@ -645,6 +673,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         transform: Literal[
             "fft2d",
             "dct2d",
+            "regular_sht",
             "reduced_sht",
             "octahedral_sht",
         ] = "fft2d",

@@ -9,13 +9,41 @@
 
 """Tests for khop_edges: verifies fast path (dst-sorted) matches slow path."""
 
+from unittest.mock import Mock
+
 import pytest
 import torch
 
 from anemoi.models.distributed.khop_edges import _sort_edges_1hop_chunks_subgraph
 from anemoi.models.distributed.khop_edges import build_graph_partition
+from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
 from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+
+
+@pytest.mark.parametrize("src_splits", [None, [2, 3, 1], [0, 6, 0]])
+@pytest.mark.parametrize("sharded_edges", [False, True])
+def test_partition_preserves_source_ownership(src_splits: list[int] | None, sharded_edges: bool) -> None:
+    edge_index = torch.tensor([[5, 2, 4, 0, 1, 4, 3, 5], [0, 0, 1, 3, 4, 6, 7, 7]])
+    expected = build_graph_partition(edge_index, num_parts=3, num_nodes=(6, 8))
+    assert expected.src_splits is None
+    shard_info = BipartiteGraphShardInfo(
+        src_nodes=src_splits,
+        dst_nodes=expected.dst_splits,
+        edges=expected.edge_splits if sharded_edges else None,
+    )
+    local_edges = edge_index.split(expected.edge_splits, dim=1)[1] if sharded_edges else edge_index
+    x = (torch.empty(6 if src_splits is None else src_splits[1], 2), torch.empty(expected.dst_splits[1], 2))
+    group = Mock()
+    group.size.return_value = 3
+    actual = build_graph_partition_from_shard_info(local_edges, x, shard_info, group)
+    assert actual.src_splits == src_splits
+    assert actual.dst_splits == expected.dst_splits
+    assert actual.edge_splits == expected.edge_splits
+    assert actual.num_nodes == (6, 8)
+    assert actual.num_edges == edge_index.size(1)
+    assert actual.num_parts == 3
 
 
 def _make_random_graph(num_src: int, num_dst: int, num_edges: int, seed: int = 42) -> tuple:

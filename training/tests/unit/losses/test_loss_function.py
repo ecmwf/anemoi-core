@@ -12,11 +12,11 @@ import logging
 from types import SimpleNamespace
 
 import einops
-import hydra
 import numpy as np
 import pytest
 import torch
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pytest_mock import MockerFixture
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -36,6 +36,7 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.methods.base import resolve_subgrid
 from anemoi.training.utils.enums import TensorDim
 
 spectral_loss_kwargs: dict[type[BaseLoss], dict[str, object]] = {
@@ -50,9 +51,8 @@ losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSEL
 
 
 def _resolve_subgrid(cfg: dict, output_mask: SimpleNamespace | None = None) -> None:
-    mock_method = SimpleNamespace(output_mask={"data": output_mask})
-    multi_cfg = {"data": cfg}
-    BaseTrainingModule._resolve_subgrid(mock_method, multi_cfg)
+    multi_cfg = OmegaConf.create({"data": cfg})
+    resolve_subgrid(multi_cfg, {"data": output_mask})
     return multi_cfg["data"]
 
 
@@ -735,19 +735,94 @@ def test_sht_powerspectraldensity_loss(loss_target: str) -> None:
     with pytest.raises(AssertionError):
         _ = loss(pred_wrong, target_wrong, squash=True)
 
-    # fail for transform without power spectral density method (e.g. FFT2D)
-    with pytest.raises(hydra.errors.InstantiationException):
-        _ = get_loss_function(
-            DictConfig(
-                {
-                    "_target_": loss_target,
-                    "transform": "fft2d",
-                    "x_dim": 710,
-                    "y_dim": 640,
-                    "scalers": [],
-                },
-            ),
-        )
+
+@pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
+def test_amse_cartesian_transforms(transform: str) -> None:
+    """AMSE works with the 2D transforms via radial-wavenumber binning."""
+    nvars = 3
+    x_dim, y_dim = 8, 6
+    points = x_dim * y_dim
+
+    loss = _make_loss(
+        "anemoi.training.losses.spectral.SpectralAMSELoss",
+        transform=transform,
+        x_dim=x_dim,
+        y_dim=y_dim,
+    )
+
+    # shapes (squash False -> per-variable, squash True -> scalar)
+    pred = torch.zeros((2, 1, 1, points, nvars))
+    target = torch.zeros_like(pred)
+    _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
+
+    # AMSE(x, x) == 0 and AMSE >= 0 (fp64 to avoid the loss's known fp32 sqrt/square
+    # eps-rounding, which is transform-agnostic)
+    torch.manual_seed(0)
+    pred = torch.randn(2, 1, 1, points, nvars, dtype=torch.float64)
+    other = torch.randn(2, 1, 1, points, nvars, dtype=torch.float64)
+    assert abs(loss(pred, pred, squash=True).item()) < 1e-6
+    assert loss(pred, pred + other, squash=True).item() >= -1e-9
+
+    # the transform's spectral-density contract (Parseval partition, cross self-consistency)
+    # is covered for all transforms in models/tests/layers/test_spectral_density.py
+
+    # gradients flow back through the radial-binning path (index_add_); the existing
+    # backward tests cover the other spectral losses, not AMSE's binning
+    pred = pred.clone().requires_grad_(True)
+    loss(pred, target.double(), squash=True).backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+    # patch-wise FFT2D has no single (ky, kx) plane to bin, so AMSE must reject it
+    if transform == "fft2d":
+        with pytest.raises(AssertionError, match="does not support patch-wise FFT2D"):
+            SpectralAMSELoss(
+                transform="fft2d",
+                x_dim=x_dim,
+                y_dim=y_dim,
+                patch_size=[3, 4],
+            )
+
+
+@pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
+def test_powerspectrum_cartesian_transforms(transform: str) -> None:
+    """PSL works with the 2D transforms via radial-wavenumber binning."""
+    nvars = 3
+    x_dim, y_dim = 8, 6
+    points = x_dim * y_dim
+
+    loss = _make_loss(
+        "anemoi.training.losses.spectral.PowerSpectrumLoss",
+        transform=transform,
+        x_dim=x_dim,
+        y_dim=y_dim,
+    )
+
+    pred = torch.zeros((2, 1, 1, points, nvars))
+    target = torch.zeros_like(pred)
+    _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
+
+    # PSL(x, x) == 0, and the power spectrum is phase-blind: PSL(x, -x) == 0 too
+    torch.manual_seed(0)
+    pred = torch.randn(2, 1, 1, points, nvars, dtype=torch.float64)
+    assert abs(loss(pred, pred, squash=True).item()) < 1e-9
+    assert abs(loss(pred, -pred, squash=True).item()) < 1e-9
+
+    # gradients flow back through the radial-binning path (index_add_)
+    pred = pred.clone().requires_grad_(True)
+    loss(pred, target.double(), squash=True).backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+    # patch-wise FFT2D has no single (ky, kx) plane to bin, so PSL must reject it
+    if transform == "fft2d":
+        with pytest.raises(AssertionError, match="does not support patch-wise FFT2D"):
+            PowerSpectrumLoss(
+                transform="fft2d",
+                x_dim=x_dim,
+                y_dim=y_dim,
+                patch_size=[3, 4],
+            )
 
 
 @pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
@@ -927,6 +1002,51 @@ def test_spectral_loss_subgrid_actually_applied(subgrid: str | tuple) -> None:
     target = torch.randn(bs, 1, 1, n_total, nvars)
     result = loss(pred, target)
     assert result.numel() == 1
+
+
+def test_build_loss_configs_resolves_spectral_subgrid_through_module() -> None:
+    """``subgrid: output_mask`` must be resolved.
+
+    Test if this is indeed the case when a combined+spectral loss config
+    is processed through the training module's own config path.
+    """
+    training_loss = OmegaConf.create(
+        {
+            "datasets": {
+                "data": {
+                    "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                    "loss_weights": [0.5, 0.5],
+                    "ignore_nans": False,
+                    "losses": [
+                        {
+                            "_target_": "anemoi.training.losses.MSELoss",
+                            "scalers": ["node_weights"],
+                        },
+                        {
+                            "_target_": "anemoi.training.losses.FourierCorrelationLoss",
+                            "transform": "fft2d",
+                            "x_dim": 4,
+                            "y_dim": 2,
+                            "subgrid": "output_mask",
+                        },
+                    ],
+                },
+            },
+        },
+    )
+
+    mask_tuple = (0, 8)
+    mock_self = SimpleNamespace(
+        config=OmegaConf.create({"training": {"training_loss": training_loss}}),
+        output_mask={"data": SimpleNamespace(as_tuple=lambda: mask_tuple)},
+    )
+
+    loss_configs = BaseTrainingModule._build_loss_configs(mock_self)
+
+    sub_losses = loss_configs["data"]["losses"]
+
+    assert tuple(sub_losses[1]["subgrid"]) == mask_tuple
+    assert "subgrid" not in sub_losses[0]
 
 
 def test_spectral_loss_projection_wrong_output_size_raises(mocker: MockerFixture) -> None:
@@ -1113,24 +1233,34 @@ def test_spectral_crps_projection_from_existing_edges() -> None:
 @pytest.mark.parametrize(
     ("transform", "transform_kwargs"),
     [
+        pytest.param("regular_sht", {"nlat": 8, "nlon": 12}, id="regular-gaussian"),
+        pytest.param(
+            "regular_sht",
+            {"nlat": 8, "nlon": 12, "latitude_grid": "equiangular-poles"},
+            id="regular-equiangular-poles",
+        ),
         pytest.param("octahedral_sht", {"nlat": 8}, id="octahedral"),
         pytest.param("reduced_sht", {"grid": "n320", "truncation": 3}, id="reduced"),
     ],
 )
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_spectral_crps_sht_transforms(
     transform: str,
     transform_kwargs: dict[str, object],
     mocker: MockerFixture,
+    dtype: torch.dtype,
 ) -> None:
     ring_sizes = [20, 24, 28, 32, 32, 28, 24, 20]
+    if transform == "regular_sht":
+        ring_sizes = [transform_kwargs["nlon"]] * transform_kwargs["nlat"]
     if transform == "reduced_sht":
         # Use a small reduced grid while exercising the real ReducedSHT transform.
         latitudes = np.repeat(np.arange(len(ring_sizes)), ring_sizes)
         mocker.patch("anemoi.transform.grids.named.lookup", return_value={"latitudes": latitudes})
 
     nvars = 2
-    pred = torch.randn(2, 1, 4, sum(ring_sizes), nvars, requires_grad=True)
-    target = torch.randn(2, 1, 1, sum(ring_sizes), nvars)
+    pred = torch.randn(2, 1, 4, sum(ring_sizes), nvars, dtype=dtype, requires_grad=True)
+    target = torch.randn(2, 1, 1, sum(ring_sizes), nvars, dtype=dtype)
     loss = _make_loss(
         "anemoi.training.losses.spectral.SpectralCRPSLoss",
         transform=transform,
@@ -1176,3 +1306,27 @@ def test_mse_nans() -> None:
 
     out = loss(pred, target)
     assert torch.isnan(out).any(), "Expected nan loss with ignore_nans=False"
+
+
+@pytest.mark.parametrize("subgrid", [None, (0, 12)])
+def test_regular_sht_loss_schema_and_subgrid(subgrid: tuple[int, int] | None) -> None:
+    from anemoi.training.schemas.training import SpectralLossSchema
+
+    config = {
+        "_target_": "anemoi.training.losses.SpectralCRPSLoss",
+        "scalers": [],
+        "transform": "regular_sht",
+        "nlat": 8,
+        "nlon": 12,
+        "latitude_grid": "equiangular-poles",
+        "subgrid": subgrid,
+    }
+    if subgrid is None:
+        schema = SpectralLossSchema.model_validate(config)
+        assert schema.model_dump()["latitude_grid"] == "equiangular-poles"
+        assert schema.model_dump()["nlon"] == 12
+    else:
+        with pytest.raises(ValueError, match="require the full grid"):
+            SpectralLossSchema.model_validate(config)
+        with pytest.raises(ValueError, match="require the full grid"):
+            SpectralCRPSLoss(transform="regular_sht", nlat=8, nlon=12, subgrid=subgrid)

@@ -6,11 +6,7 @@ defaults:
 
 # another alternative if you don't have any callbacks is to remove it from the
 # defaults list and just use
-callbacks:
-  - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
-    rollout:
-    - ${task.validation_rollout}
-    every_n_batches: 4
+callbacks: []
 
 plot:
   callbacks:
@@ -88,6 +84,10 @@ checkpoint:
   every_n_train_steps:
     save_frequency: null # Does not scale with rollout
     num_models_saved: 0
+
+  # Hyperparameters not to store in the training checkpoint. Only 'graph_data' can be excluded.
+  # This makes `anemoi-training checkpoint inference` require the graph through its --graph flag.
+  exclude_hyperparameters: []
 
 enable_progress_bar: True
 progress_bar:

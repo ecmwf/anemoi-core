@@ -74,14 +74,27 @@ The following probabilistic loss functions are available by default:
    - ``stable``: materializes pairwise tensors and uses the numerically
      stable all-pairs formulation.
 -  ``EnergyScoreLoss``: Energy score with a configurable joint outcome.
-   Set ``norm_over`` to ``spatial`` for one spatial score per variable,
-   ``variables`` for one joint variable score per grid node, or
-   ``spatial_and_variables`` for one score over the complete field.
+   ``norm_over`` lists the dimensions that form one outcome, any non-empty
+   combination of ``time``, ``grid`` and ``variables``. For example,
+   ``[grid]`` gives one spatial score per variable and output step,
+   ``[variables]`` one joint variable score per grid node and output step,
+   ``[grid, variables]`` one score over the complete field at each output
+   step, ``[time]`` one score over the output steps per grid node and
+   variable, and ``[time, grid, variables]`` one score over all output steps
+   of one model call. Rollout steps are separate model calls, scored one by
+   one and then averaged, so ``time`` never spans them. Norms over ``time``
+   need at least two output steps, so they cannot be used inside
+   ``TimeAggregateLossWrapper`` and are left out of per-timestep validation
+   metrics.
    Scalers on dimensions included in ``norm_over`` define the weighted norm
    ``sqrt(sum(weight * difference**2))``. Other scalers multiply the completed
    score directly, so the same scaler can have a different effective strength
-   when ``norm_over`` changes. In ``variables`` mode, node weights are applied
-   after the norm and should normally sum to one, as for pointwise losses.
+   when ``norm_over`` changes. When ``grid`` is not in the norm, node weights
+   are applied after the norm and should normally sum to one, as for
+   pointwise losses. When ``time`` is in the norm, output-step weights act
+   inside it. With step weights that sum to one, an error that is the same
+   at every step gives the same score as scoring each step separately and
+   averaging.
 -  ``WeightedMSELoss``: MSE with noise-level weights for EDM diffusion
    transport models.
 
@@ -123,7 +136,7 @@ scalers.
              alpha: 0.95
            - _target_: anemoi.training.losses.EnergyScoreLoss
              fair: true
-             norm_over: spatial
+             norm_over: [grid]
 
 ********************************
  Selecting and Pairing Variables
@@ -161,8 +174,11 @@ also filters variable-dependent scalers to the selected predictions.
 
 For a ``CombinedLoss``, configure the variables on the child loss to which the
 selection applies. For a ``MultiscaleLossWrapper``, configure them on its
-``per_scale_loss``. Pairing differently named variables also enables the
-compatibility checks described in :ref:`variable-compatibility-checks`.
+``per_scale_loss``, and for a ``TimeAggregateLossWrapper`` on its ``loss_fn``.
+The variable selection is then applied around the whole wrapper, so the
+wrapper only smooths or aggregates the selected variables. Pairing differently
+named variables also enables the compatibility checks described in
+:ref:`variable-compatibility-checks`.
 
 ******************************
  Time Aggregate Loss Functions
@@ -413,7 +429,7 @@ low weight energy score anchor over the complete spatial field for each variable
                  row_normalize: true
              - _target_: anemoi.training.losses.EnergyScoreLoss
                fair: true
-               norm_over: spatial
+               norm_over: [grid]
                scalers: [pressure_level, general_variable, nan_mask_weights, node_weights, time_steps]
 
 Edge scores
@@ -462,7 +478,7 @@ Any ensemble score supported as ``per_scale_loss`` can be used within
            per_scale_loss:
              _target_: anemoi.training.losses.EnergyScoreLoss
              fair: true
-             norm_over: spatial_and_variables
+             norm_over: [grid, variables]
              scalers: [pressure_level, general_variable, nan_mask_weights, node_weights, time_steps]
 
 Example: multiscale CRPS with an edge CRPS for one variable
@@ -558,21 +574,48 @@ Supported transforms include:
   known ``x_dim`` and ``y_dim``.
 * ``DCT2D``: 2D Discrete Cosine Transform for regular 2D fields. This transform requires
   the optional dependency ``torch-dct``.
+* ``RegularSHT``: SHT on full longitude rings with Gaussian or equally spaced latitudes including both poles.
+  Select ``regular_sht`` and specify ``nlat``, optional ``nlon`` (defaults to ``2 * nlat``),
+  and ``latitude_grid`` (``legendre-gauss`` by default, or ``equiangular-poles``).
 * ``ReducedSHT``: Spherical harmonic transform (SHT) on ECMWF's traditional reduced Gaussian grid. This can handle the
   native grid of ERA5 such as N320.
 * ``OctahedralSHT``: Spherical harmonic transform (SHT) on the octahedral reduced Gaussian grid.
 
+For a global 1-degree grid (360 longitudes by 181 latitudes, retrieved via MARS), use:
+
+.. code-block:: yaml
+
+   transform: regular_sht
+   nlat: 181
+   nlon: 360
+   latitude_grid: equiangular-poles
+   truncation: 90
+
+Here ``equiangular-poles`` includes both poles, ordered north to south:
+90, 89, ..., -89, -90 degrees for 181 rows. Longitudes increase eastward from
+0 degrees in steps of ``360 / nlon``, with no duplicate 360-degree column.
+Flatten with longitude varying fastest. The equally spaced latitude transform
+uses `Clenshaw-Curtis quadrature <https://dlmf.nist.gov/3.5.iv>`_. To resolve
+all retained spherical harmonics, it requires ``2 * truncation < nlat`` and
+``2 * truncation < nlon``. Forward/inverse roundtrips recover fields restricted
+to those harmonics; higher frequencies are removed by truncation.
+
+``RegularSHT`` and ``InverseRegularSHT`` accept the same ``nlat``, ``nlon``,
+``latitude_grid`` and ``truncation`` arguments. The inverse consumes coefficients
+with shape ``[..., l, m]`` and returns ``[..., grid_points]``; move the variable
+axis ahead of ``l, m`` when passing the forward wrapper's output to the inverse.
+
 .. note::
 
-   SHT-based transforms expect a flattened reduced-grid ordering:
-   ``[batch, ensemble, grid_points, variables]`` and return spectral coefficients with
-   shape ``[batch, ensemble, l, m, variables]`` where ``l = truncation + 1``.
+   Forward SHT wrappers expect flattened grid points:
+   ``[batch, time, ensemble, grid_points, variables]`` and return spectral coefficients with
+   shape ``[batch, time, ensemble, l, m, variables]`` where ``l = truncation + 1``.
 
 .. note::
 
    ``ReducedSHT`` and ``OctahedralSHT`` both perform a spherical harmonic transform on a reduced Gaussian grid.
-   By default, a naive Fourier transform is performed in the meridional direction which is very inefficient when
-   executed on GPUs. Therefore an optimised version using graphs is provided, which can be switched on by setting
+   By default, longitude rings of equal length are transformed together using batched PyTorch FFTs
+   and explicit backward formulas. Optional CUDA graphs can be enabled by setting
    ``use_graphed_rfft=True`` in the section of the config file corresponding to your spectral loss. This can provide
    significant speedups, but may not be supported on all devices and can have higher memory usage.
 
@@ -583,7 +626,7 @@ Supported transforms include:
    that will restrict the grid to the region specified by the ``output_mask`` of LAM models.
 
    ``subgrid`` is only supported for the Cartesian transforms (``FFT2D`` / ``DCT2D``). Spherical harmonic
-   transforms (``ReducedSHT`` / ``OctahedralSHT``) compute the spectra over the whole domain and reject an
+   transforms (``RegularSHT`` / ``ReducedSHT`` / ``OctahedralSHT``) compute the spectra over the whole domain and reject an
    explicit ``subgrid``.
 
    For example, to restrict an ``FFT2D`` loss to the first 100 gridpoints (a tuple) or to the LAM output
@@ -735,6 +778,39 @@ Use this for global models on the reduced Gaussian grid (only N320 supported):
 Truncation is by default set to 319 for n320 grids, but can be set to a higher or lower value in the config file.
 This truncation parameter defines how many wave numbers are included in the spectral representation.
 
+.. _spectral-amse:
+
+Spectral AMSE
+=============
+
+``SpectralAMSELoss`` implements the Adjusted Mean Squared Error of Subich et al.
+(arXiv:2501.19374), which penalises per-wavenumber amplitude and phase-coherence
+errors. It works with every spectral transform: for the SHT family the wavenumber
+``L`` is the spherical-harmonic degree, while for ``fft2d`` and ``dct2d`` the
+``(ky, kx)`` plane is binned into radial wavenumber bands
+``L = round(sqrt(ky**2 + kx**2))``. This makes it usable on regular and
+limited-area grids; note that patch-wise ``fft2d`` (``patch_size`` set) is not
+supported.
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.spectral.SpectralAMSELoss
+         transform: fft2d
+         x_dim: 256
+         y_dim: 128
+
+With ``fft2d`` and ``dct2d`` the loss has one entry per radial band, so the
+:class:`~anemoi.training.losses.scalers.SpectralDimensionScaler` (see
+:ref:`spectral-loss-scalers`) must be sized to the number of bands:
+
+- ``fft2d``: ``round(sqrt((y_dim // 2)**2 + (x_dim // 2)**2)) + 1``
+  (144 for the example above)
+- ``dct2d``: ``round(sqrt((y_dim - 1)**2 + (x_dim - 1)**2)) + 1``
+  (286 for the example above)
+
 Power Spectrum Loss
 ===================
 
@@ -754,9 +830,12 @@ wavenumber :math:`m`, the loss is
                               - \sum_m |F_{lm}|^2 \Bigr)^{2}.
 
 The chosen spectral transform must provide a ``power_spectral_density``
-method, so ``PowerSpectrumLoss`` currently supports the SHT-based
-transforms (``reduced_sht``, ``octahedral_sht``). For these,
-:math:`l` is the total wavenumber and :math:`m` the zonal wavenumber.
+method: the SHT-based transforms (``regular_sht``, ``reduced_sht``,
+``octahedral_sht``), where :math:`l` is the total wavenumber and :math:`m`
+the zonal wavenumber, and the 2D Cartesian transforms (``fft2d``, ``dct2d``),
+whose ``(ky, kx)`` plane is binned into radial wavenumber bands
+:math:`l = \mathrm{round}(\sqrt{k_y^2 + k_x^2})`. Patch-wise ``fft2d``
+(``patch_size`` set) is not supported.
 
 .. note::
 
@@ -764,6 +843,9 @@ transforms (``reduced_sht``, ``octahedral_sht``). For these,
    on the grid dimension must be a
    :class:`~anemoi.training.losses.scalers.SpectralDimensionScaler` (sized to
    the spectral dimension), not a spatial weight such as ``node_weights``.
+   For the SHT family the spectral dimension is ``truncation + 1``; for
+   ``fft2d`` and ``dct2d`` it is the number of radial bands, see the formulas
+   under :ref:`spectral-amse`.
 
 Example configuration (octahedral SHT)
 --------------------------------------
@@ -959,6 +1041,8 @@ and an error will be raised.
 If multiple groups are defined for a variable, the first group in the
 `variable_groups` is used. If the variable is not in any group, it is
 assigned to the default group.
+
+.. _spectral-loss-scalers:
 
 Spectral Loss Scalers
 =====================

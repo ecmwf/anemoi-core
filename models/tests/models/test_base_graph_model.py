@@ -9,12 +9,14 @@
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 import anemoi.models.models.base as base_model_module
+from anemoi.models.models import AnemoiModelEncProcDecHierarchical
 from anemoi.models.models.base import BaseGraphModel
 
 
@@ -30,6 +32,10 @@ class DummyGraphModel(BaseGraphModel):
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError
+
+
+class DummyHierarchicalGraphModel(DummyGraphModel):
+    _build_hidden_node_routing = AnemoiModelEncProcDecHierarchical._build_hidden_node_routing
 
 
 class _IndexGroup(SimpleNamespace):
@@ -76,34 +82,32 @@ def _make_hierarchical_graph() -> HeteroData:
 def test_base_graph_model_builds_with_omegaconf_config() -> None:
     model_config = OmegaConf.create(
         {
-            "model": {
-                "node_trainable_parameters": {
-                    "data": 0,
-                    "hidden": 0,
-                },
-                "model": {
-                    "hidden_nodes_name": "hidden",
-                    "latent_skip": False,
-                },
-                "encoders": {
-                    0: {
-                        "source_datasets": ["data"],
-                        "dataset_fusing_strategy": "not_supported",
-                        "mapper": {},
-                    },
-                },
-                "decoders": {
-                    0: {
-                        "target_datasets": ["data"],
-                        "target_node_features": ["coordinates"],
-                        "mapper": {},
-                    },
-                },
-                "residual": {
-                    "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
-                },
-                "bounding": {"datasets": {"data": []}},
+            "node_trainable_parameters": {
+                "data": 0,
+                "hidden": 0,
             },
+            "model": {
+                "hidden_nodes_name": "hidden",
+                "latent_skip": False,
+            },
+            "encoders": {
+                0: {
+                    "source_datasets": ["data"],
+                    "dataset_fusing_strategy": "not_supported",
+                    "mapper": {},
+                },
+            },
+            "decoders": {
+                0: {
+                    "target_datasets": ["data"],
+                    "target_node_features": ["coordinates"],
+                    "mapper": {},
+                },
+            },
+            "residual": {
+                "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
+            },
+            "bounding": {"datasets": {"data": []}},
         },
     )
 
@@ -120,42 +124,40 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
     assert "data" in model.residual
 
 
-def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
+def test_hierarchical_routing_accepts_omegaconf_hidden_node_lists() -> None:
     model_config = OmegaConf.create(
         {
-            "model": {
-                "num_channels": 8,
-                "node_trainable_parameters": {
-                    "data": 0,
-                    "hidden": 0,
-                },
-                "model": {
-                    "hidden_nodes_name": ["hidden_1", "hidden_2", "hidden_3"],
-                    "latent_skip": False,
-                },
-                "encoders": {
-                    0: {
-                        "source_datasets": ["data"],
-                        "dataset_fusing_strategy": "not_supported",
-                        "mapper": {},
-                    },
-                },
-                "decoders": {
-                    0: {
-                        "target_datasets": ["data"],
-                        "target_node_features": ["coordinates"],
-                        "mapper": {},
-                    },
-                },
-                "residual": {
-                    "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
-                },
-                "bounding": {"datasets": {"data": []}},
+            "num_channels": 8,
+            "node_trainable_parameters": {
+                "data": 0,
+                "hidden": 0,
             },
+            "model": {
+                "hidden_nodes_name": ["hidden_1", "hidden_2", "hidden_3"],
+                "latent_skip": False,
+            },
+            "encoders": {
+                0: {
+                    "source_datasets": ["data"],
+                    "dataset_fusing_strategy": "not_supported",
+                    "mapper": {},
+                },
+            },
+            "decoders": {
+                0: {
+                    "target_datasets": ["data"],
+                    "target_node_features": ["coordinates"],
+                    "mapper": {},
+                },
+            },
+            "residual": {
+                "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
+            },
+            "bounding": {"datasets": {"data": []}},
         },
     )
 
-    model = DummyGraphModel(
+    model = DummyHierarchicalGraphModel(
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
@@ -164,7 +166,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
         graph_data=_make_hierarchical_graph(),
     )
 
-    assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
+    assert model.hidden_levels == ["hidden_1", "hidden_2", "hidden_3"]
     assert model.node_attributes.num_nodes["hidden_3"] == 1
 
 
@@ -177,29 +179,27 @@ def _make_minimal_model():
     """Return a DummyGraphModel with a working predict_step."""
     model_config = OmegaConf.create(
         {
-            "model": {
-                "num_channels": 8,
-                "node_trainable_parameters": {"data": 0, "hidden": 0},
-                "model": {"hidden_nodes_name": "hidden", "latent_skip": False},
-                "encoders": {
-                    0: {
-                        "source_datasets": ["data"],
-                        "dataset_fusing_strategy": "not_supported",
-                        "mapper": {},
-                    },
+            "num_channels": 8,
+            "node_trainable_parameters": {"data": 0, "hidden": 0},
+            "model": {"hidden_nodes_name": "hidden", "latent_skip": False},
+            "encoders": {
+                0: {
+                    "source_datasets": ["data"],
+                    "dataset_fusing_strategy": "not_supported",
+                    "mapper": {},
                 },
-                "decoders": {
-                    0: {
-                        "target_datasets": ["data"],
-                        "target_node_features": ["coordinates"],
-                        "mapper": {},
-                    },
-                },
-                "residual": {
-                    "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
-                },
-                "bounding": {"datasets": {"data": []}},
             },
+            "decoders": {
+                0: {
+                    "target_datasets": ["data"],
+                    "target_node_features": ["coordinates"],
+                    "mapper": {},
+                },
+            },
+            "residual": {
+                "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
+            },
+            "bounding": {"datasets": {"data": []}},
         }
     )
     return DummyGraphModel(
@@ -210,6 +210,72 @@ def _make_minimal_model():
         n_step_output=1,
         graph_data=_make_graph(),
     )
+
+
+def _route_hidden_nodes(hidden_nodes_name, dataset_names=("a", "b"), model_class=BaseGraphModel) -> SimpleNamespace:
+    """Run the hidden-node routing on a bare namespace, without building a model."""
+    model = SimpleNamespace(dataset_names=list(dataset_names))
+    model_class._build_hidden_node_routing(model, hidden_nodes_name)
+    return model
+
+
+def test_hidden_node_routing_string_applies_to_all_datasets() -> None:
+    model = _route_hidden_nodes("hidden")
+
+    assert model.dataset2hidden == {"a": "hidden", "b": "hidden"}
+    assert model.hidden_names == ["hidden"]
+
+
+@pytest.mark.parametrize("as_omegaconf", [False, True])
+def test_hidden_node_routing_mapping_keeps_order_and_deduplicates(as_omegaconf) -> None:
+    mapping = {"a": "hidden_1", "b": "hidden_2", "c": "hidden_1"}
+    model = _route_hidden_nodes(OmegaConf.create(mapping) if as_omegaconf else mapping, ("a", "b", "c"))
+
+    assert model.dataset2hidden == mapping
+    assert model.hidden_names == ["hidden_1", "hidden_2"]
+
+
+@pytest.mark.parametrize("as_omegaconf", [False, True])
+def test_hierarchical_routing_encodes_every_dataset_into_the_first_level(as_omegaconf) -> None:
+    levels = ["hidden_1", "hidden_2"]
+    model = _route_hidden_nodes(
+        OmegaConf.create(levels) if as_omegaconf else levels,
+        model_class=AnemoiModelEncProcDecHierarchical,
+    )
+
+    assert model.hidden_levels == levels
+    assert model.dataset2hidden == {"a": "hidden_1", "b": "hidden_1"}
+    assert model.hidden_names == levels
+
+
+def test_hidden_node_routing_rejects_mapping_missing_a_dataset() -> None:
+    with pytest.raises(AssertionError, match=r"missing for datasets \['b'\]"):
+        _route_hidden_nodes({"a": "hidden"})
+
+
+def test_hidden_node_routing_rejects_mapping_with_unknown_dataset() -> None:
+    with pytest.raises(AssertionError, match=r"unknown datasets \['c'\]"):
+        _route_hidden_nodes({"a": "hidden", "b": "hidden", "c": "hidden"})
+
+
+def test_hidden_node_routing_rejects_unsupported_type() -> None:
+    with pytest.raises(TypeError, match="Hidden nodes name must be"):
+        _route_hidden_nodes(3)
+
+
+def test_active_hidden_name_for_datasets_sharing_a_mesh() -> None:
+    model = _route_hidden_nodes({"a": "hidden_1", "b": "hidden_2", "c": "hidden_1"}, ("a", "b", "c"))
+
+    assert BaseGraphModel._get_active_hidden_name(model, ["a"]) == "hidden_1"
+    assert BaseGraphModel._get_active_hidden_name(model, ["a", "c"]) == "hidden_1"
+    assert BaseGraphModel._get_active_hidden_name(model, ["b"]) == "hidden_2"
+
+
+def test_active_hidden_name_rejects_batch_mixing_meshes() -> None:
+    model = _route_hidden_nodes({"a": "hidden_1", "b": "hidden_2"})
+
+    with pytest.raises(ValueError, match="same hidden mesh"):
+        BaseGraphModel._get_active_hidden_name(model, ["a", "b"])
 
 
 def _identity_pre_processor():
@@ -293,3 +359,19 @@ def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
     )
 
     assert out["data"].shape[-2] == 2
+
+
+def test_predict_step_skips_input_only_datasets(monkeypatch):
+    """Datasets without a decoder (input-only) have no output and must not be post-processed."""
+    model = _make_minimal_model()
+
+    # `forcing` feeds an encoder but has no decoder, so forward only returns `data`
+    monkeypatch.setattr(model, "forward", lambda x, **kw: {"data": x["data"][:, -1:] + 1.0})
+
+    processors = {"data": _identity_pre_processor(), "forcing": _identity_pre_processor()}
+    batch = {"data": torch.zeros(1, 1, 4, 1), "forcing": torch.zeros(1, 1, 4, 2)}  # (batch, time, grid, vars)
+
+    out = model.predict_step(batch, pre_processors=processors, post_processors=processors, n_step_input=1)
+
+    assert set(out) == {"data"}
+    assert torch.equal(out["data"], torch.ones(1, 1, 1, 4, 1))

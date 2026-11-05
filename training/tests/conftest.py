@@ -20,7 +20,6 @@ mpl.use("Agg")
 # file store. Set before any test code imports mlflow.
 os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
 
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -28,27 +27,6 @@ import pytest
 from _pytest.fixtures import SubRequest
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
-
-
-def _get_config_path() -> str:
-    """Get the config path relative to the project root, working from any directory."""
-    # Find the config directory by looking for src/anemoi/training/config
-    # This works whether running from training/ or training/tests/
-    current = Path.cwd()
-
-    # Try from current directory first (running from training/)
-    config_path = current / "src" / "anemoi" / "training" / "config"
-    if config_path.exists():
-        return str(config_path)
-
-    # Try from parent directory (running from training/tests/)
-    config_path = current.parent / "src" / "anemoi" / "training" / "config"
-    if config_path.exists():
-        return str(config_path)
-
-    # Fallback: use relative path from tests/ directory
-    return "../src/anemoi/training/config"
-
 
 pytest_plugins = "anemoi.utils.testing"
 
@@ -61,11 +39,10 @@ PYTEST_MARKED_TESTS = [
 @pytest.fixture
 def config(request: SubRequest) -> DictConfig:
     from hydra import compose
-    from hydra import initialize
+    from hydra import initialize_config_module
 
     overrides = request.param
-    config_path = _get_config_path()
-    with initialize(version_base=None, config_path=config_path):
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config"):
         # config is relative to a module
         return compose(config_name="debug", overrides=overrides)
 
@@ -74,12 +51,11 @@ def config(request: SubRequest) -> DictConfig:
 def datamodule():  # noqa: ANN201
     """Lazy-load AnemoiDatasetsDataModule to avoid expensive import at test collection time."""
     from hydra import compose
-    from hydra import initialize
+    from hydra import initialize_config_module
 
     from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
-    config_path = _get_config_path()
-    with initialize(version_base=None, config_path=config_path):
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config"):
         # config is relative to a module
         cfg = compose(config_name="config")
     return AnemoiDatasetsDataModule(cfg)
@@ -122,15 +98,26 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="MLFlow server for tests requiring MLFlow (only if --mlflow is set)",
     )
+    parser.addoption(
+        "--accuracy-reference-id",
+        dest="accuracy_reference_id",
+        default="",
+        help="MLflow run ID to compare the accuracy test against (empty: use the hard-coded reference)",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    # Fail at startup rather than hours into the run: an unset MLFLOW_TEST_URL in CI
+    # expands to an empty --mlflow-server, which only surfaces as an opaque
+    # "URL must be provided if authentication is enabled." once an MLFlow test is reached.
+    if config.getoption("mlflow") and not config.getoption("mlflow_server"):
+        msg = "MLFlow server must be provided via --mlflow-server when using --mlflow"
+        raise pytest.UsageError(msg)
 
 
 @pytest.fixture
 def mlflow_server(pytestconfig: Any) -> str:
-    mlflow_server = pytestconfig.getoption("mlflow_server")
-    if pytestconfig.getoption("mlflow") and mlflow_server is None:
-        e = ValueError("MLFlow server must be provided via --mlflow-server when using --mlflow")
-        raise e
-    return mlflow_server
+    return pytestconfig.getoption("mlflow_server")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

@@ -42,8 +42,9 @@ class ForecasterSchema(BaseModel):
     "Timestep string (e.g. '6H') defining the frequency of the input and output steps."
     rollout: RolloutSchema = Field(...)
     "Rollout configuration for autoregressive training."
-    validation_rollout: NonNegativeInt | None = Field(default=None, example=[None, 6, 12])
-    "Number of rollouts to use for validation. If unset, validation uses the training rollout."
+    validation_rollout: PositiveInt | None = Field(default=None, example=[None, 6, 12])
+    "Minimum number of rollout steps unrolled in validation; the training rollout is always unrolled. "
+    "The val loss is averaged over the training rollout only."
 
 
 class OffsetForecasterSchema(BaseModel):
@@ -59,8 +60,9 @@ class OffsetForecasterSchema(BaseModel):
     "Time shift applied to the offsets between rollout steps. 'default' infers the largest valid shift."
     rollout: RolloutSchema = Field(...)
     "Rollout configuration for autoregressive training."
-    validation_rollout: NonNegativeInt | None = Field(default=None, example=[None, 6, 12])
-    "Number of rollouts to use for validation. If unset, validation uses the training rollout."
+    validation_rollout: PositiveInt | None = Field(default=None, example=[None, 6, 12])
+    "Minimum number of rollout steps unrolled in validation; the training rollout is always unrolled. "
+    "The val loss is averaged over the training rollout only."
 
 
 class AutoencoderTaskSchema(BaseModel):

@@ -16,7 +16,7 @@ parameter freezing, LoRA adapter injection, and quantisation.
 
 ``ModelModifier`` is a thin intermediate ABC over
 :class:`~anemoi.training.checkpoint.base.PipelineStage`. Its name is
-the contract the frozen ``ComponentCatalog`` uses to find concrete
+the contract ``ComponentCatalog`` uses to find concrete
 modifier classes: catalog discovery looks for any class in
 ``anemoi.training.checkpoint.modifiers`` whose MRO contains a base
 named ``ModelModifier``.
@@ -45,14 +45,14 @@ class ModelModifier(PipelineStage):
     Examples
     --------
     >>> class FreezingModifierStage(ModelModifier):
-    ...     async def process(self, context: CheckpointContext) -> CheckpointContext:
+    ...     def process(self, context: CheckpointContext) -> CheckpointContext:
     ...         for param in context.model.parameters():
     ...             param.requires_grad = False
     ...         return context
     """
 
     @abstractmethod
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Apply the modification to ``context.model``.
 
         Parameters

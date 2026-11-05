@@ -40,8 +40,8 @@ def init():
     hidden_dim: int = 256
     num_heads: int = 4
     window_size: int = None
-    dropout_p: float = (0.0,)
-    qk_norm: bool = (False,)
+    dropout_p: float = 0.0
+    qk_norm: bool = False
     attention_implementation: str = "scaled_dot_product_attention"
     layer_kernels = load_layer_kernels()
     return (
@@ -89,6 +89,19 @@ def test_TransformerMapperBlock_init(mapper_block):
     assert isinstance(block.layer_norm_mlp, nn.LayerNorm)
     assert isinstance(block.mlp, MLP)
     assert isinstance(block.attention, MultiHeadCrossAttention)
+
+
+def test_TransformerMapperBlock_all_parameters_receive_gradients(mapper_block):
+    num_src_nodes, num_dst_nodes = 3, 5
+    num_channels = mapper_block.layer_norm_mlp.normalized_shape[0]
+    x = (torch.randn(num_src_nodes, num_channels), torch.randn(num_dst_nodes, num_channels))
+    shard_info = BipartiteGraphShardInfo(src_nodes=[num_src_nodes], dst_nodes=[num_dst_nodes])
+
+    (_, x_dst), _ = mapper_block(x, shard_info, batch_size=1)
+    x_dst.sum().backward()
+
+    no_grad = [name for name, param in mapper_block.named_parameters() if param.grad is None]
+    assert not no_grad, f"parameters not used in the forward pass: {no_grad}"
 
 
 @given(

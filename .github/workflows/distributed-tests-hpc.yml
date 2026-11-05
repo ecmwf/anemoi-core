@@ -1,0 +1,43 @@
+name: distributed-tests-hpc
+
+on:
+  workflow_dispatch:
+
+jobs:
+  distributed-tests:
+    runs-on: hpc
+    timeout-minutes: 60
+    steps:
+      - uses: ecmwf/reusable-workflows/ci-hpc-generic@v2
+        with:
+          template: |
+            env | grep SLURM # helps with debugging
+            set -eux
+            module load python3/3.12.9-01
+            REPO_NAME=anemoi-core
+            REPO_BRANCH=${{ github.head_ref || github.ref_name }}
+            cd $TMPDIR
+            git clone -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
+            cd $REPO_NAME
+            python3 -m venv .venv
+            source .venv/bin/activate
+            python3 -m pip install "pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+            pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
+
+            python3 -m pytest -q models/tests/distributed \
+              --distributed \
+              --distributed-backend=all \
+              --distributed-world-size=4
+
+            deactivate
+            rm -rf $REPO_NAME
+          sbatch_options: |
+            #SBATCH --job-name=anemoi_core_distributed_pytest
+            #SBATCH --nodes=1
+            #SBATCH --ntasks=1
+            #SBATCH --cpus-per-task=4
+            #SBATCH --gpus-per-node=4
+            #SBATCH --time=00:30:00
+            #SBATCH --qos=ng
+            #SBATCH --mem=64G
+          troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}

@@ -24,7 +24,7 @@ def migrator() -> Migrator:
     -------
     A Migrator instance
     """
-    return Migrator.from_path(Path(__file__).parent / "migrations", "migrations")
+    return Migrator.from_path(Path(__file__).parent / "migrations", "tests.migrations.migrations")
 
 
 @pytest.fixture(scope="module")

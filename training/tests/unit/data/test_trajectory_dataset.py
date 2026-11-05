@@ -14,6 +14,7 @@ from typing import ClassVar
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 import torch
 
 from anemoi.training.data.data_reader import TrajectoryDataset
@@ -37,6 +38,7 @@ class FakeTrajectoriesDataset:
     ):
         self._shape = (num_inits, variables, ensemble, steps, gridpoints)
         self._data = np.random.default_rng(42).standard_normal(self._shape).astype(np.float32)
+        self.read_keys: list = []
         self._step_frequency = step_frequency or datetime.timedelta(hours=1)
         self._missing: set[int] = missing or set()
 
@@ -81,9 +83,10 @@ class FakeTrajectoriesDataset:
     def statistics(self) -> dict:
         return {"mean": np.zeros(self._shape[1]), "stdev": np.ones(self._shape[1])}
 
-    def __getitem__(self, n: int) -> np.ndarray:
-        """Return (variables, ensemble, steps, gridpoints) for a scalar init index."""
-        return self._data[n]
+    def __getitem__(self, key: int | tuple) -> np.ndarray:
+        """Return (variables, ensemble, steps, gridpoints) for a scalar init index, or index with a tuple."""
+        self.read_keys.append(key)
+        return self._data[key]
 
 
 def _make_trajectory_dataset(
@@ -229,6 +232,43 @@ class TestTrajectoryDatasetGetSample:
         ds = _make_trajectory_dataset(variables=3, ensemble=2, steps=24, gridpoints=10)
         sample = ds.get_sample(sequence=0, positions=[0, 1], grid_shard_indices=None)
         assert sample.shape == (2, 2, 10, 3)
+
+    @pytest.mark.parametrize(
+        ("positions", "step_slice", "steps"),
+        [
+            pytest.param([5, 6, 7, 8], slice(5, 9, 1), [5, 6, 7, 8], id="contiguous"),
+            pytest.param([0, 6, 12], slice(0, 18, 6), [0, 6, 12], id="strided"),
+            pytest.param(slice(2, 5), slice(2, 5, 1), [2, 3, 4], id="slice-input"),
+        ],
+    )
+    def test_evenly_spaced_positions_read_only_those_steps(
+        self,
+        positions: list[int] | slice,
+        step_slice: slice,
+        steps: list[int],
+    ) -> None:
+        """Evenly spaced steps are read with one step slice, not by loading the whole forecast."""
+        ds = _make_trajectory_dataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10)
+        sample = ds.get_sample(sequence=1, positions=positions, grid_shard_indices=None)
+
+        assert ds.data.read_keys == [(1, slice(None), slice(None), step_slice, slice(None))]
+        expected = np.transpose(ds.data._data[1][:, :, steps, :], (2, 1, 3, 0))
+        np.testing.assert_array_equal(sample.numpy(), expected)
+
+    @pytest.mark.parametrize(
+        ("positions", "steps"),
+        [
+            pytest.param([0, 6, 13], [0, 6, 13], id="irregular"),
+            pytest.param(slice(5, 1, -2), [5, 3], id="reversed-slice"),
+        ],
+    )
+    def test_irregular_positions_fall_back_to_full_read(self, positions: list[int] | slice, steps: list[int]) -> None:
+        ds = _make_trajectory_dataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10)
+        sample = ds.get_sample(sequence=2, positions=positions, grid_shard_indices=None)
+
+        assert ds.data.read_keys == [2]
+        expected = np.transpose(ds.data._data[2][:, :, steps, :], (2, 1, 3, 0))
+        np.testing.assert_array_equal(sample.numpy(), expected)
 
 
 # ---------------------------------------------------------------------------
