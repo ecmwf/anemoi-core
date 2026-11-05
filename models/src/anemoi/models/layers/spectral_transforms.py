@@ -48,6 +48,10 @@ class SpectralTransform(torch.nn.Module):
             `[batch, ensemble, y_freq, x_freq, variables]`.
         """
 
+    def weight_modes(self, scores: torch.Tensor, mode_dim: int) -> torch.Tensor:
+        """Return ``scores`` unchanged, as every stored mode is a single coefficient."""
+        return scores
+
 
 class FFT2D(SpectralTransform):
     """2D Fast Fourier Transform (FFT) implementation."""
@@ -213,17 +217,41 @@ class DCT2D(SpectralTransform):
 
 
 class SHT(SpectralTransform):
-    """Spherical Harmonic Transform (SHT) baseclass."""
+    """Spherical Harmonic Transform (SHT) baseclass.
+
+    Coefficients are returned on an ``(L, M)`` array for m >= 0 only, and entries with m > l are
+    zero. For a real field the coefficients at -m are the complex conjugates of those at m, so
+    scores and spectra count m > 0 twice and ignore m > l (see
+    ``SphericalHarmonicTransform.mode_weights``).
+    """
+
+    _sht: SphericalHarmonicTransform
+
+    def weight_modes(self, scores: torch.Tensor, mode_dim: int) -> torch.Tensor:
+        """Count m > 0 scores twice and drop m > l. ``mode_dim`` holds the flattened ``(L, M)`` entries."""
+        shape = [1] * scores.ndim
+        shape[mode_dim] = -1
+        return scores * self._sht.mode_weights.flatten().to(dtype=scores.dtype).view(shape)
+
+    def _mode_weights_for(self, spectral_coeffs: torch.Tensor) -> torch.Tensor:
+        """Return ``mode_weights`` shaped to multiply ``[..., L, M, variables]`` coefficients."""
+        return self._sht.mode_weights.to(dtype=spectral_coeffs.real.dtype).unsqueeze(-1)
 
     def power_spectral_density(self, spectral_coeffs: torch.Tensor) -> torch.Tensor:
-        """Return per-L power spectral density: sum over M of |coeff|^2."""
-        return (spectral_coeffs.real**2 + spectral_coeffs.imag**2).sum(dim=-2)
+        """Return the power per total wavenumber, summed over m = -l..l.
+
+        Input is ``[..., L, M, variables]``, output is ``[..., L, variables]``.
+        """
+        power = spectral_coeffs.real**2 + spectral_coeffs.imag**2
+        return (power * self._mode_weights_for(spectral_coeffs)).sum(dim=-2)
 
     def cross_spectral_density(self, spectral_coeffs_a: torch.Tensor, spectral_coeffs_b: torch.Tensor) -> torch.Tensor:
-        """Return per-L cross-spectral density."""
-        return (spectral_coeffs_a.real * spectral_coeffs_b.real + spectral_coeffs_a.imag * spectral_coeffs_b.imag).sum(
-            dim=-2
-        )
+        """Return the real part of the cross-spectrum per total wavenumber, summed over m = -l..l.
+
+        Input is ``[..., L, M, variables]``, output is ``[..., L, variables]``.
+        """
+        cross = spectral_coeffs_a.real * spectral_coeffs_b.real + spectral_coeffs_a.imag * spectral_coeffs_b.imag
+        return (cross * self._mode_weights_for(spectral_coeffs_a)).sum(dim=-2)
 
 
 class RegularSHT(SHT):
