@@ -96,27 +96,3 @@ YAML configuration:
          edge_builders:
          -  _target_: anemoi.graphs.edges.ReversedCutOffEdges
             cutoff_factor: 0.6
-
-*************************
- Random-sampled cut-off
-*************************
-
-When more than ``max_num_neighbours`` source nodes are within the
-radius, ``CutOffEdges`` keeps a random subset with pyg-lib and the
-nearest ones with sklearn. ``RandomSampledCutOffEdges`` keeps a seeded
-random sample of ``num_neighbours`` of them with either backend, so each
-target node sees its whole neighbourhood. This is useful when the source nodes are much denser than
-the target nodes, for example a fine limited-area grid connected to a
-coarse mesh. The sample is fixed by ``random_seed``.
-
-.. code:: yaml
-
-   edges:
-      -  source_name: data
-         target_name: hidden
-         edge_builders:
-         -  _target_: anemoi.graphs.edges.RandomSampledCutOffEdges
-            cutoff_distance_km: 50
-            num_neighbours: 32
-            # max_candidates: 1024  # neighbours found before sampling
-            # random_seed: 42
