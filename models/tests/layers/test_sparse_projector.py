@@ -89,11 +89,27 @@ def test_unknown_backend_is_rejected() -> None:
         _make_provider(n_rows=8, n_cols=16, nnz=32, backend="cuda")
 
 
-def test_forward_of_a_field_with_zero_channels(projector: SparseProjector, provider: ProjectionGraphProvider) -> None:
-    x = torch.rand(2, 3, 16, 0, requires_grad=True)
+@pytest.mark.parametrize("num_chunks", [1, 4])
+@pytest.mark.parametrize(
+    "shape",
+    [(16, 0), (2, 3, 16, 0), (0, 16, 4), (16, 1), (3, 16, 1)],
+    ids=["no_leading_axes_no_channels", "no_channels", "empty_leading_axis", "one_channel", "fewer_rows_than_chunks"],
+)
+def test_forward_and_gradient_match_dense_for_awkward_shapes(
+    provider: ProjectionGraphProvider,
+    shape: tuple[int, ...],
+    num_chunks: int,
+) -> None:
+    """Empty and size-one axes give the dense projection and its gradient."""
+    x = torch.rand(shape, requires_grad=True)
+    reference_x = x.detach().clone().requires_grad_()
 
-    out = projector(x, provider)
-    out.sum().backward()
+    out = SparseProjector(autocast=False, num_chunks=num_chunks)(x, provider)
+    expected = torch.einsum("mn,...nc->...mc", provider.get_edges().to_dense(), reference_x)
+    upstream = torch.rand(expected.shape)
+    (out * upstream).sum().backward()
+    (expected * upstream).sum().backward()
 
-    assert out.shape == (2, 3, 8, 0)
-    assert x.grad.shape == x.shape
+    assert out.shape == expected.shape
+    torch.testing.assert_close(out, expected)
+    torch.testing.assert_close(x.grad, reference_x.grad)

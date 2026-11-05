@@ -100,7 +100,8 @@ class SparseProjector(torch.nn.Module):
                 return self._project_flattened(flat, matrix)
 
         input_shape = x.shape
-        # Explicit sizes so that a field with zero channels reshapes too.
+        # Explicit sizes keep the reshapes valid when a dimension is empty, for example on a
+        # rank that holds no variables after the variables are shared out across ranks.
         x = x.reshape(math.prod(input_shape[:-2]), *input_shape[-2:])
 
         try:

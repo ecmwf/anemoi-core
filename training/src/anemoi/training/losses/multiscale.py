@@ -377,11 +377,13 @@ class MultiscaleLossWrapper(BaseLossWrapper):
                 x,
                 self.smoothers[i],
                 num_chunks=self.sparse_projector_num_chunks,
+                matrix_dtype=x.dtype,
             )
             y = self.projector(
                 y,
                 self.smoothers[i],
                 num_chunks=self.sparse_projector_num_chunks,
+                matrix_dtype=x.dtype,
             )
         return x, y
 
