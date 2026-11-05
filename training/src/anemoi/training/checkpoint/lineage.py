@@ -49,8 +49,8 @@ def record_checkpoint_lineage(module: nn.Module, checkpoint: dict[str, Any], loa
     """
     # Get existing checkpoint metadata.
     stored = (checkpoint.get("hyper_parameters") or {}).get("metadata") or {}
-    inherited = stored.get("checkpoint_lineage")
-    lineage = [dict(pair) for pair in inherited] if isinstance(inherited, list) else []
+    inherited = stored.get("checkpoint_lineage", [])
+    lineage = [dict(pair) for pair in inherited]
 
     # Get parent UUID from checkpoint metadata.
     parent_uuid = stored.get("uuid")
