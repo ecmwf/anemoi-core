@@ -92,94 +92,99 @@ to the icosahedron outside and inside the area of interest respectively.
    This class will require the `trimesh <https://trimesh.org>`_ package
    to be installed. You can install it with `pip install trimesh`.
 
-************************************
- Orography-adaptive stretched graph
-************************************
+**************************
+ Adaptive stretched graph
+**************************
 
-The class `AdaptiveOrographyTriNodes` builds the same mesh as
-`StretchedTriNodes` and then adds nodes over steep terrain inside the
-area of interest. It computes the orographic slope at each node of the
-area of interest from a NetCDF orography file, and for every edge of the
-``lam_resolution`` icosahedron whose two end nodes are among the
-steepest, it adds a node at the edge midpoint. This halves the local
-node spacing over complex terrain without refining the whole area of
-interest.
+The class `AdaptiveTriNodes` builds the same mesh as `StretchedTriNodes`
+and then adds nodes where a variable of your choice has large gradients
+inside the area of interest. The variable is read from the dataset of
+the reference nodes, which must be `AnemoiDatasetNodes`, and its first
+time step is used. For every edge of the ``lam_resolution`` icosahedron
+whose two end nodes are among those with the largest gradients, a node
+is added at the edge midpoint. With surface geopotential (``variable:
+z``), for example, this halves the local node spacing over complex
+terrain without refining the whole area of interest.
 
 .. code:: yaml
 
    nodes:
      hidden: # name of the nodes
        node_builder:
-         _target_: anemoi.graphs.nodes.AdaptiveOrographyTriNodes
+         _target_: anemoi.graphs.nodes.AdaptiveTriNodes
          global_resolution: 7
          lam_resolution: 10
          reference_node_name: data
-         orography_path: /path/to/orography.nc
-         gradient_threshold_percentile: 75  # optional, refines the steepest 25%
+         variable: z
+         gradient_threshold_percentile: 75  # optional, refines the top 25%
+         gradient_num_neighbours: 12  # optional
          mask_attr_name: cutout_mask  # optional
          margin_radius_km: 100  # optional
        attributes: ...
 
-The orography file must contain a 2-D field on a regular latitude and
-longitude grid, named one of ``orog``, ``z``, ``orography``, ``hsurf``,
-``topography`` or ``fi``. Geopotential is converted to metres.
+The gradient at each point comes from a plane fitted to its
+``gradient_num_neighbours`` nearest reference nodes. The result depends
+on the resolution of the dataset: a field on a grid coarser than the
+mesh gives smoother gradients.
 
 The added nodes are vertices of the ``lam_resolution + 1`` icosahedron,
 so the nodes support `MultiScaleEdges` with ``scale_resolutions:
-lam_resolution + 1``. Flat terrain is never refined.
+lam_resolution + 1``. Nodes with a gradient of 0 are never refined.
 
 .. warning::
 
-   This class will require the `trimesh <https://trimesh.org>`_ and
-   `xarray <https://xarray.dev>`_ packages to be installed.
+   This class will require the `trimesh <https://trimesh.org>`_ package
+   to be installed. You can install it with `pip install trimesh`.
 
-****************************************************
- Orography-following extra nodes and free-form mesh
-****************************************************
+**************************************
+ Field-following nodes without a grid
+**************************************
 
-Two more builders place nodes according to the orographic slope, without
-keeping the icosahedron structure. Neither supports `MultiScaleEdges`,
-so connect their nodes with `KNNEdges` or `CutOffEdges`.
+Two more builders place nodes according to the gradient of a dataset
+variable, without keeping the icosahedron structure. Neither supports
+`MultiScaleEdges`, so connect their nodes with `KNNEdges` or
+`CutOffEdges`.
 
-`ProbabilisticOrographyIcosahedralNodes` builds the same mesh as
+`ProbabilisticIcosahedralNodes` builds the same mesh as
 `StretchedTriNodes` and adds ``extra_nodes_percent`` % more nodes inside
 the area of interest. Candidates on a 0.02° grid are taken from the
-steepest to the flattest, and each is kept only if it is at least
-``min_dist_factor`` times the ``lam_resolution`` node spacing from every
-other node. Flat terrain gets no extra nodes.
+largest gradient to the smallest, and each is kept only if it is at
+least ``min_dist_factor`` times the ``lam_resolution`` node spacing from
+every other node. Nodes with a gradient of 0 are skipped.
 
 .. code:: yaml
 
    nodes:
      hidden:
        node_builder:
-         _target_: anemoi.graphs.nodes.ProbabilisticOrographyIcosahedralNodes
+         _target_: anemoi.graphs.nodes.ProbabilisticIcosahedralNodes
          global_resolution: 7
          lam_resolution: 10
          reference_node_name: data
-         orography_path: /path/to/orography.nc
+         variable: z
          extra_nodes_percent: 10  # optional
          min_dist_factor: 0.5  # optional
 
-`ProbabilisticOrographyNodes` builds a free-form mesh with a fixed
-number of nodes inside and outside the area of interest. Candidates are
-visited in a random order that favours steep terrain, with weights
-``(slope + 1e-6) ** (1 / compression)``, and each is kept if it is at
-least ``min_dist_m`` from every node placed so far. A small
-``compression`` (e.g. 0.1) concentrates the nodes on steep terrain; a
-large one (e.g. 10) spreads them uniformly.
+`ProbabilisticNodes` builds a free-form mesh with a fixed number of
+nodes inside and outside the area of interest. Candidates are visited in
+a random order that favours large gradients, with weights ``(g + 1e-6)
+** (1 / compression)`` where ``g`` is the gradient relative to its
+maximum, and each is kept if it is at least ``min_dist_km`` from every
+node placed so far. A small ``compression`` (e.g. 0.1) concentrates the
+nodes where the gradient is large; a large one (e.g. 10) spreads them
+uniformly.
 
 .. code:: yaml
 
    nodes:
      hidden:
        node_builder:
-         _target_: anemoi.graphs.nodes.ProbabilisticOrographyNodes
+         _target_: anemoi.graphs.nodes.ProbabilisticNodes
          reference_node_name: data
-         orography_path: /path/to/orography.nc
+         variable: z
          num_nodes_global: 40000
          num_nodes_lam: 60000
          compression_global: 10
          compression_lam: 0.1
-         min_dist_m: 5000  # optional
+         min_dist_km: 5  # optional
          random_seed: 42  # optional

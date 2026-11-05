@@ -11,9 +11,6 @@ from .area_weights import AnemoiDatasetVariableWeights
 from .area_weights import CosineLatWeightedAttribute
 from .area_weights import IsolatitudeAreaWeights
 from .area_weights import MaskedPlanarAreaWeights
-from .area_weights import OrogElevationAttribute
-from .area_weights import OrogGradientAttribute
-from .area_weights import OrogGradientWeights
 from .area_weights import PlanarAreaWeights
 from .area_weights import SphericalAreaWeights
 from .area_weights import UniformWeights
@@ -42,7 +39,4 @@ __all__ = [
     "CosineLatWeightedAttribute",
     "IsolatitudeAreaWeights",
     "AnemoiDatasetVariableWeights",
-    "OrogElevationAttribute",
-    "OrogGradientAttribute",
-    "OrogGradientWeights",
 ]

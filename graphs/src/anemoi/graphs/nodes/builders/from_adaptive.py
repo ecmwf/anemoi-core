@@ -14,15 +14,16 @@ import torch
 from sklearn.neighbors import BallTree
 from torch_geometric.data import HeteroData
 
+from anemoi.datasets import open_dataset
+from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.generate.transforms import cartesian_to_latlon_rad
 from anemoi.graphs.generate.tri_icosahedron import create_stretched_tri_nodes
-from anemoi.graphs.generate.utils import compute_orography_gradient
+from anemoi.graphs.generate.utils import compute_field_gradient
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 LOGGER = logging.getLogger(__name__)
 
-_EARTH_RADIUS_M = 6_371_000.0
 # Accepted nodes are added to the BallTree in batches of this size; until then they are
 # checked by brute force.
 _TREE_REBUILD_INTERVAL = 1000
@@ -86,53 +87,79 @@ def _poisson_disk_sample(
     return np.array(accepted, dtype=np.float32) if accepted else np.empty((0, 2), dtype=np.float32)
 
 
-class BaseOrographyNodeBuilder(BaseNodeBuilder):
-    """Base class for node builders driven by an orography field and a LAM domain.
+class BaseFieldDrivenNodeBuilder(BaseNodeBuilder):
+    """Base class for node builders driven by a dataset variable and a LAM domain.
 
-    Subclasses must implement :meth:`get_coordinates`.
+    Subclasses must implement :meth:`get_coordinates`. The first time step of
+    ``variable`` is read from the dataset of the reference nodes, which must be
+    :class:`~anemoi.graphs.nodes.AnemoiDatasetNodes`.
 
     Parameters
     ----------
     name : str
         Key for the node set in the HeteroData graph.
-    orography_path : str
-        Path to a NetCDF file with a 2-D orography field.
+    variable : str
+        Dataset variable whose gradient decides where nodes are placed.
     reference_node_name : str
-        Name of the reference node set used to define the LAM boundary.
+        Name of the reference node set, used to define the LAM boundary and to read
+        ``variable``.
     mask_attr_name : str or None, optional
         Node attribute to use as the LAM boundary mask.
     margin_radius_km : float, optional
         Buffer (km) around the reference nodes when building the LAM mask.
+    gradient_num_neighbours : int, optional
+        Number of reference nodes used to estimate the gradient at each point. Default 12.
     """
 
     def __init__(
         self,
         name: str,
-        orography_path: str,
+        variable: str,
         reference_node_name: str,
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
+        gradient_num_neighbours: int = 12,
     ) -> None:
         super().__init__(name)
-        self.orography_path = orography_path
+        assert gradient_num_neighbours >= 3, "gradient_num_neighbours must be at least 3."
+        self.variable = variable
+        self.reference_node_name = reference_node_name
+        self.gradient_num_neighbours = gradient_num_neighbours
         self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"area_mask_builder"}
 
     def register_nodes(self, graph: HeteroData) -> HeteroData:
         self.area_mask_builder.fit(graph)
+        reference = graph[self.reference_node_name]
+        assert "_dataset" in reference, (
+            f"{self.__class__.__name__} reads '{self.variable}' from the dataset of the reference nodes, "
+            f"but '{self.reference_node_name}' has none. Use AnemoiDatasetNodes for the reference nodes."
+        )
+        self._source_coords = reference.x.cpu().numpy()
+        self._source_values = np.asarray(open_dataset(reference["_dataset"], select=self.variable)[0]).squeeze()
+        assert len(self._source_values) == len(self._source_coords), (
+            f"Variable '{self.variable}' has {len(self._source_values)} values, "
+            f"but '{self.reference_node_name}' has {len(self._source_coords)} nodes."
+        )
         return super().register_nodes(graph)
 
+    def compute_gradient(self, coords: np.ndarray) -> np.ndarray:
+        """Gradient magnitude of ``variable`` at the given [lat, lon] coordinates (radians)."""
+        return compute_field_gradient(
+            self._source_coords, self._source_values, coords, num_neighbours=self.gradient_num_neighbours
+        )
 
-class AdaptiveOrographyTriNodes(BaseOrographyNodeBuilder):
-    """Hidden mesh with orography-adaptive node density.
+
+class AdaptiveTriNodes(BaseFieldDrivenNodeBuilder):
+    """Hidden mesh refined where a dataset variable has large gradients.
 
     Builds a StretchedTriNodes base mesh (``global_resolution`` outside LAM,
     ``lam_resolution`` inside LAM) and inserts extra nodes at the sphere-surface
-    midpoints of all edges whose both endpoints are LAM nodes with orographic
-    gradient above ``gradient_threshold_percentile``.  The midpoint strategy
-    effectively halves the local mesh spacing in steep-terrain areas without
-    building a full next-resolution icosphere (which would have 4× as many
-    global nodes).
+    midpoints of all edges whose both endpoints are LAM nodes with a gradient of
+    ``variable`` above ``gradient_threshold_percentile``.  With surface geopotential,
+    for example, the midpoint strategy halves the local mesh spacing over steep
+    terrain without building a full next-resolution icosphere (which would have 4×
+    as many global nodes).
 
     Encoder/decoder edges (CutOffEdges / KNNEdges) adapt automatically to the
     denser mesh.
@@ -150,21 +177,20 @@ class AdaptiveOrographyTriNodes(BaseOrographyNodeBuilder):
         Icosphere subdivision level for the base LAM mesh.
     reference_node_name : str
         Name of the reference node set used to define the LAM boundary.
-    orography_path : str
-        Path to a NetCDF file with a 2-D orography field.  The variable must
-        be named one of: orog, z, orography, hsurf, topography, fi
-        (case-insensitive).  Geopotential values (>10 000 J/kg) are
-        automatically converted to metres using g = 9.806 65 m/s².
+    variable : str
+        Dataset variable of the reference nodes whose gradient drives the refinement.
     name : str
         Key for the node set in the HeteroData graph.
     gradient_threshold_percentile : float, optional
-        Percentile of the orographic gradient (0–100) above which adaptive
-        refinement is applied.  Default 75 — refines the steepest 25 % of the
-        LAM domain.
+        Percentile of the gradient (0–100) above which adaptive refinement is
+        applied.  Default 75 — refines the 25 % of the LAM domain with the
+        largest gradients.
     mask_attr_name : str or None, optional
         Node attribute to use as the LAM boundary mask.
     margin_radius_km : float, optional
         Buffer (km) around the reference nodes when building the LAM mask.
+    gradient_num_neighbours : int, optional
+        Number of reference nodes used to estimate the gradient at each point. Default 12.
     """
 
     # Required by MultiScaleEdges: StretchedTriNodesEdgeBuilder handles 1-hop
@@ -178,13 +204,14 @@ class AdaptiveOrographyTriNodes(BaseOrographyNodeBuilder):
         global_resolution: int,
         lam_resolution: int,
         reference_node_name: str,
-        orography_path: str,
+        variable: str,
         name: str,
         gradient_threshold_percentile: float = 75.0,
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
+        gradient_num_neighbours: int = 12,
     ) -> None:
-        super().__init__(name, orography_path, reference_node_name, mask_attr_name, margin_radius_km)
+        super().__init__(name, variable, reference_node_name, mask_attr_name, margin_radius_km, gradient_num_neighbours)
         self.global_resolution = global_resolution
         self.lam_resolution = lam_resolution
         self.gradient_threshold_percentile = gradient_threshold_percentile
@@ -217,7 +244,7 @@ class AdaptiveOrographyTriNodes(BaseOrographyNodeBuilder):
         self.resolutions = list(range(adaptive_resolution + 1))  # [0, ..., lam_resolution+1]
 
         LOGGER.info(
-            "AdaptiveOrographyTriNodes: mapped %d nodes to icosphere(res=%d); "
+            "AdaptiveTriNodes: mapped %d nodes to icosphere(res=%d); "
             "MultiScaleEdges(scale_resolutions=%d) supported.",
             len(combined_snapped),
             adaptive_resolution,
@@ -276,7 +303,7 @@ class AdaptiveOrographyTriNodes(BaseOrographyNodeBuilder):
         return cartesian_to_latlon_rad(mid_cart)
 
     def get_coordinates(self) -> torch.Tensor:
-        """Build orography-adaptive hidden mesh coordinates.
+        """Build the adaptive hidden mesh coordinates.
 
         Returns
         -------
@@ -294,16 +321,16 @@ class AdaptiveOrographyTriNodes(BaseOrographyNodeBuilder):
         lam_base_coords = base_coords[base_lam_mask]
 
         LOGGER.info(
-            "Computing orographic gradient from %s for %d LAM nodes",
-            self.orography_path,
+            "Computing the gradient of %s for %d LAM nodes",
+            self.variable,
             len(lam_base_coords),
         )
-        gradients = compute_orography_gradient(self.orography_path, lam_base_coords)
+        gradients = self.compute_gradient(lam_base_coords)
         threshold = np.percentile(gradients, self.gradient_threshold_percentile)
-        # Flat nodes are never refined, even when most of the LAM is flat and the threshold is 0.
+        # Zero-gradient nodes are never refined, even when the threshold is 0.
         high_grad_mask = (gradients >= threshold) & (gradients > 0)
         LOGGER.info(
-            "Gradient threshold (p%.0f): %.5f — refining steepest %.0f%% (%d/%d LAM nodes)",
+            "Gradient threshold (p%.0f): %.5f — refining the top %.0f%% (%d/%d LAM nodes)",
             self.gradient_threshold_percentile,
             threshold,
             100.0 - self.gradient_threshold_percentile,
@@ -315,7 +342,7 @@ class AdaptiveOrographyTriNodes(BaseOrographyNodeBuilder):
         LOGGER.info("Edge-midpoint adaptive candidates: %d", len(mid_coords))
 
         if len(mid_coords) == 0:
-            LOGGER.info("AdaptiveOrographyTriNodes: %d total nodes (base=%d, adaptive=0)", *[len(base_coords)] * 2)
+            LOGGER.info("AdaptiveTriNodes: %d total nodes (base=%d, adaptive=0)", *[len(base_coords)] * 2)
             return self._snap_and_record_ordering(base_coords)
 
         mid_lam_mask = self.area_mask_builder.get_mask(mid_coords).cpu().numpy()
@@ -334,7 +361,7 @@ class AdaptiveOrographyTriNodes(BaseOrographyNodeBuilder):
 
         combined = np.concatenate([base_coords, adaptive_coords], axis=0)
         LOGGER.info(
-            "AdaptiveOrographyTriNodes: %d total nodes (base=%d, adaptive=%d)",
+            "AdaptiveTriNodes: %d total nodes (base=%d, adaptive=%d)",
             len(combined),
             len(base_coords),
             len(adaptive_coords),
@@ -342,17 +369,17 @@ class AdaptiveOrographyTriNodes(BaseOrographyNodeBuilder):
         return self._snap_and_record_ordering(combined)
 
 
-class ProbabilisticOrographyIcosahedralNodes(BaseOrographyNodeBuilder):
-    """Stretched icosahedral mesh with extra nodes over the steepest terrain.
+class ProbabilisticIcosahedralNodes(BaseFieldDrivenNodeBuilder):
+    """Stretched icosahedral mesh with extra nodes where a variable has large gradients.
 
     Starts from the same mesh as :class:`StretchedTriNodes` and adds
     ``extra_nodes_percent`` % more nodes inside the limited area. Candidates come from
-    a 0.02 deg lat/lon grid over the limited area and are taken from the steepest to
-    the flattest, each accepted only if it is at least ``min_dist_factor`` times the
+    a 0.02 deg lat/lon grid over the limited area and are taken from the largest gradient
+    to the smallest, each accepted only if it is at least ``min_dist_factor`` times the
     ``lam_resolution`` node spacing away from all other nodes.
 
-    Unlike :class:`AdaptiveOrographyTriNodes`, the extra nodes are not placed at edge
-    midpoints, so they follow the terrain more closely but do not lie on an
+    Unlike :class:`AdaptiveTriNodes`, the extra nodes are not placed at edge
+    midpoints, so they follow the field more closely but do not lie on an
     icosahedron and do not support ``MultiScaleEdges``. The result is deterministic.
 
     Parameters
@@ -363,8 +390,8 @@ class ProbabilisticOrographyIcosahedralNodes(BaseOrographyNodeBuilder):
         Icosphere subdivision level for the base LAM mesh.
     reference_node_name : str
         Name of the reference node set used to define the LAM boundary.
-    orography_path : str
-        Path to a NetCDF file with a 2-D orography field.
+    variable : str
+        Dataset variable of the reference nodes whose gradient decides where nodes go.
     name : str
         Key for the node set in the HeteroData graph.
     extra_nodes_percent : float, optional
@@ -376,6 +403,8 @@ class ProbabilisticOrographyIcosahedralNodes(BaseOrographyNodeBuilder):
         Node attribute to use as the LAM boundary mask.
     margin_radius_km : float, optional
         Buffer (km) around the reference nodes when building the LAM mask.
+    gradient_num_neighbours : int, optional
+        Number of reference nodes used to estimate the gradient at each point. Default 12.
     """
 
     candidate_resolution_deg: float = 0.02
@@ -385,14 +414,15 @@ class ProbabilisticOrographyIcosahedralNodes(BaseOrographyNodeBuilder):
         global_resolution: int,
         lam_resolution: int,
         reference_node_name: str,
-        orography_path: str,
+        variable: str,
         name: str,
         extra_nodes_percent: float = 10.0,
         min_dist_factor: float = 0.5,
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
+        gradient_num_neighbours: int = 12,
     ) -> None:
-        super().__init__(name, orography_path, reference_node_name, mask_attr_name, margin_radius_km)
+        super().__init__(name, variable, reference_node_name, mask_attr_name, margin_radius_km, gradient_num_neighbours)
         assert extra_nodes_percent >= 0, f"extra_nodes_percent must be non-negative, got {extra_nodes_percent}"
         assert min_dist_factor > 0, f"min_dist_factor must be positive, got {min_dist_factor}"
         self.global_resolution = global_resolution
@@ -401,7 +431,7 @@ class ProbabilisticOrographyIcosahedralNodes(BaseOrographyNodeBuilder):
         self.min_dist_factor = min_dist_factor
 
     def get_coordinates(self) -> torch.Tensor:
-        """Build the stretched mesh plus the extra terrain-following nodes.
+        """Build the stretched mesh plus the extra nodes.
 
         Returns
         -------
@@ -434,9 +464,9 @@ class ProbabilisticOrographyIcosahedralNodes(BaseOrographyNodeBuilder):
         )
         candidates = candidates[self.area_mask_builder.get_mask(candidates).cpu().numpy()]
 
-        gradients = compute_orography_gradient(self.orography_path, candidates)
-        steep_first = np.argsort(-gradients, kind="stable")
-        candidates = candidates[steep_first][gradients[steep_first] > 0]
+        gradients = self.compute_gradient(candidates)
+        largest_first = np.argsort(-gradients, kind="stable")
+        candidates = candidates[largest_first][gradients[largest_first] > 0]
 
         min_dist = self.min_dist_factor * np.sqrt(4 * np.pi / (10 * 4**self.lam_resolution))
         extra = _poisson_disk_sample(candidates, base_coords, n_extra, min_dist)
@@ -445,28 +475,28 @@ class ProbabilisticOrographyIcosahedralNodes(BaseOrographyNodeBuilder):
         return torch.tensor(np.concatenate([base_coords, extra], axis=0), dtype=torch.float32)
 
 
-class ProbabilisticOrographyNodes(BaseOrographyNodeBuilder):
-    """Free-form mesh whose node density follows the orography.
+class ProbabilisticNodes(BaseFieldDrivenNodeBuilder):
+    """Free-form mesh whose node density follows the gradient of a dataset variable.
 
     Places ``num_nodes_lam`` nodes inside the limited area and ``num_nodes_global``
     outside it, with no icosahedron. Candidates come from a 0.02 deg grid over the
     limited area and a 0.25 deg global grid. Each region's candidates are visited in a
-    random order weighted by ``(slope + 1e-6) ** (1 / compression)``, and each is
-    accepted if it is at least ``min_dist_m`` from all nodes placed so far. The
-    limited area is filled first.
+    random order weighted by ``(g + 1e-6) ** (1 / compression)``, where ``g`` is the
+    gradient divided by its maximum, and each is accepted if it is at least
+    ``min_dist_km`` from all nodes placed so far. The limited area is filled first.
 
-    A small ``compression`` concentrates nodes on steep terrain (e.g. 0.1 gives
-    weights proportional to slope**10); a large one (e.g. 10) gives a nearly uniform
-    distribution. Weights above the 99th percentile are clipped, so the steepest
-    candidates do not take the whole budget. Outside the orography file the slope is
-    0, so the global nodes are spread uniformly.
+    A small ``compression`` concentrates nodes where the gradient is large (e.g. 0.1
+    gives weights proportional to g**10); a large one (e.g. 10) gives a nearly uniform
+    distribution. Weights above the 99th percentile are clipped, so the largest
+    gradients do not take the whole budget. Because ``g`` is relative, the result does
+    not depend on the units of ``variable``.
 
     Parameters
     ----------
     name : str
         Key for the node set in the HeteroData graph.
-    orography_path : str
-        Path to a NetCDF file with a 2-D orography field.
+    variable : str
+        Dataset variable of the reference nodes whose gradient decides where nodes go.
     reference_node_name : str
         Name of the reference node set used to define the LAM boundary.
     num_nodes_global : int
@@ -476,9 +506,9 @@ class ProbabilisticOrographyNodes(BaseOrographyNodeBuilder):
     compression_global : float
         Compression for the global nodes. Large values give a uniform distribution.
     compression_lam : float
-        Compression for the LAM nodes. Small values follow the terrain more closely.
-    min_dist_m : float, optional
-        Minimum distance between any two nodes, in metres. Default 5 000 m.
+        Compression for the LAM nodes. Small values follow the field more closely.
+    min_dist_km : float, optional
+        Minimum distance between any two nodes, in kilometres. Default 5.
     random_seed : int, optional
         Seed of the random ordering, so the same configuration gives the same mesh.
         Default 42.
@@ -486,6 +516,8 @@ class ProbabilisticOrographyNodes(BaseOrographyNodeBuilder):
         Node attribute to use as the LAM boundary mask.
     margin_radius_km : float, optional
         Buffer (km) around the reference nodes when building the LAM mask.
+    gradient_num_neighbours : int, optional
+        Number of reference nodes used to estimate the gradient at each point. Default 12.
     """
 
     global_candidate_resolution_deg: float = 0.25
@@ -494,26 +526,27 @@ class ProbabilisticOrographyNodes(BaseOrographyNodeBuilder):
     def __init__(
         self,
         name: str,
-        orography_path: str,
+        variable: str,
         reference_node_name: str,
         num_nodes_global: int,
         num_nodes_lam: int,
         compression_global: float,
         compression_lam: float,
-        min_dist_m: float = 5_000.0,
+        min_dist_km: float = 5.0,
         random_seed: int = 42,
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
+        gradient_num_neighbours: int = 12,
     ) -> None:
-        super().__init__(name, orography_path, reference_node_name, mask_attr_name, margin_radius_km)
+        super().__init__(name, variable, reference_node_name, mask_attr_name, margin_radius_km, gradient_num_neighbours)
         assert num_nodes_global >= 0 and num_nodes_lam >= 0, "Number of nodes must be non-negative."
         assert compression_global > 0 and compression_lam > 0, "Compression must be positive."
-        assert min_dist_m > 0, f"min_dist_m must be positive, got {min_dist_m}"
+        assert min_dist_km > 0, f"min_dist_km must be positive, got {min_dist_km}"
         self.num_nodes_global = num_nodes_global
         self.num_nodes_lam = num_nodes_lam
         self.compression_global = compression_global
         self.compression_lam = compression_lam
-        self.min_dist_rad = min_dist_m / _EARTH_RADIUS_M
+        self.min_dist_rad = min_dist_km / EARTH_RADIUS
         self.random_seed = random_seed
 
     @staticmethod
@@ -523,12 +556,14 @@ class ProbabilisticOrographyNodes(BaseOrographyNodeBuilder):
 
     @staticmethod
     def _priority_log_weights(gradients: np.ndarray, compression: float) -> np.ndarray:
-        """Log of ``(gradient + 1e-6) ** (1 / compression)``, clipped at its 99th percentile.
+        """Log of ``(g + 1e-6) ** (1 / compression)``, clipped at its 99th percentile.
 
-        Working in log space keeps small slopes distinguishable: with compression 0.1
-        the weights themselves underflow to the same tiny value for most terrain.
+        ``g`` is the gradient relative to its maximum, so the floor means the same for
+        any variable. Working in log space keeps small gradients distinguishable: with
+        compression 0.1 the weights themselves underflow to the same tiny value.
         """
-        log_weights = np.log(gradients + 1e-6) / compression
+        relative = gradients / max(gradients.max(), np.finfo(float).tiny)
+        log_weights = np.log(relative + 1e-6) / compression
         return np.minimum(log_weights, np.percentile(log_weights, 99))
 
     def get_coordinates(self) -> torch.Tensor:
@@ -565,7 +600,7 @@ class ProbabilisticOrographyNodes(BaseOrographyNodeBuilder):
         ]:
             if len(candidates) == 0 or target_count == 0:
                 continue
-            gradients = compute_orography_gradient(self.orography_path, candidates)
+            gradients = self.compute_gradient(candidates)
             order = self._weighted_random_order(self._priority_log_weights(gradients, compression), rng)
             accepted = _poisson_disk_sample(candidates[order], nodes, target_count, self.min_dist_rad)
             LOGGER.info("%s %s: placed %d/%d nodes", self.__class__.__name__, label, len(accepted), target_count)

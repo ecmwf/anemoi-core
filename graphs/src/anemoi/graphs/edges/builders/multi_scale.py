@@ -76,7 +76,7 @@ class MultiScaleEdges(BaseEdgeBuilder):
     @staticmethod
     def get_edge_builder_class(node_type: str) -> type[BaseIcosahedronEdgeStrategy]:
         # Node builders that support multi-scale edges define a multi_scale_edge_cls attribute
-        # (IcosahedronNodes subclasses and AdaptiveOrographyTriNodes).
+        # (IcosahedronNodes subclasses and AdaptiveTriNodes).
         module = importlib.import_module("anemoi.graphs.nodes")
         node_cls = getattr(module, node_type, None)
         if node_cls is not None and not hasattr(node_cls, "multi_scale_edge_cls"):

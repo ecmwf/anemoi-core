@@ -194,7 +194,7 @@ Float values from source or target
 
 ``AttributeFromSourceNode`` and ``AttributeFromTargetNode`` copy boolean
 attributes. To copy a continuous node attribute, such as the elevation
-from ``OrogElevationAttribute``, use ``FloatAttributeFromSourceNode`` or
+from ``AnemoiDatasetVariableWeights`` with ``variable: z``, use ``FloatAttributeFromSourceNode`` or
 ``FloatAttributeFromTargetNode``. Both accept an optional ``norm``.
 Example usage for giving the encoder the elevation of each data node and
 the decoder the elevation of each node it reconstructs:

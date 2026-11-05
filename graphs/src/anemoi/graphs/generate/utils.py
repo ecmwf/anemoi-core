@@ -7,21 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import logging
-
 import numpy as np
 import scipy
+from scipy.spatial import cKDTree
 from typeguard import typechecked
 
-LOGGER = logging.getLogger(__name__)
-
-_EARTH_RADIUS_M = 6_371_000.0
-_OROG_VAR_NAMES = ("orog", "z", "orography", "hsurf", "topography", "fi")
-_GEOPOTENTIAL_THRESHOLD = 10_000.0
-_GEOPOTENTIAL_VAR_NAMES = ("z", "fi")
-_GEOPOTENTIAL_UNITS = ("m**2 s**-2", "m2 s-2", "m^2 s^-2", "m2/s2", "m**2/s**2", "j/kg", "j kg-1", "j kg**-1")
-_METRE_UNITS = ("m", "metre", "metres", "meter", "meters")
-_STANDARD_GRAVITY = 9.80665
+from anemoi.graphs import EARTH_RADIUS
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 
 
 def get_coordinates_ordering(coords: np.ndarray) -> np.ndarray:
@@ -119,142 +111,74 @@ def selection_matrix(idx: np.ndarray, num_diagonals: int) -> scipy.sparse.csr_ma
     return scipy.sparse.csr_matrix((np.ones(len(idx)), (idx, idx)), dtype=bool, shape=(num_diagonals, num_diagonals))
 
 
-def load_orography_grid(orography_path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Load a regular lat/lon orography field from a NetCDF file.
-
-    Parameters
-    ----------
-    orography_path : str
-        Path to a NetCDF file containing a 2-D orography field. The variable must
-        be named one of: orog, z, orography, hsurf, topography, fi (case-insensitive).
-        Geopotential values (absolute maximum above 10 000) are converted to metres
-        using g = 9.80665 m/s².
-
-    Returns
-    -------
-    tuple[np.ndarray, np.ndarray, np.ndarray]
-        Ascending latitudes (degrees), longitudes (degrees) and the elevation
-        field (metres) with shape (num_lats, num_lons).
-
-    Raises
-    ------
-    ValueError
-        If the orography variable or its lat/lon dimensions cannot be found.
-    """
-    import xarray as xr
-
-    with xr.open_dataset(orography_path) as ds:
-        orog_var = next((v for v in ds.data_vars if str(v).lower() in _OROG_VAR_NAMES), None)
-        if orog_var is None:
-            raise ValueError(
-                f"Cannot find orography variable in {orography_path}. "
-                f"Expected one of {_OROG_VAR_NAMES}. Found: {list(ds.data_vars)}"
-            )
-        orog_da = ds[orog_var].squeeze()
-
-        lat_dim = next((d for d in orog_da.dims if "lat" in str(d).lower()), None)
-        lon_dim = next((d for d in orog_da.dims if "lon" in str(d).lower()), None)
-        if lat_dim is None or lon_dim is None or orog_da.ndim != 2:
-            raise ValueError(f"Expected a 2-D lat/lon field for {orog_var}. Dims: {orog_da.dims}")
-
-        orog_da = orog_da.transpose(lat_dim, lon_dim)
-        units = str(orog_da.attrs.get("units", "")).strip().lower()
-        lat_vals = orog_da[lat_dim].values.astype(float)
-        lon_vals = orog_da[lon_dim].values.astype(float)
-        orog_vals = orog_da.values.astype(float)
-
-    if lat_vals[0] > lat_vals[-1]:
-        lat_vals = lat_vals[::-1]
-        orog_vals = orog_vals[::-1, :]
-
-    if _is_geopotential(str(orog_var).lower(), units, orog_vals):
-        LOGGER.info("Orography variable %s is geopotential, converting to metres.", orog_var)
-        orog_vals = orog_vals / _STANDARD_GRAVITY
-
-    return lat_vals, lon_vals, orog_vals
-
-
-def _is_geopotential(var_name: str, units: str, values: np.ndarray) -> bool:
-    """Decide whether an orography field is geopotential (m2/s2) rather than height (m)."""
-    if units in _GEOPOTENTIAL_UNITS:
-        return True
-    if units in _METRE_UNITS:
-        return False
-    if var_name in _GEOPOTENTIAL_VAR_NAMES:
-        return True
-    # No usable metadata: no surface on Earth is higher than 10 km.
-    return bool(np.abs(values).max() > _GEOPOTENTIAL_THRESHOLD)
-
-
-def _interpolate_to_coords(
-    lat_vals: np.ndarray, lon_vals: np.ndarray, field: np.ndarray, coords_rad: np.ndarray
+def compute_field_gradient(
+    source_coords: np.ndarray,
+    values: np.ndarray,
+    query_coords: np.ndarray,
+    num_neighbours: int = 12,
+    chunk_size: int = 100_000,
 ) -> np.ndarray:
-    """Linearly interpolate a lat/lon field to node coordinates, 0 outside the grid."""
-    from scipy.interpolate import RegularGridInterpolator
+    """Gradient magnitude of a scattered field, per kilometre, at arbitrary coordinates.
 
-    # Keep the dtype of the coordinates (node coordinates are float32), so that the
-    # interpolated values do not depend on how the caller stored them.
-    query = np.rad2deg(np.asarray(coords_rad)).reshape(-1, 2).copy()
-    # Match the longitude convention of the grid ([0, 360) or [-180, 180)). Only the
-    # longitudes outside that convention are shifted, the others stay bit-identical.
-    lon = query[:, 1]
-    if lon_vals.max() > 180.0:
-        lon[lon < 0.0] += 360.0
-    else:
-        lon[lon >= 180.0] -= 360.0
-
-    interp = RegularGridInterpolator((lat_vals, lon_vals), field, method="linear", bounds_error=False, fill_value=0.0)
-    return interp(query)
-
-
-def compute_orography_gradient(orography_path: str, coords_rad: np.ndarray) -> np.ndarray:
-    """Interpolate the orographic slope magnitude (m/m) to node coordinates.
-
-    The gradient is computed with finite differences on the regular lat/lon grid of
-    the orography file and then linearly interpolated to ``coords_rad``. Nodes
-    outside the orography grid get a gradient of 0.
+    For each query point, fits a plane to the ``num_neighbours`` nearest source points
+    in the local tangent plane. Source points with missing values are ignored. A locally
+    constant field has a gradient of exactly 0, and so do query points outside the
+    source points, where the fit would be an extrapolation.
 
     Parameters
     ----------
-    orography_path : str
-        Path to a NetCDF orography file, see :func:`load_orography_grid`.
-    coords_rad : np.ndarray, shape (N, 2)
-        Node coordinates [lat, lon] in radians.
+    source_coords : np.ndarray of shape (N, 2)
+        Latitude and longitude of the source points, in radians.
+    values : np.ndarray of shape (N,)
+        Field values at the source points.
+    query_coords : np.ndarray of shape (M, 2)
+        Latitude and longitude of the query points, in radians.
+    num_neighbours : int, optional
+        Number of source points used in each fit, by default 12.
+    chunk_size : int, optional
+        Number of query points processed at once, by default 100000.
 
     Returns
     -------
-    np.ndarray, shape (N,)
-        Gradient magnitude (m/m) at each node coordinate.
+    np.ndarray of shape (M,)
+        Gradient magnitude of the field, in field units per kilometre.
     """
-    lat_vals, lon_vals, orog_vals = load_orography_grid(orography_path)
+    values = np.asarray(values, dtype=np.float64)
+    valid = np.isfinite(values)
+    assert valid.sum() >= 3, "At least 3 source points with valid values are needed to compute a gradient."
+    source_xyz = latlon_rad_to_cartesian_np(np.asarray(source_coords, dtype=np.float64)[valid], radius=EARTH_RADIUS)
+    values = values[valid]
 
-    dlat_m = np.deg2rad(np.gradient(lat_vals)) * _EARTH_RADIUS_M
-    dlon_m = np.deg2rad(np.gradient(lon_vals))[np.newaxis, :] * _EARTH_RADIUS_M * np.cos(np.deg2rad(lat_vals))[:, None]
+    query_coords = np.asarray(query_coords, dtype=np.float64)
+    query_xyz = latlon_rad_to_cartesian_np(query_coords, radius=EARTH_RADIUS)
+    lat, lon = query_coords[:, 0], query_coords[:, 1]
+    east = np.stack([-np.sin(lon), np.cos(lon), np.zeros_like(lon)], axis=-1)
+    north = np.stack([-np.sin(lat) * np.cos(lon), -np.sin(lat) * np.sin(lon), np.cos(lat)], axis=-1)
 
-    eps = 1e-10
-    grad_lat = np.gradient(orog_vals, axis=0) / (np.abs(dlat_m[:, np.newaxis]) + eps)
-    grad_lon = np.gradient(orog_vals, axis=1) / (np.abs(dlon_m) + eps)
-    grad_magnitude = np.hypot(grad_lat, grad_lon)
+    num_neighbours = min(num_neighbours, len(values))
+    _, neighbours = cKDTree(source_xyz).query(query_xyz, k=num_neighbours, workers=-1)
+    neighbours = neighbours.reshape(len(query_coords), num_neighbours)
 
-    return _interpolate_to_coords(lat_vals, lon_vals, grad_magnitude, coords_rad)
+    gradient = np.empty(len(query_coords))
+    for start in range(0, len(query_coords), chunk_size):
+        chunk = slice(start, start + chunk_size)
+        offsets = source_xyz[neighbours[chunk]] - query_xyz[chunk][:, None]
+        design = np.stack(
+            [
+                np.ones(offsets.shape[:2]),
+                np.einsum("nkj,nj->nk", offsets, east[chunk]),
+                np.einsum("nkj,nj->nk", offsets, north[chunk]),
+            ],
+            axis=-1,
+        )
+        local_values = values[neighbours[chunk]]
+        # Relative to one neighbour rather than the mean, so a constant field gives exactly 0.
+        local_values = local_values - local_values[:, :1]
+        coefficients = np.einsum("nij,nj->ni", np.linalg.pinv(design), local_values)
+        gradient[chunk] = np.hypot(coefficients[:, 1], coefficients[:, 2])
 
-
-def compute_orography_elevation(orography_path: str, coords_rad: np.ndarray) -> np.ndarray:
-    """Interpolate the orographic elevation (metres) to node coordinates.
-
-    Nodes outside the orography grid get an elevation of 0.
-
-    Parameters
-    ----------
-    orography_path : str
-        Path to a NetCDF orography file, see :func:`load_orography_grid`.
-    coords_rad : np.ndarray, shape (N, 2)
-        Node coordinates [lat, lon] in radians.
-
-    Returns
-    -------
-    np.ndarray, shape (N,)
-        Elevation (metres) at each node coordinate.
-    """
-    lat_vals, lon_vals, orog_vals = load_orography_grid(orography_path)
-    return _interpolate_to_coords(lat_vals, lon_vals, orog_vals, coords_rad)
+        # The fit is meaningless when extrapolating. On the edge of the data the centroid of a
+        # half-disc of neighbours is near 0.42 of its radius; farther out it tends to 1.
+        centroid_distance = np.linalg.norm(offsets.mean(axis=1), axis=-1)
+        gradient[chunk][centroid_distance > 0.6 * np.linalg.norm(offsets, axis=-1).max(axis=1)] = 0.0
+    return gradient

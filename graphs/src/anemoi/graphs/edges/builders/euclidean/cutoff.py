@@ -301,8 +301,10 @@ class RandomSampledCutOffEdges(CutOffEdges):
 
     For each target node, finds the source nodes within the cut-off radius and keeps
     a random sample of ``num_neighbours`` of them (all of them if there are fewer).
-    Unlike :class:`CutOffEdges`, which keeps the nearest neighbours, each target node
-    sees a uniform sample of its whole neighbourhood. This matters when the source
+    :class:`CutOffEdges` also caps the neighbours with ``max_num_neighbours``, but which
+    ones it keeps depends on the backend: a random subset with pyg-lib and the nearest
+    ones with sklearn. Here each target node sees a seeded uniform sample of its whole
+    neighbourhood with either backend. This matters when the source
     nodes are much denser than the target nodes, e.g. a fine limited-area grid
     connected to a coarse mesh. The sample is fixed by ``random_seed``.
 

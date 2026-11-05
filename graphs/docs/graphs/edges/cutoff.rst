@@ -101,11 +101,11 @@ YAML configuration:
  Random-sampled cut-off
 *************************
 
-``CutOffEdges`` keeps the nearest neighbours of each target node when
-more than ``max_num_neighbours`` source nodes are within the radius.
-``RandomSampledCutOffEdges`` instead keeps a random sample of
-``num_neighbours`` of them, so each target node sees its whole
-neighbourhood. This is useful when the source nodes are much denser than
+When more than ``max_num_neighbours`` source nodes are within the
+radius, ``CutOffEdges`` keeps a random subset with pyg-lib and the
+nearest ones with sklearn. ``RandomSampledCutOffEdges`` keeps a seeded
+random sample of ``num_neighbours`` of them with either backend, so each
+target node sees its whole neighbourhood. This is useful when the source nodes are much denser than
 the target nodes, for example a fine limited-area grid connected to a
 coarse mesh. The sample is fixed by ``random_seed``.
 

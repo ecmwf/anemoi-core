@@ -7,9 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .builders.from_adaptive import AdaptiveOrographyTriNodes
-from .builders.from_adaptive import ProbabilisticOrographyIcosahedralNodes
-from .builders.from_adaptive import ProbabilisticOrographyNodes
+from .builders.from_adaptive import AdaptiveTriNodes
+from .builders.from_adaptive import ProbabilisticIcosahedralNodes
+from .builders.from_adaptive import ProbabilisticNodes
 from .builders.from_file import AnemoiDatasetNodes
 from .builders.from_file import LimitedAreaNPZFileNodes
 from .builders.from_file import NPZFileNodes
@@ -28,9 +28,9 @@ from .builders.from_refined_icosahedron import TriNodes
 from .builders.from_vectors import LatLonNodes
 
 __all__ = [
-    "AdaptiveOrographyTriNodes",
-    "ProbabilisticOrographyIcosahedralNodes",
-    "ProbabilisticOrographyNodes",
+    "AdaptiveTriNodes",
+    "ProbabilisticIcosahedralNodes",
+    "ProbabilisticNodes",
     "AnemoiDatasetNodes",
     "NPZFileNodes",
     "TriNodes",
