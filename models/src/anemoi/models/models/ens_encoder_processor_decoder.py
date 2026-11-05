@@ -105,7 +105,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         )
 
         if self.condition_on_residual:
-            x_skip_cond = x_skip[:, 0] if x_skip.ndim == 5 else x_skip
+            x_skip_cond = x_skip[:, 0]
             x_skip_cond = x_skip_cond[..., self._internal_input_idx[dataset_name]]
             x_data_latent = torch.cat(
                 (
