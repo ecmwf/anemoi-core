@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import math
+
 import torch
 
 
@@ -58,7 +60,9 @@ class SparseProjector(torch.nn.Module):
         """
         num_chunks = self.num_chunks if num_chunks is None else num_chunks
         input_shape = x.shape
-        x = x.reshape(-1, *input_shape[-2:])
+        # Explicit sizes keep the reshapes valid when a dimension is empty, for example on a
+        # rank that holds no variables after the variables are shared out across ranks.
+        x = x.reshape(math.prod(input_shape[:-2]), *input_shape[-2:])
 
         try:
             if num_chunks == 1:
@@ -86,11 +90,12 @@ class SparseProjector(torch.nn.Module):
         trailing_shape = x.shape[2:]
 
         # [B, N, ...] -> [B, N, C]
-        x_flat = x.reshape(batch_size, input_nodes, -1)
+        channels = math.prod(trailing_shape)
+        x_flat = x.reshape(batch_size, input_nodes, channels)
 
         # Move batch/features into the dense RHS columns:
         # [B, N, C] -> [N, B, C] -> [N, B*C]
-        x_rhs = x_flat.permute(1, 0, 2).reshape(input_nodes, -1)
+        x_rhs = x_flat.permute(1, 0, 2).reshape(input_nodes, batch_size * channels)
 
         with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
             # One sparse matmul instead of B sparse matmuls:
@@ -100,5 +105,5 @@ class SparseProjector(torch.nn.Module):
         output_nodes = out.shape[0]
 
         # [M, B*C] -> [M, B, C] -> [B, M, C] -> [B, M, ...]
-        out = out.reshape(output_nodes, batch_size, -1).permute(1, 0, 2)
+        out = out.reshape(output_nodes, batch_size, channels).permute(1, 0, 2)
         return out.reshape(batch_size, output_nodes, *trailing_shape)
