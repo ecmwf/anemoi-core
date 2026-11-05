@@ -26,6 +26,7 @@ Below are the available methods for defining the edges:
    edges/cutoff
    edges/knn
    edges/multi_scale
+   edges/delaunay
 
 Additionally, there are 2 extra arguments (``source_mask_attr_name`` and
 ``target_mask_attr_name``) that can be used in the edge configuration to
