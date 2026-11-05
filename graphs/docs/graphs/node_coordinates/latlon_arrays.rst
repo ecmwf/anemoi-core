@@ -15,4 +15,4 @@ a graph:
    lats = np.array([45.0, 45.0, 40.0, 40.0])
    lons = np.array([5.0, 10.0, 10.0, 5.0])
 
-   graph = LatLonNodes(latitudes=lats, longitudes=lons, name="my_nodes").update_graph(graph)
+   LatLonNodes(latitudes=lats, longitudes=lons, name="my_nodes").update_graph(graph)

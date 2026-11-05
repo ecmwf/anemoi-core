@@ -34,15 +34,34 @@ TRUST_FACTOR = 1.2
 
 
 class BaseAreaWeights(BaseNodeAttribute, ABC):
-    """Base class for area weights of the nodes."""
+    """Base class for area weights of the nodes.
 
-    def get_latlon_coordinates(self, nodes: NodeStorage) -> torch.Tensor:
+    Area weights are computed from the coordinates of the nodes, stored in the `x` attribute of the node storage
+    (in radians, as (lat, lon)).
+
+    The `_compute_area_weights` method must be implemented by subclasses to define how the area weights are computed
+    from the node coordinates.
+
+    Attributes
+    ----------
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
+        Defaults to "area_weights".
+    norm : str | None
+        Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
+    dtype : str
+        Data type of the node attribute. Defaults to "float32".
+    """
+
+    name: str = "area_weights"
+
+    def _get_latlon_coordinates(self, nodes: NodeStorage) -> torch.Tensor:
         return nodes.x.to(torch.float64)
 
     @abstractmethod
-    def compute_area_weights(self, latlons: np.ndarray) -> np.ndarray: ...
+    def _compute_area_weights(self, latlons: np.ndarray) -> np.ndarray: ...
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+    def _get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         """Compute the weights.
 
         Parameters
@@ -57,21 +76,33 @@ class BaseAreaWeights(BaseNodeAttribute, ABC):
         torch.Tensor
             Area weights for the nodes.
         """
-        latlons = self.get_latlon_coordinates(nodes).cpu().numpy()
-        area_weights = self.compute_area_weights(latlons)
+        latlons = self._get_latlon_coordinates(nodes).cpu().numpy()
+        area_weights = self._compute_area_weights(latlons)
         return torch.from_numpy(area_weights)
 
 
 class UniformWeights(BaseAreaWeights):
-    """Implements a uniform weight for the nodes.
+    """Uniform area weights.
+
+    It assigns the same weight (one) to all the nodes.
+
+    Attributes
+    ----------
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
+        Defaults to "area_weights".
+    norm : str | None
+        Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
+    dtype : str
+        Data type of the node attribute. Defaults to "float32".
 
     Methods
     -------
-    compute(self, graph, nodes_name)
-        Compute the area attributes for each node.
+    compute(graph: HeteroData, nodes_name: str, **kwargs) -> torch.Tensor
+        Computes the area weights for the nodes `nodes_name` of the graph.
     """
 
-    def compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
+    def _compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
         """Compute area weights.
 
         Parameters
@@ -89,19 +120,26 @@ class UniformWeights(BaseAreaWeights):
 
 
 class PlanarAreaWeights(BaseAreaWeights):
-    """Planar area weights
+    """Planar area weights.
 
-    It computes the area in a 2D plane asociated to each node.
+    It computes the area of the Voronoi cell associated to each node, with the (lat, lon) coordinates treated as a
+    2D plane. Cells on the boundary of the node set (unbounded, or with vertices far away from their node) are not
+    trusted, and take the area of the nearest trusted cell instead.
 
     Attributes
     ----------
-    norm : str
-        Normalisation of the weights.
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
+        Defaults to "area_weights".
+    norm : str | None
+        Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
+    dtype : str
+        Data type of the node attribute. Defaults to "float32".
 
     Methods
     -------
-    compute(self, graph, nodes_name)
-        Compute the area attributes for each node.
+    compute(graph: HeteroData, nodes_name: str, **kwargs) -> torch.Tensor
+        Computes the area weights for the nodes `nodes_name` of the graph.
     """
 
     @staticmethod
@@ -206,7 +244,7 @@ class PlanarAreaWeights(BaseAreaWeights):
 
         return areas
 
-    def compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
+    def _compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
         """Compute area weights.
 
         Untrusted (edge or unbounded) cells take the area of the nearest trusted cell;
@@ -263,74 +301,87 @@ class PlanarAreaWeights(BaseAreaWeights):
 
 
 class MaskedPlanarAreaWeights(PlanarAreaWeights):
-    """Masked planar area weights
+    """Masked planar area weights.
 
-    It computes the area in a 2D plane asociated to each node.
+    It computes the planar area weights (see :class:`PlanarAreaWeights`) of the masked nodes, tessellated on their
+    own, and sets the weights of the remaining nodes to 0.
 
     Attributes
     ----------
     mask_node_attr_name : str
-        Name of a node attribute to use as a mask for the computing the area weights.
-        It sets to 0 values outside this masked region.
-    norm : str, optional
-        Normalisation of the weights.
+        Name of the node attribute to use as a mask for computing the area weights. It must be already registered
+        in the nodes. Nodes with a mask value of 0 get a weight of 0.
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
+        Defaults to "area_weights".
+    norm : str | None
+        Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
+    dtype : str
+        Data type of the node attribute. Defaults to "float32".
 
     Methods
     -------
-    compute(self, graph, nodes_name)
-        Compute the area attributes for each node.
+    compute(graph: HeteroData, nodes_name: str, **kwargs) -> torch.Tensor
+        Computes the area weights for the nodes `nodes_name` of the graph.
     """
 
     def __init__(
         self,
         mask_node_attr_name: str,
+        name: str | None = None,
         norm: str | None = None,
         dtype: str = "float32",
     ) -> None:
-        super().__init__(norm, dtype)
+        super().__init__(name=name, norm=norm, dtype=dtype)
         assert isinstance(
             mask_node_attr_name, str
         ), f"{self.__class__.__name__} requires a string for 'mask_node_attr_name' variable."
         self.mask_node_attr_name = mask_node_attr_name
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+    def _get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         """Compute the weights over the masked nodes tessellated on their own, and zero elsewhere."""
         assert self.mask_node_attr_name in nodes, f"Node attribute '{self.mask_node_attr_name}' not found in nodes."
         mask = nodes[self.mask_node_attr_name].squeeze()
         selected = mask.cpu().numpy() != 0
-        latlons = self.get_latlon_coordinates(nodes).cpu().numpy()
+        latlons = self._get_latlon_coordinates(nodes).cpu().numpy()
 
         area_weights = np.zeros(len(latlons))
-        area_weights[selected] = self.compute_area_weights(latlons[selected])
+        area_weights[selected] = self._compute_area_weights(latlons[selected])
 
         # multiplying rather than indexing keeps a fractional mask scaling the weights
         return torch.from_numpy(area_weights).to(mask.device) * mask
 
 
 class SphericalAreaWeights(BaseAreaWeights):
-    """Spherical area weights
+    """Spherical area weights.
 
-    It computes the area of a unit radius sphere asociated to each node.
+    It computes the area of the spherical Voronoi cell associated to each node.
 
     Attributes
     ----------
-    norm : str
-        Normalisation of the weights.
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
+        Defaults to "area_weights".
+    norm : str | None
+        Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
     radius : float
-        Radius of the sphere.
+        Radius of the sphere. Defaults to 1.
     centre : np.ndarray
-        Centre of the sphere.
+        Centre of the sphere. Defaults to [0, 0, 0].
     fill_value : float
-        Value to fill the empty regions.
+        Value assigned to the nodes with an empty Voronoi region. Defaults to 0.
+    dtype : str
+        Data type of the node attribute. Defaults to "float32".
 
     Methods
     -------
-    compute(self, graph, nodes_name)
-        Compute the area attributes for each node.
+    compute(graph: HeteroData, nodes_name: str, **kwargs) -> torch.Tensor
+        Computes the area weights for the nodes `nodes_name` of the graph.
     """
 
     def __init__(
         self,
+        name: str | None = None,
         norm: str | None = None,
         radius: float = 1.0,
         centre: np.ndarray = np.array([0, 0, 0]),
@@ -343,12 +394,12 @@ class SphericalAreaWeights(BaseAreaWeights):
         assert (
             isinstance(radius, float) or isinstance(radius, int)
         ) and radius > 0, f"radius must be a positive value, but radius={radius}"
-        super().__init__(norm, dtype)
+        super().__init__(name=name, norm=norm, dtype=dtype)
         self.radius = radius
         self.centre = centre
         self.fill_value = fill_value
 
-    def compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
+    def _compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
         """Compute the area associated to each node.
 
         It uses Voronoi diagrams to compute the area of each node.
@@ -389,60 +440,90 @@ class SphericalAreaWeights(BaseAreaWeights):
 
 
 class BaseLatWeightedAttribute(BaseAreaWeights, ABC):
-    """Base class for latitude-weigthed area weights."""
+    """Base class for latitude-weighted area weights.
 
-    @abstractmethod
-    def compute_latitude_weight(self, latitudes: np.ndarray) -> np.ndarray: ...
-
-    def compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
-        return self.compute_latitude_weight(latlons[:, 0])
-
-
-class CosineLatWeightedAttribute(BaseLatWeightedAttribute):
-    """Latitude-weighting of the node attributes for rectilinear grids.
+    The `_compute_latitude_weight` method must be implemented by subclasses to define how the weights are computed
+    from the latitudes (in radians) of the nodes.
 
     Attributes
     ----------
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
+        Defaults to "area_weights".
+    norm : str | None
+        Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
+    dtype : str
+        Data type of the node attribute. Defaults to "float32".
+    """
+
+    @abstractmethod
+    def _compute_latitude_weight(self, latitudes: np.ndarray) -> np.ndarray: ...
+
+    def _compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
+        return self._compute_latitude_weight(latlons[:, 0])
+
+
+class CosineLatWeightedAttribute(BaseLatWeightedAttribute):
+    """Cosine latitude-weighted area weights for rectilinear grids.
+
+    The weight of each node is (max_value - min_value) * cos(lat) + min_value.
+
+    Attributes
+    ----------
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
+        Defaults to "area_weights".
     min_value : float
-        Minimum value of the weights when the latitude is -pi/2 or pi/2 radians.
+        Value of the weights when the latitude is -pi/2 or pi/2 radians. Defaults to 1e-3.
     max_value : float
-        Maximum value of the weights when the latitude is 0 radians.
-    norm : str
-        Normalisation of the weights.
+        Value of the weights when the latitude is 0 radians. Defaults to 1.
+    norm : str | None
+        Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
+    dtype : str
+        Data type of the node attribute. Defaults to "float32".
 
     Methods
     -------
-    compute(self, graph, nodes_name)
-        Compute the area attributes for each node.
+    compute(graph: HeteroData, nodes_name: str, **kwargs) -> torch.Tensor
+        Computes the area weights for the nodes `nodes_name` of the graph.
     """
 
     def __init__(
         self,
+        name: str | None = None,
         min_value: float = 1e-3,
         max_value: float = 1,
         norm: str | None = None,
         dtype: str = "float32",
     ) -> None:
-        super().__init__(norm, dtype)
+        super().__init__(name=name, norm=norm, dtype=dtype)
         self.min_value = min_value
         self.max_value = max_value
 
-    def compute_latitude_weight(self, latitudes: np.ndarray) -> np.ndarray:
+    def _compute_latitude_weight(self, latitudes: np.ndarray) -> np.ndarray:
         return (self.max_value - self.min_value) * np.cos(latitudes) + self.min_value
 
 
 class IsolatitudeAreaWeights(BaseLatWeightedAttribute):
-    r"""Latitude-weighted area weights for rectilinear grids.
+    r"""Isolatitude area weights for rectilinear grids.
+
+    It splits the sphere into latitude bands, one per unique latitude of the nodes, and assigns to each node the area
+    (in km^2) of its band divided by the number of nodes in that band.
 
     Attributes
     ----------
-    norm : str
-        Normalisation of the weights.
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
+        Defaults to "area_weights".
+    norm : str | None
+        Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
+    dtype : str
+        Data type of the node attribute. Defaults to "float32".
 
     Methods
     -------
-    compute(self, graph, nodes_name)
-        Compute the area attributes for each node.
+    compute(graph: HeteroData, nodes_name: str, **kwargs) -> torch.Tensor
+        Computes the area weights for the nodes `nodes_name` of the graph.
 
     Notes
     ------
@@ -454,7 +535,7 @@ class IsolatitudeAreaWeights(BaseLatWeightedAttribute):
     where R is the earth radius and lat_1, lat_2 are in radians.
     """
 
-    def compute_latitude_weight(self, latitudes: np.ndarray) -> np.ndarray:
+    def _compute_latitude_weight(self, latitudes: np.ndarray) -> np.ndarray:
         # Get the latitudes defining the bands
         unique_lats = np.sort(np.unique(latitudes))
         divisory_lats = (unique_lats[1:] + unique_lats[:-1]) / 2
@@ -477,30 +558,37 @@ class IsolatitudeAreaWeights(BaseLatWeightedAttribute):
 
 
 class AnemoiDatasetVariableWeights(BaseNodeAttribute):
-    """Load area weights from a variable in the dataset.
+    """Area weights read from a variable of an Anemoi dataset.
+
+    It uses the values of the variable at the first date of the dataset. It can only be used with nodes built
+    from an Anemoi dataset (i.e. :class:`AnemoiDatasetNodes`).
 
     Attributes
     ----------
     variable : str
-        Name of the variable to use as weights.
-    norm : str, optional
-        Method to use to normalise the weights.
+        Name of the dataset variable to use as weights.
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
+    norm : str | None
+        Normalisation method. Options: None, "l1", "l2", "unit-max", "unit-range", "unit-std".
+    dtype : str
+        Data type of the node attribute. Defaults to "float32".
 
     Methods
     -------
-    get_raw_values(self, nodes)
-        Extract the data and convert it to a Torch tensor object.
+    compute(graph: HeteroData, nodes_name: str, **kwargs) -> torch.Tensor
+        Computes the area weights for the nodes `nodes_name` of the graph.
     """
 
-    def __init__(self, variable: str, norm: str | None = None, dtype: str = "float32") -> None:
-        super().__init__(norm, dtype)
+    def __init__(self, variable: str, name: str | None = None, norm: str | None = None, dtype: str = "float32") -> None:
+        super().__init__(name=name, norm=norm, dtype=dtype)
         self.variable = variable
 
     def _read_data(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
         """Read the weighting variable from the dataset."""
         return open_dataset(nodes["_dataset"], select=self.variable)[0].squeeze()
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+    def _get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         """Extract the data and convert it to a Torch tensor object.
 
         Parameters
@@ -520,4 +608,4 @@ class AnemoiDatasetVariableWeights(BaseNodeAttribute):
             "AnemoiDatasetNodes",
         ], f"{self.__class__.__name__} can only be used with AnemoiDatasetNodes."
         data = torch.from_numpy(self._read_data(nodes))
-        return self.post_process(data)
+        return self._post_process(data)
