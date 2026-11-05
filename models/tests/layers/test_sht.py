@@ -398,3 +398,67 @@ def test_equiangular_poles_360_by_181_roundtrip_and_gradient(device, dtype):
 def test_regular_sht_grid_validation(cls, kwargs, match):
     with pytest.raises(ValueError, match=match):
         cls(**kwargs)
+
+
+def _two_sided_coefficients(spectral_coeffs: torch.Tensor) -> torch.Tensor:
+    """Expand stored m >= 0 coefficients to the full m = -l..l spectrum of a real field.
+
+    Input is ``[..., L, M, variables]``, output is ``[..., (truncation + 1)**2, variables]``.
+    Coefficients at m < 0 are the complex conjugates of those at m > 0.
+    """
+    n_wavenumbers = spectral_coeffs.shape[-3]
+    coefficients = []
+    for total in range(n_wavenumbers):
+        for zonal in range(-total, total + 1):
+            stored = spectral_coeffs[..., total, abs(zonal), :]
+            coefficients.append(stored if zonal >= 0 else stored.conj())
+    return torch.stack(coefficients, dim=-2)
+
+
+@pytest.mark.parametrize(
+    "direct_cls,inverse_cls",
+    [
+        pytest.param(RegularSHT, InverseRegularSHT, id="regular"),
+        pytest.param(OctahedralSHT, InverseOctahedralSHT, id="octahedral"),
+    ],
+)
+def test_sht_power_spectrum_counts_negative_zonal_wavenumbers(direct_cls, inverse_cls):
+    """Power and cross spectra sum over m = -l..l, and the power satisfies Parseval's theorem."""
+    torch.manual_seed(0)
+    nlat, truncation = 8, 3
+    direct = direct_cls(nlat=nlat, truncation=truncation)
+    inverse = inverse_cls(nlat=nlat, truncation=truncation)
+
+    # Band-limited real fields [batch, time, ensemble, points, variables], so the
+    # grid quadrature below integrates their square exactly.
+    coefficients = torch.randn(1, 1, 1, 2, truncation + 1, truncation + 1, dtype=torch.complex128).tril()
+    coefficients[..., 0].imag = 0
+    fields = inverse(coefficients).movedim(-2, -1)
+    other_fields = torch.randn_like(fields)
+    spectrum = direct(fields)
+    other_spectrum = direct(other_fields)
+
+    two_sided = _two_sided_coefficients(spectrum)
+    other_two_sided = _two_sided_coefficients(other_spectrum)
+    assert two_sided.shape[-2] == (truncation + 1) ** 2
+    assert direct._sht.mode_weights.sum() == (truncation + 1) ** 2
+
+    psd = direct.power_spectral_density(spectrum)
+    l_index = torch.cat([torch.full((2 * total + 1,), total) for total in range(truncation + 1)])
+    expected_psd = torch.zeros_like(psd).index_add_(-2, l_index, two_sided.abs() ** 2)
+    torch.testing.assert_close(psd, expected_psd)
+
+    cross = direct.cross_spectral_density(spectrum, other_spectrum)
+    expected_cross = torch.zeros_like(cross).index_add_(-2, l_index, (two_sided * other_two_sided.conj()).real)
+    torch.testing.assert_close(cross, expected_cross)
+
+    # Parseval: the summed power is (4 pi)^2 times the mean square of the field over the sphere.
+    _, latitude_weights = latitude_quadrature(nlat, "legendre-gauss")
+    ring_weights = torch.cat(
+        [
+            torch.full((n_lon,), weight * 2 * math.pi / n_lon, dtype=torch.float64)
+            for weight, n_lon in zip(latitude_weights, direct.lons_per_lat)
+        ]
+    )
+    mean_square = (ring_weights[:, None] * fields[0, 0, 0] ** 2).sum(dim=0) / (4 * math.pi)
+    torch.testing.assert_close(psd[0, 0, 0].sum(dim=0), (4 * math.pi) ** 2 * mean_square)

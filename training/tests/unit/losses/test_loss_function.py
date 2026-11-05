@@ -9,6 +9,7 @@
 
 
 import logging
+import math
 from types import SimpleNamespace
 
 import einops
@@ -21,6 +22,8 @@ from omegaconf import OmegaConf
 from pytest_mock import MockerFixture
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.layers.spectral_helpers import latitude_quadrature
+from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import HuberLoss
@@ -567,6 +570,14 @@ def test_fft2d_spectral_losses_shape_and_validation(target: str) -> None:
             [2, 2],
             id="octahedral-sht-amse",
         ),
+        pytest.param(
+            SpectralCRPSLoss,
+            4,
+            {"transform": "octahedral_sht", "nlat": 8},
+            [104, 104],
+            [8, 8],
+            id="octahedral-sht-crps",
+        ),
     ],
 )
 def test_spectral_losses_use_all_to_all_for_sharded_layout(
@@ -749,6 +760,146 @@ def test_sht_powerspectraldensity_loss(loss_target: str) -> None:
                 },
             ),
         )
+
+
+def _two_sided_coefficients(spectral_coeffs: torch.Tensor) -> torch.Tensor:
+    """Expand stored m >= 0 coefficients to the full m = -l..l spectrum of a real field.
+
+    Input is ``[..., L, M, variables]``, output is ``[..., (truncation + 1)**2, variables]``.
+    Coefficients at m < 0 are the complex conjugates of those at m > 0.
+    """
+    n_wavenumbers = spectral_coeffs.shape[-3]
+    coefficients = []
+    for total in range(n_wavenumbers):
+        for zonal in range(-total, total + 1):
+            stored = spectral_coeffs[..., total, abs(zonal), :]
+            coefficients.append(stored if zonal >= 0 else stored.conj())
+    return torch.stack(coefficients, dim=-2)
+
+
+def _expected_two_sided_crps(loss: BaseLoss, pred_coeffs: torch.Tensor, target_coeffs: torch.Tensor) -> torch.Tensor:
+    crps = loss._kernel_crps(
+        einops.rearrange(pred_coeffs, "b t e m v -> b t v m e"),
+        einops.rearrange(target_coeffs, "b t 1 m v -> b t v m 1"),
+    )
+    return crps.sum(dim=-1)[0, 0]
+
+
+def _expected_two_sided_lsd(_loss: BaseLoss, pred_coeffs: torch.Tensor, target_coeffs: torch.Tensor) -> torch.Tensor:
+    eps = torch.finfo(torch.float64).eps
+    log_diff = torch.log(target_coeffs.abs() ** 2 + eps) - torch.log(pred_coeffs.abs() ** 2 + eps)
+    return torch.sqrt((log_diff**2).sum(dim=-2)[0, 0, 0] + eps)
+
+
+def _expected_two_sided_fcl(_loss: BaseLoss, pred_coeffs: torch.Tensor, target_coeffs: torch.Tensor) -> torch.Tensor:
+    eps = torch.finfo(torch.float64).eps
+    cross = (pred_coeffs * target_coeffs.conj()).real
+    denom = torch.sqrt(pred_coeffs.abs() ** 2 * target_coeffs.abs() ** 2 + eps)
+    return (1 - torch.clamp(cross / denom, min=-1.0, max=1.0)).sum(dim=-2)[0, 0, 0]
+
+
+def _expected_two_sided_psl(_loss: BaseLoss, pred_coeffs: torch.Tensor, target_coeffs: torch.Tensor) -> torch.Tensor:
+    psd_pred = _per_total_wavenumber_sum(pred_coeffs.abs() ** 2)
+    psd_target = _per_total_wavenumber_sum(target_coeffs.abs() ** 2)
+    return ((psd_pred - psd_target) ** 2).sum(dim=-2)[0, 0, 0]
+
+
+def _expected_two_sided_amse(loss: BaseLoss, pred_coeffs: torch.Tensor, target_coeffs: torch.Tensor) -> torch.Tensor:
+    psd_pred = _per_total_wavenumber_sum(pred_coeffs.abs() ** 2)
+    psd_target = _per_total_wavenumber_sum(target_coeffs.abs() ** 2)
+    cross = _per_total_wavenumber_sum((pred_coeffs * target_coeffs.conj()).real)
+    amp_pred = torch.sqrt(psd_pred + loss.eps)
+    amp_target = torch.sqrt(psd_target + loss.eps)
+    coherence = cross / (amp_pred * amp_target + loss.eps)
+    amse = (amp_pred - amp_target) ** 2 + 2 * torch.maximum(psd_pred, psd_target) * (1 - coherence)
+    return amse.sum(dim=-2)[0, 0, 0] / (4 * math.pi) ** 2
+
+
+def _per_total_wavenumber_sum(two_sided: torch.Tensor) -> torch.Tensor:
+    """Sum a per-coefficient quantity from ``[..., L**2, variables]`` to ``[..., L, variables]``."""
+    n_wavenumbers = round(two_sided.shape[-2] ** 0.5)
+    l_index = torch.cat([torch.full((2 * total + 1,), total) for total in range(n_wavenumbers)])
+    out_shape = (*two_sided.shape[:-2], n_wavenumbers, two_sided.shape[-1])
+    return torch.zeros(out_shape, dtype=two_sided.dtype).index_add_(-2, l_index, two_sided)
+
+
+@pytest.mark.parametrize(
+    "transform_kwargs",
+    [
+        pytest.param({"transform": "octahedral_sht", "nlat": 8}, id="octahedral"),
+        pytest.param({"transform": "regular_sht", "nlat": 8}, id="regular"),
+        pytest.param({"transform": "reduced_sht", "grid": "n320"}, id="reduced-n320"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("loss_cls", "ensemble_size", "expected_fn"),
+    [
+        pytest.param(SpectralCRPSLoss, 3, _expected_two_sided_crps, id="crps"),
+        pytest.param(LogSpectralDistance, 1, _expected_two_sided_lsd, id="lsd"),
+        pytest.param(FourierCorrelationLoss, 1, _expected_two_sided_fcl, id="fcl"),
+        pytest.param(PowerSpectrumLoss, 1, _expected_two_sided_psl, id="psl"),
+        pytest.param(SpectralAMSELoss, 1, _expected_two_sided_amse, id="amse"),
+    ],
+)
+def test_sht_losses_score_the_two_sided_spectrum(
+    loss_cls: type[BaseLoss],
+    ensemble_size: int,
+    expected_fn: object,
+    transform_kwargs: dict[str, object],
+) -> None:
+    """SHT losses match the same score computed directly on all coefficients m = -l..l."""
+    torch.manual_seed(0)
+    truncation, nvars = 3, 2
+    loss = loss_cls(**transform_kwargs, truncation=truncation)
+    n_points = loss.transform._sht.n_grid_points
+    pred = torch.randn(1, 1, ensemble_size, n_points, nvars, dtype=torch.float64)
+    target = torch.randn(1, 1, 1, n_points, nvars, dtype=torch.float64)
+
+    expected = expected_fn(
+        loss,
+        _two_sided_coefficients(loss.transform(pred)),
+        _two_sided_coefficients(loss.transform(target)),
+    )
+    actual = loss(pred, target, squash=False)
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_sht_amse_equals_mse_for_a_scaled_prediction() -> None:
+    """With coherence 1, AMSE is the area-weighted MSE of the fields (Subich et al., eqs. 3-4)."""
+    torch.manual_seed(0)
+    nlat, truncation = 8, 3
+    loss = SpectralAMSELoss(transform="octahedral_sht", nlat=nlat, truncation=truncation)
+    inverse = InverseOctahedralSHT(nlat=nlat, truncation=truncation)
+
+    # Band-limited real fields, so the grid quadrature below integrates their square exactly.
+    coefficients = torch.randn(1, 1, 1, 2, truncation + 1, truncation + 1, dtype=torch.complex128).tril()
+    coefficients[..., 0].imag = 0
+    target = inverse(coefficients).movedim(-2, -1)
+    pred = 0.5 * target
+
+    _, latitude_weights = latitude_quadrature(nlat, "legendre-gauss")
+    area_weights = torch.cat(
+        [
+            torch.full((n_lon,), weight * 2 * math.pi / n_lon, dtype=torch.float64)
+            for weight, n_lon in zip(latitude_weights, loss.transform.lons_per_lat, strict=True)
+        ],
+    ) / (4 * math.pi)
+    expected = (area_weights[:, None] * (pred - target)[0, 0, 0] ** 2).sum(dim=0)
+
+    torch.testing.assert_close(loss(pred, target, squash=False), expected, rtol=1e-6, atol=0)
+
+
+def test_sht_fourier_correlation_is_zero_for_a_perfect_prediction() -> None:
+    """Unused entries with m > l must not add to the Fourier correlation loss."""
+    torch.manual_seed(0)
+    nlat = 8
+    loss = FourierCorrelationLoss(transform="octahedral_sht", nlat=nlat)
+    target = torch.randn(1, 1, 1, _octahedral_expected_points(nlat), 2, dtype=torch.float64)
+
+    out = loss(target.clone(), target, squash=False)
+
+    torch.testing.assert_close(out, torch.zeros_like(out), atol=1e-10, rtol=0)
 
 
 @pytest.mark.parametrize("transform", ["fft2d", "dct2d"])

@@ -236,9 +236,11 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
 
 class SpectralDimensionScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.SpectralDimensionScaler"] = Field(..., alias="_target_")
-    n_spectral_modes: PositiveInt = Field(example=193)
-    "Number of total wavenumbers (L dimension). For SHT-based losses this is ``truncation + 1``."
-    spectral_dims: PositiveInt | None = Field(default=None, example=193)
+    n_spectral_modes: PositiveInt = Field(example=192)
+    "Number of modes to average over. For SHT-based losses this is ``truncation + 1`` for PowerSpectrumLoss and "
+    "SpectralAMSELoss, and ``(truncation + 1)**2`` for SpectralCRPSLoss, LogSpectralDistance and "
+    "FourierCorrelationLoss."
+    spectral_dims: PositiveInt | None = Field(default=None, example=192)
     "Length of the spectral dimension as seen by the loss. Defaults to ``n_spectral_modes``. "
     "Set explicitly for losses that keep the full (L, M) dimension flattened."
     norm: Literal["unit-sum", "unit-mean", "l1"] | None = Field(default=None, example=None)
