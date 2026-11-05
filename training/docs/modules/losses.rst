@@ -762,8 +762,10 @@ Use this for global models on the reduced Gaussian grid (only N320 supported):
 Truncation is by default set to 319 for n320 grids, but can be set to a higher or lower value in the config file.
 This truncation parameter defines how many wave numbers are included in the spectral representation.
 
+.. _spectral-amse:
+
 Spectral AMSE
--------------
+=============
 
 ``SpectralAMSELoss`` implements the Adjusted Mean Squared Error of Subich et al.
 (arXiv:2501.19374), which penalises per-wavenumber amplitude and phase-coherence
@@ -783,6 +785,15 @@ supported.
          transform: fft2d
          x_dim: 256
          y_dim: 128
+
+With ``fft2d`` and ``dct2d`` the loss has one entry per radial band, so the
+:class:`~anemoi.training.losses.scalers.SpectralDimensionScaler` (see
+:ref:`spectral-loss-scalers`) must be sized to the number of bands:
+
+- ``fft2d``: ``round(sqrt((y_dim // 2)**2 + (x_dim // 2)**2)) + 1``
+  (144 for the example above)
+- ``dct2d``: ``round(sqrt((y_dim - 1)**2 + (x_dim - 1)**2)) + 1``
+  (286 for the example above)
 
 Power Spectrum Loss
 ===================
@@ -816,6 +827,9 @@ whose ``(ky, kx)`` plane is binned into radial wavenumber bands
    on the grid dimension must be a
    :class:`~anemoi.training.losses.scalers.SpectralDimensionScaler` (sized to
    the spectral dimension), not a spatial weight such as ``node_weights``.
+   For the SHT family the spectral dimension is ``truncation + 1``; for
+   ``fft2d`` and ``dct2d`` it is the number of radial bands, see the formulas
+   under :ref:`spectral-amse`.
 
 Example configuration (octahedral SHT)
 --------------------------------------
@@ -1011,6 +1025,8 @@ and an error will be raised.
 If multiple groups are defined for a variable, the first group in the
 `variable_groups` is used. If the variable is not in any group, it is
 assigned to the default group.
+
+.. _spectral-loss-scalers:
 
 Spectral Loss Scalers
 =====================

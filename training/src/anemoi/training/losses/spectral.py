@@ -363,7 +363,7 @@ class SpectralAMSELoss(SpectralLoss):
         ), "SpectralAMSELoss does not support patch-wise FFT2D; set patch_size=None"
         # AMSE uses the Cartesian PSD/CSD path, which needs the radial-band index.
         if isinstance(self.transform, Cartesian2DTransform):
-            self.transform._register_radial_bands()
+            self.transform.register_radial_bands()
         self.eps = eps
 
     def forward(
@@ -472,7 +472,7 @@ class PowerSpectrumLoss(SpectralLoss):
         ), "PowerSpectrumLoss does not support patch-wise FFT2D; set patch_size=None"
         # The Cartesian PSD sums |coeff|^2 per radial band, which needs the band index.
         if isinstance(self.transform, Cartesian2DTransform):
-            self.transform._register_radial_bands()
+            self.transform.register_radial_bands()
 
     def forward(
         self,
