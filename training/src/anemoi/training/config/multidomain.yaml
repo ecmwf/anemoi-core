@@ -1,0 +1,137 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- system: example
+- graph: multidomain
+- model: graphtransformer
+- task: forecaster
+- training: stretched
+- _self_
+
+# Two-domain (multidomain) setup: the single-domain `stretched` configs describe the
+# first domain `data`; everything below adds the second domain `data_2`
+# (and overrides the settings that differ for multidomain training).
+
+config_validation: True
+
+system:
+  input:
+    dataset: ???
+    forcing_dataset: ???
+
+diagnostics:
+  plot:
+    datasets_to_plot: [data, data_2]
+
+data:
+  datasets:
+    data_2: ${data.datasets.data}
+  # multi-domain validation runs through the domains sequentially,
+  # limiting validation batches could potentially exclude one of the domains,
+  # so set data.limit_batches.validation to null to ensure both domains are validated.
+  # to select a shorter validation window adapt start and end in dataloader.validation
+  limit_batches:
+    validation: null
+
+dataloader:
+  loading_policy:
+    _target_: anemoi.training.data.loading.MultiDomainLoadingPolicy
+  training:
+    datasets:
+      data:
+        dataset_config:
+          dataset:
+            cutout:
+            - dataset: ${system.input.dataset}
+              area: [70, -10, 55, 30]
+              thinning: 25
+            - dataset: ${system.input.forcing_dataset}
+            adjust: all
+            min_distance_km: 0
+      data_2:
+        dataset_config:
+          dataset:
+            cutout:
+            - dataset: ${system.input.dataset}
+              area: [72, -25, 52, 50]
+              thinning: 25
+            - dataset: ${system.input.forcing_dataset}
+            adjust: all
+            min_distance_km: 0
+          frequency: ${data.frequency}
+        start: ${dataloader.training.datasets.data.start}
+        end: ${dataloader.training.datasets.data.end}
+  validation:
+    datasets:
+      data:
+        dataset_config:
+          dataset: ${dataloader.training.datasets.data.dataset_config.dataset}
+      data_2:
+        dataset_config:
+          dataset: ${dataloader.training.datasets.data_2.dataset_config.dataset}
+          frequency: ${data.frequency}
+        start: ${dataloader.validation.datasets.data.start}
+        end: ${dataloader.validation.datasets.data.end}
+  test:
+    datasets:
+      data:
+        dataset_config:
+          dataset: ${dataloader.training.datasets.data.dataset_config.dataset}
+      data_2:
+        dataset_config:
+          dataset: ${dataloader.training.datasets.data_2.dataset_config.dataset}
+          frequency: ${data.frequency}
+        start: ${dataloader.test.datasets.data.start}
+        end: ${dataloader.test.datasets.data.end}
+
+model:
+  model:
+    hidden_nodes_name:
+      data: hidden
+      data_2: hidden_2
+  encoders:
+    "0":
+      source_datasets: [data, data_2]
+  decoders:
+    "0":
+      target_datasets: [data, data_2]
+  residual:
+    datasets:
+      data_2: ${model.residual.datasets.data}
+  output_mask:
+    datasets:
+      data_2: ${model.output_mask.datasets.data}
+  # multi-domain training does not support trainable parameters
+  node_trainable_parameters:
+    data: 0
+    hidden: 0
+    data_2: 0
+    hidden_2: 0
+  edge_trainable_parameters:
+    data2hidden: 0
+    hidden2hidden: 0
+    hidden2data: 0
+  bounding:
+    datasets:
+      data_2: ${model.bounding.datasets.data}
+
+training:
+  scalers:
+    datasets:
+      data:
+        node_weights:
+          weight_frac_of_total: 0.25
+      data_2: ${training.scalers.datasets.data}
+  training_loss:
+    datasets:
+      data_2: ${training.training_loss.datasets.data}
+  validation_metrics:
+    datasets:
+      data_2: ${training.validation_metrics.datasets.data}
+  variable_groups:
+    datasets:
+      data_2: ${training.variable_groups.datasets.data}
+  metrics:
+    datasets:
+      data_2: ${training.metrics.datasets.data}
