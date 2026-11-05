@@ -238,8 +238,10 @@ In this example, ``model_interface.model`` is the following:
        )
      )
      (latent_aggregator): SumAggregator()
-     (processor_graph_provider): StaticGraphProvider(
-       (trainable): TrainableTensor()
+     (processor_graph_provider): ModuleDict(
+       (hidden): StaticGraphProvider(
+         (trainable): TrainableTensor()
+       )
      )
      (processor): TransformerProcessor(
        ...
@@ -265,7 +267,8 @@ are merged by the ``latent_aggregator`` before the processor. Each
 encoder, processor, and decoder has a corresponding ``*_graph_provider``
 that manages the graph edges and trainable edge parameters, supplying
 edge attributes and indices to its mapper/processor during the forward
-pass.
+pass. The encoder and decoder providers are keyed by dataset name, and
+the processor provider by hidden mesh name (here ``hidden``).
 
 .. _layer-kernels:
 

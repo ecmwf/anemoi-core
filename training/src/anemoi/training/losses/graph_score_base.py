@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import math
 from abc import abstractmethod
 from contextlib import nullcontext
 
@@ -35,7 +36,7 @@ def csr_matmul(matrix: torch.Tensor, node_values: torch.Tensor) -> torch.Tensor:
         msg = f"CSR matrix width {matrix.shape[1]} does not match the input node count {input_nodes}."
         raise ValueError(msg)
 
-    dense_batches = node_values.numel() // (input_nodes * channels)
+    dense_batches = math.prod(input_shape[:-2])
     right_hand_side = (
         node_values.reshape(dense_batches, input_nodes, channels)
         .permute(1, 0, 2)
