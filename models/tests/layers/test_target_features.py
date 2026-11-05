@@ -295,11 +295,12 @@ def _test_composite_target_layout_rank(
     splits = [3] + [2] * (world_size - 1)
     num_nodes = sum(splits)
     start, stop = sum(splits[:rank]), sum(splits[: rank + 1])
-    coordinates = torch.arange(num_nodes * 4, dtype=torch.float32, device=device).reshape(num_nodes, 4)
+    # Already-encoded coordinate features act as distinct row markers, not raw lat/lon pairs.
+    coordinate_features = torch.arange(num_nodes * 4, dtype=torch.float32, device=device).reshape(num_nodes, 4)
     encoded = torch.arange(num_nodes * 8, dtype=torch.float32, device=device).reshape(num_nodes, 8) / 7
     inputs = torch.arange(num_nodes * 2, dtype=torch.float32, device=device).reshape(1, 1, 1, num_nodes, 2)
     model = SimpleNamespace(
-        node_attributes=SimpleNamespace(latlons_data=coordinates),
+        node_attributes=SimpleNamespace(latlons_data=coordinate_features),
         _internal_input_idx={"data": [0, 1]},
     )
     feature = create_decoding_target_features(["encoded_data", "coordinates", "prognostics"], ["data"], model)
@@ -311,8 +312,13 @@ def _test_composite_target_layout_rank(
         model_comm_group=group,
         dataset_name="data",
     )
-    expected = torch.cat([encoded, coordinates, inputs.reshape(num_nodes, 2)], dim=1)
-    torch.testing.assert_close(actual, expected[start:stop] if input_is_sharded else expected)
+    expected = torch.cat([encoded, coordinate_features, inputs.reshape(num_nodes, 2)], dim=1)
+    # Callable messages retain numerical details while identifying the layout and rank.
+    torch.testing.assert_close(
+        actual,
+        expected[start:stop] if input_is_sharded else expected,
+        msg=lambda details: f"composite features on rank {rank}, input_is_sharded={input_is_sharded}\n{details}",
+    )
 
 
 @pytest.mark.distributed
