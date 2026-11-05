@@ -50,7 +50,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 continue
 
             encoder_config = model_config.encoders[self.dataset2encoder[dataset_name]]
-            hidden_name = self.dataset2hidden[dataset_name]
 
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
@@ -103,6 +102,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             trainable_size=model_config.processor.get("trainable_size", 0),
             dataset_name=self.dataset_names[0] if file_graph else None,
         )
+        processor_edge_dims = [provider.edge_dim for provider in self.processor_graph_provider.values()]
+        assert all(
+            dim == processor_edge_dims[0] for dim in processor_edge_dims
+        ), f"All hidden meshes must have the same processor edge dimension, got {processor_edge_dims}."
+        processor_edge_dim = processor_edge_dims[0]
 
         self.processor = instantiate(
             model_config.processor,
