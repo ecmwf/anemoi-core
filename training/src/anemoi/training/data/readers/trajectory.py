@@ -136,7 +136,7 @@ class TrajectoryDataReader(GriddedDataReader):
 
     def tree(self, prefix: str = "") -> Tree:
         tree = super().tree(prefix)
-        tree.add(f"Num initialisations: {self.num_sequences}")
+        tree.add(f"Num. initialisations: {self.num_sequences}")
         tree.add(f"Steps per initialisation: {self.sequence_length()}")
         tree.add(f"Sampling: {self.sampling}")
         return tree
