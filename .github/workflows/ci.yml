@@ -40,12 +40,6 @@ jobs:
       # resolve-deps declares matrix-<kind> outputs only for some kinds; json holds them all.
       test-matrix: ${{ toJSON(fromJSON(steps.r.outputs.json).test) }}
     steps:
-      # No container: uv provides ci-infrastructure's Python.
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-        with:
-          # setup-uv runs before the checkout, so its cache key cannot follow the
-          # dependencies: the first save would be restored forever. Downloads are fast.
-          enable-cache: false
       - id: mint
         uses: actions/create-github-app-token@v3
         with:
@@ -69,12 +63,6 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.resolve.outputs.test-matrix) }}
     steps:
-      # No container: uv provides the job script's Python and ci-infrastructure's.
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-        with:
-          # setup-uv runs before the checkout, so its cache key cannot follow the
-          # dependencies: the first save would be restored forever. Downloads are fast.
-          enable-cache: false
       - id: mint
         uses: actions/create-github-app-token@v3
         with:
