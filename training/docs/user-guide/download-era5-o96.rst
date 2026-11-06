@@ -36,8 +36,8 @@ To download the dataset, you can use the `anemoi-datasets` :ref:`copy
 
    % pip install "anemoi-datasets>=0.5.22"
    % anemoi-datasets copy \
-       --url https://data.ecmwf.int/anemoi-datasets/era5-o96-1979-2023-6h-v8.zarr \
-       --target era5-o96-1979-2023-6h-v8.zarr
+       https://data.ecmwf.int/anemoi-datasets/era5-o96-1979-2023-6h-v8.zarr \
+       era5-o96-1979-2023-6h-v8.zarr
 
 By default, the download will process 100 files at a time, in one
 thread. If your internet connection is fast enough, you can increase the
