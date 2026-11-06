@@ -8,7 +8,7 @@ repos:
     stages: [pre-commit]
     language: python
     entry: jupyter nbconvert --ClearOutputPreprocessor.enabled=True --inplace
-    additional_dependencies: [jupyter]
+    additional_dependencies: [nbconvert]
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v6.0.0
   hooks:
@@ -86,6 +86,11 @@ repos:
     - --check-protected  # Check protected methods
     - --check-class      # Check class docstrings
     - --disable=SIG101,SIG102,SIG305     # Disable empty docstrings
+- repo: https://github.com/ecmwf/ci-infrastructure
+  rev: 82d9bb0981ec1b76b3800f3770a3698a96e81db6
+  hooks:
+  - id: check-ci-approval
+  - id: check-ci-result
 ci:
   autoupdate_schedule: monthly
   autoupdate_commit_msg: "chore(deps): pre-commit.ci autoupdate"
