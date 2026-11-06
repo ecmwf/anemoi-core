@@ -533,7 +533,7 @@ model:
     analysis:
       source_datasets: [ "lam" ]
       dataset_fusing_strategy: "none"
-      fuser: null
+      node_embedder: null
       mapper:
         _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
         num_channels: ${model.num_channels}
@@ -552,7 +552,7 @@ model:
     combined_surface:
       source_datasets: [ "combined_surface" ]
       dataset_fusing_strategy: "none"
-      fuser: null
+      node_embedder: null
       mapper:
         _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
         num_channels: ${model.num_channels}

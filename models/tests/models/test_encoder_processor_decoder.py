@@ -123,13 +123,13 @@ def test_build_latent_aggregator_passes_layer_kernels_to_aggregator() -> None:
     assert model.latent_aggregator.hidden_projection.bias is None
 
 
-# --- Encoder fusion ("none" / "sequential" + fuser) -------------------------------------------
+# --- Encoder fusion ("none" / "sequential" + node_embedder) -------------------------------------------
 
-LINEAR_FUSER = {"_target_": "anemoi.models.layers.fuser.LinearFuser", "num_channels": 6}
+LINEAR_NODE_EMBEDDER = {"_target_": "anemoi.models.layers.node_embedder.LinearNodeEmbedder", "num_channels": 6}
 
 
 class _RecordingMapper(nn.Module):
-    """Stand-in encoder mapper that records the widths it was built with."""
+    """Stand-in encoder mapper that records the channel counts it was built with."""
 
     def __init__(self, in_channels_src: int, in_channels_dst: int, edge_dim: int, **kwargs) -> None:
         super().__init__()
@@ -138,13 +138,13 @@ class _RecordingMapper(nn.Module):
         self.edge_dim = edge_dim
 
 
-def _encoder_config(strategy: str, source_datasets: list[str], fuser: dict | None = None):
+def _encoder_config(strategy: str, source_datasets: list[str], node_embedder: dict | None = None):
     return OmegaConf.create(
         {
             "shared": {
                 "source_datasets": source_datasets,
                 "dataset_fusing_strategy": strategy,
-                "fuser": fuser,
+                "node_embedder": node_embedder,
                 "mapper": {
                     "_target_": "tests.models.test_encoder_processor_decoder._RecordingMapper",
                     "layer_kernels": {"Linear": {"_target_": "torch.nn.Linear", "bias": False}},
@@ -166,51 +166,53 @@ def _model_for_encoder_build(strategy: str, in_dims: dict[str, int]) -> _SharedE
 
 
 @pytest.mark.parametrize(
-    ("strategy", "fuser", "match"),
+    ("strategy", "node_embedder", "match"),
     [
-        ("joint", LINEAR_FUSER, "planned but not yet supported"),
+        ("joint", LINEAR_NODE_EMBEDDER, "planned but not yet supported"),
         ("concat", None, "unsupported dataset_fusing_strategy"),
-        ("sequential", None, "needs a fuser"),
+        ("sequential", None, "needs a node embedder"),
     ],
 )
-def test_validate_fusing_strategy_rejects_invalid_settings(strategy: str, fuser: dict | None, match: str) -> None:
-    config = _encoder_config(strategy, ["dataset_a"], fuser)["shared"]
+def test_validate_fusing_strategy_rejects_invalid_settings(
+    strategy: str, node_embedder: dict | None, match: str
+) -> None:
+    config = _encoder_config(strategy, ["dataset_a"], node_embedder)["shared"]
 
     with pytest.raises(ValueError, match=match):
         AnemoiModelEncProcDec._validate_fusing_strategy("shared", config)
 
 
-def test_validate_fusing_strategy_ignores_fuser_for_none(caplog: pytest.LogCaptureFixture) -> None:
-    config = _encoder_config("none", ["dataset_a"], LINEAR_FUSER)["shared"]
+def test_validate_fusing_strategy_ignores_node_embedder_for_none(caplog: pytest.LogCaptureFixture) -> None:
+    config = _encoder_config("none", ["dataset_a"], LINEAR_NODE_EMBEDDER)["shared"]
 
     assert AnemoiModelEncProcDec._validate_fusing_strategy("shared", config) == "none"
-    assert "fuser setting is ignored" in caplog.text
+    assert "node embedder setting is ignored" in caplog.text
 
 
 @pytest.mark.parametrize("in_dims", [{"dataset_a": 3, "dataset_b": 5}, {"dataset_a": 3}])
-def test_sequential_builds_linear_fuser_feeding_the_mapper(in_dims: dict[str, int]) -> None:
-    from anemoi.models.layers.fuser import LinearFuser
+def test_sequential_builds_linear_node_embedder_feeding_the_mapper(in_dims: dict[str, int]) -> None:
+    from anemoi.models.layers.node_embedder import LinearNodeEmbedder
 
     model = _model_for_encoder_build("sequential", in_dims)
 
-    model._build_encoding_networks(_encoder_config("sequential", list(in_dims), LINEAR_FUSER))
+    model._build_encoding_networks(_encoder_config("sequential", list(in_dims), LINEAR_NODE_EMBEDDER))
 
-    fuser = model.encoder_src_projection["shared"]
-    assert isinstance(fuser, LinearFuser)
-    assert model.encoder["shared"].in_channels_src == 6  # fuser.num_channels, also for a single source
+    node_embedder = model.encoder_src_projection["shared"]
+    assert isinstance(node_embedder, LinearNodeEmbedder)
+    assert model.encoder["shared"].in_channels_src == 6  # node_embedder.num_channels, also for a single source
     assert model._encoder_projects_sources("shared")
-    # The fuser falls back to the mapper's layer_kernels (bias=False here).
-    assert all(projection.bias is None for projection in fuser.values())
-    # State-dict keys are unchanged from the pre-fuser per-dataset projections: no checkpoint migration.
+    # The node embedder falls back to the mapper's layer_kernels (bias=False here).
+    assert all(projection.bias is None for projection in node_embedder.values())
+    # State-dict keys are unchanged from the pre-node-embedder per-dataset projections: no checkpoint migration.
     assert sorted(k for k in model.state_dict() if k.startswith("encoder_src_projection.")) == sorted(
         f"encoder_src_projection.shared.{d}.weight" for d in in_dims
     )
 
 
-def test_none_builds_no_fuser_and_feeds_the_assembled_width() -> None:
+def test_none_builds_no_node_embedder_and_feeds_the_assembled_width() -> None:
     model = _model_for_encoder_build("none", {"dataset_a": 4, "dataset_b": 4})
 
-    model._build_encoding_networks(_encoder_config("none", ["dataset_a", "dataset_b"], LINEAR_FUSER))
+    model._build_encoding_networks(_encoder_config("none", ["dataset_a", "dataset_b"], LINEAR_NODE_EMBEDDER))
 
     assert len(model.encoder_src_projection) == 0
     assert model.encoder["shared"].in_channels_src == 4
@@ -220,7 +222,7 @@ def test_none_builds_no_fuser_and_feeds_the_assembled_width() -> None:
 def test_none_rejects_source_datasets_of_differing_widths() -> None:
     model = _model_for_encoder_build("none", {"dataset_a": 3, "dataset_b": 5})
 
-    with pytest.raises(ValueError, match="same input width"):
+    with pytest.raises(ValueError, match="same number of input channels"):
         model._build_encoding_networks(_encoder_config("none", ["dataset_a", "dataset_b"]))
 
 
@@ -253,18 +255,18 @@ def test_none_rejects_several_source_datasets_in_one_batch() -> None:
         _forward_until_aggregation(model, ["dataset_a", "dataset_b"])
 
 
-def test_sequential_projects_each_source_through_its_fuser() -> None:
-    from anemoi.models.layers.fuser import LinearFuser
+def test_sequential_projects_each_source_through_its_node_embedder() -> None:
+    from anemoi.models.layers.node_embedder import LinearNodeEmbedder
 
     model = _SharedEncoderModel()
-    fuser = LinearFuser(num_channels=4, in_channels={"dataset_a": 4, "dataset_b": 4})
-    model.encoder_src_projection = nn.ModuleDict({"shared": fuser})
+    node_embedder = LinearNodeEmbedder(num_channels=4, in_channels={"dataset_a": 4, "dataset_b": 4})
+    model.encoder_src_projection = nn.ModuleDict({"shared": node_embedder})
 
     with pytest.raises(_AggregationReached):
         _forward_until_aggregation(model, ["dataset_a", "dataset_b"])
 
-    # _SharedEncoder returns its source input as the latent, so the latent is the fuser output.
+    # _SharedEncoder returns its source input as the latent, so the latent is the node embedder output.
     with torch.no_grad():
         for value, name in enumerate(["dataset_a", "dataset_b"], start=1):
-            expected = fuser(torch.full((1, 4), float(value)), name)
+            expected = node_embedder(torch.full((1, 4), float(value)), name)
             torch.testing.assert_close(model.latent_aggregator.latents[name], expected)

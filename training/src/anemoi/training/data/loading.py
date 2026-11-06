@@ -137,8 +137,7 @@ class DataLoadingPolicy(ABC):
         return [frozenset(dataset_names)]
 
     def check_encoder_fusion(self, encoders: Mapping[str, Mapping], dataset_names: Sequence[str]) -> None:
-        """Check that no 'dataset_fusing_strategy: none' encoder can receive several
-        of its source datasets in one batch.
+        """Check that no 'none' encoder can receive several of its source datasets in one batch.
 
         An encoder with ``dataset_fusing_strategy: "none"`` does not fuse, so it may list several
         ``source_datasets`` only if no batch holds more than one of them (e.g. multi-domain
@@ -172,7 +171,7 @@ class DataLoadingPolicy(ABC):
                         "batches (e.g. MultiDomainLoadingPolicy).\n"
                         "    To encode them together, set\n"
                         f"        model.encoders.{encoder_name}.dataset_fusing_strategy: 'sequential'\n"
-                        f"    with a model.encoders.{encoder_name}.fuser block, or give them separate encoders."
+                        f"    with a model.encoders.{encoder_name}.node_embedder block, or give them separate encoders."
                     )
                     raise ValueError(msg)
 

@@ -80,25 +80,25 @@ def gathered_batch_sizes(batch_sizes: tuple[int, ...] | None, shard_sizes: Shard
 
 
 def _format_dims(dims: dict[str, int]) -> str:
-    """Helper function. Prints one dataset per line, widths aligned, widest first so the odd one out stands out."""
+    """Helper function. Prints one dataset per line, counts aligned, largest first so the odd one out stands out."""
     pad = max(len(name) for name in dims)
     ordered = sorted(dims.items(), key=lambda item: (-item[1], item[0]))
-    return "\n".join(f"      {name:<{pad}}  {width}" for name, width in ordered)
+    return "\n".join(f"      {name:<{pad}}  {count}" for name, count in ordered)
 
 
 def _mismatched_input_dims_message(encoder_name: str, in_dims: dict[str, int]) -> str:
-    """Explain why a 'none' encoder cannot take source datasets of differing widths."""
+    """Explain why a 'none' encoder cannot take source datasets with differing numbers of input channels."""
     return (
         f"Encoder '{encoder_name}' has dataset_fusing_strategy 'none', which feeds each source dataset "
-        f"to the encoder mapper as is, with no fuser, so all {len(in_dims)} of its source datasets must "
-        f"have the same input width. Got:\n"
+        f"to the encoder mapper as is, with no node embedder, so all {len(in_dims)} of its source datasets must "
+        f"have the same number of input channels. Got:\n"
         f"{_format_dims(in_dims)}\n"
-        "    These are assembled encoder input widths (variables + coordinates + trainable node "
+        "    These are assembled encoder input channels (variables + coordinates + trainable node "
         "parameters + any timedelta node features), not raw variable counts.\n"
-        "    To share one encoder across datasets of differing widths, set\n"
+        "    To share one encoder across datasets with different input channels, set\n"
         f"        model.encoders.{encoder_name}.dataset_fusing_strategy: 'sequential'\n"
-        f"        model.encoders.{encoder_name}.fuser:\n"
-        "          _target_: anemoi.models.layers.fuser.LinearFuser\n"
+        f"        model.encoders.{encoder_name}.node_embedder:\n"
+        "          _target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder\n"
         f"          num_channels: {max(in_dims.values())}\n"
         "    which projects each dataset onto num_channels before the shared mapper.\n"
         "    Alternatively, give these datasets separate encoders if they should not share weights."
@@ -114,7 +114,7 @@ def _several_sources_message(encoder_name: str, dataset_names: list[str]) -> str
         "batch carries one of them (e.g. multi-domain training with MultiDomainLoadingPolicy).\n"
         "    To encode several source datasets in the same batch, set\n"
         f"        model.encoders.{encoder_name}.dataset_fusing_strategy: 'sequential'\n"
-        f"    with a model.encoders.{encoder_name}.fuser block, or give them separate encoders."
+        f"    with a model.encoders.{encoder_name}.node_embedder block, or give them separate encoders."
     )
 
 
@@ -122,9 +122,9 @@ def _mismatched_edge_dims_message(encoder_name: str, edge_dims: dict[str, int]) 
     """Explain a per-source edge-dimension mismatch, which is a graph-config problem."""
     return (
         f"Encoder '{encoder_name}' has source datasets whose encoder graphs supply different edge "
-        f"feature widths, so they cannot share one mapper. Got:\n"
+        f"feature counts, so they cannot share one mapper. Got:\n"
         f"{_format_dims(edge_dims)}\n"
-        "    Edge width comes from the graph, not the model: a static (gridded) source contributes "
+        "    The number of edge features comes from the graph, not the model: a static (gridded) source contributes "
         "the attributes named in the mapper's sub_graph_edge_attributes plus trainable_size, while a "
         "dynamic (observation) source contributes every attribute declared on its edges and no "
         "trainable parameters.\n"
@@ -198,12 +198,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         return torch.cat(features, dim=-1)
 
     def _encoder_projects_sources(self, encoder_name: str) -> bool:
-        """Whether this encoder maps its source datasets through a fuser.
+        """Whether this encoder maps its source datasets through a node embedder.
 
-        True for 'sequential' encoders. Once the fusers are built this is read off the modules,
-        so models pickled before fusers were explicit (single-source 'sequential' without a
-        projection) keep their behaviour. Before that (decoder target widths are computed
-        first) it follows the configured strategy.
+        True for 'sequential' encoders. Once the node embedders are built this is read off the modules,
+        so models pickled before node embedders were explicit (single-source 'sequential' without a
+        projection) keep their behaviour. Before that (decoder target input channels are
+        computed first) it follows the configured strategy.
         """
         if "encoder_src_projection" in self._modules:
             return encoder_name in self.encoder_src_projection
@@ -217,10 +217,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         src_shard_sizes: ShardSizes = None,
         model_comm_group: ProcessGroup | None = None,
     ) -> Tensor:
-        """Apply this encoder's fuser to one source dataset, if it has one.
+        """Apply this encoder's node embedder to one source dataset, if it has one.
 
         Under model sharding a source that is replicated on every rank (``src_shard_sizes`` is
-        None) is sharded before the fuser and gathered after it. The fuser is applied row by row,
+        None) is sharded before the node embedder and gathered after it. The node embedder is applied row by row,
         so its weight gradient on each rank then covers only that rank's rows, as the strategy's
         gradient scaling expects; applied to all rows it would be counted once per rank. The
         mapper still receives the replicated input it gets for an unprojected source.
@@ -234,12 +234,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         return gather_tensor(projection(x_shard), 0, shard_sizes, model_comm_group)
 
     def _build_encoding_networks(self, encoders_config: DotDict) -> None:
-        """Instantiate one mapper per encoder, plus a fuser for 'sequential' encoders.
+        """Instantiate one mapper per encoder, plus a node embedder for 'sequential' encoders.
 
         Requires self.encoder_graph_provider to be populated, since an encoder's edge
         dimension comes from its source datasets' graph providers.
         """
-        # Fusers of 'sequential' encoders: per-dataset projections onto the mapper input width,
+        # Node embedders of 'sequential' encoders: per-dataset projections onto the mapper's input channels,
         # keyed [encoder_name][dataset_name]. The attribute name is part of the state-dict keys.
         self.encoder_src_projection = torch.nn.ModuleDict()
 
@@ -251,16 +251,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 raise ValueError(_mismatched_edge_dims_message(encoder_name, edge_dims))
 
             if self.encoder_fusing_strategy[encoder_name] == "sequential":
-                fuser_config = encoder_config.fuser
-                layer_kernels = fuser_config.get("layer_kernels") or encoder_config.mapper.get("layer_kernels")
-                fuser = instantiate(
-                    fuser_config,
-                    _recursive_=False,  # layer_kernels are instantiated by the fuser
+                node_embedder_config = encoder_config.node_embedder
+                layer_kernels = node_embedder_config.get("layer_kernels") or encoder_config.mapper.get("layer_kernels")
+                node_embedder = instantiate(
+                    node_embedder_config,
+                    _recursive_=False,  # layer_kernels are instantiated by the node embedder
                     in_channels=in_dims,
                     layer_kernels=layer_kernels,
                 )
-                self.encoder_src_projection[encoder_name] = fuser
-                in_channels_src = fuser.num_channels
+                self.encoder_src_projection[encoder_name] = node_embedder
+                in_channels_src = node_embedder.num_channels
             else:
                 if len(set(in_dims.values())) > 1:
                     raise ValueError(_mismatched_input_dims_message(encoder_name, in_dims))
@@ -768,7 +768,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     ) -> dict[str, Tensor]:
         """Encode one encoder's source datasets, returning its latents keyed by dataset name.
 
-        With ``sequential`` every source dataset is projected by the encoder's fuser and gets its
+        With ``sequential`` every source dataset is projected by the encoder's node embedder and gets its
         own pass through the shared mapper against the same unmodified hidden latent, yielding
         its own latent; the latent aggregator combines them. With ``none`` the batch may hold only
         one of the encoder's source datasets, which is encoded unprojected. ``mapper_kwargs`` holds
@@ -798,7 +798,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 **(mapper_kwargs or {}).get(source.dataset_name, {}),
             )
-            # Decoder target features expect the *assembled* (pre-projection) width, so a
+            # Decoder target features expect the *assembled* (pre-projection) input channels, so a
             # projecting encoder reports its input rather than the mapper's src passthrough.
             x_data_latent_dict[source.dataset_name] = source.x_data_latent if projects else x_data_latent
             latents[source.dataset_name] = x_latent

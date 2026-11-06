@@ -93,12 +93,12 @@ model:
   encoders:
     "0":
       # One shared encoder for both domains. MultiDomainLoadingPolicy puts one domain in each batch,
-      # so the "none" strategy (no fuser) applies: it needs equal input widths. Training checks against
+      # so the "none" strategy (no node embedder) applies: it needs equal input channels. Training checks against
       # the loading policy that no batch holds both datasets (SynchronizedLoadingPolicy would fail).
-      # Use "sequential" with a fuser to encode them together.
+      # Use "sequential" with a node embedder to encode them together.
       source_datasets: [data, data_2]
       dataset_fusing_strategy: "none"
-      fuser: null
+      node_embedder: null
   decoders:
     "0":
       target_datasets: [data, data_2]

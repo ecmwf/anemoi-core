@@ -74,7 +74,7 @@ MODELS = {
     "edm_transport": {"model_class": AnemoiTransportModelEncProcDec, "obs_predicted": True},
     "edm_transport_obs_input_only": {"model_class": AnemoiTransportModelEncProcDec, "obs_predicted": False},
     "edm_tendency_obs_input_only": {"model_class": AnemoiTransportTendModelEncProcDec, "obs_predicted": False},
-    # One 'sequential' encoder fuses the grid and the observations, of different widths, through a fuser.
+    # One 'sequential' encoder fuses the grid and the observations, with different input channels, through a node embedder.
     "fused_sequential": {"model_class": AnemoiModelEncProcDec, "obs_predicted": True, "fused": True},
 }
 # Observation rows per input window and in the target window.
@@ -296,7 +296,10 @@ def _model_config(model_class: type, obs_predicted: bool, with_grid: bool = True
             "fused": {
                 "source_datasets": ["grid", "obs"],
                 "dataset_fusing_strategy": "sequential",
-                "fuser": {"_target_": "anemoi.models.layers.fuser.LinearFuser", "num_channels": 10},
+                "node_embedder": {
+                    "_target_": "anemoi.models.layers.node_embedder.LinearNodeEmbedder",
+                    "num_channels": 10,
+                },
                 "mapper": mapper("GraphTransformerForwardMapper", 0, shard_strategy="edges"),
             }
         }

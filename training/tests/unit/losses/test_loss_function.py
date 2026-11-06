@@ -837,8 +837,8 @@ def test_amse_cartesian_transforms(transform: str) -> None:
     torch.manual_seed(0)
     pred = torch.randn(2, 1, 1, points, nvars, dtype=torch.float64)
     other = torch.randn(2, 1, 1, points, nvars, dtype=torch.float64)
-    assert abs(loss(pred, pred, squash=True).item()) < 1e-6
-    assert loss(pred, pred + other, squash=True).item() >= -1e-9
+    assert abs(loss(_gridded_source_view(pred), _gridded_source_view(pred), squash=True).item()) < 1e-6
+    assert loss(_gridded_source_view(pred), _gridded_source_view(pred + other), squash=True).item() >= -1e-9
 
     # the transform's spectral-density contract (Parseval partition, cross self-consistency)
     # is covered for all transforms in models/tests/layers/test_spectral_density.py
@@ -846,7 +846,7 @@ def test_amse_cartesian_transforms(transform: str) -> None:
     # gradients flow back through the radial-binning path (index_add_); the existing
     # backward tests cover the other spectral losses, not AMSE's binning
     pred = pred.clone().requires_grad_(True)
-    loss(pred, target.double(), squash=True).backward()
+    loss(_gridded_source_view(pred), _gridded_source_view(target.double()), squash=True).backward()
     assert pred.grad is not None
     assert torch.isfinite(pred.grad).all()
 
@@ -882,12 +882,12 @@ def test_powerspectrum_cartesian_transforms(transform: str) -> None:
     # PSL(x, x) == 0, and the power spectrum is phase-blind: PSL(x, -x) == 0 too
     torch.manual_seed(0)
     pred = torch.randn(2, 1, 1, points, nvars, dtype=torch.float64)
-    assert abs(loss(pred, pred, squash=True).item()) < 1e-9
-    assert abs(loss(pred, -pred, squash=True).item()) < 1e-9
+    assert abs(loss(_gridded_source_view(pred), _gridded_source_view(pred), squash=True).item()) < 1e-9
+    assert abs(loss(_gridded_source_view(pred), _gridded_source_view(-pred), squash=True).item()) < 1e-9
 
     # gradients flow back through the radial-binning path (index_add_)
     pred = pred.clone().requires_grad_(True)
-    loss(pred, target.double(), squash=True).backward()
+    loss(_gridded_source_view(pred), _gridded_source_view(target.double()), squash=True).backward()
     assert pred.grad is not None
     assert torch.isfinite(pred.grad).all()
 

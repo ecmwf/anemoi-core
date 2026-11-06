@@ -120,8 +120,8 @@ encoder and decoder group to both domains::
      encoders:
        shared:
          source_datasets: [data, data_2]
-         dataset_fusing_strategy: none   # one domain per batch, no fuser
-         fuser: null
+         dataset_fusing_strategy: none   # one domain per batch, no node embedder
+         node_embedder: null
          mapper:
            _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
            # ... mapper configuration
@@ -135,13 +135,13 @@ encoder and decoder group to both domains::
 
 The ``shared`` key is user-defined; datasets listed in the same group use the
 same mapper weights. Because each batch holds a single domain, the encoder uses
-the ``none`` fusing strategy: the domains must have the same input width, and
+the ``none`` fusing strategy: the domains must have the same number of input channels, and
 they may never share a batch. Before building the model, training asks the
 loading policy which datasets can share a batch
 (``DataLoadingPolicy.co_loaded_datasets``) and raises if a ``none`` encoder could
 receive two of its source datasets together, so the same encoder under
-``SynchronizedLoadingPolicy`` fails at start-up. Domains of different widths need the
-``sequential`` strategy with a ``fuser`` (see the anemoi-models documentation on
+``SynchronizedLoadingPolicy`` fails at start-up. Domains with different variables need the
+``sequential`` strategy with a ``node_embedder`` (see the anemoi-models documentation on
 multi-dataset models). ``hidden`` and ``hidden_2`` must be nodes in the
 graph configuration, with ``data -> hidden -> data`` and
 ``data_2 -> hidden_2 -> data_2`` edges. The complete example is the top-level

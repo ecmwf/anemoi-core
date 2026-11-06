@@ -43,11 +43,11 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 # Encoder dataset-fusing strategies currently implemented.
-# - "none": no fusion and no fuser; the mapper takes a source dataset's assembled input directly.
-#   Normally one source dataset per encoder; several are accepted only if they share an input
-#   width and at most one of them is present per batch (e.g. multi-domain training).
-# - "sequential": a fuser (``model.encoders.<name>.fuser``) projects every source dataset onto a
-#   common width; each is then encoded in its own pass with the shared mapper weights, and the
+# - "none": no fusion and no node embedder; the mapper takes a source dataset's assembled input directly.
+#   Normally one source dataset per encoder; several are accepted only if they have the same
+#   number of input channels and at most one of them is present per batch (e.g. multi-domain training).
+# - "sequential": a node embedder (``model.encoders.<name>.node_embedder``) projects every source dataset onto a
+#   common number of input channels; each is then encoded in its own pass with the shared mapper weights, and the
 #   per-dataset latents are combined by the latent aggregator.
 SUPPORTED_FUSING_STRATEGIES = {"none", "sequential"}
 
@@ -358,13 +358,13 @@ class BaseGraphModel(nn.Module):
 
     @staticmethod
     def _validate_fusing_strategy(encoder_name: str, encoder_config: DotDict) -> str:
-        """Return the encoder's fusing strategy after checking it against its fuser setting.
+        """Return the encoder's fusing strategy after checking it against its node embedder setting.
 
         Also enforced by the config schema, but repeated here so that models built without
         config validation fail just as early.
         """
         strategy = encoder_config.get("dataset_fusing_strategy", "none")
-        fuser_config = encoder_config.get("fuser")
+        node_embedder_config = encoder_config.get("node_embedder")
         if strategy in PLANNED_FUSING_STRATEGIES:
             msg = (
                 f"Encoder '{encoder_name}' sets dataset_fusing_strategy '{strategy}', which is planned but "
@@ -377,17 +377,17 @@ class BaseGraphModel(nn.Module):
                 f"Valid options are: {sorted(SUPPORTED_FUSING_STRATEGIES)}."
             )
             raise ValueError(msg)
-        if strategy == "sequential" and fuser_config is None:
+        if strategy == "sequential" and node_embedder_config is None:
             msg = (
-                f"Encoder '{encoder_name}' uses dataset_fusing_strategy 'sequential', which needs a fuser, e.g.\n"
-                f"    model.encoders.{encoder_name}.fuser:\n"
-                "      _target_: anemoi.models.layers.fuser.LinearFuser\n"
+                f"Encoder '{encoder_name}' uses dataset_fusing_strategy 'sequential', which needs a node embedder, e.g.\n"
+                f"    model.encoders.{encoder_name}.node_embedder:\n"
+                "      _target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder\n"
                 "      num_channels: 512"
             )
             raise ValueError(msg)
-        if strategy == "none" and fuser_config is not None:
+        if strategy == "none" and node_embedder_config is not None:
             LOGGER.warning(
-                "Encoder '%s' uses dataset_fusing_strategy 'none'; its fuser setting is ignored.", encoder_name
+                "Encoder '%s' uses dataset_fusing_strategy 'none'; its node embedder setting is ignored.", encoder_name
             )
         return strategy
 

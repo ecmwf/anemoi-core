@@ -36,7 +36,7 @@ First, let's take the model configuration ``transformer.yaml``:
      0:                        # user-defined group name (appears in the state-dict)
        source_datasets: [ "data" ]           # datasets encoded by this group
        dataset_fusing_strategy: "none"     # "none" or "sequential" ("joint" is planned)
-       fuser: null                         # required by "sequential"
+       node_embedder: null                         # required by "sequential"
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024

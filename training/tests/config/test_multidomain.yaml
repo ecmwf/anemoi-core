@@ -482,10 +482,10 @@ model:
     edge_pre_mlp: false
   encoders:
     shared:
-      # Both domains, one per batch (MultiDomainLoadingPolicy): no fusion, no fuser.
+      # Both domains, one per batch (MultiDomainLoadingPolicy): no fusion, no node embedder.
       source_datasets: [ "data", "data_2" ]
       dataset_fusing_strategy: "none"
-      fuser: null
+      node_embedder: null
       mapper:
         _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
         num_channels: ${model.num_channels}

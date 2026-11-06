@@ -60,8 +60,8 @@ processor:
 encoders:
   "0":
     source_datasets: [ "data" ]
-    dataset_fusing_strategy:  "none" # Options: "none" (one source dataset per batch), "sequential" (needs a fuser); "joint" is planned
-    fuser: null # required by "sequential", e.g. {_target_: anemoi.models.layers.fuser.LinearFuser, num_channels: 512}
+    dataset_fusing_strategy:  "none" # Options: "none" (one source dataset per batch), "sequential" (needs a node embedder); "joint" is planned
+    node_embedder: null # required by "sequential", e.g. {_target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder, num_channels: 512}
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       trainable_size: ${model.edge_trainable_parameters.data2hidden}
