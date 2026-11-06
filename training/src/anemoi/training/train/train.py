@@ -477,7 +477,7 @@ class AnemoiTrainer(ABC):
         # - timesteps, specifying the time steps used during training for input and output
 
         md_dict = {
-            "version": "2.0",
+            "version": "3.0",
             "config": self.config,
             "seed": self.initial_seed,
             "base_seed": self.base_seed,
