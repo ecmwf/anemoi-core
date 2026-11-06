@@ -161,7 +161,6 @@ training:
   seed: 42
   method:
     _target_: anemoi.training.train.methods.SingleTraining
-  num_sanity_val_steps: 2
   deterministic: false
   precision: 16-mixed
   accum_grad_batches: 1
@@ -185,8 +184,6 @@ training:
     pl_lr_scheduler:
       interval: step
 
-  # select model (since CRPS PR)
-  submodules_to_freeze: []
   # select strategy
   strategy:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
