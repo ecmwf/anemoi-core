@@ -28,6 +28,7 @@ from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.time_indices import normalize_time_indices
 from anemoi.utils.testing import GetTestArchive
+from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import skip_if_offline
 
 LOGGER = logging.getLogger(__name__)
@@ -701,6 +702,33 @@ def test_config_validation_edm_transport(edm_transport_config: tuple[DictConfig,
 
 def test_config_validation_stochastic_interpolant(stochastic_interpolant_config: tuple[DictConfig, str]) -> None:
     cfg, _ = stochastic_interpolant_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_spatial_downscaler(
+    spatial_downscaler_config: tuple[DictConfig, list[str], list[str]],
+    get_test_archive: GetTestArchive,
+    get_test_data: GetTestData,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
+    """Full training-cycle smoke-test for the residual spatial downscaler (O48 -> O96)."""
+    cfg, urls, test_data_paths = spatial_downscaler_config
+    for url in urls:
+        get_test_archive(url)
+    for path in test_data_paths:
+        get_test_data(path)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
+
+
+def test_config_validation_spatial_downscaler(
+    spatial_downscaler_config: tuple[DictConfig, list[str], list[str]],
+) -> None:
+    """Schema-level validation for the spatial downscaler config."""
+    cfg, _, _ = spatial_downscaler_config
     BaseSchema(**cfg)
 
 

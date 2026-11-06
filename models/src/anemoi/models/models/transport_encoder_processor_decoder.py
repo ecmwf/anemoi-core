@@ -1233,19 +1233,22 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         return dict(model_config.get("residual_reference") or {})
 
     def fill_metadata(self, md_dict) -> None:
-        """Record the input shapes of each input dataset on its own, and none for output-only datasets.
+        """Record the input shapes of each input dataset on its own, and null ones for output-only datasets.
 
         The inherited ``input_dim`` is the encoder width: for a fused anchor it also counts the
         other sources and the noised targets, for every other dataset no encoder uses it.
+        Output-only datasets keep the ``shapes`` keys so every dataset has the same metadata
+        layout, with ``variables`` and ``input_timesteps`` set to ``None``.
         """
         super().fill_metadata(md_dict)
         inference_inputs = set(self.inference_input_datasets)
         for dataset_name in self.input_dim:
-            dataset_md = md_dict["metadata_inference"][dataset_name]
+            shapes = md_dict["metadata_inference"][dataset_name]["shapes"]
             if dataset_name in inference_inputs:
-                dataset_md["shapes"]["variables"] = BaseGraphModel._calculate_input_dim(self, dataset_name)
+                shapes["variables"] = BaseGraphModel._calculate_input_dim(self, dataset_name)
             else:
-                dataset_md.pop("shapes", None)
+                shapes["variables"] = None
+                shapes["input_timesteps"] = None
 
     def _build_target_routing(self) -> None:
         self._validate_residual_reference()

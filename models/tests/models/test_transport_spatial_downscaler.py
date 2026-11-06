@@ -1057,7 +1057,10 @@ def test_real_construction_fill_metadata_records_input_and_output_roles() -> Non
 
 @pytest.mark.parametrize("fused", [True, False], ids=["fused", "not_fused"])
 def test_real_construction_fill_metadata_records_input_shapes_per_input_dataset(fused: bool) -> None:
-    """Each input records its own width, as a forecaster would, not the fused encoder width."""
+    """Each input records its own width, as a forecaster would, not the fused encoder width.
+
+    Output-only datasets keep the same keys, with no input width or input timesteps.
+    """
     config = _make_downscaler_config()
     graph = None
     if not fused:
@@ -1083,4 +1086,9 @@ def test_real_construction_fill_metadata_records_input_shapes_per_input_dataset(
             "ensemble": 1,
             "grid": None,
         }
-    assert "shapes" not in md_dict["metadata_inference"]["out_hres"]
+    assert md_dict["metadata_inference"]["out_hres"]["shapes"] == {
+        "variables": None,
+        "input_timesteps": None,
+        "ensemble": 1,
+        "grid": None,
+    }

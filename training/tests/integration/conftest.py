@@ -14,6 +14,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 import torch
 from hydra import compose
@@ -715,6 +716,63 @@ def edm_transport_config(
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     return cfg, url_dataset
+
+
+SPATIAL_DOWNSCALER_RESIDUAL_STATISTICS = {
+    "mean": {"10u": 0.00436932, "10v": 0.00327185, "2t": 0.0562636},
+    "minimum": {"10u": -65.4177, "10v": -80.4492, "2t": -25.248},
+    "maximum": {"10u": 69.6479, "10v": 72.633, "2t": 28.5995},
+    "stdev": {"10u": 1.3768, "10v": 1.38414, "2t": 1.45},
+}
+
+
+@pytest.fixture
+def spatial_downscaler_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+    temporary_directory_for_test_data: TemporaryDirectoryForTestData,
+    tmp_path: Path,
+) -> tuple[DictConfig, list[str], list[str]]:
+    """Compose a runnable configuration for the residual spatial downscaler (O48 -> O96).
+
+    It is based on `spatial_downscaler_transport_edm_diffusion.yaml`. The residual
+    statistics of the target's prognostic variables are written to a temporary file.
+
+    Returns the config, the dataset archives to fetch with `get_test_archive` and the
+    test-data files (the O48 -> O96 projection matrix) to fetch with `get_test_data`.
+    Nothing is downloaded here, so the config can be validated offline.
+    """
+    with initialize_config_module(
+        version_base=None,
+        config_module="anemoi.training.config",
+        job_name="test_spatial_downscaler",
+    ):
+        template = compose(config_name="spatial_downscaler_transport_edm_diffusion")
+
+    use_case_modifications = OmegaConf.load(
+        Path.cwd() / "training/tests/integration/config/test_spatial_downscaler.yaml",
+    )
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+    tmp_dir_dataset_lres, url_dataset_lres = get_tmp_path(use_case_modifications.system.input.dataset_lres)
+    use_case_modifications.system.input.dataset_lres = str(tmp_dir_dataset_lres)
+    path_truncation = use_case_modifications.system.input.truncation
+    use_case_modifications.system.input.truncation = temporary_directory_for_test_data(path_truncation)
+
+    residual_statistics_path = tmp_path / "residual_statistics.npz"
+    np.savez(
+        residual_statistics_path,
+        **{key: np.array(values, dtype=object) for key, values in SPATIAL_DOWNSCALER_RESIDUAL_STATISTICS.items()},
+    )
+
+    use_case_modifications.system.input.residual_statistics = str(residual_statistics_path)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, [url_dataset, url_dataset_lres], [path_truncation]
 
 
 @pytest.fixture(

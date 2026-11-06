@@ -12,7 +12,7 @@ defaults:
 
 
 # set to true to switch on config validation
-config_validation: false
+config_validation: True
 
 diagnostics:
   callbacks: []
