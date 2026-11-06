@@ -42,6 +42,10 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         ignore_nans: bool = False,
     ) -> None:
         super().__init__(loss=loss_fn, ignore_nans=ignore_nans)
+        # Each aggregate is scored one step at a time, so losses that span output steps cannot be used here.
+        if loss_fn.scores_across_time:
+            msg = "TimeAggregateLossWrapper cannot wrap a loss whose score spans several output steps."
+            raise ValueError(msg)
         self.time_aggregation_types = time_aggregation_types
 
     def forward(

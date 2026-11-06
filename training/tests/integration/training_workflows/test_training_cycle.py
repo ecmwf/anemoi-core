@@ -79,6 +79,34 @@ def test_training_cycle_multidatasets(
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_multidomain(
+    multidomain_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
+    cfg, urls = multidomain_config
+    for url in urls:
+        get_test_archive(url)
+
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    model = trainer.model.model.model
+    assert len(model.encoder) == 1
+    assert len(model.decoder) == 1
+    assert model.dataset2hidden == {
+        "data": "hidden",
+        "data_2": "hidden_2",
+    }
+    assert model._graph_data["data"].num_nodes != model._graph_data["data_2"].num_nodes
+    assert model._graph_data["hidden"].num_nodes != model._graph_data["hidden_2"].num_nodes
+    assert trainer.model.trainer.global_step == 4
+
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_training_cycle_lam(
     lam_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,

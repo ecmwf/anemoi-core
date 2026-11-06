@@ -107,6 +107,7 @@ class PerTimestepMetrics(Callback):
                     pred_layout=IndexSpace.MODEL_OUTPUT,
                     target_layout=IndexSpace.DATA_FULL,
                     without_scalers=[TensorDim.TIME],
+                    skip_metrics_across_time=True,
                 )
 
                 for metric_name, value in metrics.items():

@@ -152,6 +152,11 @@ class CombinedLoss(BaseLoss):
         """Whether any wrapped loss requires explicit shard-layout metadata."""
         return any(getattr(loss, "needs_shard_layout_info", False) for loss in self.losses)
 
+    @property
+    def scores_across_time(self) -> bool:
+        """Whether any wrapped loss scores across output steps."""
+        return any(loss.scores_across_time for loss in self.losses)
+
     @staticmethod
     def _forward_kwargs_for_loss(loss_fn: BaseLoss, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Filter shard-layout kwargs for child losses that do not require them."""

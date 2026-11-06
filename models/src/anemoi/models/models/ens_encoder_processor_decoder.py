@@ -175,19 +175,20 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
         fcstep = min(1, fcstep)
-
+        # Process each dataset through its corresponding encoder
+        hidden_name = self._get_active_hidden_name(dataset_names)
         dataset_latents = {}
         x_skip_dict = {}
         x_data_latent_dict = {}
 
         # TODO: revisit this (should not need an explicit move to device here)
-        hidden_coordinates = self._hidden_coordinates().to(batch.device)
+        hidden_coordinates = self._hidden_coordinates(hidden_name).to(batch.device)
         hidden_coordinates_batched = einops.repeat(hidden_coordinates, "n f -> (repeat n) f", repeat=batch_ens_size)
         hidden_batch_sizes = (hidden_coordinates.shape[0],) * batch_ens_size
         x_hidden_latent = latlons_to_sincos(hidden_coordinates)
         x_hidden_latent = einops.repeat(x_hidden_latent, "n f -> (repeat n) f", repeat=batch_ens_size)
 
-        hidden_trainable_parameters = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
+        hidden_trainable_parameters = self.node_attributes(hidden_name, batch_size=batch_ens_size)
         if hidden_trainable_parameters is not None:
             x_hidden_latent = torch.cat([x_hidden_latent, hidden_trainable_parameters], dim=-1)
 
@@ -236,13 +237,15 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x=x_latent,
             batch_size=batch_size,
             ensemble_size=ensemble_size,
-            grid_size=self._graph_data[self._graph_name_hidden].num_nodes,
+            grid_size=self._graph_data[hidden_name].num_nodes,
             grid_shard_sizes=shard_sizes_hidden,
             model_comm_group=model_comm_group,
         )
         noise_kwargs = {"cond": latent_noise} if latent_noise is not None else {}
 
-        processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider.get_edges(
+        processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider[
+            hidden_name
+        ].get_edges(
             src_coords=hidden_coordinates,
             dst_coords=hidden_coordinates,
             batch_size=batch_ens_size,

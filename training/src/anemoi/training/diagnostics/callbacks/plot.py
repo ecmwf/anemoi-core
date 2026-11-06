@@ -497,7 +497,13 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             # The refactored preprocessors are stateless (no per-instance ``nan_locations`` buffer to gather),
             # so only the device move is required here.
             self.post_processors = copy.deepcopy(pl_module.model.post_processors)
-            for dataset_name in self.post_processors:
+            for dataset_name in batch:
+                for post_processor in self.post_processors[dataset_name].processors.values():
+                    if isinstance(getattr(post_processor, "nan_locations", None), torch.Tensor):
+                        post_processor.nan_locations = pl_module.allgather_batch(
+                            post_processor.nan_locations,
+                            pl_module.grid_shard_sizes[dataset_name],
+                        )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
             plot_kwargs = self._plot_kwargs_from_output(pl_module, output)
@@ -506,10 +512,11 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 metrics=output.metrics,
                 predictions=gathered_predictions,
             )
+            # A batch may hold only some datasets (e.g. one domain with MultiDomainLoadingPolicy).
             self.plot(
                 trainer,
                 pl_module,
-                self.dataset_names,
+                [dataset_name for dataset_name in self.dataset_names if dataset_name in batch],
                 output,
                 batch,
                 batch_idx,

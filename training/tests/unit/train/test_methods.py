@@ -98,6 +98,12 @@ class ShardingAwareCaptureLoss(CaptureLoss):
         return True
 
 
+class AcrossTimeCaptureLoss(CaptureLoss):
+    @property
+    def scores_across_time(self) -> bool:
+        return True
+
+
 def assert_metric_kwargs(
     kwargs: dict[str, Any],
     *,
@@ -1323,6 +1329,36 @@ def test_calculate_val_metrics_forwards_dataset_shard_sizes_when_requested() -> 
         grid_dim=-2,
         grid_shard_sizes=shard_sizes,
     )
+
+
+@pytest.mark.parametrize("skip_metrics_across_time", [False, True])
+def test_calculate_val_metrics_can_skip_metrics_across_time(skip_metrics_across_time: bool) -> None:
+    """Metrics that span output steps are left out when the caller passes one step at a time."""
+    module = MagicMock(spec=BaseTrainingModule)
+    module._postprocess_dataset_view = lambda view, *_args, **_kwargs: view
+    module._grid_shard_sizes = lambda source: BaseTrainingModule._grid_shard_sizes(module, source)
+    pointwise = CaptureLoss()
+    across_time = AcrossTimeCaptureLoss()
+
+    module.metrics = {"data": {"pointwise": pointwise, "across_time": CombinedLoss(losses=[across_time])}}
+    module.val_metric_ranges = {"data": {"z_500": [1]}}
+    module.model_comm_group = None
+    module.model_comm_group_size = 1
+    module.grid_dim = -2
+
+    metrics = BaseTrainingModule.calculate_val_metrics(
+        module,
+        y_pred=_gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {}),
+        y=_gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {}),
+        grid_shard_slice=None,
+        dataset_name="data",
+        step=0,
+        skip_metrics_across_time=skip_metrics_across_time,
+    )
+
+    assert "pointwise_metric/data/z_500/1" in metrics
+    assert ("across_time_metric/data/z_500/1" in metrics) is not skip_metrics_across_time
+    assert len(across_time.calls) == (0 if skip_metrics_across_time else 1)
 
 
 def test_calculate_val_metrics_passes_none_shard_sizes_when_gathered() -> None:
