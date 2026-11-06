@@ -497,7 +497,7 @@ The loss is also scaled by assigning a weight to each node on the output
 grid. These weights are calculated during graph-creation and stored as
 an attribute in the graph object. Node weighting is applied via the
 ``node_weights`` scaler defined under
-``config.training.scalers.<dataset_name>.node_weights``; set
+``config.training.scalers.datasets.<dataset_name>.node_weights``; set
 ``nodes_attribute_name`` to the graph attribute to use as weights, and
 reference the scaler from a loss by including ``node_weights`` in its
 ``scalers:`` list. By default anemoi-training uses area weighting
@@ -599,33 +599,25 @@ interrupted; `Resuming a run`_ lists the conditions.
 
 A training checkpoint stores the arguments used to build the training
 module (the Lightning *hyperparameters*), so that it can be restored
-without re-creating them: the config, the data indices, the metadata,
-the dataset statistics, the supporting arrays and the graph. The graph
-is by far the largest of these and can make up a significant part of the
-checkpoint size.
+without re-creating them: the config, the data indices, the data types
+of the datasets, the metadata, the dataset statistics and the supporting
+arrays. The graph is not among them: the model builds it from the
+training config when it is created, either from the nodes and edges in
+``config.graph`` or, if the graph config defines no nodes, by loading the
+pre-built graph in ``config.system.input.graph``.
 
-The graph can be left out of the training checkpoints with
-``config.diagnostics.checkpoint.exclude_hyperparameters``:
+``config.diagnostics.checkpoint.exclude_hyperparameters`` lists
+hyperparameters to leave out of the training checkpoints. The default is
+an empty list, which stores everything, and at present no hyperparameter
+can be excluded: all of them are needed to resume training or to convert
+the checkpoint.
 
-.. code:: yaml
-
-   diagnostics:
-     checkpoint:
-       exclude_hyperparameters: [graph_data]
-
-The default is an empty list, which stores everything. ``graph_data`` is
-the only hyperparameter that is currently allowed to be excluded.
-
-Resuming training, loading the weights, and transfer learning do not
-need the graph in the checkpoint, as the graph is rebuilt or loaded from
-the training config (``config.system.input.graph``) when the run (re)starts.
-Excluding ``graph_data`` therefore does not affect them.
-
-The graph does matter for converting a training checkpoint into an
-inference checkpoint with ``anemoi-training checkpoint inference``, which
-rebuilds the model from the stored hyperparameters. A training checkpoint without
-the graph can still be converted to an inference checkpoint if the graph
-is supplied separately, via the ``--graph`` argument:
+Converting a training checkpoint into an inference checkpoint with
+``anemoi-training checkpoint inference`` rebuilds the model from the
+stored hyperparameters, and so builds the graph from the stored config.
+If the datasets the graph is built from are not available, a pre-built
+graph can be supplied with the ``--graph`` argument instead. The model
+then loads that graph (only for gridded datasets):
 
 .. code:: bash
 
@@ -933,8 +925,8 @@ directly will crash or silently mis-pair tensors when used with:
 
 -  **Imputers** (e.g. ``ConstantImputer``), which register scratch
    buffers whose shapes change on the first forward pass.
--  **Updating loss scalers** (e.g. ``NaNMaskScaler``), which re-register
-   scaler buffers every batch via ``ScaleTensor.update_scaler`` —
+-  **Custom updating loss scalers**, which can re-register scaler buffers
+   via ``ScaleTensor.update_scaler`` —
    shuffling the buffer order in the live model relative to the averaged
    model's snapshot.
 

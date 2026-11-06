@@ -9,8 +9,10 @@
 
 
 import logging
+import math
 from abc import ABC
 from abc import abstractmethod
+from typing import Literal
 
 import torch
 from torch_geometric.data.storage import NodeStorage
@@ -43,6 +45,14 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
         if self.node_attr_name is None:
             error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
             raise TypeError(error_msg)
+
+    @property
+    def ndim(self) -> int:
+        """Number of output features produced per edge.
+        Used by the dynamic graph providers to size the edge feature dimension at
+        construction time (before any edges exist). Defaults to 1.
+        """
+        return 1
 
     def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
         if self.node_attr_name in source_nodes:
@@ -95,6 +105,10 @@ class EdgeLength(BasePositionalBuilder):
 class EdgeDirection(BasePositionalBuilder):
     """Computes edge direction for bipartite graphs."""
 
+    @property
+    def ndim(self) -> int:
+        return 2
+
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         edge_dirs = compute_directions(source_coords=x_j, target_coords=x_i)
         return edge_dirs
@@ -122,6 +136,10 @@ class DirectionalHarmonics(EdgeDirection):
     def __init__(self, order: int = 3, norm: str | None = None, dtype: str = "float32") -> None:
         self.order = order
         super().__init__(norm=norm, dtype=dtype)
+
+    @property
+    def ndim(self) -> int:
+        return 2 * self.order
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         # Get the 2D direction vectors [dx, dy]
@@ -193,6 +211,15 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
         if self.nodes_axis is None:
             raise AttributeError(f"{self.__class__.__name__} class must set 'nodes_axis' attribute.")
 
+    @property
+    def ndim(self) -> int:
+        # not supported for dynamic graphs
+        msg = (
+            f"{self.__class__.__name__}.ndim is not defined: its output width is data-dependent "
+            "and it is unsupported in dynamic graphs (build_graph does not provide node attributes)."
+        )
+        raise NotImplementedError(msg)
+
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         node_attr = (x_j, x_i)[self.nodes_axis.value]
         assert (
@@ -211,6 +238,74 @@ class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
     """Copy an attribute of the target node to the edge."""
 
     nodes_axis = NodesAxis.TARGET
+
+
+class Timedeltas(BaseEdgeAttributeBuilder):
+    """Propagate scaled runtime timedeltas from one endpoint to each edge."""
+
+    node_attr_name = "timedeltas"
+
+    def __init__(
+        self,
+        node_axis: Literal["source", "target"],
+        scale_seconds: float = 3600.0,
+        dtype: str = "float32",
+    ) -> None:
+        if node_axis not in ("source", "target"):
+            raise ValueError(f"node_axis must be 'source' or 'target', got {node_axis!r}.")
+        if not math.isfinite(scale_seconds) or scale_seconds <= 0:
+            raise ValueError(f"scale_seconds must be positive and finite, got {scale_seconds}.")
+
+        torch_dtype = getattr(torch, dtype, None)
+        if not isinstance(torch_dtype, torch.dtype) or not torch_dtype.is_floating_point:
+            raise ValueError(f"dtype must name a floating-point torch dtype, got {dtype!r}.")
+
+        self.node_axis = node_axis
+        self.scale_seconds = float(scale_seconds)
+        self.torch_dtype = torch_dtype
+        super().__init__(norm=None, dtype=dtype)
+
+    @property
+    def ndim(self) -> int:
+        return 1
+
+    def _get_endpoint_values(self, nodes: NodeStorage) -> torch.Tensor:
+        if self.node_attr_name not in nodes:
+            raise ValueError(
+                f"Timedeltas requires the selected {self.node_axis} nodes to contain a "
+                f"'{self.node_attr_name}' attribute."
+            )
+
+        timedeltas = nodes[self.node_attr_name]
+        if not isinstance(timedeltas, torch.Tensor):
+            raise TypeError(
+                f"The selected {self.node_axis} node '{self.node_attr_name}' attribute must be a torch.Tensor."
+            )
+        if timedeltas.ndim == 1:
+            timedeltas = timedeltas.unsqueeze(-1)
+        elif timedeltas.ndim != 2 or timedeltas.shape[1] != 1:
+            raise ValueError(
+                f"The selected {self.node_axis} node '{self.node_attr_name}' attribute must have shape "
+                f"(num_nodes,) or (num_nodes, 1), got {tuple(timedeltas.shape)}."
+            )
+        num_nodes = nodes.x.shape[0] if "x" in nodes else nodes.get("num_nodes")
+        if num_nodes is not None and timedeltas.shape[0] != num_nodes:
+            raise ValueError(
+                f"The selected {self.node_axis} node '{self.node_attr_name}' attribute has "
+                f"{timedeltas.shape[0]} values for {num_nodes} nodes."
+            )
+        return timedeltas.to(device=self.device, dtype=self.torch_dtype)
+
+    def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
+        if self.node_axis == "source":
+            return self._get_endpoint_values(source_nodes), None
+        return None, self._get_endpoint_values(target_nodes)
+
+    def compute(self, x_i: torch.Tensor | None, x_j: torch.Tensor | None) -> torch.Tensor:
+        timedeltas = x_j if self.node_axis == "source" else x_i
+        if timedeltas is None:
+            raise ValueError(f"Timedeltas could not read the selected {self.node_axis} endpoint values.")
+        return timedeltas / self.scale_seconds
 
 
 class RadialBasisFeatures(EdgeLength):
@@ -271,6 +366,10 @@ class RadialBasisFeatures(EdgeLength):
     """
 
     norm_by_group: bool = True  # normalise the RBF features per destination node
+
+    @property
+    def ndim(self) -> int:
+        return len(self.centers)
 
     def __init__(
         self,

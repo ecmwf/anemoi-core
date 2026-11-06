@@ -10,31 +10,37 @@
 import pytest
 import torch
 
+from anemoi.models.data import TensorLayout
 from anemoi.training.losses.scaler_tensor import ScaleTensor
+from anemoi.training.utils.enums import TensorDim
+
+GRID = TensorDim.GRID
+VARIABLE = TensorDim.VARIABLE
+GRID_VARIABLE_LAYOUT = TensorLayout(grid=0, variables=1)
 
 
 def test_scale_contains() -> None:
-    scale = ScaleTensor(test=(0, 2))
+    scale = ScaleTensor(test=(GRID, 2))
     assert "test" in scale
 
 
 def test_scale_contains_indexing() -> None:
-    scale = ScaleTensor(test=(0, 2))
-    assert 0 in scale
+    scale = ScaleTensor(test=(GRID, 2))
+    assert GRID in scale
 
 
 def test_scale_tuple_contains_indexing() -> None:
-    scale = ScaleTensor(test=((0, 1), 2))
-    assert (0, 1) in scale
+    scale = ScaleTensor(test=((GRID, VARIABLE), 2))
+    assert (GRID, VARIABLE) in scale
 
 
 def test_scale_tuple_not_contains_indexing() -> None:
-    scale = ScaleTensor(test=(0, 2))
-    assert (0, 1) not in scale
+    scale = ScaleTensor(test=(GRID, 2))
+    assert (GRID, VARIABLE) not in scale
 
 
 def test_scale_contains_subset_indexing() -> None:
-    scale = ScaleTensor(test=(0, 2), wow=(0, 2))
+    scale = ScaleTensor(test=(GRID, 2), wow=(GRID, 2))
     assert "test" in scale
     scale = scale.subset("wow")
     assert "wow" in scale
@@ -42,126 +48,104 @@ def test_scale_contains_subset_indexing() -> None:
 
 
 def test_scale_contains_subset_by_dim_indexing() -> None:
-    scale = ScaleTensor(test=(0, 2), wow=(1, 2))
+    scale = ScaleTensor(test=(GRID, 2), wow=(VARIABLE, 2))
     assert "test" in scale
-    scale = scale.subset_by_dim(1)
+    scale = scale.subset_by_dim(VARIABLE)
     assert "wow" in scale
     assert "test" not in scale
 
 
-def test_scale_resolve() -> None:
-    scale = ScaleTensor(test=(-1, 2))
-    scale = scale.resolve(4)
-    assert 3 in scale
-    assert -1 not in scale
-
-
 def test_add_existing_scaler() -> None:
-    scale = ScaleTensor(test=(0, torch.tensor([2.0])))
+    scale = ScaleTensor(test=(GRID, torch.tensor([2.0])))
     with pytest.raises(ValueError, match=r".*already exists.*"):
-        scale.add_scaler(0, torch.tensor(3.0), name="test")
+        scale.add_scaler(GRID, torch.tensor(3.0), name="test")
 
 
 def test_update_scaler() -> None:
-    scale = ScaleTensor(test=(0, torch.ones(3)))
-    assert "test" in dict(scale.named_buffers())
+    # Scalers live in ``_tensors``, not in registered buffers; ``_apply`` converts them explicitly.
+    scale = ScaleTensor(test=(VARIABLE, torch.ones(3)))
 
     updated_scaler = torch.full((2,), 3.0)
     scale.update_scaler("test", updated_scaler)
 
+    assert scale.tensors["test"][0] == (VARIABLE,)
     torch.testing.assert_close(scale.tensors["test"][1], updated_scaler)
-    torch.testing.assert_close(scale.get_scaler_tensor("test"), updated_scaler)
-    assert "test" not in dict(scale.named_buffers())
-    assert not hasattr(scale, "test")
 
     scale.to(dtype=torch.float64)
-    assert scale.get_scaler_tensor("test").dtype == torch.float64
+    assert scale.tensors["test"][1].dtype == torch.float64
 
 
 def test_update_missing_scaler() -> None:
-    scale = ScaleTensor(test=(0, torch.ones(2)))
+    scale = ScaleTensor(test=(GRID, torch.ones(2)))
     with pytest.raises(ValueError, match=r".*not found in scalers.*"):
         scale.update_scaler("test_missing", torch.tensor([3.0]))
     assert "test" in scale
-    assert (0,) in scale
+    assert (GRID,) in scale
 
 
 def test_update_scaler_wrong_dim_allow_override() -> None:
-    scale = ScaleTensor(test=(0, torch.ones((2, 3))))
+    scale = ScaleTensor(test=((GRID, VARIABLE), torch.ones((2, 3))))
     assert scale.update_scaler("test", torch.ones((2, 2)), override=True) is None
 
 
 @pytest.mark.parametrize(
     ("scalers", "input_tensor", "output"),
     [
-        ([[0, torch.Tensor([2])]], torch.tensor([1.0, 2.0, 3.0]), torch.tensor([2.0, 4.0, 6.0])),
-        ([[0, torch.Tensor([0.5])]], torch.tensor([10.0, 20.0, 30.0]), torch.tensor([5.0, 10.0, 15.0])),
-        ([[-1, torch.Tensor([0.5])]], torch.tensor([10.0, 20.0, 30.0]), torch.tensor([5.0, 10.0, 15.0])),
-        ([[0, torch.Tensor([0])]], torch.tensor([5.0, 10.0, 15.0]), torch.tensor([0.0, 0.0, 0.0])),
+        ([[VARIABLE, torch.Tensor([2])]], torch.tensor([1.0, 2.0, 3.0]), torch.tensor([2.0, 4.0, 6.0])),
+        ([[VARIABLE, torch.Tensor([0.5])]], torch.tensor([10.0, 20.0, 30.0]), torch.tensor([5.0, 10.0, 15.0])),
+        ([[GRID, torch.Tensor([0.5])]], torch.tensor([10.0, 20.0, 30.0]), torch.tensor([5.0, 10.0, 15.0])),
+        ([[VARIABLE, torch.Tensor([0])]], torch.tensor([5.0, 10.0, 15.0]), torch.tensor([0.0, 0.0, 0.0])),
         (
-            [[0, torch.Tensor([0.5])], [-1, torch.Tensor([3])]],
+            [[VARIABLE, torch.Tensor([0.5])], [GRID, torch.Tensor([3])]],
             torch.tensor([10.0, 20.0, 30.0]),
             torch.tensor([15.0, 30.0, 45.0]),
         ),
         (
-            [[0, torch.Tensor([0.5])], [0, torch.Tensor([3])]],
+            [[VARIABLE, torch.Tensor([0.5])], [VARIABLE, torch.Tensor([3])]],
             torch.tensor([10.0, 20.0, 30.0]),
             torch.tensor([15.0, 30.0, 45.0]),
         ),
     ],
 )
 def test_scale_tensor_one_dim(
-    scalers: list[list[int, torch.Tensor]],
+    scalers: list[list[TensorDim, torch.Tensor]],
     input_tensor: torch.Tensor,
     output: torch.Tensor,
 ) -> None:
-
+    """Scalers along one axis multiply a single-grid-point tensor of three variables."""
     scale = ScaleTensor()
     for scaler in scalers:
         scale.add_scaler(*scaler)
 
-    torch.testing.assert_close(scale.scale(input_tensor), output)
-    torch.testing.assert_close(scale.scale_iteratively(input_tensor), output)
+    scaled = scale.scale_iteratively(input_tensor.unsqueeze(0), layout=GRID_VARIABLE_LAYOUT)
+    torch.testing.assert_close(scaled, output.unsqueeze(0))
 
 
 def test_invalid_dim_sizes() -> None:
     scaler = ScaleTensor()
-    scaler.add_scaler(0, torch.ones((5,)))
+    scaler.add_scaler(VARIABLE, torch.ones((5,)))
 
     with pytest.raises(ValueError, match=r"Validating tensor 'invalid' raised an error."):
-        scaler.add_scaler(0, torch.ones((15,)), name="invalid")
-
-
-def test_invalid_dim_sizes_negative_indexing() -> None:
-    scaler = ScaleTensor()
-    scaler.add_scaler(0, torch.ones((5,)))
-    scaler.add_scaler(-1, torch.ones((15,)), name="invalid")
-
-    with pytest.raises(ValueError, match=r"Validating tensor 'invalid' raised an error."):
-        scaler.resolve(1)
-
-
-def test_valid_dim_sizes_negative_indexing() -> None:
-    scaler = ScaleTensor()
-    scaler.add_scaler(0, torch.ones((5,)))
-    scaler.add_scaler(-1, torch.ones((15,)))
-
-    scaler.resolve(2)
+        scaler.add_scaler(VARIABLE, torch.ones((15,)), name="invalid")
 
 
 @pytest.mark.parametrize(
     ("scalers", "input_tensor", "output"),
     [
-        ([[0, 2.0]], torch.ones([4, 6]), torch.ones([4, 6]) * 2),
-        ([[0, [[1.0, 1.0], [1.0, 2.0]]]], torch.ones((2, 2)), [[1, 1], [1, 2]]),
-        ([[(0, 1), [[1.0, 1.0], [1.0, 2.0]]]], torch.ones((2, 2)), [[1, 1], [1, 2]]),
-        ([[(1, 0), [[1.0, 1.0], [1.0, 2.0]]]], torch.ones((2, 2)), [[1, 1], [1, 2]]),
-        ([[(0, 1), [[1.0, 2.0], [1.0, 1.0]]]], torch.ones((2, 2)), [[1, 2], [1, 1]]),
-        ([[(1, 0), [[1.0, 2.0], [1.0, 1.0]]]], torch.ones((2, 2)), [[1, 1], [2, 1]]),
+        ([[GRID, 2.0]], torch.ones([4, 6]), torch.ones([4, 6]) * 2),
+        ([[(GRID, VARIABLE), [[1.0, 1.0], [1.0, 2.0]]]], torch.ones((2, 2)), [[1, 1], [1, 2]]),
+        ([[(VARIABLE, GRID), [[1.0, 1.0], [1.0, 2.0]]]], torch.ones((2, 2)), [[1, 1], [1, 2]]),
+        ([[(GRID, VARIABLE), [[1.0, 2.0], [1.0, 1.0]]]], torch.ones((2, 2)), [[1, 2], [1, 1]]),
+        pytest.param(
+            [[(VARIABLE, GRID), [[1.0, 2.0], [1.0, 1.0]]]],
+            torch.ones((2, 2)),
+            [[1, 1], [2, 1]],
+            id="scaler-axes-transposed-to-the-layout",
+        ),
     ],
 )
 def test_scale_tensor_two_dim(
-    scalers: list[list[int, torch.Tensor]],
+    scalers: list[list[TensorDim | tuple[TensorDim, ...], torch.Tensor]],
     input_tensor: torch.Tensor,
     output: torch.Tensor,
 ) -> None:
@@ -175,126 +159,109 @@ def test_scale_tensor_two_dim(
     if not isinstance(output, torch.Tensor):
         output = torch.tensor(output, dtype=torch.float32)
 
-    torch.testing.assert_close(scale.scale(input_tensor), output)
-    torch.testing.assert_close(scale.scale_iteratively(input_tensor), output)
+    torch.testing.assert_close(scale.scale_iteratively(input_tensor, layout=GRID_VARIABLE_LAYOUT), output)
 
 
-@pytest.mark.parametrize("method_name", ["scale", "scale_iteratively"])
-def test_scale_tensor_subset_indices_requires_tuple(method_name: str) -> None:
+def test_scale_tensor_subset_indices_requires_tuple() -> None:
     scale = ScaleTensor()
     x = torch.ones((1, 1, 1, 4, 5), dtype=torch.float32)
 
     with pytest.raises(TypeError, match="must be a tuple"):
-        getattr(scale, method_name)(x, subset_indices=[Ellipsis, [1, 3]])
+        scale.scale_iteratively(x, subset_indices=[Ellipsis, [1, 3]])
 
 
-@pytest.mark.parametrize("method_name", ["scale", "scale_iteratively"])
-def test_scale_tensor_subset_indices_select_last_dimension(method_name: str) -> None:
-    scale = ScaleTensor(
-        batch=(0, torch.tensor([10.0, 20.0])),
-        variable=(-1, torch.tensor([1.0, 2.0, 3.0, 4.0])),
-    )
+def test_scale_tensor_subset_indices_select_last_dimension() -> None:
+    batch_scaler = torch.tensor([10.0, 20.0])
+    variable_scaler = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    scale = ScaleTensor(batch=(TensorDim.BATCH_SIZE, batch_scaler), variable=(VARIABLE, variable_scaler))
     x = torch.arange(2 * 3 * 4, dtype=torch.float32).reshape(2, 3, 4)
     subset_indices = (..., torch.tensor([0, 2]))
 
-    out = getattr(scale, method_name)(x, subset_indices=subset_indices)
-
-    expected_scaler = scale.get_scaler(x.ndim).expand_as(x).index_select(-1, subset_indices[-1])
-    expected = x.index_select(-1, subset_indices[-1]) * expected_scaler
-    torch.testing.assert_close(out, expected)
-
-
-@pytest.mark.parametrize("method_name", ["scale", "scale_iteratively"])
-def test_scale_tensor_subset_indices_select_first_dimension(method_name: str) -> None:
-    scale = ScaleTensor(
-        batch=(0, torch.tensor([10.0, 20.0])),
-        variable=(-1, torch.tensor([1.0, 2.0, 3.0, 4.0])),
+    out = scale.scale_iteratively(
+        x,
+        subset_indices=subset_indices,
+        layout=TensorLayout(batch=0, grid=1, variables=2),
     )
-    x = torch.arange(2 * 3 * 4, dtype=torch.float32).reshape(2, 3, 4)
-    subset_indices = ([1, 0],)
 
-    out = getattr(scale, method_name)(x, subset_indices=subset_indices)
-
-    subset_index = torch.tensor(subset_indices[0], dtype=torch.long)
-    expected_scaler = scale.get_scaler(x.ndim).expand_as(x).index_select(0, subset_index)
-    expected = x.index_select(0, subset_index) * expected_scaler
+    expected_scaler = (batch_scaler[:, None, None] * variable_scaler[None, None, :]).expand_as(x)
+    expected = x.index_select(-1, subset_indices[-1]) * expected_scaler.index_select(-1, subset_indices[-1])
     torch.testing.assert_close(out, expected)
 
 
-@pytest.mark.parametrize("subset_id", ["test", 0])
-def test_scaler_subset(subset_id) -> None:  # noqa: ANN001
-    scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
+@pytest.mark.parametrize("subset_id", ["test", GRID])
+def test_scaler_subset(subset_id: str) -> None:
+    scale = ScaleTensor(test=(GRID, torch.tensor([2.0])), wow=(VARIABLE, torch.tensor([3.0])))
     subset = scale.subset(subset_id)
     assert "test" in subset
     assert "wow" not in subset
-    assert 0 in subset
-    assert 1 not in subset
+    assert GRID in subset
+    assert VARIABLE not in subset
 
 
-@pytest.mark.parametrize("without_id", ["test", 0])
-def test_scaler_subset_without(without_id: int) -> None:
-    scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
+@pytest.mark.parametrize("without_id", ["test", GRID])
+def test_scaler_subset_without(without_id: str) -> None:
+    scale = ScaleTensor(test=(GRID, torch.tensor([2.0])), wow=(VARIABLE, torch.tensor([3.0])))
     subset = scale.without(without_id)
     assert "test" not in subset
     assert "wow" in subset
-    assert 1 in subset
+    assert VARIABLE in subset
 
 
-@pytest.mark.parametrize("subset_id", [0, 1])
-def test_scaler_subset_by_dim(subset_id: int) -> None:
-    scale = ScaleTensor(test=(-2, torch.tensor([2.0])), wow=(-1, torch.tensor([3.0])))
-    scale = scale.resolve(2)
+@pytest.mark.parametrize("subset_id", [GRID, VARIABLE])
+def test_scaler_subset_by_dim(subset_id: TensorDim) -> None:
+    scale = ScaleTensor(test=(GRID, torch.tensor([2.0])), wow=(VARIABLE, torch.tensor([3.0])))
     subset1 = scale.subset(subset_id)
     assert subset_id in subset1
+    assert len(subset1) == 1
 
 
 @pytest.mark.parametrize("without_id", ["test"])
-def test_scaler_subset_without_overlap(without_id) -> None:  # noqa: ANN001
-    scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(0, torch.tensor([3.0])))
+def test_scaler_subset_without_overlap(without_id: str) -> None:
+    scale = ScaleTensor(test=(GRID, torch.tensor([2.0])), wow=(GRID, torch.tensor([3.0])))
     subset = scale.without(without_id)
     assert "test" not in subset
     assert "wow" in subset
-    assert 0 in subset
+    assert GRID in subset
 
 
 def test_scaler_remove_str() -> None:
-    scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
+    scale = ScaleTensor(test=(GRID, torch.tensor([2.0])), wow=(VARIABLE, torch.tensor([3.0])))
     subset = scale.remove_scaler("wow")
     assert "test" in subset
     assert "wow" not in subset
-    assert 0 in subset
+    assert GRID in subset
 
 
-def test_scaler_remove_int() -> None:
-    scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
-    subset = scale.remove_scaler(1)
+def test_scaler_remove_dim() -> None:
+    scale = ScaleTensor(test=(GRID, torch.tensor([2.0])), wow=(VARIABLE, torch.tensor([3.0])))
+    subset = scale.remove_scaler(VARIABLE)
     assert "test" in subset
     assert "wow" not in subset
-    assert 0 in subset
-    assert 1 not in subset
+    assert GRID in subset
+    assert VARIABLE not in subset
 
 
 def test_scaler_freeze_str() -> None:
-    scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
+    scale = ScaleTensor(test=(GRID, torch.tensor([2.0])), wow=(VARIABLE, torch.tensor([3.0])))
     with scale.freeze_state():
         subset = scale.remove_scaler("wow")
         assert "test" in subset
         assert "wow" not in subset
-        assert 0 in subset
-        assert 1 not in subset
+        assert GRID in subset
+        assert VARIABLE not in subset
 
     assert "wow" in subset
-    assert 1 in subset
+    assert VARIABLE in subset
 
 
-def test_scaler_freeze_int() -> None:
-    scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))
+def test_scaler_freeze_dim() -> None:
+    scale = ScaleTensor(test=(GRID, torch.tensor([2.0])), wow=(VARIABLE, torch.tensor([3.0])))
     with scale.freeze_state():
-        subset = scale.remove_scaler(1)
+        subset = scale.remove_scaler(VARIABLE)
         assert "test" in subset
         assert "wow" not in subset
-        assert 0 in subset
-        assert 1 not in subset
+        assert GRID in subset
+        assert VARIABLE not in subset
 
     assert "wow" in subset
-    assert 1 in subset
+    assert VARIABLE in subset

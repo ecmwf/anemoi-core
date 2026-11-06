@@ -20,9 +20,7 @@ from .settings import StochasticInterpolantSettings
 from .settings import TransportSourceSettings
 from .sources import TransportSourceBuilder
 from .sources import TransportSourceRequest
-from .sources import TransportSourceSpec
 from .sources import reference_state_sampling_source
-from .sources import sampling_source_specs
 
 __all__ = [
     "EDMDiffusionModelObjective",
@@ -38,12 +36,10 @@ __all__ = [
     "TransportSourceBuilder",
     "TransportSourceRequest",
     "TransportModelObjective",
-    "TransportSourceSpec",
     "TransportSourceSettings",
     "UnitTimeSchedule",
     "UniformTimeTrainingDistribution",
     "get_transport_model_objective",
     "reference_state_sampling_source",
-    "sampling_source_specs",
     "StochasticInterpolantSettings",
 ]

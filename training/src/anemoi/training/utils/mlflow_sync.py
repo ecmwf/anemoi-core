@@ -65,6 +65,19 @@ from mlflow.utils.mlflow_tags import MLFLOW_USER  # noqa: E402
 from mlflow.utils.validation import MAX_METRICS_PER_BATCH  # noqa: E402
 from mlflow.utils.validation import MAX_PARAMS_TAGS_PER_BATCH  # noqa: E402
 
+
+def _enabled_loggers() -> list[logging.Logger]:
+    return [
+        logger
+        for logger in logging.Logger.manager.loggerDict.values()
+        if isinstance(logger, logging.Logger) and not logger.disabled
+    ]
+
+
+# The first import of mlflow_export_import configures logging with ``logging.config.dictConfig``,
+# whose default ``disable_existing_loggers=True`` silences every logger created so far, anemoi's
+# included. Re-enable those loggers once the import is done.
+_loggers_before_import = _enabled_loggers()
 try:
     import mlflow_export_import.common.utils as mlflow_utils
     from mlflow_export_import.client.client_utils import create_http_client
@@ -81,6 +94,10 @@ except ImportError:
         "Please install it from https://github.com/mlflow/mlflow-export-import"
     )
     raise ImportError(msg) from None
+finally:
+    for _logger in _loggers_before_import:
+        _logger.disabled = False
+    del _loggers_before_import
 
 LOGGER = logging.getLogger(__name__)
 

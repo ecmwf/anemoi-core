@@ -19,11 +19,27 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources.base import Source
 from anemoi.training.losses import EnergyScoreLoss
 from anemoi.training.utils.enums import EnergyScoreDimension
 from anemoi.training.utils.enums import TensorDim
 
 GRID_SHARD_SIZES = [3, 2]
+LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+
+
+def _view(data: torch.Tensor) -> Source:
+    """Wrap a (batch, time, ensemble, grid, variables) tensor in the source view the loss takes."""
+    return GriddedSource(
+        name="data",
+        data=data,
+        variables=[f"v{i}" for i in range(data.shape[-1])],
+        statistics={},
+        coordinates=torch.zeros(data.shape[-2], 2, device=data.device),
+        layout=LAYOUT,
+    )
 
 
 def _check_sharded_energy_scores(rank: int, init_file: str) -> None:
@@ -60,19 +76,19 @@ def _check_sharded_energy_scores(rank: int, init_file: str) -> None:
                     )
 
                     unsharded_pred = full_pred.clone().requires_grad_()
-                    expected = loss(unsharded_pred, target, squash=False)
+                    expected = loss(_view(unsharded_pred), _view(target), squash=False)
                     expected.sum().backward()
 
                     # Each rank's gradient covers its own grid nodes and should equal that
                     # part of the unsharded gradient.
                     sharded_pred = full_pred[:, :, :, grid_shard_slice].clone().requires_grad_()
                     actual = loss(
-                        sharded_pred,
-                        target[:, :, :, grid_shard_slice],
+                        _view(sharded_pred),
+                        _view(target[:, :, :, grid_shard_slice]),
                         squash=False,
                         grid_shard_slice=grid_shard_slice,
                         group=dist.group.WORLD,
-                        grid_dim=TensorDim.GRID,
+                        grid_dim=LAYOUT.axis(TensorDim.GRID),
                         grid_shard_sizes=GRID_SHARD_SIZES,
                     )
                     actual.sum().backward()

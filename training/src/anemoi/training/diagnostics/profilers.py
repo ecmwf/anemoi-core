@@ -499,25 +499,20 @@ class BenchmarkProfiler(Profiler):
             f.write(model_summary)
             f.close()
 
-    def get_model_summary(self, model: BaseTrainingModule, example_input_array: dict[str, np.ndarray]) -> str:
+    def get_model_summary(self, model: BaseTrainingModule) -> str:
+        """Summarise the model's layers and parameter counts.
 
+        The model layers the new objects, which torchinfo
+        cannot size, so input/output sizes and mult-adds are not reported.
+        """
         from torchinfo import summary
-
-        # when using flash attention model, we need to convert the input and model to float16 and cuda
-        # since FlashAttention only supports fp16 and bf16 data type
-        for dataset_name in example_input_array:
-            example_input_array[dataset_name] = example_input_array[dataset_name].to(dtype=torch.float16)
-            example_input_array[dataset_name] = example_input_array[dataset_name].to("cuda")
-        model.half()
-        model = model.to("cuda")
 
         summary_str = str(
             summary(
                 model,
-                input_data=example_input_array,
                 depth=20,
                 col_width=16,
-                col_names=["trainable", "input_size", "output_size", "num_params", "params_percent", "mult_adds"],
+                col_names=["trainable", "num_params", "params_percent"],
                 row_settings=["var_names"],
                 verbose=0,
             ),

@@ -11,6 +11,7 @@
 import logging
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import einops
 import torch
@@ -28,6 +29,9 @@ from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
+
+if TYPE_CHECKING:
+    from anemoi.models.data.sources.gridded import GriddedSource
 
 LOGGER = logging.getLogger(__name__)
 
@@ -93,7 +97,10 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             Default number of chunks for multiscale smoothing.
             ``1`` means processing all fields in one go.
         ignore_nans : bool
-            Passed to :class:`BaseLoss`; ignored by the wrapper itself.
+            Passed to :class:`BaseLoss`. The wrapper also enables it when the per-scale loss
+            ignores NaNs. When enabled, NaN targets and the predictions at the same points are
+            set to 0 before smoothing, and the targets are set back to NaN in every scale
+            afterwards, so the per-scale loss masks only the original NaN points.
         loss_matrices_path : Path | str | None
             Deprecated.  Pass inside *multiscale_config* instead.
         loss_matrices : list[Path | str] | None
@@ -320,8 +327,8 @@ class MultiscaleLossWrapper(BaseLossWrapper):
 
     def forward(
         self,
-        y_pred_ens: torch.Tensor,
-        y: torch.Tensor,
+        y_pred_ens: "GriddedSource",
+        y: "GriddedSource",
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -332,8 +339,27 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         grid_dim: int | None = None,
         **kwargs,
     ) -> torch.Tensor:
+        """Smooth gridded tensors and evaluate each scale with the source metadata."""
+        if y_pred_ens.is_tabular:
+            msg = (
+                f"{self.__class__.__name__} smooths over a fixed grid and does not support tabular "
+                f"datasets such as {y_pred_ens.name!r}. Use a pointwise loss."
+            )
+            raise NotImplementedError(msg)
         channel_shard_sizes_pred = None
         channel_shard_sizes_y = None
+        # Smoothing a NaN target spreads the NaN over the filter stencil, so the per-scale loss
+        # would mask a halo around every missing point. So we put 0 in the target and, at the same
+        # points, in every ensemble member of the prediction before smoothing, so both sides are
+        # smoothed from the same points. The NaNs are restored in the target for each loss scale.
+        # The mask is taken in the grid-sharded layout. This needs the prediction and target to hold
+        # the same variables in the same order, which the variable mapper around this wrapper ensures.
+        target_nan_mask = torch.isnan(y.data) if self.ignore_nans else None
+        if target_nan_mask is None:
+            pred_data, y_data = y_pred_ens.data, y.data
+        else:
+            pred_data = y_pred_ens.data.masked_fill(target_nan_mask, 0.0)
+            y_data = y.data.masked_fill(target_nan_mask, 0.0)
         is_model_sharded = grid_shard_sizes is not None
         if is_model_sharded:
             # go to full sequence dimension for smoothing
@@ -343,14 +369,14 @@ class MultiscaleLossWrapper(BaseLossWrapper):
                 channel_shard_sizes_pred,
                 channel_shard_sizes_y,
             ) = self._prepare_for_smoothing(
-                y_pred_ens,
-                y,
+                pred_data,
+                y_data,
                 group,
                 grid_shard_sizes,
             )
         else:
-            y_pred_ens_for_smooth = y_pred_ens
-            y_for_smooth = y
+            y_pred_ens_for_smooth = pred_data
+            y_for_smooth = y_data
 
         weighted_losses = []
         prev_y_pred_ens = None
@@ -399,6 +425,9 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             prev_y_pred_ens = current_y_pred_ens
             prev_y = current_y
 
+            if target_nan_mask is not None:
+                y_tmp = y_tmp.masked_fill(target_nan_mask, float("nan"))
+
             # sharding kwargs - only pass if the loss needs them
             sharding_kwargs = (
                 {"grid_shard_sizes": grid_shard_sizes, "grid_dim": grid_dim}
@@ -409,8 +438,8 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             weighted_losses.append(
                 weight
                 * self.loss(
-                    y_pred_ens_tmp,
-                    y_tmp,
+                    y_pred_ens.clone(data=y_pred_ens_tmp),
+                    y.clone(data=y_tmp),
                     squash=squash,
                     scaler_indices=scaler_indices,
                     without_scalers=without_scalers,

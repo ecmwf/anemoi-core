@@ -19,6 +19,7 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from omegaconf import open_dict
 
+from anemoi.models.data import Batch
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.train.evaluate import AnemoiEvaluator
 from anemoi.training.train.methods.base import BaseTrainingModule
@@ -50,9 +51,9 @@ def _record_training_batches(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int,
     records = []
     seed_batch = BaseTrainingModule.on_train_batch_start
 
-    def seed_and_record(self: BaseTrainingModule, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
+    def seed_and_record(self: BaseTrainingModule, batch: Batch, batch_idx: int) -> None:
         seed_batch(self, batch, batch_idx)
-        data = next(iter(batch.values()))
+        data = next(iter(batch.values())).data
         records.append((self.current_epoch, batch_idx, _digest(data), _digest(torch.get_rng_state())))
 
     monkeypatch.setattr(BaseTrainingModule, "on_train_batch_start", seed_and_record)

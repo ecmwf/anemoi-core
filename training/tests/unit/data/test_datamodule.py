@@ -18,6 +18,7 @@ import torch
 from omegaconf import DictConfig
 from pytest_mock import MockFixture
 from torch.utils.data import Dataset
+from torch.utils.data import default_collate
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.tasks import Forecaster
@@ -197,10 +198,10 @@ def test_get_dataset_loads_time_steps_of_current_rollout(mocker: MockFixture) ->
     """Datasets load the time steps that the task needs when they are constructed."""
     datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
     datamodule.task = mocker.Mock()
-    datamodule.__dict__["loading_policy"] = mocker.Mock()
+    datamodule.__dict__["loading_policy"] = mocker.MagicMock()
 
     data_reader = object()
-    create_dataset = mocker.patch("anemoi.training.data.datamodule.create_dataset", return_value=data_reader)
+    create_reader = mocker.patch("anemoi.training.data.datamodule.create_reader", return_value=data_reader)
     mocker.patch(
         "anemoi.training.data.datamodule.compute_relative_date_indices",
         return_value={"data": [0, 1]},
@@ -208,7 +209,7 @@ def test_get_dataset_loads_time_steps_of_current_rollout(mocker: MockFixture) ->
 
     datamodule._get_dataset({"data": object()}, label="validation")
 
-    create_dataset.assert_called_once()
+    create_reader.assert_called_once()
     datamodule.loading_policy.build_dataset.assert_called_once_with(
         {"data": data_reader},
         {"data": [0, 1]},
@@ -353,6 +354,8 @@ def _fit(
     datamodule = _make_datamodule(_fixed_rollout_task(), batch_size=3, num_workers=2, persistent_workers=True)
     datamodule.__dict__.update(ds_train=SampleIndexDataset(40), ds_valid=SampleIndexDataset(6))
     mocker.patch.object(datamodule, "_sample_groups", return_value={"num_replicas": 2, "rank": 1})
+    # The samples are plain indices, so they are stacked into a tensor rather than built into a Batch.
+    mocker.patch.object(datamodule, "_make_collate_fn", return_value=default_collate)
     module = _RecordingModule()
     trainer = pl.Trainer(
         accelerator="cpu",

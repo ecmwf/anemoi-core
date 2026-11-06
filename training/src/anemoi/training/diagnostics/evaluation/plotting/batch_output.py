@@ -38,7 +38,8 @@ Built-in plot functions and their optional kwargs
     - ``log_scale`` (bool, default ``False``): use log scale on the y-axis.
 
 ``ensemble_plot_fn``
-    Ensemble spread/mean/error map plot.
+    Ensemble spread/mean/error map plot. Supports sparse observation datasets, whose
+    panels are drawn at the target observation locations.
 
     - ``accumulation_levels_plot`` (list, default ``DEFAULT_ACCUMULATION_LEVELS``):
       colour levels in mm for precipitation fields.
@@ -78,13 +79,22 @@ def sample_plot_fn(
     accumulation_levels_plot: list | None = None,
     prediction_label: str = "pred",
     auxiliary_label: str = "corrupted targets",
+    sparse: bool = False,
+    output_latlons: np.ndarray | None = None,
     **_kwargs: Any,
 ) -> Figure:
-    """Adapter for ``plot_predicted_multilevel_flat_sample`` (PlotSample)."""
+    """Adapter for ``plot_predicted_multilevel_flat_sample`` (PlotSample).
+
+    Supports both dense gridded datasets and sparse/observation datasets. For
+    sparse datasets (``sparse=True``) the input and target/prediction points live
+    at different scattered locations; ``output_latlons`` gives the target
+    observation coordinates and the sample plotter renders scattered panels.
+    """
     from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
     from anemoi.training.diagnostics.evaluation.plotting.settings import DEFAULT_ACCUMULATION_LEVELS
 
     levels = accumulation_levels_plot if accumulation_levels_plot is not None else DEFAULT_ACCUMULATION_LEVELS
+
     return plot_predicted_multilevel_flat_sample(
         parameters,
         per_sample,
@@ -100,6 +110,8 @@ def sample_plot_fn(
         prediction_label=prediction_label,
         auxiliary=auxiliary,
         auxiliary_label=auxiliary_label,
+        sparse=sparse,
+        output_latlons=output_latlons,
     )
 
 
@@ -113,9 +125,17 @@ def spectrum_plot_fn(
     auxiliary: np.ndarray | None = None,  # noqa: ARG001
     settings: Any | None = None,  # noqa: ARG001
     min_delta: float | None = None,
+    sparse: bool = False,
     **_kwargs: Any,
-) -> Figure:
-    """Adapter for ``plot_power_spectrum`` (PlotSpectrum)."""
+) -> Figure | None:
+    """Adapter for ``plot_power_spectrum`` (PlotSpectrum).
+
+    Spectra assume a single shared lat/lon grid, which does not hold for
+    scattered observations. Returns ``None`` for sparse datasets so the callback
+    skips them.
+    """
+    if sparse:
+        return None
     from anemoi.training.diagnostics.evaluation.plotting.spectrum import plot_power_spectrum
 
     return plot_power_spectrum(parameters, latlons, x, y_true, y_pred, min_delta=min_delta)
@@ -131,9 +151,16 @@ def histogram_plot_fn(
     auxiliary: np.ndarray | None = None,  # noqa: ARG001
     settings: Any | None = None,
     log_scale: bool = False,
+    sparse: bool = False,
     **_kwargs: Any,
-) -> Figure:
-    """Adapter for ``plot_histogram`` (PlotHistogram)."""
+) -> Figure | None:
+    """Adapter for ``plot_histogram`` (PlotHistogram).
+
+    Gridded histogram binning is not supported for scattered observations;
+    returns ``None`` for sparse datasets so the callback skips them.
+    """
+    if sparse:
+        return None
     from anemoi.training.diagnostics.evaluation.plotting.histogram import plot_histogram
 
     return plot_histogram(
@@ -156,6 +183,8 @@ def ensemble_plot_fn(
     auxiliary: np.ndarray | None = None,  # noqa: ARG001
     settings: Any | None = None,
     accumulation_levels_plot: list | None = None,
+    sparse: bool = False,
+    output_latlons: np.ndarray | None = None,
     **_kwargs: Any,
 ) -> Figure:
     """Adapter for ``plot_predicted_ensemble`` (PlotEnsSample)."""
@@ -173,4 +202,6 @@ def ensemble_plot_fn(
         precip_and_related_fields=getattr(settings, "precip_and_related_fields", None),
         colormaps=getattr(settings, "colormaps", None),
         projection_kind=getattr(settings, "projection_kind", "equirectangular"),
+        sparse=sparse,
+        output_latlons=output_latlons,
     )

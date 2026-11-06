@@ -27,7 +27,7 @@ from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import model_validator
 
-from anemoi.models.layers.target_features import VALID_TARGET_FEATURES
+from anemoi.models.models.target_features import VALID_TARGET_FEATURES
 from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 
@@ -159,13 +159,52 @@ class Boolean1DSchema(BaseModel):
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
+class NoOpNodeEmbedderSchema(BaseModel):
+    """Pass-through node embedder: the encoder mapper takes each source dataset's input as is."""
+
+    target_: Literal["anemoi.models.layers.node_embedder.NoOpNodeEmbedder"] = Field(..., alias="_target_")
+
+
+class LinearNodeEmbedderSchema(BaseModel):
+    """Linear node embedder: one linear projection per source dataset onto ``num_channels``."""
+
+    target_: Literal["anemoi.models.layers.node_embedder.LinearNodeEmbedder"] = Field(..., alias="_target_")
+    num_channels: PositiveInt = Field(example=512)
+    "Number of channels the source datasets are projected to; the input channels of the encoder mapper."
+    layer_kernels: Union[dict[str, dict], None] = Field(default=None)
+    "Layer implementations for the projections. Defaults to the encoder mapper's layer_kernels."
+
+
+NodeEmbedderSchemas = Annotated[Union[NoOpNodeEmbedderSchema, LinearNodeEmbedderSchema], Field(discriminator="target_")]
+
+
 class EncodersSchema(BaseModel):
     """Encoder schema"""
 
     source_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the encoder is applicable."
-    dataset_fusing_strategy: Literal["not_supported"] = Field(default="not_supported")
-    "Dataset fusing strategy. Default to 'not_supported'."
+    dataset_fusing_strategy: Literal["none", "sequential", "joint"] = Field(default="none")
+    """How the source datasets of this encoder are combined.
+
+    - 'none' (default): no fusion; the node embedder is a ``NoOpNodeEmbedder``, so the mapper takes the
+      assembled input of one source dataset directly. Normally ``source_datasets`` lists one dataset; several are
+      allowed only if they have the same number of input channels and at most one of them is present in
+      any batch (e.g. multi-domain training with one domain per batch).
+    - 'sequential': each source dataset is projected by a projecting ``node_embedder`` (e.g.
+      ``LinearNodeEmbedder``) onto
+      ``node_embedder.num_channels`` and encoded in its own pass with the shared mapper weights, in
+      the order listed in ``source_datasets``. The latents are combined by the latent
+      aggregator. Source datasets may differ in their number of input channels.
+    - 'joint': planned, not yet supported.
+    """
+    node_embedder: Optional[NodeEmbedderSchemas] = Field(
+        default_factory=lambda: NoOpNodeEmbedderSchema(_target_="anemoi.models.layers.node_embedder.NoOpNodeEmbedder")
+    )
+    """Per-dataset embedding onto the mapper input channels.
+
+    'none' uses ``NoOpNodeEmbedder`` (the default; ``null`` is read as it too, and any other node embedder is
+    ignored). 'sequential' needs a projecting one such as ``LinearNodeEmbedder``. A node embedder embeds node
+    features only: the encoder edges of all source datasets must still carry the same number of edge features."""
     mapper: Union[
         GNNEncoderSchema,
         GraphTransformerEncoderSchema,
@@ -175,6 +214,28 @@ class EncodersSchema(BaseModel):
         ...,
         discriminator="target_",
     )
+
+    @model_validator(mode="after")
+    def check_fusing_strategy(self) -> EncodersSchema:
+        """Reject the planned 'joint' strategy and a 'sequential' encoder without a projecting node embedder."""
+        if self.dataset_fusing_strategy == "joint":
+            msg = "dataset_fusing_strategy 'joint' is planned but not yet supported; use 'none' or 'sequential'."
+            raise ValueError(msg)
+        pass_through = self.node_embedder is None or isinstance(self.node_embedder, NoOpNodeEmbedderSchema)
+        if self.dataset_fusing_strategy == "sequential" and pass_through:
+            msg = (
+                "dataset_fusing_strategy 'sequential' needs a projecting node embedder (not NoOpNodeEmbedder), e.g. "
+                "node_embedder: {_target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder, num_channels: 512}."
+            )
+            raise ValueError(msg)
+        if self.dataset_fusing_strategy == "none" and not pass_through:
+            LOGGER.warning(
+                "Encoder with source_datasets %s has dataset_fusing_strategy 'none'; its node embedder %s is ignored "
+                "and NoOpNodeEmbedder is used instead.",
+                self.source_datasets,
+                self.node_embedder.target_,
+            )
+        return self
 
 
 class DecodersSchema(BaseModel):
@@ -209,9 +270,12 @@ class BaseModelSchema(PydanticBaseModel):
     bounding: DatasetDict[list[BoundingSchema]]
     "List of bounding configuration applied in order to the specified variables."
     output_mask: DatasetDict[OutputMaskSchemas]  # !TODO CHECK!
+    output_mask: DatasetDict[OutputMaskSchemas]  # !TODO CHECK!
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
+    latent_aggregator: AggregatorSchema
+    "Latent aggregator schema."
     latent_aggregator: AggregatorSchema
     "Latent aggregator schema."
     processor: Union[
@@ -224,6 +288,12 @@ class BaseModelSchema(PydanticBaseModel):
         ...,
         discriminator="target_",
     )
+    "Model processor schema."
+    encoders: dict[str, EncodersSchema]
+    "Model encoders schemas."
+    decoders: dict[str, DecodersSchema]
+    "Model decoders schemas."
+    residual: DatasetDict[ResidualConnectionSchema]
     "Model processor schema."
     encoders: dict[str, EncodersSchema]
     "Model encoders schemas."
@@ -337,6 +407,22 @@ class TransportModelSchema(BaseModelSchema):
     @model_validator(mode="after")
     def validate_no_bounding_for_transport(self) -> "TransportModelSchema":
         if self.bounding:
+            if "datasets" in self.bounding:
+                for dataset_name, bounding_list in self.bounding["datasets"].items():
+                    if (bounding_list is not None) and len(bounding_list) > 0:
+                        msg = (
+                            "Transport models do not support bounding layers. "
+                            f"Found {len(bounding_list)} bounding configuration(s) for dataset '{dataset_name}'. "
+                            f"Please remove all bounding configurations for transport models."
+                        )
+                        raise ValueError(msg)
+            elif len(self.bounding) > 0:
+                msg = (
+                    "Transport models do not support bounding layers. "
+                    f"Found {len(self.bounding)} bounding configuration(s). "
+                    f"Please remove all bounding configurations for transport models."
+                )
+                raise ValueError(msg)
             if "datasets" in self.bounding:
                 for dataset_name, bounding_list in self.bounding["datasets"].items():
                     if (bounding_list is not None) and len(bounding_list) > 0:

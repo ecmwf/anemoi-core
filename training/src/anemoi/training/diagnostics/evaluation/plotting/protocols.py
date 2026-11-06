@@ -38,6 +38,7 @@ Pass it in the YAML config::
 
 from __future__ import annotations
 
+import functools
 import inspect
 from typing import TYPE_CHECKING
 from typing import Any
@@ -207,7 +208,7 @@ def validate_plot_fn(plot_fn: Any, protocol: type, callback_name: str) -> None:
 
     # Unwrap functools.partial / Hydra partial to the underlying function.
     fn = plot_fn
-    while hasattr(fn, "func"):
+    while isinstance(fn, functools.partial):
         fn = fn.func
 
     try:

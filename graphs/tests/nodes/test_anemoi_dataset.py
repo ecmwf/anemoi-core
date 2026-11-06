@@ -9,6 +9,7 @@
 
 import pytest
 import torch
+from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.nodes.attributes import SphericalAreaWeights
@@ -24,6 +25,18 @@ def test_init(mocker, mock_anemoi_dataset):
 
     assert isinstance(node_builder, from_file.BaseNodeBuilder)
     assert isinstance(node_builder, from_file.AnemoiDatasetNodes)
+
+
+@pytest.mark.parametrize("as_config", [True, False], ids=["dictconfig", "dict"])
+def test_unset_dataset_options_are_not_passed_on(mocker, mock_anemoi_dataset, as_config):
+    """Options set to None are dropped, as the training readers do: ``open_dataset`` treats them as given."""
+    open_dataset = mocker.patch("anemoi.datasets.open_dataset", return_value=mock_anemoi_dataset)
+    options = {"dataset": "dataset.zarr", "frequency": None, "select": None, "step_frequency": 1}
+
+    node_builder = from_file.AnemoiDatasetNodes(OmegaConf.create(options) if as_config else options, name="test_nodes")
+    node_builder.register_nodes(HeteroData())
+
+    open_dataset.assert_called_once_with({"dataset": "dataset.zarr", "step_frequency": 1})
 
 
 def test_fail():

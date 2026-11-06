@@ -53,6 +53,27 @@ def test_grouped_normaliser(norm: str):
     assert normalised_data.shape == data.shape
 
 
+@pytest.mark.parametrize("norm_by_group", [False, True])
+def test_unit_std_single_value_is_finite(norm_by_group: bool):
+    """The sample std. dev. of a single value is NaN; unit-std must skip normalisation instead."""
+
+    class Normaliser(NormaliserMixin):
+        def __init__(self):
+            self.norm = "unit-std"
+            self.norm_by_group = norm_by_group
+
+    normaliser = Normaliser()
+    if norm_by_group:
+        # group 1 holds a single value
+        data = torch.tensor([[0.2], [0.5], [0.7]])
+        normalised_data = normaliser.normalise(data, torch.tensor([0, 0, 1]), 2)
+    else:
+        data = torch.tensor([[0.7]])
+        normalised_data = normaliser.normalise(data)
+
+    assert torch.isfinite(normalised_data).all()
+
+
 @pytest.mark.parametrize("norm", ["l3", "invalid"])
 def test_normaliser_wrong_norm(norm: str):
     """Test NormaliserMixin normalise method."""

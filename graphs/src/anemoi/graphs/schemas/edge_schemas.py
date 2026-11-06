@@ -60,6 +60,11 @@ class CutoffEdgeSchema(BaseModel):
     "Mask to apply to target nodes of the edges. Default to None."
     max_num_neighbours: PositiveInt = Field(default=64, example=64)
     "Maximum number of nearest neighbours to consider when building edges. Default to 64."
+    backend: Literal["auto", "sklearn"] = Field(default="auto")
+    (
+        "Neighbour search backend. 'auto' uses pyg-lib when installed, else sklearn. 'sklearn' keeps the nearest "
+        "max_num_neighbours within the cut-off; pyg-lib keeps an arbitrary subset of them. Default to 'auto'."
+    )
 
     @model_validator(mode="after")
     def validate_cutoff_params(self):
