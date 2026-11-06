@@ -92,7 +92,13 @@ model:
       data_2: hidden_2
   encoders:
     "0":
+      # One shared encoder for both domains. MultiDomainLoadingPolicy puts one domain in each batch,
+      # so the "none" strategy (no fuser) applies: it needs equal input widths. Training checks against
+      # the loading policy that no batch holds both datasets (SynchronizedLoadingPolicy would fail).
+      # Use "sequential" with a fuser to encode them together.
       source_datasets: [data, data_2]
+      dataset_fusing_strategy: "none"
+      fuser: null
   decoders:
     "0":
       target_datasets: [data, data_2]

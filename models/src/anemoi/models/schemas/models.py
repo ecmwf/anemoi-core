@@ -159,26 +159,42 @@ class Boolean1DSchema(BaseModel):
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
+class LinearFuserSchema(BaseModel):
+    """Linear fuser: one linear projection per source dataset onto ``num_channels``."""
+
+    target_: Literal["anemoi.models.layers.fuser.LinearFuser"] = Field(..., alias="_target_")
+    num_channels: PositiveInt = Field(example=512)
+    "Common width the source datasets are projected to; the input width of the encoder mapper."
+    layer_kernels: Union[dict[str, dict], None] = Field(default=None)
+    "Layer implementations for the projections. Defaults to the encoder mapper's layer_kernels."
+
+
+FuserSchemas = Annotated[Union[LinearFuserSchema], Field(discriminator="target_")]
+
+
 class EncodersSchema(BaseModel):
     """Encoder schema"""
 
     source_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the encoder is applicable."
-    dataset_fusing_strategy: Literal["none", "sequential"] = Field(default="none")
-    """How several source datasets are combined by this encoder.
+    dataset_fusing_strategy: Literal["none", "sequential", "joint"] = Field(default="none")
+    """How the source datasets of this encoder are combined.
 
-    - 'none' (default): no fusion. The natural choice for a single-source encoder; with several
-      source datasets each is encoded separately and they must share an input dimension.
-    - 'sequential': one encoder pass per source dataset, in the order listed in
-      ``source_datasets``, with shared encoder weights. The resulting latents are combined
-      by the latent aggregator.
+    - 'none' (default): no fusion and no fuser. The mapper takes the assembled input of one
+      source dataset directly. Normally ``source_datasets`` lists one dataset; several are
+      allowed only if they have the same input width and at most one of them is present in
+      any batch (e.g. multi-domain training with one domain per batch).
+    - 'sequential': each source dataset is projected by the ``fuser`` onto
+      ``fuser.num_channels`` and encoded in its own pass with the shared mapper weights, in
+      the order listed in ``source_datasets``. The latents are combined by the latent
+      aggregator. Source datasets may differ in width.
+    - 'joint': planned, not yet supported.
     """
-    fusion_projection_dim: Optional[PositiveInt] = Field(default=None)
-    """Width the per-dataset 'thin' source projections map to, for multi-source encoders.
+    fuser: Optional[FuserSchemas] = Field(default=None)
+    """Per-dataset projection onto the mapper input width. Required by 'sequential', ignored by 'none'.
 
-    Only used when ``source_datasets`` has more than one entry and the fusing strategy is
-    'sequential'. Defaults to the widest source dataset's input dimension.
-    """
+    It projects node features only: the encoder edges of all source datasets must still carry the
+    same number of edge features."""
     mapper: Union[
         GNNEncoderSchema,
         GraphTransformerEncoderSchema,
@@ -188,6 +204,25 @@ class EncodersSchema(BaseModel):
         ...,
         discriminator="target_",
     )
+
+    @model_validator(mode="after")
+    def check_fusing_strategy(self) -> EncodersSchema:
+        """Reject the planned 'joint' strategy and a 'sequential' encoder without a fuser."""
+        if self.dataset_fusing_strategy == "joint":
+            msg = "dataset_fusing_strategy 'joint' is planned but not yet supported; use 'none' or 'sequential'."
+            raise ValueError(msg)
+        if self.dataset_fusing_strategy == "sequential" and self.fuser is None:
+            msg = (
+                "dataset_fusing_strategy 'sequential' needs a fuser, e.g. "
+                "fuser: {_target_: anemoi.models.layers.fuser.LinearFuser, num_channels: 512}."
+            )
+            raise ValueError(msg)
+        if self.dataset_fusing_strategy == "none" and self.fuser is not None:
+            LOGGER.warning(
+                "Encoder with source_datasets %s has dataset_fusing_strategy 'none'; its fuser is ignored.",
+                self.source_datasets,
+            )
+        return self
 
 
 class DecodersSchema(BaseModel):

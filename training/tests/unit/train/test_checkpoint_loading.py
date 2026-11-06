@@ -26,6 +26,7 @@ from anemoi.training.checkpoint.builder import reject_unsupported_warm_start
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.runner import checkpoint_pipeline_configured
 from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
+from anemoi.training.data.loading import SynchronizedLoadingPolicy
 from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
@@ -925,6 +926,7 @@ def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pyte
         data_indices={"data": DummyIndex(), "obs": DummyIndex()},
         metadata={},
         datamodule=SimpleNamespace(
+            loading_policy=SynchronizedLoadingPolicy(),
             statistics={},
             statistics_tendencies={},
             ds_train=SimpleNamespace(data_readers=data_readers),

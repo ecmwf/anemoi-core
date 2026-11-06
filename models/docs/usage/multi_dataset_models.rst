@@ -47,6 +47,9 @@ choose stable, descriptive names.
      global:                 # user-defined group name (appears in the state-dict)
        source_datasets: [ "era5", "ifs"]  # datasets encoded by this group
        dataset_fusing_strategy: "sequential"
+       fuser:
+         _target_: anemoi.models.layers.fuser.LinearFuser
+         num_channels: 512   # input width of this group's mapper
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024
@@ -54,6 +57,7 @@ choose stable, descriptive names.
      regional:
        source_datasets: [ "cerra" ]
        dataset_fusing_strategy: "none"
+       fuser: null           # ignored by "none"
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024
@@ -80,9 +84,34 @@ choose stable, descriptive names.
    group share the same mapper weights.
 
 ``dataset_fusing_strategy``
-   How multiple datasets within a single group are combined if passed during the
-   same forward pass: ``"none"`` (default) or ``"sequential"`` (see
-   :ref:`usage-multi-dataset-shared-groups`).
+   How the source datasets of an encoder group are combined (see
+   :ref:`usage-multi-dataset-shared-groups`):
+
+   - ``"none"`` (default): no fusion and no fuser. The mapper takes the
+     assembled input of a source dataset directly, so its input width is that
+     dataset's width. Normally the group lists a single dataset. Several are
+     allowed only if they have the same input width and each batch holds at most
+     one of them (multi-domain training). Training checks this against the
+     data loading policy before it builds the model, and the model raises if a
+     batch ever holds two.
+   - ``"sequential"``: the ``fuser`` projects every source dataset onto
+     ``fuser.num_channels``, the input width of the mapper. Each dataset is
+     then encoded in its own pass with the shared mapper weights, in the order
+     listed in ``source_datasets``, and the latent aggregator combines the
+     latents. The datasets may differ in width. This also works with a single
+     source dataset. The fuser aligns node features only: the encoder edges of
+     all source datasets must still carry the same number of edge features
+     (see :ref:`usage-multi-dataset-edge-features`).
+   - ``"joint"``: planned, not yet supported. Setting it raises an error.
+
+``fuser``
+   The per-dataset input projection of a ``"sequential"`` group; required
+   there, and ignored (with a warning) for ``"none"``. It must name a fuser
+   class with ``_target_`` and a positive ``num_channels``. The available fuser
+   is ``anemoi.models.layers.fuser.LinearFuser``, which applies one linear layer
+   per source dataset. It uses the mapper's ``layer_kernels`` unless it sets its
+   own. Its weights appear in the state dict as
+   ``encoder_src_projection.<group>.<dataset>.*``.
 
 ``num_channels``
    Note that ``num_channels`` is configured **per mapper** (and on the
@@ -103,11 +132,47 @@ Several datasets can be listed in the same encoder (``source_datasets``) or
 decoder (``target_datasets``) group. They then share the mapper weights, while
 each dataset keeps its own graph edges.
 
-When several datasets of a group are present in the same batch, each is encoded
-separately with the shared weights and the latents are merged by the
-:ref:`latent aggregator <usage-latent-aggregator>`. Together with
-``MultiDomainLoadingPolicy`` (one domain per batch) this lets domains with
-different grids be trained with one set of weights.
+With ``"sequential"``, when several datasets of a group are present in the
+same batch, each is projected by the ``fuser``, encoded separately with the
+shared weights, and the latents are merged by the
+:ref:`latent aggregator <usage-latent-aggregator>`.
+
+With ``"none"`` there is no fuser, and a batch may hold only one of the group's
+datasets. Training rejects a ``"none"`` group whose datasets the loading policy
+puts in the same batch (``SynchronizedLoadingPolicy`` puts every dataset in every
+batch) before it builds the model. Together with ``MultiDomainLoadingPolicy`` (one domain per batch) this
+lets domains with different grids, but the same variables, be trained with one
+set of weights. Use ``"sequential"`` instead if the domains differ in width.
+
+.. _usage-multi-dataset-edge-features:
+
+Edge features must match
+========================
+
+The datasets of a shared encoder group are encoded by one mapper, whose
+edge-embedding weights expect a fixed number of edge features. The
+``<dataset> -> hidden`` encoder edges of every source dataset in the group must
+therefore carry the same number of edge features. With ``"sequential"`` this
+holds even though the datasets' node features may differ: the ``fuser``
+projects node features only, and not edge features. The same applies to a
+``"none"`` group with several datasets.
+
+The number of edge features comes from the graph, not from the model:
+
+- a gridded dataset (static graph) contributes the columns of the edge
+  attributes named in the mapper's ``sub_graph_edge_attributes``, plus the
+  mapper's ``trainable_size``;
+- an observation dataset (dynamic graph) contributes the columns of every
+  attribute declared on its edges in the graph config, and no trainable
+  parameters.
+
+For example, ``edge_length`` (1 column) and ``edge_dirs`` (2 columns) give 3
+features. If the mapper sets ``trainable_size: 8``, a gridded dataset gets 11
+and an observation dataset 3, so the two cannot share an encoder. To fuse them,
+set the mapper's ``trainable_size`` to 0 and declare the same attributes on
+each dataset's encoder edges, or give the datasets separate encoder groups.
+The model checks this when it is built and names the edge feature count of
+each source dataset if they differ.
 
 .. _usage-multi-dataset-hidden-nodes:
 

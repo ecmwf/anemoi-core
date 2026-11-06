@@ -299,6 +299,13 @@ class AnemoiTrainer(ABC):
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
+        # Fail before the graph and model are built if a non-fusing encoder would receive
+        # several of its source datasets in one batch under the configured loading policy.
+        self.datamodule.loading_policy.check_encoder_fusion(
+            OmegaConf.select(self.config, "model.encoders", default={}),
+            list(self.datamodule.ds_train.data_readers),
+        )
+
         kwargs = {
             "config": self.config,
             "task": self.task,

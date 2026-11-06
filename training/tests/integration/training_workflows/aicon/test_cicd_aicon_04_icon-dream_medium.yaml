@@ -173,6 +173,7 @@ model:
     "0":
       source_datasets: [ "data" ]
       dataset_fusing_strategy: "none"
+      fuser: null
       mapper:
         _target_: anemoi.models.layers.mapper.GNNForwardMapper
         num_channels: ${model.num_channels}

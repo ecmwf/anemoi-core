@@ -509,6 +509,7 @@ model:
     analysis:
       source_datasets: ["era"]
       dataset_fusing_strategy: "none"
+      fuser: null
       mapper:
         _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
         num_channels: 768
@@ -528,6 +529,7 @@ model:
     combined_surface:
       source_datasets: [combined_surface]
       dataset_fusing_strategy: none
+      fuser: null
       mapper: ${model.obs_encoder}
   latent_aggregator:
     _target_: anemoi.models.layers.aggregator.SumAggregator

@@ -44,7 +44,8 @@ processor:
 encoders:
   "0": # user-defined key. It will appear in the state-dict
     source_datasets: [ "data" ]
-    dataset_fusing_strategy:  "none" # Options: "none", "sequential"
+    dataset_fusing_strategy:  "none" # Options: "none" (one source dataset per batch), "sequential" (needs a fuser); "joint" is planned
+    fuser: null # required by "sequential", e.g. {_target_: anemoi.models.layers.fuser.LinearFuser, num_channels: 512}
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}

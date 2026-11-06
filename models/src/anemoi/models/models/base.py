@@ -43,15 +43,16 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 # Encoder dataset-fusing strategies currently implemented.
-# - "none": no fusion. The natural choice for a single-source encoder; several source datasets
-#   are only accepted if they share an input dimension, and each is encoded independently.
-# - "sequential": one encoder pass per source dataset with shared weights; the per-dataset
-#   latents are combined by the latent aggregator.
+# - "none": no fusion and no fuser; the mapper takes a source dataset's assembled input directly.
+#   Normally one source dataset per encoder; several are accepted only if they share an input
+#   width and at most one of them is present per batch (e.g. multi-domain training).
+# - "sequential": a fuser (``model.encoders.<name>.fuser``) projects every source dataset onto a
+#   common width; each is then encoded in its own pass with the shared mapper weights, and the
+#   per-dataset latents are combined by the latent aggregator.
 SUPPORTED_FUSING_STRATEGIES = {"none", "sequential"}
 
-# Strategies for which per-dataset "thin" source projections are built, so that source
-# datasets of differing feature widths (channel counts) can share one encoder.
-PROJECTING_FUSING_STRATEGIES = {"sequential"}
+# Strategies that are documented but not implemented yet.
+PLANNED_FUSING_STRATEGIES = {"joint"}
 
 
 def hidden_node_names(hidden_nodes_name: str | list[str] | Mapping[str, str]) -> list[str]:
@@ -351,9 +352,44 @@ class BaseGraphModel(nn.Module):
                         "dataset_fusing_strategy to control how that encoder combines its sources."
                     )
                 self.dataset2encoder[d] = encoder_name
-            self.encoder_fusing_strategy[encoder_name] = encoder_config.dataset_fusing_strategy
+            self.encoder_fusing_strategy[encoder_name] = self._validate_fusing_strategy(encoder_name, encoder_config)
 
         self.input_datasets = list(self.dataset2encoder.keys())
+
+    @staticmethod
+    def _validate_fusing_strategy(encoder_name: str, encoder_config: DotDict) -> str:
+        """Return the encoder's fusing strategy after checking it against its fuser setting.
+
+        Also enforced by the config schema, but repeated here so that models built without
+        config validation fail just as early.
+        """
+        strategy = encoder_config.get("dataset_fusing_strategy", "none")
+        fuser_config = encoder_config.get("fuser")
+        if strategy in PLANNED_FUSING_STRATEGIES:
+            msg = (
+                f"Encoder '{encoder_name}' sets dataset_fusing_strategy '{strategy}', which is planned but "
+                f"not yet supported. Valid options are: {sorted(SUPPORTED_FUSING_STRATEGIES)}."
+            )
+            raise ValueError(msg)
+        if strategy not in SUPPORTED_FUSING_STRATEGIES:
+            msg = (
+                f"Encoder '{encoder_name}' has unsupported dataset_fusing_strategy '{strategy}'. "
+                f"Valid options are: {sorted(SUPPORTED_FUSING_STRATEGIES)}."
+            )
+            raise ValueError(msg)
+        if strategy == "sequential" and fuser_config is None:
+            msg = (
+                f"Encoder '{encoder_name}' uses dataset_fusing_strategy 'sequential', which needs a fuser, e.g.\n"
+                f"    model.encoders.{encoder_name}.fuser:\n"
+                "      _target_: anemoi.models.layers.fuser.LinearFuser\n"
+                "      num_channels: 512"
+            )
+            raise ValueError(msg)
+        if strategy == "none" and fuser_config is not None:
+            LOGGER.warning(
+                "Encoder '%s' uses dataset_fusing_strategy 'none'; its fuser setting is ignored.", encoder_name
+            )
+        return strategy
 
     def _build_decoder_routing(self, decoders_config: DotDict) -> None:
         """Builds the dataset routing for decoders."""
@@ -383,13 +419,6 @@ class BaseGraphModel(nn.Module):
         assert (
             not not_target_datasets
         ), f"Datasets {not_target_datasets} are referenced by decoders but missing from data_indices provided to the model. "
-
-        for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
-            if fusing_strategy not in SUPPORTED_FUSING_STRATEGIES:
-                raise ValueError(
-                    f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'. "
-                    + f"Valid options are: {SUPPORTED_FUSING_STRATEGIES}"
-                )
 
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():

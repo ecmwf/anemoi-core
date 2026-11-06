@@ -22,6 +22,7 @@ from torch_geometric.data.storage import EdgeStorage
 
 from anemoi.graphs.create import HeteroData
 from anemoi.models.data.batch import Batch
+from anemoi.models.distributed.graph import ensure_sharded
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -29,10 +30,10 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.processor import NoOpProcessor
 from anemoi.models.models import BaseGraphModel
-from anemoi.models.models.base import PROJECTING_FUSING_STRATEGIES
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
@@ -85,21 +86,35 @@ def _format_dims(dims: dict[str, int]) -> str:
     return "\n".join(f"      {name:<{pad}}  {width}" for name, width in ordered)
 
 
-def _mismatched_input_dims_message(encoder_name: str, in_dims: dict[str, int], strategy: str) -> str:
-    """Explain why an unprojected encoder cannot take source datasets of differing widths."""
+def _mismatched_input_dims_message(encoder_name: str, in_dims: dict[str, int]) -> str:
+    """Explain why a 'none' encoder cannot take source datasets of differing widths."""
     return (
-        f"Encoder '{encoder_name}' has dataset_fusing_strategy '{strategy}', which passes every source "
-        f"dataset through the same encoder weights but builds no per-dataset projections, so all "
-        f"{len(in_dims)} of its source datasets must have the same input width. Got:\n"
+        f"Encoder '{encoder_name}' has dataset_fusing_strategy 'none', which feeds each source dataset "
+        f"to the encoder mapper as is, with no fuser, so all {len(in_dims)} of its source datasets must "
+        f"have the same input width. Got:\n"
         f"{_format_dims(in_dims)}\n"
         "    These are assembled encoder input widths (variables + coordinates + trainable node "
         "parameters + any timedelta node features), not raw variable counts.\n"
         "    To share one encoder across datasets of differing widths, set\n"
         f"        model.encoders.{encoder_name}.dataset_fusing_strategy: 'sequential'\n"
-        f"    which inserts a thin linear projection per dataset onto a common width "
-        f"(default max = {max(in_dims.values())}, override with "
-        f"model.encoders.{encoder_name}.fusion_projection_dim).\n"
+        f"        model.encoders.{encoder_name}.fuser:\n"
+        "          _target_: anemoi.models.layers.fuser.LinearFuser\n"
+        f"          num_channels: {max(in_dims.values())}\n"
+        "    which projects each dataset onto num_channels before the shared mapper.\n"
         "    Alternatively, give these datasets separate encoders if they should not share weights."
+    )
+
+
+def _several_sources_message(encoder_name: str, dataset_names: list[str]) -> str:
+    """Explain why a 'none' encoder cannot encode several source datasets in one batch."""
+    return (
+        f"Encoder '{encoder_name}' has dataset_fusing_strategy 'none' but the batch holds "
+        f"{len(dataset_names)} of its source datasets: {dataset_names}. 'none' does not fuse: it "
+        "encodes one source dataset per batch, so several source_datasets are only valid when each "
+        "batch carries one of them (e.g. multi-domain training with MultiDomainLoadingPolicy).\n"
+        "    To encode several source datasets in the same batch, set\n"
+        f"        model.encoders.{encoder_name}.dataset_fusing_strategy: 'sequential'\n"
+        f"    with a model.encoders.{encoder_name}.fuser block, or give them separate encoders."
     )
 
 
@@ -183,30 +198,49 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         return torch.cat(features, dim=-1)
 
     def _encoder_projects_sources(self, encoder_name: str) -> bool:
-        """Whether this encoder maps its source datasets through per-dataset projections.
+        """Whether this encoder maps its source datasets through a fuser.
 
-        Only multi-source encoders using a real fusing strategy do; single-source encoders keep
-        feeding the mapper their assembled input directly, so their weights are unchanged.
+        True for 'sequential' encoders. Once the fusers are built this is read off the modules,
+        so models pickled before fusers were explicit (single-source 'sequential' without a
+        projection) keep their behaviour. Before that (decoder target widths are computed
+        first) it follows the configured strategy.
         """
-        return (
-            len(self.encoder2datasets[encoder_name]) > 1
-            and self.encoder_fusing_strategy[encoder_name] in PROJECTING_FUSING_STRATEGIES
-        )
+        if "encoder_src_projection" in self._modules:
+            return encoder_name in self.encoder_src_projection
+        return self.encoder_fusing_strategy[encoder_name] == "sequential"
 
-    def _project_source(self, encoder_name: str, dataset_name: str, x_data_latent: Tensor) -> Tensor:
-        """Apply this encoder's thin projection for one source dataset, if it has one."""
+    def _project_source(
+        self,
+        encoder_name: str,
+        dataset_name: str,
+        x_data_latent: Tensor,
+        src_shard_sizes: ShardSizes = None,
+        model_comm_group: ProcessGroup | None = None,
+    ) -> Tensor:
+        """Apply this encoder's fuser to one source dataset, if it has one.
+
+        Under model sharding a source that is replicated on every rank (``src_shard_sizes`` is
+        None) is sharded before the fuser and gathered after it. The fuser is applied row by row,
+        so its weight gradient on each rank then covers only that rank's rows, as the strategy's
+        gradient scaling expects; applied to all rows it would be counted once per rank. The
+        mapper still receives the replicated input it gets for an unprojected source.
+        """
         if encoder_name not in self.encoder_src_projection:
             return x_data_latent
-        return self.encoder_src_projection[encoder_name][dataset_name](x_data_latent)
+        projection = self.encoder_src_projection[encoder_name][dataset_name]
+        if src_shard_sizes is not None or not model_is_distributed(model_comm_group):
+            return projection(x_data_latent)
+        x_shard, shard_sizes = ensure_sharded(x_data_latent, 0, None, model_comm_group)
+        return gather_tensor(projection(x_shard), 0, shard_sizes, model_comm_group)
 
     def _build_encoding_networks(self, encoders_config: DotDict) -> None:
-        """Instantiate one mapper per encoder, plus thin source projections where needed.
+        """Instantiate one mapper per encoder, plus a fuser for 'sequential' encoders.
 
         Requires self.encoder_graph_provider to be populated, since an encoder's edge
         dimension comes from its source datasets' graph providers.
         """
-        # Per-dataset "thin" projections onto a shared width, for multi-source encoders whose
-        # source datasets differ in input dimension. Keyed [encoder_name][dataset_name].
+        # Fusers of 'sequential' encoders: per-dataset projections onto the mapper input width,
+        # keyed [encoder_name][dataset_name]. The attribute name is part of the state-dict keys.
         self.encoder_src_projection = torch.nn.ModuleDict()
 
         self.encoder = torch.nn.ModuleDict()
@@ -216,16 +250,20 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             if len(set(edge_dims.values())) > 1:
                 raise ValueError(_mismatched_edge_dims_message(encoder_name, edge_dims))
 
-            projects = self._encoder_projects_sources(encoder_name)
-            if projects:
-                in_channels_src = encoder_config.get("fusion_projection_dim") or max(in_dims.values())
+            if self.encoder_fusing_strategy[encoder_name] == "sequential":
+                fuser_config = encoder_config.fuser
+                layer_kernels = fuser_config.get("layer_kernels") or encoder_config.mapper.get("layer_kernels")
+                fuser = instantiate(
+                    fuser_config,
+                    _recursive_=False,  # layer_kernels are instantiated by the fuser
+                    in_channels=in_dims,
+                    layer_kernels=layer_kernels,
+                )
+                self.encoder_src_projection[encoder_name] = fuser
+                in_channels_src = fuser.num_channels
             else:
                 if len(set(in_dims.values())) > 1:
-                    raise ValueError(
-                        _mismatched_input_dims_message(
-                            encoder_name, in_dims, self.encoder_fusing_strategy[encoder_name]
-                        )
-                    )
+                    raise ValueError(_mismatched_input_dims_message(encoder_name, in_dims))
                 in_channels_src = next(iter(in_dims.values()))
 
             self.encoder[encoder_name] = instantiate(
@@ -235,12 +273,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 in_channels_dst=self.input_dim_latent,
                 edge_dim=next(iter(edge_dims.values())),
             )
-
-            if projects:
-                Linear = self.encoder[encoder_name].layer_factory.Linear
-                self.encoder_src_projection[encoder_name] = torch.nn.ModuleDict(
-                    {d: Linear(dim, in_channels_src) for d, dim in in_dims.items()}
-                )
 
     def _build_encoding_graphproviders(
         self, encoders_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict
@@ -736,16 +768,26 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     ) -> dict[str, Tensor]:
         """Encode one encoder's source datasets, returning its latents keyed by dataset name.
 
-        With ``sequential`` (and with ``none``) every source dataset gets its own
-        pass through the shared encoder against the same unmodified hidden latent, and yields its
-        own latent; the latent aggregator combines them. ``mapper_kwargs`` holds extra mapper
-        arguments per dataset (e.g. the noise conditioning of a transport model).
+        With ``sequential`` every source dataset is projected by the encoder's fuser and gets its
+        own pass through the shared mapper against the same unmodified hidden latent, yielding
+        its own latent; the latent aggregator combines them. With ``none`` the batch may hold only
+        one of the encoder's source datasets, which is encoded unprojected. ``mapper_kwargs`` holds
+        extra mapper arguments per dataset (e.g. the noise conditioning of a transport model).
         """
+        if self.encoder_fusing_strategy[encoder_name] == "none" and len(sources) > 1:
+            raise ValueError(_several_sources_message(encoder_name, [source.dataset_name for source in sources]))
+
         projects = self._encoder_projects_sources(encoder_name)
         latents: dict[str, Tensor] = {}
 
         for source in sources:
-            x_src = self._project_source(encoder_name, source.dataset_name, source.x_data_latent)
+            x_src = self._project_source(
+                encoder_name,
+                source.dataset_name,
+                source.x_data_latent,
+                src_shard_sizes=source.shard_info.src_nodes,
+                model_comm_group=model_comm_group,
+            )
             x_data_latent, x_latent = self.encoder[encoder_name](
                 (x_src, x_hidden_latent),
                 batch_size=batch_size,
