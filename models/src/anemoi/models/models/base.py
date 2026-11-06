@@ -11,7 +11,6 @@
 import logging
 from abc import abstractmethod
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Optional
 
 import torch
@@ -25,8 +24,6 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
-from anemoi.graphs.utils import load_graph_from_file
-from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data_indices.collection import IndexCollection
@@ -34,146 +31,35 @@ from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.categorical import build_categorical_embeddings
 from anemoi.models.layers.graph import NodeTrainableParameters
+from anemoi.models.layers.node_embedder import is_noop_node_embedder_config
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import TargetForcingsFeature
 from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.models.models.target_features import time_steps_per_node
 from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.models.utils.graphs import hidden_node_names
+from anemoi.models.utils.graphs import load_existing_graph
+from anemoi.models.utils.graphs import split_graph_config
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 # Encoder dataset-fusing strategies currently implemented.
-# - "none": no fusion. The natural choice for a single-source encoder; several source datasets
-#   are only accepted if they share an input dimension, and each is encoded independently.
-# - "sequential": one encoder pass per source dataset with shared weights; the per-dataset
-#   latents are combined by the latent aggregator.
-# - "joint": a single encoder pass over the union of all source nodes, yielding one latent.
+# - "none": no fusion; the node embedder (``model.encoders.<name>.node_embedder``) is a NoOpNodeEmbedder, so the
+#   mapper takes a source dataset's assembled input directly. Normally one source dataset per encoder; several
+#   are accepted only if they have the same number of input channels and at most one of them is present per batch
+#   (e.g. multi-domain training).
+# - "sequential": a projecting node embedder (e.g. LinearNodeEmbedder) projects every source dataset onto a
+#   common number of input channels; each is then encoded in its own pass with the shared mapper weights, and the
+#   per-dataset latents are combined by the latent aggregator.
+# - "joint": every source dataset is embedded by the node embedder and all of them are encoded in a single mapper
+#   pass over the union of their nodes and encoder edges, yielding one latent keyed by the encoder name. A
+#   NoOpNodeEmbedder is accepted when all source datasets have the same number of input channels.
 SUPPORTED_FUSING_STRATEGIES = {"none", "sequential", "joint"}
 
-# Strategies for which per-dataset "thin" source projections are built, so that source
-# datasets of differing feature widths (channel counts) can share one encoder.
-PROJECTING_FUSING_STRATEGIES = {"sequential", "joint"}
-
-
-def hidden_node_names(hidden_nodes_name: str | list[str] | Mapping[str, str]) -> list[str]:
-    """Names of the hidden meshes, in order and without repeats.
-
-    Parameters
-    ----------
-    hidden_nodes_name : str, list of str or mapping of str to str
-        One hidden mesh, the levels of a hierarchical model, or a mapping from dataset
-        name to the hidden mesh it is encoded into.
-
-    Returns
-    -------
-    list[str]
-        The hidden mesh names.
-    """
-    if isinstance(hidden_nodes_name, str):
-        return [hidden_nodes_name]
-    if isinstance(hidden_nodes_name, Mapping):
-        return list(dict.fromkeys(hidden_nodes_name.values()))
-    if isinstance(hidden_nodes_name, (list, tuple, ListConfig)):
-        return list(dict.fromkeys(hidden_nodes_name))
-    msg = (
-        "Hidden nodes name must be a string, a list of strings, or a dataset mapping, " f"got {type(hidden_nodes_name)}"
-    )
-    raise TypeError(msg)
-
-
-def split_graph_config(
-    graph_config: DotDict,
-    is_dataset_static: dict[str, bool],
-    hidden_nodes_name: str | list[str] | Mapping[str, str],
-) -> tuple[DotDict, DotDict]:
-    """This function creates the static graph structure and returns the dictionary for the dynamic graph configuration.
-
-    Parameters
-    ----------
-    graph_config : DotDict
-        Graph configuration.
-    is_dataset_static : dict[str, bool]
-        Dictionary indicating whether each dataset is static (e.g., static grid) or not.
-    hidden_nodes_name : str, list of str or mapping of str to str
-        Name(s) of the hidden nodes in the graph, or a mapping from dataset name to hidden
-        nodes name. The hidden nodes are considered to be static.
-
-    Returns
-    -------
-    tuple[DotDict, DotDict]
-        Static graph configuration and dynamic graph configuration.
-    """
-    for hidden_name in hidden_node_names(hidden_nodes_name):
-        is_dataset_static[hidden_name] = True
-
-    static_graph_config, dynamic_graph_config = {"nodes": {}, "edges": []}, {"nodes": {}, "edges": {}}
-    for nodes_name, nodes_config in graph_config.nodes.items():
-        if is_dataset_static[nodes_name]:
-            static_graph_config["nodes"][nodes_name] = nodes_config
-        else:
-            dynamic_graph_config["nodes"][nodes_name] = nodes_config
-
-    for edge_config in graph_config.edges:
-        source_name = edge_config.source_name
-        target_name = edge_config.target_name
-        if is_dataset_static[source_name] and is_dataset_static[target_name]:
-            static_graph_config["edges"].append(edge_config)
-            dynamic_graph_config["edges"][(source_name, "to", target_name)] = {}
-        else:
-            dynamic_graph_config["edges"][(source_name, "to", target_name)] = {
-                "edge_builders": edge_config.edge_builders,
-                "attributes": edge_config.attributes,
-            }
-
-    return DotDict(static_graph_config), DotDict(dynamic_graph_config)
-
-
-def load_existing_graph(
-    graph_path: str | Path | None,
-    is_dataset_static: dict[str, bool],
-    hidden_nodes_name: str | list[str] | Mapping[str, str],
-) -> tuple[HeteroData, DotDict]:
-    """Load a pre-built static graph and return it with an empty dynamic graph configuration.
-
-    This serves the existing-graph mode, where the graph config defines
-    no nodes or edges and the graph is read from ``system.input.graph``.
-
-    Parameters
-    ----------
-    graph_path : str | Path | None
-        Path to the serialised graph.
-    is_dataset_static : dict[str, bool]
-        Dictionary indicating whether each dataset is static. The hidden nodes are added as static.
-    hidden_nodes_name : str, list of str or mapping of str to str
-        Name(s) of the hidden nodes in the graph, or a mapping from dataset name to hidden
-        nodes name.
-
-    Returns
-    -------
-    tuple[HeteroData, DotDict]
-        The loaded graph and a dynamic graph configuration with no builders for any of its edges.
-    """
-    if graph_path is None:
-        msg = "The graph config defines no nodes, so a pre-built graph must be given in `system.input.graph`."
-        raise ValueError(msg)
-    dynamic_datasets = [name for name, is_static in is_dataset_static.items() if not is_static]
-    if dynamic_datasets:
-        msg = (
-            f"A pre-built graph only works with static datasets, but {dynamic_datasets} require a dynamic graph. "
-            "Define their nodes and edges in the graph config instead."
-        )
-        raise NotImplementedError(msg)
-
-    for hidden_name in hidden_node_names(hidden_nodes_name):
-        is_dataset_static[hidden_name] = True
-
-    graph = load_graph_from_file(Path(graph_path))
-    validate_loaded_graph(graph, list(is_dataset_static))
-
-    dynamic_graph_config = {"nodes": {}, "edges": {edge_type: {} for edge_type in graph.edge_types}}
-    return graph, DotDict(dynamic_graph_config)
+# Strategies that are documented but not implemented yet.
+PLANNED_FUSING_STRATEGIES: set[str] = set()
 
 
 class BaseGraphModel(nn.Module):
@@ -365,7 +251,7 @@ class BaseGraphModel(nn.Module):
                         "dataset_fusing_strategy to control how that encoder combines its sources."
                     )
                 self.dataset2encoder[d] = encoder_name
-            self.encoder_fusing_strategy[encoder_name] = encoder_config.dataset_fusing_strategy
+            self.encoder_fusing_strategy[encoder_name] = self._validate_fusing_strategy(encoder_name, encoder_config)
 
         self.input_datasets = list(self.dataset2encoder.keys())
 
@@ -378,6 +264,45 @@ class BaseGraphModel(nn.Module):
                     f"also a source dataset of encoder '{owner}'. Rename one of them."
                 )
                 raise ValueError(msg)
+
+    @staticmethod
+    def _validate_fusing_strategy(encoder_name: str, encoder_config: DotDict) -> str:
+        """Return the encoder's fusing strategy after checking it against its node embedder setting.
+
+        Also enforced by the config schema, but repeated here so that models built without
+        config validation fail just as early.
+        """
+        strategy = encoder_config.get("dataset_fusing_strategy", "none")
+        node_embedder_config = encoder_config.get("node_embedder")
+        if strategy in PLANNED_FUSING_STRATEGIES:
+            msg = (
+                f"Encoder '{encoder_name}' sets dataset_fusing_strategy '{strategy}', which is planned but "
+                f"not yet supported. Valid options are: {sorted(SUPPORTED_FUSING_STRATEGIES)}."
+            )
+            raise ValueError(msg)
+        if strategy not in SUPPORTED_FUSING_STRATEGIES:
+            msg = (
+                f"Encoder '{encoder_name}' has unsupported dataset_fusing_strategy '{strategy}'. "
+                f"Valid options are: {sorted(SUPPORTED_FUSING_STRATEGIES)}."
+            )
+            raise ValueError(msg)
+        if strategy == "sequential" and is_noop_node_embedder_config(node_embedder_config):
+            msg = (
+                f"Encoder '{encoder_name}' uses dataset_fusing_strategy 'sequential', which needs a projecting "
+                "node embedder (not NoOpNodeEmbedder), e.g.\n"
+                f"    model.encoders.{encoder_name}.node_embedder:\n"
+                "      _target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder\n"
+                "      num_channels: 512"
+            )
+            raise ValueError(msg)
+        if strategy == "none" and not is_noop_node_embedder_config(node_embedder_config):
+            LOGGER.warning(
+                "Encoder '%s' uses dataset_fusing_strategy 'none'; its node embedder %s is ignored and "
+                "NoOpNodeEmbedder is used instead.",
+                encoder_name,
+                node_embedder_config.get("_target_"),
+            )
+        return strategy
 
     def _build_decoder_routing(self, decoders_config: DotDict) -> None:
         """Builds the dataset routing for decoders."""
@@ -407,13 +332,6 @@ class BaseGraphModel(nn.Module):
         assert (
             not not_target_datasets
         ), f"Datasets {not_target_datasets} are referenced by decoders but missing from data_indices provided to the model. "
-
-        for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
-            if fusing_strategy not in SUPPORTED_FUSING_STRATEGIES:
-                raise ValueError(
-                    f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'. "
-                    + f"Valid options are: {SUPPORTED_FUSING_STRATEGIES}"
-                )
 
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():

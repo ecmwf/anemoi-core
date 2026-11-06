@@ -11,6 +11,8 @@ from abc import ABC
 from abc import abstractmethod
 from collections import Counter
 from collections.abc import Iterator
+from collections.abc import Mapping
+from collections.abc import Sequence
 
 import numpy as np
 from rich.console import Console
@@ -114,6 +116,64 @@ class DataLoadingPolicy(ABC):
     def check_dataset_compatibility(self, dataset: Dataset, **options: object) -> None:
         """Check compatibility requirements specific to this loading policy."""
         del dataset, options
+
+    def co_loaded_datasets(self, dataset_names: Sequence[str]) -> list[frozenset[str]]:
+        """Groups of datasets that can appear together in one batch.
+
+        The default assumes every dataset can share a batch with every other, which is the
+        strictest answer for checks that depend on it; policies that split datasets across
+        batches override it.
+
+        Parameters
+        ----------
+        dataset_names : Sequence[str]
+            Names of the datasets this policy loads.
+
+        Returns
+        -------
+        list[frozenset[str]]
+            Every batch holds datasets from a single group.
+        """
+        return [frozenset(dataset_names)]
+
+    def check_encoder_fusion(self, encoders: Mapping[str, Mapping], dataset_names: Sequence[str]) -> None:
+        """Check that no 'none' encoder can receive several of its source datasets in one batch.
+
+        An encoder with ``dataset_fusing_strategy: "none"`` does not fuse, so it may list several
+        ``source_datasets`` only if no batch holds more than one of them (e.g. multi-domain
+        training). The model enforces this per batch; this check catches it before the model is built.
+
+        Parameters
+        ----------
+        encoders : Mapping[str, Mapping]
+            The ``model.encoders`` config, keyed by encoder name.
+        dataset_names : Sequence[str]
+            Names of the datasets this policy loads.
+
+        Raises
+        ------
+        ValueError
+            If a batch can hold two or more source datasets of a 'none' encoder.
+        """
+        groups = self.co_loaded_datasets(dataset_names)
+        for encoder_name, encoder_config in encoders.items():
+            if encoder_config.get("dataset_fusing_strategy", "none") != "none":
+                continue
+            sources = list(encoder_config.get("source_datasets", []))
+            for group in groups:
+                together = [name for name in sources if name in group]
+                if len(together) > 1:
+                    msg = (
+                        f"Encoder '{encoder_name}' has dataset_fusing_strategy 'none', but with "
+                        f"{type(self).__name__} its source datasets {together} are loaded into the same "
+                        "batch. 'none' does not fuse: it encodes one source dataset per batch, so several "
+                        "source_datasets are only valid when the loading policy puts them in separate "
+                        "batches (e.g. MultiDomainLoadingPolicy).\n"
+                        "    To encode them together, set\n"
+                        f"        model.encoders.{encoder_name}.dataset_fusing_strategy: 'sequential'\n"
+                        f"    with a model.encoders.{encoder_name}.node_embedder block, or give them separate encoders."
+                    )
+                    raise ValueError(msg)
 
 
 class SynchronizedLoadingPolicy(DataLoadingPolicy):
@@ -268,6 +328,10 @@ class MultiDomainLoadingPolicy(DataLoadingPolicy):
             batch_size=batch_size,
             drop_last=drop_last,
         )
+
+    def co_loaded_datasets(self, dataset_names: Sequence[str]) -> list[frozenset[str]]:
+        """Each dataset is its own domain, and batches never mix domains."""
+        return [frozenset({name}) for name in dataset_names]
 
     def check_dataset_compatibility(self, dataset: MultiDomainDataset, **options: object) -> None:
         check_datasets_variables_order(dataset.name_to_index)

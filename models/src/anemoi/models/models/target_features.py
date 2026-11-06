@@ -346,7 +346,7 @@ class EncodedDataFeature(DecodingTargetFeature):
         # source latent; other mappers, and projecting encoders, hand over the assembled input.
         encoder_name = getattr(self.model, "dataset2encoder", {}).get(dataset_name)
         latent_dim = getattr(self.model, "encoder_src_latent_dim", {}).get(encoder_name)
-        if latent_dim is not None and not self.model._encoder_projects_sources(encoder_name):
+        if latent_dim is not None and not self.model._encoder_hands_over_input(encoder_name):
             return latent_dim
         return self.model.input_dim[dataset_name]
 

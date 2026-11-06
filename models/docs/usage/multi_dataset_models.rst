@@ -47,6 +47,9 @@ choose stable, descriptive names.
      global:                 # user-defined group name (appears in the state-dict)
        source_datasets: [ "era5", "ifs"]  # datasets encoded by this group
        dataset_fusing_strategy: "sequential"
+       node_embedder:
+         _target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder
+         num_channels: 512   # input channels of this group's mapper
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024
@@ -54,6 +57,8 @@ choose stable, descriptive names.
      regional:
        source_datasets: [ "cerra" ]
        dataset_fusing_strategy: "none"
+       node_embedder:                # pass-through: the mapper takes cerra's input as is
+         _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024
@@ -80,9 +85,47 @@ choose stable, descriptive names.
    group share the same mapper weights.
 
 ``dataset_fusing_strategy``
-   How multiple datasets within a single group are combined if passed during the
-   same forward pass: ``"none"`` (default), ``"sequential"`` or ``"joint"`` (see
-   :ref:`usage-multi-dataset-shared-groups`).
+   How the source datasets of an encoder group are combined (see
+   :ref:`usage-multi-dataset-shared-groups`):
+
+   - ``"none"`` (default): no fusion; the node embedder is the pass-through
+     ``NoOpNodeEmbedder``. The mapper takes the assembled input of a source dataset directly, so its input channels are
+     that dataset's assembled input channels. Normally the group lists a single dataset. Several are
+     allowed only if they have the same number of input channels and each batch holds at most
+     one of them (multi-domain training). Training checks this against the
+     data loading policy before it builds the model, and the model raises if a
+     batch ever holds two.
+   - ``"sequential"``: a projecting ``node_embedder`` maps every source dataset onto
+     ``node_embedder.num_channels``, the input channels of the mapper. Each dataset is
+     then encoded in its own pass with the shared mapper weights, in the order
+     listed in ``source_datasets``, and the latent aggregator combines the
+     latents. The datasets may differ in their number of variables. This also works with a single
+     source dataset. The node embedder aligns node features only: the encoder edges of
+     all source datasets must still carry the same number of edge features
+     (see :ref:`usage-multi-dataset-edge-features`).
+   - ``"joint"``: the ``node_embedder`` maps every source dataset onto the mapper's
+     input channels, and all source datasets are encoded in a single mapper pass
+     over the union of their nodes, so each hidden node attends to every source
+     dataset at once. ``NoOpNodeEmbedder`` is accepted if the datasets share their
+     number of input channels; otherwise use a projecting one such as
+     ``LinearNodeEmbedder``. See :ref:`usage-multi-dataset-shared-groups`.
+
+``node_embedder``
+   The per-dataset input embedding applied before the encoder mapper, named by
+   ``_target_``. Two node embedders are available in
+   ``anemoi.models.layers.node_embedder``:
+
+   - ``NoOpNodeEmbedder`` passes each source dataset's input through unchanged,
+     much like ``NoOpProcessor`` stands in for a processor. It is the node embedder
+     of ``"none"`` groups and the default. ``null`` is read as
+     ``NoOpNodeEmbedder`` too, and any other node embedder set on a ``"none"``
+     group is ignored with a warning. It has no parameters.
+   - ``LinearNodeEmbedder`` applies one linear layer per source dataset onto a
+     positive ``num_channels``. ``"sequential"`` groups need it (or another
+     projecting node embedder); ``NoOpNodeEmbedder`` is rejected there.
+     ``"joint"`` groups take either. It uses
+     the mapper's ``layer_kernels`` unless it sets its own. Its weights appear in
+     the state dict as ``encoder_src_projection.<group>.<dataset>.*``.
 
 ``num_channels``
    Note that ``num_channels`` is configured **per mapper** (and on the
@@ -103,35 +146,57 @@ Several datasets can be listed in the same encoder (``source_datasets``) or
 decoder (``target_datasets``) group. They then share the mapper weights, while
 each dataset keeps its own graph edges.
 
-When several datasets of an encoder group are present in the same batch, the
-group's ``dataset_fusing_strategy`` sets how they are encoded:
+With ``"sequential"``, when several datasets of a group are present in the
+same batch, each is projected by the ``node_embedder``, encoded separately with the
+shared weights, and the latents are merged by the
+:ref:`latent aggregator <usage-latent-aggregator>`.
 
-``none``
-   No fusion (default). The natural choice for a single-source encoder. With
-   several source datasets, each is encoded separately and they must share an
-   input dimension.
+With ``"none"`` the node embedder passes the input through (``NoOpNodeEmbedder``), and a batch may hold only one of the group's
+datasets. Training rejects a ``"none"`` group whose datasets the loading policy
+puts in the same batch (``SynchronizedLoadingPolicy`` puts every dataset in every
+batch) before it builds the model. Together with ``MultiDomainLoadingPolicy`` (one domain per batch) this
+lets domains with different grids, but the same variables, be trained with one
+set of weights. Use ``"sequential"`` instead if the domains differ in their number of variables.
 
-``sequential``
-   One encoder pass per source dataset, in the order listed in
-   ``source_datasets``, with shared encoder weights. Per-dataset projections map
-   sources of differing widths onto a common width, and the latents are merged
-   by the :ref:`latent aggregator <usage-latent-aggregator>`.
+With ``"joint"`` the per-dataset encoder edges are merged into one bipartite
+graph and all source datasets are encoded in a single pass; the encoder
+contributes one latent, keyed by the encoder name, to the latent aggregator.
+Gridded and tabular sources can be mixed. The encoder graphs must have edges
+(edge-less and sparse-projection mappers are not supported), and an encoder
+with ``shard_strategy: heads`` needs the same merged node count in every batch
+element, so ragged (tabular) sources need ``shard_strategy: edges``. With
+``MultiDomainLoadingPolicy`` only the datasets of the batch's domain are
+encoded, so a ``"joint"`` group merges sources on one hidden mesh at a time.
 
-``joint``
-   A single encoder pass over the union of all source nodes, so each hidden node
-   attends to every source dataset at once. The per-dataset encoder edges are
-   merged into one bipartite graph, and the encoder contributes one latent,
-   keyed by the encoder name, to the latent aggregator. Gridded and tabular
-   sources can be mixed, and sources of differing widths go through per-dataset
-   projections, as for ``sequential``. The encoder graphs must have edges
-   (edge-less and sparse-projection mappers are not supported), and an encoder
-   with ``shard_strategy: heads`` needs the same merged node count in every
-   batch element, so ragged (tabular) sources need ``shard_strategy: edges``.
+.. _usage-multi-dataset-edge-features:
 
-Together with ``MultiDomainLoadingPolicy`` (one domain per batch) a shared group
-lets domains with different grids be trained with one set of weights. Only the
-datasets of the batch's domain are encoded, so a ``joint`` group merges sources
-on one hidden mesh at a time.
+Edge features must match
+========================
+
+The datasets of a shared encoder group are encoded by one mapper, whose
+edge-embedding weights expect a fixed number of edge features. The
+``<dataset> -> hidden`` encoder edges of every source dataset in the group must
+therefore carry the same number of edge features. With ``"sequential"`` this
+holds even though the datasets' node features may differ: the ``node_embedder``
+projects node features only, and not edge features. The same applies to a
+``"none"`` group with several datasets.
+
+The number of edge features comes from the graph, not from the model:
+
+- a gridded dataset (static graph) contributes the columns of the edge
+  attributes named in the mapper's ``sub_graph_edge_attributes``, plus the
+  mapper's ``trainable_size``;
+- an observation dataset (dynamic graph) contributes the columns of every
+  attribute declared on its edges in the graph config, and no trainable
+  parameters.
+
+For example, ``edge_length`` (1 column) and ``edge_dirs`` (2 columns) give 3
+features. If the mapper sets ``trainable_size: 8``, a gridded dataset gets 11
+and an observation dataset 3, so the two cannot share an encoder. To fuse them,
+set the mapper's ``trainable_size`` to 0 and declare the same attributes on
+each dataset's encoder edges, or give the datasets separate encoder groups.
+The model checks this when it is built and names the edge feature count of
+each source dataset if they differ.
 
 .. _usage-multi-dataset-hidden-nodes:
 

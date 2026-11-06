@@ -489,7 +489,7 @@ def test_multiscale_smooths_in_input_dtype(mocker: MockerFixture) -> None:
     loss = multiscale_loss(_view(pred), _view(target))
 
     assert loss.dtype == torch.float64
-    assert provider.projection_matrix.dtype == torch.float64
+    assert provider.projection_matrix.dtype == torch.float32
     assert torch.isfinite(loss)
 
 

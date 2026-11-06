@@ -173,6 +173,8 @@ model:
     "0":
       source_datasets: [ "data" ]
       dataset_fusing_strategy: "none"
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper:
         _target_: anemoi.models.layers.mapper.GNNForwardMapper
         num_channels: ${model.num_channels}

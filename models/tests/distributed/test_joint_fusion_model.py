@@ -83,6 +83,10 @@ def _model_config(strategy: str = "joint") -> DictConfig:
                 "obs": {
                     "source_datasets": list(DATASETS),
                     "dataset_fusing_strategy": strategy,
+                    "node_embedder": {
+                        "_target_": "anemoi.models.layers.node_embedder.LinearNodeEmbedder",
+                        "num_channels": 8,
+                    },
                     "mapper": mapper("GraphTransformerForwardMapper"),
                 },
             },

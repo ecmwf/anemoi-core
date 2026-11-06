@@ -159,29 +159,56 @@ class Boolean1DSchema(BaseModel):
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
+class NoOpNodeEmbedderSchema(BaseModel):
+    """Pass-through node embedder: the encoder mapper takes each source dataset's input as is."""
+
+    target_: Literal["anemoi.models.layers.node_embedder.NoOpNodeEmbedder"] = Field(..., alias="_target_")
+
+
+class LinearNodeEmbedderSchema(BaseModel):
+    """Linear node embedder: one linear projection per source dataset onto ``num_channels``."""
+
+    target_: Literal["anemoi.models.layers.node_embedder.LinearNodeEmbedder"] = Field(..., alias="_target_")
+    num_channels: PositiveInt = Field(example=512)
+    "Number of channels the source datasets are projected to; the input channels of the encoder mapper."
+    layer_kernels: Union[dict[str, dict], None] = Field(default=None)
+    "Layer implementations for the projections. Defaults to the encoder mapper's layer_kernels."
+
+
+NodeEmbedderSchemas = Annotated[Union[NoOpNodeEmbedderSchema, LinearNodeEmbedderSchema], Field(discriminator="target_")]
+
+
 class EncodersSchema(BaseModel):
     """Encoder schema"""
 
     source_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the encoder is applicable."
     dataset_fusing_strategy: Literal["none", "sequential", "joint"] = Field(default="none")
-    """How several source datasets are combined by this encoder.
+    """How the source datasets of this encoder are combined.
 
-    - 'none' (default): no fusion. The natural choice for a single-source encoder; with several
-      source datasets each is encoded separately and they must share an input dimension.
-    - 'sequential': one encoder pass per source dataset, in the order listed in
-      ``source_datasets``, with shared encoder weights. The resulting latents are combined
-      by the latent aggregator.
-    - 'joint': a single encoder pass over the union of all source nodes, so each hidden node
-      attends to every source dataset at once. Needs edge-based encoder graphs; yields one latent
-      per encoder.
+    - 'none' (default): no fusion; the node embedder is a ``NoOpNodeEmbedder``, so the mapper takes the
+      assembled input of one source dataset directly. Normally ``source_datasets`` lists one dataset; several are
+      allowed only if they have the same number of input channels and at most one of them is present in
+      any batch (e.g. multi-domain training with one domain per batch).
+    - 'sequential': each source dataset is projected by a projecting ``node_embedder`` (e.g.
+      ``LinearNodeEmbedder``) onto
+      ``node_embedder.num_channels`` and encoded in its own pass with the shared mapper weights, in
+      the order listed in ``source_datasets``. The latents are combined by the latent
+      aggregator. Source datasets may differ in their number of input channels.
+    - 'joint': each source dataset is embedded by the ``node_embedder`` and all of them are encoded in a
+      single mapper pass over the union of their nodes and encoder edges, so each hidden node attends to every
+      source dataset at once. Needs edge-based encoder graphs; yields one latent per encoder, keyed by the
+      encoder name. A ``NoOpNodeEmbedder`` is accepted if all source datasets have the same number of input
+      channels.
     """
-    fusion_projection_dim: Optional[PositiveInt] = Field(default=None)
-    """Width the per-dataset 'thin' source projections map to, for multi-source encoders.
+    node_embedder: Optional[NodeEmbedderSchemas] = Field(
+        default_factory=lambda: NoOpNodeEmbedderSchema(_target_="anemoi.models.layers.node_embedder.NoOpNodeEmbedder")
+    )
+    """Per-dataset embedding onto the mapper input channels.
 
-    Only used when ``source_datasets`` has more than one entry and the fusing strategy is
-    'sequential' or 'joint'. Defaults to the widest source dataset's input dimension.
-    """
+    'none' uses ``NoOpNodeEmbedder`` (the default; ``null`` is read as it too, and any other node embedder is
+    ignored). 'sequential' needs a projecting one such as ``LinearNodeEmbedder``; 'joint' takes either. A node embedder embeds node
+    features only: the encoder edges of all source datasets must still carry the same number of edge features."""
     mapper: Union[
         GNNEncoderSchema,
         GraphTransformerEncoderSchema,
@@ -191,6 +218,25 @@ class EncodersSchema(BaseModel):
         ...,
         discriminator="target_",
     )
+
+    @model_validator(mode="after")
+    def check_fusing_strategy(self) -> EncodersSchema:
+        """Reject a 'sequential' encoder without a projecting node embedder."""
+        pass_through = self.node_embedder is None or isinstance(self.node_embedder, NoOpNodeEmbedderSchema)
+        if self.dataset_fusing_strategy == "sequential" and pass_through:
+            msg = (
+                "dataset_fusing_strategy 'sequential' needs a projecting node embedder (not NoOpNodeEmbedder), e.g. "
+                "node_embedder: {_target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder, num_channels: 512}."
+            )
+            raise ValueError(msg)
+        if self.dataset_fusing_strategy == "none" and not pass_through:
+            LOGGER.warning(
+                "Encoder with source_datasets %s has dataset_fusing_strategy 'none'; its node embedder %s is ignored "
+                "and NoOpNodeEmbedder is used instead.",
+                self.source_datasets,
+                self.node_embedder.target_,
+            )
+        return self
 
 
 class DecodersSchema(BaseModel):

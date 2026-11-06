@@ -109,7 +109,9 @@ class TestTrajectoryDataReaderProperties:
 
     def test_tree_reports_trajectory_settings(self) -> None:
         text = repr(_make_reader(num_base_dates=4, steps=6))
-        assert "Num initialisations: 4" in text
+        assert "Num. initialisations: 4" in text
+        # Trajectory datasets have no ``dates``: the summary reports the initialisation dates.
+        assert "Initialisations from: 2020-01-01T00:00:00 To: 2020-01-04T00:00:00" in text
         assert "Steps per initialisation: 6" in text
 
 

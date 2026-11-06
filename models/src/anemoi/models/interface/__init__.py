@@ -133,6 +133,7 @@ class AnemoiModelInterface(torch.nn.Module):
             # Existing-graph mode: the model loads the pre-built graph from system.input.graph.
             system_input = (self.config.get("system") or {}).get("input") or {}
             graph_config = {**graph_config, "path": system_input.get("graph")}
+
         self.model = instantiate(
             model_instantiate_config,
             model_config=self.config.model,

@@ -199,8 +199,8 @@ def model(metadata: dict, config: DictConfig) -> DummyModule:
 
 
 @pytest.mark.data_dependent
-def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule) -> None:
-    """Test if the inference checkpoints and lightning checkpoints store same uuid.
+def test_training_checkpoint_has_its_own_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule) -> None:
+    """Test that a training checkpoint stores a different uuid from its inference checkpoint.
 
     Args:
         tmp_path (str): path to checkpoint dir.
@@ -210,15 +210,18 @@ def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule
     trainer = Trainer(default_root_dir=tmp_path, accelerator="cpu", callbacks=[callback], max_epochs=2, logger=False)
     trainer.fit(model)
 
-    for ckpt_path in Path(tmp_path).iterdir():
-        if str(ckpt_path.name).startswith("inference"):
-            pl_ckpt_name = (ckpt_path.name).replace("inference-", "")
+    for inference_ckpt_path in Path(tmp_path).iterdir():
+        if str(inference_ckpt_path.name).startswith("inference"):
+            training_ckpt_name = inference_ckpt_path.name.replace("inference-", "")
 
-            if Path(tmp_path + "/" + pl_ckpt_name).exists():
-                uuid = load_metadata(ckpt_path)["uuid"]
+            if Path(tmp_path + "/" + training_ckpt_name).exists():
+                inference_uuid = load_metadata(inference_ckpt_path)["uuid"]
+                training_ckpt_path = tmp_path + "/" + training_ckpt_name
+                training_uuid = load_metadata(training_ckpt_path)["uuid"]
 
-                pl_model = DummyModule.load_from_checkpoint(tmp_path + "/" + pl_ckpt_name, weights_only=False)
+                training_model = DummyModule.load_from_checkpoint(training_ckpt_path, weights_only=False)
 
-                assert uuid == pl_model.hparams["metadata"]["uuid"]
+                assert training_uuid == training_model.hparams["metadata"]["uuid"]
+                assert training_uuid != inference_uuid
 
     shutil.rmtree(tmp_path)
