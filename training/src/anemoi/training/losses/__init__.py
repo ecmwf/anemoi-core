@@ -13,6 +13,7 @@ from .energy_score import EnergyScoreLoss
 from .graph_edge_crps import GraphEdgeCRPSLoss
 from .graph_edge_energy_score import GraphEdgeEnergyScoreLoss
 from .graph_energy_score import GraphEnergyScoreLoss
+from .graph_smoothness import GraphLaplacianSmoothnessLoss
 from .graph_variogram_score import GraphVariogramScoreLoss
 from .huber import HuberLoss
 from .kcrps import CRPS
@@ -21,6 +22,7 @@ from .loss import get_loss_function
 from .mae import MAELoss
 from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
+from .nan_aware_mse import NaNAwareMSELoss
 from .obs_source_weighted import ObsSourceWeightedMSELoss
 from .rmse import RMSELoss
 from .spectral import FourierCorrelationLoss
@@ -40,6 +42,7 @@ __all__ = [
     "GraphEdgeCRPSLoss",
     "GraphEdgeEnergyScoreLoss",
     "GraphEnergyScoreLoss",
+    "GraphLaplacianSmoothnessLoss",
     "GraphVariogramScoreLoss",
     "HuberLoss",
     "LogCoshLoss",
@@ -49,6 +52,7 @@ __all__ = [
     "MAELoss",
     "MSELoss",
     "MultiscaleLossWrapper",
+    "NaNAwareMSELoss",
     "ObsSourceWeightedMSELoss",
     "PowerSpectrumLoss",
     "RMSELoss",

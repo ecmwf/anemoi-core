@@ -261,6 +261,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     mse = "anemoi.training.losses.MSELoss"
     weighted_mse = "anemoi.training.losses.WeightedMSELoss"
     mae = "anemoi.training.losses.MAELoss"
+    nan_aware_mse = "anemoi.training.losses.NaNAwareMSELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
     fcl = "anemoi.training.losses.FourierCorrelationLoss"
@@ -544,6 +545,21 @@ class HuberLossSchema(BaseLossSchema):
     "Threshold for Huber loss."
 
 
+class GraphLaplacianSmoothnessLossSchema(BaseLossSchema):
+    """Squared graph Laplacian of the prediction over the ``<dataset> -> <dataset>`` graph edges."""
+
+    target_: Literal["anemoi.training.losses.GraphLaplacianSmoothnessLoss"] = Field(..., alias="_target_")
+    "GraphLaplacianSmoothnessLoss target."
+    penalty_weight: float = 1.0
+    "Factor on the squared Laplacian."
+    ignore_nans: bool = True
+    "Accepted for a common loss interface; the penalty does not use the target."
+    src_nodes_name: str | None = None
+    "Source node group of the neighbour edges; defaults to the dataset's node group."
+    dst_nodes_name: str | None = None
+    "Target node group of the neighbour edges; defaults to the dataset's node group."
+
+
 class ObservationSourceSchema(BaseModel):
     """One observing system of ``ObsSourceWeightedMSELoss``."""
 
@@ -702,6 +718,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.SpectralAMSELoss": "spectral",
     "anemoi.training.losses.HuberLoss": "huber",
     "anemoi.training.losses.ObsSourceWeightedMSELoss": "obs_source_weighted",
+    "anemoi.training.losses.GraphLaplacianSmoothnessLoss": "graph_smoothness",
     "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
 }
 
@@ -729,6 +746,7 @@ class CombinedLossSchema(BaseLossSchema):
             Annotated[BaseLossSchema, Tag("base")]
             | Annotated[HuberLossSchema, Tag("huber")]
             | Annotated[ObsSourceWeightedMSELossSchema, Tag("obs_source_weighted")]
+            | Annotated[GraphLaplacianSmoothnessLossSchema, Tag("graph_smoothness")]
             | Annotated[CRPSSchema, Tag("crps")]
             | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
             | Annotated[EnergyScoreLossSchema, Tag("energy_score")]
@@ -789,6 +807,7 @@ LossSchemas = Annotated[
     Annotated[BaseLossSchema, Tag("base")]
     | Annotated[HuberLossSchema, Tag("huber")]
     | Annotated[ObsSourceWeightedMSELossSchema, Tag("obs_source_weighted")]
+    | Annotated[GraphLaplacianSmoothnessLossSchema, Tag("graph_smoothness")]
     | Annotated[CombinedLossSchema, Tag("combined")]
     | Annotated[CRPSSchema, Tag("crps")]
     | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
@@ -845,7 +864,10 @@ class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
 
 StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema | SingleDeviceStrategySchema
 
-VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]] | None
+# Maps group names to group specifications. Also accepts the reserved key
+# `ignore_variables_metadata: bool`, which makes `ExtractVariableGroupAndLevel` ignore the
+# dataset's `variables_metadata` and derive the parameter/level from the variable name.
+VariableGroupType = dict[str, bool | str | list[str] | dict[str, str | bool | list[str | int]]] | None
 
 
 class UpdateDsStatsOnCkptLoadSchema(BaseModel):

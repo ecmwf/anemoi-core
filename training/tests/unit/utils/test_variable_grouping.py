@@ -11,6 +11,7 @@
 from dataclasses import dataclass
 
 import pytest
+from omegaconf import OmegaConf
 
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.transform.variables import Variable
@@ -205,3 +206,105 @@ def test_failover_to_crack_in_malformed_data(
     assert (
         variable_name == expected_variable
     ), f"Expected variable name {expected_variable} for {variable}, but got {variable_name}"
+
+
+# Observation-style metadata: `param` is the full variable name including the level or channel
+# suffix, and everything is declared surface. Such metadata is internally self-consistent, so it
+# is trusted by default, yet it is useless for grouping.
+OBS_STYLE_METADATA = {
+    "z_500": {"mars": {"param": "z_500", "levtype": "sfc"}, "units": "1"},
+    "t_850": {"mars": {"param": "t_850", "levtype": "sfc"}},
+    "cris_1053": {"mars": {"param": "cris_1053", "levtype": "sfc"}},
+    "cris_1109": {"mars": {"param": "cris_1109", "levtype": "sfc"}},
+    "2t": {"mars": {"param": "2t", "levtype": "sfc"}},
+}
+
+
+@pytest.mark.parametrize(
+    ("variable", "expected_param", "expected_level"),
+    [
+        ("z_500", "z", 500),
+        ("t_850", "t", 850),
+        ("cris_1053", "cris", 1053),
+        ("2t", "2t", None),
+    ],
+)
+def test_ignore_variables_metadata_cracks_name(
+    variable: str,
+    expected_param: str,
+    expected_level: int | None,
+) -> None:
+    """With the flag set, self-consistent but useless obs-style metadata is bypassed entirely."""
+    extractor = ExtractVariableGroupAndLevel(
+        {"default": "sfc", "ignore_variables_metadata": True},
+        OBS_STYLE_METADATA,
+    )
+    assert extractor.get_param(variable) == expected_param
+    assert extractor.get_level(variable) == expected_level
+
+
+def test_metadata_trusted_by_default_for_obs_style_metadata() -> None:
+    """Guard the default: without the flag the unhelpful metadata still wins.
+
+    This deliberately asserts the undesirable behaviour, to document that the fix is opt-in.
+    """
+    extractor = ExtractVariableGroupAndLevel({"default": "sfc"}, OBS_STYLE_METADATA)
+    assert extractor.get_param("z_500") == "z_500"
+    assert extractor.get_level("z_500") is None
+
+
+def test_ignore_variables_metadata_restores_group_membership() -> None:
+    """The flag also fixes `get_group`, which otherwise matches on the un-cracked param."""
+    groups = {"default": "sfc", "ignore_variables_metadata": True, "pl": {"param": ["t", "z"]}}
+    extractor = ExtractVariableGroupAndLevel(groups, OBS_STYLE_METADATA)
+
+    assert extractor.get_group("z_500") == "pl"
+    assert extractor.get_group("t_850") == "pl"
+    assert extractor.get_group("cris_1053") == "sfc"
+
+    # Channels of one instrument collapse to a single (group, param) block
+    assert extractor.get_group_and_level("cris_1053")[:2] == ("sfc", "cris")
+    assert extractor.get_group_and_level("cris_1109")[:2] == ("sfc", "cris")
+
+
+def test_ignore_variables_metadata_is_not_treated_as_a_group() -> None:
+    """The reserved key must be popped, not iterated as a group specification."""
+    extractor = ExtractVariableGroupAndLevel(
+        {"default": "sfc", "ignore_variables_metadata": True, "pl": ["z"]},
+    )
+    assert "ignore_variables_metadata" not in extractor.variable_groups
+    assert extractor.ignore_variables_metadata
+    assert extractor.get_group("2t") == "sfc"
+    assert extractor.get_group("z_500") == "pl"
+
+
+def test_ignore_variables_metadata_rejects_non_param_group_specs() -> None:
+    """Without metadata there is no attribute to match on, so this must fail loudly."""
+    extractor = ExtractVariableGroupAndLevel(
+        {"default": "sfc", "ignore_variables_metadata": True, "pl": {"is_pressure_level": True}},
+        OBS_STYLE_METADATA,
+    )
+    with pytest.raises(ValueError, match="not found in metadata"):
+        extractor.get_group("z_500")
+
+
+def test_ignore_variables_metadata_from_dictconfig() -> None:
+    """Hydra delivers `variable_groups` as a DictConfig, so the pop must follow to_container."""
+    groups = OmegaConf.create(
+        {"default": "sfc", "ignore_variables_metadata": True, "pl": {"param": ["z"]}},
+    )
+    extractor = ExtractVariableGroupAndLevel(groups, OBS_STYLE_METADATA)
+
+    assert extractor.ignore_variables_metadata
+    assert "ignore_variables_metadata" not in extractor.variable_groups
+    assert extractor.get_group_and_level("z_500") == ("pl", "z", 500)
+
+
+def test_ignore_variables_metadata_constructor_argument() -> None:
+    """The flag is also settable programmatically, without the reserved config key."""
+    extractor = ExtractVariableGroupAndLevel(
+        {"default": "sfc"},
+        OBS_STYLE_METADATA,
+        ignore_variables_metadata=True,
+    )
+    assert extractor.get_param("z_500") == "z"
