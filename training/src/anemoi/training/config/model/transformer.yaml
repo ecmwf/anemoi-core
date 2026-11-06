@@ -45,8 +45,9 @@ processor:
 encoders:
   "0":
     source_datasets: [ "data" ]
-    dataset_fusing_strategy:  "none" # Options: "none" (one source dataset per batch), "sequential" (needs a node embedder); "joint" is planned
-    node_embedder: null # required by "sequential", e.g. {_target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder, num_channels: 512}
+    dataset_fusing_strategy:  "none" # Options: "none" (one source dataset per batch), "sequential" (needs a projecting node embedder); "joint" is planned
+    node_embedder: # NoOpNodeEmbedder (pass-through) for "none"; "sequential" needs a projecting one, e.g. {_target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder, num_channels: 512}
+      _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}

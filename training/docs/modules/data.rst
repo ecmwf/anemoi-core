@@ -120,8 +120,9 @@ encoder and decoder group to both domains::
      encoders:
        shared:
          source_datasets: [data, data_2]
-         dataset_fusing_strategy: none   # one domain per batch, no node embedder
-         node_embedder: null
+         dataset_fusing_strategy: none   # one domain per batch, pass-through node embedder
+         node_embedder:
+           _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
          mapper:
            _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
            # ... mapper configuration
@@ -141,7 +142,7 @@ loading policy which datasets can share a batch
 (``DataLoadingPolicy.co_loaded_datasets``) and raises if a ``none`` encoder could
 receive two of its source datasets together, so the same encoder under
 ``SynchronizedLoadingPolicy`` fails at start-up. Domains with different variables need the
-``sequential`` strategy with a ``node_embedder`` (see the anemoi-models documentation on
+``sequential`` strategy with a projecting ``node_embedder`` such as ``LinearNodeEmbedder`` (see the anemoi-models documentation on
 multi-dataset models). ``hidden`` and ``hidden_2`` must be nodes in the
 graph configuration, with ``data -> hidden -> data`` and
 ``data_2 -> hidden_2 -> data_2`` edges. The complete example is the top-level

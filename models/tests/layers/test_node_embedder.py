@@ -13,6 +13,8 @@ from hydra.utils import instantiate
 from omegaconf import OmegaConf
 
 from anemoi.models.layers.node_embedder import LinearNodeEmbedder
+from anemoi.models.layers.node_embedder import NoOpNodeEmbedder
+from anemoi.models.layers.node_embedder import is_noop_node_embedder_config
 
 
 def test_linear_node_embedder_projects_each_dataset_to_num_channels() -> None:
@@ -60,3 +62,44 @@ def test_linear_node_embedder_instantiates_from_config() -> None:
 
     assert isinstance(node_embedder, LinearNodeEmbedder)
     assert node_embedder(torch.randn(2, 3), "era5").shape == (2, 6)
+
+
+def test_noop_node_embedder_passes_the_input_through() -> None:
+    node_embedder = NoOpNodeEmbedder(in_channels={"era5": 5, "cerra": 5})
+    x = torch.randn(3, 5)
+
+    assert node_embedder.num_channels == 5
+    assert node_embedder(x, "cerra") is x
+    assert not list(node_embedder.parameters())
+    assert node_embedder.state_dict() == {}
+
+
+def test_noop_node_embedder_rejects_differing_input_channels() -> None:
+    with pytest.raises(ValueError, match="same number of input channels"):
+        NoOpNodeEmbedder(in_channels={"era5": 3, "cerra": 5})
+
+
+def test_noop_node_embedder_rejects_empty_in_channels() -> None:
+    with pytest.raises(ValueError, match="at least one source dataset"):
+        NoOpNodeEmbedder(in_channels={})
+
+
+def test_noop_node_embedder_instantiates_from_config() -> None:
+    config = OmegaConf.create({"_target_": "anemoi.models.layers.node_embedder.NoOpNodeEmbedder"})
+
+    node_embedder = instantiate(config, _recursive_=False, in_channels={"era5": 3}, layer_kernels=None)
+
+    assert isinstance(node_embedder, NoOpNodeEmbedder)
+    assert node_embedder.num_channels == 3
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        (None, True),
+        ({"_target_": "anemoi.models.layers.node_embedder.NoOpNodeEmbedder"}, True),
+        ({"_target_": "anemoi.models.layers.node_embedder.LinearNodeEmbedder", "num_channels": 4}, False),
+    ],
+)
+def test_is_noop_node_embedder_config(config: dict | None, expected: bool) -> None:
+    assert is_noop_node_embedder_config(config) is expected
