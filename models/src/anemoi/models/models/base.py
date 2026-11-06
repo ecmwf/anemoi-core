@@ -23,7 +23,6 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.create import GraphCreator
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data_indices.collection import IndexCollection
@@ -37,8 +36,6 @@ from anemoi.models.models.target_features import time_steps_per_node
 from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.models.utils.graphs import hidden_node_names
-from anemoi.models.utils.graphs import load_existing_graph
-from anemoi.models.utils.graphs import split_graph_config
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -64,10 +61,10 @@ class BaseGraphModel(nn.Module):
         self,
         *,
         model_config: DotDict,
-        model_graph_config: DotDict,
+        static_graph_data: HeteroData,
+        dynamic_graph_config: DotDict,
         data_indices: dict[str, IndexCollection],
         statistics: dict[str, dict],
-        data_types: dict[str, str],
         n_step_input: dict[str, int],
         n_step_output: dict[str, int],
     ) -> None:
@@ -81,10 +78,11 @@ class BaseGraphModel(nn.Module):
             Data indices
         statistics : dict
             Data statistics
-        model_graph_config : DotDict
-            Graph configuration
-        data_types : dict[str, str]
-            Data types for each dataset. Data types are "tabular" or "gridded".
+        static_graph_data : HeteroData
+            Static graph: the nodes and edges of the gridded datasets and the hidden meshes.
+        dynamic_graph_config : DotDict
+            Builders of the nodes and edges that touch tabular datasets, built per batch. Its ``edges``
+            have an entry for every edge type, with no builders for the static ones.
         n_step_input : dict[str, int]
             Number of input time steps (windows, for tabular datasets) for each dataset. Gridded datasets embed
             all of them per node; tabular datasets stack their windows on the node axis, so each node carries one
@@ -96,29 +94,17 @@ class BaseGraphModel(nn.Module):
         super().__init__()
 
         model_config = DotDict(model_config)
-        model_graph_config = DotDict(model_graph_config)
+        dynamic_graph_config = DotDict(dynamic_graph_config)
         self._graph_name_hidden = model_config.model.hidden_nodes_name
-        self.is_dataset_static = {name: data_type == "gridded" for name, data_type in data_types.items()}
-
-        if model_graph_config.get("nodes"):
-            static_graph_config, dynamic_graph_config = split_graph_config(
-                model_graph_config, self.is_dataset_static, self._graph_name_hidden
-            )
-            self._graph_data = GraphCreator(static_graph_config).create()
-        else:
-            # Existing-graph mode: no nodes in the graph config, load the graph from file. The model
-            # interface passes ``system.input.graph`` as the graph config's ``path``.
-            self._graph_data, dynamic_graph_config = load_existing_graph(
-                model_graph_config.get("path"),
-                self.is_dataset_static,
-                self._graph_name_hidden,
-            )
+        self._graph_data = static_graph_data
         self.data_indices = data_indices
         self.statistics = statistics
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
+        # Gridded datasets live in the static graph; tabular ones are built per batch.
+        self.is_dataset_static = {name: name in static_graph_data.node_types for name in self.dataset_names}
         self._build_hidden_node_routing()
 
         self.latent_skip = model_config.model.latent_skip
@@ -495,6 +481,7 @@ class BaseGraphModel(nn.Module):
                     f"time axis; remove model.residual.datasets.{dataset_name}."
                 )
                 raise ValueError(msg)
+
             self.residual[dataset_name] = instantiate(
                 residual_config,
                 graph=self._graph_data,

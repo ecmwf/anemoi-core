@@ -321,16 +321,21 @@ def test_after_batch_transfer_gathers_then_projects(keep_batch_sharded: bool) ->
         assert calls == [("gather", batch), ("project", gathered, comm_group)]
 
 
-class _ProjectionGraphModel(torch.nn.Module):
-    """Stand-in model that builds a graph from a source grid of two points onto one projected point."""
+def _projection_graph() -> HeteroData:
+    """A source grid of two points projected onto one point."""
+    graph = HeteroData()
+    graph["source"].num_nodes = 2
+    graph["projected"].x = torch.tensor([[0.1, 0.2]])
+    graph["source", "to", "projected"].edge_index = torch.tensor([[0, 1], [0, 0]])
+    return graph
 
-    def __init__(self, **_kwargs: Any) -> None:
+
+class _ProjectionGraphModel(torch.nn.Module):
+    """Stand-in model that receives the static graph from the interface."""
+
+    def __init__(self, *, static_graph_data: HeteroData, **_kwargs: Any) -> None:
         super().__init__()
-        graph = HeteroData()
-        graph["source"].num_nodes = 2
-        graph["projected"].x = torch.tensor([[0.1, 0.2]])
-        graph["source", "to", "projected"].edge_index = torch.tensor([[0, 1], [0, 0]])
-        self._graph_data = graph
+        self._graph_data = static_graph_data
 
 
 def _projecting_interface() -> AnemoiModelInterface:
@@ -361,6 +366,7 @@ def _projecting_interface() -> AnemoiModelInterface:
     interface.data_types = {}
     interface.n_step_input = {}
     interface.n_step_output = {}
+    interface._build_graph = lambda: (_projection_graph(), {"nodes": {}, "edges": {}})
     interface._build_model()
     return interface
 

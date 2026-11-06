@@ -55,6 +55,8 @@ from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
+from anemoi.models.utils.graphs import build_graph
+from anemoi.utils.config import DotDict
 
 from ._distributed_runner import _run_distributed_test
 
@@ -346,12 +348,17 @@ def _build_model(
     latitudes, longitudes = _points_on_sphere(NUM_GRID_POINTS, generator)
     datasets = ["grid", "obs"] if with_grid else ["obs"]
     torch.manual_seed(1)
+    static_graph_data, dynamic_graph_config = build_graph(
+        DotDict(_graph_config(latitudes, longitudes, max_obs_neighbours, with_grid)),
+        is_dataset_static={name: name == "grid" for name in datasets},
+        hidden_nodes_name="hidden",
+    )
     model = model_class(
         model_config=_model_config(model_class, obs_predicted, with_grid, fused),
-        model_graph_config=_graph_config(latitudes, longitudes, max_obs_neighbours, with_grid),
+        static_graph_data=static_graph_data,
+        dynamic_graph_config=dynamic_graph_config,
         data_indices={name: index for name, index in _data_indices().items() if name in datasets},
         statistics={name: stats for name, stats in _statistics().items() if name in datasets},
-        data_types={name: kind for name, kind in {"grid": "gridded", "obs": "tabular"}.items() if name in datasets},
         n_step_input={name: 2 for name in datasets},
         n_step_output={name: 1 for name in datasets},
     )

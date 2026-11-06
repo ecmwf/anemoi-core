@@ -30,6 +30,8 @@ from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTrans
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.normalizer import InputNormalizer
+from anemoi.models.utils.graphs import build_graph
+from anemoi.utils.config import DotDict
 
 NUM_GRID_POINTS = 60
 OBS_ROWS_PER_WINDOW = (17, 21)  # the two input windows of the observation dataset
@@ -213,12 +215,17 @@ def _data_indices() -> dict[str, IndexCollection]:
 def _build_model(kind: str) -> AnemoiTransportModelEncProcDec:
     latitudes, longitudes = _points_on_sphere(NUM_GRID_POINTS, torch.Generator().manual_seed(0))
     torch.manual_seed(1)
+    static_graph_data, dynamic_graph_config = build_graph(
+        DotDict(_graph_config(latitudes, longitudes)),
+        is_dataset_static={"grid": True, "obs": False},
+        hidden_nodes_name="hidden",
+    )
     return MODEL_CLASSES[kind](
         model_config=_model_config(),
-        model_graph_config=_graph_config(latitudes, longitudes),
+        static_graph_data=static_graph_data,
+        dynamic_graph_config=dynamic_graph_config,
         data_indices=_data_indices(),
         statistics=STATISTICS,
-        data_types={"grid": "gridded", "obs": "tabular"},
         n_step_input={"grid": 2, "obs": 2},
         n_step_output={"grid": 1, "obs": 1},
     )

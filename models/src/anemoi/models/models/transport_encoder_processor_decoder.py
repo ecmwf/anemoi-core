@@ -22,6 +22,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric.data import HeteroData
 
 from anemoi.models.data import Batch
 from anemoi.models.data.flat import FlatSource
@@ -88,10 +89,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self,
         *,
         model_config: DictConfig,
-        model_graph_config: DictConfig,
+        static_graph_data: HeteroData,
+        dynamic_graph_config: DotDict,
         data_indices: dict,
         statistics: dict,
-        data_types: dict[str, str],
         n_step_input: dict[str, int],
         n_step_output: dict[str, int],
     ) -> None:
@@ -111,10 +112,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         super().__init__(
             model_config=model_config,
-            model_graph_config=model_graph_config,
+            static_graph_data=static_graph_data,
+            dynamic_graph_config=dynamic_graph_config,
             data_indices=data_indices,
             statistics=statistics,
-            data_types=data_types,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )
@@ -896,10 +897,10 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         self,
         *,
         model_config: DictConfig,
-        model_graph_config: DictConfig,
+        static_graph_data: HeteroData,
+        dynamic_graph_config: DotDict,
         data_indices: dict,
         statistics: dict,
-        data_types: dict[str, str],
         n_step_input: dict[str, int],
         n_step_output: dict[str, int],
     ) -> None:
@@ -908,10 +909,10 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         self.condition_on_residual = model_config.condition_on_residual
         super().__init__(
             model_config=model_config,
-            model_graph_config=model_graph_config,
+            static_graph_data=static_graph_data,
+            dynamic_graph_config=dynamic_graph_config,
             data_indices=data_indices,
             statistics=statistics,
-            data_types=data_types,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )
