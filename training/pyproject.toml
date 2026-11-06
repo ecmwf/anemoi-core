@@ -71,6 +71,9 @@ optional-dependencies.docs = [
   "sphinx-argparse",
   "sphinx-rtd-theme",
 ]
+optional-dependencies.peft = [
+  "peft>=0.18",
+]
 optional-dependencies.plotting = [
   "cartopy>=0.25",
   "datashader>=0.17",
@@ -88,9 +91,9 @@ optional-dependencies.s3 = [
   "anemoi-utils[s3]>=0.5.7",
 ]
 optional-dependencies.tests = [
-  "anemoi-graphs[tri]",                              # required to load the gnn checkpoint as part of the tests
-  "anemoi-models[spectral]",                         # required to test the DCT2D spectral loss
-  "anemoi-training[azure,mlflow,plotting,s3,wandb]", # AzureMlflowLogger / S3Source / plotting integration
+  "anemoi-graphs[tri]",                                   # required to load the gnn checkpoint as part of the tests
+  "anemoi-models[spectral]",                              # required to test the DCT2D spectral loss
+  "anemoi-training[azure,mlflow,peft,plotting,s3,wandb]", # AzureMlflowLogger / S3Source / PEFT adapters / plotting integration
   "hypothesis>=6.11",
   "pytest>=8",
   "pytest-mock>=3",
