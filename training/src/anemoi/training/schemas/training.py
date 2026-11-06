@@ -415,6 +415,10 @@ class WaveletEnergyScoreLossSchema(EnsembleScoreLossSchema):
     "Number of latitudes, for ``octahedral_sht`` and ``regular_sht``."
     nlon: PositiveInt | None = None
     "Number of longitudes, for ``regular_sht``. Defaults to 2 * nlat."
+    checkpoint_scales: bool = False
+    "Recompute each scale in the backward pass: lowers the peak memory and takes longer."
+    variables_per_checkpoint: PositiveInt | None = None
+    "Recompute each group of this many variables of each scale in the backward pass; includes ``checkpoint_scales``."
     ignore_nans: Literal[False] = False
     "The transforms cannot handle missing values."
     no_autocast: Literal[True] = True

@@ -15,11 +15,15 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pydantic import TypeAdapter
 from pydantic import ValidationError
+from pytest_mock import MockerFixture
+from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
 from anemoi.models.layers.spectral_transforms import octahedral_lons_per_lat
+from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.losses import WaveletEnergyScoreLoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.schemas.training import LossSchemas
@@ -177,6 +181,116 @@ def test_rejects_a_grid_of_the_wrong_size() -> None:
         make_loss()(pred[..., :-1, :], target[..., :-1, :])
 
 
+def make_inputs_with_variables(variables: int, members: int = 3) -> tuple[torch.Tensor, torch.Tensor]:
+    """Prediction [1, 1, members, grid, variables] and target [1, 1, 1, grid, variables]."""
+    pred = band_limited((1, 1, members, variables), 0).movedim(-2, -1)
+    target = band_limited((1, 1, 1, variables), 1).movedim(-2, -1)
+    return pred, target
+
+
+@pytest.mark.parametrize(
+    ("settings", "checkpoints"),
+    [
+        ({"checkpoint_scales": True}, 2),
+        ({"variables_per_checkpoint": 1}, 6),
+        ({"variables_per_checkpoint": 2}, 4),
+        ({"variables_per_checkpoint": 5}, 2),
+        ({"checkpoint_scales": True, "variables_per_checkpoint": 2}, 4),
+    ],
+    ids=["scales", "one variable", "groups of unequal size", "group above all variables", "scales and groups"],
+)
+def test_checkpoints_give_the_same_loss_and_gradients(
+    settings: dict,
+    checkpoints: int,
+    mocker: MockerFixture,
+) -> None:
+    """Two scales and three variables: one checkpoint per group of each scale, each run again by the backward pass."""
+    checkpoint_spy = mocker.patch("anemoi.training.losses.wavelet.checkpoint", wraps=checkpoint)
+    pred, target = make_inputs_with_variables(3)
+    plain_pred = pred.clone().requires_grad_()
+    plain = make_loss()(plain_pred, target, squash=False)
+    plain.sum().backward()
+    assert checkpoint_spy.call_count == 0
+
+    checkpointed_pred = pred.clone().requires_grad_()
+    loss = make_loss(**settings)
+    score_spy = mocker.spy(loss, "_score_of_scale")
+    result = loss(checkpointed_pred, target, squash=False)
+    assert checkpoint_spy.call_count == checkpoints
+    assert score_spy.call_count == checkpoints
+    result.sum().backward()
+    assert score_spy.call_count == 2 * checkpoints
+
+    torch.testing.assert_close(result, plain, rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(checkpointed_pred.grad, plain_pred.grad, rtol=1e-4, atol=1e-6)
+
+
+@pytest.mark.parametrize("no_gradients", [torch.no_grad, torch.inference_mode], ids=["no_grad", "inference_mode"])
+def test_checkpoints_give_the_same_loss_without_gradients(no_gradients: type) -> None:
+    pred, target = make_inputs_with_variables(3)
+    with no_gradients():
+        plain = make_loss()(pred, target, squash=False)
+        result = make_loss(checkpoint_scales=True, variables_per_checkpoint=2)(pred, target, squash=False)
+    torch.testing.assert_close(result, plain, rtol=1e-5, atol=1e-6)
+
+
+def test_rejects_an_empty_group_of_variables() -> None:
+    with pytest.raises(ValueError, match="variables_per_checkpoint"):
+        make_loss(variables_per_checkpoint=0)
+
+
+def test_compile_config_compiles_the_grid_point_work(mocker: MockerFixture) -> None:
+    mocker.patch("anemoi.models.utils.compile._meets_library_versions_for_compile", return_value=True)
+    compiled = []
+
+    def fake_compile(kernel: object, **_options: object) -> object:
+        compiled.append(mocker.Mock(side_effect=kernel))
+        return compiled[-1]
+
+    compile_mock = mocker.patch("anemoi.training.losses.wavelet.torch.compile", side_effect=fake_compile)
+    loss = make_loss()
+    kernels = [loss._products, loss._score_from_smoothed]
+    model = torch.nn.Module()
+    model.add_module("loss", torch.nn.ModuleDict({"data": loss}))
+
+    mark_for_compilation(
+        model,
+        OmegaConf.create([{"module": "anemoi.training.losses.WaveletEnergyScoreLoss", "options": {"dynamic": False}}]),
+    )
+
+    assert [call.args[0] for call in compile_mock.call_args_list] == kernels
+    assert all(call.kwargs == {"dynamic": False} for call in compile_mock.call_args_list)
+    # The loss runs the compiled kernels from here on.
+    assert [loss._products, loss._score_from_smoothed] == compiled
+    pred, target = make_inputs()
+    loss(pred, target)
+    assert all(kernel.called for kernel in compiled)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required to compile the kernels")
+@pytest.mark.parametrize(
+    "settings",
+    [{}, {"checkpoint_scales": True}, {"variables_per_checkpoint": 2}],
+    ids=["no checkpoints", "scales", "groups"],
+)
+def test_compiled_kernels_give_the_same_loss_and_gradients(settings: dict) -> None:
+    pred, target = make_inputs_with_variables(3)
+    pred, target = pred.cuda(), target.cuda()
+    plain_pred = pred.clone().requires_grad_()
+    plain = make_loss().cuda()(plain_pred, target, squash=False)
+    plain.sum().backward()
+
+    loss = make_loss(**settings).cuda()
+    loss.compile_for_training()
+    compiled_pred = pred.clone().requires_grad_()
+    result = loss(compiled_pred, target, squash=False)
+    result.sum().backward()
+
+    torch.testing.assert_close(result, plain, rtol=1e-4, atol=1e-5)
+    torch.testing.assert_close(compiled_pred.grad, plain_pred.grad, rtol=1e-3, atol=1e-5)
+
+
 def test_builds_from_a_validated_config() -> None:
     config = {
         "_target_": "anemoi.training.losses.WaveletEnergyScoreLoss",
@@ -184,11 +298,15 @@ def test_builds_from_a_validated_config() -> None:
         "nlat": NLAT,
         "scale_weights": WEIGHTS,
         "smoothing_octaves": 2,
+        "checkpoint_scales": True,
+        "variables_per_checkpoint": 8,
         "scalers": [],
     }
     assert isinstance(TypeAdapter(LossSchemas).validate_python(config), WaveletEnergyScoreLossSchema)
     loss = get_loss_function(DictConfig(config))
     assert isinstance(loss, WaveletEnergyScoreLoss)
+    assert loss.checkpoint_scales
+    assert loss.variables_per_checkpoint == 8
     pred, target = make_inputs()
     assert torch.isfinite(loss(pred, target))
 
@@ -202,6 +320,7 @@ def test_builds_from_a_validated_config() -> None:
         {"transform": "octahedral_sht", "scale_weights": [1.0]},  # no nlat
         {"transform": "octahedral_sht", "nlat": NLAT, "scale_weights": [1.0], "no_autocast": False},
         {"transform": "octahedral_sht", "nlat": NLAT, "scale_weights": [1.0], "ignore_nans": True},
+        {"transform": "octahedral_sht", "nlat": NLAT, "scale_weights": [1.0], "variables_per_checkpoint": 0},
     ],
 )
 def test_schema_rejects_invalid_configs(config: dict) -> None:
@@ -209,7 +328,7 @@ def test_schema_rejects_invalid_configs(config: dict) -> None:
         WaveletEnergyScoreLossSchema(_target_="anemoi.training.losses.WaveletEnergyScoreLoss", **config)
 
 
-def _check_sharded_grid(rank: int, world_size: int, n_variables: int, init_file: str) -> None:
+def _check_sharded_grid(rank: int, world_size: int, n_variables: int, settings: dict, init_file: str) -> None:
     torch.set_num_threads(1)
     dist.init_process_group(
         "gloo",
@@ -224,7 +343,7 @@ def _check_sharded_grid(rank: int, world_size: int, n_variables: int, init_file:
         target = torch.cat([target, 2.0 * target[..., :1]], dim=-1)[..., :n_variables]
         node_weights = torch.rand(N_POINTS, generator=torch.Generator().manual_seed(3))
 
-        loss = make_loss()
+        loss = make_loss(**settings)
         loss.add_scaler(TensorDim.GRID, node_weights, name="node_weights")
         full_pred = pred.clone().requires_grad_()
         expected = loss(full_pred, target)
@@ -254,20 +373,26 @@ def _check_sharded_grid(rank: int, world_size: int, n_variables: int, init_file:
 
 @pytest.mark.skipif(not dist.is_available() or not dist.is_gloo_available(), reason="Requires Gloo")
 @pytest.mark.parametrize(
-    ("world_size", "n_variables"),
-    [(2, 3), (3, 2)],
-    ids=["variables split unevenly", "a rank without variables"],
+    ("world_size", "n_variables", "settings"),
+    [(2, 3, {}), (3, 2, {}), (2, 3, {"variables_per_checkpoint": 1}), (3, 2, {"checkpoint_scales": True})],
+    ids=[
+        "variables split unevenly",
+        "a rank without variables",
+        "variables split unevenly, in checkpoints",
+        "a rank without variables, in checkpoints",
+    ],
 )
 def test_a_sharded_grid_gives_the_unsharded_loss_and_gradients(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     world_size: int,
     n_variables: int,
+    settings: dict,
 ) -> None:
     monkeypatch.setenv("OMP_NUM_THREADS", "1")
     mp.spawn(
         _check_sharded_grid,
-        args=(world_size, n_variables, str(tmp_path / "rendezvous")),
+        args=(world_size, n_variables, settings, str(tmp_path / "rendezvous")),
         nprocs=world_size,
         join=True,
     )
