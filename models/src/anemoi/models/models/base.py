@@ -11,7 +11,6 @@
 import logging
 from abc import abstractmethod
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Optional
 
 import torch
@@ -25,7 +24,6 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
-from anemoi.models.utils.graphs import hidden_node_names, split_graph_config, load_existing_graph
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data_indices.collection import IndexCollection
@@ -37,6 +35,9 @@ from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.models.models.target_features import time_steps_per_node
 from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.models.utils.graphs import hidden_node_names
+from anemoi.models.utils.graphs import load_existing_graph
+from anemoi.models.utils.graphs import split_graph_config
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
