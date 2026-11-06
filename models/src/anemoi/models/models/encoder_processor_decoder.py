@@ -32,6 +32,9 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.models.layers.node_embedder import NOOP_NODE_EMBEDDER_TARGET
+from anemoi.models.layers.node_embedder import NoOpNodeEmbedder
+from anemoi.models.layers.node_embedder import is_noop_node_embedder_config
 from anemoi.models.layers.processor import NoOpProcessor
 from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
@@ -90,7 +93,7 @@ def _mismatched_input_dims_message(encoder_name: str, in_dims: dict[str, int]) -
     """Explain why a 'none' encoder cannot take source datasets with differing numbers of input channels."""
     return (
         f"Encoder '{encoder_name}' has dataset_fusing_strategy 'none', which feeds each source dataset "
-        f"to the encoder mapper as is, with no node embedder, so all {len(in_dims)} of its source datasets must "
+        f"to the encoder mapper as is (NoOpNodeEmbedder), so all {len(in_dims)} of its source datasets must "
         f"have the same number of input channels. Got:\n"
         f"{_format_dims(in_dims)}\n"
         "    These are assembled encoder input channels (variables + coordinates + trainable node "
@@ -197,8 +200,19 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         features = [attribute.compute(x_flat.timedeltas) for attribute in attribute_builders.values()]
         return torch.cat(features, dim=-1)
 
+    def _projecting_node_embedder(self, encoder_name: str) -> torch.nn.Module | None:
+        """This encoder's node embedder if it changes its input, or None if the input passes through.
+
+        None for a NoOpNodeEmbedder, and for encoders with no entry at all: models pickled before every
+        encoder had a node embedder only hold the projecting ones.
+        """
+        if encoder_name not in self.encoder_src_projection:
+            return None
+        node_embedder = self.encoder_src_projection[encoder_name]
+        return None if isinstance(node_embedder, NoOpNodeEmbedder) else node_embedder
+
     def _encoder_projects_sources(self, encoder_name: str) -> bool:
-        """Whether this encoder maps its source datasets through a node embedder.
+        """Whether this encoder maps its source datasets through a projecting node embedder.
 
         True for 'sequential' encoders. Once the node embedders are built this is read off the modules,
         so models pickled before node embedders were explicit (single-source 'sequential' without a
@@ -206,7 +220,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         computed first) it follows the configured strategy.
         """
         if "encoder_src_projection" in self._modules:
-            return encoder_name in self.encoder_src_projection
+            return self._projecting_node_embedder(encoder_name) is not None
         return self.encoder_fusing_strategy[encoder_name] == "sequential"
 
     def _project_source(
@@ -217,7 +231,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         src_shard_sizes: ShardSizes = None,
         model_comm_group: ProcessGroup | None = None,
     ) -> Tensor:
-        """Apply this encoder's node embedder to one source dataset, if it has one.
+        """Apply this encoder's node embedder to one source dataset, unless it is a pass-through.
 
         Under model sharding a source that is replicated on every rank (``src_shard_sizes`` is
         None) is sharded before the node embedder and gathered after it. The node embedder is applied row by row,
@@ -225,22 +239,25 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         gradient scaling expects; applied to all rows it would be counted once per rank. The
         mapper still receives the replicated input it gets for an unprojected source.
         """
-        if encoder_name not in self.encoder_src_projection:
+        node_embedder = self._projecting_node_embedder(encoder_name)
+        if node_embedder is None:
             return x_data_latent
-        projection = self.encoder_src_projection[encoder_name][dataset_name]
+        # Indexed by dataset name rather than called: models pickled before LinearNodeEmbedder hold a plain ModuleDict.
+        projection = node_embedder[dataset_name]
         if src_shard_sizes is not None or not model_is_distributed(model_comm_group):
             return projection(x_data_latent)
         x_shard, shard_sizes = ensure_sharded(x_data_latent, 0, None, model_comm_group)
         return gather_tensor(projection(x_shard), 0, shard_sizes, model_comm_group)
 
     def _build_encoding_networks(self, encoders_config: DotDict) -> None:
-        """Instantiate one mapper per encoder, plus a node embedder for 'sequential' encoders.
+        """Instantiate one node embedder and one mapper per encoder.
 
         Requires self.encoder_graph_provider to be populated, since an encoder's edge
         dimension comes from its source datasets' graph providers.
         """
-        # Node embedders of 'sequential' encoders: per-dataset projections onto the mapper's input channels,
-        # keyed [encoder_name][dataset_name]. The attribute name is part of the state-dict keys.
+        # Node embedders keyed by encoder name: a NoOpNodeEmbedder for 'none' encoders, a projecting one
+        # (per-dataset projections onto the mapper's input channels) for 'sequential' encoders. The
+        # attribute name is part of the state-dict keys of the projecting ones.
         self.encoder_src_projection = torch.nn.ModuleDict()
 
         self.encoder = torch.nn.ModuleDict()
@@ -250,21 +267,22 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             if len(set(edge_dims.values())) > 1:
                 raise ValueError(_mismatched_edge_dims_message(encoder_name, edge_dims))
 
-            if self.encoder_fusing_strategy[encoder_name] == "sequential":
-                node_embedder_config = encoder_config.node_embedder
-                layer_kernels = node_embedder_config.get("layer_kernels") or encoder_config.mapper.get("layer_kernels")
-                node_embedder = instantiate(
-                    node_embedder_config,
-                    _recursive_=False,  # layer_kernels are instantiated by the node embedder
-                    in_channels=in_dims,
-                    layer_kernels=layer_kernels,
-                )
-                self.encoder_src_projection[encoder_name] = node_embedder
-                in_channels_src = node_embedder.num_channels
-            else:
+            node_embedder_config = encoder_config.get("node_embedder")
+            if self.encoder_fusing_strategy[encoder_name] == "none":
+                # 'none' never projects: null or another node embedder falls back to the pass-through one.
+                if node_embedder_config is None or not is_noop_node_embedder_config(node_embedder_config):
+                    node_embedder_config = DotDict({"_target_": NOOP_NODE_EMBEDDER_TARGET})
                 if len(set(in_dims.values())) > 1:
                     raise ValueError(_mismatched_input_dims_message(encoder_name, in_dims))
-                in_channels_src = next(iter(in_dims.values()))
+            layer_kernels = node_embedder_config.get("layer_kernels") or encoder_config.mapper.get("layer_kernels")
+            node_embedder = instantiate(
+                node_embedder_config,
+                _recursive_=False,  # layer_kernels are instantiated by the node embedder
+                in_channels=in_dims,
+                layer_kernels=layer_kernels,
+            )
+            self.encoder_src_projection[encoder_name] = node_embedder
+            in_channels_src = node_embedder.num_channels
 
             self.encoder[encoder_name] = instantiate(
                 encoder_config.mapper,

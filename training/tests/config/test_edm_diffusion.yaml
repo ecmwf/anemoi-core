@@ -502,7 +502,8 @@ model:
     analysis:
       source_datasets: ["era"]
       dataset_fusing_strategy: "none"
-      node_embedder: null
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper:
         _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
         num_channels: 768
@@ -522,7 +523,8 @@ model:
     combined_surface:
       source_datasets: [combined_surface]
       dataset_fusing_strategy: none
-      node_embedder: null
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper: ${model.obs_encoder}
   latent_aggregator:
     _target_: anemoi.models.layers.aggregator.SumAggregator

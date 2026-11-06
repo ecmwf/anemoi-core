@@ -33,6 +33,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NodeTrainableParameters
+from anemoi.models.layers.node_embedder import is_noop_node_embedder_config
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.models.models.target_features import time_steps_per_node
@@ -43,10 +44,11 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 # Encoder dataset-fusing strategies currently implemented.
-# - "none": no fusion and no node embedder; the mapper takes a source dataset's assembled input directly.
-#   Normally one source dataset per encoder; several are accepted only if they have the same
-#   number of input channels and at most one of them is present per batch (e.g. multi-domain training).
-# - "sequential": a node embedder (``model.encoders.<name>.node_embedder``) projects every source dataset onto a
+# - "none": no fusion; the node embedder (``model.encoders.<name>.node_embedder``) is a NoOpNodeEmbedder, so the
+#   mapper takes a source dataset's assembled input directly. Normally one source dataset per encoder; several
+#   are accepted only if they have the same number of input channels and at most one of them is present per batch
+#   (e.g. multi-domain training).
+# - "sequential": a projecting node embedder (e.g. LinearNodeEmbedder) projects every source dataset onto a
 #   common number of input channels; each is then encoded in its own pass with the shared mapper weights, and the
 #   per-dataset latents are combined by the latent aggregator.
 SUPPORTED_FUSING_STRATEGIES = {"none", "sequential"}
@@ -377,17 +379,21 @@ class BaseGraphModel(nn.Module):
                 f"Valid options are: {sorted(SUPPORTED_FUSING_STRATEGIES)}."
             )
             raise ValueError(msg)
-        if strategy == "sequential" and node_embedder_config is None:
+        if strategy == "sequential" and is_noop_node_embedder_config(node_embedder_config):
             msg = (
-                f"Encoder '{encoder_name}' uses dataset_fusing_strategy 'sequential', which needs a node embedder, e.g.\n"
+                f"Encoder '{encoder_name}' uses dataset_fusing_strategy 'sequential', which needs a projecting "
+                "node embedder (not NoOpNodeEmbedder), e.g.\n"
                 f"    model.encoders.{encoder_name}.node_embedder:\n"
                 "      _target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder\n"
                 "      num_channels: 512"
             )
             raise ValueError(msg)
-        if strategy == "none" and node_embedder_config is not None:
+        if strategy == "none" and not is_noop_node_embedder_config(node_embedder_config):
             LOGGER.warning(
-                "Encoder '%s' uses dataset_fusing_strategy 'none'; its node embedder setting is ignored.", encoder_name
+                "Encoder '%s' uses dataset_fusing_strategy 'none'; its node embedder %s is ignored and "
+                "NoOpNodeEmbedder is used instead.",
+                encoder_name,
+                node_embedder_config.get("_target_"),
             )
         return strategy
 

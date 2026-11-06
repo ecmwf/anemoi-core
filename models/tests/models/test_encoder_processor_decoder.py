@@ -126,6 +126,7 @@ def test_build_latent_aggregator_passes_layer_kernels_to_aggregator() -> None:
 # --- Encoder fusion ("none" / "sequential" + node_embedder) -------------------------------------------
 
 LINEAR_NODE_EMBEDDER = {"_target_": "anemoi.models.layers.node_embedder.LinearNodeEmbedder", "num_channels": 6}
+NOOP_NODE_EMBEDDER = {"_target_": "anemoi.models.layers.node_embedder.NoOpNodeEmbedder"}
 
 
 class _RecordingMapper(nn.Module):
@@ -170,7 +171,8 @@ def _model_for_encoder_build(strategy: str, in_dims: dict[str, int]) -> _SharedE
     [
         ("joint", LINEAR_NODE_EMBEDDER, "planned but not yet supported"),
         ("concat", None, "unsupported dataset_fusing_strategy"),
-        ("sequential", None, "needs a node embedder"),
+        ("sequential", None, "needs a projecting node embedder"),
+        ("sequential", NOOP_NODE_EMBEDDER, "needs a projecting node embedder"),
     ],
 )
 def test_validate_fusing_strategy_rejects_invalid_settings(
@@ -186,7 +188,17 @@ def test_validate_fusing_strategy_ignores_node_embedder_for_none(caplog: pytest.
     config = _encoder_config("none", ["dataset_a"], LINEAR_NODE_EMBEDDER)["shared"]
 
     assert AnemoiModelEncProcDec._validate_fusing_strategy("shared", config) == "none"
-    assert "node embedder setting is ignored" in caplog.text
+    assert "LinearNodeEmbedder is ignored and NoOpNodeEmbedder is used instead" in caplog.text
+
+
+@pytest.mark.parametrize("node_embedder", [NOOP_NODE_EMBEDDER, None])
+def test_validate_fusing_strategy_accepts_noop_or_null_for_none(
+    node_embedder: dict | None, caplog: pytest.LogCaptureFixture
+) -> None:
+    config = _encoder_config("none", ["dataset_a"], node_embedder)["shared"]
+
+    assert AnemoiModelEncProcDec._validate_fusing_strategy("shared", config) == "none"
+    assert "ignored" not in caplog.text
 
 
 @pytest.mark.parametrize("in_dims", [{"dataset_a": 3, "dataset_b": 5}, {"dataset_a": 3}])
@@ -209,14 +221,19 @@ def test_sequential_builds_linear_node_embedder_feeding_the_mapper(in_dims: dict
     )
 
 
-def test_none_builds_no_node_embedder_and_feeds_the_assembled_width() -> None:
+@pytest.mark.parametrize("node_embedder", [NOOP_NODE_EMBEDDER, None, LINEAR_NODE_EMBEDDER])
+def test_none_builds_a_noop_node_embedder_and_feeds_the_assembled_input_channels(node_embedder: dict | None) -> None:
+    from anemoi.models.layers.node_embedder import NoOpNodeEmbedder
+
     model = _model_for_encoder_build("none", {"dataset_a": 4, "dataset_b": 4})
 
-    model._build_encoding_networks(_encoder_config("none", ["dataset_a", "dataset_b"], LINEAR_NODE_EMBEDDER))
+    # null and a (ignored) LinearNodeEmbedder fall back to the pass-through node embedder too.
+    model._build_encoding_networks(_encoder_config("none", ["dataset_a", "dataset_b"], node_embedder))
 
-    assert len(model.encoder_src_projection) == 0
+    assert isinstance(model.encoder_src_projection["shared"], NoOpNodeEmbedder)
     assert model.encoder["shared"].in_channels_src == 4
     assert not model._encoder_projects_sources("shared")
+    assert not [k for k in model.state_dict() if k.startswith("encoder_src_projection.")]
 
 
 def test_none_rejects_source_datasets_of_differing_widths() -> None:
@@ -247,6 +264,20 @@ def test_none_encodes_the_one_source_dataset_present_in_the_batch() -> None:
     assert list(model.latent_aggregator.latents) == ["dataset_b"]
 
 
+def test_none_passes_the_source_through_its_noop_node_embedder() -> None:
+    from anemoi.models.layers.node_embedder import NoOpNodeEmbedder
+
+    model = _SharedEncoderModel()
+    model.encoder_fusing_strategy = {"shared": "none"}
+    model.encoder_src_projection = nn.ModuleDict({"shared": NoOpNodeEmbedder({"dataset_a": 4, "dataset_b": 4})})
+
+    with pytest.raises(_AggregationReached):
+        _forward_until_aggregation(model, ["dataset_b"])
+
+    # _SharedEncoder returns its source input as the latent: dataset_b is the second source, filled with 2.
+    torch.testing.assert_close(model.latent_aggregator.latents["dataset_b"], torch.full((1, 4), 2.0))
+
+
 def test_none_rejects_several_source_datasets_in_one_batch() -> None:
     model = _SharedEncoderModel()
     model.encoder_fusing_strategy = {"shared": "none"}
@@ -255,11 +286,15 @@ def test_none_rejects_several_source_datasets_in_one_batch() -> None:
         _forward_until_aggregation(model, ["dataset_a", "dataset_b"])
 
 
-def test_sequential_projects_each_source_through_its_node_embedder() -> None:
+@pytest.mark.parametrize("legacy_module_dict", [False, True])
+def test_sequential_projects_each_source_through_its_node_embedder(legacy_module_dict: bool) -> None:
     from anemoi.models.layers.node_embedder import LinearNodeEmbedder
 
     model = _SharedEncoderModel()
     node_embedder = LinearNodeEmbedder(num_channels=4, in_channels={"dataset_a": 4, "dataset_b": 4})
+    if legacy_module_dict:
+        # Models pickled before LinearNodeEmbedder hold a plain ModuleDict of per-dataset projections.
+        node_embedder = nn.ModuleDict(dict(node_embedder.items()))
     model.encoder_src_projection = nn.ModuleDict({"shared": node_embedder})
 
     with pytest.raises(_AggregationReached):
@@ -268,5 +303,5 @@ def test_sequential_projects_each_source_through_its_node_embedder() -> None:
     # _SharedEncoder returns its source input as the latent, so the latent is the node embedder output.
     with torch.no_grad():
         for value, name in enumerate(["dataset_a", "dataset_b"], start=1):
-            expected = node_embedder(torch.full((1, 4), float(value)), name)
+            expected = node_embedder[name](torch.full((1, 4), float(value)))
             torch.testing.assert_close(model.latent_aggregator.latents[name], expected)

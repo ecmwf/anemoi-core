@@ -57,7 +57,8 @@ choose stable, descriptive names.
      regional:
        source_datasets: [ "cerra" ]
        dataset_fusing_strategy: "none"
-       node_embedder: null           # ignored by "none"
+       node_embedder:                # pass-through: the mapper takes cerra's input as is
+         _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024
@@ -87,14 +88,14 @@ choose stable, descriptive names.
    How the source datasets of an encoder group are combined (see
    :ref:`usage-multi-dataset-shared-groups`):
 
-   - ``"none"`` (default): no fusion and no node embedder. The mapper takes the
-     assembled input of a source dataset directly, so its input channels are
+   - ``"none"`` (default): no fusion; the node embedder is the pass-through
+     ``NoOpNodeEmbedder``. The mapper takes the assembled input of a source dataset directly, so its input channels are
      that dataset's assembled input channels. Normally the group lists a single dataset. Several are
      allowed only if they have the same number of input channels and each batch holds at most
      one of them (multi-domain training). Training checks this against the
      data loading policy before it builds the model, and the model raises if a
      batch ever holds two.
-   - ``"sequential"``: the ``node_embedder`` projects every source dataset onto
+   - ``"sequential"``: a projecting ``node_embedder`` maps every source dataset onto
      ``node_embedder.num_channels``, the input channels of the mapper. Each dataset is
      then encoded in its own pass with the shared mapper weights, in the order
      listed in ``source_datasets``, and the latent aggregator combines the
@@ -105,13 +106,20 @@ choose stable, descriptive names.
    - ``"joint"``: planned, not yet supported. Setting it raises an error.
 
 ``node_embedder``
-   The per-dataset input projection of a ``"sequential"`` group; required
-   there, and ignored (with a warning) for ``"none"``. It must name a node embedder
-   class with ``_target_`` and a positive ``num_channels``. The available node embedder
-   is ``anemoi.models.layers.node_embedder.LinearNodeEmbedder``, which applies one linear layer
-   per source dataset. It uses the mapper's ``layer_kernels`` unless it sets its
-   own. Its weights appear in the state dict as
-   ``encoder_src_projection.<group>.<dataset>.*``.
+   The per-dataset input embedding applied before the encoder mapper, named by
+   ``_target_``. Two node embedders are available in
+   ``anemoi.models.layers.node_embedder``:
+
+   - ``NoOpNodeEmbedder`` passes each source dataset's input through unchanged,
+     much like ``NoOpProcessor`` stands in for a processor. It is the node embedder
+     of ``"none"`` groups and the default. ``null`` is read as
+     ``NoOpNodeEmbedder`` too, and any other node embedder set on a ``"none"``
+     group is ignored with a warning. It has no parameters.
+   - ``LinearNodeEmbedder`` applies one linear layer per source dataset onto a
+     positive ``num_channels``. ``"sequential"`` groups need it (or another
+     projecting node embedder); ``NoOpNodeEmbedder`` is rejected there. It uses
+     the mapper's ``layer_kernels`` unless it sets its own. Its weights appear in
+     the state dict as ``encoder_src_projection.<group>.<dataset>.*``.
 
 ``num_channels``
    Note that ``num_channels`` is configured **per mapper** (and on the
@@ -137,7 +145,7 @@ same batch, each is projected by the ``node_embedder``, encoded separately with 
 shared weights, and the latents are merged by the
 :ref:`latent aggregator <usage-latent-aggregator>`.
 
-With ``"none"`` there is no node embedder, and a batch may hold only one of the group's
+With ``"none"`` the node embedder passes the input through (``NoOpNodeEmbedder``), and a batch may hold only one of the group's
 datasets. Training rejects a ``"none"`` group whose datasets the loading policy
 puts in the same batch (``SynchronizedLoadingPolicy`` puts every dataset in every
 batch) before it builds the model. Together with ``MultiDomainLoadingPolicy`` (one domain per batch) this
