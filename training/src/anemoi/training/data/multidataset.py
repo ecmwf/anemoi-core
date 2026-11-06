@@ -194,7 +194,8 @@ class MultiDataset(Dataset):
         return capture.get()
 
     def tree(self) -> Tree:
-        tree = Tree(f"{self.__class__.__name__}")
+        prefix = "Fake " if self.fake_dataloading else ""
+        tree = Tree(prefix + f"{self.__class__.__name__}")
         for name, reader in self.data_readers.items():
             subtree = reader.tree(prefix=name)
             tree.add(subtree)
