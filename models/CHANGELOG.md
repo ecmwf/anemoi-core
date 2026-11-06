@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.21.0](https://github.com/ecmwf/anemoi-core/compare/models-0.20.0...models-0.21.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **models, training:** multi-domain training ([#1107](https://github.com/ecmwf/anemoi-core/issues/1107))
+
+### Features
+
+* **models, training:** Multi-domain training ([#1107](https://github.com/ecmwf/anemoi-core/issues/1107)) ([fd35b6a](https://github.com/ecmwf/anemoi-core/commit/fd35b6af8dca78cf5db234757052e72c9d208541))
+* **training,models:** Add radial spectral density to cartesian transforms, enable AMSE and PowerSpectrumLoss ([#1189](https://github.com/ecmwf/anemoi-core/issues/1189)) ([2bf4da2](https://github.com/ecmwf/anemoi-core/commit/2bf4da2c0f1f9919910cbd8b386af36984678219))
+
+
+### Bug Fixes
+
+* **models:** Condition ensemble encoder on prognostic residuals ([#1542](https://github.com/ecmwf/anemoi-core/issues/1542)) ([f73d7a7](https://github.com/ecmwf/anemoi-core/commit/f73d7a7386e5ff94e6a07efbec51633f6572e70f))
+* **models:** Sum in at least float32 in _reduce ([#1535](https://github.com/ecmwf/anemoi-core/issues/1535)) ([e8905ee](https://github.com/ecmwf/anemoi-core/commit/e8905eee22d1fa83c7da185fd736bf142bad2d24))
+
+
+### Performance Improvements
+
+* **training:** Move multiscale loss inside variable filter ([#1505](https://github.com/ecmwf/anemoi-core/issues/1505)) ([35554ca](https://github.com/ecmwf/anemoi-core/commit/35554ca97d15c3a8379732fc9a04e6746c2de5f8))
+
 ## [0.20.0](https://github.com/ecmwf/anemoi-core/compare/models-0.19.0...models-0.20.0) (2026-11-03)
 
 

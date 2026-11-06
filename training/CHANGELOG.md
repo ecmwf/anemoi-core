@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.18.0](https://github.com/ecmwf/anemoi-core/compare/training-0.17.2...training-0.18.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** energy score norm over a list of dimensions ([#1536](https://github.com/ecmwf/anemoi-core/issues/1536))
+* **models, training:** multi-domain training ([#1107](https://github.com/ecmwf/anemoi-core/issues/1107))
+
+### Features
+
+* **models, training:** Multi-domain training ([#1107](https://github.com/ecmwf/anemoi-core/issues/1107)) ([fd35b6a](https://github.com/ecmwf/anemoi-core/commit/fd35b6af8dca78cf5db234757052e72c9d208541))
+* **training,models:** Add radial spectral density to cartesian transforms, enable AMSE and PowerSpectrumLoss ([#1189](https://github.com/ecmwf/anemoi-core/issues/1189)) ([2bf4da2](https://github.com/ecmwf/anemoi-core/commit/2bf4da2c0f1f9919910cbd8b386af36984678219))
+* **training:** Energy score norm over a list of dimensions ([#1536](https://github.com/ecmwf/anemoi-core/issues/1536)) ([0495f35](https://github.com/ecmwf/anemoi-core/commit/0495f3514c7d34358fe4832974ad342a9560d155))
+* **training:** Record which checkpoint uuid a run was loaded from ([#1533](https://github.com/ecmwf/anemoi-core/issues/1533)) ([8455661](https://github.com/ecmwf/anemoi-core/commit/8455661be3c3168fa15431706e15bf372fdf2a5b))
+
+
+### Bug Fixes
+
+* **tests:** Update n320 dataset path in benchmark configs ([#1539](https://github.com/ecmwf/anemoi-core/issues/1539)) ([9e33154](https://github.com/ecmwf/anemoi-core/commit/9e331549e727fa9cdd95f01b32836072689ed615))
+* **training:** Give training checkpoint its own uuid ([#1543](https://github.com/ecmwf/anemoi-core/issues/1543)) ([06153e1](https://github.com/ecmwf/anemoi-core/commit/06153e1a63b952c8a889dda7dbf668b994f048ce))
+
+
+### Performance Improvements
+
+* **training:** Move multiscale loss inside variable filter ([#1505](https://github.com/ecmwf/anemoi-core/issues/1505)) ([35554ca](https://github.com/ecmwf/anemoi-core/commit/35554ca97d15c3a8379732fc9a04e6746c2de5f8))
+
 ## [0.17.2](https://github.com/ecmwf/anemoi-core/compare/training-0.17.0...training-0.17.2) (2026-11-03)
 
 
