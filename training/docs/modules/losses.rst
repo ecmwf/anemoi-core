@@ -243,8 +243,11 @@ also filters variable-dependent scalers to the selected predictions.
 
 For a ``CombinedLoss``, configure the variables on the child loss to which the
 selection applies. For a ``MultiscaleLossWrapper``, configure them on its
-``per_scale_loss``. Pairing differently named variables also enables the
-compatibility checks described in :ref:`variable-compatibility-checks`.
+``per_scale_loss``, and for a ``TimeAggregateLossWrapper`` on its ``loss_fn``.
+The variable selection is then applied around the whole wrapper, so the
+wrapper only smooths or aggregates the selected variables. Pairing differently
+named variables also enables the compatibility checks described in
+:ref:`variable-compatibility-checks`.
 
 ******************************
  Time Aggregate Loss Functions
@@ -842,6 +845,39 @@ Use this for global models on the reduced Gaussian grid (only N320 supported):
 Truncation is by default set to 319 for n320 grids, but can be set to a higher or lower value in the config file.
 This truncation parameter defines how many wave numbers are included in the spectral representation.
 
+.. _spectral-amse:
+
+Spectral AMSE
+=============
+
+``SpectralAMSELoss`` implements the Adjusted Mean Squared Error of Subich et al.
+(arXiv:2501.19374), which penalises per-wavenumber amplitude and phase-coherence
+errors. It works with every spectral transform: for the SHT family the wavenumber
+``L`` is the spherical-harmonic degree, while for ``fft2d`` and ``dct2d`` the
+``(ky, kx)`` plane is binned into radial wavenumber bands
+``L = round(sqrt(ky**2 + kx**2))``. This makes it usable on regular and
+limited-area grids; note that patch-wise ``fft2d`` (``patch_size`` set) is not
+supported.
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.spectral.SpectralAMSELoss
+         transform: fft2d
+         x_dim: 256
+         y_dim: 128
+
+With ``fft2d`` and ``dct2d`` the loss has one entry per radial band, so the
+:class:`~anemoi.training.losses.scalers.SpectralDimensionScaler` (see
+:ref:`spectral-loss-scalers`) must be sized to the number of bands:
+
+- ``fft2d``: ``round(sqrt((y_dim // 2)**2 + (x_dim // 2)**2)) + 1``
+  (144 for the example above)
+- ``dct2d``: ``round(sqrt((y_dim - 1)**2 + (x_dim - 1)**2)) + 1``
+  (286 for the example above)
+
 Power Spectrum Loss
 ===================
 
@@ -861,9 +897,12 @@ wavenumber :math:`m`, the loss is
                               - \sum_m |F_{lm}|^2 \Bigr)^{2}.
 
 The chosen spectral transform must provide a ``power_spectral_density``
-method, so ``PowerSpectrumLoss`` currently supports the SHT-based
-transforms (``regular_sht``, ``reduced_sht``, ``octahedral_sht``). For these,
-:math:`l` is the total wavenumber and :math:`m` the zonal wavenumber.
+method: the SHT-based transforms (``regular_sht``, ``reduced_sht``,
+``octahedral_sht``), where :math:`l` is the total wavenumber and :math:`m`
+the zonal wavenumber, and the 2D Cartesian transforms (``fft2d``, ``dct2d``),
+whose ``(ky, kx)`` plane is binned into radial wavenumber bands
+:math:`l = \mathrm{round}(\sqrt{k_y^2 + k_x^2})`. Patch-wise ``fft2d``
+(``patch_size`` set) is not supported.
 
 .. note::
 
@@ -871,6 +910,9 @@ transforms (``regular_sht``, ``reduced_sht``, ``octahedral_sht``). For these,
    on the grid dimension must be a
    :class:`~anemoi.training.losses.scalers.SpectralDimensionScaler` (sized to
    the spectral dimension), not a spatial weight such as ``node_weights``.
+   For the SHT family the spectral dimension is ``truncation + 1``; for
+   ``fft2d`` and ``dct2d`` it is the number of radial bands, see the formulas
+   under :ref:`spectral-amse`.
 
 Example configuration (octahedral SHT)
 --------------------------------------
@@ -1066,6 +1108,8 @@ and an error will be raised.
 If multiple groups are defined for a variable, the first group in the
 `variable_groups` is used. If the variable is not in any group, it is
 assigned to the default group.
+
+.. _spectral-loss-scalers:
 
 Spectral Loss Scalers
 =====================
