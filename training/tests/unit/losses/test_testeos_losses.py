@@ -119,3 +119,23 @@ def test_graph_smoothness_schema() -> None:
         "predicted_variables": ["z_500"],
     }
     TypeAdapter(LossSchemas).validate_python(config)
+
+
+def test_general_variable_weights_fall_back_from_level_to_base_to_default() -> None:
+    from omegaconf import DictConfig
+
+    from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.losses.scalers.variable import GeneralVariableLossScaler
+    from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+
+    names = ["z_500", "z_850", "t_850", "msl"]
+    data_indices = IndexCollection(DictConfig({"forcing": [], "diagnostic": []}), {n: i for i, n in enumerate(names)})
+    extractor = ExtractVariableGroupAndLevel({"default": "sfc", "pl": ["z", "t"]})
+    scaler = GeneralVariableLossScaler(
+        data_indices=data_indices,
+        weights=DictConfig({"default": 0.5, "z": 2.0, "z_500": 3.0}),
+        metadata_extractor=extractor,
+    )
+    values = scaler.get_scaling_values()
+    by_name = {name: values[idx].item() for name, idx in data_indices.model.output.name_to_index.items()}
+    assert by_name == {"z_500": 3.0, "z_850": 2.0, "t_850": 0.5, "msl": 0.5}

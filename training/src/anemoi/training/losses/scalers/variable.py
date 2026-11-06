@@ -51,7 +51,12 @@ class BaseVariableLossScaler(BaseScaler):
 
 
 class GeneralVariableLossScaler(BaseVariableLossScaler):
-    """Scaling per variable defined in config file."""
+    """Scaling per variable defined in config file.
+
+    A weight can be given for a variable's full name with its level or channel (``z_500: 250``),
+    for its base name (``z: 150``, applied to every level/channel without its own entry), and as
+    ``default``. The lookup falls back in that order.
+    """
 
     def __init__(
         self,
@@ -89,19 +94,11 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
 
         for variable_name, idx in self.data_indices.model.output.name_to_index.items():
             _, variable_ref, _ = self.variable_metadata_extractor.get_group_and_level(variable_name)
-            # Apply variable scaling by variable name
-            # or base variable name (variable_ref: variable name without variable level)
+            # Exact variable name (e.g. z_500, iasi_337) first, then the base variable name
+            # (variable_ref: the name without its level/channel, e.g. z), then the default.
             variable_loss_scaling[idx] = self.weights.get(
-                variable_ref,
-                self.weights.get("default", 1.0),
+                variable_name,
+                self.weights.get(variable_ref, self.weights.get("default", 1.0)),
             )
-            if variable_ref != variable_name:
-                assert (
-                    self.weights.get(
-                        variable_name,
-                        None,
-                    )
-                    is None
-                ), f"Variable {variable_name} is not allowed to have a separate scaling besides {variable_ref}."
 
         return variable_loss_scaling
