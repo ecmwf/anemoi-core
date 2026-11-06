@@ -11,9 +11,11 @@ import uuid
 from typing import Optional
 
 import torch
+from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric.data import HeteroData
 
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sample import create_batched_struct
@@ -21,6 +23,8 @@ from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.models.utils.graphs import build_graph
+from anemoi.utils.config import DotDict
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -121,31 +125,19 @@ class AnemoiModelInterface(torch.nn.Module):
             self.pre_processors[dataset_name] = pre
             self.post_processors[dataset_name] = post
 
-        # Instantiate the model
-        # Only pass _target_ and _convert_ from model config to avoid passing nested model settings as kwargs.
-        model_instantiate_config = {
-            "_target_": self.config.model.model._target_,
-            "_convert_": getattr(self.config.model.model, "_convert_", "none"),
-        }
-        graph_config = self.config.graph
-        if not graph_config.get("nodes"):
-            # Existing-graph mode: the model loads the pre-built graph from system.input.graph.
-            system_input = (self.config.get("system") or {}).get("input") or {}
-            graph_config = {**graph_config, "path": system_input.get("graph")}
-
-        self.model = instantiate(
-            model_instantiate_config,
+        # Instantiate the model. The class is called directly rather than through hydra's instantiate,
+        # which would convert the dynamic graph config (keyed by edge-type tuples) to an OmegaConf node.
+        self.graph_data, dynamic_graph_config = self._build_graph()
+        model_class = get_class(self.config.model.model._target_)
+        self.model = model_class(
             model_config=self.config.model,
-            model_graph_config=graph_config,
+            static_graph_data=self.graph_data,
+            dynamic_graph_config=dynamic_graph_config,
             data_indices=self.data_indices,
             statistics=self.statistics,
-            data_types=self.data_types,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
-            _recursive_=False,  # Disables recursive instantiation by Hydra
         )
-        # The model builds the graph from the graph config; spatial projectors read their edges from it.
-        self.graph_data = self.model._graph_data
 
         # Spatial preprocessors (e.g. CrossGridProjector for downscaling).
         # Keyed by dataset name; empty by default so existing models are unaffected.
@@ -165,6 +157,21 @@ class AnemoiModelInterface(torch.nn.Module):
 
         # Use the forward method of the model directly
         self.forward = self.model.forward
+
+    def _build_graph(self) -> tuple[HeteroData, DotDict]:
+        """Build the static graph and the dynamic graph configuration from ``config.graph``.
+
+        The graph stored at ``system.input.graph`` is loaded unless ``graph.overwrite`` is set; the
+        static nodes and edges of the config missing from it are then built. The dynamic part of
+        the config (nodes and edges touching tabular datasets) is built by the model per batch.
+        """
+        system_input = (self.config.get("system") or {}).get("input") or {}
+        return build_graph(
+            DotDict(self.config.graph),
+            is_dataset_static={name: data_type == "gridded" for name, data_type in self.data_types.items()},
+            hidden_nodes_name=self.config.model.model.hidden_nodes_name,
+            graph_path=system_input.get("graph"),
+        )
 
     def apply_spatial_pre_processors(self, batch: Batch, model_comm_group: Optional[ProcessGroup] = None) -> Batch:
         """Project each dataset that has a spatial preprocessor onto its graph node set.
