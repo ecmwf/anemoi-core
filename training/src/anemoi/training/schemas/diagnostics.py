@@ -56,6 +56,7 @@ class LossPlotFnSchema(GenericSchema):
     Built-in loss plot options
     --------------------------
     - ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn``
+    - ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_contribution_plot_fn``
 
     Custom functions are accepted — pass any dotted import path and bind
     extra kwargs via ``_partial_: true``.
@@ -123,6 +124,31 @@ class LossCurvePlotSchema(PydanticBaseModel):
     "Batch frequency to plot at."
     plot_fn: LossPlotFnSchema | None = Field(default=None)
     "Hydra-instantiable plot function (use ``_partial_: true``). ``None`` uses the default."
+    steps: list[str] | None = Field(default=None, examples=[["rstep7"]])
+    "Forecast step labels to plot (e.g. ``rstep7``). ``None`` plots every forecast step."
+
+
+class PlotLossCorrectedSchema(PydanticBaseModel):
+    """Config schema for :class:`PlotLossCorrected`.
+
+    Mirrors :class:`LossCurvePlotSchema` — the callback subclasses
+    ``LossCurvePlot`` and only overrides how the prediction is scored.
+    """
+
+    model_config = {"extra": "allow", "populate_by_name": True}
+
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLossCorrected"] = Field(alias="_target_")
+    "PlotLossCorrected object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(default_factory=lambda: ["data"], examples=["data"])
+    "List of dataset names to plot. Defaults to ``['data']``."
+    parameter_groups: dict[str, list[str]]
+    "Dictionary with parameter groups with parameter names as key."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at."
+    plot_fn: LossPlotFnSchema | None = Field(default=None)
+    "Hydra-instantiable plot function (use ``_partial_: true``). ``None`` uses the default."
+    steps: list[str] | None = Field(default=None, examples=[["rstep7"]])
+    "Forecast step labels to plot (e.g. ``rstep7``). ``None`` plots every forecast step."
 
 
 class MatplotlibColormapSchema(BaseModel):
@@ -212,10 +238,12 @@ class BatchOutputPlotSchema(PydanticBaseModel):
     "Batch frequency to plot at, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
     "Region of interest to restrict plots to."
+    steps: list[str] | None = Field(default=None, examples=[["rstep7"]])
+    "Forecast step labels to plot (e.g. ``rstep7``). ``None`` plots every forecast step."
 
 
 PlotCallbacks = Annotated[
-    GraphFeaturePlotSchema | LossCurvePlotSchema | BatchOutputPlotSchema,
+    GraphFeaturePlotSchema | LossCurvePlotSchema | PlotLossCorrectedSchema | BatchOutputPlotSchema,
     Field(discriminator="target_"),
 ]
 

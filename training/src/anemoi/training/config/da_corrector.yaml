@@ -1,0 +1,49 @@
+defaults:
+  - data: zarr
+  - dataloader: native_grid
+  - diagnostics: evaluation
+  - system: example
+  - graph: multi_scale_corrector
+  - model: graphtransformer
+  - task: da_forecaster
+  - training: da_single
+  - override training/corrector: graphtransformer
+  - _self_
+
+config_validation: True
+
+diagnostics:
+  log:
+    mlflow:
+      tracking_uri: null
+
+# Supply a dataset containing hirs_* and mwt_* channels and the metadata below.
+# Adapt the inherited forcing, diagnostic, and preprocessing settings to that dataset.
+system:
+  input:
+    dataset: ???
+
+data:
+  datasets:
+    data:
+      corrector:
+        - hirs_view_zenith_angle
+        - mwt_view_zenith_angle
+
+# Model sharding requires batch size one on each rank.
+dataloader:
+  batch_size:
+    training: 1
+    validation: 1
+    test: 1
+
+training:
+  corrector:
+    # Both instruments use the shared architecture, with separate learned weights.
+    instrument_groups:
+      hirs:
+        corrector_variables: [hirs_view_zenith_angle]
+        channels: null # Selects output names beginning with hirs_.
+      mwt:
+        corrector_variables: [mwt_view_zenith_angle]
+        channels: null # Selects output names beginning with mwt_.

@@ -35,6 +35,30 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
+    supports_skip_input: bool = True
+    supports_categorical_embeddings: bool = True
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        """Default subclasses that override ``forward`` to not supporting ``skip_input``.
+
+        ``forward`` threads ``skip_input`` to ``_assemble_input``; a subclass that
+        replaces it drops the tensor on the floor via ``**kwargs`` unless it threads
+        it too. Inheriting the parent's ``True`` would therefore advertise support
+        that is not there, and callers checking the flag would be misled rather than
+        protected. A subclass that does honour ``skip_input`` opts back in by setting
+        ``supports_skip_input = True`` in its own body.
+        """
+        super().__init_subclass__(**kwargs)
+        if "supports_skip_input" not in cls.__dict__ and cls.forward is not AnemoiModelEncProcDec.forward:
+            cls.supports_skip_input = False
+        # Same reasoning for categorical embeddings: a subclass that rebuilds the encoder
+        # input or its width would otherwise feed raw codes into a mis-sized encoder.
+        if "supports_categorical_embeddings" not in cls.__dict__ and (
+            cls._assemble_input is not AnemoiModelEncProcDec._assemble_input
+            or cls._calculate_input_dim is not AnemoiModelEncProcDec._calculate_input_dim
+        ):
+            cls.supports_categorical_embeddings = False
+
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
         # Encoder data -> hidden
@@ -98,9 +122,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Dropout probabilities are handled in anemoi-training and only a list of
         # dropped dataset names is passed into forward.
         self.principal_dataset_name = model_config.model.get("principal_dataset", self.dataset_names[0])
-        assert self.principal_dataset_name in self.dataset_names, (
-            "Configured principal dataset given in config file '%s' not in dataset_names=%s."
-            % (self.principal_dataset_name, self.dataset_names)
+        assert (
+            self.principal_dataset_name in self.dataset_names
+        ), "Configured principal dataset given in config file '%s' not in dataset_names=%s." % (
+            self.principal_dataset_name,
+            self.dataset_names,
         )
         assert (
             isinstance(self.processor, NoOpProcessor)
@@ -185,11 +211,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_sizes: DatasetShardSizes | None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
+        skip_input: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, ShardSizes]:
         """Assemble the encoder source features and the residual skip for a single dataset.
 
         Flattens the raw input over ``(batch, ensemble, grid)`` and ``(time, vars)``, concatenates
         the per-node attributes on the feature dimension, and computes the residual skip tensor.
+        The encoder always sees ``x``; ``skip_input``, when given, replaces it as the
+        source of the additive skip connection only.
 
         Returns
         -------
@@ -202,7 +231,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
         x_skip = self.residual[dataset_name](
-            x,
+            x if skip_input is None else skip_input,
             grid_shard_sizes=grid_shard_sizes,
             model_comm_group=model_comm_group,
             n_step_output=self.n_step_output,
@@ -210,6 +239,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
+
+        # After the residual, which reads the raw columns: swap raw categorical codes for embeddings.
+        # getattr: models pickled before categorical embeddings existed lack the attribute.
+        if dataset_name in getattr(self, "categorical_embeddings", {}):
+            x = self._embed_categorical_inputs(x, dataset_name)
 
         # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(
@@ -345,6 +379,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_sizes: DatasetShardSizes | None = None,
         dropped_dataset_names: list[str] | set[str] | None = None,
         decoder_dropped_dataset_names: list[str] | set[str] | None = None,
+        skip_input: Optional[dict[str, Tensor]] = None,
         **kwargs,
     ) -> dict[str, Tensor]:
         """Forward pass of the model.
@@ -358,6 +393,20 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
+        dropped_dataset_names : list[str] | set[str], optional
+            Datasets dropped for this forward pass: masked in the latent
+            aggregator and their decoder output replaced by NaN.
+        decoder_dropped_dataset_names : list[str] | set[str], optional
+            Datasets that still feed the encoder but whose decoder output is
+            replaced by NaN.
+        skip_input : Optional[dict[str, Tensor]], optional
+            Per-dataset tensors, same shape as ``x``, replacing ``x`` as the source
+            of the additive skip connection. The encoder still sees ``x``, so this
+            decouples what informs the prediction from what is added back to it.
+            Already normalized and, under grid sharding, sharded consistently with
+            ``x``. ``None`` (the default) leaves the residual reading ``x``.
+        **kwargs
+            Additional keyword arguments (unused).
 
         Returns
         -------
@@ -397,12 +446,22 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             if dataset_name not in self.input_datasets:
                 continue
 
+            # Indexed strictly: a missing skip_input key means the caller believes it
+            # supplied a residual base and did not. Falling back to x would silently
+            # restore the very tensor the override exists to replace, so a KeyError is
+            # the safer failure.
+            dataset_skip_input = None if skip_input is None else skip_input[dataset_name]
+            assert dataset_skip_input is None or dataset_skip_input.shape == x[dataset_name].shape, (
+                f"skip_input['{dataset_name}'] shape {tuple(dataset_skip_input.shape)} must match "
+                f"x shape {tuple(x[dataset_name].shape)}."
+            )
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
                 x[dataset_name],
                 batch_size=batch_size,
                 grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
+                skip_input=dataset_skip_input,
             )
             x_skip_dict[dataset_name] = x_skip
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
