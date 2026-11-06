@@ -9,7 +9,11 @@
 
 import numpy as np
 import scipy
+from scipy.spatial import cKDTree
 from typeguard import typechecked
+
+from anemoi.graphs import EARTH_RADIUS
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 
 
 def get_coordinates_ordering(coords: np.ndarray) -> np.ndarray:
@@ -105,3 +109,76 @@ def selection_matrix(idx: np.ndarray, num_diagonals: int) -> scipy.sparse.csr_ma
         diagonal matrix with ones at selected indices (idx,idx).
     """
     return scipy.sparse.csr_matrix((np.ones(len(idx)), (idx, idx)), dtype=bool, shape=(num_diagonals, num_diagonals))
+
+
+def compute_field_gradient(
+    source_coords: np.ndarray,
+    values: np.ndarray,
+    query_coords: np.ndarray,
+    num_neighbours: int = 12,
+    chunk_size: int = 100_000,
+) -> np.ndarray:
+    """Gradient magnitude of a scattered field, per kilometre, at arbitrary coordinates.
+
+    For each query point, fits a plane to the ``num_neighbours`` nearest source points
+    in the local tangent plane. Source points with missing values are ignored. A locally
+    constant field has a gradient of exactly 0, and so do query points outside the
+    source points, where the fit would be an extrapolation.
+
+    Parameters
+    ----------
+    source_coords : np.ndarray of shape (N, 2)
+        Latitude and longitude of the source points, in radians.
+    values : np.ndarray of shape (N,)
+        Field values at the source points.
+    query_coords : np.ndarray of shape (M, 2)
+        Latitude and longitude of the query points, in radians.
+    num_neighbours : int, optional
+        Number of source points used in each fit, by default 12.
+    chunk_size : int, optional
+        Number of query points processed at once, by default 100000.
+
+    Returns
+    -------
+    np.ndarray of shape (M,)
+        Gradient magnitude of the field, in field units per kilometre.
+    """
+    values = np.asarray(values, dtype=np.float64)
+    valid = np.isfinite(values)
+    assert valid.sum() >= 3, "At least 3 source points with valid values are needed to compute a gradient."
+    source_xyz = latlon_rad_to_cartesian_np(np.asarray(source_coords, dtype=np.float64)[valid], radius=EARTH_RADIUS)
+    values = values[valid]
+
+    query_coords = np.asarray(query_coords, dtype=np.float64)
+    query_xyz = latlon_rad_to_cartesian_np(query_coords, radius=EARTH_RADIUS)
+    lat, lon = query_coords[:, 0], query_coords[:, 1]
+    east = np.stack([-np.sin(lon), np.cos(lon), np.zeros_like(lon)], axis=-1)
+    north = np.stack([-np.sin(lat) * np.cos(lon), -np.sin(lat) * np.sin(lon), np.cos(lat)], axis=-1)
+
+    num_neighbours = min(num_neighbours, len(values))
+    _, neighbours = cKDTree(source_xyz).query(query_xyz, k=num_neighbours, workers=-1)
+    neighbours = neighbours.reshape(len(query_coords), num_neighbours)
+
+    gradient = np.empty(len(query_coords))
+    for start in range(0, len(query_coords), chunk_size):
+        chunk = slice(start, start + chunk_size)
+        offsets = source_xyz[neighbours[chunk]] - query_xyz[chunk][:, None]
+        design = np.stack(
+            [
+                np.ones(offsets.shape[:2]),
+                np.einsum("nkj,nj->nk", offsets, east[chunk]),
+                np.einsum("nkj,nj->nk", offsets, north[chunk]),
+            ],
+            axis=-1,
+        )
+        local_values = values[neighbours[chunk]]
+        # Relative to one neighbour rather than the mean, so a constant field gives exactly 0.
+        local_values = local_values - local_values[:, :1]
+        coefficients = np.einsum("nij,nj->ni", np.linalg.pinv(design), local_values)
+        gradient[chunk] = np.hypot(coefficients[:, 1], coefficients[:, 2])
+
+        # The fit is meaningless when extrapolating. On the edge of the data the centroid of a
+        # half-disc of neighbours is near 0.42 of its radius; farther out it tends to 1.
+        centroid_distance = np.linalg.norm(offsets.mean(axis=1), axis=-1)
+        gradient[chunk][centroid_distance > 0.6 * np.linalg.norm(offsets, axis=-1).max(axis=1)] = 0.0
+    return gradient
