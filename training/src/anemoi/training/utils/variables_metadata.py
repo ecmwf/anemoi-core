@@ -38,6 +38,8 @@ def extract_variables_metadata_from_checkpoint(
 def check_variables_metadata_compatibility(
     ckpt_variables_metadata: dict[str, dict] | None,
     dataset_metadata: dict[str, dict],
+    *,
+    allow_subset: bool = False,
     **options: object,
 ) -> None:
     """Check unit compatibility between checkpoint and dataset variables_metadata.
@@ -54,6 +56,12 @@ def check_variables_metadata_compatibility(
     dataset_metadata : dict[str, dict]
         Per-dataset metadata from the current datamodule. Each entry is expected to have
         a ``"variables_metadata"`` key.
+    allow_subset : bool, optional
+        When True, tolerate the current data being a subset of the checkpoint's variables
+        (fine-tuning into a model with FEWER variables, issue #838): variables present only
+        in the checkpoint are dropped before the check, since there is no counterpart in the
+        current data to compare against. Unit compatibility is still enforced for every
+        shared variable. Default False keeps the strict equal-variable-set check.
     **options : object
         Additional keyword arguments forwarded to ``Variable.check_compatibility``
         (e.g. ``ignore_units``, ``ignore_processing_period``).
@@ -80,14 +88,28 @@ def check_variables_metadata_compatibility(
 
         if ds_var_meta is None:
             LOG.warning(
-                "Dataset '%s' does not contain variables_metadata. "
-                "Skipping unit compatibility check for this dataset.",
+                "Dataset '%s' does not contain variables_metadata. Skipping unit compatibility check for this dataset.",
                 dataset_name,
             )
             continue
 
         ckpt_vars = {name: Variable.from_dict(name, data) for name, data in ckpt_var_meta.items()}
         ds_vars = {name: Variable.from_dict(name, data) for name, data in ds_var_meta.items()}
+
+        if allow_subset:
+            # Fine-tuning into FEWER variables (issue #838): only the shared variables can be
+            # unit-checked. Variables present only in the checkpoint have no counterpart in the
+            # current data, so drop them here instead of failing the equal-set check.
+            ckpt_only = [name for name in ckpt_vars if name not in ds_vars]
+            if ckpt_only:
+                LOG.warning(
+                    "Skipping unit compatibility for %d checkpoint-only variable(s) absent from "
+                    "dataset '%s' (allow_variable_subset): %s",
+                    len(ckpt_only),
+                    dataset_name,
+                    sorted(ckpt_only),
+                )
+                ckpt_vars = {name: var for name, var in ckpt_vars.items() if name in ds_vars}
 
         try:
             Variable.check_compatibility(ckpt_vars, ds_vars, **options)
@@ -127,14 +149,12 @@ def check_loss_variable_units_compatibility(
         return
 
     for pred_var, target_var in zip(predicted_variables, target_variables, strict=True):
-
         if pred_var == target_var:
             continue
 
         if pred_var not in variables_metadata:
             LOG.warning(
-                "Predicted variable '%s' not found in variables_metadata. "
-                "Skipping unit check for pair ('%s', '%s').",
+                "Predicted variable '%s' not found in variables_metadata. Skipping unit check for pair ('%s', '%s').",
                 pred_var,
                 pred_var,
                 target_var,

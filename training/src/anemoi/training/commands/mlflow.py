@@ -24,7 +24,7 @@ def prepare_mlflow_run_id(
     config: dict,
     owner: str = getpass.getuser(),
     run_name: str | None = None,
-) -> None:
+) -> tuple[str, str]:
     """Prepare MLflow run metadata.
 
     Parameters
@@ -45,6 +45,7 @@ def prepare_mlflow_run_id(
     """
     import mlflow
 
+    from anemoi.training.checkpoint.sources.run import run_identity_from_config
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
     from anemoi.utils.mlflow.client import AnemoiMlflowClient
 
@@ -57,15 +58,26 @@ def prepare_mlflow_run_id(
         else client.create_experiment(config.diagnostics.log.mlflow.experiment_name)
     )
 
-    # Parse configuration
-    if config.training.run_id is not None:  # Existing run_id
-        LOGGER.info("Existing run_id: %s", config.training.run_id)
+    # An existing run to attach to is expressed as a resume RunIdSource under
+    # training.checkpoint.source (a fork mints a fresh run, so it falls through to
+    # creating one below). The source class decides what the block means
+    # (``run_identity_from_config`` resolves it through ``source_class_from_config``),
+    # so a subclass of RunIdSource attaches like its parent; matching the end of the
+    # ``_target_`` string here is how this command and the trainer drifted apart.
+    existing_run_id = run_identity_from_config(config)[0]
+
+    if existing_run_id is not None:  # Existing run_id
+        LOGGER.info("Existing run_id: %s", existing_run_id)
         try:
-            client.get_run(config.training.run_id)
+            client.get_run(existing_run_id)
         except ValueError as e:
             msg = "Invalid run_id provided."
             raise ValueError(msg) from e
-        return None
+        # Return the run being attached to, not None: the caller unpacks two values
+        # and writes them to the metadata file the launch script reads. Returning
+        # None raised ``TypeError: cannot unpack non-sequence NoneType object`` and
+        # left that file unwritten.
+        return existing_run_id, experiment_id
 
     # Create a new run attached to the experiment
     run_name = run_name if run_name is not None else config.diagnostics.log.mlflow.run_name

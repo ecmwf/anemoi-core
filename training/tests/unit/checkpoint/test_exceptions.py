@@ -143,6 +143,21 @@ class TestCheckpointNotFoundError:
         assert "attempted_locations" in error.details
         assert error.details["path"] == "/main/path.ckpt"
 
+    @pytest.mark.unit
+    def test_checkpoint_not_found_error_suggests_similar_files(self, tmp_path: Path) -> None:
+        """A missing file whose directory holds other checkpoints names them as similar files."""
+        (tmp_path / "sibling.ckpt").write_bytes(b"x")
+        (tmp_path / "other.pt").write_bytes(b"y")
+
+        assert "Found similar files" in str(CheckpointNotFoundError(tmp_path / "missing.ckpt"))
+
+    @pytest.mark.unit
+    def test_checkpoint_not_found_error_reports_a_missing_directory(self, tmp_path: Path) -> None:
+        """A missing parent directory is reported as such."""
+        error = CheckpointNotFoundError(tmp_path / "nonexistent_dir" / "model.ckpt")
+
+        assert "Directory does not exist" in str(error)
+
 
 class TestCheckpointLoadError:
     """Test CheckpointLoadError functionality."""
@@ -281,6 +296,16 @@ class TestCheckpointIncompatibleError:
 
         assert isinstance(error, CheckpointError)
         assert isinstance(error, CheckpointIncompatibleError)
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("field", ["missing_keys", "unexpected_keys"])
+    def test_checkpoint_incompatible_error_truncates_long_key_lists(self, field: str) -> None:
+        """Key lists longer than five are cut to five entries plus an '... and N more' tail."""
+        keys = [f"layer.{i}.weight" for i in range(6)]
+        text = str(CheckpointIncompatibleError("Mismatch", **{field: keys}))
+
+        assert "... and 1 more" in text
+        assert keys[5] not in text
 
 
 class TestCheckpointSourceError:

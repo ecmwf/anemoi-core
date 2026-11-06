@@ -108,6 +108,8 @@ def _get_checkpoint_callback(diagnostics_cfg: DictConfig, checkpoint_paths_cfg: 
     ckpt_frequency_save_dict = {}
 
     for key, frequency_dict in diagnostics_cfg.checkpoint.items():
+        if key == "exclude_hyperparameters" or frequency_dict is None:
+            continue
         frequency = frequency_dict.save_frequency
         n_saved = frequency_dict.num_models_saved
         if key == "every_n_minutes" and frequency_dict.save_frequency is not None:

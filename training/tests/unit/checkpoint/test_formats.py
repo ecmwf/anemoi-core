@@ -144,6 +144,16 @@ class TestFormatFromData:
         """Test that empty dict returns pytorch (no matching keys)."""
         assert detect_format_from_data({}) == "pytorch"
 
+    @pytest.mark.unit
+    def test_two_lightning_auxiliary_keys_without_version_detect_lightning(self) -> None:
+        """Two Lightning auxiliary keys are enough to classify as lightning, with no version key."""
+        assert detect_format_from_data({"callbacks": {}, "optimizer_states": [{}]}) == "lightning"
+
+    @pytest.mark.unit
+    def test_unrecognised_non_tensor_values_default_to_pytorch(self) -> None:
+        """A non-empty dict whose values are not tensors is neither lightning nor a raw state dict."""
+        assert detect_format_from_data({"foo": 1, "bar": "baz"}) == "pytorch"
+
 
 class TestFormatLoading:
     """Test checkpoint loading functionality."""
@@ -376,6 +386,12 @@ class TestFormatAvailability:
     def test_state_dict_format_always_available(self) -> None:
         """Test that state dict format is always available."""
         assert is_format_available("state_dict") is True
+
+    @pytest.mark.unit
+    def test_unsupported_formats_are_not_available(self) -> None:
+        """Safetensors and unknown format names report as unavailable."""
+        assert is_format_available("safetensors") is False
+        assert is_format_available("unknown") is False
 
 
 class TestFormatIntegration:

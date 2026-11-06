@@ -38,7 +38,7 @@ def test_filter_state_dict_removes_shape_mismatches() -> None:
 
 
 def test_filter_state_dict_does_not_mutate_input() -> None:
-    """Critical: PR #458 uses non-mutating filter. Legacy code mutated. We do NOT mutate."""
+    """``filter_state_dict`` returns new dicts and leaves its input unchanged."""
     source = {"a": torch.randn(3), "b": torch.randn(5)}
     target = {"a": torch.randn(3), "b": torch.randn(10)}
     original_keys = set(source.keys())
@@ -46,3 +46,21 @@ def test_filter_state_dict_does_not_mutate_input() -> None:
     filter_state_dict(source, target)
 
     assert set(source.keys()) == original_keys
+
+
+def test_filter_state_dict_maps_each_skipped_key_to_its_reason() -> None:
+    source = {
+        "shared.weight": torch.full((5, 10), 1.0),  # matches
+        "missing_key": torch.full((3,), 2.0),  # absent from target
+        "mismatch_key": torch.full((7, 10), 3.0),  # present but wrong shape
+    }
+    target = {
+        "shared.weight": torch.full((5, 10), 0.0),
+        "mismatch_key": torch.full((5, 10), 0.0),
+    }
+
+    filtered, skipped = filter_state_dict(source, target)
+
+    assert "shared.weight" in filtered
+    assert skipped["missing_key"] == "Key not in target"
+    assert skipped["mismatch_key"].startswith("Shape mismatch:")
