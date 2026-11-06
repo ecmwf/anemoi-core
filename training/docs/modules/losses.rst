@@ -185,6 +185,28 @@ Select it through ``model.compile``:
      compile:
        - module: anemoi.training.losses.WaveletEnergyScoreLoss
 
+For example, on N320 (10 scales up to T319), with the grid-point work compiled
+and the checkpoints switched off:
+
+.. code-block:: yaml
+
+   training:
+     training_loss:
+       datasets:
+         your_dataset_name:
+           _target_: anemoi.training.losses.WaveletEnergyScoreLoss
+           transform: reduced_sht
+           grid: n320
+           scale_weights: [0, 0, 0, 0, 0, 0, 1.0, 1.0, 1.0, 0]
+           checkpoint_scales: false
+           variables_per_checkpoint: null
+           scalers: [pressure_level, general_variable, node_weights, time_steps]
+
+   model:
+     compile:
+       # keep the modules your model config already lists
+       - module: anemoi.training.losses.WaveletEnergyScoreLoss
+
 ************************
  Combined Loss Functions
 ************************
