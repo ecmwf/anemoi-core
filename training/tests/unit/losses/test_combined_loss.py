@@ -124,18 +124,19 @@ def test_combined_loss_forwards_graph_context_to_nested_multiscale_loss() -> Non
     graph = HeteroData()
     captured: dict[str, object] = {}
 
-    def fake_load_smoothing_matrices(
+    def fake_build_smoothers(
         self: MultiscaleLossWrapper,
         multiscale_config: dict[str, object],
         graph_data: HeteroData | None,
         data_node_name: str | None,
+        sparse_projector_backend: str,
     ) -> list[None]:
-        del self, multiscale_config
+        del self, multiscale_config, sparse_projector_backend
         captured["graph_data"] = graph_data
         captured["data_node_name"] = data_node_name
         return [None]
 
-    with patch.object(MultiscaleLossWrapper, "_load_smoothing_matrices", fake_load_smoothing_matrices):
+    with patch.object(MultiscaleLossWrapper, "_build_smoothers", fake_build_smoothers):
         loss = get_loss_function(
             DictConfig(
                 {
@@ -145,10 +146,10 @@ def test_combined_loss_forwards_graph_context_to_nested_multiscale_loss() -> Non
                             "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
                             "weights": [1.0],
                             "multiscale_config": {
-                                "num_scales": 1,
-                                "base_num_nearest_neighbours": 1,
-                                "base_sigma": 1.0,
+                                "num_nearest_neighbours": 1,
+                                "sigmas": [1.0],
                             },
+                            "sparse_projector_backend": "torch",
                             "per_scale_loss": {"_target_": "anemoi.training.losses.MSELoss"},
                         },
                     ],

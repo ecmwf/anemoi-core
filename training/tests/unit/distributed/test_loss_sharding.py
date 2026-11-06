@@ -36,7 +36,7 @@ N_TIME = 2
 N_MEMBERS = 3
 GRID_AXIS = 3
 LOSS_GRAPH = {"edges_name": ["data", "to", "data"], "edge_weight_attribute": "weight", "row_normalize": True}
-SMOOTHING = {"num_scales": 2, "base_num_nearest_neighbours": 4, "base_sigma": 0.05}
+SMOOTHING = {"num_nearest_neighbours": 8, "sigmas": [0.1, 0.05]}
 # Fewer, as many as, and more variables than the 2 or 3 ranks, so some ranks get no variable
 # when the variables are shared out for smoothing or for the graph scores.
 VARIABLE_COUNTS = (1, 2, 3, 4)
@@ -65,6 +65,7 @@ def _loss_builders(graph: HeteroData) -> dict[str, Callable[[bool], BaseLoss]]:
             weights=[1.0, 0.5, 0.25],
             multiscale_config=SMOOTHING,
             graph_data=graph,
+            sparse_projector_backend="torch",
             ignore_nans=ignore_nans,
         ),
         "graph energy": lambda ignore_nans: GraphEnergyScoreLoss(

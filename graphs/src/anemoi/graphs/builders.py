@@ -20,6 +20,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+import torch
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
@@ -27,6 +28,10 @@ from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from anemoi.graphs.projection_helpers import DEFAULT_GAUSSIAN_NORM
 
 LOGGER = logging.getLogger(__name__)
+
+# Nodes per KNN search in build_neighbour_table. A block of 2**20 nodes with K=128 needs a few GB;
+# the blocks are kept large because tree-based searches rebuild their tree per block.
+NEIGHBOUR_TABLE_BLOCK_SIZE = 2**20
 
 
 def _knn_edge_cfg(
@@ -54,36 +59,56 @@ def _knn_edge_cfg(
     }
 
 
-def _expand_smoother_config(cfg: dict | Any) -> dict[str, dict]:
-    """Return an explicit ``{name: spec}`` smoothers dict from cfg.
+def build_neighbour_table(
+    graph_data: HeteroData,
+    data_node_name: str,
+    num_nearest_neighbours: int,
+    block_size: int = NEIGHBOUR_TABLE_BLOCK_SIZE,
+) -> torch.Tensor:
+    """Table of the K nearest data nodes of every data node, the node itself included.
 
-    Accepts either an already-explicit ``smoothers`` mapping or a compact
-    geometric-progression spec (``num_scales``, ``base_num_nearest_neighbours``,
-    ``base_sigma``, …).
+    Uses the search of :class:`~anemoi.graphs.edges.KNNEdges`, so the result matches the edges it
+    would build, but runs it block by block into an ``(N, K)`` table instead of a full edge index.
+
+    Parameters
+    ----------
+    graph_data:
+        Main graph; data-node coordinates are read from here.
+    data_node_name:
+        Node type in *graph_data* that holds the data-grid coordinates.
+    num_nearest_neighbours:
+        Neighbours per node, the node itself included.
+    block_size:
+        Nodes per search.
+
+    Returns
+    -------
+    torch.Tensor
+        ``int32`` table of shape ``(num_nodes, num_nearest_neighbours)``.
     """
-    if OmegaConf.is_config(cfg):
-        cfg = OmegaConf.to_container(cfg, resolve=True)
+    from anemoi.graphs.edges import KNNEdges
 
-    smoothers = cfg.get("smoothers")
-    if smoothers:
-        return dict(smoothers)
+    builder = KNNEdges(data_node_name, data_node_name, num_nearest_neighbours)
+    nodes = graph_data[data_node_name]
+    coords, _ = builder.get_cartesian_node_coordinates(nodes, nodes)
+    search_kwargs = builder.prepare_method_kwargs()
 
-    num_scales = cfg.get("num_scales")
-    if num_scales is None:
-        return {}
-
-    base_neighbours = cfg["base_num_nearest_neighbours"]
-    base_sigma = cfg["base_sigma"]
-    scale_factor = cfg.get("scale_factor", 2)
-
-    smoothers = {}
-    for i in range(num_scales):
-        factor = scale_factor**i
-        smoothers[f"smooth_{factor}x"] = {
-            "num_nearest_neighbours": base_neighbours * factor,
-            "sigma": round(base_sigma * factor, 5),
-        }
-    return smoothers
+    num_nodes = coords.shape[0]
+    table = torch.empty(num_nodes, num_nearest_neighbours, dtype=torch.int32, device=builder.device)
+    for start in range(0, num_nodes, block_size):
+        block = coords[start : start + block_size]
+        sources, targets = builder.compute_edge_index_from_coords(coords, block, **search_kwargs)
+        counts = torch.bincount(targets, minlength=block.shape[0])
+        if not bool((counts == num_nearest_neighbours).all()):
+            raise ValueError(
+                f"Every node of '{data_node_name}' needs exactly {num_nearest_neighbours} neighbours, "
+                f"found between {int(counts.min())} and {int(counts.max())}."
+            )
+        # Group the edges by target node if the search did not.
+        if not bool((targets[1:] >= targets[:-1]).all()):
+            sources = sources[torch.argsort(targets, stable=True)]
+        table[start : start + block.shape[0]] = sources.reshape(-1, num_nearest_neighbours).to(table.device)
+    return table
 
 
 def build_node_to_node_projection_subgraph(
@@ -204,56 +229,4 @@ def build_truncation_subgraph(
             ],
         }
     )
-    return GraphCreator(config).update_graph(subgraph)
-
-
-def build_smoother_subgraph(
-    graph_data: HeteroData,
-    data_node_name: str,
-    smoother_config: Mapping | Any,
-) -> HeteroData:
-    """Build a ``HeteroData`` with self-loop smoother edges over data nodes.
-
-    Creates a fresh subgraph that shares data-node coordinates by reference
-    (no copy/clone) with *graph_data* and adds KNN self-loop edges.
-    Edge name is ``(data_node_name, "to", data_node_name)``.
-
-    Parameters
-    ----------
-    graph_data:
-        Main graph; data-node coordinates are read from here by reference.
-    data_node_name:
-        Node type in *graph_data* that holds the data-grid coordinates.
-    smoother_config:
-        Single-smoother mapping with keys: ``num_nearest_neighbours`` and
-        ``sigma``. Edge weights use ``gauss_weight`` with ``l1``-normalised
-        Gaussian distances.
-
-    Returns
-    -------
-    HeteroData
-        Subgraph with self-loop KNN smoother edges over *data_node_name*.
-    """
-    from anemoi.graphs.create import GraphCreator
-
-    if OmegaConf.is_config(smoother_config):
-        smoother_config = OmegaConf.to_container(smoother_config, resolve=True)
-
-    num_nearest_neighbours = smoother_config["num_nearest_neighbours"]
-    sigma = smoother_config["sigma"]
-
-    subgraph = HeteroData()
-    # Share tensors by reference — no copy of the underlying coordinate data.
-    subgraph[data_node_name].x = graph_data[data_node_name].x
-    subgraph[data_node_name].num_nodes = graph_data[data_node_name].num_nodes
-
-    config = OmegaConf.create(
-        {
-            "nodes": {},
-            "edges": [
-                _knn_edge_cfg(data_node_name, data_node_name, num_nearest_neighbours, sigma),
-            ],
-        }
-    )
-
     return GraphCreator(config).update_graph(subgraph)

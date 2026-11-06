@@ -18,7 +18,7 @@ from anemoi.models.preprocessing.cross_grid_projector import CrossGridProjector
 # ---------------------------------------------------------------------------
 
 
-def _make_projector(n_src: int = 8, n_dst: int = 4) -> CrossGridProjector:
+def _make_projector(n_src: int = 8, n_dst: int = 4, backend: str = "torch") -> CrossGridProjector:
     """Build a CrossGridProjector from a synthetic .npz sparse matrix."""
     import pathlib
     import tempfile
@@ -36,7 +36,7 @@ def _make_projector(n_src: int = 8, n_dst: int = 4) -> CrossGridProjector:
 
     tmp = pathlib.Path(tempfile.mktemp(suffix=".npz"))
     save_npz(str(tmp), mat)
-    projector = CrossGridProjector(file_path=tmp, row_normalize=False)
+    projector = CrossGridProjector(file_path=tmp, row_normalize=False, backend=backend)
     tmp.unlink()
     return projector
 
@@ -108,3 +108,8 @@ class TestCrossGridProjector:
         expected, _ = projector(x)
         actual, _ = loaded(x)
         assert torch.allclose(expected, actual)
+
+
+@pytest.mark.parametrize("backend", ["triton", "torch"])
+def test_cross_grid_projector_passes_its_backend_to_the_projection(backend: str) -> None:
+    assert _make_projector(backend=backend).provider.backend == backend
