@@ -21,6 +21,8 @@ concrete training method so that:
   activation-checkpointed to save memory without changing gradients.
 - A training-only per-instrument corrector network is applied to predictions
   before the loss (never for state advancement).
+- Losses that declare ``needs_reference`` (e.g. ``SpectralIncrementSmoothnessLoss``) get
+  the step's residual base as ``reference``, so they can penalise the increment.
 
 The mixin carries no ensemble concerns. Subclasses adapt it through three hooks,
 :meth:`_prepare_state`, :meth:`_step_forward_kwargs` and :meth:`_output_prediction`,
@@ -103,6 +105,46 @@ class DATrainingMixin:
         """
         del validation_mode
         return y_pred
+
+    @property
+    def _loss_needs_reference(self) -> bool:
+        """Whether any configured leaf loss consumes the residual base (``needs_reference``)."""
+        # Not cached: a property on an nn.Module must not raise AttributeError (it would be
+        # masked by Module.__getattr__), and the leaf walk is a handful of Python objects.
+        losses = self.__dict__.get("_modules", {}).get("loss") or {}
+        return any(
+            getattr(leaf, "needs_reference", False) for loss in losses.values() for leaf in loss.iter_leaf_losses()
+        )
+
+    def _loss_reference(
+        self,
+        base: dict[str, torch.Tensor],
+        y_pred: dict[str, torch.Tensor],
+        cold_start: bool,
+    ) -> dict[str, torch.Tensor | None]:
+        """Residual base of this step in the prediction's (model-output) layout, per dataset.
+
+        ``base`` is what the model's residual saw: ``skip_input`` when one was passed (the
+        model background after a DA step), otherwise the step input ``x``. Its last input
+        time is broadcast over the output times (the residual does the same) and written
+        into the prognostic output positions; diagnostics have no base and are NaN, which
+        the increment loss rejects if they are selected. Detached: the penalty targets the
+        increment produced at this step, not the state it started from.
+
+        At the DA cold start (an all-zero ``skip_input`` before any background exists) the
+        base is not a state, so every dataset gets ``None`` and the loss contributes zero.
+        """
+        if cold_start:
+            return dict.fromkeys(y_pred)
+        reference = {}
+        for dataset_name, pred in y_pred.items():
+            prog_in = self.data_indices[dataset_name].model.input.prognostic
+            prog_out = self.data_indices[dataset_name].model.output.prognostic
+            last = base[dataset_name][:, -1:, ..., prog_in].detach()
+            ref = torch.full_like(pred, float("nan"))
+            ref[..., prog_out] = last.expand(-1, pred.shape[1], *last.shape[2:]).to(pred.dtype)
+            reference[dataset_name] = ref
+        return reference
 
     def _init_correctors(self, graph_data: HeteroData) -> None:
         """Build per-instrument corrector networks for each dataset with corrector variables.
@@ -325,6 +367,14 @@ class DATrainingMixin:
                     y_target = {
                         name: t.index_select(-1, self._loss_target_idx(name, t.device)) for name, t in y.items()
                     }
+                    reference_kwargs = {}
+                    if self._loss_needs_reference:
+                        # Step 0 with a skip_input is the all-zero DA cold start (no background yet).
+                        reference_kwargs["reference"] = self._loss_reference(
+                            skip_input if skip_input is not None else x,
+                            y_for_loss,
+                            cold_start=(i == 0 and skip_input is not None),
+                        )
                     loss_next, metrics_next, _ = checkpoint(
                         self.compute_loss_metrics,
                         y_for_loss,
@@ -334,6 +384,7 @@ class DATrainingMixin:
                         pred_layout=IndexSpace.MODEL_OUTPUT,
                         target_layout=IndexSpace.DATA_OUTPUT,
                         use_reentrant=False,
+                        **reference_kwargs,
                     )
                     if loss_next is not None:
                         loss = loss + weight * loss_next

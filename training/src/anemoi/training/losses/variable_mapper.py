@@ -295,6 +295,30 @@ class LossVariableMapper(BaseLossWrapper):
         remapped_scaler_indices = (*scaler_indices[:-1], self._restore_indexer_type(mapped_indices, variable_indexer))
         return remapped_scaler_indices, len(mapped_indices) == 0
 
+    @staticmethod
+    def _filter_reference(loss_kwargs: dict[str, Any], pred_indices: list[int]) -> dict[str, Any]:
+        """Filter a residual-base ``reference`` with the prediction indices.
+
+        The reference (SpectralIncrementSmoothnessLoss) is in the prediction's layout, so it must be
+        filtered like the prediction to stay channel-aligned. Other kwargs pass through unchanged.
+
+        Parameters
+        ----------
+        loss_kwargs : dict[str, Any]
+            Keyword arguments for the wrapped loss.
+        pred_indices : list[int]
+            Prediction indices selected by this mapper.
+
+        Returns
+        -------
+        dict[str, Any]
+            The keyword arguments, with ``reference`` filtered if it is a tensor.
+        """
+        reference = loss_kwargs.get("reference")
+        if isinstance(reference, torch.Tensor):
+            loss_kwargs["reference"] = reference[..., pred_indices].contiguous()
+        return loss_kwargs
+
     def forward(
         self,
         pred: torch.Tensor,
@@ -346,7 +370,7 @@ class LossVariableMapper(BaseLossWrapper):
         pred_filtered = pred_filtered.contiguous()
         target_filtered = target_filtered.contiguous()
 
-        loss_kwargs = dict(kwargs)
+        loss_kwargs = self._filter_reference(dict(kwargs), pred_indices)
         loss_kwargs.update(
             {
                 "scaler_indices": scaler_indices,

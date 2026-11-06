@@ -16,6 +16,7 @@ from .graph_energy_score import GraphEnergyScoreLoss
 from .graph_smoothness import GraphLaplacianSmoothnessLoss
 from .graph_variogram_score import GraphVariogramScoreLoss
 from .huber import HuberLoss
+from .increment_smoothness import SpectralIncrementSmoothnessLoss
 from .kcrps import CRPS
 from .logcosh import LogCoshLoss
 from .loss import get_loss_function
@@ -63,6 +64,7 @@ __all__ = [
     "RefractivityOperatorLoss",
     "SpectralAMSELoss",
     "SpectralCRPSLoss",
+    "SpectralIncrementSmoothnessLoss",
     "TargetIdentityLoss",
     "TimeAggregateLossWrapper",
     "WeightedMSELoss",

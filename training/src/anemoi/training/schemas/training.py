@@ -649,6 +649,29 @@ class GraphSmoothnessLossSchema(BaseLossSchema):
     "Optional path to a file containing an edge_index tensor."
 
 
+class SpectralIncrementSmoothnessLossSchema(BaseLossSchema):
+    """Schema for SpectralIncrementSmoothnessLoss."""
+
+    target_: Literal["anemoi.training.losses.SpectralIncrementSmoothnessLoss"] = Field(..., alias="_target_")
+    "Spectral smoothness penalty on the increment (pred - residual base)."
+    transform: Literal["octahedral_sht", "reduced_sht"] = "octahedral_sht"
+    "Spherical-harmonic transform; octahedral_sht needs nlat, reduced_sht needs grid."
+    nlat: int | None = Field(default=None, gt=0)
+    "Number of latitudes of the octahedral grid (192 for O96)."
+    grid: str | None = None
+    "Reduced Gaussian grid name for reduced_sht (n320)."
+    truncation: int | None = Field(default=None, gt=0)
+    "Optional spectral truncation."
+    order: int = Field(default=2, ge=1)
+    "Number of Laplacians: 1 = Laplacian, 2 = biharmonic."
+    length_scale_km: float = Field(default=100.0, gt=0.0)
+    "Length unit of the operator (penalty in length_scale^(4*order))."
+    penalty_weight: float = 1.0
+    "Multiplier on the penalty."
+    ignore_nans: bool = False
+    "Must be False: spectral transforms cannot handle NaNs."
+
+
 class BandNaNAwareMSELossSchema(BaseLossSchema):
     """Schema for BandNaNAwareMSELoss (validation metric restricted to a latitude band)."""
 
@@ -751,6 +774,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.GraphEnergyScoreLoss": "graph_energy_score",
     "anemoi.training.losses.EnergyScoreLoss": "energy_score",
     "anemoi.training.losses.GraphLaplacianSmoothnessLoss": "graph_smoothness",
+    "anemoi.training.losses.SpectralIncrementSmoothnessLoss": "increment_smoothness",
     "anemoi.training.losses.RefractivityOperatorLoss": "refractivity_operator",
     "anemoi.training.losses.TargetIdentityLoss": "target_identity",
     "anemoi.training.losses.BandNaNAwareMSELoss": "band_nan_aware_mse",
@@ -801,6 +825,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
             | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
+            | Annotated[SpectralIncrementSmoothnessLossSchema, Tag("increment_smoothness")]
             | Annotated[RefractivityOperatorLossSchema, Tag("refractivity_operator")]
             | Annotated[TargetIdentityLossSchema, Tag("target_identity")]
             | Annotated[BandNaNAwareMSELossSchema, Tag("band_nan_aware_mse")]
@@ -865,6 +890,7 @@ LossSchemas = Annotated[
     | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
     | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
+    | Annotated[SpectralIncrementSmoothnessLossSchema, Tag("increment_smoothness")]
     | Annotated[RefractivityOperatorLossSchema, Tag("refractivity_operator")]
     | Annotated[TargetIdentityLossSchema, Tag("target_identity")]
     | Annotated[BandNaNAwareMSELossSchema, Tag("band_nan_aware_mse")]

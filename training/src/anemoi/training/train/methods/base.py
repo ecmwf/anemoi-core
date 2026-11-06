@@ -772,6 +772,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             loss_kwargs["pred_layout"] = pred_layout
         if target_layout is not None:
             loss_kwargs["target_layout"] = target_layout
+        if "reference" in _kwargs:
+            # Residual base for increment losses (SpectralIncrementSmoothnessLoss); other losses ignore it.
+            loss_kwargs["reference"] = _kwargs["reference"]
         if getattr(loss, "needs_shard_layout_info", False):
             # grid_shard_sizes must stay consistent with grid_shard_slice: if the tensors were
             # gathered to the full grid (grid_shard_slice is None), the loss must be told it is
@@ -872,6 +875,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             validation_mode=validation_mode,
             dataset_name=dataset_name,
         )
+        reference = kwargs.get("reference")
+        was_gathered = grid_shard_slice is None and self.grid_shard_slice[dataset_name] is not None
+        if isinstance(reference, torch.Tensor) and was_gathered:
+            # The prediction was gathered to the full grid; the reference must follow it.
+            kwargs["reference"] = gather_tensor(
+                reference,
+                self.grid_dim,
+                self.grid_shard_sizes[dataset_name],
+                self.model_comm_group,
+            )
 
         loss = self._compute_loss(
             y_pred=y_pred_full,
@@ -923,13 +936,19 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         assert isinstance(y, dict), "y must be a dict keyed by dataset name"
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
+        # ``reference`` (residual base per dataset, for increment losses) arrives keyed by dataset
+        # name; each dataset's loss gets its own tensor (or None when it has no background).
+        references = kwargs.pop("reference", None)
         for dataset_name in self.target_dataset_names:
+            dataset_kwargs = dict(kwargs)
+            if references is not None:
+                dataset_kwargs["reference"] = references.get(dataset_name)
             dataset_loss, dataset_metrics, y_preds[dataset_name] = self.compute_dataset_loss_metrics(
                 y_pred[dataset_name],
                 y[dataset_name],
                 validation_mode=validation_mode,
                 dataset_name=dataset_name,
-                **kwargs,
+                **dataset_kwargs,
             )
 
             if dataset_loss is not None:
