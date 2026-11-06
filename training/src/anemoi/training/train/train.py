@@ -485,6 +485,7 @@ class AnemoiTrainer(ABC):
             "provenance_training": gather_provenance_info(),
             "timestamp": datetime.datetime.now(tz=datetime.UTC),
             "metadata_inference": metadata_inference,
+            "checkpoint_lineage": [],
         }
         self.datamodule.fill_metadata(md_dict)
         self.task.fill_metadata(md_dict)
