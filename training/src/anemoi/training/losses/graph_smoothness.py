@@ -104,7 +104,8 @@ class GraphLaplacianSmoothnessLoss(BaseLoss):
             )
             raise ValueError(msg)
 
-        edge_index = graph_data[edge_type].edge_index.long()
+        # The graph may be built on the GPU; the buffers are moved with the module later.
+        edge_index = graph_data[edge_type].edge_index.long().cpu()
         num_nodes = graph_data[src_nodes_name].num_nodes
         degree = torch.zeros(num_nodes, dtype=torch.float32)
         degree.scatter_add_(0, edge_index[0], torch.ones(edge_index.shape[1], dtype=torch.float32))
