@@ -96,26 +96,33 @@ to the icosahedron outside and inside the area of interest respectively.
  Adaptive stretched graph
 **************************
 
-The class `AdaptiveTriNodes` builds the same mesh as `StretchedTriNodes`
-and then adds nodes where a variable of your choice has large gradients
-inside the area of interest. The variable is read from the dataset of
-the reference nodes, which must be `AnemoiDatasetNodes`, and its first
-time step is used. For every edge of the ``lam_resolution`` icosahedron
+The class `AdaptiveStretchedTriNodes` builds the same mesh as `StretchedTriNodes`
+and then adds nodes where an attribute of your choice has large
+gradients inside the area of interest. The attribute is read from the
+reference nodes, so those nodes must come first in the graph config. For
+every edge of the ``lam_resolution`` icosahedron
 whose two end nodes are among those with the largest gradients, a node
-is added at the edge midpoint. With surface geopotential (``variable:
-z``), for example, this halves the local node spacing over complex
+is added at the edge midpoint. With surface geopotential, for example,
+this halves the local node spacing over complex
 terrain without refining the whole area of interest.
 
 .. code:: yaml
 
    nodes:
+     data:
+       node_builder: ...
+       attributes:
+         z_orog:
+           _target_: anemoi.graphs.nodes.attributes.AnemoiDatasetVariableWeights
+           variable: z
+           norm: unit-max
      hidden: # name of the nodes
        node_builder:
-         _target_: anemoi.graphs.nodes.AdaptiveTriNodes
+         _target_: anemoi.graphs.nodes.AdaptiveStretchedTriNodes
          global_resolution: 7
          lam_resolution: 10
          reference_node_name: data
-         variable: z
+         reference_node_attr_name: z_orog
          gradient_threshold_percentile: 75  # optional, refines the top 25%
          gradient_num_neighbours: 12  # optional
          mask_attr_name: cutout_mask  # optional
@@ -124,8 +131,8 @@ terrain without refining the whole area of interest.
 
 The gradient at each point comes from a plane fitted to its
 ``gradient_num_neighbours`` nearest reference nodes. The result depends
-on the resolution of the dataset: a field on a grid coarser than the
-mesh gives smoother gradients.
+on the resolution of the reference nodes: a field on a grid coarser
+than the mesh gives smoother gradients.
 
 The added nodes are vertices of the ``lam_resolution + 1`` icosahedron,
 so the nodes support `MultiScaleEdges` with ``scale_resolutions:
@@ -140,12 +147,12 @@ lam_resolution + 1``. Nodes with a gradient of 0 are never refined.
  Field-following nodes without a grid
 **************************************
 
-Two more builders place nodes according to the gradient of a dataset
-variable, without keeping the icosahedron structure. Neither supports
+Two more builders place nodes according to the gradient of an attribute
+of the reference nodes, without keeping the icosahedron structure. Neither supports
 `MultiScaleEdges`, so connect their nodes with `KNNEdges` or
 `CutOffEdges`.
 
-`ProbabilisticIcosahedralNodes` builds the same mesh as
+`ProbabilisticStretchedTriNodes` builds the same mesh as
 `StretchedTriNodes` and adds ``extra_nodes_percent`` % more nodes inside
 the area of interest. Candidates on a 0.02° grid are taken from the
 largest gradient to the smallest, and each is kept only if it is at
@@ -157,11 +164,11 @@ every other node. Nodes with a gradient of 0 are skipped.
    nodes:
      hidden:
        node_builder:
-         _target_: anemoi.graphs.nodes.ProbabilisticIcosahedralNodes
+         _target_: anemoi.graphs.nodes.ProbabilisticStretchedTriNodes
          global_resolution: 7
          lam_resolution: 10
          reference_node_name: data
-         variable: z
+         reference_node_attr_name: z_orog
          extra_nodes_percent: 10  # optional
          min_dist_factor: 0.5  # optional
 
@@ -181,7 +188,7 @@ uniformly.
        node_builder:
          _target_: anemoi.graphs.nodes.ProbabilisticNodes
          reference_node_name: data
-         variable: z
+         reference_node_attr_name: z_orog
          num_nodes_global: 40000
          num_nodes_lam: 60000
          compression_global: 10

@@ -180,7 +180,7 @@ class LimitedAreaMask(BooleanBaseNodeAttribute):
         assert "_area_mask_builder" in nodes, (
             f"{self.__class__.__name__} requires an '_area_mask_builder' attribute. "
             "Use only with node builders that define a LAM boundary "
-            "(e.g. StretchedTriNodes, AdaptiveTriNodes)."
+            "(e.g. StretchedTriNodes, AdaptiveStretchedTriNodes)."
         )
         lam_mask = nodes["_area_mask_builder"].get_mask(nodes.x)
         return lam_mask

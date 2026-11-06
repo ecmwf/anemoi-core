@@ -15,9 +15,9 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges import MultiScaleEdges
 from anemoi.graphs.generate.transforms import cartesian_to_latlon_rad
-from anemoi.graphs.nodes import AdaptiveTriNodes
-from anemoi.graphs.nodes import ProbabilisticIcosahedralNodes
+from anemoi.graphs.nodes import AdaptiveStretchedTriNodes
 from anemoi.graphs.nodes import ProbabilisticNodes
+from anemoi.graphs.nodes import ProbabilisticStretchedTriNodes
 from anemoi.graphs.nodes import StretchedTriNodes
 from anemoi.graphs.nodes.builders import from_adaptive
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
@@ -29,55 +29,49 @@ LAM_RESOLUTION = 7
 
 
 @pytest.fixture
-def reference_graph(monkeypatch) -> HeteroData:
-    """Data nodes on a 0.1 deg grid with a fake dataset.
+def reference_graph() -> HeteroData:
+    """Data nodes on a 0.1 deg grid with three attributes.
 
-    The dataset has a 3000 m Gaussian mountain at (46N, 8E) as ``z``, the same mountain at
-    (45.5N, 7.5E) as ``other``, and a constant as ``flat``.
+    ``z`` is a 3000 m Gaussian mountain at (46N, 8E), ``other`` the same mountain at
+    (45.5N, 7.5E), and ``flat`` a constant.
     """
     lat_g, lon_g = np.meshgrid(np.arange(45.0, 47.01, 0.1), np.arange(7.0, 9.01, 0.1), indexing="ij")
     lat, lon = lat_g.ravel(), lon_g.ravel()
 
     def mountain(lat0, lon0):
-        return 3000.0 * np.exp(-((lat - lat0) ** 2 + (lon - lon0) ** 2) / (2 * 0.4**2))
-
-    variables = {"z": mountain(46.0, 8.0), "other": mountain(45.5, 7.5), "flat": np.full(len(lat), 500.0)}
-
-    def fake_open_dataset(dataset, select):
-        assert dataset == "fake.zarr"
-        return variables[select][np.newaxis, np.newaxis, np.newaxis]
-
-    monkeypatch.setattr(from_adaptive, "open_dataset", fake_open_dataset)
+        values = 3000.0 * np.exp(-((lat - lat0) ** 2 + (lon - lon0) ** 2) / (2 * 0.4**2))
+        return torch.tensor(values, dtype=torch.float32).unsqueeze(-1)
 
     graph = HeteroData()
     graph["data"].x = torch.tensor(np.deg2rad(np.stack([lat, lon], axis=-1)), dtype=torch.float32)
-    graph["data"]["_dataset"] = "fake.zarr"
+    graph["data"]["z"] = mountain(46.0, 8.0)
+    graph["data"]["other"] = mountain(45.5, 7.5)
+    graph["data"]["flat"] = torch.full((len(lat), 1), 500.0)
     return graph
 
 
-def _build(graph: HeteroData, variable: str = "z", attrs: dict | None = None) -> HeteroData:
-    builder = AdaptiveTriNodes(GLOBAL_RESOLUTION, LAM_RESOLUTION, "data", variable, "hidden")
+def _build(graph: HeteroData, attr_name: str = "z", attrs: dict | None = None) -> HeteroData:
+    builder = AdaptiveStretchedTriNodes(GLOBAL_RESOLUTION, LAM_RESOLUTION, "data", attr_name, "hidden")
     graph = builder.update_graph(graph, attrs or {})
     return StretchedTriNodes(GLOBAL_RESOLUTION, LAM_RESOLUTION, "base", "data").update_graph(graph, {})
 
 
 def test_init():
-    builder = AdaptiveTriNodes(GLOBAL_RESOLUTION, LAM_RESOLUTION, "data", "z", "hidden")
+    builder = AdaptiveStretchedTriNodes(GLOBAL_RESOLUTION, LAM_RESOLUTION, "data", "z", "hidden")
     assert isinstance(builder, BaseNodeBuilder)
     assert builder.gradient_threshold_percentile == 75.0
 
 
-def test_requires_dataset_reference_nodes(reference_graph):
-    del reference_graph["data"]["_dataset"]
-    with pytest.raises(AssertionError, match="AnemoiDatasetNodes"):
-        _build(reference_graph)
+def test_requires_the_attribute_on_the_reference_nodes(reference_graph):
+    with pytest.raises(AssertionError, match="missing"):
+        _build(reference_graph, "missing")
 
 
-def test_variable_is_chosen_in_the_config(reference_graph):
-    """Another variable moves the extra nodes to where that variable has large gradients."""
+def test_attribute_is_chosen_in_the_config(reference_graph):
+    """Another attribute moves the extra nodes to where that attribute has large gradients."""
 
-    def mean_distance(variable, peak):
-        graph = _build(reference_graph.clone(), variable)
+    def mean_distance(attr_name, peak):
+        graph = _build(reference_graph.clone(), attr_name)
         extra = torch.rad2deg(graph["hidden"].x[graph["base"].num_nodes :])
         assert len(extra) > 0
         return torch.linalg.norm(extra - torch.tensor(peak), dim=1).mean()
@@ -154,11 +148,11 @@ def test_poisson_disk_sample_keeps_min_distance(monkeypatch):
     assert _min_pairwise_distance_rad(accepted.astype(float)) > min_dist * (1 - 1e-5)
 
 
-class TestProbabilisticIcosahedralNodes:
+class TestProbabilisticStretchedTriNodes:
 
-    def _build(self, graph, variable="z"):
-        builder = ProbabilisticIcosahedralNodes(
-            GLOBAL_RESOLUTION, LAM_RESOLUTION, "data", variable, "hidden", extra_nodes_percent=50
+    def _build(self, graph, attr_name="z"):
+        builder = ProbabilisticStretchedTriNodes(
+            GLOBAL_RESOLUTION, LAM_RESOLUTION, "data", attr_name, "hidden", extra_nodes_percent=50
         )
         graph = builder.update_graph(graph, {})
         return StretchedTriNodes(GLOBAL_RESOLUTION, LAM_RESOLUTION, "base", "data").update_graph(graph, {})
@@ -181,10 +175,10 @@ class TestProbabilisticIcosahedralNodes:
 
 class TestProbabilisticNodes:
 
-    def _build(self, graph, variable="z", compression_lam=0.1, seed=42):
+    def _build(self, graph, attr_name="z", compression_lam=0.1, seed=42):
         builder = ProbabilisticNodes(
             "hidden",
-            variable,
+            attr_name,
             "data",
             num_nodes_global=200,
             num_nodes_lam=150,
@@ -209,10 +203,9 @@ class TestProbabilisticNodes:
         uniform = self._build(reference_graph, compression_lam=10.0)
         assert median_distance_to_peak(steep) < 0.7 * median_distance_to_peak(uniform)
 
-    def test_does_not_depend_on_the_units(self, reference_graph, monkeypatch):
+    def test_does_not_depend_on_the_units(self, reference_graph):
         reference = self._build(reference_graph)
-        fake = from_adaptive.open_dataset
-        monkeypatch.setattr(from_adaptive, "open_dataset", lambda ds, select: 1e-6 * fake(ds, select))
+        reference_graph["data"]["z"] = 1e-6 * reference_graph["data"]["z"]
         torch.testing.assert_close(self._build(reference_graph), reference)
 
     def test_seed(self, reference_graph):

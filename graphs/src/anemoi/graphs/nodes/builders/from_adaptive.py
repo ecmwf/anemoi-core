@@ -14,27 +14,19 @@ import torch
 from sklearn.neighbors import BallTree
 from torch_geometric.data import HeteroData
 
-from anemoi.datasets import open_dataset
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.generate.transforms import cartesian_to_latlon_rad
 from anemoi.graphs.generate.tri_icosahedron import create_stretched_tri_nodes
 from anemoi.graphs.generate.utils import compute_field_gradient
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
+from anemoi.graphs.utils import haversine_distance
 
 LOGGER = logging.getLogger(__name__)
 
 # Accepted nodes are added to the BallTree in batches of this size; until then they are
 # checked by brute force.
 _TREE_REBUILD_INTERVAL = 1000
-
-
-def _haversine_rad(coord: np.ndarray, others: np.ndarray) -> np.ndarray:
-    """Great-circle distance (radians) from one [lat, lon] point to an array of points."""
-    dlat = others[:, 0] - coord[0]
-    dlon = others[:, 1] - coord[1]
-    a = np.sin(dlat / 2) ** 2 + np.cos(coord[0]) * np.cos(others[:, 0]) * np.sin(dlon / 2) ** 2
-    return 2 * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))
 
 
 def _poisson_disk_sample(
@@ -75,7 +67,9 @@ def _poisson_disk_sample(
             break
         if tree is not None and tree.query(coord.reshape(1, -1), k=1)[0][0, 0] <= min_dist_rad:
             continue
-        if pending and _haversine_rad(coord, np.asarray(pending)).min() <= min_dist_rad:
+        if pending and haversine_distance(torch.as_tensor(coord)[None], torch.as_tensor(np.asarray(pending))).min() <= (
+            min_dist_rad
+        ):
             continue
         accepted.append(coord)
         pending.append(coord)
@@ -88,21 +82,20 @@ def _poisson_disk_sample(
 
 
 class BaseFieldDrivenNodeBuilder(BaseNodeBuilder):
-    """Base class for node builders driven by a dataset variable and a LAM domain.
+    """Base class for node builders driven by an attribute of other nodes and a LAM domain.
 
-    Subclasses must implement :meth:`get_coordinates`. The first time step of
-    ``variable`` is read from the dataset of the reference nodes, which must be
-    :class:`~anemoi.graphs.nodes.AnemoiDatasetNodes`.
+    Subclasses must implement :meth:`get_coordinates`. The attribute is read from the
+    reference nodes, which must be defined before these nodes in the graph config.
 
     Parameters
     ----------
     name : str
         Key for the node set in the HeteroData graph.
-    variable : str
-        Dataset variable whose gradient decides where nodes are placed.
+    reference_node_attr_name : str
+        Attribute of the reference nodes whose gradient decides where nodes are placed.
     reference_node_name : str
         Name of the reference node set, used to define the LAM boundary and to read
-        ``variable``.
+        ``reference_node_attr_name``.
     mask_attr_name : str or None, optional
         Node attribute to use as the LAM boundary mask.
     margin_radius_km : float, optional
@@ -114,7 +107,7 @@ class BaseFieldDrivenNodeBuilder(BaseNodeBuilder):
     def __init__(
         self,
         name: str,
-        variable: str,
+        reference_node_attr_name: str,
         reference_node_name: str,
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
@@ -122,7 +115,7 @@ class BaseFieldDrivenNodeBuilder(BaseNodeBuilder):
     ) -> None:
         super().__init__(name)
         assert gradient_num_neighbours >= 3, "gradient_num_neighbours must be at least 3."
-        self.variable = variable
+        self.reference_node_attr_name = reference_node_attr_name
         self.reference_node_name = reference_node_name
         self.gradient_num_neighbours = gradient_num_neighbours
         self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
@@ -131,32 +124,32 @@ class BaseFieldDrivenNodeBuilder(BaseNodeBuilder):
     def register_nodes(self, graph: HeteroData) -> HeteroData:
         self.area_mask_builder.fit(graph)
         reference = graph[self.reference_node_name]
-        assert "_dataset" in reference, (
-            f"{self.__class__.__name__} reads '{self.variable}' from the dataset of the reference nodes, "
-            f"but '{self.reference_node_name}' has none. Use AnemoiDatasetNodes for the reference nodes."
+        assert self.reference_node_attr_name in reference.node_attrs(), (
+            f"{self.__class__.__name__} needs attribute '{self.reference_node_attr_name}' on the reference nodes "
+            f"'{self.reference_node_name}'. Define it there, and define those nodes first in the graph config."
         )
         self._source_coords = reference.x.cpu().numpy()
-        self._source_values = np.asarray(open_dataset(reference["_dataset"], select=self.variable)[0]).squeeze()
-        assert len(self._source_values) == len(self._source_coords), (
-            f"Variable '{self.variable}' has {len(self._source_values)} values, "
-            f"but '{self.reference_node_name}' has {len(self._source_coords)} nodes."
+        self._source_values = reference[self.reference_node_attr_name].cpu().numpy().squeeze()
+        assert self._source_values.ndim == 1, (
+            f"Attribute '{self.reference_node_attr_name}' must have one value per node, "
+            f"got shape {reference[self.reference_node_attr_name].shape}."
         )
         return super().register_nodes(graph)
 
     def compute_gradient(self, coords: np.ndarray) -> np.ndarray:
-        """Gradient magnitude of ``variable`` at the given [lat, lon] coordinates (radians)."""
+        """Gradient magnitude of the attribute at the given [lat, lon] coordinates (radians)."""
         return compute_field_gradient(
             self._source_coords, self._source_values, coords, num_neighbours=self.gradient_num_neighbours
         )
 
 
-class AdaptiveTriNodes(BaseFieldDrivenNodeBuilder):
-    """Hidden mesh refined where a dataset variable has large gradients.
+class AdaptiveStretchedTriNodes(BaseFieldDrivenNodeBuilder):
+    """Hidden mesh refined where an attribute of the reference nodes has large gradients.
 
     Builds a StretchedTriNodes base mesh (``global_resolution`` outside LAM,
     ``lam_resolution`` inside LAM) and inserts extra nodes at the sphere-surface
     midpoints of all edges whose both endpoints are LAM nodes with a gradient of
-    ``variable`` above ``gradient_threshold_percentile``.  With surface geopotential,
+    the attribute above ``gradient_threshold_percentile``.  With surface geopotential,
     for example, the midpoint strategy halves the local mesh spacing over steep
     terrain without building a full next-resolution icosphere (which would have 4×
     as many global nodes).
@@ -177,8 +170,8 @@ class AdaptiveTriNodes(BaseFieldDrivenNodeBuilder):
         Icosphere subdivision level for the base LAM mesh.
     reference_node_name : str
         Name of the reference node set used to define the LAM boundary.
-    variable : str
-        Dataset variable of the reference nodes whose gradient drives the refinement.
+    reference_node_attr_name : str
+        Attribute of the reference nodes whose gradient drives the refinement.
     name : str
         Key for the node set in the HeteroData graph.
     gradient_threshold_percentile : float, optional
@@ -204,14 +197,21 @@ class AdaptiveTriNodes(BaseFieldDrivenNodeBuilder):
         global_resolution: int,
         lam_resolution: int,
         reference_node_name: str,
-        variable: str,
+        reference_node_attr_name: str,
         name: str,
         gradient_threshold_percentile: float = 75.0,
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
         gradient_num_neighbours: int = 12,
     ) -> None:
-        super().__init__(name, variable, reference_node_name, mask_attr_name, margin_radius_km, gradient_num_neighbours)
+        super().__init__(
+            name,
+            reference_node_attr_name,
+            reference_node_name,
+            mask_attr_name,
+            margin_radius_km,
+            gradient_num_neighbours,
+        )
         self.global_resolution = global_resolution
         self.lam_resolution = lam_resolution
         self.gradient_threshold_percentile = gradient_threshold_percentile
@@ -244,7 +244,7 @@ class AdaptiveTriNodes(BaseFieldDrivenNodeBuilder):
         self.resolutions = list(range(adaptive_resolution + 1))  # [0, ..., lam_resolution+1]
 
         LOGGER.info(
-            "AdaptiveTriNodes: mapped %d nodes to icosphere(res=%d); "
+            "AdaptiveStretchedTriNodes: mapped %d nodes to icosphere(res=%d); "
             "MultiScaleEdges(scale_resolutions=%d) supported.",
             len(combined_snapped),
             adaptive_resolution,
@@ -322,7 +322,7 @@ class AdaptiveTriNodes(BaseFieldDrivenNodeBuilder):
 
         LOGGER.info(
             "Computing the gradient of %s for %d LAM nodes",
-            self.variable,
+            self.reference_node_attr_name,
             len(lam_base_coords),
         )
         gradients = self.compute_gradient(lam_base_coords)
@@ -342,7 +342,7 @@ class AdaptiveTriNodes(BaseFieldDrivenNodeBuilder):
         LOGGER.info("Edge-midpoint adaptive candidates: %d", len(mid_coords))
 
         if len(mid_coords) == 0:
-            LOGGER.info("AdaptiveTriNodes: %d total nodes (base=%d, adaptive=0)", *[len(base_coords)] * 2)
+            LOGGER.info("AdaptiveStretchedTriNodes: %d total nodes (base=%d, adaptive=0)", *[len(base_coords)] * 2)
             return self._snap_and_record_ordering(base_coords)
 
         mid_lam_mask = self.area_mask_builder.get_mask(mid_coords).cpu().numpy()
@@ -361,7 +361,7 @@ class AdaptiveTriNodes(BaseFieldDrivenNodeBuilder):
 
         combined = np.concatenate([base_coords, adaptive_coords], axis=0)
         LOGGER.info(
-            "AdaptiveTriNodes: %d total nodes (base=%d, adaptive=%d)",
+            "AdaptiveStretchedTriNodes: %d total nodes (base=%d, adaptive=%d)",
             len(combined),
             len(base_coords),
             len(adaptive_coords),
@@ -369,8 +369,8 @@ class AdaptiveTriNodes(BaseFieldDrivenNodeBuilder):
         return self._snap_and_record_ordering(combined)
 
 
-class ProbabilisticIcosahedralNodes(BaseFieldDrivenNodeBuilder):
-    """Stretched icosahedral mesh with extra nodes where a variable has large gradients.
+class ProbabilisticStretchedTriNodes(BaseFieldDrivenNodeBuilder):
+    """Stretched icosahedral mesh with extra nodes where an attribute has large gradients.
 
     Starts from the same mesh as :class:`StretchedTriNodes` and adds
     ``extra_nodes_percent`` % more nodes inside the limited area. Candidates come from
@@ -378,7 +378,7 @@ class ProbabilisticIcosahedralNodes(BaseFieldDrivenNodeBuilder):
     to the smallest, each accepted only if it is at least ``min_dist_factor`` times the
     ``lam_resolution`` node spacing away from all other nodes.
 
-    Unlike :class:`AdaptiveTriNodes`, the extra nodes are not placed at edge
+    Unlike :class:`AdaptiveStretchedTriNodes`, the extra nodes are not placed at edge
     midpoints, so they follow the field more closely but do not lie on an
     icosahedron and do not support ``MultiScaleEdges``. The result is deterministic.
 
@@ -390,8 +390,8 @@ class ProbabilisticIcosahedralNodes(BaseFieldDrivenNodeBuilder):
         Icosphere subdivision level for the base LAM mesh.
     reference_node_name : str
         Name of the reference node set used to define the LAM boundary.
-    variable : str
-        Dataset variable of the reference nodes whose gradient decides where nodes go.
+    reference_node_attr_name : str
+        Attribute of the reference nodes whose gradient decides where nodes go.
     name : str
         Key for the node set in the HeteroData graph.
     extra_nodes_percent : float, optional
@@ -414,7 +414,7 @@ class ProbabilisticIcosahedralNodes(BaseFieldDrivenNodeBuilder):
         global_resolution: int,
         lam_resolution: int,
         reference_node_name: str,
-        variable: str,
+        reference_node_attr_name: str,
         name: str,
         extra_nodes_percent: float = 10.0,
         min_dist_factor: float = 0.5,
@@ -422,7 +422,14 @@ class ProbabilisticIcosahedralNodes(BaseFieldDrivenNodeBuilder):
         margin_radius_km: float = 100.0,
         gradient_num_neighbours: int = 12,
     ) -> None:
-        super().__init__(name, variable, reference_node_name, mask_attr_name, margin_radius_km, gradient_num_neighbours)
+        super().__init__(
+            name,
+            reference_node_attr_name,
+            reference_node_name,
+            mask_attr_name,
+            margin_radius_km,
+            gradient_num_neighbours,
+        )
         assert extra_nodes_percent >= 0, f"extra_nodes_percent must be non-negative, got {extra_nodes_percent}"
         assert min_dist_factor > 0, f"min_dist_factor must be positive, got {min_dist_factor}"
         self.global_resolution = global_resolution
@@ -476,7 +483,7 @@ class ProbabilisticIcosahedralNodes(BaseFieldDrivenNodeBuilder):
 
 
 class ProbabilisticNodes(BaseFieldDrivenNodeBuilder):
-    """Free-form mesh whose node density follows the gradient of a dataset variable.
+    """Free-form mesh whose node density follows the gradient of an attribute of the reference nodes.
 
     Places ``num_nodes_lam`` nodes inside the limited area and ``num_nodes_global``
     outside it, with no icosahedron. Candidates come from a 0.02 deg grid over the
@@ -489,14 +496,14 @@ class ProbabilisticNodes(BaseFieldDrivenNodeBuilder):
     gives weights proportional to g**10); a large one (e.g. 10) gives a nearly uniform
     distribution. Weights above the 99th percentile are clipped, so the largest
     gradients do not take the whole budget. Because ``g`` is relative, the result does
-    not depend on the units of ``variable``.
+    not depend on the units of the attribute.
 
     Parameters
     ----------
     name : str
         Key for the node set in the HeteroData graph.
-    variable : str
-        Dataset variable of the reference nodes whose gradient decides where nodes go.
+    reference_node_attr_name : str
+        Attribute of the reference nodes whose gradient decides where nodes go.
     reference_node_name : str
         Name of the reference node set used to define the LAM boundary.
     num_nodes_global : int
@@ -526,7 +533,7 @@ class ProbabilisticNodes(BaseFieldDrivenNodeBuilder):
     def __init__(
         self,
         name: str,
-        variable: str,
+        reference_node_attr_name: str,
         reference_node_name: str,
         num_nodes_global: int,
         num_nodes_lam: int,
@@ -538,7 +545,14 @@ class ProbabilisticNodes(BaseFieldDrivenNodeBuilder):
         margin_radius_km: float = 100.0,
         gradient_num_neighbours: int = 12,
     ) -> None:
-        super().__init__(name, variable, reference_node_name, mask_attr_name, margin_radius_km, gradient_num_neighbours)
+        super().__init__(
+            name,
+            reference_node_attr_name,
+            reference_node_name,
+            mask_attr_name,
+            margin_radius_km,
+            gradient_num_neighbours,
+        )
         assert num_nodes_global >= 0 and num_nodes_lam >= 0, "Number of nodes must be non-negative."
         assert compression_global > 0 and compression_lam > 0, "Compression must be positive."
         assert min_dist_km > 0, f"min_dist_km must be positive, got {min_dist_km}"
