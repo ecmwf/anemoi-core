@@ -17,7 +17,8 @@ import torch
 VerticalCoordinateType = Literal[
     "surface",
     "pressure",
-    "heightaboveground",
+    "height_above_ground",
+    "height_above_sea",
     "model",
     "layer",
 ]
@@ -75,6 +76,7 @@ class VariableSpecification:
     vertical_coordinate: VerticalCoordinate | None = None
     temporal_operator: TemporalOperator | None = None
     temporal_window: int | float | None = None
+    value_unit: str | None = None
     kind: Literal["physical", "forcing"] = "physical"
 
 
@@ -245,7 +247,7 @@ class VariableVocabulary:
                 return (
                     param_group,
                     float(height),
-                    "heightaboveground",
+                    "height_above_ground",
                     "m",
                 )
 
@@ -302,6 +304,8 @@ class VariableVocabulary:
             variable_metadata,
         )
 
+        value_unit = variable_metadata.get("units", mars.get("units"))
+
         if mars.get("levtype") is None:
             return VariableSpecification(
                 name=name,
@@ -309,20 +313,34 @@ class VariableVocabulary:
                 vertical_coordinate=None,
                 temporal_operator=None,
                 temporal_window=None,
+                value_unit=value_unit,
                 kind="forcing",
             )
-        (
-            param_group,
-            level,
-            vertical_type,
-            unit,
-        ) = VariableVocabulary._fetch_level_and_type(mars)
 
-        vertical_coordinate = VerticalCoordinate(
-            type=vertical_type,
-            level=level,
-            unit=unit,
-        )
+        param = mars.get("param", name)
+        if name in {"msl", "mslp"} or param in {"msl", "mslp"}:
+            vertical_coordinate = VerticalCoordinate(type="height_above_sea", level=0.0, unit="m")
+            param = "p"
+        elif name == "sp" or param == "sp":
+            vertical_coordinate = VerticalCoordinate(type="height_above_ground", level=0.0, unit="m")
+            param = "p"
+        elif name == "tp" or param == "tp":
+            vertical_coordinate = VerticalCoordinate(type="height_above_ground", level=0.0, unit="m")
+            param = "tp"
+        else:
+            (
+                param_group,
+                level,
+                vertical_type,
+                unit,
+            ) = VariableVocabulary._fetch_level_and_type(mars)
+
+            vertical_coordinate = VerticalCoordinate(
+                type=vertical_type,
+                level=level,
+                unit=unit,
+            )
+            param = param_group if param_group is not None else param
 
         (
             temporal_window,
@@ -331,10 +349,11 @@ class VariableVocabulary:
 
         return VariableSpecification(
             name=name,
-            param=(param_group if param_group is not None else mars.get("param", name)),
+            param=param,
             vertical_coordinate=vertical_coordinate,
             temporal_operator=temporal_operator,
             temporal_window=temporal_window,
+            value_unit=value_unit,
             kind="physical",
         )
 
@@ -371,12 +390,6 @@ class VariableVocabulary:
         VariableVocabulary
             Foundation variable vocabulary.
         """
-        specifications: dict[str, VariableSpecification] = {}
-
-        all_params: set[str] = set()
-        all_vertical_types: set[str] = set()
-        all_temporal_operators: set[str] = set()
-
         names: set[str] = set()
 
         # Foundation vocabulary is the union of model input/output fields.
@@ -388,6 +401,7 @@ class VariableVocabulary:
 
             names.update(current_data_indices.name_to_index.keys())
 
+        specifications: dict[str, VariableSpecification] = {}
         for name in sorted(names):
             if name not in metadata:
                 raise KeyError(f"Missing metadata for variable {name}")
@@ -400,27 +414,49 @@ class VariableVocabulary:
                 continue
 
             specifications[name] = spec
-            if spec.kind == "physical":
-                all_params.add(spec.param)
+        return cls._from_specifications(specifications)
 
-                all_vertical_types.add(spec.vertical_coordinate.type)
+    @classmethod
+    def from_datasets(
+        cls,
+        data_indices: dict[str, Any],
+        metadata: dict[str, dict[str, dict[str, Any]]] | None,
+    ) -> "VariableVocabulary":
+        """Build one stable vocabulary from the union of all domain fields."""
+        if metadata is None:
+            raise ValueError("variable metadata is required when variable_tokenizer is configured")
 
-                all_temporal_operators.add(spec.temporal_operator)
+        specifications: dict[str, VariableSpecification] = {}
+        for dataset_name, indices in data_indices.items():
+            dataset_metadata = metadata.get(dataset_name, {})
+            domain_vocabulary = cls.from_foundation(indices, dataset_metadata)
+            for name, specification in domain_vocabulary.specification_by_name.items():
+                previous = specifications.get(name)
+                if previous is not None and previous != specification:
+                    raise ValueError(
+                        f"Variable {name!r} has incompatible metadata in dataset {dataset_name!r}: "
+                        f"{previous!r} != {specification!r}"
+                    )
+                specifications[name] = specification
 
-        # IDs are established once for the foundation model.
-        #
-        # On transfer/resume these mappings should be restored from the
-        # checkpoint rather than rebuilt from a domain subset.
-        param_to_id = {param: i for i, param in enumerate(sorted(all_params))}
+        return cls._from_specifications(specifications)
 
-        vertical_type_to_id = {vertical_type: i for i, vertical_type in enumerate(sorted(all_vertical_types))}
-
-        temporal_operator_to_id = {
-            temporal_operator: i for i, temporal_operator in enumerate(sorted(all_temporal_operators))
+    @classmethod
+    def _from_specifications(
+        cls,
+        specifications: dict[str, VariableSpecification],
+    ) -> "VariableVocabulary":
+        """Assign deterministic categorical IDs to a specification union."""
+        physical = [spec for spec in specifications.values() if spec.kind == "physical"]
+        param_to_id = {value: index for index, value in enumerate(sorted({spec.param for spec in physical}))}
+        vertical_type_to_id = {
+            value: index for index, value in enumerate(sorted({spec.vertical_coordinate.type for spec in physical}))
         }
-
+        temporal_operator_to_id = {
+            value: index for index, value in enumerate(sorted({spec.temporal_operator for spec in physical}))
+        }
         return cls(
-            specifications=specifications,
+            specifications=dict(sorted(specifications.items())),
             param_to_id=param_to_id,
             vertical_type_to_id=vertical_type_to_id,
             temporal_operator_to_id=temporal_operator_to_id,
@@ -581,6 +617,7 @@ class VariableVocabulary:
                     ),
                     "temporal_operator": (spec.temporal_operator),
                     "temporal_window": (spec.temporal_window),
+                    "value_unit": (spec.value_unit),
                     "kind": (spec.kind),
                 }
                 for name, spec in self.specification_by_name.items()
@@ -634,6 +671,7 @@ class VariableVocabulary:
                 vertical_coordinate=vertical_coordinate,
                 temporal_operator=spec["temporal_operator"],
                 temporal_window=spec["temporal_window"],
+                value_unit=spec.get("value_unit"),
             )
 
         return cls(

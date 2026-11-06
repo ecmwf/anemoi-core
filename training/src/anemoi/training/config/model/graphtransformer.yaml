@@ -180,7 +180,7 @@ bounding: #These are applied in order
 variable_tokenizer: null
     # _target_: anemoi.models.variable.variabletokenizer.MultiHeadAttentionTransform
     # emb_dim: 256
-    # output_dim: 512
+    # out_dim: 512
 variable_detokenizer: null
   # _target_: anemoi.models.variable.variabledetokenizer.Detokenizer
   # emb_dim: 256

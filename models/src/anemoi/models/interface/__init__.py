@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import uuid
-from typing import Optional
 
 import torch
 from hydra.utils import instantiate
@@ -123,7 +122,12 @@ class AnemoiModelInterface(torch.nn.Module):
             data_indices,
             statistics_tendencies,
         )
-        return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
+        return (
+            pre_processors,
+            post_processors,
+            pre_processors_tendencies,
+            post_processors_tendencies,
+        )
 
     @staticmethod
     def _build_processor_pair(
@@ -132,7 +136,10 @@ class AnemoiModelInterface(torch.nn.Module):
         statistics: dict,
     ) -> tuple[Processors, Processors]:
         processors = [
-            [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
+            [
+                name,
+                instantiate(processor, data_indices=data_indices, statistics=statistics),
+            ]
             for name, processor in processors_configs.items()
         ]
         return Processors(processors), Processors(processors, inverse=True)
@@ -175,7 +182,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.post_processors_tendencies = torch.nn.ModuleDict()
 
         data_config = get_multiple_datasets_config(self.config.data)
-        for dataset_name in self.statistics.keys():
+        for dataset_name in self.statistics:
             # Build processors for each dataset
             pre, post, pre_tend, post_tend = self._build_processors_for_dataset(
                 data_config[dataset_name].processors,
@@ -211,8 +218,10 @@ class AnemoiModelInterface(torch.nn.Module):
             "_target_": self.config.model.model._target_,
             "_convert_": getattr(self.config.model.model, "_convert_", "none"),
         }
-        # print(self.metadata["dataset"]["data"].keys())
-        variable_metadata = self.metadata["dataset"]["data"]["variables_metadata"]
+        variable_metadata = {
+            dataset_name: self.metadata["dataset"].get(dataset_name, {}).get("variables_metadata", {})
+            for dataset_name in self.data_indices
+        }
         self.model = instantiate(
             model_instantiate_config,
             model_config=self.config.model,
@@ -231,7 +240,7 @@ class AnemoiModelInterface(torch.nn.Module):
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         gather_out: bool = True,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
