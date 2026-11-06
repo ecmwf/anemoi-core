@@ -163,6 +163,28 @@ For example, on O1280 (``nlat: 2560``, 12 scales up to T1279), scales 8 to
             scale_weights: [0, 0, 0, 0, 0, 0, 0, 0, 1.0, 1.0, 1.0, 0]
             scalers: [pressure_level, general_variable, node_weights, time_steps]
 
+Memory and speed
+----------------
+
+Two settings lower the peak memory by recomputing values during the backward pass, which takes longer:
+
+-  ``checkpoint_scales: true`` keeps the values of one scale at a time.
+-  ``variables_per_checkpoint: 8`` also splits the variables into groups of 8,
+   and keeps the values of one group of one scale at a time. Each group adds a
+   fixed time offset, so very small groups are slow with many variables. The
+   setting includes ``checkpoint_scales``.
+
+Both are off by default, and low-resolution training should not require these settings.
+
+Compiling improves both speed and memory requirements.
+Select it through ``model.compile``:
+
+.. code-block:: yaml
+
+   model:
+     compile:
+       - module: anemoi.training.losses.WaveletEnergyScoreLoss
+
 ************************
  Combined Loss Functions
 ************************

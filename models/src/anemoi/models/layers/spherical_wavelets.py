@@ -326,19 +326,31 @@ class RieszStructureTensor(Module):
         window = self.riesz_windows[k, : top + 1].to(coeffs.real.dtype)
         return self.gradient(coeffs[..., : top + 1, : top + 1] * window[:, None])
 
+    @staticmethod
+    def products(pair: Tensor, east: Tensor, north: Tensor) -> Tensor:
+        """The six products ``[..., 6, grid]`` of a Riesz pair ``[..., 2, grid]``, formed in 3D: xx, yy, zz, xy, xz, yz."""
+        x, y, z = (pair[..., :1, :] * east + pair[..., 1:, :] * north).unbind(-2)
+        return torch.stack([x * x, y * y, z * z, x * y, x * z, y * z], dim=-2)
+
+    def smooth(self, products: Tensor, k: int) -> Tensor:
+        """Products ``[..., 6, grid]`` smoothed with the heat kernel of the k-th chosen scale."""
+        smoothed = self.smoothing_shts[k](products)
+        return self.gradient.inverse(smoothed * self.heat_kernels[k, : smoothed.shape[-2], None].to(products.dtype))
+
+    @classmethod
+    def read_tensor(cls, smoothed: Tensor, east: Tensor, north: Tensor) -> Tensor:
+        """J_ee, J_nn and J_en ``[..., 3, grid]`` from smoothed products ``[..., 6, grid]``."""
+        return torch.stack(
+            [cls._read(smoothed, east, east), cls._read(smoothed, north, north), cls._read(smoothed, east, north)],
+            dim=-2,
+        )
+
     def tensor(self, coeffs: Tensor, k: int) -> Tensor:
         """J_ee, J_nn and J_en ``[..., 3, grid]`` of the k-th chosen scale, from coefficients ``[..., l, m]``."""
         dtype = coeffs.real.dtype
         east, north = self.east.to(dtype), self.north.to(dtype)
-        pair = self.riesz_pair(coeffs, k)
-        x, y, z = (pair[..., :1, :] * east + pair[..., 1:, :] * north).unbind(-2)  # the Riesz pair in 3D
-        products = torch.stack([x * x, y * y, z * z, x * y, x * z, y * z], dim=-2)
-        smoothed = self.smoothing_shts[k](products)
-        smoothed = self.gradient.inverse(smoothed * self.heat_kernels[k, : smoothed.shape[-2], None].to(dtype))
-        return torch.stack(
-            [self._read(smoothed, east, east), self._read(smoothed, north, north), self._read(smoothed, east, north)],
-            dim=-2,
-        )
+        products = self.products(self.riesz_pair(coeffs, k), east, north)
+        return self.read_tensor(self.smooth(products, k), east, north)
 
     def forward(self, x: Tensor) -> Tensor:
         """J_ee, J_nn and J_en ``[..., scale, 3, grid]`` of fields ``[..., grid]``, for the chosen scales in order."""

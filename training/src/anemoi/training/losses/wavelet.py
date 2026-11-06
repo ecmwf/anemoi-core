@@ -14,6 +14,7 @@ from typing import Literal
 import einops
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import ShardSizes
@@ -91,6 +92,8 @@ class WaveletEnergyScoreLoss(BaseLoss):
         grid: Literal["n320", "N320"] | None = None,
         nlat: int | None = None,
         nlon: int | None = None,
+        checkpoint_scales: bool = False,
+        variables_per_checkpoint: int | None = None,
         ignore_nans: bool = False,
         no_autocast: bool = True,
     ) -> None:
@@ -117,6 +120,13 @@ class WaveletEnergyScoreLoss(BaseLoss):
             Number of latitudes, for ``octahedral_sht`` and ``regular_sht``.
         nlon : int, optional
             Number of longitudes, for ``regular_sht``. Defaults to 2 * nlat.
+        checkpoint_scales : bool
+            Recompute each scale in the backward pass, keeping the values of one scale in memory at a time. Lowers
+            the peak memory and takes longer. Default False.
+        variables_per_checkpoint : int, optional
+            Split the variables into groups of this size and recompute each group of each scale in the backward
+            pass. This includes what ``checkpoint_scales`` does and lowers the peak memory further. Each group adds
+            a fixed time, so very small groups are slow with many variables. Default None: no groups.
         ignore_nans : bool
             Must be False: the transforms cannot handle missing values.
         no_autocast : bool
@@ -130,6 +140,9 @@ class WaveletEnergyScoreLoss(BaseLoss):
             raise ValueError(msg)
         if direction_floor <= 0.0:
             msg = f"direction_floor must be positive, got {direction_floor}."
+            raise ValueError(msg)
+        if variables_per_checkpoint is not None and variables_per_checkpoint < 1:
+            msg = f"variables_per_checkpoint must be at least 1, got {variables_per_checkpoint}."
             raise ValueError(msg)
         super().__init__(ignore_nans=ignore_nans)
 
@@ -150,6 +163,8 @@ class WaveletEnergyScoreLoss(BaseLoss):
         self.structure = RieszStructureTensor(lons_per_lat, truncation, scales, smoothing_octaves=smoothing_octaves)
         self.weights = [float(scale_weights[j]) for j in scales]
         self.direction_floor = direction_floor
+        self.checkpoint_scales = checkpoint_scales
+        self.variables_per_checkpoint = variables_per_checkpoint
         self.fair = fair
 
     @property
@@ -186,6 +201,56 @@ class WaveletEnergyScoreLoss(BaseLoss):
         pair_coefficient = 1.0 / (ensemble_size * (ensemble_size - 1)) if self.fair else 1.0 / ensemble_size**2
         return skill - pair_coefficient * spread
 
+    def compile_for_training(self, **options) -> None:
+        """Compile the grid-point work of the loss; the spectral transforms run as they are."""
+        self._products = torch.compile(self._products, **options)
+        self._score_from_smoothed = torch.compile(self._score_from_smoothed, **options)
+
+    def _products(self, pair: torch.Tensor, east: torch.Tensor, north: torch.Tensor) -> torch.Tensor:
+        return self.structure.products(pair, east, north)
+
+    def _score_from_smoothed(
+        self,
+        smoothed: torch.Tensor,
+        target_vectors: torch.Tensor,
+        east: torch.Tensor,
+        north: torch.Tensor,
+    ) -> torch.Tensor:
+        vectors = self.structure_vectors(self.structure.read_tensor(smoothed, east, north))
+        return self.energy_score(vectors, target_vectors)
+
+    def _score_of_scale(self, coeffs: torch.Tensor, target_vectors: torch.Tensor, k: int) -> torch.Tensor:
+        """Energy scores ``[..., grid]`` at the k-th chosen scale, from the members' coefficients."""
+        dtype = coeffs.real.dtype
+        east, north = self.structure.east.to(dtype), self.structure.north.to(dtype)
+        products = self._products(self.structure.riesz_pair(coeffs, k), east, north)
+        return self._score_from_smoothed(self.structure.smooth(products, k), target_vectors, east, north)
+
+    def _checkpointed_score_of_scale(self, coeffs: torch.Tensor, target_vectors: torch.Tensor, k: int) -> torch.Tensor:
+        return checkpoint(
+            self._score_of_scale,
+            coeffs,
+            target_vectors,
+            k,
+            use_reentrant=False,
+            preserve_rng_state=False,
+        )
+
+    def _arranged_score_of_scale(self, coeffs: torch.Tensor, target_vectors: torch.Tensor, k: int) -> torch.Tensor:
+        """Energy scores ``[b, t, v, grid]`` at the k-th chosen scale, in checkpoints if the loss is set to use them."""
+        size = self.variables_per_checkpoint
+        if size is not None:
+            groups = zip(coeffs.split(size, dim=2), target_vectors.split(size, dim=2), strict=True)
+            return torch.cat([self._checkpointed_score_of_scale(c, t, k) for c, t in groups], dim=2)
+        if self.checkpoint_scales:
+            return self._checkpointed_score_of_scale(coeffs, target_vectors, k)
+        return self._score_of_scale(coeffs, target_vectors, k)
+
+    def _target_vectors(self, target: torch.Tensor) -> list[torch.Tensor]:
+        """Vectors of the target ``[b, t, v, 1, 3, grid]``, one tensor per chosen scale."""
+        coeffs = self.structure.coefficients(target.float())
+        return [self.structure_vectors(self.structure.tensor(coeffs, k)) for k in range(len(self.weights))]
+
     def point_scores(self, y_pred: torch.Tensor, y_target: torch.Tensor) -> torch.Tensor:
         """Weighted wavelet energy scores at each grid point, ``[b, t, 1, grid, v]``, on the full grid."""
         if self.fair and y_pred.shape[2] < 2:
@@ -198,12 +263,12 @@ class WaveletEnergyScoreLoss(BaseLoss):
         pred = einops.rearrange(y_pred, "b t e g v -> b t v e g")
         target = einops.rearrange(y_target, "b t 1 g v -> b t v 1 g")
         with torch.amp.autocast(device_type=pred.device.type, enabled=False):
-            # Target and members go through the transforms together, the target first.
-            coeffs = self.structure.coefficients(torch.cat([target, pred], dim=3).float())
+            # The target goes through the transforms on its own, hence nothing about it is kept for the backward pass.
+            target_vectors = self._target_vectors(target)
+            coeffs = self.structure.coefficients(pred.float())
             scores = 0.0
             for k, weight in enumerate(self.weights):
-                vectors = self.structure_vectors(self.structure.tensor(coeffs, k))  # [b, t, v, 1 + e, 3, g]
-                scores = scores + weight * self.energy_score(vectors[..., 1:, :, :], vectors[..., :1, :, :])
+                scores = scores + weight * self._arranged_score_of_scale(coeffs, target_vectors[k], k)
         return einops.rearrange(scores, "b t v g -> b t 1 g v")
 
     def forward(

@@ -334,6 +334,48 @@ def ensemble_graph_multiscale_config(
 
 
 @pytest.fixture
+def ensemble_wavelet_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    """Wavelet energy score on O96, with its grid-point work compiled and the scales in checkpoints."""
+    overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
+
+    with initialize_config_module(
+        version_base=None,
+        config_module="anemoi.training.config",
+        job_name="test_ensemble_wavelet",
+    ):
+        template = compose(config_name="ensemble_crps", overrides=overrides)
+
+    use_case_modifications = OmegaConf.load(CONFIG_DIR / "test_ensemble_crps.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    cfg.training.training_loss.datasets.data = {
+        "_target_": "anemoi.training.losses.WaveletEnergyScoreLoss",
+        "transform": "octahedral_sht",
+        "nlat": 192,
+        "scale_weights": [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0],
+        "variables_per_checkpoint": 8,
+        "scalers": ["pressure_level", "general_variable", "node_weights", "time_steps"],
+    }
+    cfg.training.validation_metrics.datasets.data.multiscale.multiscale_config = None
+    cfg.training.validation_metrics.datasets.data.multiscale.weights = [1.0]
+    cfg.model.compile.append({"module": "anemoi.training.losses.WaveletEnergyScoreLoss"})
+    cfg.diagnostics.plot.callbacks = []
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
+    return cfg, url_dataset
+
+
+@pytest.fixture
 def ensemble_truncated_connection_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
