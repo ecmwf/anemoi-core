@@ -48,9 +48,8 @@ def reference_irfft(x, lengths):
 
 
 def tolerances(dtype):
-    # Small FFTs: float64 checks are close to machine precision. In float32, two fields share each complex FFT,
-    # so each takes on the rounding of the larger of the two.
-    return dict(rtol=4e-6, atol=4e-6) if dtype == torch.float32 else dict(rtol=2e-13, atol=2e-13)
+    # Small FFTs: float64 checks are close to machine precision.
+    return dict(rtol=2e-6, atol=2e-6) if dtype == torch.float32 else dict(rtol=2e-13, atol=2e-13)
 
 
 def compare_value_and_vjp(actual, expected, x, dtype):
@@ -207,6 +206,109 @@ def test_long_rings_keep_float32_accuracy():
     z = torch.randn(2, len(lengths), 640, device="cuda", dtype=torch.complex64)
     expected = reference_irfft(z.to(torch.complex128), lengths)
     torch.testing.assert_close(fft.irfft(z).double(), expected, rtol=0, atol=2e-6 * expected.abs().max().item())
+
+
+def fields_of_different_size(ratio, device):
+    """A smooth large field and a small one that also changes in size by a factor 1000 from ring to ring."""
+    north = [20 + 4 * ring for ring in range(32)]
+    lengths = north + north[::-1]
+    fft = RingFFT(lengths)
+    point_ring = fft._table(torch.device(device))["point_ring"]
+    latitude = point_ring.to(torch.float64) / (fft.nlat - 1)
+    large = 20.0 + torch.cos(2 * torch.pi * latitude)
+    small = torch.randn(fft.points, device=device, dtype=torch.float64) * ratio * 10.0 ** (-3.0 * latitude)
+    return fft, lengths, torch.stack([large, small]), point_ring
+
+
+def ring_errors(actual, expected):
+    """Error of each ring relative to the ring's own size."""
+    return (actual - expected).abs().pow(2).sum(-1).sqrt() / expected.abs().pow(2).sum(-1).sqrt()
+
+
+@pytest.mark.parametrize("ratio", [1.0, 1e-2, 1e-4, 1e-6])
+def test_small_field_keeps_its_accuracy_next_to_a_large_one(fft_device, ratio):
+    fft, lengths, x, _ = fields_of_different_size(ratio, fft_device)
+    expected = reference_rfft(x, lengths)
+    errors = ring_errors(fft.rfft(x.float()).to(torch.complex128), expected)
+    assert errors.max() < 2e-6
+
+
+@pytest.mark.parametrize("ratio", [1.0, 1e-2, 1e-4, 1e-6])
+def test_inverse_keeps_a_small_field_accurate_next_to_a_large_one(fft_device, ratio):
+    fft, lengths, x, point_ring = fields_of_different_size(ratio, fft_device)
+    coefficients = reference_rfft(x, lengths)
+    expected = reference_irfft(coefficients, lengths)
+    actual = fft.irfft(coefficients.to(torch.complex64)).double()
+    squares = torch.zeros(2, fft.nlat, device=fft_device, dtype=torch.float64)
+    errors = squares.index_add(1, point_ring, (actual - expected) ** 2).sqrt()
+    sizes = squares.index_add(1, point_ring, expected**2).sqrt()
+    assert (errors / sizes).max() < 2e-6
+
+
+@pytest.mark.parametrize("ratio", [1e-2, 1e-4, 1e-6])
+@pytest.mark.parametrize("direction", ["rfft", "irfft"])
+def test_gradients_of_a_small_field_keep_their_accuracy(fft_device, ratio, direction):
+    """Both adjoints preserve the accuracy of small cotangents in a batch."""
+    fft, lengths, x, _ = fields_of_different_size(1.0, fft_device)
+    x = x.float() if direction == "rfft" else reference_rfft(x.float(), lengths)
+    x.requires_grad_()
+    out = getattr(fft, direction)(x)
+    grad = torch.randn_like(out)
+    grad[1] *= ratio
+    actual = torch.autograd.grad(out, x, grad)[0][1]
+    x64 = x.detach().to(torch.float64 if direction == "rfft" else torch.complex128).requires_grad_()
+    reference = reference_rfft if direction == "rfft" else reference_irfft
+    out64 = reference(x64, lengths)
+    expected = torch.autograd.grad(out64, x64, grad.to(out64.dtype))[0][1]
+    assert (actual.to(expected.dtype) - expected).norm() < 2e-6 * expected.norm()
+
+
+@pytest.mark.parametrize("direction", ["rfft", "irfft"])
+@pytest.mark.parametrize("backward", [False, True])
+@pytest.mark.parametrize("large_or_bad", [1e12, float("nan"), float("inf")])
+def test_fields_are_independent(fft_device, direction, backward, large_or_bad):
+    """Large or non-finite fields cannot contaminate other fields, including exact zeros, in either adjoint."""
+    lengths = [20, 24, 28, 28, 24, 20]
+    fft = RingFFT(lengths)
+    shape = (fft.points,) if direction == "rfft" else (fft.nlat, fft.modes)
+    dtype = torch.float32 if direction == "rfft" else torch.complex64
+    x = torch.randn(4, *shape, device=fft_device, dtype=dtype)
+    reference = reference_rfft if direction == "rfft" else reference_irfft
+
+    if backward:
+        x.requires_grad_()
+        out = getattr(fft, direction)(x)
+        cotangent = torch.randn_like(out)
+        cotangent[0] *= large_or_bad
+        cotangent[2] *= 1e12
+        cotangent[3] = 0
+        actual = torch.autograd.grad(out, x, cotangent)[0]
+        expected = torch.autograd.grad(reference(x, lengths), x, cotangent)[0]
+    else:
+        x[0] *= large_or_bad
+        x[2] *= 1e12
+        x[3] = 0
+        actual = getattr(fft, direction)(x)
+        expected = reference(x, lengths)
+
+    torch.testing.assert_close(actual[1], expected[1], **tolerances(torch.float32))
+    assert torch.count_nonzero(actual[3]) == 0
+
+
+def test_chirp_data_is_float64_data_rounded(fft_device):
+    lengths = [20, 24, 28, 28, 24, 20]
+    fft = RingFFT(lengths)
+    device = torch.device(fft_device)
+    assert torch.equal(fft._chirp(torch.float32, device), fft._chirp(torch.float64, device).to(torch.complex64))
+    groups, _, _ = fft._plan(8, device)
+    for group in groups:
+        for real in (torch.float32, torch.float64):
+            kernel = fft._chirp_kernel(group, group.modes, group.n - 1, 1.0, real)
+            post = fft._order_chirp(group, group.taken, 1.0 / group.n.to(torch.float64), -1.0, real)
+            if real == torch.float32:
+                kernel32, post32 = kernel, post
+        assert torch.equal(kernel32, kernel.to(torch.complex64))
+        assert torch.equal(post32, post.to(torch.complex64))
 
 
 @pytest.mark.parametrize("lengths", [[], [0, 4], [-1, 4], [2.5, 4]])

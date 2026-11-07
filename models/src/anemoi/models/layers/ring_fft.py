@@ -13,15 +13,18 @@
   length: more than a thousand small calls per transform at O1280.
 - With m k = (m^2 + k^2 - (m - k)^2) / 2, a ring's Fourier sum becomes a convolution with the "chirp"
   exp(i pi j^2 / n) (Bluestein 1970). A convolution can be padded with zeros to any length of at least
-  n + 2 M - 2, where M is the number of orders, so rings of different lengths share one FFT length. The
-  padding gives the orders -M < m < M.
-- The fields are real, so two of them go through each complex FFT: the first as its real part and the
-  second as its imaginary part. Their spectra are told apart with the orders m and -m.
+  n + M - 1, where M is the number of orders, so rings of different lengths share one FFT length.
+- Each field has its own complex transform, keeping its rounding and non-finite values independent of
+  other fields in the batch.
 - The rings are grouped by that padded length, a power of 2. Each group takes one batched FFT, one
   product and one inverse FFT.
 - Each group keeps its chirp data between calls: the FFT of its chirp and the factors on its orders,
   about one complex value per padded point for each number of orders and direction in use.
-- The chirp phases use j^2 mod 2 n in integers, so they stay exact on long rings.
+- The cached kernel includes division by the padded length. The convolution's inverse FFT is unnormalized,
+  saving a scaling pass on every call. The padded length is a power of 2, so this scaling is exact within
+  the normal floating-point range.
+- The chirp phases use j^2 mod 2 n in integers, so they stay exact on long rings. All chirp data is worked
+  out in float64 and then rounded, because errors in these factors reach every value of the transform.
 - The scaling matches ``norm="forward"``: the forward sum is divided by the ring length, the inverse is
   not. The gradients are the adjoints of the two sums.
 """
@@ -33,8 +36,8 @@ import numpy as np
 import torch
 from torch import Tensor
 
-# The padded buffers hold about 1.6 to 2 times the grid points per field. Fields go through in groups
-# that keep one buffer below this many complex values.
+# Fields go through in chunks that limit one padded buffer to this many complex values, unless a single
+# field already exceeds the limit. Outputs, cached tables and FFT workspaces need additional memory.
 _MAX_BUFFER_VALUES = 2**26
 
 
@@ -46,6 +49,16 @@ def _padded_length(needed: int) -> int:
 def _multiplicity(m: Tensor, n: Tensor) -> Tensor:
     # Orders 0 and n / 2 appear once in a real spectrum, all others twice.
     return torch.where((m == 0) | (2 * m == n), 1.0, 2.0)
+
+
+def _complex_type(real: torch.dtype) -> torch.dtype:
+    return torch.complex64 if real == torch.float32 else torch.complex128
+
+
+def _phase(j: Tensor, n: Tensor, sign: float) -> Tensor:
+    """exp(sign i pi j^2 / n) in float64, from j^2 mod 2 n."""
+    angle = torch.pi * ((j * j) % (2 * n)).to(torch.float64) / n.to(torch.float64)
+    return torch.polar(torch.ones_like(angle), sign * angle)
 
 
 def _real_at_ends(coefficients: Tensor, ends: Tensor) -> Tensor:
@@ -123,7 +136,7 @@ class RingFFT:
             table = self._table(device)
             by_size = {}
             for ring, n in enumerate(self.lengths):
-                by_size.setdefault(_padded_length(n + 2 * min(modes, n // 2 + 1) - 2), []).append(ring)
+                by_size.setdefault(_padded_length(n + min(modes, n // 2 + 1) - 1), []).append(ring)
             groups, start, offset = [], torch.empty(self.nlat, dtype=torch.int64), 0
             for size, rings in sorted(by_size.items()):
                 taken = max(min(modes, self.lengths[ring] // 2 + 1) for ring in rings)
@@ -143,25 +156,26 @@ class RingFFT:
         if key not in self._chirps:
             k = np.concatenate([np.arange(n) for n in self.lengths]).astype(np.int64)
             n = np.repeat(np.asarray(self.lengths), self.lengths)
-            angle = torch.as_tensor(np.pi * ((k * k) % (2 * n)) / n, device=device).to(real)
-            self._chirps[key] = torch.polar(torch.ones_like(angle), -angle)
+            chirp = _phase(torch.as_tensor(k, device=device), torch.as_tensor(n, device=device), -1.0)
+            self._chirps[key] = chirp.to(_complex_type(real))
         return self._chirps[key]
 
     @staticmethod
     def _chirp_kernel(group: _Group, ahead: Tensor, behind: Tensor, sign: float, real: torch.dtype) -> Tensor:
-        """FFT of exp(sign i pi j^2 / n), placed at j = 0 .. ahead - 1 and at size + j for j = -behind .. -1."""
+        """Normalized FFT of exp(sign i pi j^2 / n), at j = 0 .. ahead - 1 and size + j for j = -behind .. -1.
+
+        Include the convolution's 1 / size normalization here so each call can use an unnormalized inverse FFT.
+        """
         size = group.size
         p = torch.arange(size, device=group.n.device)[None, :]
         j = torch.where(p < ahead, p, torch.where(p >= size - behind, p - size, size))
-        angle = torch.pi * ((j * j) % (2 * group.n)).to(real) / group.n.to(real)
-        return torch.fft.fft(torch.polar((j < size).to(real), sign * angle), dim=-1)
+        return torch.fft.fft((j < size) * _phase(j, group.n, sign), dim=-1, norm="forward").to(_complex_type(real))
 
     @staticmethod
     def _order_chirp(group: _Group, taken: int, weight: Tensor, sign: float, real: torch.dtype) -> Tensor:
         """weight * exp(sign i pi m^2 / n) for the orders m < taken that the ring holds, zero above."""
         m = torch.arange(taken, device=group.n.device)[None, :]
-        angle = torch.pi * ((m * m) % (2 * group.n)).to(real) / group.n.to(real)
-        return torch.polar((m < group.modes).to(real) * weight, sign * angle)
+        return ((m < group.modes) * weight * _phase(m, group.n, sign)).to(_complex_type(real))
 
     @staticmethod
     def _ends(group: _Group, taken: int) -> Tensor:
@@ -170,20 +184,10 @@ class RingFFT:
         return (m == 0) | (2 * m == group.n)
 
     def _inverse_weights(self, group: _Group, weight_by_length: bool, real: torch.dtype) -> Tensor:
-        """Weight of each order in the two-sided sum, times exp(i pi m^2 / n), ``[ring, taken]``.
-
-        An order inside the spectrum appears at m and -m, with half the weight each. Orders 0 and n / 2
-        appear once.
-        """
+        """Weight of each nonnegative order times exp(i pi m^2 / n), ``[ring, taken]``."""
         m = torch.arange(group.taken, device=group.n.device)[None, :]
-        weight = 1.0 / group.n.to(real) if weight_by_length else _multiplicity(m, group.n).to(real)
-        half = torch.where((m == 0) | (2 * m == group.n), 1.0, 0.5).to(real)
-        return self._order_chirp(group, group.taken, half * weight, 1.0, real)
-
-    @staticmethod
-    def _negative_positions(group: _Group) -> Tensor:
-        """Positions of the orders -m in a padded row, for m = 0 .. taken - 1."""
-        return (group.size - torch.arange(group.taken, device=group.n.device)) % group.size
+        weight = 1.0 / group.n.to(torch.float64) if weight_by_length else _multiplicity(m, group.n).to(torch.float64)
+        return self._order_chirp(group, group.taken, weight, 1.0, real)
 
     def _field_groups(self, batch: int, buffer: int) -> list[slice]:
         step = max(1, _MAX_BUFFER_VALUES // max(buffer, 1))
@@ -193,36 +197,28 @@ class RingFFT:
         """(1 / n) sum over k of x[k] exp(-2 pi i m k / n) for m < modes, ``[batch, ring, modes]``."""
         real, batch = x.dtype, x.shape[0]
         groups, index, buffer_size = self._plan(modes, x.device)
-        if batch % 2:
-            x = torch.cat([x, x.new_zeros(1, x.shape[1])])
-        pairs = torch.complex(x[0::2], x[1::2]) * self._chirp(real, x.device)
-        out = pairs.new_zeros((x.shape[0], self.nlat, modes))
-        for fields in self._field_groups(pairs.shape[0], buffer_size):
-            buffer = pairs.new_zeros((fields.stop - fields.start, buffer_size))
-            buffer.index_copy_(1, index, pairs[fields])
-            first, second = slice(2 * fields.start, 2 * fields.stop, 2), slice(2 * fields.start + 1, 2 * fields.stop, 2)
+        chirp = self._chirp(real, x.device)
+        out = x.new_zeros((batch, self.nlat, modes), dtype=_complex_type(real))
+        for fields in self._field_groups(batch, buffer_size):
+            buffer = out.new_zeros((fields.stop - fields.start, buffer_size))
+            buffer.index_copy_(1, index, x[fields] * chirp)
             for group in groups:
                 taken = group.taken
                 kernel = group.data(
                     ("forward kernel", real),
-                    lambda: self._chirp_kernel(group, group.modes, group.n + group.modes - 2, 1.0, real),
+                    lambda: self._chirp_kernel(group, group.modes, group.n - 1, 1.0, real),
                 )
                 post = group.data(
                     ("forward post", real),
-                    lambda: self._order_chirp(group, taken, 1.0 / group.n.to(real), -1.0, real),
+                    lambda: self._order_chirp(group, taken, 1.0 / group.n.to(torch.float64), -1.0, real),
                 )
                 ends = group.data(("ends",), lambda: self._ends(group, taken))
-                negative = group.data(("negative",), lambda: self._negative_positions(group))
                 block = buffer[:, group.offset : group.offset + group.size * group.count].view(
                     -1, group.count, group.size
                 )
-                sums = torch.fft.ifft(torch.fft.fft(block, dim=-1) * kernel, dim=-1)
-                # The pair's sum at m and the conjugate of its sum at -m give the two spectra.
-                plus = sums[..., :taken] * post
-                minus = (sums[..., negative] * post).conj()
-                out[first, group.rings, :taken] = _real_at_ends(0.5 * (plus + minus), ends)
-                out[second, group.rings, :taken] = _real_at_ends(-0.5j * (plus - minus), ends)
-        return out[:batch]
+                sums = torch.fft.ifft(torch.fft.fft(block, dim=-1) * kernel, dim=-1, norm="forward")
+                out[fields, group.rings, :taken] = _real_at_ends(sums[..., :taken] * post, ends)
+        return out
 
     def _inverse_sums(self, a: Tensor, weight_by_length: bool) -> Tensor:
         """Sum over m of w(m) Re(a[m] exp(2 pi i m k / n)), ``[batch, points]``.
@@ -232,12 +228,9 @@ class RingFFT:
         """
         real, batch, modes = a.real.dtype, a.shape[0], a.shape[-1]
         groups, index, buffer_size = self._plan(modes, a.device)
-        if batch % 2:
-            a = torch.cat([a, a.new_zeros(1, *a.shape[1:])])
         chirp = self._chirp(real, a.device).conj()
-        out = a.real.new_empty((a.shape[0], self.points))
-        for fields in self._field_groups(a.shape[0] // 2, buffer_size):
-            first, second = slice(2 * fields.start, 2 * fields.stop, 2), slice(2 * fields.start + 1, 2 * fields.stop, 2)
+        out = a.real.new_empty((batch, self.points))
+        for fields in self._field_groups(batch, buffer_size):
             buffer = a.new_zeros((fields.stop - fields.start, buffer_size))
             for group in groups:
                 taken = group.taken
@@ -247,25 +240,16 @@ class RingFFT:
                 )
                 kernel = group.data(
                     ("inverse kernel", real),
-                    lambda: self._chirp_kernel(group, group.n + group.modes - 1, group.modes - 1, -1.0, real),
+                    lambda: self._chirp_kernel(group, group.n, group.modes - 1, -1.0, real),
                 )
                 ends = group.data(("ends",), lambda: self._ends(group, taken))
-                c1 = _real_at_ends(a[first, group.rings, :taken], ends)
-                c2 = _real_at_ends(a[second, group.rings, :taken], ends)
                 block = buffer[:, group.offset : group.offset + group.size * group.count].view(
                     -1, group.count, group.size
                 )
-                # The two-sided spectrum of the first field plus i times that of the second: orders 0 .. taken - 1
-                # at the start of each padded row, orders -(taken - 1) .. -1 at its end.
-                plus = (c1 + 1j * c2) * weights
-                minus = (torch.where(ends, 0.0, c1.conj() + 1j * c2.conj()) * weights)[..., 1:].flip(-1)
-                gap = plus.new_zeros((*plus.shape[:-1], group.size - 2 * taken + 1))
-                row = torch.cat([plus, gap, minus], dim=-1)
-                block.copy_(torch.fft.ifft(torch.fft.fft(row, dim=-1) * kernel, dim=-1))
-            values = buffer[:, index] * chirp
-            out[first] = values.real
-            out[second] = values.imag
-        return out[:batch]
+                block[..., :taken] = _real_at_ends(a[fields, group.rings, :taken], ends) * weights
+                block.copy_(torch.fft.ifft(torch.fft.fft(block, dim=-1) * kernel, dim=-1, norm="forward"))
+            out[fields] = (buffer[:, index] * chirp).real
+        return out
 
     def rfft(self, x: Tensor, modes: int | None = None) -> Tensor:
         """Fourier coefficients ``[..., ring, modes]`` of real fields ``[..., points]``.
