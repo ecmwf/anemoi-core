@@ -65,6 +65,13 @@ class TestHEALPixMultiScaleEdgesTransform:
         assert len(graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index) > 0
         assert graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index.dim() == 2
 
+    def test_transform_fail_ring_ordered_nodes(self):
+        """HEALPixMultiScaleEdges only knows NEST pixel numbers."""
+        graph = HEALPixNodes(1, "ring_nodes", nest_ordering=False).update_graph(HeteroData(), {})
+        edges = HEALPixMultiScaleEdges("ring_nodes", "ring_nodes", None)
+        with pytest.raises(ValueError, match="needs HEALPixNodes in NEST ordering"):
+            edges.update_graph(graph)
+
     def test_transform_fail_nodes(self, healpix_graph: HeteroData):
         """Test MultiScaleEdges update method with wrong node type."""
         edges = HEALPixMultiScaleEdges("fail_nodes", "fail_nodes", None)

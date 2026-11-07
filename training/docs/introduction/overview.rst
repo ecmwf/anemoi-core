@@ -20,7 +20,7 @@ Anemoi Training supports multiple model architectures, including:
 
 -  Graph Neural Networks (GNNs)
 -  Graph Transformers
--  Transformers with Flash Attention
+-  Transformers
 
 This flexibility allows researchers and practitioners to experiment with
 different approaches and select the most suitable architecture for their
