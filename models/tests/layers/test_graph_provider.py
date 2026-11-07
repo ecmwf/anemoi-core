@@ -102,6 +102,41 @@ def test_projection_graph_provider_requires_exactly_one_source(kwargs) -> None:
         ProjectionGraphProvider(**kwargs)
 
 
+@pytest.mark.parametrize("bad", [-1.0, float("nan"), float("inf"), 1j])
+def test_projection_strict_weights_are_checked_before_normalization(tmp_path, bad) -> None:
+    path = tmp_path / "invalid.npz"
+    save_npz(path, csr_matrix([[bad, 0], [0, bad]]))
+    with pytest.raises(ValueError, match="real, finite and nonnegative"):
+        ProjectionGraphProvider.from_config({"matrix_path": str(path), "row_normalize": True}, validate_weights=True)
+
+
+def test_projection_strict_graph_weights_preserve_existing_default() -> None:
+    graph = _make_graph_with_edges()
+    graph["data", "to", "target"].gauss_weight.neg_()
+    config = {
+        "edges_name": ("data", "to", "target"),
+        "edge_weight_attribute": "gauss_weight",
+        "row_normalize": True,
+    }
+    assert ProjectionGraphProvider.from_config(config, graph_data=graph) is not None
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        ProjectionGraphProvider.from_config(config, graph_data=graph, validate_weights=True)
+
+
+def test_projection_strict_validation_rejects_negative_duplicate_before_coalescing(tmp_path) -> None:
+    path = tmp_path / "duplicate.npz"
+    save_npz(path, csr_matrix(([-1.0, 2.0], [0, 0], [0, 2]), shape=(1, 1)))
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        ProjectionGraphProvider(file_path=path, row_normalize=True, validate_weights=True)
+
+
+def test_projection_strict_validation_rejects_empty_dimensions(tmp_path) -> None:
+    path = tmp_path / "empty.npz"
+    save_npz(path, csr_matrix((2, 0)))
+    with pytest.raises(ValueError, match="nonempty source and destination"):
+        ProjectionGraphProvider(file_path=path, validate_weights=True)
+
+
 def _make_graph_with_edges() -> HeteroData:
     graph = HeteroData()
     graph["data"].num_nodes = 3
