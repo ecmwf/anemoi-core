@@ -1488,6 +1488,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         )
         seed_random_generators(seed)
         LOGGER.debug("Epoch %d, batch %d: random number generators seeded with %d", self.current_epoch, batch_idx, seed)
+        # Input dropout that shares its masks across the views of a batch draws them anew.
+        for pre_processor in getattr(getattr(self, "model", None), "pre_processors", {}).values():
+            for processor in getattr(pre_processor, "processors", {}).values():
+                if hasattr(processor, "reset_masks"):
+                    processor.reset_masks()
 
     def training_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
         del batch_idx

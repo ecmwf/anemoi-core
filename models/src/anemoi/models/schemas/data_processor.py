@@ -320,6 +320,8 @@ class StructuredObsDropoutSchema(BaseModel):
     "Global multiplier on every group probability (scheduled by DropoutScheduler)."
     coordinate_variables: Union[dict[str, str], None] = None
     "Override names of the sin/cos latitude/longitude input columns used for block dropout."
+    shared_masks: bool = False
+    "Draw the masks once per training batch and reuse them for every gridded view of it (inputs and DA observations)."
 
 
 class PreprocessorTarget(str, Enum):

@@ -101,6 +101,9 @@ class BaseInputDropout(BasePreprocessor):
     def _n_input(self, x: torch.Tensor) -> int:
         return x.shape[1] if self.multi_step is None else min(self.multi_step, x.shape[1])
 
+    def reset_masks(self) -> None:
+        """Start a new training batch. A no-op unless the dropout reuses its masks across views."""
+
     def inverse_transform(self, x: torch.Tensor, **_kwargs) -> torch.Tensor:
         """No-op: dropout is not reversible."""
         return x

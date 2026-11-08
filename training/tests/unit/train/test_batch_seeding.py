@@ -52,3 +52,19 @@ def test_batch_random_numbers_follow_base_seed(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(seeding, "_base_seed", 1001)
 
     assert not torch.equal(_draw_after_batch_start(0, epoch=0, batch_idx=0), reference)
+
+
+def test_batch_start_resets_shared_dropout_masks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dropout that shares its masks across the views of a batch draws new ones for every batch."""
+    monkeypatch.setattr(seeding, "_base_seed", 1000)
+    resets = []
+    dropout = SimpleNamespace(reset_masks=lambda: resets.append(1))
+    pre_processors = {"data": SimpleNamespace(processors={"obs_dropout": dropout, "normalizer": object()})}
+    module = SimpleNamespace(
+        model_comm_group_id=0,
+        current_epoch=0,
+        model=SimpleNamespace(pre_processors=pre_processors),
+    )
+    BaseTrainingModule.on_train_batch_start(module, batch={}, batch_idx=0)
+    BaseTrainingModule.on_train_batch_start(module, batch={}, batch_idx=1)
+    assert len(resets) == 2

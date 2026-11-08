@@ -17,6 +17,7 @@ from typing import Optional
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.preprocessing.spatial_dropout import GRIDDED_NDIM
 from anemoi.models.preprocessing.spatial_dropout import BaseInputDropout
 
 LOGGER = logging.getLogger(__name__)
@@ -60,8 +61,13 @@ class StructuredObsDropout(BaseInputDropout):
     multiplier down from ``start_prob: 1.0``.
 
     The pre-processors run once per view: on the inputs, then on each rollout step's observations
-    that advance the input state (the DA-cycle observations of a DA forecaster). Each call draws
-    new masks. A tabular view is processed one sample at a time, its rows as the cells.
+    that advance the input state (the DA-cycle observations of a DA forecaster). By default each
+    call draws new masks. With ``shared_masks: true`` the first gridded view of a training batch
+    draws them and every later view of that batch reuses them, so an observation withheld at one
+    time is also withheld at the other times (the feat/testeos behaviour, which masks the whole
+    batch tensor at once). The training module calls :meth:`reset_masks` at the start of each
+    batch. A tabular view is processed one sample at a time, its rows as the cells, and always
+    draws its own masks.
 
     Random draws use the global torch RNG on each rank. Under grid sharding each rank of a model
     group draws its own stream and block patterns for its grid shard; cell masks are unaffected.
@@ -88,7 +94,14 @@ class StructuredObsDropout(BaseInputDropout):
     """
 
     _GROUP_KEYS = {"variables", "stream_prob", "cell_prob", "n_blocks", "block_radius_km", "allow_forcing"}
-    _parameter_keys = ("dropout_prob", "multi_step", "max_streams_dropped", "groups", "coordinate_variables")
+    _parameter_keys = (
+        "dropout_prob",
+        "multi_step",
+        "max_streams_dropped",
+        "groups",
+        "coordinate_variables",
+        "shared_masks",
+    )
 
     def __init__(
         self,
@@ -101,8 +114,8 @@ class StructuredObsDropout(BaseInputDropout):
         Parameters
         ----------
         config : DotDict
-            ``groups``, and optional ``multi_step``, ``max_streams_dropped``, ``dropout_prob`` and
-            ``coordinate_variables``.
+            ``groups``, and optional ``multi_step``, ``max_streams_dropped``, ``dropout_prob``,
+            ``coordinate_variables`` and ``shared_masks``.
         data_indices : IndexCollection
             Data indices of the dataset.
         statistics : dict
@@ -115,6 +128,9 @@ class StructuredObsDropout(BaseInputDropout):
         if self.dropout_prob < 0.0:
             msg = f"dropout_prob is a non-negative multiplier, got {self.dropout_prob}"
             raise ValueError(msg)
+        self.shared_masks = bool(config.get("shared_masks", False))
+        # Per-group (batch, grid) masks of the current training batch, when shared across views.
+        self._batch_masks: Optional[list[Optional[torch.Tensor]]] = None
         max_streams = config.get("max_streams_dropped", None)
         self.max_streams_dropped = None if max_streams is None else int(max_streams)
 
@@ -280,24 +296,18 @@ class StructuredObsDropout(BaseInputDropout):
         view = self._as_gridded(x)
         batch_size, grid = view.shape[0], view.shape[-2]
         n_input = self._n_input(view)
-        stream = self._stream_mask(batch_size, x.device)
-        xyz = None
-        if self.coordinate_variables is not None and all(
-            name in name_to_index for name in self.coordinate_variables.values()
-        ):
-            coordinates = {key: name_to_index[name] for key, name in self.coordinate_variables.items()}
-            xyz = self._unit_vectors(view, coordinates)
+        share = self.shared_masks and x.ndim == GRIDDED_NDIM
+        masks = self._batch_masks if share else None
+        if masks is None or any(m is not None and m.shape != (batch_size, grid) for m in masks):
+            # Shared masks are drawn for every group, so a later view finds the groups it carries.
+            wanted = [share or bool(positions[name]) for name in self.group_names]
+            masks = self._draw_masks(view, name_to_index, wanted, batch_size, grid)
+            if share:
+                self._batch_masks = masks
 
         for g, group_name in enumerate(self.group_names):
-            if not positions[group_name]:
-                continue
-            mask = stream[:, g : g + 1].expand(batch_size, grid)
-            cell_prob = min(self._cell_prob[g] * self.dropout_prob, 1.0)
-            if cell_prob > 0:
-                mask = mask | (torch.rand(batch_size, grid, device=x.device) < cell_prob)
-            if self._n_blocks[g] > 0 and xyz is not None:
-                mask = mask | self._block_mask(xyz, self._n_blocks[g], self._block_radius_km[g])
-            if not mask.any():
+            mask = masks[g]
+            if mask is None or not positions[group_name]:
                 continue
             idx = torch.tensor(positions[group_name], dtype=torch.long, device=x.device)
             # (batch, grid) -> broadcast over time, members and the group's variables.
@@ -306,3 +316,39 @@ class StructuredObsDropout(BaseInputDropout):
             view[:, :n_input, ..., idx] = sub.masked_fill(mask, torch.nan)
 
         return x
+
+    def _draw_masks(
+        self,
+        view: torch.Tensor,
+        name_to_index: dict[str, int],
+        wanted: list[bool],
+        batch_size: int,
+        grid: int,
+    ) -> list[Optional[torch.Tensor]]:
+        """Draw the ``(batch, grid)`` mask of each wanted group; None where nothing is dropped."""
+        device = view.device
+        stream = self._stream_mask(batch_size, device)
+        xyz = None
+        if self.coordinate_variables is not None and all(
+            name in name_to_index for name in self.coordinate_variables.values()
+        ):
+            coordinates = {key: name_to_index[name] for key, name in self.coordinate_variables.items()}
+            xyz = self._unit_vectors(view, coordinates)
+
+        masks: list[Optional[torch.Tensor]] = []
+        for g in range(len(self.group_names)):
+            if not wanted[g]:
+                masks.append(None)
+                continue
+            mask = stream[:, g : g + 1].expand(batch_size, grid)
+            cell_prob = min(self._cell_prob[g] * self.dropout_prob, 1.0)
+            if cell_prob > 0:
+                mask = mask | (torch.rand(batch_size, grid, device=device) < cell_prob)
+            if self._n_blocks[g] > 0 and xyz is not None:
+                mask = mask | self._block_mask(xyz, self._n_blocks[g], self._block_radius_km[g])
+            masks.append(mask if mask.any() else None)
+        return masks
+
+    def reset_masks(self) -> None:
+        """Forget the masks of the previous training batch."""
+        self._batch_masks = None

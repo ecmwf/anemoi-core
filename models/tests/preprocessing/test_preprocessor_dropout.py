@@ -114,6 +114,38 @@ def test_cell_mask_shared_across_variables_and_time(data_indices) -> None:
     assert reference.float().mean().item() == pytest.approx(0.4, abs=0.06)
 
 
+def test_shared_masks_reused_across_views_until_reset(data_indices) -> None:
+    """With shared_masks the input and DA-observation views of a batch lose the same cells."""
+    torch.manual_seed(0)
+    groups = _groups(radiosonde={"cell_prob": 0.4, "n_blocks": 1, "block_radius_km": 2000}, mw_temp={"cell_prob": 0.3})
+    dropout = _structured(data_indices, groups, shared_masks=True)
+    inputs = _transform(dropout, _batch(time=2))
+    observations = _transform(dropout, _batch(time=1), skip_imputation=True, apply_dropout=True)
+    for idx in (SONDE, MWT):
+        nan_in = torch.isnan(inputs[..., idx])
+        assert nan_in.any()
+        assert (torch.isnan(observations[..., idx]) == nan_in[:, :1]).all()
+
+    dropout.reset_masks()
+    redrawn = _transform(dropout, _batch(time=2))
+    assert not (torch.isnan(redrawn[..., SONDE]) == torch.isnan(inputs[..., SONDE])).all()
+
+
+def test_masks_are_redrawn_per_view_by_default(data_indices) -> None:
+    torch.manual_seed(0)
+    dropout = _structured(data_indices, _groups(radiosonde={"cell_prob": 0.4}))
+    first = torch.isnan(_transform(dropout, _batch(time=1))[..., SONDE])
+    second = torch.isnan(_transform(dropout, _batch(time=1), skip_imputation=True, apply_dropout=True)[..., SONDE])
+    assert not (first == second).all()
+
+
+def test_shared_masks_redrawn_for_a_different_batch_shape(data_indices) -> None:
+    dropout = _structured(data_indices, _groups(radiosonde={"cell_prob": 0.4}), shared_masks=True)
+    _transform(dropout, _batch(batch=4))
+    out = _transform(dropout, _batch(batch=2, grid=100))
+    assert torch.isnan(out[..., SONDE]).any()
+
+
 def test_block_dropout_respects_radius(data_indices) -> None:
     torch.manual_seed(0)
     radius = 2000.0
@@ -219,6 +251,7 @@ def test_schemas_accept_example_configs() -> None:
     StructuredObsDropoutSchema.model_validate(
         {
             "max_streams_dropped": 2,
+            "shared_masks": True,
             "groups": {"radiosonde": {"variables": ["z_*"], "cell_prob": 0.3, "n_blocks": 2, "block_radius_km": 1500}},
         },
     )
