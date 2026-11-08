@@ -297,8 +297,8 @@ class AnemoiModelInterface(torch.nn.Module):
     def predict_step(
         self,
         x: dict[str, dict],
-        target_template: dict[str, dict] = None,
-        target_forcing: dict[str, dict] = None,
+        target_template: Optional[dict[str, dict]] = None,
+        target_forcing: Optional[dict[str, dict]] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         **kwargs,
@@ -308,17 +308,19 @@ class AnemoiModelInterface(torch.nn.Module):
         Parameters
         ----------
         x : dict[str, dict]
-            Input data, one payload per dataset, as taken by
-            :func:`~anemoi.models.data.sample.create_batched_struct`: the ``data`` in
-            model-input space, its ``data_type``, ``variables`` and ``layout``, and the
-            ``latitudes`` and ``longitudes`` in degrees (required; there is no fallback
-            to the graph). Tabular payloads also carry ``timedeltas`` and ``boundaries``.
-        target_template : dict[str, dict]
-            Output geometry, one payload per decoded dataset; required. Like an input
-            payload without ``data``, naming the variables to decode.
-        target_forcing : dict[str, dict]
+            Input data in physical units, one payload per input dataset, as taken by
+            :func:`~anemoi.models.data.sample.create_batched_struct`: the ``data`` (with
+            the model's input variables, in model-input order), its ``data_type``,
+            ``variables`` and ``layout``, and the ``latitudes`` and ``longitudes`` in
+            degrees (required; there is no fallback to the graph). Tabular payloads also
+            carry ``timedeltas`` and ``boundaries``.
+        target_template : Optional[dict[str, dict]]
+            Output geometry, one payload per dataset to decode; required despite the
+            default. Like an input payload without ``data``, naming the variables to decode.
+            Only the datasets given here are decoded.
+        target_forcing : Optional[dict[str, dict]]
             Decoder conditioning, one payload per decoded dataset, holding the forcing
-            variables at the output valid times.
+            variables at the output valid times. ``None`` for decoders that take no forcings.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, specifies which GPUs work together.
         gather_out : bool, optional
