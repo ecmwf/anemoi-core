@@ -835,6 +835,36 @@ def test_predict_step_samples_onto_the_target_and_postprocesses() -> None:
     assert out["ds_a"].variables == list(model.data_indices["ds_a"].model.output.ordered_names)
 
 
+def test_predict_step_passes_pre_processors_to_sampled_to_physical() -> None:
+    """Tendency models need the pre-processors to apply output constraints to the rebuilt states."""
+    model = _transport_model_stub()
+    _configure_sampling_model(model, {"ds_a": (2, 3, 4)})
+    model.n_step_output = {"ds_a": 1}
+    x = _sampling_batch(model, {"ds_a": torch.zeros(1, 2, 1, 4, 2)})
+    target_template = _target_template(model, {"ds_a": torch.zeros(1, 2, 1, 4, 2)})
+    model.sample = lambda _x, **kwargs: Batch({"ds_a": kwargs["target_template"]["ds_a"].unflatten(torch.zeros(4, 3))})
+    captured = {}
+
+    def _sampled_to_physical(sampled, _x, _post_processors, **kwargs):
+        captured.update(kwargs)
+        return sampled
+
+    model._sampled_to_physical = _sampled_to_physical
+    pre_processors = torch.nn.ModuleDict({"ds_a": AddOneProcessor()})
+
+    model.predict_step(
+        x=x,
+        target_template=target_template,
+        pre_processors=pre_processors,
+        post_processors=torch.nn.ModuleDict({"ds_a": AddOneProcessor()}),
+        n_step_input={"ds_a": 2},
+        model_comm_group=None,
+        gather_out=False,
+    )
+
+    assert captured["pre_processors"] is pre_processors
+
+
 def test_predict_step_runs_without_target_forcings() -> None:
     """Without forcings, predict_step samples with an empty decoder conditioning."""
     model = _transport_model_stub()

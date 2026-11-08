@@ -21,9 +21,9 @@ from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.models.base import hidden_node_names
-from anemoi.models.models.base import split_graph_config
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import COORDS_DIM
+from anemoi.models.utils.graphs import split_graph_config
 from tests.batch_builders import build_batch
 
 
@@ -84,7 +84,7 @@ def _make_hierarchical_graph() -> HeteroData:
     return graph
 
 
-def test_base_graph_model_builds_with_omegaconf_config(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_base_graph_model_builds_with_omegaconf_config() -> None:
     model_config = OmegaConf.create(
         {
             "node_trainable_parameters": {
@@ -117,15 +117,14 @@ def test_base_graph_model_builds_with_omegaconf_config(monkeypatch: pytest.Monke
     )
 
     graph = _make_graph()
-    monkeypatch.setattr("anemoi.models.models.base.GraphCreator.create", lambda self: graph)
     model = DummyGraphModel(
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
         n_step_input={"data": 1},
         n_step_output={"data": 1},
-        model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
-        data_types={"data": "gridded"},
+        static_graph_data=graph,
+        dynamic_graph_config={"nodes": {}, "edges": {}},
     )
 
     assert model.seen_hidden_name == "hidden"
@@ -133,7 +132,7 @@ def test_base_graph_model_builds_with_omegaconf_config(monkeypatch: pytest.Monke
     assert model.target_dim["data"] == 4
 
 
-def test_base_graph_model_accepts_omegaconf_hidden_node_lists(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
     model_config = OmegaConf.create(
         {
             "num_channels": 8,
@@ -167,15 +166,14 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists(monkeypatch: pytes
     )
 
     graph = _make_hierarchical_graph()
-    monkeypatch.setattr("anemoi.models.models.base.GraphCreator.create", lambda self: graph)
     model = DummyGraphModel(
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
         n_step_input={"data": 1},
         n_step_output={"data": 1},
-        model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
-        data_types={"data": "gridded"},
+        static_graph_data=graph,
+        dynamic_graph_config={"nodes": {}, "edges": {}},
     )
 
     assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
@@ -303,7 +301,7 @@ def test_latent_input_dim_rejects_mapped_meshes_of_different_widths() -> None:
 
 def test_unpickling_a_model_without_hidden_routing_fills_it_in(monkeypatch: pytest.MonkeyPatch) -> None:
     """Inference checkpoints pickle the model; ones pickled before per-mesh routing must still run."""
-    model = _make_minimal_model(monkeypatch)
+    model = _make_minimal_model()
     provider = nn.Linear(1, 1)
     state = dict(model.__dict__)
     state["_modules"] = {**state["_modules"], "processor_graph_provider": provider}
@@ -323,7 +321,7 @@ def test_unpickling_a_model_without_hidden_routing_fills_it_in(monkeypatch: pyte
 # ---------------------------------------------------------------------------
 
 
-def _make_minimal_model(monkeypatch: pytest.MonkeyPatch) -> DummyGraphModel:
+def _make_minimal_model() -> DummyGraphModel:
     """Return a DummyGraphModel with a working predict_step."""
     model_config = OmegaConf.create(
         {
@@ -351,15 +349,14 @@ def _make_minimal_model(monkeypatch: pytest.MonkeyPatch) -> DummyGraphModel:
         }
     )
     graph = _make_graph()
-    monkeypatch.setattr("anemoi.models.models.base.GraphCreator.create", lambda self: graph)
     return DummyGraphModel(
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
         n_step_input={"data": 1},
         n_step_output={"data": 1},
-        model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
-        data_types={"data": "gridded"},
+        static_graph_data=graph,
+        dynamic_graph_config={"nodes": {}, "edges": {}},
     )
 
 
@@ -402,7 +399,7 @@ def test_predict_step_spatial_preprocessors_called_before_normalization(monkeypa
             call_order.append("pre")
             return x
 
-    model = _make_minimal_model(monkeypatch)
+    model = _make_minimal_model()
 
     # Patch forward so predict_step can complete without a real graph network.
     monkeypatch.setattr(model, "forward", lambda x, **kw: Batch({"data": x["data"]}))
@@ -435,7 +432,7 @@ def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
             assert grid_shard_sizes == source_grid_shard_sizes
             return x[..., :2, :], target_grid_shard_sizes
 
-    model = _make_minimal_model(monkeypatch)
+    model = _make_minimal_model()
     comm_group = SimpleNamespace(size=lambda: 2)
 
     def forward(x, **_kwargs):
@@ -464,7 +461,7 @@ def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
 
 def test_predict_step_skips_input_only_datasets(monkeypatch):
     """Datasets without a decoder (input-only) have no output and must not be post-processed."""
-    model = _make_minimal_model(monkeypatch)
+    model = _make_minimal_model()
 
     # `forcing` feeds an encoder but has no decoder, so forward only returns `data`
     monkeypatch.setattr(model, "forward", lambda x, **kw: Batch({"data": x["data"].clone(data=x["data"].data + 1.0)}))

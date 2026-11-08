@@ -19,11 +19,12 @@ from pydantic import ValidationError
 from pydantic import field_validator
 from pydantic import model_validator
 
+from anemoi.models.preprocessing.normalization import NORMALIZATION_STATISTICS
 from anemoi.utils.schemas import BaseModel
 
 
 class NormalizerSchema(BaseModel):
-    default: Union[str, None] = Field(literals=["mean-std", "std", "min-max", "max", "none"])
+    default: Union[str, None] = Field(literals=list(NORMALIZATION_STATISTICS))
     """Normalizer default method to apply"""
     remap: Union[dict[str, str], None] = Field(default_factory=dict)
     """Dictionary for remapping variables"""
@@ -140,8 +141,8 @@ class NormalizedReluPostprocessorSchema(RootModel[dict[Any, Any]]):
                 if not isinstance(v, str):  #
                     msg = f'"normalizer" must map to a string, got {v}'
                     raise TypeError(msg)
-                if v not in ["none", "mean-std", "std", "min-max", "max"]:
-                    msg = f'"normalizer" must be one of "none", "mean-std", "std", "min-max", "max", got {v}'
+                if v not in NORMALIZATION_STATISTICS:
+                    msg = f'"normalizer" must be one of {list(NORMALIZATION_STATISTICS)}, got {v}'
                     raise ValueError(msg)
 
             # Accept numeric keys as int or float

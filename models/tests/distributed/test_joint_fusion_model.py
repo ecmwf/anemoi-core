@@ -29,6 +29,8 @@ from anemoi.models.data import Batch
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
+from anemoi.models.utils.graphs import build_graph
+from anemoi.utils.config import DotDict
 
 from ._distributed_runner import _run_distributed_test
 from .test_model_sharding_gradients import DTYPE
@@ -143,12 +145,17 @@ def _build_model(strategy: str = "joint") -> AnemoiModelEncProcDec:
         {name: index for index, name in enumerate(VARIABLES)},
     )
     torch.manual_seed(1)
+    static_graph_data, dynamic_graph_config = build_graph(
+        DotDict(_graph_config()),
+        is_dataset_static={name: False for name in DATASETS},
+        hidden_nodes_name="hidden",
+    )
     model = AnemoiModelEncProcDec(
         model_config=_model_config(strategy),
-        model_graph_config=_graph_config(),
+        static_graph_data=static_graph_data,
+        dynamic_graph_config=dynamic_graph_config,
         data_indices={name: indices for name in DATASETS},
         statistics={name: STATISTICS for name in DATASETS},
-        data_types={name: "tabular" for name in DATASETS},
         n_step_input={name: 2 for name in DATASETS},
         n_step_output={name: 1 for name in DATASETS},
     )

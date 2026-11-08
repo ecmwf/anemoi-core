@@ -32,6 +32,8 @@ from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEnc
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.imputer import ConstantImputer
 from anemoi.models.preprocessing.normalizer import InputNormalizer
+from anemoi.models.utils.graphs import build_graph
+from anemoi.utils.config import DotDict
 from tests.distributed.test_model_sharding_gradients import DTYPE
 from tests.distributed.test_model_sharding_gradients import GRID_VARIABLES
 from tests.distributed.test_model_sharding_gradients import NUM_GRID_POINTS
@@ -66,12 +68,17 @@ def _build(
     if grid_target_features is not None:
         config.decoders.grid.target_node_features = grid_target_features
     torch.manual_seed(1)
+    static_graph_data, dynamic_graph_config = build_graph(
+        DotDict(_graph_config(latitudes, longitudes, max_obs_neighbours=4096)),
+        is_dataset_static={"grid": True, "obs": False},
+        hidden_nodes_name="hidden",
+    )
     model = model_class(
         model_config=config,
-        model_graph_config=_graph_config(latitudes, longitudes, max_obs_neighbours=4096),
+        static_graph_data=static_graph_data,
+        dynamic_graph_config=dynamic_graph_config,
         data_indices=data_indices or _data_indices(),
         statistics=_statistics(),
-        data_types={"grid": "gridded", "obs": "tabular"},
         n_step_input={"grid": 2, "obs": 2},
         n_step_output={"grid": 1, "obs": 1},
     )

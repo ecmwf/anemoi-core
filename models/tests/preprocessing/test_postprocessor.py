@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+import io
+
 import numpy as np
 import pytest
 import torch
@@ -16,6 +18,9 @@ from omegaconf import DictConfig
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.layers.activations import CustomRelu
+from anemoi.models.preprocessing import BasePreprocessor
+from anemoi.models.preprocessing.normalization import NORMALIZATION_STATISTICS
 from anemoi.models.preprocessing.normalizer import InputNormalizer
 from anemoi.models.preprocessing.postprocessor import ConditionalNaNPostprocessor
 from anemoi.models.preprocessing.postprocessor import ConditionalZeroPostprocessor
@@ -67,19 +72,10 @@ def normmrelupostprocessor():
         },
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    statistics = {
-        "mean": np.array([1.0, 2.0, 3.0, 4.5, 3.0]),
-        "stdev": np.array([0.5, 0.5, 0.5, 1, 14]),
-        "minimum": np.array([1.0, 1.0, 1.0, 1.0, 1.0]),
-        "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0]),
-    }
     data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
 
-    return NormalizedReluPostprocessor(
-        config=config.data.normmrelupostprocessor,
-        data_indices=data_indices,
-        statistics=statistics,
-    )
+    # normalizer "none": the thresholds are used as given, so no statistics are needed.
+    return NormalizedReluPostprocessor(config=config.data.normmrelupostprocessor, data_indices=data_indices)
 
 
 @pytest.fixture()
@@ -248,12 +244,10 @@ def input_normalizer_postprocessor():
         NormalizedReluPostprocessor(
             config=config.data.normmrelupostprocessor_ms,
             data_indices=data_indices,
-            statistics=CHAINED_STATISTICS,
         ),
         NormalizedReluPostprocessor(
             config=config.data.normmrelupostprocessor_mm,
             data_indices=data_indices,
-            statistics=CHAINED_STATISTICS,
         ),
     )
 
@@ -297,3 +291,116 @@ def test_chained_postprocessor_inplace(postprocessor_fixture, data_fixture, requ
     for postprocessor in postprocessors[::-1]:
         view = postprocessor(view, in_place=False, inverse=True)
     assert torch.allclose(view.data.reshape(out.shape), out, equal_nan=True)
+
+
+def _mean_std_relu_on_q() -> NormalizedReluPostprocessor:
+    """A NormalizedReluPostprocessor clipping q at 0 (physical units) under mean-std normalization."""
+    config = DictConfig(
+        {
+            "data": {
+                "relu": {"default": "none", 0: ["q"], "normalizer": "mean-std"},
+                "forcing": ["z"],
+                "diagnostic": ["other"],
+            },
+        },
+    )
+    name_to_index = {name: idx for idx, name in enumerate(CHAINED_VARIABLES)}
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    return NormalizedReluPostprocessor(config=config.data.relu, data_indices=data_indices)
+
+
+def test_normalized_relu_thresholds_follow_view_statistics() -> None:
+    """The threshold is normalized with the statistics of the view, not fixed at construction."""
+    postprocessor = _mean_std_relu_on_q()
+    q = CHAINED_VARIABLES.index("q")
+    payload = torch.zeros(2, len(CHAINED_VARIABLES))
+    payload[:, q] = torch.tensor([-5.0, -1.0])
+
+    # CHAINED_STATISTICS: q has mean 4.5, stdev 1 -> threshold (0 - 4.5) / 1 = -4.5.
+    out = postprocessor(make_gridded_view(payload, list(range(len(CHAINED_VARIABLES)))), inverse=True, in_place=False)
+    assert torch.equal(out.data[0, 0, :, q], torch.tensor([-4.5, -1.0]))
+
+    # Same processor, a view whose q has mean 0, stdev 2 -> threshold 0.
+    view = make_gridded_view(payload, list(range(len(CHAINED_VARIABLES))))
+    statistics = {key: value.copy() for key, value in view.statistics.items()}
+    statistics["mean"][q], statistics["stdev"][q] = 0.0, 2.0
+    out = postprocessor(view.clone(statistics=statistics), inverse=True, in_place=False)
+    assert torch.equal(out.data[0, 0, :, q], torch.tensor([0.0, 0.0]))
+
+
+def test_normalized_relu_requires_matching_statistics() -> None:
+    postprocessor = _mean_std_relu_on_q()
+    x = torch.zeros(2, len(CHAINED_VARIABLES))
+    with pytest.raises(ValueError, match="needs the view's statistics"):
+        postprocessor.inverse_transform(x)
+    with pytest.raises(ValueError, match="needs the statistics"):
+        postprocessor.inverse_transform(x, statistics={"mean": CHAINED_STATISTICS["mean"]})
+    with pytest.raises(ValueError, match="has 4 values, but the tensor has 5 variables"):
+        postprocessor.inverse_transform(x, statistics={key: value[:4] for key, value in CHAINED_STATISTICS.items()})
+
+
+def test_normalized_relu_loads_pickle_with_frozen_thresholds() -> None:
+    """Checkpoints pickled before the per-call normalization keep working.
+
+    Those instances carry ``statistics`` and already-normalized ``CustomRelu`` objects in
+    ``postprocessorfunctions``; the thresholds must come from the config instead.
+    """
+    postprocessor = _mean_std_relu_on_q()
+    # Recreate the state such an instance had: frozen data-space statistics, normalized ReLUs.
+    postprocessor.statistics = CHAINED_STATISTICS
+    postprocessor.postprocessorfunctions = [CustomRelu(-4.5)]
+
+    buffer = io.BytesIO()
+    torch.save(postprocessor, buffer)
+    buffer.seek(0)
+    loaded = torch.load(buffer, weights_only=False)
+
+    q = CHAINED_VARIABLES.index("q")
+    payload = torch.zeros(2, len(CHAINED_VARIABLES))
+    payload[:, q] = torch.tensor([-5.0, -1.0])
+    out = loaded(make_gridded_view(payload, list(range(len(CHAINED_VARIABLES)))), inverse=True, in_place=False)
+    assert torch.equal(out.data[0, 0, :, q], torch.tensor([-4.5, -1.0]))
+
+
+class _LegacyProcessor(BasePreprocessor):
+    """A third-party processor written against the old constructor signature."""
+
+    def __init__(self, config=None, data_indices=None, statistics=None) -> None:
+        super().__init__(config, data_indices, statistics)
+
+    def transform(self, x, **kwargs):
+        return x
+
+    def inverse_transform(self, x, **kwargs):
+        return x
+
+
+def test_constructor_statistics_are_deprecated() -> None:
+    config = DictConfig({"default": "none"})
+    with pytest.warns(FutureWarning, match="'statistics' constructor argument is deprecated"):
+        _LegacyProcessor(config, None, CHAINED_STATISTICS)
+
+
+@pytest.mark.parametrize("method", list(NORMALIZATION_STATISTICS))
+def test_normalized_relu_thresholds_match_the_normalizer(method) -> None:
+    """The threshold lands where the normaliser puts the same physical value, for every method."""
+    config = DictConfig(
+        {
+            "data": {
+                "relu": {"default": "none", 2.5: ["q"], "normalizer": method},
+                "forcing": ["z"],
+                "diagnostic": ["other"],
+            },
+        },
+    )
+    name_to_index = {name: idx for idx, name in enumerate(CHAINED_VARIABLES)}
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
+    postprocessor = NormalizedReluPostprocessor(config=config.data.relu, data_indices=data_indices)
+    q = CHAINED_VARIABLES.index("q")
+
+    view = make_gridded_view(torch.full((1, len(CHAINED_VARIABLES)), -1.0e6), list(range(len(CHAINED_VARIABLES))))
+    out = postprocessor(view, inverse=True, in_place=False)
+
+    normalizer = InputNormalizer(config={"default": method})
+    norm_mul, norm_add = normalizer.get_norm_parameters(view.statistics, view.name_to_index, torch.device("cpu"))
+    torch.testing.assert_close(out.data[0, 0, 0, q], 2.5 * norm_mul[q] + norm_add[q])

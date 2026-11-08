@@ -47,10 +47,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         self,
         *,
         model_config: DotDict,
-        model_graph_config: DotDict,
+        static_graph_data: HeteroData,
+        dynamic_graph_config: DotDict,
         data_indices: dict[str, IndexCollection],
         statistics: dict[str, dict],
-        data_types: dict[str, str],
         n_step_input: dict[str, int],
         n_step_output: dict[str, int],
     ) -> None:
@@ -58,10 +58,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         self.condition_on_residual = DotDict(model_config).condition_on_residual
         super().__init__(
             model_config=model_config,
-            model_graph_config=model_graph_config,
+            static_graph_data=static_graph_data,
+            dynamic_graph_config=dynamic_graph_config,
             data_indices=data_indices,
             statistics=statistics,
-            data_types=data_types,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )
