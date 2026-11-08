@@ -43,7 +43,7 @@ class BaseImputer(BasePreprocessor, ABC):
 
     @abstractmethod
     def get_imputing_replacements(
-        self, name_to_index: dict[str, int], statistics: dict[str, torch.Tensor]
+        self, name_to_index: dict[str, int], statistics: dict[str, np.ndarray]
     ) -> dict[int, float]: ...
 
     @abstractmethod
@@ -62,18 +62,18 @@ class BaseImputer(BasePreprocessor, ABC):
         Parameters
         ----------
         x : torch.Tensor
-            Input data view (with NaNs).
+            Input tensor (with NaNs), variables on the last axis.
         statistics : dict[str, np.ndarray]
-            Statistics dictionary required for normalization.
+            Statistics dictionary, required by imputers that fill with a statistic.
         name_to_index : dict[str, int]
-            Dictionary mapping variable names to their indices, required for normalization.
+            Dictionary mapping variable names to their indices, required for imputation.
         skip_imputation : bool, optional
             Return the input unchanged instead of filling missing values.
 
         Returns
         -------
         torch.Tensor
-            View with NaNs replaced by configured values.
+            Tensor with NaNs replaced by configured values.
         """
         if skip_imputation:
             return x
@@ -107,7 +107,7 @@ class InputImputer(BaseImputer):
     """
 
     def get_imputing_replacements(
-        self, name_to_index: dict[str, int], statistics: dict[str, torch.Tensor]
+        self, name_to_index: dict[str, int], statistics: dict[str, np.ndarray]
     ) -> dict[int, float]:
         """Get the replacement values for imputation."""
         assert name_to_index is not None, f"{self.__class__.__name__} require name_to_index for imputation."

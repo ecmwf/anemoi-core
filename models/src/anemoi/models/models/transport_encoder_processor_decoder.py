@@ -847,6 +847,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 post_processors,
                 model_comm_group=model_comm_group,
                 statistics_tendencies=statistics_tendencies,
+                pre_processors=pre_processors,
             )
 
             if gather_out:
@@ -1065,10 +1066,13 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     ) -> "Source":
         """Turn normalised output states into normalised tendencies.
 
-        Each output step is un-normalised, the reference is subtracted from its prognostic variables,
+        The prognostic variables of each output step are un-normalised, the reference is subtracted,
         and the result is normalised again as a source carrying that step's tendency statistics
         (:meth:`_as_tendency`). Diagnostic variables stay normalised states. The processors leave
-        missing values missing, so a gap in a state stays a gap in its tendency.
+        missing values missing, so a gap in a state stays a gap in its tendency. The tendency is the
+        raw change of the data, matching its statistics: the processors that apply to states only
+        (output constraints such as ReLU bounds, and remappings such as ``sqrt``) are not applied to it,
+        see ``Processors(..., tendency=True)``.
 
         Parameters
         ----------
@@ -1098,24 +1102,29 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         state_positions, reference_positions = self._prognostic_positions(dataset_name, state, reference)
         prognostic = torch.as_tensor(state_positions, dtype=torch.long, device=state.device)
 
-        state_physical = post_processors(state, in_place=False, skip_imputation=True)
-        reference_physical = post_processors(reference, in_place=False, skip_imputation=True)
-        reference_prognostic = reference_physical.data[..., reference_positions]
+        # Only the prognostic variables have tendencies; the diagnostics are copied from ``state``.
+        state_physical = post_processors(
+            state.select_variables(state_positions), in_place=False, skip_imputation=True, skip_output_constraints=True
+        )
+        reference_physical = post_processors(
+            reference.select_variables(reference_positions),
+            in_place=False,
+            skip_imputation=True,
+            skip_output_constraints=True,
+        ).data
 
         steps = []
         for step, statistics in enumerate(tendency_statistics):
             step_state = state_physical.select(time=[step])
-            step_data = step_state.data.index_add(
-                -1, prognostic, reference_prognostic.to(step_state.data.dtype), alpha=-1
-            )
-            tendency = step_state.clone(data=step_data)
-            steps.append(
-                pre_processors(
-                    self._as_tendency(dataset_name, tendency, statistics),
-                    in_place=True,
-                    skip_imputation=True,
-                ).data,
-            )
+            tendency = step_state.clone(data=step_state.data - reference_physical.to(step_state.data.dtype))
+            normalised = pre_processors(
+                self._as_tendency(dataset_name, tendency, statistics),
+                in_place=True,
+                skip_imputation=True,
+                tendency=True,
+            ).data
+            step_output = state.select(time=[step]).data
+            steps.append(step_output.index_copy(-1, prognostic, normalised.to(step_output.dtype)))
         return state.clone(data=torch.cat(steps, dim=1))
 
     def add_tendency_to_state(
@@ -1129,7 +1138,12 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     ) -> "Source":
         """Turn normalised tendencies back into states; the inverse of :meth:`compute_tendency`.
 
-        The processors leave missing values missing, as in :meth:`compute_tendency`.
+        The processors leave missing values missing, as in :meth:`compute_tendency`. As there, the
+        prognostic tendencies are converted without the processors that apply to states only
+        (``Processors(..., tendency=True)``), and the diagnostics are converted as states. Output
+        constraints (post-processors such as ReLU bounds) are not applied to the rebuilt states either:
+        they constrain predicted states, so apply them by post-processing the normalised states (pass
+        ``pre_processors``) like any state prediction, as :meth:`_sampled_to_physical` does.
 
         Parameters
         ----------
@@ -1144,8 +1158,10 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         post_processors : nn.Module
             The dataset's state post-processors.
         pre_processors : nn.Module, optional
-            The dataset's state pre-processors. When given, the states are normalised again;
-            otherwise they are returned un-normalised.
+            The dataset's state pre-processors. When given, the states are normalised again, first
+            clipped to the domains of the remappings (``clip_to_domain``): a state rebuilt from a
+            tendency can leave them, unlike a state predicted in remapped space. Otherwise the states
+            are returned un-normalised and unclipped.
 
         Returns
         -------
@@ -1158,19 +1174,40 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 f"{len(tendency_statistics)} tendency statistics."
             )
         tendency_positions, reference_positions = self._prognostic_positions(dataset_name, tendency, reference)
+        prognostic_set = set(tendency_positions)
+        diagnostic_positions = [i for i in range(tendency.n_variables) if i not in prognostic_set]
         prognostic = torch.as_tensor(tendency_positions, dtype=torch.long, device=tendency.device)
-        reference_physical = post_processors(reference, in_place=False, skip_imputation=True)
-        reference_prognostic = reference_physical.data[..., reference_positions]
+        diagnostic = torch.as_tensor(diagnostic_positions, dtype=torch.long, device=tendency.device)
+        reference_physical = post_processors(
+            reference.select_variables(reference_positions),
+            in_place=False,
+            skip_imputation=True,
+            skip_output_constraints=True,
+        ).data
 
         steps = []
         for step, statistics in enumerate(tendency_statistics):
-            step_tendency = self._as_tendency(dataset_name, tendency.select(time=[step]), statistics)
-            physical = post_processors(step_tendency, in_place=False, skip_imputation=True).data
-            steps.append(physical.index_add(-1, prognostic, reference_prognostic.to(physical.dtype)))
+            step_view = tendency.select(time=[step])
+            step_tendency = self._as_tendency(dataset_name, step_view.select_variables(tendency_positions), statistics)
+            prognostic_state = post_processors(step_tendency, in_place=False, skip_imputation=True, tendency=True).data
+            prognostic_state = prognostic_state + reference_physical.to(prognostic_state.dtype)
+            physical = prognostic_state.new_empty(step_view.data.shape)
+            physical.index_copy_(-1, prognostic, prognostic_state)
+            if diagnostic_positions:
+                diagnostic_state = post_processors(
+                    step_view.select_variables(diagnostic_positions),
+                    in_place=False,
+                    skip_imputation=True,
+                    skip_output_constraints=True,
+                ).data
+                physical.index_copy_(-1, diagnostic, diagnostic_state.to(physical.dtype))
+            steps.append(physical)
 
         state = tendency.clone(data=torch.cat(steps, dim=1))
         if pre_processors is not None:
-            state = pre_processors(state, in_place=True, skip_imputation=True)
+            state = pre_processors(
+                state, in_place=True, skip_imputation=True, skip_output_constraints=True, clip_to_domain=True
+            )
         return state
 
     def _sampled_to_physical(
@@ -1180,9 +1217,17 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         post_processors: nn.ModuleDict,
         model_comm_group: Optional[ProcessGroup] = None,
         statistics_tendencies: Optional[dict[str, Mapping]] = None,
+        pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> Batch:
-        """Turn sampled tendencies into states in physical units, added to the latest input state."""
+        """Turn sampled tendencies into states in physical units, added to the latest input state.
+
+        The processors that apply to states only (output constraints such as ReLU bounds, and
+        remappings, whose domains bound the states) apply to the states, not to the tendencies: when
+        the post-processors include any, the states are rebuilt normalised (clipped to the remapping
+        domains) and then post-processed like a state prediction, which needs ``pre_processors``.
+        Otherwise the states are rebuilt directly in physical units.
+        """
         del kwargs
         if statistics_tendencies is None:
             raise ValueError("Tendency statistics must be provided to convert sampled tendencies into states.")
@@ -1192,17 +1237,30 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             {name: source.grid_shard_sizes for name, source in x.items()},
             model_comm_group,
         )
-        return sampled.with_sources(
-            {
-                dataset_name: self.add_tendency_to_state(
-                    dataset_name,
-                    references[dataset_name],
-                    tendency,
-                    self.tendency_statistics(dataset_name, statistics_tendencies.get(dataset_name)),
-                    post_processors[dataset_name],
+
+        def to_physical(dataset_name: str, tendency: "Source") -> "Source":
+            post = post_processors[dataset_name]
+            add_kwargs = {
+                "dataset_name": dataset_name,
+                "reference": references[dataset_name],
+                "tendency": tendency,
+                "tendency_statistics": self.tendency_statistics(dataset_name, statistics_tendencies.get(dataset_name)),
+                "post_processors": post,
+            }
+            if not getattr(post, "has_state_only_processors", False):
+                return self.add_tendency_to_state(**add_kwargs)
+            if pre_processors is None:
+                msg = (
+                    f"Dataset '{dataset_name}' has post-processors that apply to states only (output "
+                    "constraints, remappings); applying them to the states rebuilt from tendencies needs "
+                    "the pre-processors."
                 )
-                for dataset_name, tendency in sampled.items()
-            },
+                raise ValueError(msg)
+            normalised = self.add_tendency_to_state(**add_kwargs, pre_processors=pre_processors[dataset_name])
+            return post(normalised, in_place=True)
+
+        return sampled.with_sources(
+            {dataset_name: to_physical(dataset_name, tendency) for dataset_name, tendency in sampled.items()},
         )
 
     def apply_reference_state_truncation(

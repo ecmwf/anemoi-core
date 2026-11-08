@@ -20,6 +20,10 @@ from torch import nn
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.activations import leaky_hardtanh
+from anemoi.models.preprocessing.normalization import check_normalization_method
+from anemoi.models.preprocessing.normalization import missing_statistics
+from anemoi.models.preprocessing.normalization import normalize_value
+from anemoi.models.preprocessing.normalization import remapped_statistics
 
 if TYPE_CHECKING:
     from anemoi.models.data import Source
@@ -89,6 +93,9 @@ class LeakyReluBounding(BaseBounding):
 class NormalizedReluBounding(BaseBounding):
     """Bounding with a ReLU activation and customizable normalized thresholds."""
 
+    #: The model interface sets ``statistics_remap`` to the dataset's normaliser remap.
+    uses_statistics_remap = True
+
     def __init__(
         self,
         *,
@@ -106,16 +113,16 @@ class NormalizedReluBounding(BaseBounding):
         min_val : list[float]
             The minimum values for the ReLU activation, in the same order as variables.
         normalizer : list[str]
-            Normalization types per variable: 'mean-std', 'min-max', 'max', 'std'.
+            Normalization method per variable, as configured for the variable in the
+            :class:`~anemoi.models.preprocessing.normalizer.InputNormalizer` (see
+            :data:`~anemoi.models.preprocessing.normalization.NORMALIZATION_STATISTICS`).
         """
         super().__init__(variables=variables)
         self.min_val = min_val
         self.normalizer = normalizer
 
-        if not all(norm in {"mean-std", "min-max", "max", "std"} for norm in self.normalizer):
-            raise ValueError(
-                "Each normalizer must be one of: 'mean-std', 'min-max', 'max', 'std' in NormalizedReluBounding."
-            )
+        for method in self.normalizer:
+            check_normalization_method(method, self.__class__.__name__)
         if len(self.normalizer) != len(variables):
             raise ValueError(
                 "The length of the normalizer list must match the number of variables in NormalizedReluBounding."
@@ -125,25 +132,23 @@ class NormalizedReluBounding(BaseBounding):
                 "The length of the min_val list must match the number of variables in NormalizedReluBounding."
             )
 
-    def _compute_norm_min_val(self, name_to_index: dict[str, int], statistics: dict[str, torch.Tensor]) -> torch.Tensor:
-        """Compute normalized minimum values from statistics."""
+    def _compute_norm_min_val(self, name_to_index: dict[str, int], statistics: dict) -> torch.Tensor:
+        """Normalise the physical minimum values with the view's statistics.
+
+        Variables the normaliser remaps (e.g. ``cp: tp``) use the remapped statistics, as the
+        normaliser does (``statistics_remap``, set by the model interface; see
+        :attr:`~anemoi.models.preprocessing.BasePreprocessor.shares_statistics_remap`).
+        """
+        missing = missing_statistics(self.normalizer, statistics or {})
+        if missing:
+            msg = f"{self.__class__.__name__} with normalizers {self.normalizer} needs the statistics {missing}."
+            raise ValueError(msg)
+        remap = getattr(self, "statistics_remap", None) or {}
+        if remap:
+            statistics = remapped_statistics(statistics, name_to_index, remap, self.__class__.__name__)
         norm_min_val = torch.zeros(len(self.variables))
-        for ii, variable in enumerate(self.variables):
-            stat_index = name_to_index[variable]
-            if self.normalizer[ii] == "mean-std":
-                mean = statistics["mean"][stat_index]
-                std = statistics["stdev"][stat_index]
-                norm_min_val[ii] = (self.min_val[ii] - mean) / std
-            elif self.normalizer[ii] == "min-max":
-                min_stat = statistics["min"][stat_index]
-                max_stat = statistics["max"][stat_index]
-                norm_min_val[ii] = (self.min_val[ii] - min_stat) / (max_stat - min_stat)
-            elif self.normalizer[ii] == "max":
-                max_stat = statistics["max"][stat_index]
-                norm_min_val[ii] = self.min_val[ii] / max_stat
-            elif self.normalizer[ii] == "std":
-                std = statistics["stdev"][stat_index]
-                norm_min_val[ii] = self.min_val[ii] / std
+        for ii, (variable, method) in enumerate(zip(self.variables, self.normalizer)):
+            norm_min_val[ii] = normalize_value(method, self.min_val[ii], statistics, name_to_index[variable])
         return norm_min_val
 
     def bound(self, data: torch.Tensor, indices: torch.Tensor, norm_min_val: torch.Tensor, **_kwargs) -> torch.Tensor:
