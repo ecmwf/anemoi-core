@@ -93,6 +93,17 @@ def test_forecaster_steps_reflect_rollout_start() -> None:
     assert list(task.steps("testing")) == [{"rollout_step": 0}, {"rollout_step": 1}]
 
 
+def test_forecaster_exact_validation_rollout() -> None:
+    """validation_rollout is a minimum by default; exact_validation_rollout unrolls exactly that many steps."""
+    kwargs = {"multistep_input": 1, "multistep_output": 1, "timestep": "6h", "rollout": {"start": 2, "maximum": 2}}
+    assert len(Forecaster(**kwargs, validation_rollout=1).steps("validation")) == 2
+    exact = Forecaster(**kwargs, validation_rollout=1, exact_validation_rollout=True)
+    assert list(exact.steps("validation")) == [{"rollout_step": 0}]
+    assert len(exact.steps("training")) == 2
+    assert len(Forecaster(**kwargs, validation_rollout=3, exact_validation_rollout=True).steps("validation")) == 3
+    assert exact.get_offsets("validation") == exact.get_offsets("training")[: len(exact.get_offsets("validation"))]
+
+
 def test_forecaster_validation_rollout_none_follows_training_rollout() -> None:
     """Unset validation_rollout follows the current training rollout."""
     task = Forecaster(

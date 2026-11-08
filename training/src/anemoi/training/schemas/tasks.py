@@ -46,6 +46,9 @@ class ForecasterSchema(BaseModel):
     validation_rollout: PositiveInt | None = Field(default=None, example=[None, 6, 12])
     "Minimum number of rollout steps unrolled in validation; the training rollout is always unrolled. "
     "The val loss is averaged over the training rollout only."
+    exact_validation_rollout: bool = Field(default=False)
+    "Unroll exactly ``validation_rollout`` steps in validation, also when the training rollout is longer. "
+    "The val loss then averages over those steps only."
 
 
 class DAForecasterSchema(BaseModel):
@@ -63,6 +66,9 @@ class DAForecasterSchema(BaseModel):
     "Rollout configuration of the forecast steps (after the DA cycles)."
     validation_rollout: PositiveInt | None = Field(default=None, example=[None, 6, 12])
     "Minimum number of forecast steps unrolled in validation; the training rollout is always unrolled."
+    exact_validation_rollout: bool = Field(default=False)
+    "Unroll exactly ``validation_rollout`` steps in validation, also when the training rollout is longer. "
+    "The val loss then averages over those steps only."
     da_cycles: NonNegativeInt = Field(default=0)
     "Number of data-assimilation cycles run before the forecast rollout."
     da_loss_weight: NonNegativeFloat = Field(default=0.0)
@@ -89,6 +95,9 @@ class OffsetForecasterSchema(BaseModel):
     validation_rollout: PositiveInt | None = Field(default=None, example=[None, 6, 12])
     "Minimum number of rollout steps unrolled in validation; the training rollout is always unrolled. "
     "The val loss is averaged over the training rollout only."
+    exact_validation_rollout: bool = Field(default=False)
+    "Unroll exactly ``validation_rollout`` steps in validation, also when the training rollout is longer. "
+    "The val loss then averages over those steps only."
 
 
 class AutoencoderTaskSchema(BaseModel):

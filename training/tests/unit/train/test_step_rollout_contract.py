@@ -215,6 +215,18 @@ def test_dataset_loss_is_averaged_over_training_rollout_only() -> None:
     assert {k for k in output.metrics if "metric" in k} == {f"era5_mse_metric/era5/all/{k}" for k in (1, 2, 3)}
 
 
+def test_loss_is_averaged_over_the_unrolled_steps_when_validation_is_shorter() -> None:
+    """exact_validation_rollout: validation unrolls 1 step, training 2; the loss is that step's, not half of it."""
+    module = SingleTraining.__new__(SingleTraining)
+    module.target_dataset_names = ["era5"]
+    module.loss = {"era5": types.SimpleNamespace(name="mse")}
+    module.task = StubTask(num_steps=2, num_validation_steps=1)
+    step_metrics = [{"era5_mse_loss": torch.tensor(3.0)}]
+    output = module._combine_loss_and_metrics([torch.tensor(3.0)], step_metrics, predictions=[])
+    assert float(output.loss) == pytest.approx(3.0)
+    assert float(output.metrics["era5_mse_loss"]) == pytest.approx(3.0)
+
+
 def test_loss_keys_are_absent_outside_validation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Per-dataset loss keys are a validation-only diagnostic."""
     module = _module_for_metric_keys(monkeypatch)

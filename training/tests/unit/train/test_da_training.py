@@ -132,6 +132,21 @@ def test_unweighted_da_cycles_compute_no_loss_and_the_loss_averages_the_forecast
     torch.testing.assert_close(output.loss, sum(forecast_losses) / 2)
 
 
+def test_exact_validation_rollout_loss_is_the_single_forecast_step() -> None:
+    """Validation unrolls the DA cycles and one forecast step; the loss is that step's loss, not half of it."""
+    task = _da_task(da_loss_weight=0.0, validation_rollout=1, exact_validation_rollout=True)
+    module = _module(task)
+    original = module.compute_loss_metrics
+    forecast_losses = []
+    module.compute_loss_metrics = lambda y_pred, y, **kw: (
+        forecast_losses.append(original(y_pred, y, **kw)[0]) or (forecast_losses[-1], {}, y_pred)
+    )
+    output = module._step(_batch(_num_times(task)), validation_mode=True)
+    assert len(output.predictions) == 3
+    assert len(forecast_losses) == 1
+    torch.testing.assert_close(output.loss, forecast_losses[0])
+
+
 def test_weighted_da_cycles_add_to_the_forecast_mean() -> None:
     batch = _batch(_num_times(_da_task()))
     weighted = _module(_da_task(da_loss_weight=0.5))

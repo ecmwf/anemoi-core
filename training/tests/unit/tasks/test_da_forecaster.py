@@ -67,6 +67,16 @@ def test_steps_tag_da_cycles_before_the_rollout() -> None:
     assert task.num_loss_steps == 2
 
 
+def test_exact_validation_rollout_keeps_the_da_cycles() -> None:
+    task = _task(da_cycles=2, rollout={"start": 2, "maximum": 3}, validation_rollout=1, exact_validation_rollout=True)
+    assert task.steps("validation") == (
+        {"rollout_step": 0, "is_da": True},
+        {"rollout_step": 1, "is_da": True},
+        {"rollout_step": 2, "is_da": False},
+    )
+    assert task.num_steps == 4
+
+
 def test_offsets_cover_the_da_cycles_and_stay_a_prefix() -> None:
     task = _task(da_cycles=2, rollout={"start": 1, "maximum": 3})
     longest = task.get_offsets()

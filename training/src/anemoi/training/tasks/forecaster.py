@@ -84,6 +84,7 @@ class BaseForecaster(BaseTask):
         rollout_shift: datetime.timedelta,
         rollout: dict | None = None,
         validation_rollout: int | None = None,
+        exact_validation_rollout: bool = False,
         **kwargs,
     ) -> None:
 
@@ -99,6 +100,8 @@ class BaseForecaster(BaseTask):
         self._rollout_shift = rollout_shift
         self.rollout = RolloutConfig(**(rollout or {}))
         self.validation_rollout = validation_rollout
+        # Unroll exactly validation_rollout steps in validation, also when training unrolls more.
+        self.exact_validation_rollout = exact_validation_rollout
         self._advance_map = self._compute_advance_map()
         self._plot_adapter = ForecasterPlotAdapter(self)
 
@@ -106,7 +109,10 @@ class BaseForecaster(BaseTask):
         """Return the current steps configuration based on the rollout step."""
         max_rollout = self.rollout.step
         if mode == "validation" and self.validation_rollout is not None:
-            max_rollout = max(max_rollout, self.validation_rollout)
+            if self.exact_validation_rollout:
+                max_rollout = self.validation_rollout
+            else:
+                max_rollout = max(max_rollout, self.validation_rollout)
         return tuple({"rollout_step": i} for i in range(max_rollout))
 
     def get_metric_name(self, rollout_step: int = 0, **_kwargs) -> str:

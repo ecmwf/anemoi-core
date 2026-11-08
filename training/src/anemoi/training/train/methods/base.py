@@ -1242,14 +1242,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Validation may unroll more steps than training. The total loss and the per-dataset
         losses only cover the first ``task.num_steps`` steps, so ``val_*_loss`` is directly
-        comparable to ``train_*_loss``. Validation metrics are reported for every step.
+        comparable to ``train_*_loss``. Validation metrics are reported for every step. With
+        ``exact_validation_rollout`` validation may unroll fewer steps; the losses then average
+        over the unrolled loss steps.
 
         Each step's loss is weighted by ``step_weights`` (``task.step_loss_weight``, default 1) and
         the sum divided by ``task.num_loss_steps``; a step without a loss (``None``, weight 0) adds
         nothing.
         """
         num_steps = self.task.num_steps
-        normaliser = self.task.num_loss_steps
+        # Validation may also unroll fewer steps than training (``exact_validation_rollout``);
+        # then only the loss steps that were unrolled count.
+        normaliser = max(self.task.num_loss_steps - max(num_steps - len(step_losses), 0), 1)
         weights = [1.0] * len(step_losses) if step_weights is None else step_weights
         weighted = [
             weight * step_loss
