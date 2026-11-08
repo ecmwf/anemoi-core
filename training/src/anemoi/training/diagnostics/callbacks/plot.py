@@ -930,7 +930,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
     ) -> None:
         if batch_idx % self.every_n_batches == 0:
             # Anything a loss holds that refers back to the loss itself, such as a kernel from torch.compile, keeps
-            # using the original loss in this copy. This can lead to issues at some point.
+            # using the original loss in this copy. Changes made to the copy do not reach those parts.
             self.loss = copy.deepcopy(pl_module.loss)
             super().on_validation_batch_end(
                 trainer,

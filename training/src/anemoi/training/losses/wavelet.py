@@ -23,6 +23,9 @@ from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.layers.ring_fft import FFTBackend
+from anemoi.models.layers.ring_fft import shared_ring_fft
+from anemoi.models.layers.ring_fft import validate_fft_options
 from anemoi.models.layers.spectral_transforms import octahedral_lons_per_lat
 from anemoi.models.layers.spectral_transforms import reduced_gaussian_lons_per_lat
 from anemoi.models.layers.spherical_wavelets import RieszStructureTensor
@@ -37,7 +40,7 @@ _WAVELET_LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
 
 
 def _grid_lons_per_lat(transform: str, grid: str | None, nlat: int | None, nlon: int | None) -> list[int]:
-    """Number of points on each latitude ring of the data grid, from pole to pole."""
+    """Return the number of points on each latitude ring of the data grid, from pole to pole."""
     if transform == "reduced_sht":
         if grid is None:
             msg = "The 'reduced_sht' transform needs the name of the grid, e.g. grid: n320."
@@ -57,32 +60,28 @@ def _grid_lons_per_lat(transform: str, grid: str | None, nlat: int | None, nlon:
 class WaveletEnergyScoreLoss(BaseLoss):
     """Energy score of the local amount and direction of structure at wavelet scales.
 
-    At each chosen scale and grid point, ``RieszStructureTensor`` gives J_ee, J_nn and J_en: the structure
-    tensor of the scale's Riesz pair, smoothed over a few wavelengths. From them
+    At each chosen scale and grid point, ``RieszStructureTensor`` gives J_ee, J_nn and J_en, the structure
+    tensor of the Riesz pair of that scale, smoothed over a few wavelengths. With E = J_ee + J_nn, these entries
+    form the vector
 
-        v = ( sqrt(E), (J_ee - J_nn) / sqrt(E + floor), 2 J_en / sqrt(E + floor) ),   E = J_ee + J_nn.
+        v = ( sqrt(E), (J_ee - J_nn) / sqrt(E + floor), 2 J_en / sqrt(E + floor) ).
 
-    - sqrt(E) is the amount of structure at that scale around the point.
-    - The other two entries point along twice the angle of the prevailing direction across the crests. Their
-      length is sqrt(E) times how strongly the crests line up (0 to 1).
-    - The floor is ``direction_floor`` times the field's area-weighted mean E, so very weak structure has
-      little say in the direction. Each member and the target use their own floor. It is the same function of
-      the field for all of them, so the score stays proper.
+    The first entry, sqrt(E), is the amount of structure at that scale around the point. The other two entries
+    point along twice the angle of the prevailing direction across the crests, and their length is sqrt(E) times
+    how strongly the crests line up, between 0 and 1. The floor is ``direction_floor`` times the area-weighted
+    mean of E over the field, so that very weak structure has little influence on the direction. Each member and
+    the target use their own floor. Since the floor is the same function of the field for all of them, the score
+    stays proper.
 
-    The loss is the energy score of v over the members at each point, added over the scales with their
-    weights, then scaled and reduced like the CRPS. It rewards the right amount of structure at each scale,
-    lined up the right way, and tolerates small shifts in the position of each crest. The transforms need the
-    whole grid: on a sharded grid the fields are spread over the variables for the transforms and back
+    The loss is the energy score of v over the members at each point, summed over the scales with their weights
+    and then scaled and reduced like the CRPS. It rewards the right amount of structure at each scale, lined up
+    the right way, and tolerates small shifts in the position of each crest. The transforms need the whole grid,
+    so on a sharded grid the fields are spread over the variables for the transforms and gathered back
     afterwards.
 
-    The finest scale lies mostly beyond the truncation; give it weight 0.
-
-    For best results, train with ``training.float32_matmul_precision: highest``.
-
-    - With TF32 matrix products (the default "high") the transforms keep only about three digits. On real fields
-      at O640 the gradient is then about 1 % off, and 13 % for precipitation.
-    - Full float32 keeps it within about 1e-5 for most fields. For smooth fields such as z500 the finest scales
-      come close to what float32 itself resolves (0.5 %).
+    The finest scale lies mostly beyond the truncation and should be given weight 0. For more accurate gradients,
+    use ``training.float32_matmul_precision: highest``. With TF32 matrix products, the default "high", the error
+    of the gradient depends on how many fields go through a transform together.
     """
 
     def __init__(
@@ -91,6 +90,9 @@ class WaveletEnergyScoreLoss(BaseLoss):
         scale_weights: list[float],
         *,
         truncation: int | None = None,
+        fft_backend: FFTBackend = "ring",
+        use_graphed_rfft: bool = False,
+        use_graphed_irfft: bool = False,
         smoothing_octaves: int = 3,
         direction_floor: float = 0.01,
         fair: bool = True,
@@ -102,46 +104,55 @@ class WaveletEnergyScoreLoss(BaseLoss):
         ignore_nans: bool = False,
         no_autocast: bool = True,
     ) -> None:
-        """Initialise the wavelet energy score.
+        """Initialize the wavelet energy score.
 
         Parameters
         ----------
         transform : {"reduced_sht", "octahedral_sht", "regular_sht"}
             Layout of the data grid. All three use Gaussian latitudes, ordered ring by ring from north to south.
         scale_weights : list[float]
-            Weight of each wavelet scale, from the largest; scale j covers 2^(j - 1) < l < 2^(j + 1). Scales with
-            weight 0 are not computed.
+            Weight of each wavelet scale, starting from the largest, where scale j covers 2^(j - 1) < l < 2^(j + 1).
+            Scales with weight 0 are not computed.
         truncation : int, optional
-            Highest total wavenumber. Defaults to nlat // 2 - 1.
+            Highest degree. Defaults to nlat // 2 - 1.
+        fft_backend : {"ring", "padded"}
+            FFT algorithm on reduced grids for all transforms. The default "ring" uses native FFTs grouped by ring
+            length.
+        use_graphed_rfft : bool
+            Capture the native forward FFTs in CUDA graphs. Defaults to False and cannot be combined with "padded".
+        use_graphed_irfft : bool
+            Capture the native inverse FFTs in CUDA graphs. Defaults to False and cannot be combined with "padded".
         smoothing_octaves : int
-            How many octaves below its own scale each structure tensor is smoothed. Default 3.
+            Number of octaves below its own scale at which each structure tensor is smoothed. Defaults to 3.
         direction_floor : float
-            Floor under E in the direction entries, relative to the field's mean E. Default 0.01.
+            Floor under E in the direction entries, relative to the mean of E over the field. Defaults to 0.01.
         fair : bool
-            Use the fair (unbiased) energy score. Default True.
+            Use the fair, unbiased energy score. Defaults to True.
         grid : str, optional
-            Name of the reduced Gaussian grid, for ``reduced_sht`` (only "n320").
+            Name of the reduced Gaussian grid for ``reduced_sht``. Only "n320" is supported.
         nlat : int, optional
-            Number of latitudes, for ``octahedral_sht`` and ``regular_sht``.
+            Number of latitudes for ``octahedral_sht`` and ``regular_sht``.
         nlon : int, optional
-            Number of longitudes, for ``regular_sht``. Defaults to 2 * nlat.
+            Number of longitudes for ``regular_sht``. Defaults to 2 * nlat.
         checkpoint_scales : bool
-            Recompute each scale in the backward pass, keeping the values of one scale in memory at a time. Lowers
-            the peak memory and takes longer. Default False.
+            Recompute each scale in the backward pass, so that the values of only one scale are in memory at a
+            time. This lowers the peak memory and takes longer. Defaults to False.
         variables_per_checkpoint : int, optional
             Split the variables into groups of this size and recompute each group of each scale in the backward
             pass. This includes what ``checkpoint_scales`` does and lowers the peak memory further. Each group adds
-            a fixed time, so very small groups are slow with many variables. Default None: no groups.
+            a fixed time, so very small groups are slow with many variables. Defaults to None, which keeps the
+            variables together.
         ignore_nans : bool
-            Must be False: the transforms cannot handle missing values.
+            Must be False, since the transforms cannot handle missing values.
         no_autocast : bool
-            Must be True: the transforms and the score always run in float32.
+            Must be True, since the transforms and the score always run with autocast off, in float32 or float64.
         """
+        validate_fft_options(fft_backend, use_graphed_rfft or use_graphed_irfft)
         if ignore_nans:
             msg = "WaveletEnergyScoreLoss cannot handle missing values; ignore_nans must be False."
             raise ValueError(msg)
         if not no_autocast:
-            msg = "WaveletEnergyScoreLoss always runs in float32; no_autocast must be True."
+            msg = "WaveletEnergyScoreLoss always runs with autocast off; no_autocast must be True."
             raise ValueError(msg)
         if direction_floor <= 0.0:
             msg = f"direction_floor must be positive, got {direction_floor}."
@@ -165,7 +176,15 @@ class WaveletEnergyScoreLoss(BaseLoss):
             raise ValueError(msg)
 
         scales = [j for j, weight in enumerate(scale_weights) if weight > 0.0]
-        self.structure = RieszStructureTensor(lons_per_lat, truncation, scales, smoothing_octaves=smoothing_octaves)
+        self.structure = RieszStructureTensor(
+            lons_per_lat,
+            truncation,
+            scales,
+            smoothing_octaves=smoothing_octaves,
+            fft_backend=fft_backend,
+            use_graphed_rfft=use_graphed_rfft,
+            use_graphed_irfft=use_graphed_irfft,
+        )
         self.weights = [float(scale_weights[j]) for j in scales]
         self.direction_floor = direction_floor
         self.checkpoint_scales = checkpoint_scales
@@ -182,7 +201,10 @@ class WaveletEnergyScoreLoss(BaseLoss):
         return f"{prefix}wavelet_energy_score"
 
     def structure_vectors(self, tensor: torch.Tensor) -> torch.Tensor:
-        """Vectors v ``[..., 3, grid]`` from J_ee, J_nn and J_en ``[..., 3, grid]``, see the class description."""
+        """Form the vectors v ``[..., 3, grid]`` from J_ee, J_nn and J_en ``[..., 3, grid]``.
+
+        The class description defines the vectors.
+        """
         j_ee, j_nn, j_en = tensor.unbind(-2)
         energy = (j_ee + j_nn).clamp_min(0.0)
         floor = self.direction_floor * (energy * self.structure.area.to(energy.dtype)).sum(-1, keepdim=True)
@@ -193,7 +215,7 @@ class WaveletEnergyScoreLoss(BaseLoss):
         )
 
     def energy_score(self, members: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """Energy score ``[..., grid]`` of member vectors ``[..., e, 3, grid]`` against ``[..., 1, 3, grid]``."""
+        """Compute the energy score ``[..., grid]`` of members ``[..., e, 3, grid]`` against ``[..., 1, 3, grid]``."""
 
         def length(x: torch.Tensor) -> torch.Tensor:
             return (x.square().sum(-2) + _TINY).sqrt()
@@ -207,9 +229,18 @@ class WaveletEnergyScoreLoss(BaseLoss):
         return skill - pair_coefficient * spread
 
     def compile_for_training(self, **options) -> None:
-        """Compile the grid-point work of the loss; the spectral transforms run as they are."""
+        """Compile the grid-point work and, with ``fft_backend: padded``, the padded-FFT packing.
+
+        The ``options`` apply to the grid-point work. The packing uses its own settings, with dynamic shapes and
+        without CUDA graphs, and is shared by all padded losses and metrics on the same grid in this process. Once
+        the cache of ``shared_ring_fft`` is cleared, later lookups create an uncompiled instance, so training should
+        keep the cache after this call.
+        """
         self._products = torch.compile(self._products, **options)
         self._score_from_smoothed = torch.compile(self._score_from_smoothed, **options)
+        lengths = tuple(self.structure.sht.lons_per_lat)
+        if self.structure.sht.fft_backend == "padded" and len(set(lengths)) > 1:
+            shared_ring_fft(lengths, "padded", False).compile_for_training()
 
     def _products(self, pair: torch.Tensor, east: torch.Tensor, north: torch.Tensor) -> torch.Tensor:
         return self.structure.products(pair, east, north)
@@ -225,7 +256,7 @@ class WaveletEnergyScoreLoss(BaseLoss):
         return self.energy_score(vectors, target_vectors)
 
     def _score_of_scale(self, coeffs: torch.Tensor, target_vectors: torch.Tensor, k: int) -> torch.Tensor:
-        """Energy scores ``[..., grid]`` at the k-th chosen scale, from the members' coefficients."""
+        """Compute the energy scores ``[..., grid]`` at the k-th chosen scale from the coefficients of the members."""
         dtype = coeffs.real.dtype
         east, north = self.structure.east.to(dtype), self.structure.north.to(dtype)
         products = self._products(self.structure.riesz_pair(coeffs, k), east, north)
@@ -242,7 +273,10 @@ class WaveletEnergyScoreLoss(BaseLoss):
         )
 
     def _arranged_score_of_scale(self, coeffs: torch.Tensor, target_vectors: torch.Tensor, k: int) -> torch.Tensor:
-        """Energy scores ``[b, t, v, grid]`` at the k-th chosen scale, in checkpoints if the loss is set to use them."""
+        """Compute the energy scores ``[b, t, v, grid]`` at the k-th chosen scale.
+
+        The scale runs in checkpoints when the loss is set to use them.
+        """
         size = self.variables_per_checkpoint
         if size is not None:
             groups = zip(coeffs.split(size, dim=2), target_vectors.split(size, dim=2), strict=True)
@@ -252,12 +286,12 @@ class WaveletEnergyScoreLoss(BaseLoss):
         return self._score_of_scale(coeffs, target_vectors, k)
 
     def _target_vectors(self, target: torch.Tensor) -> list[torch.Tensor]:
-        """Vectors of the target ``[b, t, v, 1, 3, grid]``, one tensor per chosen scale."""
-        coeffs = self.structure.coefficients(target.float())
+        """Compute the vectors of the target ``[b, t, v, 1, 3, grid]``, one tensor per chosen scale."""
+        coeffs = self.structure.coefficients(target)
         return [self.structure_vectors(self.structure.tensor(coeffs, k)) for k in range(len(self.weights))]
 
     def point_scores(self, y_pred: torch.Tensor, y_target: torch.Tensor) -> torch.Tensor:
-        """Weighted wavelet energy scores at each grid point, ``[b, t, 1, grid, v]``, on the full grid."""
+        """Compute the weighted wavelet energy scores ``[b, t, 1, grid, v]`` at each point of the full grid."""
         if self.fair and y_pred.shape[2] < 2:
             msg = "The fair WaveletEnergyScoreLoss needs at least two ensemble members."
             raise ValueError(msg)
@@ -270,7 +304,7 @@ class WaveletEnergyScoreLoss(BaseLoss):
         with torch.amp.autocast(device_type=pred.device.type, enabled=False):
             # The target goes through the transforms on its own, hence nothing about it is kept for the backward pass.
             target_vectors = self._target_vectors(target)
-            coeffs = self.structure.coefficients(pred.float())
+            coeffs = self.structure.coefficients(pred)
             scores = 0.0
             for k, weight in enumerate(self.weights):
                 scores = scores + weight * self._arranged_score_of_scale(coeffs, target_vectors[k], k)

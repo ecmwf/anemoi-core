@@ -32,7 +32,10 @@ DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
 
 
 def point_coordinates(lons_per_lat: list[int]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Latitude, longitude and area (adding up to 1) of every point, ring by ring from north to south."""
+    """Return the latitude, longitude and area of every point, ring by ring from north to south.
+
+    The areas add up to 1.
+    """
     colatitude, weights = latitude_quadrature(len(lons_per_lat), "legendre-gauss")
     latitude = np.repeat(0.5 * np.pi - colatitude, lons_per_lat)
     longitude = np.concatenate([2.0 * np.pi * np.arange(n) / n for n in lons_per_lat])
@@ -41,7 +44,7 @@ def point_coordinates(lons_per_lat: list[int]) -> tuple[np.ndarray, np.ndarray, 
 
 
 def band_limited(lons_per_lat: list[int], batch: int, truncation: int, seed: int = 0) -> torch.Tensor:
-    """Random real fields ``[batch, grid]`` in float64 that the grid represents exactly up to the truncation."""
+    """Return random real fields ``[batch, grid]`` in float64 that the grid represents exactly up to the truncation."""
     generator = torch.Generator().manual_seed(seed)
     coeffs = torch.randn(batch, truncation + 1, truncation + 1, dtype=torch.complex128, generator=generator).tril()
     coeffs[..., 0] = coeffs[..., 0].real
@@ -49,7 +52,10 @@ def band_limited(lons_per_lat: list[int], batch: int, truncation: int, seed: int
 
 
 def test_the_step_is_the_s2let_step() -> None:
-    """k(t) = integral of b(x) / x from t to 1, divided by the same from 1/2; b = exp(-2 / (1 - y^2)), y = 4 x - 3."""
+    """The step k(t) is the integral of b(x) / x from t to 1 divided by the same integral from 1/2.
+
+    Here, b = exp(-2 / (1 - y^2)) with y = 4 x - 3.
+    """
 
     def integrand(x: float) -> float:
         y = 4.0 * (x - 0.5) - 1.0
@@ -89,7 +95,7 @@ def test_one_scale_for_each_octave_that_starts_at_or_below_the_truncation(trunca
 
 @pytest.mark.parametrize("grid", GRIDS)
 def test_gradient_of_a_known_field(grid: str) -> None:
-    """A field of degrees 1 to 6 and orders 0, 1 and 5, against its gradient written out by hand."""
+    """The gradient of a field of degrees 1 to 6 and orders 0, 1 and 5 matches the gradient written out by hand."""
     lons_per_lat = GRIDS[grid]
     lat, lon, _ = point_coordinates(lons_per_lat)
     sin, cos = np.sin(lat), np.cos(lat)
@@ -126,8 +132,8 @@ def test_the_riesz_pair_has_the_energy_of_its_band(grid: str) -> None:
 @pytest.mark.parametrize("grid", ["octahedral", "regular"])
 @pytest.mark.parametrize(("scale", "octaves"), [(5, 2), (6, 2)])
 def test_smoothing_loses_about_one_over_ls_squared_to_the_radial_direction(grid: str, scale: int, octaves: int) -> None:
-    """The heat kernel is 1 at l = 0, so the smoothing keeps the global mean. The read-off in the tangent plane
-    leaves out about 1 / Ls^2.
+    """The heat kernel is 1 at l = 0, so the smoothing keeps the global mean, and the read-off in the tangent
+    plane leaves out about 1 / Ls^2.
     """
     nlat, truncation = 128, 79
     lons_per_lat = octahedral_lons_per_lat(nlat) if grid == "octahedral" else [2 * nlat] * nlat
@@ -143,7 +149,10 @@ def test_smoothing_loses_about_one_over_ls_squared_to_the_radial_direction(grid:
 
 
 def test_the_tensor_is_positive_semi_definite() -> None:
-    """Up to about 3e-7 of the largest energy: the cut heat kernel dips that far below 0 for Ls >= 4."""
+    """The tensor is positive semi-definite up to about 3e-7 of the largest energy.
+
+    The cut heat kernel dips that far below 0 for Ls >= 4.
+    """
     nlat, truncation = 128, 79
     lons_per_lat = octahedral_lons_per_lat(nlat)
     structure = RieszStructureTensor(lons_per_lat, truncation, scales=[2, 5, 6], smoothing_octaves=2)  # Ls 1, 8, 16
@@ -199,7 +208,7 @@ def test_rejects_a_scale_too_small_for_float64() -> None:
 
 
 def test_rejects_a_heat_kernel_cut_short() -> None:
-    # Scale 3 with one octave needs degrees up to 5 * 4 = 20; the transforms reach 12.
+    # Scale 3 with one octave needs degrees up to 5 * 4 = 20, but the transforms reach only 12.
     with pytest.raises(ValueError, match="needs smoothing degrees up to 20"):
         RieszStructureTensor(GRIDS["octahedral"], TRUNCATION, scales=[3], smoothing_octaves=1)
 
@@ -211,7 +220,7 @@ def test_rejects_too_few_latitudes_for_the_products() -> None:
 
 
 def test_needs_more_longitudes_than_the_products_reach() -> None:
-    # The products of scale 3 at T11 reach order 24, and the smoothing goes up to 10.
+    # The products of scale 3 at T11 reach degree 24, and the smoothing goes up to 10.
     with pytest.raises(ValueError, match="need more than 34 longitudes"):
         RieszStructureTensor([34] * NLAT, TRUNCATION, scales=[3], smoothing_octaves=2)
     RieszStructureTensor([35] * NLAT, TRUNCATION, scales=[3], smoothing_octaves=2)
