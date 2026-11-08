@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 from hydra.errors import InstantiationException
 from hypothesis import given
+from hypothesis import settings
 from hypothesis import strategies as st
 from omegaconf import OmegaConf
 
@@ -84,6 +85,9 @@ class TestLayerUtils:
         with pytest.raises(InstantiationException):
             load_layer_kernels(kernels_config)
 
+    # No deadline: the first example also pays for torch's lazy initialisation, which can take
+    # several hundred milliseconds on a busy node; the test checks shapes, not speed.
+    @settings(deadline=None)
     @given(input_shape=st.lists(st.integers(1, 20), min_size=2, max_size=4))
     def test_kernel_forward_pass(self, default_layer_kernels, input_shape):
         # Create random input

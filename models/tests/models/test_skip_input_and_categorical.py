@@ -46,6 +46,12 @@ from tests.distributed.test_model_sharding_gradients import _synthetic_batches
 CODES = [3, 7, 11]
 
 
+@pytest.fixture(autouse=True)
+def _graphs_on_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Build the graphs on the CPU, where the model and the data are, also on a GPU node."""
+    monkeypatch.setenv("ANEMOI_GRAPHS_FORCE_CPU", "1")
+
+
 def _build(
     model_class: type = AnemoiModelEncProcDec,
     categorical: dict | None = None,
