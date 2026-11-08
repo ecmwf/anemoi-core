@@ -180,6 +180,20 @@ reconstruct fine-scale detail from scratch. An optional anti-aliasing
 blend (``anti_aliasing=True``) smoothly mixes the filtered and
 unfiltered fields.
 
+The transforms run in float32 or float64 with autocast switched off,
+also under mixed-precision training. On an octahedral grid,
+``fft_backend`` selects the ring FFTs, with ``ring``, the default, for
+native FFTs grouped by ring length and ``padded`` for padded FFTs.
+Native FFTs need one cuFFT plan per ring length, direction and batch
+shape. With ``truncate`` and ``anti_aliasing``, the forward pass alone
+runs four transforms with different batch shapes. At O1280, with 1280
+ring lengths, that is about 5120 plans, above PyTorch's default limit of
+4096 per GPU. At high resolution, the layer can use
+``fft_backend: padded``, or the limit can be raised in the process that
+runs the model, with ``training.cufft_plan_cache_size`` in training and
+``torch.backends.cuda.cufft_plan_cache[device].max_size`` elsewhere, for
+example in inference.
+
 .. autoclass:: anemoi.models.layers.residual.SpectralOrnsteinConnection
    :members:
    :no-undoc-members:

@@ -16,7 +16,11 @@ import torch
 from torch import Tensor
 from torch.nn import Module
 
+from anemoi.models.layers.ring_fft import FFTBackend
 from anemoi.models.layers.ring_fft import shared_ring_fft
+from anemoi.models.layers.ring_fft import validate_fft_options
+from anemoi.models.layers.ring_fft_base import at_least_float32
+from anemoi.models.layers.ring_fft_base import empty_transform
 
 LOGGER = logging.getLogger(__name__)
 
@@ -191,6 +195,8 @@ class SphericalHarmonicTransform(Module):
         lons_per_lat: list[int],
         truncation: int,
         latitude_grid: LatitudeGrid = "legendre-gauss",
+        fft_backend: FFTBackend = "ring",
+        use_graphed_rfft: bool = False,
     ) -> None:
         r"""Initializes SphericalHarmonicTransform.
 
@@ -202,9 +208,16 @@ class SphericalHarmonicTransform(Module):
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array
         latitude_grid : {"legendre-gauss", "equiangular-poles"}, optional
             Gaussian latitude nodes or equally spaced rows including both poles, ordered north to south.
+        fft_backend : {"ring", "padded"}, optional
+            Native FFTs grouped by ring length (default) or padded Bluestein FFTs for reduced grids.
+        use_graphed_rfft : bool, optional
+            Capture the native reduced-grid rFFT in CUDA graphs. Default is False.
         """
 
         super().__init__()
+        validate_fft_options(fft_backend, use_graphed_rfft)
+        self.fft_backend = fft_backend
+        self.use_graphed_rfft = use_graphed_rfft
 
         self.lons_per_lat = lons_per_lat
         self.nlat = len(self.lons_per_lat)
@@ -235,12 +248,12 @@ class SphericalHarmonicTransform(Module):
         self.register_buffer("mode_weights", mode_weights, persistent=False)
 
     def rfft_rings_reduced(self, x: Tensor) -> Tensor:
-        """Fourier coefficients ``[..., latitude, m]`` on each ring of a reduced grid, up to the truncation.
+        """Compute the Fourier coefficients ``[..., latitude, m]`` on each ring of a reduced grid, up to the truncation.
 
-        All rings go through a few FFTs together, see ``RingFFT``.
+        The configured native or padded backend supplies the ring FFTs and their gradients.
         """
         modes = min(self.truncation + 1, max(self.lons_per_lat) // 2 + 1)
-        return shared_ring_fft(tuple(self.lons_per_lat)).rfft(x, modes)
+        return shared_ring_fft(tuple(self.lons_per_lat), self.fft_backend, self.use_graphed_rfft).rfft(x, modes)
 
     def rfft_rings_regular(self, x: Tensor) -> Tensor:
         """Performs direct real-to-complex FFT on each latitude ring of a regular grid.
@@ -256,6 +269,9 @@ class SphericalHarmonicTransform(Module):
             Fourier space field [..., latitude, zonal wavenumber m].
         """
 
+        if x.numel() == 0:
+            shape = (*x.shape[:-1], self.nlat, self.lons_per_lat[0] // 2 + 1)
+            return empty_transform(x, shape, torch.promote_types(x.dtype, torch.complex64))
         return torch.fft.rfft(x.reshape(*x.shape[:-1], self.nlat, self.lons_per_lat[0]), norm="forward")
 
     def forward(self, x: Tensor) -> Tensor:
@@ -272,6 +288,11 @@ class SphericalHarmonicTransform(Module):
             spectral representation of field [..., total wavenumber l, zonal wavenumber m].
         """
 
+        x = at_least_float32(x)
+        with torch.amp.autocast(device_type=x.device.type, enabled=False):
+            return self._transform(x)
+
+    def _transform(self, x: Tensor) -> Tensor:
         x = 2.0 * torch.pi * self.rfft_rings(x)
         x = torch.view_as_real(x)
 
@@ -318,6 +339,8 @@ class InverseSphericalHarmonicTransform(Module):
         lons_per_lat: list[int],
         truncation: int,
         latitude_grid: LatitudeGrid = "legendre-gauss",
+        fft_backend: FFTBackend = "ring",
+        use_graphed_irfft: bool = False,
     ) -> None:
         r"""Initializes InverseSphericalHarmonicTransform.
 
@@ -329,9 +352,16 @@ class InverseSphericalHarmonicTransform(Module):
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array.
         latitude_grid : {"legendre-gauss", "equiangular-poles"}, optional
             Gaussian latitude nodes or equally spaced rows including both poles, ordered north to south.
+        fft_backend : {"ring", "padded"}, optional
+            Native FFTs grouped by ring length (default) or padded Bluestein FFTs for reduced grids.
+        use_graphed_irfft : bool, optional
+            Capture the native reduced-grid irFFT in CUDA graphs. Default is False.
         """
 
         super().__init__()
+        validate_fft_options(fft_backend, use_graphed_irfft)
+        self.fft_backend = fft_backend
+        self.use_graphed_irfft = use_graphed_irfft
 
         nlat = len(lons_per_lat)
         theta, _ = _sht_quadrature(nlat, truncation, latitude_grid)
@@ -355,11 +385,11 @@ class InverseSphericalHarmonicTransform(Module):
         self.register_buffer("pct", pct, persistent=False)
 
     def irfft_rings_reduced(self, x: Tensor) -> Tensor:
-        """Ring values ``[..., grid]`` of a reduced grid from their Fourier coefficients ``[..., latitude, m]``.
+        """Compute the values ``[..., grid]`` on the rings of a reduced grid from coefficients ``[..., latitude, m]``.
 
-        All rings go through a few FFTs together, see ``RingFFT``.
+        The configured native or padded backend supplies the ring FFTs and their gradients.
         """
-        return shared_ring_fft(tuple(self.lons_per_lat)).irfft(x)
+        return shared_ring_fft(tuple(self.lons_per_lat), self.fft_backend, self.use_graphed_irfft).irfft(x)
 
     def irfft_rings_regular(self, x: Tensor) -> Tensor:
         """Performs inverse complex-to-real FFT on each latitude ring of a regular grid.
@@ -375,6 +405,8 @@ class InverseSphericalHarmonicTransform(Module):
             field [..., grid].
         """
 
+        if x.numel() == 0:
+            return empty_transform(x, (*x.shape[:-2], self.n_grid_points), x.real.dtype)
         return torch.fft.irfft(x, self.lons_per_lat[0], norm="forward").reshape(*x.shape[:-2], self.n_grid_points)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -391,6 +423,11 @@ class InverseSphericalHarmonicTransform(Module):
             field [..., grid].
         """
 
+        x = at_least_float32(x)
+        with torch.amp.autocast(device_type=x.device.type, enabled=False):
+            return self._transform(x)
+
+    def _transform(self, x: Tensor) -> Tensor:
         x = torch.view_as_real(x)
 
         rl = torch.einsum("...lm, mlk -> ...km", x[..., 0], self.pct.to(x.dtype))

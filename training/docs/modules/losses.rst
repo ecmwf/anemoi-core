@@ -616,9 +616,25 @@ axis ahead of ``l, m`` when passing the forward wrapper's output to the inverse.
 
 .. note::
 
-   ``ReducedSHT`` and ``OctahedralSHT`` both perform a spherical harmonic transform on a reduced Gaussian grid.
-   The Fourier transforms along the latitude rings use Bluestein's padding trick: rings of different
-   lengths share a few FFT lengths, so all rings go through a few batched FFTs together.
+   ``ReducedSHT`` and ``OctahedralSHT`` accept ``fft_backend: ring``, the
+   default, or ``fft_backend: padded`` in the spectral-loss configuration.
+   Native FFTs group rings of equal length, while padded FFTs transform each
+   field independently with cached chirps. ``use_graphed_rfft: true`` enables
+   CUDA graph capture for the native backend, and each capture keeps GPU memory
+   for the rest of the process. The flag defaults to false and cannot be
+   combined with ``fft_backend: padded``. The inverse transform wrappers accept
+   the corresponding ``use_graphed_irfft`` flag. Native FFTs need one cuFFT
+   plan per ring length, direction and batch shape, so at high resolution they
+   can need more plans than PyTorch keeps by default. Raise the limit with
+   ``training.cufft_plan_cache_size`` if necessary.
+
+.. note::
+
+   Spherical harmonic transforms run with autocast switched off, in float32 or
+   float64. Half-precision fields are promoted to float32, and float32 and
+   float64 fields keep their precision. Since the Legendre sums are matrix
+   products, in float32 they follow ``training.float32_matmul_precision``, and
+   with the default ``high`` they use TF32 where the GPU supports it.
 
 .. note::
 

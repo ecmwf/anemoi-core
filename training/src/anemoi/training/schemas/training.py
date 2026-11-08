@@ -606,6 +606,10 @@ class SpectralLossSchema(BaseLossSchema):
 
     transform: Literal["fft2d", "dct2d", "regular_sht", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
+    fft_backend: Literal["ring", "padded"] = "ring"
+    "FFTs on reduced grids, with 'ring' for native FFTs grouped by ring length and 'padded' for padded FFTs."
+    use_graphed_rfft: bool = False
+    "Capture the native reduced-grid FFTs in CUDA graphs. This cannot be combined with the padded backend."
     subgrid: tuple[int, int | None] | Literal["output_mask"] | None = None
     """Optional slice or string to select a subgrid before the transform."""
     projection_config: SpectralProjectionConfigSchema | None = None
@@ -615,6 +619,9 @@ class SpectralLossSchema(BaseLossSchema):
 
     @model_validator(mode="after")
     def check_subgrid_transform(self) -> Self:
+        if self.fft_backend == "padded" and self.use_graphed_rfft:
+            msg = "CUDA graphs require fft_backend='ring'"
+            raise ValueError(msg)
         if self.subgrid is not None and self.transform in ("regular_sht", "reduced_sht", "octahedral_sht"):
             msg = (
                 f"subgrid is not supported for the '{self.transform}' transform: "
@@ -836,6 +843,9 @@ class BaseTrainingSchema(BaseModel):
     float32_matmul_precision: Literal["highest", "high", "medium"] = Field(default="high")
     "Precision of float32 matrix products, passed to torch.set_float32_matmul_precision. With 'high', the products"
     " may use TF32."
+    cufft_plan_cache_size: PositiveInt | None = Field(default=None)
+    "Maximum number of cached cuFFT plans per GPU. Native ring FFTs need one per ring length, direction and batch"
+    " shape. None leaves the current limit unchanged, which is normally 4096."
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""

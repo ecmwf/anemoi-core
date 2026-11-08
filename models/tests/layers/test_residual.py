@@ -12,12 +12,14 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
+from pydantic import ValidationError
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.residual import ScalarOrnsteinConnection
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.layers.residual import SpectralOrnsteinConnection
 from anemoi.models.layers.residual import TruncatedConnection
+from anemoi.models.schemas.residual import SpectralOrnsteinConnectionSchema
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -296,3 +298,53 @@ def test_spectral_ornstein_truncation_has_filter():
     assert hasattr(conn, "filter")
     assert hasattr(conn, "x_fsht")
     assert hasattr(conn, "x_isht")
+
+
+@pytest.mark.parametrize("backend", ["ring", "padded"])
+def test_spectral_ornstein_passes_fft_backend_to_its_transforms(backend):
+    graph, nlat, n_points = _make_octahedral_graph(nlat=8)
+    conn = SpectralOrnsteinConnection(
+        lmax=2,
+        grid="octahedral",
+        truncate=True,
+        fft_backend=backend,
+        graph=graph,
+        data_indices=_make_data_indices(3),
+        dataset_name="data",
+    )
+    assert conn.isht._isht.fft_backend == backend
+    assert conn.x_fsht.fft_backend == backend
+    assert conn.x_isht.fft_backend == backend
+
+
+def test_spectral_ornstein_schema_takes_fft_backend():
+    target = "anemoi.models.layers.residual.SpectralOrnsteinConnection"
+    assert SpectralOrnsteinConnectionSchema(_target_=target, fft_backend="padded").fft_backend == "padded"
+    assert SpectralOrnsteinConnectionSchema(_target_=target).fft_backend == "ring"
+    with pytest.raises(ValidationError):
+        SpectralOrnsteinConnectionSchema(_target_=target, fft_backend="unknown")
+
+
+@pytest.mark.parametrize("backend", ["ring", "padded"])
+def test_spectral_ornstein_transforms_keep_float32_under_autocast(backend):
+    """Mixed precision leaves the layer's spherical transforms in float32."""
+    torch.manual_seed(0)
+    graph, nlat, n_points = _make_octahedral_graph(nlat=8)
+    conn = SpectralOrnsteinConnection(
+        lmax=3,
+        grid="octahedral",
+        truncate=True,
+        fft_backend=backend,
+        graph=graph,
+        data_indices=_make_data_indices(3),
+        dataset_name="data",
+    )
+    with torch.no_grad():
+        for parameter in conn.parameters():
+            parameter.normal_()
+    x = torch.randn(2, 3, 1, n_points, 3)
+    # The layer writes the truncated fields into its input, so each call gets its own copy.
+    expected = conn(x.clone())
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        actual = conn(x.clone())
+    torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-5)
