@@ -1,0 +1,706 @@
+# Minimal observations-only configuration for joint encoder fusion.
+#
+# Three tabular datasets (surface, AMV, GPS-RO) go through ONE encoder with
+# dataset_fusing_strategy: joint, i.e. a single mapper pass over the merged observation
+# nodes; each dataset gets a thin linear projection onto a common width first. The model
+# decodes surface observations only. Small model, few steps: this checks that the
+# configuration builds, trains and validates, not skill.
+#
+# Run: sbatch test_joint_obs.sh (repository root), or
+#   anemoi-training train --config-path=$PWD/training/tests/config --config-name=test_joint_obs
+# Model-sharded variant (exercises the sharded merge):
+#   ... system.hardware.num_gpus_per_model=2 model.keep_batch_sharded=true
+data:
+  format: zarr
+  frequency: 12h
+  datasets:
+    combined_amv:
+      forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - reportype
+      - pressure
+      - cos_sza
+      diagnostic: []
+      processors:
+        const_imputer:
+          _target_: anemoi.models.preprocessing.imputer.InputImputer
+          config:
+            default: mean
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            std: null
+            min-max: null
+            max: null
+            none:
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - cos_julian_day
+            - cos_local_time
+            - sin_julian_day
+            - sin_local_time
+            - cos_sza
+    combined_surface:
+      forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - reportype
+      - stalt
+      - lsm
+      - cos_sza
+      diagnostic: []
+      processors:
+        const_imputer:
+          _target_: anemoi.models.preprocessing.imputer.InputImputer
+          config:
+            default: mean
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            std: null
+            min-max: null
+            max: null
+            none:
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - cos_julian_day
+            - cos_local_time
+            - sin_julian_day
+            - sin_local_time
+            - lsm
+            - cos_sza
+    combined_gpsro_notrop:
+      forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - satellite_id
+      - height
+      - cos_sza
+      diagnostic: []
+      processors:
+        const_imputer:
+          _target_: anemoi.models.preprocessing.imputer.InputImputer
+          config:
+            default: mean
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            std: null
+            min-max: null
+            max: null
+            none:
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - cos_julian_day
+            - cos_local_time
+            - sin_julian_day
+            - sin_local_time
+            - cos_sza
+  num_features: null
+dataloader:
+  prefetch_factor: 2
+  pin_memory: true
+  persistent_workers: false
+  fake_dataloading: false
+  loading_policy:
+    _target_: anemoi.training.data.loading.SynchronizedLoadingPolicy
+  read_group_size: ${system.hardware.num_gpus_per_model}
+  num_workers:
+    training: 4
+    validation: 4
+    test: 4
+  batch_size:
+    training: 1
+    validation: 1
+    test: 1
+  limit_batches:
+    training: 50
+    validation: 10
+    test: 10
+  training:
+    datasets:
+      combined_amv:
+        dataset_config:
+          dataset: ${system.input.combined_amv}
+          frequency: ${data.frequency}
+          drop:
+          - seqno
+          - report_status.active
+          window: (-12h,0]
+        start: 2008
+        end: 2023
+        trajectory: null
+      combined_surface:
+        dataset_config:
+          dataset: ${system.input.combined_surface}
+          frequency: ${data.frequency}
+          drop:
+          - seqno
+          - obsvalue_td2m_0
+          window: (-12h,0]
+        start: 2008
+        end: 2023
+        trajectory: null
+      combined_gpsro_notrop:
+        dataset_config:
+          dataset: ${system.input.combined_gpsro_notrop}
+          frequency: ${data.frequency}
+          drop:
+          - obsvalue_bend_angle_0
+          - healpix_idx_16
+          window: (-12h,0]
+        start: 2008
+        end: 2023
+        trajectory: null
+  validation:
+    datasets:
+      combined_amv:
+        dataset_config:
+          dataset: ${system.input.combined_amv}
+          frequency: ${data.frequency}
+          drop:
+          - seqno
+          - report_status.active
+          window: (-12h,0]
+        start: 2024
+        end: 2024
+        trajectory: null
+      combined_surface:
+        dataset_config:
+          dataset: ${system.input.combined_surface}
+          frequency: ${data.frequency}
+          drop:
+          - seqno
+          - obsvalue_td2m_0
+          window: (-12h,0]
+        start: 2024
+        end: 2024
+        trajectory: null
+      combined_gpsro_notrop:
+        dataset_config:
+          dataset: ${system.input.combined_gpsro_notrop}
+          drop:
+          - obsvalue_bend_angle_0
+          - healpix_idx_16
+          frequency: ${data.frequency}
+          window: (-12h,0]
+        start: 2024
+        end: 2024
+        trajectory: null
+  test:
+    datasets:
+      combined_amv:
+        dataset_config:
+          dataset: ${system.input.combined_amv}
+          frequency: ${data.frequency}
+          drop:
+          - seqno
+          - report_status.active
+          window: (-12h,0]
+        start: 2025
+        end: 2025
+        trajectory: null
+      combined_surface:
+        dataset_config:
+          dataset: ${system.input.combined_surface}
+          frequency: ${data.frequency}
+          drop:
+          - seqno
+          - obsvalue_td2m_0
+          window: (-12h,0]
+        start: 2025
+        end: 2025
+        trajectory: null
+      combined_gpsro_notrop:
+        dataset_config:
+          dataset: ${system.input.combined_gpsro_notrop}
+          drop:
+          - obsvalue_bend_angle_0
+          - healpix_idx_16
+          frequency: ${data.frequency}
+          window: (-12h,0]
+        start: 2025
+        end: 2025
+        trajectory: null
+diagnostics:
+  callbacks: []
+  plot:
+    settings:
+      asynchronous: true
+      datashader: true
+      projection_kind: equirectangular
+      precip_and_related_fields: []
+      colormaps:
+        default:
+          _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
+          name: viridis
+        error:
+          _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
+          name: bwr
+        precip:
+          _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormapClevels
+          clevels:
+          - '#ffffff'
+          - '#04e9e7'
+          - '#019ff4'
+          - '#0300f4'
+          - '#02fd02'
+          - '#01c501'
+          - '#008e00'
+          - '#fdf802'
+          - '#e5bc00'
+          - '#fd9500'
+          - '#fd0000'
+          - '#d40000'
+          - '#bc0000'
+          - '#f800fd'
+          variables: ${diagnostics.plot.settings.precip_and_related_fields}
+    frequency:
+      batch: 5
+      epoch: 1
+    parameters: []
+    sample_idx: 0
+    datasets_to_plot: []
+    focus_areas: {}
+    callbacks:
+    - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
+      dataset_names:
+      - combined_surface
+      parameter_groups: {}
+      every_n_batches: ${diagnostics.plot.frequency.batch}
+      plot_fn:
+        _target_: anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn
+        _partial_: true
+    - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+      tag_infix: sample
+      dataset_names:
+      - combined_surface
+      sample_idx: ${diagnostics.plot.sample_idx}
+      parameters:
+      - obsvalue_t2m_0
+      - obsvalue_u10m_0
+      - obsvalue_v10m_0
+      - obsvalue_ps_0
+      - obsvalue_pmsl_0
+      every_n_batches: ${diagnostics.plot.frequency.batch}
+      plot_fn:
+        _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
+        _partial_: true
+        per_sample: 6
+        accumulation_levels_plot:
+        - 0
+        - 0.05
+        - 0.1
+        - 0.25
+        - 0.5
+        - 1
+        - 1.5
+        - 2
+        - 3
+        - 4
+        - 5
+        - 6
+        - 7
+        - 100
+  benchmark_profiler:
+    memory:
+      enabled: true
+      steps: 5
+      warmup: 20
+      extra_plots: false
+      trace_rank0_only: false
+    time:
+      enabled: false
+      verbose: false
+    speed:
+      enabled: true
+    system:
+      enabled: false
+    model_summary:
+      enabled: false
+    snapshot:
+      enabled: false
+      steps: 4
+      warmup: 0
+  log:
+    mlflow:
+      enabled: true
+      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
+      offline: true
+      authentication: true
+      tracking_uri: https://mlflow.ecmwf.int
+      experiment_name: anemobs
+      project_name: AIFS
+      system: false
+      terminal: true
+      run_name: test-joint-obs
+      prefix: ''
+      log_hyperparams: true
+      on_resume_create_child: true
+      expand_hyperparams:
+      - config
+      http_max_retries: 35
+      max_params_length: 3000
+      save_dir: ${system.output.logs.mlflow}
+      log_model: false
+    interval: 100
+    wandb:
+      enabled: false
+      _target_: pytorch_lightning.loggers.wandb.WandbLogger
+      offline: false
+      log_model: false
+      project: Anemoi
+      entity: a
+      gradients: false
+      parameters: false
+      interval: ${diagnostics.log.interval}
+  debug:
+    anomaly_detection: false
+  enable_checkpointing: true
+  checkpoint:
+    every_n_minutes:
+      save_frequency: null
+      num_models_saved: 0
+    every_n_epochs:
+      save_frequency: 1
+      num_models_saved: -1
+    every_n_train_steps:
+      save_frequency: null
+      num_models_saved: 0
+    exclude_hyperparameters: []
+  enable_progress_bar: true
+  progress_bar:
+    _target_: pytorch_lightning.callbacks.TQDMProgressBar
+    refresh_rate: 1
+  check_val_every_n_epoch: 1
+  print_memory_summary: false
+system:
+  output:
+    root: ${oc.env:SCRATCH}/anemoi-test/joint-obs/
+    logs:
+      root: logs
+      wandb: wandb
+      mlflow: mlflow
+      tensorboard: tensorboard
+    checkpoints:
+      root: checkpoint
+      every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
+      every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
+      every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
+    plots: plots
+    profiler: profiler
+  input:
+    combined_amv: observations-ea-ofb-0001-197901-202505-combined-amv-native-v1-from-dop-try-2
+    combined_gpsro_notrop: observations-od-ai-0001-2006-2025-combined-gpsro-notrop-v1-from-dop-try-2
+    combined_surface: dop-ea-ofb-0001-1979-2025-v2-combined-surface-observations
+    loss_matrices_path: null
+    truncation: null
+    truncation_inv: null
+  hardware:
+    accelerator: auto
+    num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE,1}}
+    num_nodes: ${oc.decode:${oc.env:SLURM_NNODES,1}}
+    num_gpus_per_model: 1
+graph:
+  overwrite: true
+  nodes:
+    combined_amv:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${dataloader.training.datasets.combined_amv.dataset_config}
+      attributes: ${graph.attributes.nodes}
+    combined_gpsro_notrop:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${dataloader.training.datasets.combined_gpsro_notrop.dataset_config}
+      attributes: ${graph.attributes.nodes}
+    hidden:
+      node_builder:
+        _target_: anemoi.graphs.nodes.TriNodes
+        resolution: 5
+  edges:
+  - source_name: combined_gpsro_notrop
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.ReversedKNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: combined_surface
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.ReversedKNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: combined_amv
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.ReversedKNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: hidden
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.MultiScaleEdges
+      x_hops: 1
+      scale_resolutions: ${graph.nodes.hidden.node_builder.resolution}
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: hidden
+    target_name: combined_surface
+    edge_builders:
+    - _target_: anemoi.graphs.edges.KNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  attributes:
+    nodes:
+      area_weight:
+        _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+        norm: unit-max
+        fill_value: 0
+    edges:
+      edge_length:
+        _target_: anemoi.graphs.edges.attributes.EdgeLength
+        norm: unit-std
+      edge_dirs:
+        _target_: anemoi.graphs.edges.attributes.EdgeDirection
+        norm: unit-std
+      dir_harmonics:
+        _target_: anemoi.graphs.edges.attributes.DirectionalHarmonics
+        order: 3
+  post_processors: []
+model:
+  cpu_offload: false
+  keep_batch_sharded: false
+  model:
+    _target_: anemoi.models.models.AnemoiModelEncProcDec
+    hidden_nodes_name: hidden
+    latent_skip: true
+  layer_kernels:
+    LayerNorm:
+      _target_: torch.nn.LayerNorm
+    Linear:
+      _target_: torch.nn.Linear
+    Activation:
+      _target_: torch.nn.GELU
+    QueryNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      bias: false
+    KeyNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      bias: false
+  processor:
+    _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+    num_channels: 256
+    trainable_size: 8
+    sub_graph_edge_attributes:
+    - edge_length
+    - edge_dirs
+    - dir_harmonics
+    num_layers: 4
+    num_chunks: 4
+    mlp_hidden_ratio: 4
+    num_heads: 8
+    qk_norm: false
+    cpu_offload: ${model.cpu_offload}
+    gradient_checkpointing: true
+    layer_kernels: ${model.layer_kernels}
+    graph_attention_backend: triton
+    edge_pre_mlp: false
+  obs_encoder:
+    _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+    num_channels: 256
+    trainable_size: 0
+    sub_graph_edge_attributes:
+    - edge_length
+    - edge_dirs
+    - dir_harmonics
+    num_chunks: 4
+    mlp_hidden_ratio: 4
+    num_heads: 8
+    qk_norm: false
+    cpu_offload: ${model.cpu_offload}
+    gradient_checkpointing: true
+    layer_kernels: ${model.layer_kernels}
+    shard_strategy: edges
+    graph_attention_backend: triton
+    edge_pre_mlp: false
+  encoders:
+    obs:
+      source_datasets:
+      - combined_surface
+      - combined_amv
+      - combined_gpsro_notrop
+      dataset_fusing_strategy: joint
+      node_embedder:  # joint fusion needs a projecting node embedder
+        _target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder
+        num_channels: 128
+      mapper: ${model.obs_encoder}
+  latent_aggregator:
+    _target_: anemoi.models.layers.aggregator.SumAggregator
+  decoders:
+    combined_surface:
+      target_datasets:
+      - combined_surface
+      target_node_features:
+      - coordinates
+      - target_forcings
+      mapper:
+        _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+        num_channels: 256
+        trainable_size: 0
+        sub_graph_edge_attributes:
+        - edge_length
+        - edge_dirs
+        - dir_harmonics
+        num_chunks: 4
+        mlp_hidden_ratio: 4
+        num_heads: 8
+        initialise_data_extractor_zero: false
+        qk_norm: false
+        cpu_offload: ${model.cpu_offload}
+        gradient_checkpointing: true
+        layer_kernels: ${model.layer_kernels}
+        shard_strategy: edges
+        graph_attention_backend: triton
+        edge_pre_mlp: false
+  bounding:
+    datasets:
+      combined_surface: []
+  residual:
+    datasets: {}
+  output_mask:
+    datasets:
+      combined_surface:
+        _target_: anemoi.training.utils.masks.NoOutputMask
+  compile: []
+  node_trainable_parameters:
+    combined_surface: 0
+    combined_amv: 0
+    combined_gpsro_notrop: 0
+    hidden: 8
+task:
+  _target_: anemoi.training.tasks.Forecaster
+  multistep_input: 1
+  multistep_output: 1
+  timestep: 12H
+  rollout:
+    start: 1
+    epoch_increment: 0
+    maximum: 1
+  validation_rollout: 1
+training:
+  scalers:
+    datasets:
+      combined_surface:
+        general_variable:
+          _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+          weights:
+            default: 1
+  optimization:
+    optimizer:
+      _target_: torch.optim.AdamW
+      betas:
+      - 0.9
+      - 0.95
+      weight_decay: 0.1
+    lr_scheduler:
+      _target_: timm.scheduler.CosineLRScheduler
+      lr_min: 3.0e-07
+      t_initial: ${training.max_steps}
+      warmup_t: 10
+      t_in_epochs: false
+    lr: 0.0001
+    pl_lr_scheduler:
+      interval: step
+  seed: 12345678
+  update_ds_stats_on_ckpt_load:
+    states: false
+    tendencies: true
+  check_variables_compatibility:
+    ignore_units: false
+    ignore_processing_period: false
+  allow_variable_subset: false
+  deterministic: false
+  precision: bf16-mixed
+  accum_grad_batches: 1
+  num_sanity_val_steps: 0
+  gradient_clip:
+    val: 1.0
+    algorithm: norm
+  method:
+    _target_: anemoi.training.train.methods.SingleTraining
+  strategy:
+    _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+    num_gpus_per_model: ${system.hardware.num_gpus_per_model}
+    read_group_size: ${dataloader.read_group_size}
+    static_graph: false
+    find_unused_parameters: true
+    use_local_synchronization: true
+    broadcast_buffers: false
+  loss_gradient_scaling: false
+  max_epochs: 2
+  max_steps: 100
+  training_loss:
+    datasets:
+      combined_surface:
+        _target_: anemoi.training.losses.MSELoss
+        scalers:
+        - general_variable
+        ignore_nans: true
+  validation_metrics:
+    datasets:
+      combined_surface:
+        mse:
+          _target_: anemoi.training.losses.MSELoss
+          scalers: []
+          ignore_nans: true
+  variable_groups:
+    datasets:
+      combined_surface:
+        default: sfc
+  metrics:
+    datasets:
+      combined_surface:
+      - obsvalue_t2m_0
+      - obsvalue_u10m_0
+      - obsvalue_v10m_0
+      - obsvalue_ps_0
+      - obsvalue_pmsl_0
+config_validation: false
