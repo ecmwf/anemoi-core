@@ -97,7 +97,7 @@ def legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarra
 
 
 def legendre_by_degree(truncation: int, x: np.ndarray, device: torch.device | str = "cpu") -> Iterator[Tensor]:
-    r"""Yield (-1)^m c^l_m P^l_m(x) for each total wavenumber l.
+    r"""Yield (-1)^m c^l_m P^l_m(x) for each degree l.
 
     The recurrence uses float64 on ``device`` and keeps only the two preceding degrees, so its memory
     does not grow with the square of the truncation.
@@ -105,22 +105,22 @@ def legendre_by_degree(truncation: int, x: np.ndarray, device: torch.device | st
     Parameters
     ----------
     truncation : int
-        Maximum total wavenumber.
+        Highest degree.
     x : np.ndarray
-        Points at which to evaluate the Legendre polynomials, shape (n,). Should be in the range [-1, 1].
+        Points at which the Legendre polynomials are evaluated, with shape (n,) and values in [-1, 1].
     device : torch.device | str, optional
         Device on which the values are computed. Default is the CPU.
 
     Yields
     ------
     Tensor
-        For l = 0, 1, ..., truncation, a float64 tensor of shape (truncation + 1, n) indexed by the zonal
-        wavenumber m, with zeros for m > l. Values use the inverse transform's normalisation,
-        with 1 / (4 pi) at l = 0.
+        For l = 0, 1, ..., truncation, a float64 tensor of shape (truncation + 1, n), indexed by the order m
+        and zero for m > l. The values use the normalization of the inverse transform, with 1 / (4 pi) at
+        l = 0.
 
     Notes
     -----
-    Based on the recurrence in torch-harmonics.
+    The recurrence follows torch-harmonics.
 
     Method of computation follows
     [1] Schaeffer, N.; Efficient spherical harmonic transforms aimed at pseudospectral numerical simulations, G3:
@@ -140,7 +140,7 @@ def legendre_by_degree(truncation: int, x: np.ndarray, device: torch.device | st
         # Weights of the degree before and the degree before that, for degree n and order k <= n - 2.
         from_previous = np.sqrt((2 * n - 1) / (n - k) * (2 * n + 1) / (n + k))
         from_before_previous = np.sqrt((n + k - 1) / (n - k) * (2 * n + 1) / (2 * n - 3) * (n - k - 1) / (n + k))
-        # Weights that take the diagonal value m = l of the degree before to the two top orders of degree n.
+        # Weights that take the diagonal value of the degree before, at order n - 1, to the two top orders of degree n.
         to_below_diagonal = np.sqrt(2 * n[:, 0] + 1)
         to_diagonal = np.sqrt((2 * n + 1) * (1 + x) * (1 - x) / 2 / n)
 
@@ -193,19 +193,19 @@ def hemisphere_legendre_blocks(
 ) -> list[tuple[int, Tensor]]:
     r"""Build Legendre tables on northern latitudes, grouped by order and degree parity.
 
-    At the corresponding southern latitude, P^l_m equals (-1)^(l + m) times its northern value.
-    Only northern latitudes, and the equator when the grid has a row there, are stored. Writing
-    l = 2 j + r separates even and odd degrees.
+    At the corresponding southern latitude, P^l_m equals (-1)^(l + m) times its northern value, so only the
+    northern latitudes are stored, together with the equator when the grid has a row there. Writing
+    l = 2 j + r separates the even and odd degrees.
 
-    Since P^l_m is zero for l < m, each block starting at order m0 stores degrees from
-    l = 2 j0 onward, where j0 = m0 // 2. This omits the leading zero degrees in each block.
+    Since P^l_m is zero for l < m, each block that starts at order m0 stores the degrees from l = 2 j0 onward,
+    with j0 = m0 // 2, and leaves out the leading zero degrees.
 
     Parameters
     ----------
     cos_colat : np.ndarray
         Cosine of the colatitude of each northern row, ordered from the pole, shape (n_north,).
     truncation : int
-        Maximum wavenumber.
+        Highest degree.
     dtype : torch.dtype
         Precision of the returned tables. The polynomials are computed in float64, one degree at a time.
     device : torch.device
@@ -214,10 +214,10 @@ def hemisphere_legendre_blocks(
     Returns
     -------
     list[tuple[int, Tensor]]
-        Pairs of (m0, table), where m0 is the block's first order. Each table has shape
-        (number of orders, 2, n_j - j0, n_north), indexed by
-        (m - m0, r, j - j0, northern latitude), with n_j = (truncation + 2) // 2.
-        Values use the inverse transform's normalisation. Entries with m > l or l > truncation are zero.
+        Pairs (m0, table), with m0 the first order of the block. Each table has shape
+        (number of orders, 2, n_j - j0, n_north) and is indexed by (m - m0, r, j - j0, northern latitude),
+        with n_j = (truncation + 2) // 2. The values use the normalization of the inverse transform, and
+        entries with m > l or l > truncation are zero.
     """
     n_j = (truncation + 2) // 2
     first_orders = first_orders_of_blocks(truncation)
@@ -255,7 +255,7 @@ class LegendreTableSet:
         n_north = (nlat + 1) // 2
         # The forward direction weights each northern ring (and its southern mirror) by its quadrature
         # weight. The factor 8 pi^2 combines the 2 pi that turns the ring FFT's average over longitude
-        # into an integral with the 4 pi between the forward and inverse normalisation. The equator row
+        # into an integral with the 4 pi between the forward and inverse normalization. The equator row
         # is paired with itself, so it is counted twice and its weight is halved.
         weight = 8 * np.pi**2 * weight[:n_north]
         if nlat % 2:
@@ -268,10 +268,10 @@ class LegendreTableSet:
         )
 
     def up_to(self, truncation: int) -> tuple[list[tuple[int, Tensor]], Tensor, Tensor]:
-        """Return Legendre blocks, quadrature weights and signs (-1)^m for a truncation up to this set's own.
+        """Return the Legendre blocks, quadrature weights and signs (-1)^m for a truncation up to this set's own.
 
-        Select blocks starting at m <= truncation and slice their order and degree axes to the required
-        size. See ``hemisphere_legendre_blocks`` for the layout.
+        The blocks that start at m <= truncation are selected, and their order and degree axes are cut to the
+        required size. ``hemisphere_legendre_blocks`` describes the layout.
         """
         n_j = (truncation + 2) // 2
         blocks = [
@@ -283,16 +283,16 @@ class LegendreTableSet:
 
 
 class LegendreTables:
-    """Cache Legendre tables for spherical harmonic transforms in this process.
+    """Process-wide cache of Legendre tables for spherical harmonic transforms.
 
-    Each (nlat, latitude grid, dtype, device) has one table set, built on first use. A higher truncation replaces
-    the cached set; lower truncations use slices, which have the same blocks as tables built for them (see
-    ``first_orders_of_blocks``), so a transform does the same work whichever set it uses. Tables remain cached
-    until ``clear`` is called.
+    Each combination of nlat, latitude grid, dtype and device has one table set, built on first use. A higher
+    truncation replaces the cached set, and lower truncations use slices of it. These slices have the same blocks
+    as tables built for the lower truncation, as described in ``first_orders_of_blocks``, so a transform does the
+    same work with either set. The tables stay cached until ``clear`` is called.
 
-    Building tables under ``FakeTensorMode`` stores tensors without data and breaks subsequent calls
-    with real inputs. ``torch.compile`` with the ``eager`` and ``aot_eager`` backends builds real
-    tables (checked with PyTorch 2.9.1).
+    Tables built under ``FakeTensorMode`` hold tensors without data and break later calls with real inputs.
+    ``torch.compile`` with the ``eager`` and ``aot_eager`` backends builds real tables, as checked with
+    PyTorch 2.9.1.
     """
 
     def __init__(self) -> None:
@@ -313,7 +313,7 @@ class LegendreTables:
         return tables
 
     def clear(self) -> None:
-        """Clear the cache. Subsequent calls rebuild the tables."""
+        """Clear the cache, so that later calls rebuild the tables."""
         self._tables.clear()
 
     def stored_bytes(self) -> int:
@@ -330,8 +330,12 @@ LEGENDRE_TABLES = LegendreTables()
 class SphericalHarmonicTransform(Module):
     r"""Transform a field on latitude rings to spherical harmonic coefficients.
 
-    Legendre tables are built on first use and shared by transforms with the same latitude count,
-    latitude grid, precision and device. See ``LegendreTables``.
+    The Legendre tables are built on first use and shared by all transforms with the same number of latitudes,
+    latitude grid, precision and device, see ``LegendreTables``.
+
+    The transform runs in float32 or float64 with autocast switched off. Half-precision fields are promoted to
+    float32, and float32 and float64 fields keep their precision. Since the Legendre sums are matrix products,
+    in float32 they follow ``torch.get_float32_matmul_precision``, which allows TF32 with "high".
 
     Attributes
     ----------
@@ -340,7 +344,7 @@ class SphericalHarmonicTransform(Module):
     nlat : int
         Number of latitudes in the grid, from pole to pole.
     truncation : int
-        Maximum total wavenumber; coefficients include degrees 0 through truncation.
+        Highest degree. The coefficients include the degrees 0 to truncation.
     n_grid_points : int
         Total number of grid points in the global grid.
     mode_weights : torch.Tensor
@@ -352,7 +356,7 @@ class SphericalHarmonicTransform(Module):
     Methods
     -------
     rfft_rings_reduced(x: Tensor) -> Tensor
-        Compute the Fourier coefficients on the rings of a reduced grid, all rings together.
+        Compute the Fourier coefficients on all rings of a reduced grid together.
     rfft_rings_regular(x: Tensor) -> Tensor
         Compute real-to-complex FFTs on a regular grid.
     forward(x: Tensor) -> Tensor
@@ -368,6 +372,7 @@ class SphericalHarmonicTransform(Module):
         lons_per_lat: list[int],
         truncation: int,
         latitude_grid: LatitudeGrid = "legendre-gauss",
+        *,
         fft_backend: FFTBackend = "ring",
         use_graphed_rfft: bool = False,
     ) -> None:
@@ -378,13 +383,14 @@ class SphericalHarmonicTransform(Module):
         lons_per_lat : list[int]
             Number of longitudinal points on each latitude ring, from pole to pole.
         truncation : int
-            Maximum total wavenumber; coefficients include degrees 0 through truncation.
+            Highest degree. The coefficients include the degrees 0 to truncation.
         latitude_grid : {"legendre-gauss", "equiangular-poles"}, optional
             Gaussian latitude nodes or equally spaced rows including both poles, ordered north to south.
-        fft_backend : {"ring", "padded"}, optional
-            Native FFTs grouped by ring length (default) or padded Bluestein FFTs for reduced grids.
-        use_graphed_rfft : bool, optional
-            Capture the native reduced-grid rFFT in CUDA graphs. Default is False.
+        fft_backend : {"ring", "padded"}
+            FFT algorithm on reduced grids. The default "ring" uses native FFTs grouped by ring length.
+        use_graphed_rfft : bool
+            Capture the native reduced-grid FFTs in CUDA graphs. Defaults to False and cannot be combined with
+            "padded".
         """
 
         super().__init__()
@@ -430,7 +436,7 @@ class SphericalHarmonicTransform(Module):
         Returns
         -------
         torch.Tensor
-            Fourier space field [..., latitude, zonal wavenumber m].
+            Fourier space field [..., latitude, order m].
         """
 
         if x.numel() == 0:
@@ -449,9 +455,8 @@ class SphericalHarmonicTransform(Module):
         Returns
         -------
         torch.Tensor
-            spectral representation of field [..., total wavenumber l, zonal wavenumber m].
+            spectral representation of field [..., degree l, order m], in complex64 or complex128.
         """
-
         x = at_least_float32(x)
         with torch.amp.autocast(device_type=x.device.type, enabled=False):
             return self._transform(x)
@@ -470,8 +475,8 @@ class SphericalHarmonicTransform(Module):
         x = torch.stack((north + south, north - south), dim=-2)  # [..., northern latitude, m, r, real/imaginary]
         x = x * quadrature_weight[:, None, None, None]
 
-        # Each block of orders gives its degrees from its first j on; the degrees below are zero. Keeping
-        # (m, r) in the table's order lets the contraction use the table in place, without a copy.
+        # Each block of orders gives its degrees from its first j on, since the degrees below are zero.
+        # Keeping (m, r) in the table's order lets the contraction use the table in place, without a copy.
         x = torch.cat(
             [
                 F.pad(
@@ -490,13 +495,17 @@ class SphericalHarmonicTransform(Module):
 class InverseSphericalHarmonicTransform(Module):
     r"""Transform spherical harmonic coefficients to a field on latitude rings.
 
-    Legendre tables are built on first use and shared by transforms with the same latitude count,
-    latitude grid, precision and device. See ``LegendreTables``.
+    The Legendre tables are built on first use and shared by all transforms with the same number of latitudes,
+    latitude grid, precision and device, see ``LegendreTables``.
+
+    The transform runs in complex64 or complex128 with autocast switched off. Half-precision coefficients are
+    promoted to complex64, and complex64 and complex128 coefficients keep their precision. In single precision,
+    the Legendre sums follow ``torch.get_float32_matmul_precision``.
 
     Attributes
     ----------
     truncation : int
-        Maximum total wavenumber; coefficients include degrees 0 through truncation.
+        Highest degree. The coefficients include the degrees 0 to truncation.
     nlat : int
         Number of latitudes in the grid, from pole to pole.
     lons_per_lat : list[int]
@@ -507,7 +516,7 @@ class InverseSphericalHarmonicTransform(Module):
     Methods
     -------
     irfft_rings_reduced(x: Tensor) -> Tensor
-        Compute the ring values of a reduced grid from their Fourier coefficients, all rings together.
+        Compute the values on all rings of a reduced grid together from their Fourier coefficients.
     irfft_rings_regular(x: Tensor) -> Tensor
         Compute complex-to-real FFTs on a regular grid.
     forward(x: Tensor) -> Tensor
@@ -523,6 +532,7 @@ class InverseSphericalHarmonicTransform(Module):
         lons_per_lat: list[int],
         truncation: int,
         latitude_grid: LatitudeGrid = "legendre-gauss",
+        *,
         fft_backend: FFTBackend = "ring",
         use_graphed_irfft: bool = False,
     ) -> None:
@@ -533,13 +543,14 @@ class InverseSphericalHarmonicTransform(Module):
         lons_per_lat : list[int]
             Number of longitudinal points on each latitude ring, from pole to pole.
         truncation : int
-            Maximum total wavenumber; coefficients include degrees 0 through truncation.
+            Highest degree. The coefficients include the degrees 0 to truncation.
         latitude_grid : {"legendre-gauss", "equiangular-poles"}, optional
             Gaussian latitude nodes or equally spaced rows including both poles, ordered north to south.
-        fft_backend : {"ring", "padded"}, optional
-            Native FFTs grouped by ring length (default) or padded Bluestein FFTs for reduced grids.
-        use_graphed_irfft : bool, optional
-            Capture the native reduced-grid irFFT in CUDA graphs. Default is False.
+        fft_backend : {"ring", "padded"}
+            FFT algorithm on reduced grids. The default "ring" uses native FFTs grouped by ring length.
+        use_graphed_irfft : bool
+            Capture the native reduced-grid FFTs in CUDA graphs. Defaults to False and cannot be combined with
+            "padded".
         """
 
         super().__init__()
@@ -576,7 +587,7 @@ class InverseSphericalHarmonicTransform(Module):
         Parameters
         ----------
         x : torch.Tensor
-            Fourier space field [..., latitude, zonal wavenumber m].
+            Fourier space field [..., latitude, order m].
 
         Returns
         -------
@@ -594,13 +605,13 @@ class InverseSphericalHarmonicTransform(Module):
         Parameters
         ----------
         x : torch.Tensor
-            spectral representation of field [..., total wavenumber l, zonal wavenumber m]. Both sizes may be
-            smaller than truncation + 1; the missing higher wavenumbers are then taken as zero.
+            spectral representation of field [..., degree l, order m]. Both sizes may be smaller than
+            truncation + 1, and the missing higher degrees and orders are then taken as zero.
 
         Returns
         -------
         torch.Tensor
-            field [..., grid].
+            field [..., grid], in float32 or float64.
         """
 
         n_l, n_m = x.shape[-2], x.shape[-1]
