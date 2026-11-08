@@ -10,6 +10,18 @@
 import pytest
 import torch
 
+try:
+    from hypothesis import settings
+except ImportError:  # the tests that use hypothesis skip their collection without it
+    settings = None
+
+if settings is not None:
+    # No per-example deadline: the first example of a test also pays for torch's lazy
+    # initialisation and kernel selection, which on a shared node exceeds the 200 ms default and
+    # makes the tests flaky (DeadlineExceeded / FlakyFailure). The tests check results, not speed.
+    settings.register_profile("anemoi-models", deadline=None)
+    settings.load_profile("anemoi-models")
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
