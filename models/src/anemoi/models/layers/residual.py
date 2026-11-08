@@ -23,6 +23,7 @@ from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.ring_fft import FFTBackend
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
@@ -465,6 +466,11 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
         ``truncate=True``).
     anti_aliasing : bool
         If True (and ``truncate=True``), use anti-aliasing blending in the filter.
+    fft_backend : {"ring", "padded"}
+        FFTs of the transforms on an octahedral grid, with "ring" for native FFTs grouped by ring length and
+        "padded" for padded FFTs. Defaults to "ring". Native FFTs need one cuFFT plan per ring length, direction
+        and batch shape, so at high resolution the layer's transforms can need more plans than PyTorch keeps by
+        default.
     graph : HeteroData | None
         Graph of the model. The coordinates of the dataset's nodes give the number of latitudes and
         longitudes. Required.
@@ -489,6 +495,7 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
         truncate: bool = False,
         skip_truncate_variables: list[str] | None = None,
         anti_aliasing: bool = True,
+        fft_backend: FFTBackend = "ring",
         graph: HeteroData | None = None,
         statistics: dict | None = None,
         data_indices=None,
@@ -498,6 +505,7 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
         super().__init__()
         regressors = regressors or []
         assert data_indices is not None, "SpectralOrnsteinConnection needs `data_indices`."
+        self.fft_backend = fft_backend
 
         self._internal_input_idx = list(data_indices.model.input.prognostic)
         variables = data_indices.model.input.name_to_index
@@ -514,9 +522,9 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
         self.weight = Parameter(weight)
 
         if grid == "octahedral":
-            self.isht = InverseOctahedralSHT(self.nlat, truncation=lmax - 1)
+            self.isht = InverseOctahedralSHT(self.nlat, truncation=lmax - 1, fft_backend=fft_backend)
         elif grid == "regular":
-            self.isht = InverseRegularSHT(self.nlat, truncation=lmax - 1)
+            self.isht = InverseRegularSHT(self.nlat, truncation=lmax - 1, fft_backend=fft_backend)
         else:
             raise ValueError(f"Unsupported grid type {grid!r}. Supported types: ['octahedral', 'regular']")
 
@@ -536,13 +544,21 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
             oct_lons = [20 + 4 * i for i in range(self.nlat // 2)]
             oct_lons += list(reversed(oct_lons))
             trunc = self.nlat - 1
-            self.x_fsht = SphericalHarmonicTransform(lons_per_lat=oct_lons, truncation=trunc)
-            self.x_isht = InverseSphericalHarmonicTransform(lons_per_lat=oct_lons, truncation=trunc)
+            self.x_fsht = SphericalHarmonicTransform(
+                lons_per_lat=oct_lons, truncation=trunc, fft_backend=self.fft_backend
+            )
+            self.x_isht = InverseSphericalHarmonicTransform(
+                lons_per_lat=oct_lons, truncation=trunc, fft_backend=self.fft_backend
+            )
         elif grid == "regular":
             reg_lons = [self.nlon] * self.nlat
             trunc = self.nlat - 1
-            self.x_fsht = SphericalHarmonicTransform(lons_per_lat=reg_lons, truncation=trunc)
-            self.x_isht = InverseSphericalHarmonicTransform(lons_per_lat=reg_lons, truncation=trunc)
+            self.x_fsht = SphericalHarmonicTransform(
+                lons_per_lat=reg_lons, truncation=trunc, fft_backend=self.fft_backend
+            )
+            self.x_isht = InverseSphericalHarmonicTransform(
+                lons_per_lat=reg_lons, truncation=trunc, fft_backend=self.fft_backend
+            )
         else:
             raise ValueError(f"Unsupported grid type {grid!r}.")
 

@@ -31,7 +31,7 @@ def _restore_precision() -> Iterator[None]:
 
 
 def _compose_config(tmp_path: Path, extra_overrides: list[str]) -> DictConfig:
-    """The default preset with placeholder values for its mandatory fields."""
+    """Return the default preset with placeholder values for its mandatory fields."""
     overrides = [
         f"system.input.dataset={tmp_path / 'dataset.zarr'}",
         f"system.input.graph={tmp_path / 'graph.pt'}",

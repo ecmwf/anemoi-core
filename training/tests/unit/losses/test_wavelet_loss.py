@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from pytest_mock import MockerFixture
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.layers.ring_fft import shared_ring_fft
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
 from anemoi.models.layers.spectral_transforms import octahedral_lons_per_lat
 from anemoi.models.utils.compile import mark_for_compilation
@@ -37,7 +38,7 @@ N_POINTS = sum(octahedral_lons_per_lat(NLAT))
 
 
 def band_limited(shape: tuple[int, ...], seed: int) -> torch.Tensor:
-    """Random fields [..., grid] that the octahedral grid represents exactly up to TRUNCATION."""
+    """Return random fields [..., grid] that the octahedral grid represents exactly up to TRUNCATION."""
     generator = torch.Generator().manual_seed(seed)
     coefficients = torch.randn(*shape, TRUNCATION + 1, TRUNCATION + 1, dtype=torch.complex128, generator=generator)
     coefficients = coefficients.tril()
@@ -47,7 +48,7 @@ def band_limited(shape: tuple[int, ...], seed: int) -> torch.Tensor:
 
 
 def make_inputs(members: int = 3, seed: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
-    """Prediction [1, 1, members, grid, 2 variables] and target [1, 1, 1, grid, 2 variables]."""
+    """Return a prediction [1, 1, members, grid, 2 variables] and a target [1, 1, 1, grid, 2 variables]."""
     pred = band_limited((1, 1, members, 2), seed).movedim(-2, -1)
     target = band_limited((1, 1, 1, 2), seed + 1).movedim(-2, -1)
     return pred, target
@@ -60,7 +61,7 @@ def make_loss(**kwargs) -> WaveletEnergyScoreLoss:
 
 
 def reference_scores(loss: WaveletEnergyScoreLoss, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    """The weighted energy scores [variable, grid], written out over all ordered pairs of distinct members."""
+    """Compute the weighted energy scores [variable, grid], written out over all ordered pairs of distinct members."""
     structure = loss.structure
     members = pred[0, 0].movedim(-1, 0)  # [variable, member, grid]
     truth = target[0, 0, 0].movedim(-1, 0)  # [variable, grid]
@@ -89,9 +90,9 @@ def test_scores_are_the_weighted_energy_scores_of_the_structure_vectors(fair: bo
 
 
 def test_structure_vectors_from_eigenvalues_and_direction() -> None:
-    """J with eigenvalues a >= b, the larger along the angle theta from east.
+    """A tensor J with eigenvalues a >= b, the larger along the angle theta from east, gives the expected vector.
 
-    It gives v = (sqrt(a + b), (a - b) / sqrt(a + b + floor) (cos 2 theta, sin 2 theta)).
+    The vector is v = (sqrt(a + b), (a - b) / sqrt(a + b + floor) (cos 2 theta, sin 2 theta)).
     """
     loss = make_loss(direction_floor=0.3)
     generator = torch.Generator().manual_seed(4)
@@ -159,7 +160,7 @@ def test_rejects_autocast() -> None:
 
 
 def test_rejects_too_few_longitudes_on_a_regular_grid() -> None:
-    # Scale 3 at T11: the products of its Riesz pair reach order 24, and its smoothing degree 10.
+    # Scale 3 at T11: the products of its Riesz pair reach degree 24, and its smoothing degree 10.
     with pytest.raises(ValueError, match="need more than 34 longitudes"):
         WaveletEnergyScoreLoss(
             transform="regular_sht",
@@ -182,7 +183,7 @@ def test_rejects_a_grid_of_the_wrong_size() -> None:
 
 
 def make_inputs_with_variables(variables: int, members: int = 3) -> tuple[torch.Tensor, torch.Tensor]:
-    """Prediction [1, 1, members, grid, variables] and target [1, 1, 1, grid, variables]."""
+    """Return a prediction [1, 1, members, grid, variables] and a target [1, 1, 1, grid, variables]."""
     pred = band_limited((1, 1, members, variables), 0).movedim(-2, -1)
     target = band_limited((1, 1, 1, variables), 1).movedim(-2, -1)
     return pred, target
@@ -204,7 +205,7 @@ def test_checkpoints_give_the_same_loss_and_gradients(
     checkpoints: int,
     mocker: MockerFixture,
 ) -> None:
-    """Two scales and three variables: one checkpoint per group of each scale, each run again by the backward pass."""
+    """With two scales and three variables, each group of each scale has one checkpoint, rerun by the backward pass."""
     checkpoint_spy = mocker.patch("anemoi.training.losses.wavelet.checkpoint", wraps=checkpoint)
     pred, target = make_inputs_with_variables(3)
     plain_pred = pred.clone().requires_grad_()
@@ -239,7 +240,8 @@ def test_rejects_an_empty_group_of_variables() -> None:
         make_loss(variables_per_checkpoint=0)
 
 
-def test_compile_config_compiles_the_grid_point_work(mocker: MockerFixture) -> None:
+@pytest.mark.parametrize("backend", ["ring", "padded"])
+def test_compile_config_compiles_the_grid_point_work(mocker: MockerFixture, backend: str) -> None:
     mocker.patch("anemoi.models.utils.compile._meets_library_versions_for_compile", return_value=True)
     compiled = []
 
@@ -248,7 +250,8 @@ def test_compile_config_compiles_the_grid_point_work(mocker: MockerFixture) -> N
         return compiled[-1]
 
     compile_mock = mocker.patch("anemoi.training.losses.wavelet.torch.compile", side_effect=fake_compile)
-    loss = make_loss()
+    compile_fft = mocker.patch("anemoi.models.layers.padded_fft.PaddedFFT.compile_for_training")
+    loss = make_loss(fft_backend=backend)
     kernels = [loss._products, loss._score_from_smoothed]
     model = torch.nn.Module()
     model.add_module("loss", torch.nn.ModuleDict({"data": loss}))
@@ -260,6 +263,7 @@ def test_compile_config_compiles_the_grid_point_work(mocker: MockerFixture) -> N
 
     assert [call.args[0] for call in compile_mock.call_args_list] == kernels
     assert all(call.kwargs == {"dynamic": False} for call in compile_mock.call_args_list)
+    assert compile_fft.call_count == (1 if backend == "padded" else 0)
     # The loss runs the compiled kernels from here on.
     assert [loss._products, loss._score_from_smoothed] == compiled
     pred, target = make_inputs()
@@ -274,21 +278,28 @@ def test_compile_config_compiles_the_grid_point_work(mocker: MockerFixture) -> N
     [{}, {"checkpoint_scales": True}, {"variables_per_checkpoint": 2}],
     ids=["no checkpoints", "scales", "groups"],
 )
-def test_compiled_kernels_give_the_same_loss_and_gradients(settings: dict) -> None:
-    pred, target = make_inputs_with_variables(3)
-    pred, target = pred.cuda(), target.cuda()
-    plain_pred = pred.clone().requires_grad_()
-    plain = make_loss().cuda()(plain_pred, target, squash=False)
-    plain.sum().backward()
+@pytest.mark.parametrize("backend", ["ring", "padded"])
+def test_compiled_kernels_give_the_same_loss_and_gradients(settings: dict, backend: str) -> None:
+    shared_ring_fft.cache_clear()
+    try:
+        pred, target = make_inputs_with_variables(3)
+        pred, target = pred.cuda(), target.cuda()
+        plain_pred = pred.clone().requires_grad_()
+        plain = make_loss(fft_backend=backend).cuda()(plain_pred, target, squash=False)
+        plain.sum().backward()
 
-    loss = make_loss(**settings).cuda()
-    loss.compile_for_training()
-    compiled_pred = pred.clone().requires_grad_()
-    result = loss(compiled_pred, target, squash=False)
-    result.sum().backward()
+        loss = make_loss(fft_backend=backend, **settings).cuda()
+        loss.compile_for_training()
+        compiled_pred = pred.clone().requires_grad_()
+        result = loss(compiled_pred, target, squash=False)
+        result.sum().backward()
 
-    torch.testing.assert_close(result, plain, rtol=1e-4, atol=1e-5)
-    torch.testing.assert_close(compiled_pred.grad, plain_pred.grad, rtol=1e-3, atol=1e-5)
+        torch.testing.assert_close(result, plain, rtol=1e-4, atol=1e-5)
+        torch.testing.assert_close(compiled_pred.grad, plain_pred.grad, rtol=1e-3, atol=1e-5)
+    finally:
+        # The compiled padded FFT is shared by every transform on the grid, so it is dropped here and later
+        # tests get an uncompiled one.
+        shared_ring_fft.cache_clear()
 
 
 def test_builds_from_a_validated_config() -> None:
@@ -326,6 +337,73 @@ def test_builds_from_a_validated_config() -> None:
 def test_schema_rejects_invalid_configs(config: dict) -> None:
     with pytest.raises(ValidationError):
         WaveletEnergyScoreLossSchema(_target_="anemoi.training.losses.WaveletEnergyScoreLoss", **config)
+
+
+@pytest.mark.parametrize("backend", ["ring", "padded"])
+def test_backend_config_reaches_all_wavelet_transforms(backend: str) -> None:
+    config = {
+        "_target_": "anemoi.training.losses.WaveletEnergyScoreLoss",
+        "transform": "octahedral_sht",
+        "nlat": NLAT,
+        "scale_weights": WEIGHTS,
+        "smoothing_octaves": 2,
+        "fft_backend": backend,
+        "use_graphed_rfft": backend == "ring",
+        "use_graphed_irfft": backend == "ring",
+        "scalers": [],
+    }
+    TypeAdapter(LossSchemas).validate_python(config)
+    loss = get_loss_function(DictConfig(config))
+    structure = loss.structure
+    for transform in [structure.sht, *structure.smoothing_shts]:
+        assert transform.fft_backend == backend
+        assert transform.use_graphed_rfft == config["use_graphed_rfft"]
+    assert structure.gradient.inverse.fft_backend == backend
+    assert structure.gradient.inverse.use_graphed_irfft == config["use_graphed_irfft"]
+
+
+@pytest.mark.parametrize("flag", ["use_graphed_rfft", "use_graphed_irfft"])
+def test_padded_graphs_rejected_by_schema_and_loss(flag: str) -> None:
+    settings = {"fft_backend": "padded", flag: True}
+    with pytest.raises(ValidationError, match="CUDA graphs require"):
+        WaveletEnergyScoreLossSchema(
+            _target_="anemoi.training.losses.WaveletEnergyScoreLoss",
+            transform="octahedral_sht",
+            nlat=NLAT,
+            scale_weights=WEIGHTS,
+            **settings,
+        )
+    with pytest.raises(ValueError, match="CUDA graphs require"):
+        make_loss(**settings)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required for graph capture")
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"use_graphed_rfft": True},
+        {"use_graphed_irfft": True},
+        {"use_graphed_rfft": True, "use_graphed_irfft": True},
+        {"use_graphed_rfft": True, "use_graphed_irfft": True, "checkpoint_scales": True},
+    ],
+)
+def test_graphed_wavelet_loss_and_gradients(settings: dict) -> None:
+    shared_ring_fft.cache_clear()
+    pred, target = make_inputs()
+    pred, target = pred.cuda(), target.cuda()
+    plain, graphed = make_loss().cuda(), make_loss(**settings).cuda()
+    try:
+        for scale in (1.0, 1.1):
+            x = (pred * scale).requires_grad_()
+            expected = plain(x, target, squash=False)
+            actual = graphed(x, target, squash=False)
+            torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-6)
+            got = torch.autograd.grad(actual.sum(), x)[0]
+            want = torch.autograd.grad(expected.sum(), x)[0]
+            torch.testing.assert_close(got, want, rtol=1e-4, atol=1e-5)
+    finally:
+        shared_ring_fft.cache_clear()
 
 
 def _check_sharded_grid(rank: int, world_size: int, n_variables: int, settings: dict, init_file: str) -> None:

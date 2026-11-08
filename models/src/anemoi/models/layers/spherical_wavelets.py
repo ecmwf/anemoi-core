@@ -11,39 +11,36 @@
 
 Scales
 ------
-The total wavenumbers l are split into dyadic wavelet scales with the kernels of S2LET (Wiaux et al. 2008,
-Leistedt et al. 2013). A smooth step k(t), 1 for t < 1/2 and 0 for t > 1, gives
+The degrees l are split into dyadic wavelet scales with the kernels of S2LET (Wiaux et al. 2008,
+Leistedt et al. 2013). These are built from a smooth step k(t), which is 1 for t < 1/2 and 0 for t > 1, as
 
-    kappa_j(l) = sqrt(k(l / 2^(j + 1)) - k(l / 2^j))
+    kappa_j(l) = sqrt(k(l / 2^(j + 1)) - k(l / 2^j)).
 
-- Scale j = 0, 1, ... covers 2^(j - 1) < l < 2^(j + 1) and peaks at l = 2^j.
-- The scaling function sqrt(k(l)) holds only l = 0. With it, the squared kernels add up to 1 at every degree.
-- The truncation cuts the last scale or two short.
+Scale j = 0, 1, ... covers 2^(j - 1) < l < 2^(j + 1) and peaks at l = 2^j. The scaling function sqrt(k(l))
+holds only l = 0, and together with it the squared kernels add up to 1 at every degree. The truncation cuts the
+last one or two scales short.
 
 Riesz pair
 ----------
 The band of scale j is the field with each coefficient multiplied by kappa_j(l). Its Riesz pair (Felsberg &
-Sommer 2001) is the east and north gradient of the band, with each degree divided by sqrt(l (l + 1)).
-
-- It has the same energy as the band.
-- At each point it points across the band's crests, whatever their phase.
-- The gradient comes from the Legendre recurrence. It needs one degree more than the band, but no table of
-  derivatives.
+Sommer 2001) is the east and north gradient of the band with each degree divided by sqrt(l (l + 1)). The pair
+has the same energy as the band and, at each point, points across the crests of the band, whatever their phase.
+The gradient follows from the Legendre recurrence, which needs one degree more than the band and works from the
+Legendre tables alone.
 
 Structure tensor
 ----------------
-The tensor r r^T of the Riesz pair r, averaged over a few wavelengths, says how much structure there is around
-each point (its trace E), and how strongly and along which direction it lines up.
+The tensor r r^T of the Riesz pair r, averaged over a few wavelengths, describes how much structure there is
+around each point, given by its trace E, and how strongly and along which direction this structure lines up.
+The average is a smoothing with the heat kernel exp(-l (l + 1) / (2 Ls^2)), with Ls = 2^(j - smoothing_octaves),
+cut at 5 Ls, where the kernel is below 4e-6. On the sphere, the cut kernel dips to about -3e-7 of its peak, so
+the tensor is positive semi-definite up to that amount. For scales j below smoothing_octaves, Ls < 1 and the
+tensor is close to its global mean.
 
-- The average is a smoothing with the heat kernel exp(-l (l + 1) / (2 Ls^2)), with Ls = 2^(j - smoothing_octaves).
-  It is cut at 5 Ls, where it is below 4e-6.
-- On the sphere the cut kernel dips to about -3e-7 of its peak, so the tensor is positive semi-definite up to
-  that.
-- Scales j below smoothing_octaves have Ls < 1: their tensor is close to the global mean.
-- The tensor is smoothed in three dimensions, which have no special direction at the poles, and then read off in
-  the local east and north directions: J_ee, J_nn and J_en.
-- The neighbours' tangent planes are tilted against the point's own. About 1 / Ls^2 of the energy ends up in the
-  radial direction, which the read-off leaves out (below 1e-3 for Ls >= 32).
+The tensor is smoothed in three dimensions, which have no special direction at the poles, and then read off in
+the local east and north directions as J_ee, J_nn and J_en. Since the tangent planes of neighbouring points are
+tilted against the plane of the point itself, about 1 / Ls^2 of the energy ends up in the radial direction and
+is left out by the read-off. This fraction is below 1e-3 for Ls >= 32.
 """
 
 import math
@@ -55,6 +52,8 @@ from torch.nn import Module
 from torch.nn import ModuleList
 from torch.nn import functional as F
 
+from anemoi.models.layers.ring_fft import FFTBackend
+from anemoi.models.layers.ring_fft_base import at_least_float32
 from anemoi.models.layers.spectral_helpers import LEGENDRE_TABLES
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
@@ -65,12 +64,14 @@ _HEAT_KERNEL_REACH = 5.0
 
 
 def _s2let_step_and_rest(t: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """The S2LET step k(t) and 1 - k(t), each worked out directly.
+    """Compute the S2LET step k(t) and 1 - k(t), each one directly.
 
-    The small values near the ends of a scale are then not lost as the difference of two numbers close to 1.
+    Computing both directly keeps the small values near the ends of a scale, which the difference of two numbers
+    close to 1 would lose.
 
-    k(t) is 1 for t <= 1/2 and 0 for t >= 1. In between it is the integral of b(x) / x from t to 1, divided by the
-    same integral from 1/2. The bump b(x) = exp(-2 / (1 - y^2)), with y = 4 (x - 1/2) - 1, runs over [1/2, 1].
+    The step k(t) is 1 for t <= 1/2 and 0 for t >= 1. In between, it is the integral of b(x) / x from t to 1
+    divided by the same integral from 1/2, with the bump b(x) = exp(-2 / (1 - y^2)) and y = 4 (x - 1/2) - 1 on
+    [1/2, 1].
     """
     grid = np.linspace(0.5, 1.0, 4096)
     y = 4.0 * (grid - 0.5) - 1.0
@@ -85,14 +86,14 @@ def _s2let_step_and_rest(t: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def s2let_step(t: np.ndarray) -> np.ndarray:
-    """Smooth step k(t) of S2LET for dyadic scales: 1 for t <= 1/2, 0 for t >= 1."""
+    """Return the smooth step k(t) of S2LET for dyadic scales, which is 1 for t <= 1/2 and 0 for t >= 1."""
     return _s2let_step_and_rest(t)[0]
 
 
 def scale_degree_ranges(truncation: int) -> list[tuple[int, int]]:
-    """Lowest and highest degree of each dyadic scale up to the truncation, from scale 0 up.
+    """Return the lowest and highest degree of each dyadic scale up to the truncation, from scale 0 upward.
 
-    Scale j covers 2^(j - 1) < l < 2^(j + 1). There is one scale for each octave that starts at or below the
+    Scale j covers 2^(j - 1) < l < 2^(j + 1), and there is one scale for each octave that starts at or below the
     truncation.
     """
     if truncation < 1:
@@ -102,11 +103,11 @@ def scale_degree_ranges(truncation: int) -> list[tuple[int, int]]:
 
 
 def wavelet_kernels(truncation: int) -> np.ndarray:
-    """Dyadic S2LET kernels kappa_j(l), ``[n_scales, truncation + 1]``, one row per scale of ``scale_degree_ranges``.
+    """Return the dyadic S2LET kernels kappa_j(l), ``[n_scales, truncation + 1]``.
 
-    - A kernel is 0 outside its scale.
-    - Inside, a value is 0 only where the true value is below what float64 holds (about 1e-300). A whole row is
-      then 0 only when the finest scale holds just its lowest degree: at T2049, T4097 and so on.
+    The kernels have one row per scale of ``scale_degree_ranges`` and are 0 outside their scale. Inside it, a
+    value is 0 only where the true value is below what float64 can hold, about 1e-300. A whole row is then 0 only
+    when the finest scale holds just its lowest degree, at T2049, T4097 and so on.
     """
     ell = np.arange(truncation + 1, dtype=np.float64)
     rows = []
@@ -121,14 +122,14 @@ def wavelet_kernels(truncation: int) -> np.ndarray:
 
 
 class SphericalGradient(Module):
-    """East and north gradient, on the unit sphere, of a field given by its spectral coefficients.
+    """East and north gradient on the unit sphere of a field given by its spectral coefficients.
 
-    - East: each coefficient times i m, then divided by sin(colatitude) on the grid.
-    - North: the Legendre recurrence writes sin(colatitude) times the latitude derivative as a mix of the degrees
-      one up and one down. So the inverse transform needs one degree beyond the truncation, but no table of
-      derivatives.
-
-    ``inverse`` is that inverse transform. It accepts any smaller input, so other fields on the same grid can use it.
+    The east component follows from multiplying each coefficient by i m and dividing the result by
+    sin(colatitude) on the grid. For the north component, the Legendre recurrence writes sin(colatitude) times
+    the latitude derivative as a combination of the degrees one above and one below. The inverse transform
+    therefore needs one degree beyond the truncation and works from the Legendre tables alone. This inverse
+    transform is available as ``inverse``, and since it accepts any smaller input, other fields on the same grid
+    can use it as well.
 
     Parameters
     ----------
@@ -136,10 +137,21 @@ class SphericalGradient(Module):
         Number of longitudes on each Gaussian latitude ring, from north to south. Gaussian latitudes avoid the
         poles, where east and north are not defined.
     truncation : int
-        Highest total wavenumber of the input coefficients.
+        Highest degree of the input coefficients.
+    fft_backend : {"ring", "padded"}
+        FFT algorithm on reduced grids. Defaults to "ring".
+    use_graphed_irfft : bool
+        Capture the native inverse FFTs in CUDA graphs. Defaults to False.
     """
 
-    def __init__(self, lons_per_lat: list[int], truncation: int) -> None:
+    def __init__(
+        self,
+        lons_per_lat: list[int],
+        truncation: int,
+        *,
+        fft_backend: FFTBackend = "ring",
+        use_graphed_irfft: bool = False,
+    ) -> None:
         super().__init__()
         nlat = len(lons_per_lat)
         if truncation > nlat - 2:
@@ -148,7 +160,9 @@ class SphericalGradient(Module):
                 f"truncation can be at most {nlat - 2}, got {truncation}."
             )
         self.truncation = truncation
-        self.inverse = InverseSphericalHarmonicTransform(lons_per_lat, truncation + 1)
+        self.inverse = InverseSphericalHarmonicTransform(
+            lons_per_lat, truncation + 1, fft_backend=fft_backend, use_graphed_irfft=use_graphed_irfft
+        )
 
         colatitude, _ = latitude_quadrature(nlat, "legendre-gauss")
         self.register_buffer(
@@ -168,9 +182,9 @@ class SphericalGradient(Module):
         self.register_buffer("zonal_wavenumber", torch.arange(truncation + 1, dtype=torch.float64), persistent=False)
 
     def forward(self, coeffs: Tensor) -> Tensor:
-        """East and north gradient ``[..., 2, grid]`` of the field with coefficients ``[..., n, n]``.
+        """Compute the east and north gradient ``[..., 2, grid]`` of the field with coefficients ``[..., n, n]``.
 
-        n can be at most truncation + 1.
+        Here, n can be at most truncation + 1.
         """
         n = coeffs.shape[-1]
         if coeffs.shape[-2] != n or n > self.truncation + 1:
@@ -193,12 +207,11 @@ class SphericalGradient(Module):
 def _check_room_for_products(lons_per_lat: list[int], tops: list[int], smoothing_tops: list[int]) -> None:
     """Check that the grid holds the products of each Riesz pair up to its smoothing degrees.
 
-    - The Riesz pair of a scale with top degree L reaches degree L + 1, so its products reach 2 (L + 1).
-    - Their transform up to the smoothing top S is exact on Gaussian latitudes while 2 (L + 1) + S <= 2 nlat - 1.
-    - On a regular grid the rings must also have more than 2 (L + 1) + S points, or high orders of the products
-      fold onto the orders that are kept.
-    - Reduced rings near the poles are shorter and fold some orders onto degrees near S. The heat kernel is below
-      4e-6 there, so the smoothed tensor is barely affected.
+    The Riesz pair of a scale with top degree L reaches degree L + 1, so its products reach 2 (L + 1). On Gaussian
+    latitudes, their transform up to the smoothing top S is exact as long as 2 (L + 1) + S <= 2 nlat - 1. On a
+    regular grid, the rings must also have more than 2 (L + 1) + S points, since otherwise high orders of the
+    products fold onto the orders that are kept. The shorter reduced rings near the poles fold some orders onto
+    degrees near S, where the heat kernel is below 4e-6, so the smoothed tensor is barely affected.
     """
     needed = max(2 * (top + 1) + smoothing_top for top, smoothing_top in zip(tops, smoothing_tops))
     nlat = len(lons_per_lat)
@@ -214,13 +227,11 @@ def _check_room_for_products(lons_per_lat: list[int], tops: list[int], smoothing
 
 
 class RieszStructureTensor(Module):
-    """Smoothed structure tensor of the Riesz pair of a field, at chosen wavelet scales.
+    """Smoothed structure tensor of the Riesz pair of a field at chosen wavelet scales.
 
-    See the module description for the scales, the Riesz pair and the smoothing.
-
-    - The result is J_ee, J_nn and J_en at every grid point, for each chosen scale.
-    - A field goes through the forward transform once. Each scale then uses only the degrees it reaches.
-    - All transforms share one set of Legendre tables.
+    The module description covers the scales, the Riesz pair and the smoothing. The result holds J_ee, J_nn and
+    J_en at every grid point for each chosen scale. A field goes through the forward transform once, and each
+    scale then uses only the degrees it reaches. All transforms share one set of Legendre tables.
 
     Parameters
     ----------
@@ -228,16 +239,23 @@ class RieszStructureTensor(Module):
         Number of longitudes on each Gaussian latitude ring, from north to south. The points on each ring are
         equally spaced, starting at longitude 0.
     truncation : int
-        Highest total wavenumber. Let L be the top degree of the finest chosen scale, at most 2^(j + 1) - 1, and Ls
-        its smoothing degree. The products of its Riesz pair reach degree 2 (L + 1) and its heat kernel 5 Ls. The
-        grid must hold both: 2 (L + 1) + 5 Ls <= 2 nlat - 1, and on a regular grid more longitudes than that.
+        Highest degree. With L the top degree of the finest chosen scale, at most 2^(j + 1) - 1, and Ls
+        its smoothing degree, the products of its Riesz pair reach degree 2 (L + 1) and its heat kernel reaches
+        5 Ls. The grid must hold both, with 2 (L + 1) + 5 Ls <= 2 nlat - 1 and, on a regular grid, more
+        longitudes than that.
     scales : list[int]
         Wavelet scales j to return, each covering 2^(j - 1) < l < 2^(j + 1), in the order given.
     smoothing_octaves : int
-        Octaves between a scale and its smoothing degree Ls = 2^(j - smoothing_octaves). The smoothing is then
-        2^smoothing_octaves / (2 pi) wavelengths of the scale's peak wide, about 1.3 for the default 3. The heat
-        kernel must fit below the highest degree of the transforms: with fewer octaves the finest scales are
-        rejected.
+        Number of octaves between a scale and its smoothing degree Ls = 2^(j - smoothing_octaves). The smoothing is
+        then 2^smoothing_octaves / (2 pi) wavelengths of the scale's peak wide, about 1.3 for the default 3. The
+        heat kernel must fit below the highest degree of the transforms, so with fewer octaves the finest scales
+        are rejected.
+    fft_backend : {"ring", "padded"}
+        FFT algorithm on reduced grids, shared by all forward, smoothing and inverse transforms. Defaults to "ring".
+    use_graphed_rfft : bool
+        Capture the native forward FFTs in CUDA graphs. Defaults to False.
+    use_graphed_irfft : bool
+        Capture the native inverse FFTs in CUDA graphs. Defaults to False.
     """
 
     def __init__(
@@ -246,6 +264,10 @@ class RieszStructureTensor(Module):
         truncation: int,
         scales: list[int],
         smoothing_octaves: int = 3,
+        *,
+        fft_backend: FFTBackend = "ring",
+        use_graphed_rfft: bool = False,
+        use_graphed_irfft: bool = False,
     ) -> None:
         super().__init__()
         ranges = scale_degree_ranges(truncation)
@@ -263,8 +285,12 @@ class RieszStructureTensor(Module):
         self.tops = [ranges[j][1] for j in self.scales]
 
         # The forward transform only needs the degrees the finest chosen scale reaches.
-        self.sht = SphericalHarmonicTransform(lons_per_lat, max(self.tops))
-        self.gradient = SphericalGradient(lons_per_lat, max(self.tops))
+        self.sht = SphericalHarmonicTransform(
+            lons_per_lat, max(self.tops), fft_backend=fft_backend, use_graphed_rfft=use_graphed_rfft
+        )
+        self.gradient = SphericalGradient(
+            lons_per_lat, max(self.tops), fft_backend=fft_backend, use_graphed_irfft=use_graphed_irfft
+        )
         ell = np.arange(max(self.tops) + 1, dtype=np.float64)
         riesz_scale = np.zeros_like(ell)
         riesz_scale[1:] = 1.0 / np.sqrt(ell[1:] * (ell[1:] + 1.0))
@@ -284,7 +310,10 @@ class RieszStructureTensor(Module):
                     "Use more smoothing_octaves or leave the scale out."
                 )
         _check_room_for_products(lons_per_lat, self.tops, smoothing_tops)
-        self.smoothing_shts = ModuleList(SphericalHarmonicTransform(lons_per_lat, top) for top in smoothing_tops)
+        self.smoothing_shts = ModuleList(
+            SphericalHarmonicTransform(lons_per_lat, top, fft_backend=fft_backend, use_graphed_rfft=use_graphed_rfft)
+            for top in smoothing_tops
+        )
         degrees = np.arange(max(smoothing_tops) + 1, dtype=np.float64)
         heat_kernels = np.stack([np.exp(-degrees * (degrees + 1.0) / (2.0 * ls**2)) for ls in smoothing_degrees])
         self.register_buffer("heat_kernels", torch.from_numpy(heat_kernels), persistent=False)
@@ -303,7 +332,7 @@ class RieszStructureTensor(Module):
 
     @staticmethod
     def _read(entries: Tensor, u: Tensor, w: Tensor) -> Tensor:
-        """u^T S w ``[..., grid]`` of symmetric tensors S given as ``[..., 6, grid]``: xx, yy, zz, xy, xz, yz."""
+        """Compute u^T S w ``[..., grid]`` of symmetric tensors S ``[..., 6, grid]``, ordered xx, yy, zz, xy, xz, yz."""
         diagonal = (entries[..., :3, :] * u * w).sum(-2)
         off_diagonal = (
             entries[..., 3, :] * (u[0] * w[1] + u[1] * w[0])
@@ -313,46 +342,53 @@ class RieszStructureTensor(Module):
         return diagonal + off_diagonal
 
     def coefficients(self, x: Tensor) -> Tensor:
-        """Spectral coefficients ``[..., l, m]`` of fields ``[..., grid]`` up to the finest chosen scale's top degree."""
+        """Transform fields ``[..., grid]`` to coefficients ``[..., l, m]`` up to the top of the finest chosen scale."""
         # Build the Legendre tables once, at the largest size used here (the gradient's). The smaller transforms
         # then use parts of them.
+        x = at_least_float32(x)
         inverse = self.gradient.inverse
         LEGENDRE_TABLES.get(inverse.nlat, inverse.latitude_grid, inverse.truncation, x.dtype, x.device)
         return self.sht(x)
 
     def riesz_pair(self, coeffs: Tensor, k: int) -> Tensor:
-        """East and north Riesz parts ``[..., 2, grid]`` of the k-th chosen scale, from coefficients ``[..., l, m]``."""
+        """Compute the Riesz pair ``[..., 2, grid]`` of the k-th chosen scale from coefficients ``[..., l, m]``."""
         top = self.tops[k]
         window = self.riesz_windows[k, : top + 1].to(coeffs.real.dtype)
         return self.gradient(coeffs[..., : top + 1, : top + 1] * window[:, None])
 
     @staticmethod
     def products(pair: Tensor, east: Tensor, north: Tensor) -> Tensor:
-        """The six products ``[..., 6, grid]`` of a Riesz pair ``[..., 2, grid]``, formed in 3D: xx, yy, zz, xy, xz, yz."""
+        """Form the six products ``[..., 6, grid]`` of a Riesz pair ``[..., 2, grid]`` in 3D.
+
+        The products are ordered xx, yy, zz, xy, xz, yz.
+        """
         x, y, z = (pair[..., :1, :] * east + pair[..., 1:, :] * north).unbind(-2)
         return torch.stack([x * x, y * y, z * z, x * y, x * z, y * z], dim=-2)
 
     def smooth(self, products: Tensor, k: int) -> Tensor:
-        """Products ``[..., 6, grid]`` smoothed with the heat kernel of the k-th chosen scale."""
+        """Smooth the products ``[..., 6, grid]`` with the heat kernel of the k-th chosen scale."""
         smoothed = self.smoothing_shts[k](products)
         return self.gradient.inverse(smoothed * self.heat_kernels[k, : smoothed.shape[-2], None].to(products.dtype))
 
     @classmethod
     def read_tensor(cls, smoothed: Tensor, east: Tensor, north: Tensor) -> Tensor:
-        """J_ee, J_nn and J_en ``[..., 3, grid]`` from smoothed products ``[..., 6, grid]``."""
+        """Read off J_ee, J_nn and J_en ``[..., 3, grid]`` from smoothed products ``[..., 6, grid]``."""
         return torch.stack(
             [cls._read(smoothed, east, east), cls._read(smoothed, north, north), cls._read(smoothed, east, north)],
             dim=-2,
         )
 
     def tensor(self, coeffs: Tensor, k: int) -> Tensor:
-        """J_ee, J_nn and J_en ``[..., 3, grid]`` of the k-th chosen scale, from coefficients ``[..., l, m]``."""
+        """Compute J_ee, J_nn and J_en ``[..., 3, grid]`` of the k-th chosen scale from coefficients ``[..., l, m]``."""
         dtype = coeffs.real.dtype
         east, north = self.east.to(dtype), self.north.to(dtype)
         products = self.products(self.riesz_pair(coeffs, k), east, north)
         return self.read_tensor(self.smooth(products, k), east, north)
 
     def forward(self, x: Tensor) -> Tensor:
-        """J_ee, J_nn and J_en ``[..., scale, 3, grid]`` of fields ``[..., grid]``, for the chosen scales in order."""
+        """Compute J_ee, J_nn and J_en ``[..., scale, 3, grid]`` of fields ``[..., grid]`` at the chosen scales.
+
+        The scales follow the order of ``scales``.
+        """
         coeffs = self.coefficients(x)
         return torch.stack([self.tensor(coeffs, k) for k in range(len(self.scales))], dim=-3)

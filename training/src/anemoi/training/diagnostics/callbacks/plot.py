@@ -733,7 +733,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
     ) -> dict[str, torch.Tensor]:
         """Snapshot loss + gather nan-mask weights, then delegate batch prep to the plot adapter."""
         # Anything a loss holds that refers back to the loss itself, such as a kernel from torch.compile, keeps using
-        # the original loss in this copy. This can lead to issues at some point.
+        # the original loss in this copy. Changes made to the copy do not reach those parts.
         self.loss = copy.deepcopy(pl_module.loss)
 
         # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)

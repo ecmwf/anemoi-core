@@ -7,303 +7,255 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Fourier transforms along the latitude rings of a reduced grid, with a few FFTs for all rings.
+"""Native FFTs grouped by ring length, optional CUDA graph capture, and backend selection."""
 
-- A reduced grid has a different number of points on most rings, so plain FFTs need one call per ring
-  length: more than a thousand small calls per transform at O1280.
-- With m k = (m^2 + k^2 - (m - k)^2) / 2, a ring's Fourier sum becomes a convolution with the "chirp"
-  exp(i pi j^2 / n) (Bluestein 1970). A convolution can be padded with zeros to any length of at least
-  n + M - 1, where M is the number of orders, so rings of different lengths share one FFT length.
-- Each field has its own complex transform, keeping its rounding and non-finite values independent of
-  other fields in the batch.
-- The rings are grouped by that padded length, a power of 2. Each group takes one batched FFT, one
-  product and one inverse FFT.
-- Each group keeps its chirp data between calls: the FFT of its chirp and the factors on its orders,
-  about one complex value per padded point for each number of orders and direction in use.
-- The cached kernel includes division by the padded length. The convolution's inverse FFT is unnormalized,
-  saving a scaling pass on every call. The padded length is a power of 2, so this scaling is exact within
-  the normal floating-point range.
-- The chirp phases use j^2 mod 2 n in integers, so they stay exact on long rings. All chirp data is worked
-  out in float64 and then rounded, because errors in these factors reach every value of the transform.
-- The scaling matches ``norm="forward"``: the forward sum is divided by the ring length, the inverse is
-  not. The gradients are the adjoints of the two sums.
-"""
-
+import gc
+import logging
+from collections import defaultdict
 from functools import lru_cache
-from numbers import Integral
+from functools import partial
+from typing import Literal
 
 import numpy as np
 import torch
 from torch import Tensor
+from torch.cuda.graphs import make_graphed_callables
 
-# Fields go through in chunks that limit one padded buffer to this many complex values, unless a single
-# field already exceeds the limit. Outputs, cached tables and FFT workspaces need additional memory.
-_MAX_BUFFER_VALUES = 2**26
+from anemoi.models.layers.padded_fft import PaddedFFT
+from anemoi.models.layers.ring_fft_base import RingFFTBase
 
+LOGGER = logging.getLogger(__name__)
 
-def _padded_length(needed: int) -> int:
-    """The smallest power of 2 that is at least ``needed``."""
-    return 1 << max(0, needed - 1).bit_length()
-
-
-def _multiplicity(m: Tensor, n: Tensor) -> Tensor:
-    # Orders 0 and n / 2 appear once in a real spectrum, all others twice.
-    return torch.where((m == 0) | (2 * m == n), 1.0, 2.0)
+FFTBackend = Literal["ring", "padded"]
 
 
-def _complex_type(real: torch.dtype) -> torch.dtype:
-    return torch.complex64 if real == torch.float32 else torch.complex128
+def validate_fft_options(backend: str, graphed: bool = False) -> None:
+    """Validate the backend selection before any tables or graph wrappers are built."""
+    if backend not in ("ring", "padded"):
+        raise ValueError(f"Unknown fft_backend={backend!r}; use 'ring' or 'padded'")
+    if backend == "padded" and graphed:
+        raise ValueError("CUDA graphs require fft_backend='ring'; padded FFTs do not support graph capture")
 
 
-def _phase(j: Tensor, n: Tensor, sign: float) -> Tensor:
-    """exp(sign i pi j^2 / n) in float64, from j^2 mod 2 n."""
-    angle = torch.pi * ((j * j) % (2 * n)).to(torch.float64) / n.to(torch.float64)
-    return torch.polar(torch.ones_like(angle), sign * angle)
+def shared_ring_fft(
+    lengths: tuple[int, ...] | list[int], backend: FFTBackend = "ring", graphed: bool = False
+) -> "NativeRingFFT | PaddedFFT | GraphedRingFFT":
+    """Return the ring FFTs of one grid with the chosen backend, shared by all transforms on that grid.
 
-
-def _real_at_ends(coefficients: Tensor, ends: Tensor) -> Tensor:
-    """Drop the imaginary part at orders 0 and n / 2 (``ends``), which are real for a real field."""
-    return torch.where(ends, torch.complex(coefficients.real, torch.zeros_like(coefficients.real)), coefficients)
-
-
-class _Group:
-    """Rings that share a padded length, with their place in the padded buffer."""
-
-    def __init__(self, size: int, rings: list[int], offset: int, lengths: Tensor, modes: int, taken: int) -> None:
-        self.size = size
-        # Orders worked out for the group: the most that any of its rings holds.
-        self.taken = taken
-        self.offset = offset
-        self.count = len(rings)
-        self.rings = torch.as_tensor(rings, dtype=torch.int64, device=lengths.device)
-        self.n = lengths[self.rings][:, None]
-        self.modes = torch.clamp(self.n // 2 + 1, max=modes)
-        self.cache = {}
-
-    def data(self, key: tuple, build):
-        """Chirp data of this group, built the first time it is asked for and then kept."""
-        if key not in self.cache:
-            self.cache[key] = build()
-        return self.cache[key]
+    For a given grid, backend and graph setting, equivalent positional and keyword calls return the same
+    instance. ``shared_ring_fft.cache_clear()`` clears the factory cache.
+    """
+    validate_fft_options(backend, graphed)
+    return _ring_fft(tuple(lengths), backend, bool(graphed))
 
 
 @lru_cache(maxsize=None)
-def shared_ring_fft(lengths: tuple[int, ...]) -> "RingFFT":
-    """The ring transforms of a grid, shared by every transform on it."""
-    return RingFFT(lengths)
+def _ring_fft(
+    lengths: tuple[int, ...], backend: FFTBackend, graphed: bool
+) -> "NativeRingFFT | PaddedFFT | GraphedRingFFT":
+    if backend == "padded":
+        return PaddedFFT(lengths)
+    if graphed:
+        return GraphedRingFFT(lengths)
+    return NativeRingFFT(lengths)
 
 
-class RingFFT:
-    """Ring Fourier sums of a reduced grid, and their adjoints, with Bluestein's padding trick.
+shared_ring_fft.cache_clear = _ring_fft.cache_clear
+shared_ring_fft.cache_info = _ring_fft.cache_info
 
-    The tables are built on each device the first time they are needed there, and kept. Use
-    ``shared_ring_fft`` to share one instance between the transforms on a grid.
 
-    Parameters
-    ----------
-    lengths : tuple[int, ...]
-        Number of points on each ring, in the order the rings are stored.
+class NativeRingFFT(RingFFTBase):
+    """Real FFTs on the rings of a reduced grid, with one batched FFT for all rings of the same length.
+
+    Both directions are scaled as with ``norm="forward"``. The backward pass uses explicit adjoints and the grid
+    metadata, so the input fields are not saved. Each ring is transformed at its own length, and the requested
+    number of orders determines how many coefficients are kept.
     """
 
     def __init__(self, lengths: tuple[int, ...]) -> None:
-        if not lengths or any(not isinstance(n, Integral) or n < 1 for n in lengths):
-            raise ValueError("Ring lengths must be positive integers")
-        self.lengths = tuple(int(n) for n in lengths)
-        self.nlat = len(lengths)
-        self.points = sum(self.lengths)
-        self.modes = max(self.lengths) // 2 + 1
+        super().__init__(lengths)
+        by_length = defaultdict(list)
+        offsets = np.cumsum([0, *self.lengths])
+        for ring, n in enumerate(self.lengths):
+            by_length[n].append(ring)
+        self.groups = tuple((n, len(rings)) for n, rings in sorted(by_length.items()))
+        grid_order, spectrum_ring, spectrum_mode, mode_lengths, multiplicity = [], [], [], [], []
+        for n, rings in sorted(by_length.items()):
+            modes = n // 2 + 1
+            weights = np.full(modes, 2, dtype=np.int64)
+            weights[0] = 1
+            if n % 2 == 0:
+                weights[-1] = 1
+            for ring in rings:
+                grid_order.append(np.arange(offsets[ring], offsets[ring + 1]))
+                spectrum_ring.append(np.full(modes, ring, dtype=np.int64))
+                spectrum_mode.append(np.arange(modes))
+                mode_lengths.append(np.full(modes, n, dtype=np.int64))
+                multiplicity.append(weights)
+        self._grid_order = np.concatenate(grid_order)
+        self._spectrum_ring = np.concatenate(spectrum_ring)
+        self._spectrum_mode = np.concatenate(spectrum_mode)
+        self._mode_lengths = np.concatenate(mode_lengths)
+        self._multiplicity = np.concatenate(multiplicity)
         self._tables = {}
-        self._plans = {}
-        self._chirps = {}
+        self._spectra = {}
 
     def _table(self, device: torch.device) -> dict[str, Tensor]:
-        """Ring lengths, and the ring and position of each point, on ``device``."""
         if device not in self._tables:
-            lengths = np.asarray(self.lengths)
             self._tables[device] = {
-                "ring_length": torch.as_tensor(lengths, dtype=torch.int64, device=device),
-                "point_ring": torch.as_tensor(np.repeat(np.arange(self.nlat), lengths), device=device),
-                "point_k": torch.as_tensor(np.concatenate([np.arange(n) for n in self.lengths]), device=device),
+                "grid_order": torch.as_tensor(self._grid_order, device=device),
+                "mode_lengths": torch.as_tensor(self._mode_lengths, device=device),
+                "multiplicity": torch.as_tensor(self._multiplicity, device=device),
             }
         return self._tables[device]
 
-    def _plan(self, modes: int, device: torch.device) -> tuple[list[_Group], Tensor, int]:
-        """The groups of rings for ``modes`` orders, the place of each grid point in the padded buffer, and the
-        buffer length.
-        """
+    def _spectrum_indices(self, modes: int, device: torch.device) -> tuple[Tensor, Tensor]:
+        """Return the positions of the kept orders in the packed spectra and in [ring, order]."""
         key = (modes, device)
-        if key not in self._plans:
-            table = self._table(device)
-            by_size = {}
-            for ring, n in enumerate(self.lengths):
-                by_size.setdefault(_padded_length(n + min(modes, n // 2 + 1) - 1), []).append(ring)
-            groups, start, offset = [], torch.empty(self.nlat, dtype=torch.int64), 0
-            for size, rings in sorted(by_size.items()):
-                taken = max(min(modes, self.lengths[ring] // 2 + 1) for ring in rings)
-                groups.append(_Group(size, rings, offset, table["ring_length"], modes, taken))
-                start[rings] = offset + size * torch.arange(len(rings))
-                offset += size * len(rings)
-            self._plans[key] = (groups, start.to(device), offset)
-        groups, start, offset = self._plans[key]
-        # The place of each point is worked out on every call: kept, it would take 8 bytes per point for
-        # every number of orders in use.
-        table = self._table(device)
-        return groups, start[table["point_ring"]] + table["point_k"], offset
+        if key not in self._spectra:
+            kept = np.flatnonzero(self._spectrum_mode < modes)
+            order = self._spectrum_ring[kept] * modes + self._spectrum_mode[kept]
+            self._spectra[key] = (torch.as_tensor(kept, device=device), torch.as_tensor(order, device=device))
+        return self._spectra[key]
 
-    def _chirp(self, real: torch.dtype, device: torch.device) -> Tensor:
-        """exp(-i pi k^2 / n) at each point, from k^2 mod 2 n, in the complex type that goes with ``real``."""
-        key = (real, device)
-        if key not in self._chirps:
-            k = np.concatenate([np.arange(n) for n in self.lengths]).astype(np.int64)
-            n = np.repeat(np.asarray(self.lengths), self.lengths)
-            chirp = _phase(torch.as_tensor(k, device=device), torch.as_tensor(n, device=device), -1.0)
-            self._chirps[key] = chirp.to(_complex_type(real))
-        return self._chirps[key]
+    def _pack_spectrum(self, x: Tensor) -> Tensor:
+        kept, order = self._spectrum_indices(x.shape[-1], x.device)
+        values = x.flatten(-2).index_select(-1, order)
+        if x.shape[-1] >= self.modes:
+            return values
+        packed = x.new_zeros((*x.shape[:-2], len(self._spectrum_mode)))
+        return packed.index_copy_(-1, kept, values)
 
+    def _unpack_spectrum(self, packed: Tensor, modes: int) -> Tensor:
+        kept, order = self._spectrum_indices(modes, packed.device)
+        out = packed.new_zeros((*packed.shape[:-1], self.nlat * modes))
+        values = packed if modes >= self.modes else packed.index_select(-1, kept)
+        out.index_copy_(-1, order, values)
+        return out.reshape(*packed.shape[:-1], self.nlat, modes)
+
+    def _unpack_grid(self, packed: Tensor) -> Tensor:
+        out = torch.empty_like(packed)
+        return out.index_copy_(-1, self._table(packed.device)["grid_order"], packed)
+
+    def _rfft_groups(self, packed: Tensor) -> Tensor:
+        results, offset = [], 0
+        for n, count in self.groups:
+            block = packed[..., offset : offset + count * n].reshape(*packed.shape[:-1], count, n)
+            results.append(torch.fft.rfft(block, norm="backward").flatten(-2))
+            offset += count * n
+        return torch.cat(results, dim=-1)
+
+    def _irfft_groups(self, packed: Tensor) -> Tensor:
+        results, offset = [], 0
+        for n, count in self.groups:
+            modes = n // 2 + 1
+            block = packed[..., offset : offset + count * modes].reshape(*packed.shape[:-1], count, modes)
+            results.append(torch.fft.irfft(block, n=n, norm="forward").flatten(-2))
+            offset += count * modes
+        return torch.cat(results, dim=-1)
+
+    def _rfft(self, x: Tensor, modes: int) -> Tensor:
+        return _NativeRFFT.apply(x, self, modes)
+
+    def _irfft(self, a: Tensor) -> Tensor:
+        return _NativeIRFFT.apply(a, self)
+
+
+class _NativeRFFT(torch.autograd.Function):
     @staticmethod
-    def _chirp_kernel(group: _Group, ahead: Tensor, behind: Tensor, sign: float, real: torch.dtype) -> Tensor:
-        """Normalized FFT of exp(sign i pi j^2 / n), at j = 0 .. ahead - 1 and size + j for j = -behind .. -1.
-
-        Include the convolution's 1 / size normalization here so each call can use an unnormalized inverse FFT.
-        """
-        size = group.size
-        p = torch.arange(size, device=group.n.device)[None, :]
-        j = torch.where(p < ahead, p, torch.where(p >= size - behind, p - size, size))
-        return torch.fft.fft((j < size) * _phase(j, group.n, sign), dim=-1, norm="forward").to(_complex_type(real))
-
-    @staticmethod
-    def _order_chirp(group: _Group, taken: int, weight: Tensor, sign: float, real: torch.dtype) -> Tensor:
-        """weight * exp(sign i pi m^2 / n) for the orders m < taken that the ring holds, zero above."""
-        m = torch.arange(taken, device=group.n.device)[None, :]
-        return ((m < group.modes) * weight * _phase(m, group.n, sign)).to(_complex_type(real))
-
-    @staticmethod
-    def _ends(group: _Group, taken: int) -> Tensor:
-        """Orders 0 and n / 2 of each ring of the group, ``[ring, taken]``."""
-        m = torch.arange(taken, device=group.n.device)[None, :]
-        return (m == 0) | (2 * m == group.n)
-
-    def _inverse_weights(self, group: _Group, weight_by_length: bool, real: torch.dtype) -> Tensor:
-        """Weight of each nonnegative order times exp(i pi m^2 / n), ``[ring, taken]``."""
-        m = torch.arange(group.taken, device=group.n.device)[None, :]
-        weight = 1.0 / group.n.to(torch.float64) if weight_by_length else _multiplicity(m, group.n).to(torch.float64)
-        return self._order_chirp(group, group.taken, weight, 1.0, real)
-
-    def _field_groups(self, batch: int, buffer: int) -> list[slice]:
-        step = max(1, _MAX_BUFFER_VALUES // max(buffer, 1))
-        return [slice(start, min(start + step, batch)) for start in range(0, batch, step)]
-
-    def _forward_sums(self, x: Tensor, modes: int) -> Tensor:
-        """(1 / n) sum over k of x[k] exp(-2 pi i m k / n) for m < modes, ``[batch, ring, modes]``."""
-        real, batch = x.dtype, x.shape[0]
-        groups, index, buffer_size = self._plan(modes, x.device)
-        chirp = self._chirp(real, x.device)
-        out = x.new_zeros((batch, self.nlat, modes), dtype=_complex_type(real))
-        for fields in self._field_groups(batch, buffer_size):
-            buffer = out.new_zeros((fields.stop - fields.start, buffer_size))
-            buffer.index_copy_(1, index, x[fields] * chirp)
-            for group in groups:
-                taken = group.taken
-                kernel = group.data(
-                    ("forward kernel", real),
-                    lambda: self._chirp_kernel(group, group.modes, group.n - 1, 1.0, real),
-                )
-                post = group.data(
-                    ("forward post", real),
-                    lambda: self._order_chirp(group, taken, 1.0 / group.n.to(torch.float64), -1.0, real),
-                )
-                ends = group.data(("ends",), lambda: self._ends(group, taken))
-                block = buffer[:, group.offset : group.offset + group.size * group.count].view(
-                    -1, group.count, group.size
-                )
-                sums = torch.fft.ifft(torch.fft.fft(block, dim=-1) * kernel, dim=-1, norm="forward")
-                out[fields, group.rings, :taken] = _real_at_ends(sums[..., :taken] * post, ends)
-        return out
-
-    def _inverse_sums(self, a: Tensor, weight_by_length: bool) -> Tensor:
-        """Sum over m of w(m) Re(a[m] exp(2 pi i m k / n)), ``[batch, points]``.
-
-        w is the multiplicity of the order, or 1 / n with ``weight_by_length``. Orders above n / 2 are left
-        out, as in an inverse real FFT.
-        """
-        real, batch, modes = a.real.dtype, a.shape[0], a.shape[-1]
-        groups, index, buffer_size = self._plan(modes, a.device)
-        chirp = self._chirp(real, a.device).conj()
-        out = a.real.new_empty((batch, self.points))
-        for fields in self._field_groups(batch, buffer_size):
-            buffer = a.new_zeros((fields.stop - fields.start, buffer_size))
-            for group in groups:
-                taken = group.taken
-                weights = group.data(
-                    ("inverse weights", real, weight_by_length),
-                    lambda: self._inverse_weights(group, weight_by_length, real),
-                )
-                kernel = group.data(
-                    ("inverse kernel", real),
-                    lambda: self._chirp_kernel(group, group.n, group.modes - 1, -1.0, real),
-                )
-                ends = group.data(("ends",), lambda: self._ends(group, taken))
-                block = buffer[:, group.offset : group.offset + group.size * group.count].view(
-                    -1, group.count, group.size
-                )
-                block[..., :taken] = _real_at_ends(a[fields, group.rings, :taken], ends) * weights
-                block.copy_(torch.fft.ifft(torch.fft.fft(block, dim=-1) * kernel, dim=-1, norm="forward"))
-            out[fields] = (buffer[:, index] * chirp).real
-        return out
-
-    def rfft(self, x: Tensor, modes: int | None = None) -> Tensor:
-        """Fourier coefficients ``[..., ring, modes]`` of real fields ``[..., points]``.
-
-        ``modes`` defaults to all orders the longest ring holds. Orders a ring cannot hold (above half its
-        length) are zero.
-        """
-        if x.ndim < 1 or x.shape[-1] != self.points:
-            raise ValueError(f"Expected {self.points} grid points")
-        if not x.is_floating_point():
-            raise TypeError("rfft expects a real floating-point tensor")
-        modes = self.modes if modes is None else modes
-        leading = x.shape[:-1]
-        out = _RingRFFT.apply(x.reshape(-1, self.points), self, modes)
-        return out.reshape(*leading, self.nlat, modes)
-
-    def irfft(self, a: Tensor) -> Tensor:
-        """Real fields ``[..., points]`` from Fourier coefficients ``[..., ring, modes]``.
-
-        Orders above half a ring's length are ignored, as in an inverse real FFT.
-        """
-        if a.ndim < 2 or a.shape[-2] != self.nlat or a.shape[-1] < 1:
-            raise ValueError(f"Expected {self.nlat} rings and at least one order")
-        if not a.is_complex():
-            raise TypeError("irfft expects a complex tensor")
-        leading = a.shape[:-2]
-        out = _RingIRFFT.apply(a.reshape(-1, *a.shape[-2:]), self)
-        return out.reshape(*leading, self.points)
-
-
-class _RingRFFT(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x: Tensor, fft: RingFFT, modes: int) -> Tensor:
+    def forward(ctx, x: Tensor, fft: NativeRingFFT, modes: int) -> Tensor:
         ctx.fft = fft
-        return fft._forward_sums(x, modes)
+        table = fft._table(x.device)
+        packed = x.index_select(-1, table["grid_order"])
+        return fft._unpack_spectrum(fft._rfft_groups(packed) / table["mode_lengths"], modes)
 
     @staticmethod
     def backward(ctx, grad: Tensor) -> tuple[Tensor, None, None]:
-        # The adjoint of (1 / n) sum x exp(-i phi) is (1 / n) Re sum g exp(i phi) over all orders it gave.
-        return ctx.fft._inverse_sums(grad, weight_by_length=True), None, None
+        fft = ctx.fft
+        table = fft._table(grad.device)
+        # The real inverse counts each interior order twice, once for each half of the spectrum, so the adjoint
+        # halves them.
+        packed = fft._pack_spectrum(grad) / (table["mode_lengths"] * table["multiplicity"])
+        return fft._unpack_grid(fft._irfft_groups(packed)), None, None
 
 
-class _RingIRFFT(torch.autograd.Function):
+class _NativeIRFFT(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, a: Tensor, fft: RingFFT) -> Tensor:
-        ctx.fft = fft
-        ctx.modes = a.shape[-1]
-        return fft._inverse_sums(a, weight_by_length=False)
+    def forward(ctx, a: Tensor, fft: NativeRingFFT) -> Tensor:
+        ctx.fft, ctx.modes = fft, a.shape[-1]
+        return fft._unpack_grid(fft._irfft_groups(fft._pack_spectrum(a)))
 
     @staticmethod
     def backward(ctx, grad: Tensor) -> tuple[Tensor, None]:
-        # The adjoint of sum w Re(a exp(i phi)) is w sum g exp(-i phi), zero for orders the ring cannot hold.
         fft = ctx.fft
-        sums = fft._forward_sums(grad, ctx.modes)
-        m = torch.arange(ctx.modes, device=grad.device)
-        n = fft._table(grad.device)["ring_length"][:, None]
-        return sums * (n * _multiplicity(m[None, :], n)).to(grad.dtype), None
+        table = fft._table(grad.device)
+        packed = fft._rfft_groups(grad.index_select(-1, table["grid_order"]))
+        return fft._unpack_spectrum(packed * table["multiplicity"], ctx.modes), None
+
+
+class GraphedRingFFT(RingFFTBase):
+    """Native ring FFTs, captured in CUDA graphs in up to three latitude bands and then replayed.
+
+    A capture is made on first use for each direction, number of orders, shape, dtype and device, and for inputs
+    with and without gradients. It keeps its own input, output and gradient buffers and its memory pool for the
+    life of the process. The backward pass does not support gradients of gradients.
+
+    A replay runs the cuFFT plans that its capture was made with. PyTorch keeps these plans in its plan cache and
+    frees the least recently used ones when the cache is full, and a replay after one of its plans has been freed
+    is unsafe. The cache, sized with ``training.cufft_plan_cache_size``, should therefore hold every plan of the
+    run and should not be cleared.
+    """
+
+    def __init__(self, lengths: tuple[int, ...]) -> None:
+        super().__init__(lengths)
+        LOGGER.warning(
+            "CUDA graphs for ring FFTs replay cuFFT plans from PyTorch's plan cache; a replay after the cache has "
+            "freed one of them is unsafe. Set training.cufft_plan_cache_size above the number of plans the run "
+            "needs."
+        )
+        bands = min(3, self.nlat)
+        self.ffts, self.grid_slices = [], []
+        offset = 0
+        for band in range(bands):
+            start, end = band * self.nlat // bands, (band + 1) * self.nlat // bands
+            fft = shared_ring_fft(self.lengths[start:end], "ring", False)
+            self.ffts.append(fft)
+            self.grid_slices.append(slice(offset, offset + fft.points))
+            offset += fft.points
+        self._captures = {}
+
+    def _run(self, x: Tensor, inverse: bool, modes: int | None = None) -> Tensor:
+        if x.device.type != "cuda":
+            raise RuntimeError("CUDA graphs require CUDA input")
+        requires_grad = x.requires_grad and torch.is_grad_enabled()
+        key = (inverse, modes, tuple(x.shape), x.dtype, x.device, requires_grad)
+        if inverse:
+            inputs = list(x.split([fft.nlat for fft in self.ffts], dim=-2))
+            functions = tuple(fft.irfft for fft in self.ffts)
+        else:
+            inputs = [x[..., part] for part in self.grid_slices]
+            functions = tuple(partial(fft.rfft, modes=modes) for fft in self.ffts)
+        if key not in self._captures:
+            # Collect unreachable objects before capture, since their destructors may call CUDA.
+            gc_enabled = gc.isenabled()
+            gc.disable()
+            try:
+                gc.collect()
+                # The capture's buffers are made outside inference mode, so that a capture made during
+                # validation can still take new inputs in training.
+                with torch.inference_mode(False), torch.cuda.device(x.device), torch.amp.autocast(
+                    "cuda", enabled=torch.is_autocast_enabled(), cache_enabled=False
+                ):
+                    samples = tuple((torch.zeros_like(band, requires_grad=requires_grad),) for band in inputs)
+                    self._captures[key] = make_graphed_callables(functions, samples)
+            finally:
+                if gc_enabled:
+                    gc.enable()
+        # Joining the bands copies the result, so a later replay cannot overwrite what this call returned.
+        return torch.cat([fn(band) for fn, band in zip(self._captures[key], inputs)], dim=-1 if inverse else -2)
+
+    def _rfft(self, x: Tensor, modes: int) -> Tensor:
+        return self._run(x, inverse=False, modes=modes)
+
+    def _irfft(self, a: Tensor) -> Tensor:
+        return self._run(a, inverse=True)

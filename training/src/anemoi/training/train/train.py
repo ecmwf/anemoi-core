@@ -59,6 +59,23 @@ LOGGER = logging.getLogger(__name__)
 PL_VERSION = version.parse(pl.__version__)
 
 
+def set_cufft_plan_cache_size(size: int | None) -> None:
+    """Set the cuFFT plan cache limit on every visible GPU, or leave the limits unchanged for None.
+
+    This runs before the device of the worker is selected. Setting a limit allocates no plans, since memory is
+    only used when FFT calls create them. A cache that is too small for the workload causes the plans to be built
+    again and again.
+    """
+    if size is None:
+        return
+    limits = {}
+    for device in range(torch.cuda.device_count()):
+        cache = torch.backends.cuda.cufft_plan_cache[device]
+        cache.max_size = size
+        limits[f"cuda:{device}"] = cache.max_size
+    LOGGER.info("cuFFT plan cache limits: %s", limits)
+
+
 class AnemoiTrainer(ABC):
     """Utility class for training the model."""
 
@@ -88,6 +105,7 @@ class AnemoiTrainer(ABC):
 
         # "high" lets float32 matrix products use TF32 where the hardware has it, which is faster but less exact.
         torch.set_float32_matmul_precision(self.config.training.get("float32_matmul_precision", "high"))
+        set_cufft_plan_cache_size(self.config.training.get("cufft_plan_cache_size", None))
 
         # Optionally override the torch default BLAS backend.
         _blas_backend = self.config.training.get("preferred_blas_backend", None)

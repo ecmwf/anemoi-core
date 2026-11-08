@@ -181,13 +181,13 @@ def test_default_blocks_widen_from_order_128():
 
 
 def test_transforms_of_different_truncations_can_be_recomputed_for_gradients(order_blocks):
-    """Two truncations on one grid inside a checkpoint, from an empty cache.
+    """Two truncations on one grid, starting from an empty cache, are recomputed inside a checkpoint.
 
-    The higher truncation replaces the tables the lower one built during the forward pass, and the pass is run
+    The higher truncation replaces the tables that the lower one built during the forward pass, and the pass is run
     again for the gradients. Both runs must save the same tensors, and the gradients must match the uncheckpointed
     ones.
     """
-    # Above T127 blocks laid out by truncation would differ between the two; T255 needs 256 latitudes.
+    # Above T127, blocks laid out by truncation would differ between the two, and T255 needs 256 latitudes.
     lons = _lons_per_lat(256, "octahedral")
     low, high = SphericalHarmonicTransform(lons, 31), SphericalHarmonicTransform(lons, 255)
     x = torch.randn(2, sum(lons), dtype=torch.float64, requires_grad=True)

@@ -920,9 +920,14 @@ Note that all entries are optional and can be left unspecified. The default prec
 default selection of PyTorch.
 
 ``float32_matmul_precision`` is passed to ``torch.set_float32_matmul_precision`` and applies to the matrix products
-that run in float32, for example in losses that turn autocast off. It is one of ``highest``, ``high`` (the default)
-or ``medium``. ``high`` lets them use TF32 where the GPU has it, which is faster but keeps only about three
-significant digits. Set it to ``highest`` for full float32.
+that run in float32, for example in losses that switch autocast off. It is one of ``highest``, ``high``, the
+default, or ``medium``. With ``high``, the products use TF32 where the GPU supports it, which is faster but less
+exact, and ``highest`` keeps them in full float32.
+
+``cufft_plan_cache_size`` sets how many cuFFT plans PyTorch keeps on each GPU. When it is unset, the current limit,
+normally 4096, stays unchanged. Native ring FFTs on reduced grids need one plan per ring length, direction and
+batch shape. For runs at high resolution, the notes on memory and speed of the wavelet energy score in
+:doc:`../modules/losses` give more detail.
 
 ******************
  Weight Averaging
