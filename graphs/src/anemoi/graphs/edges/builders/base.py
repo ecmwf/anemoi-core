@@ -10,16 +10,14 @@
 
 import logging
 import time
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import torch
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
-from anemoi.graphs.utils import concat_edges
-from anemoi.graphs.utils import get_distributed_device
+from anemoi.graphs.utils import concat_edges, get_distributed_device
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)

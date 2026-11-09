@@ -10,12 +10,10 @@
 from typing import Any
 
 import pytest
-from omegaconf import DictConfig
-from omegaconf import open_dict
+from omegaconf import DictConfig, open_dict
 
 from anemoi.training.train.train import AnemoiTrainer
-from anemoi.utils.testing import GetTestArchive
-from anemoi.utils.testing import skip_if_offline
+from anemoi.utils.testing import GetTestArchive, skip_if_offline
 from tests.integration.helpers import assert_keys_exist
 
 

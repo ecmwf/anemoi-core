@@ -12,9 +12,7 @@
 import numpy as np
 import pytest
 
-from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.data_reader import NativeGridDataset
-from anemoi.training.data.data_reader import TrajectoryDataset
+from anemoi.training.data.data_reader import BaseAnemoiReader, NativeGridDataset, TrajectoryDataset
 
 # ---------------------------------------------------------------------------
 # Helpers: lightweight stubs that bypass open_dataset

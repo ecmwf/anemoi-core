@@ -7,26 +7,23 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Iterator
 
 import numpy as np
-from torch.utils.data import ConcatDataset
-from torch.utils.data import Dataset
-from torch.utils.data import Sampler
-from torchdata.stateful_dataloader.sampler import BatchSampler
-from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
+from torch.utils.data import ConcatDataset, Dataset, Sampler
+from torchdata.stateful_dataloader.sampler import BatchSampler, StatefulDistributedSampler
 
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.multidataset import MultiDataset
-from anemoi.training.utils.seeding import SeedContext
-from anemoi.training.utils.seeding import derive_seed
+from anemoi.training.utils.seeding import SeedContext, derive_seed
 from anemoi.training.utils.time_indices import TimeIndices
-from anemoi.training.utils.variables_metadata import check_datasets_variables_compatibility
-from anemoi.training.utils.variables_metadata import check_datasets_variables_order
+from anemoi.training.utils.variables_metadata import (
+    check_datasets_variables_compatibility,
+    check_datasets_variables_order,
+)
 
 
 class DataLoadingPolicy(ABC):

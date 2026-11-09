@@ -19,8 +19,7 @@ from anemoi.utils.testing import cli_testing
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
-    from pytest_mock import MockerFixture
-    from pytest_mock import MockType
+    from pytest_mock import MockerFixture, MockType
 
 
 @pytest.fixture

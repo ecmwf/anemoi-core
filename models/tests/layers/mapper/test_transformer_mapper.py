@@ -7,18 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from dataclasses import asdict
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import asdict, dataclass, field
 from typing import Optional
 
 import pytest
 import torch
 
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.layers.mapper import TransformerBackwardMapper
-from anemoi.models.layers.mapper import TransformerBaseMapper
-from anemoi.models.layers.mapper import TransformerForwardMapper
+from anemoi.models.layers.mapper import TransformerBackwardMapper, TransformerBaseMapper, TransformerForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 

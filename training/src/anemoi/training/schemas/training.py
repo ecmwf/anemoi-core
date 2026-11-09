@@ -9,21 +9,20 @@
 
 from enum import StrEnum
 from functools import partial
-from typing import Annotated
-from typing import Any
-from typing import Literal
-from typing import Self
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import AfterValidator
-from pydantic import ConfigDict
-from pydantic import Discriminator
-from pydantic import Field
-from pydantic import NonNegativeFloat
-from pydantic import NonNegativeInt
-from pydantic import PositiveInt
-from pydantic import Tag
-from pydantic import field_validator
-from pydantic import model_validator
+from pydantic import (
+    AfterValidator,
+    ConfigDict,
+    Discriminator,
+    Field,
+    NonNegativeFloat,
+    NonNegativeInt,
+    PositiveInt,
+    Tag,
+    field_validator,
+    model_validator,
+)
 
 from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.training.utils.enums import EnergyScoreDimension

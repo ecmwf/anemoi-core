@@ -10,9 +10,11 @@
 import pytest
 import torch
 
-from anemoi.models.transport.schedules import KarrasSigmaTrainingDistribution
-from anemoi.models.transport.schedules import UniformTimeTrainingDistribution
-from anemoi.models.transport.schedules import UnitTimeSchedule
+from anemoi.models.transport.schedules import (
+    KarrasSigmaTrainingDistribution,
+    UniformTimeTrainingDistribution,
+    UnitTimeSchedule,
+)
 
 
 def test_unit_time_schedule_returns_monotonic_time_grid() -> None:

@@ -14,9 +14,7 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.losses import CRPS
-from anemoi.training.losses import MSELoss
-from anemoi.training.losses import get_loss_function
+from anemoi.training.losses import CRPS, MSELoss, get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.variable_mapper import LossVariableMapper

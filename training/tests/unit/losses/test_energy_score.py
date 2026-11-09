@@ -18,15 +18,11 @@ from pytest_mock import MockerFixture
 from torch.autograd import gradcheck
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.losses import CRPS
-from anemoi.training.losses import EnergyScoreLoss
-from anemoi.training.losses import get_loss_function
+from anemoi.training.losses import CRPS, EnergyScoreLoss, get_loss_function
 from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
 from anemoi.training.losses.variable_mapper import LossVariableMapper
-from anemoi.training.schemas.training import CombinedLossSchema
-from anemoi.training.schemas.training import LossSchemas
-from anemoi.training.utils.enums import EnergyScoreDimension
-from anemoi.training.utils.enums import TensorDim
+from anemoi.training.schemas.training import CombinedLossSchema, LossSchemas
+from anemoi.training.utils.enums import EnergyScoreDimension, TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
 Norm = tuple[EnergyScoreDimension, ...]

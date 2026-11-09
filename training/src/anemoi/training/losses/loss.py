@@ -13,15 +13,12 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from hydra.utils import get_class
-from hydra.utils import instantiate
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from hydra.utils import get_class, instantiate
+from omegaconf import DictConfig, OmegaConf
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import OutputTensorIndex
-from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.base import LossFactoryContextKey
+from anemoi.training.losses.base import BaseLoss, LossFactoryContextKey
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel

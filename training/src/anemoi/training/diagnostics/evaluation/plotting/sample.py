@@ -12,16 +12,12 @@ import numpy as np
 import pandas as pd
 from matplotlib import colormaps as mpl_colormaps
 from matplotlib.collections import PathCollection
-from matplotlib.colors import BoundaryNorm
-from matplotlib.colors import Colormap
-from matplotlib.colors import Normalize
-from matplotlib.colors import TwoSlopeNorm
+from matplotlib.colors import BoundaryNorm, Colormap, Normalize, TwoSlopeNorm
 from matplotlib.figure import Figure
 
 from anemoi.training.diagnostics.evaluation.geospatial.maps import map_features
 from anemoi.training.diagnostics.evaluation.geospatial.projections import MapProjection
-from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
-from anemoi.training.diagnostics.evaluation.plotting.settings import _hide_axes_ticks
+from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT, _hide_axes_ticks
 
 
 def _scale_precip_fields(

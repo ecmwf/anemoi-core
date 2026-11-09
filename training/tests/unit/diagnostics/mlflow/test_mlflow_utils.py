@@ -8,11 +8,13 @@
 import pytest
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
-from anemoi.training.diagnostics.mlflow.utils import MAX_PARAMS_LENGTH_PARAM
-from anemoi.training.diagnostics.mlflow.utils import check_params_length
-from anemoi.training.diagnostics.mlflow.utils import clean_config_params
-from anemoi.training.diagnostics.mlflow.utils import expand_iterables
-from anemoi.training.diagnostics.mlflow.utils import get_max_params_length
+from anemoi.training.diagnostics.mlflow.utils import (
+    MAX_PARAMS_LENGTH_PARAM,
+    check_params_length,
+    clean_config_params,
+    expand_iterables,
+    get_max_params_length,
+)
 
 
 def test_clean_config_params() -> None:

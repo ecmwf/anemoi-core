@@ -8,8 +8,7 @@
 # nor does it submit to any jurisdiction.
 """Configuration utilities for handling dataset-specific configurations."""
 
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 

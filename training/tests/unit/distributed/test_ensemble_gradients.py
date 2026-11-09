@@ -21,11 +21,9 @@ from pytorch_lightning.plugins.environments import LightningEnvironment
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.graph import gather_tensor, shard_tensor
 from anemoi.training.distributed.groups import get_my_ensemble_comm_group
-from anemoi.training.distributed.strategy import DDPEnsGroupStrategy
-from anemoi.training.distributed.strategy import register_gradient_scaling_hooks
+from anemoi.training.distributed.strategy import DDPEnsGroupStrategy, register_gradient_scaling_hooks
 
 
 class _EnsembleModel(pl.LightningModule):

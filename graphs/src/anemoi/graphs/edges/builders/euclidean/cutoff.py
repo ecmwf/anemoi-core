@@ -16,8 +16,7 @@ from torch_geometric.nn import radius as pyg_radius
 
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.builders.euclidean.base import BaseDistanceEdgeBuilders
-from anemoi.graphs.utils import crop_to_max_num_neighbours
-from anemoi.graphs.utils import get_grid_reference_distance
+from anemoi.graphs.utils import crop_to_max_num_neighbours, get_grid_reference_distance
 
 LOGGER = logging.getLogger(__name__)
 

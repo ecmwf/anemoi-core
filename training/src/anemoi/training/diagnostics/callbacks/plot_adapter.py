@@ -18,10 +18,8 @@ adding ensemble member handling without modifying the inner adapter's logic.
 
 from __future__ import annotations
 
-from abc import ABC
-from abc import abstractmethod
-from typing import TYPE_CHECKING
-from typing import Any
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

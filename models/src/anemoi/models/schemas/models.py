@@ -11,21 +11,11 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import Annotated
-from typing import Any
-from typing import Literal
-from typing import Optional
-from typing import Union
+from typing import Annotated, Any, Literal, Optional, Union
 
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Field
-from pydantic import NonNegativeFloat
-from pydantic import NonNegativeInt
-from pydantic import PositiveFloat
-from pydantic import PositiveInt
-from pydantic import model_validator
+from pydantic import Field, NonNegativeFloat, NonNegativeInt, PositiveFloat, PositiveInt, model_validator
 
 from anemoi.models.layers.target_features import VALID_TARGET_FEATURES
 from anemoi.models.schemas.schema_utils import DatasetDict
@@ -33,19 +23,25 @@ from anemoi.utils.schemas import BaseModel
 
 from .aggregator import AggregatorSchema  # noqa: TC001
 from .bounding import BoundingSchema
-from .decoder import GNNDecoderSchema  # noqa: TC001
-from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
-from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
-from .decoder import TransformerDecoderSchema  # noqa: TC001
-from .encoder import GNNEncoderSchema  # noqa: TC001
-from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
-from .encoder import PointWiseForwardMapperSchema  # noqa: TC001
-from .encoder import TransformerEncoderSchema  # noqa: TC001
-from .processor import GNNProcessorSchema  # noqa: TC001
-from .processor import GraphTransformerProcessorSchema  # noqa: TC001
-from .processor import NoOpProcessorSchema  # noqa: TC001
-from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
-from .processor import TransformerProcessorSchema  # noqa: TC001
+from .decoder import (
+    GNNDecoderSchema,  # noqa: TC001
+    GraphTransformerDecoderSchema,  # noqa: TC001
+    PointWiseBackwardMapperSchema,  # noqa: TC001
+    TransformerDecoderSchema,  # noqa: TC001
+)
+from .encoder import (
+    GNNEncoderSchema,  # noqa: TC001
+    GraphTransformerEncoderSchema,  # noqa: TC001
+    PointWiseForwardMapperSchema,  # noqa: TC001
+    TransformerEncoderSchema,  # noqa: TC001
+)
+from .processor import (
+    GNNProcessorSchema,  # noqa: TC001
+    GraphTransformerProcessorSchema,  # noqa: TC001
+    NoOpProcessorSchema,  # noqa: TC001
+    PointWiseMLPProcessorSchema,  # noqa: TC001
+    TransformerProcessorSchema,  # noqa: TC001
+)
 from .residual import ResidualConnectionSchema
 
 LOGGER = logging.getLogger(__name__)

@@ -11,26 +11,24 @@
 
 from collections.abc import Callable
 from functools import partial
-from typing import Any
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 import torch
 
-from anemoi.training.diagnostics.callbacks.plot import BatchOutputPlot
-from anemoi.training.diagnostics.callbacks.plot import LossCurvePlot
-from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
-from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
-from anemoi.training.diagnostics.evaluation.plotting.batch_output import ensemble_plot_fn
-from anemoi.training.diagnostics.evaluation.plotting.batch_output import histogram_plot_fn
-from anemoi.training.diagnostics.evaluation.plotting.batch_output import sample_plot_fn
-from anemoi.training.diagnostics.evaluation.plotting.batch_output import spectrum_plot_fn
+from anemoi.training.diagnostics.callbacks.plot import BatchOutputPlot, LossCurvePlot
+from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper, ForecasterPlotAdapter
+from anemoi.training.diagnostics.evaluation.plotting.batch_output import (
+    ensemble_plot_fn,
+    histogram_plot_fn,
+    sample_plot_fn,
+    spectrum_plot_fn,
+)
 from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_trainable_modules
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn
-from anemoi.training.tasks import Forecaster
-from anemoi.training.tasks import TemporalDownscaler
+from anemoi.training.tasks import Forecaster, TemporalDownscaler
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
 

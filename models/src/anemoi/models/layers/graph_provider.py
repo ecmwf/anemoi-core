@@ -10,26 +10,20 @@
 
 import copy
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
-from typing import Union
+from typing import Optional, Union
 
 import numpy as np
 import torch
-from scipy.sparse import coo_matrix
-from scipy.sparse import load_npz
-from scipy.sparse import spmatrix
-from torch import Tensor
-from torch import nn
+from scipy.sparse import coo_matrix, load_npz, spmatrix
+from torch import Tensor, nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
 
-from anemoi.models.distributed.khop_edges import shard_edges_1hop
-from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
+from anemoi.models.distributed.khop_edges import shard_edges_1hop, sort_edge_index_by_dst
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.layers.graph import TrainableTensor
 

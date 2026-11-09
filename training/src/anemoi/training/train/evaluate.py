@@ -13,11 +13,9 @@ from functools import cached_property
 import hydra
 import pytorch_lightning as pl
 import torch
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
-from anemoi.training.diagnostics.callbacks import CallbacksContext
-from anemoi.training.diagnostics.callbacks import get_callbacks
+from anemoi.training.diagnostics.callbacks import CallbacksContext, get_callbacks
 from anemoi.training.train.train import AnemoiTrainer
 
 LOGGER = logging.getLogger(__name__)

@@ -11,11 +11,9 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from functools import cached_property
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytorch_lightning as pl
 import torch
@@ -24,47 +22,42 @@ from omegaconf import OmegaConf
 from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME, uses_fused_dataset_graph
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes, get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
-from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
-from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
+from anemoi.training.checkpoint.loading.base import (
+    apply_checkpoint_corrections,
+    extract_checkpoint_variables_metadata,
+    preserve_anemoi_metadata,
+)
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
-from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
-from anemoi.training.losses.scaler_tensor import grad_scaler
+from anemoi.training.losses.scaler_tensor import TENSOR_SPEC, grad_scaler
 from anemoi.training.losses.scalers import create_scalers
-from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
-from anemoi.training.losses.scalers.base_scaler import BaseScaler
-from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
-from anemoi.training.losses.utils import check_loss_tree_variable_units
-from anemoi.training.losses.utils import print_variable_scaling
+from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks, BaseScaler, BaseUpdatingScaler
+from anemoi.training.losses.utils import check_loss_tree_variable_units, print_variable_scaling
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import build_output_masks
-from anemoi.training.utils.resolve_config import is_container
-from anemoi.training.utils.resolve_config import is_mapping
-from anemoi.training.utils.resolve_config import is_sequence
-from anemoi.training.utils.seeding import SeedContext
-from anemoi.training.utils.seeding import choose_base_seed
-from anemoi.training.utils.seeding import derive_seed
-from anemoi.training.utils.seeding import get_base_seed
-from anemoi.training.utils.seeding import seed_random_generators
-from anemoi.training.utils.seeding import set_base_seed
+from anemoi.training.utils.resolve_config import is_container, is_mapping, is_sequence
+from anemoi.training.utils.seeding import (
+    SeedContext,
+    choose_base_seed,
+    derive_seed,
+    get_base_seed,
+    seed_random_generators,
+    set_base_seed,
+)
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
-    from pytorch_lightning.utilities.types import OptimizerLRScheduler
+    from pytorch_lightning.utilities.types import LRSchedulerTypeUnion, OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data_indices.collection import IndexCollection

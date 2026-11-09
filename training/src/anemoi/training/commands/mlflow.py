@@ -343,8 +343,7 @@ class MlFlow(Command):
             return
 
         if args.subcommand == "prepare":
-            from hydra import compose
-            from hydra import initialize
+            from hydra import compose, initialize
 
             # Load configuration and resolve schema
             with initialize(version_base=None, config_path="./"):

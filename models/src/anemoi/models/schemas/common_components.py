@@ -7,14 +7,10 @@
 # nor does it submit to any jurisdiction.
 #
 
-from typing import Literal
-from typing import Union
+from typing import Literal, Union
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Field
-from pydantic import NonNegativeInt
-from pydantic import PositiveFloat
-from pydantic import PositiveInt
+from pydantic import Field, NonNegativeInt, PositiveFloat, PositiveInt
 
 from anemoi.utils.schemas import BaseModel
 

@@ -15,12 +15,14 @@ import pytest
 import torch
 
 from anemoi.training.utils import seeding
-from anemoi.training.utils.seeding import SeedContext
-from anemoi.training.utils.seeding import choose_base_seed
-from anemoi.training.utils.seeding import derive_seed
-from anemoi.training.utils.seeding import get_base_seed
-from anemoi.training.utils.seeding import seed_random_generators
-from anemoi.training.utils.seeding import set_base_seed
+from anemoi.training.utils.seeding import (
+    SeedContext,
+    choose_base_seed,
+    derive_seed,
+    get_base_seed,
+    seed_random_generators,
+    set_base_seed,
+)
 
 
 def test_choose_base_seed_takes_checkpoint_seed_without_config_seed() -> None:

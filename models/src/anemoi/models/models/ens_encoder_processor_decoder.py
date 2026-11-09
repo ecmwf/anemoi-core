@@ -20,11 +20,13 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.shapes import (
+    BipartiteGraphShardInfo,
+    DatasetShardSizes,
+    GraphShardInfo,
+    ShardSizes,
+    get_shard_sizes,
+)
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
 

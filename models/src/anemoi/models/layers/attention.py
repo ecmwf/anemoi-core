@@ -13,23 +13,17 @@ from __future__ import annotations
 import logging
 import math
 import os
-from typing import Optional
-from typing import Union
+from typing import Optional, Union
 
 import einops
 import torch
 from packaging import version
-from torch import Tensor
-from torch import nn
-from torch import where
+from torch import Tensor, nn, where
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import PairTensor
 
 from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, GraphShardInfo, ShardSizes, get_shard_sizes
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)

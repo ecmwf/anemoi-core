@@ -10,12 +10,10 @@
 
 import logging
 from collections import deque
-from collections.abc import Callable
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
-from omegaconf import DictConfig
-from omegaconf import ListConfig
+from omegaconf import DictConfig, ListConfig
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 

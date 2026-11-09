@@ -15,18 +15,19 @@ import hashlib
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
 
 from anemoi.training.checkpoint.base import CheckpointContext
-from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-from anemoi.training.checkpoint.exceptions import CheckpointSourceError
-from anemoi.training.checkpoint.exceptions import CheckpointTimeoutError
-from anemoi.training.checkpoint.exceptions import CheckpointValidationError
+from anemoi.training.checkpoint.exceptions import (
+    CheckpointConfigError,
+    CheckpointLoadError,
+    CheckpointSourceError,
+    CheckpointTimeoutError,
+    CheckpointValidationError,
+)
 from anemoi.training.checkpoint.sources.http import HTTPSource
 
 if TYPE_CHECKING:

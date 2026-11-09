@@ -9,11 +9,8 @@
 
 
 import logging
-from abc import ABC
-from abc import abstractmethod
-from typing import Any
-from typing import Iterable
-from typing import Union
+from abc import ABC, abstractmethod
+from typing import Any, Iterable, Union
 
 import torch
 from hydra.utils import instantiate
@@ -21,8 +18,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.attributes import EdgeLength
-from anemoi.graphs.utils import NodesAxis
-from anemoi.graphs.utils import get_edge_attributes
+from anemoi.graphs.utils import NodesAxis, get_edge_attributes
 
 LOGGER = logging.getLogger(__name__)
 

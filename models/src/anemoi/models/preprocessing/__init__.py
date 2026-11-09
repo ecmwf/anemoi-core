@@ -11,8 +11,7 @@ import logging
 from typing import Optional
 
 import torch
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 
 from anemoi.models.data_indices.collection import IndexCollection
 

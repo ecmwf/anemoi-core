@@ -43,8 +43,7 @@ class Checkpoint(Command):
         if args.subcommand == "inference":
             LOG.info("Loading training checkpoint from %s, please wait...", args.input)
 
-            from anemoi.training.utils.checkpoint import load_and_prepare_model
-            from anemoi.training.utils.checkpoint import save_inference_checkpoint
+            from anemoi.training.utils.checkpoint import load_and_prepare_model, save_inference_checkpoint
 
             module, metadata = load_and_prepare_model(args.input, graph_path=args.graph)
             supporting_arrays, module.supporting_arrays = module.supporting_arrays, None

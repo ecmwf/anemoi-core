@@ -10,15 +10,13 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 
-from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
-from anemoi.training.diagnostics.evaluation.plotting.settings import argsort_variablename_variablelevel
+from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT, argsort_variablename_variablelevel
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure

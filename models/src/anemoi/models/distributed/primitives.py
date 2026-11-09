@@ -8,17 +8,14 @@
 # nor does it submit to any jurisdiction.
 
 
-from typing import List
-from typing import Optional
+from typing import List, Optional
 
 import torch
 import torch.distributed as dist
 from torch import Tensor
-from torch.distributed.distributed_c10d import ProcessGroup
-from torch.distributed.distributed_c10d import _resolve_process_group
+from torch.distributed.distributed_c10d import ProcessGroup, _resolve_process_group
 
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import expand_shard_sizes_to_shapes
+from anemoi.models.distributed.shapes import ShardSizes, expand_shard_sizes_to_shapes
 from anemoi.models.distributed.utils import get_memory_format
 
 

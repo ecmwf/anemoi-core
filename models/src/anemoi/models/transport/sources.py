@@ -10,18 +10,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from dataclasses import field
-from typing import Any
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.transport.random_fields import randn_like_with_grid_sharding
-from anemoi.models.transport.random_fields import randn_with_grid_sharding
+from anemoi.models.distributed.shapes import DatasetShardSizes, ShardSizes
+from anemoi.models.transport.random_fields import randn_like_with_grid_sharding, randn_with_grid_sharding
 from anemoi.models.transport.settings import TransportSourceSettings
 
 TRANSPORT_SOURCE_KINDS = frozenset({"zero", "gaussian", "reference_state"})

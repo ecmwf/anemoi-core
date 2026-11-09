@@ -20,8 +20,7 @@ from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
-from anemoi.training.utils.checkpoint import check_classes
-from anemoi.training.utils.checkpoint import clear_imputer_runtime_state
+from anemoi.training.utils.checkpoint import check_classes, clear_imputer_runtime_state
 from anemoi.utils.checkpoints import save_metadata
 
 LOGGER = logging.getLogger(__name__)

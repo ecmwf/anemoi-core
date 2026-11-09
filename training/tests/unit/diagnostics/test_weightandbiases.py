@@ -10,9 +10,7 @@
 from typing import Union
 
 import pytest
-from omegaconf import DictConfig
-from omegaconf import ListConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.diagnostics import WandbSchema

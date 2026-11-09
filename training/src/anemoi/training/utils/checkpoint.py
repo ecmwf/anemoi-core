@@ -15,14 +15,10 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from pytorch_lightning import Callback
-from pytorch_lightning import LightningModule
-from pytorch_lightning import Trainer
+from pytorch_lightning import Callback, LightningModule, Trainer
 
-from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
-from anemoi.graphs.utils import load_graph_from_file
-from anemoi.graphs.utils import validate_loaded_graph
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME, uses_fused_dataset_graph
+from anemoi.graphs.utils import load_graph_from_file, validate_loaded_graph
 from anemoi.models.migrations import Migrator
 from anemoi.models.preprocessing.imputer import BaseImputer
 from anemoi.utils.checkpoints import save_metadata

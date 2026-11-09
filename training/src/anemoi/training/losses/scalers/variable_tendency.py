@@ -17,8 +17,7 @@ import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
-from anemoi.utils.dates import as_timedelta
-from anemoi.utils.dates import frequency_to_string
+from anemoi.utils.dates import as_timedelta, frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
 

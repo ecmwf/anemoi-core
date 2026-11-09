@@ -10,16 +10,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.samplers import transport_samplers
-from anemoi.models.transport.schedules import SIGMA_SCHEDULES
-from anemoi.models.transport.schedules import TIME_SCHEDULES
+from anemoi.models.transport.schedules import SIGMA_SCHEDULES, TIME_SCHEDULES
 
 LOGGER = logging.getLogger(__name__)
 

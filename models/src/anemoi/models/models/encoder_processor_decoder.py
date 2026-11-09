@@ -18,11 +18,13 @@ from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.shapes import (
+    BipartiteGraphShardInfo,
+    DatasetShardSizes,
+    GraphShardInfo,
+    ShardSizes,
+    get_shard_sizes,
+)
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.processor import NoOpProcessor
 from anemoi.models.models import BaseGraphModel

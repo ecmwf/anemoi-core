@@ -14,9 +14,7 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.preprocessing.imputer import ConstantImputer
-from anemoi.models.preprocessing.imputer import CopyImputer
-from anemoi.models.preprocessing.imputer import InputImputer
+from anemoi.models.preprocessing.imputer import ConstantImputer, CopyImputer, InputImputer
 
 
 @pytest.fixture()

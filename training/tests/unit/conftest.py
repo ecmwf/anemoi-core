@@ -12,8 +12,7 @@ from pathlib import Path
 
 import pytest
 from _pytest.fixtures import SubRequest
-from hydra import compose
-from hydra import initialize
+from hydra import compose, initialize
 from omegaconf import DictConfig
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule

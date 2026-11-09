@@ -14,15 +14,10 @@ import torch
 from torch import Tensor
 from torch.nn.functional import dropout
 from torch_geometric.nn.conv import MessagePassing
-from torch_geometric.typing import Adj
-from torch_geometric.typing import OptPairTensor
-from torch_geometric.typing import OptTensor
-from torch_geometric.typing import Size
-from torch_geometric.utils import scatter
-from torch_geometric.utils import softmax
+from torch_geometric.typing import Adj, OptPairTensor, OptTensor, Size
+from torch_geometric.utils import scatter, softmax
 
-from anemoi.models.layers.mlp import MLP
-from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.mlp import MLP, MLPImplementation
 from anemoi.utils.config import DotDict
 
 

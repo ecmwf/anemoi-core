@@ -111,9 +111,7 @@ def run_checkpoint_pipeline(
         unset (raised by the pipeline's weights-loaded check).
     """
     from anemoi.training.checkpoint.base import CheckpointContext
-    from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
-    from anemoi.training.checkpoint.builder import build_resume_source
-    from anemoi.training.checkpoint.builder import resumes_via_lightning
+    from anemoi.training.checkpoint.builder import build_checkpoint_pipeline, build_resume_source, resumes_via_lightning
 
     if not OmegaConf.is_config(config):
         config = OmegaConf.create(config)

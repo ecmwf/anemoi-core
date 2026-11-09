@@ -7,13 +7,9 @@
 # nor does it submit to any jurisdiction.
 
 
-from typing import Annotated
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Discriminator
-from pydantic import Field
-from pydantic import NonNegativeInt
-from pydantic import PositiveInt
+from pydantic import Discriminator, Field, NonNegativeInt, PositiveInt
 
 from anemoi.utils.schemas import BaseModel
 

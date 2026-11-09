@@ -12,16 +12,17 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 import torch
 
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-from anemoi.training.checkpoint.loading.base import LoadingStrategy
-from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
-from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
-from anemoi.training.checkpoint.loading.base import warn_on_hparams_divergence
+from anemoi.training.checkpoint.loading.base import (
+    LoadingStrategy,
+    extract_checkpoint_variables_metadata,
+    preserve_anemoi_metadata,
+    warn_on_hparams_divergence,
+)
 
 if TYPE_CHECKING:
     from typing import Any

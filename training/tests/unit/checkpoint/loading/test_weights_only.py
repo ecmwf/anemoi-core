@@ -18,13 +18,10 @@ import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
 
-from anemoi.training.checkpoint.base import CheckpointContext
-from anemoi.training.checkpoint.base import PipelineStage
-from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
-from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+from anemoi.training.checkpoint.base import CheckpointContext, PipelineStage
+from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError, CheckpointLoadError
 from anemoi.training.checkpoint.loading.base import warn_on_hparams_divergence
-from anemoi.training.checkpoint.loading.strategies import ColdStartLoader
-from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
+from anemoi.training.checkpoint.loading.strategies import ColdStartLoader, WeightsOnlyLoader
 
 
 class SimpleModel(nn.Module):

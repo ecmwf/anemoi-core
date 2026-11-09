@@ -10,8 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from anemoi.models.transport import TransportSourceRequest
 from anemoi.training.train.methods.base import BaseTrainingModule

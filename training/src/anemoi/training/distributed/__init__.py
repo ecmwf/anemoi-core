@@ -9,7 +9,6 @@
 
 
 from .single import SingleDeviceStrategy
-from .strategy import DDPEnsGroupStrategy
-from .strategy import DDPGroupStrategy
+from .strategy import DDPEnsGroupStrategy, DDPGroupStrategy
 
 __all__ = ["DDPEnsGroupStrategy", "DDPGroupStrategy", "SingleDeviceStrategy"]
