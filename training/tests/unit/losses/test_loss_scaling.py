@@ -84,7 +84,10 @@ def fake_data(
 
 @pytest.fixture
 def fake_data_no_param() -> tuple[
-    DictConfig, IndexCollection, dict[str, list[float]], dict[str, dict[str, list[float]] | list[str]]
+    DictConfig,
+    IndexCollection,
+    dict[str, list[float]],
+    dict[str, dict[str, list[float]] | list[str]],
 ]:
     config = DictConfig(
         {
