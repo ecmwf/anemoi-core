@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   ci-approval:
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
