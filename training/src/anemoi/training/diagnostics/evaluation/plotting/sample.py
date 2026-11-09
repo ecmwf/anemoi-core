@@ -80,6 +80,46 @@ def _compute_main_norm(
     )
 
 
+def _datashader_canvas_size(n_points: int, lon: np.ndarray, lat: np.ndarray) -> tuple[int, int]:
+    """Return the datashader canvas (width, height) in pixels.
+
+    Datasets with at least ``lower_limit / 0.004`` points keep the square ``0.004 * n_points`` canvas
+    (clipped to ``upper_limit``). Smaller sets, typically limited-area grids, used to be clamped to a
+    square ``lower_limit`` canvas that averaged many neighbouring points into each pixel; they now get a
+    canvas with the domain's aspect ratio and about two points per pixel (at least ``min_side`` per side).
+    Works in any (lon, lat) units since only the extent ratio is used.
+    """
+    lower_limit, upper_limit, min_side = 25, 500, 10
+    n_square = int(np.floor(n_points * 0.004))
+    if n_square >= lower_limit:
+        side = min(n_square, upper_limit)
+        return side, side
+
+    dx = float(np.nanmax(lon) - np.nanmin(lon))
+    dy = float(np.nanmax(lat) - np.nanmin(lat))
+    aspect = dx / dy if dx > 0 and dy > 0 else 1.0
+    n_pixels = max(n_points / 2.0, 1.0)
+    width = int(np.clip(round(np.sqrt(n_pixels * aspect)), min_side, upper_limit))
+    height = int(np.clip(round(np.sqrt(n_pixels / aspect)), min_side, upper_limit))
+    return width, height
+
+
+def _scatter_marker_size(fig: Figure, ax: plt.Axes, data: np.ndarray, max_sparse_scale: float = 3.0) -> float:
+    """Return a scatter marker area (points^2) that roughly tiles the axes.
+
+    The cell side is ``sqrt(axes area / n_points)``, so dense fields fill the panel at any grid size.
+    Sparse fields (mostly NaN, e.g. station observations) get markers up to ``max_sparse_scale`` cells
+    wide, scaled by ``sqrt(n_points / n_valid)``, so isolated points stay visible. Never below 1.
+    """
+    n_points = max(int(data.shape[0]), 1)
+    n_valid = max(int(np.isfinite(data).sum()), 1)
+    bbox = ax.get_window_extent()
+    area_pt2 = (bbox.width * 72.0 / fig.dpi) * (bbox.height * 72.0 / fig.dpi)
+    cell = 1.25 * np.sqrt(area_pt2 / n_points)  # 1.25: round markers on a grid leave gaps at exactly 1 cell
+    side = cell * float(np.clip(np.sqrt(n_points / n_valid), 1.0, max_sparse_scale))
+    return max(side**2, 1.0)
+
+
 def single_plot(
     fig: Figure,
     ax: plt.Axes,
@@ -97,26 +137,26 @@ def single_plot(
     Parameters
     ----------
     fig : Figure
-        Figure object handle
+        Figure object handle.
     ax : matplotlib.axes
-        Axis object handle
+        Axis object handle.
     lon : np.ndarray
-        longitude coordinates array, shape (lon,)
+        longitude coordinates array, shape (lon,).
     lat : np.ndarray
-        latitude coordinates array, shape (lat,)
+        latitude coordinates array, shape (lat,).
     data : np.ndarray
-        Data to plot
+        Data to plot.
     cmap : Colormap, optional
-        Colormap, if None use "viridis"
+        Colormap, if None use "viridis".
     norm : str, optional
-        Normalization string from matplotlib, by default None
+        Normalization string from matplotlib, by default None.
     title : str, optional
-        Title for plot, by default None
-    datashader: bool, optional
-        Scatter plot, by default False
-    data_crs:
+        Title for plot, by default None.
+    datashader : bool, optional
+        Scatter plot, by default False.
+    data_crs : object, optional
         Cartopy CRS describing the coordinate system of lon/lat (always PlateCarree when
-        using a non-equirectangular axes projection), by default None
+        using a non-equirectangular axes projection), by default None.
 
     Returns
     -------
@@ -125,22 +165,28 @@ def single_plot(
     if cmap is None:
         cmap = "viridis"
     if not datashader:
-        scatter_kwargs = {"c": data, "cmap": cmap, "s": 1, "alpha": 1.0, "norm": norm, "rasterized": False}
+        scatter_kwargs = {
+            "c": data,
+            "cmap": cmap,
+            "s": _scatter_marker_size(fig, ax, data),
+            "alpha": 1.0,
+            "norm": norm,
+            "rasterized": False,
+            "linewidths": 0,
+        }
         if data_crs is not None:
             scatter_kwargs["transform"] = data_crs
         psc = ax.scatter(lon, lat, **scatter_kwargs)
     else:
         df = pd.DataFrame({"val": data, "x": lon, "y": lat})
-        lower_limit = 25
-        upper_limit = 500
-        n_pixels = max(min(int(np.floor(data.shape[0] * 0.004)), upper_limit), lower_limit)
+        plot_width, plot_height = _datashader_canvas_size(data.shape[0], lon, lat)
         psc = dsshow(
             df,
             dsh.Point("x", "y"),
             dsh.mean("val"),
             cmap=cmap,
-            plot_width=n_pixels,
-            plot_height=n_pixels,
+            plot_width=plot_width,
+            plot_height=plot_height,
             norm=norm,
             aspect="auto",
             ax=ax,
@@ -260,39 +306,41 @@ def plot_flat_sample(
     Parameters
     ----------
     fig : Figure
-        Figure object handle
+        Figure object handle.
     ax : matplotlib.axes
-        Axis object handle
+        Axis object handle.
     lon : np.ndarray
-        longitude coordinates array, shape (lon,)
+        longitude coordinates array, shape (lon,).
     lat : np.ndarray
-        latitude coordinates array, shape (lat,)
+        latitude coordinates array, shape (lat,).
     input_ : np.ndarray
-        Input data of shape (lat*lon,)
+        Input data of shape (lat*lon,).
     truth : np.ndarray or None
         Expected data of shape (lat*lon,). If None, only input and pred (and pred-input) are plotted.
     pred : np.ndarray
-        Predicted data of shape (lat*lon,)
+        Predicted data of shape (lat*lon,).
     vname : str
-        Variable name
+        Variable name.
     clevels : float
-        Accumulation levels used for precipitation related plots
-    datashader: bool, optional
-        Datashader plot, by default True
+        Accumulation levels used for precipitation related plots.
+    datashader : bool, optional
+        Datashader plot, by default False.
     precip_and_related_fields : list, optional
-        List of precipitation-like variables, by default []
+        List of precipitation-like variables, by default [].
     cmap : Colormap, optional
-        Colormap for the plot
+        Colormap for the plot.
     error_cmap : Colormap, optional
-        Colormap for the error plot
+        Colormap for the error plot.
+    data_crs : object, optional
+        Cartopy CRS of lon/lat for non-equirectangular axes, by default None.
     prediction_label : str, optional
-        Label used for the prediction panel titles, by default "pred"
+        Label used for the prediction panel titles, by default "pred".
     auxiliary : np.ndarray or None, optional
-        Optional extra field (e.g. corrupted targets) plotted as a 7th panel, by default None
+        Optional extra field (e.g. corrupted targets) plotted as a 7th panel, by default None.
     auxiliary_label : str, optional
-        Label used for the auxiliary panel title, by default "corrupted targets"
+        Label used for the auxiliary panel title, by default "corrupted targets".
     diagnostic_only : bool, optional
-        If True, suppress the input/increment/persistence panels, by default False
+        If True, suppress the input/increment/persistence panels, by default False.
 
     Returns
     -------
@@ -396,32 +444,32 @@ def plot_predicted_multilevel_flat_sample(
     parameters : dict[int, tuple[str, bool]]
         Variable index -> (variable_name, diagnostic_only).
     n_plots_per_sample : int
-        Number of plots per sample
+        Number of plots per sample.
     latlons : np.ndarray
-        lat/lon coordinates array, shape (lat*lon, 2)
+        lat/lon coordinates array, shape (lat*lon, 2).
     clevels : float
-        Accumulation levels used for precipitation related plots
+        Accumulation levels used for precipitation related plots.
     x : np.ndarray
-        Input data of shape (lat*lon, nvar*level)
+        Input data of shape (lat*lon, nvar*level).
     y_true : np.ndarray or None
         Expected data of shape (lat*lon, nvar*level). If None, only x and y_pred are plotted.
     y_pred : np.ndarray
-        Predicted data of shape (lat*lon, nvar*level)
-    datashader: bool, optional
-        Scatter plot, by default False
+        Predicted data of shape (lat*lon, nvar*level).
+    datashader : bool, optional
+        Scatter plot, by default False.
     precip_and_related_fields : list, optional
-        List of precipitation-like variables, by default []
+        List of precipitation-like variables, by default [].
     colormaps : dict[str, Colormap], optional
-        Dictionary of colormaps, by default None
+        Dictionary of colormaps, by default None.
     projection_kind : str, optional
-        Map projection kind, by default "equirectangular"
+        Map projection kind, by default "equirectangular".
     prediction_label : str, optional
-        Label used for the prediction panel titles, by default "pred"
+        Label used for the prediction panel titles, by default "pred".
     auxiliary : np.ndarray or None, optional
         Optional extra field (e.g. corrupted targets) of shape (lat*lon, nvar*level),
-        plotted as an additional panel per variable, by default None
+        plotted as an additional panel per variable, by default None.
     auxiliary_label : str, optional
-        Label used for the auxiliary panel title, by default "corrupted targets"
+        Label used for the auxiliary panel title, by default "corrupted targets".
 
     Returns
     -------
