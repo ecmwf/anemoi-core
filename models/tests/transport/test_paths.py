@@ -35,9 +35,7 @@ def test_karras_sigma_helper_matches_scheduler_prefinal_values() -> None:
         sigma_min=0.02,
         num_steps=num_steps,
         rho=7.0,
-    ).get_schedule(
-        dtype_compute=torch.float64
-    )[:-1]
+    ).get_schedule(dtype_compute=torch.float64)[:-1]
 
     torch.testing.assert_close(helper_sigmas, scheduler_sigmas)
 

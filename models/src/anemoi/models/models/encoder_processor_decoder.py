@@ -92,9 +92,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=model_config.processor.get("trainable_size", 0),
             )
         processor_edge_dims = [provider.edge_dim for provider in self.processor_graph_provider.values()]
-        assert all(
-            dim == processor_edge_dims[0] for dim in processor_edge_dims
-        ), f"All hidden meshes must have the same processor edge dimension, got {processor_edge_dims}."
+        assert all(dim == processor_edge_dims[0] for dim in processor_edge_dims), (
+            f"All hidden meshes must have the same processor edge dimension, got {processor_edge_dims}."
+        )
         processor_edge_dim = processor_edge_dims[0]
 
         self.processor = instantiate(
@@ -296,9 +296,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
         if x_skip is not None:
             assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
-            assert (
-                x_skip.shape[1] == x_out.shape[1]
-            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+            assert x_skip.shape[1] == x_out.shape[1], (
+                f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+            )
             x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
@@ -313,18 +313,18 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         in_out_sharded: bool,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> None:
-        assert not (
-            in_out_sharded and model_comm_group is None
-        ), "If input is sharded, model_comm_group must be provided."
+        assert not (in_out_sharded and model_comm_group is None), (
+            "If input is sharded, model_comm_group must be provided."
+        )
 
         if model_comm_group is not None:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded across GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                "Only batch size of 1 is supported when model is sharded across GPUs"
+            )
 
-            assert (
-                model_comm_group.size() == 1 or ensemble_size == 1
-            ), "Ensemble size per device must be 1 when model is sharded across GPUs"
+            assert model_comm_group.size() == 1 or ensemble_size == 1, (
+                "Ensemble size per device must be 1 when model is sharded across GPUs"
+            )
 
     def forward(
         self,
@@ -465,9 +465,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 decoder_edge_attr,
                 decoder_edge_index,
                 dec_edge_shard_sizes,
-            ) = self.decoder_graph_provider[
-                dataset_name
-            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
+            ) = self.decoder_graph_provider[dataset_name].get_edges(
+                batch_size=batch_size, model_comm_group=model_comm_group
+            )
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden,
