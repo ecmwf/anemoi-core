@@ -26,6 +26,7 @@ from pydantic import field_validator
 from pydantic import model_validator
 
 from anemoi.models.schemas.schema_utils import DatasetDict
+from anemoi.training.utils.enums import EnergyScoreDimension
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
 
@@ -370,7 +371,7 @@ class GraphEnergyScoreLossSchema(GraphScoreLossSchema):
 class EnergyScoreLossSchema(EnsembleScoreLossSchema):
     target_: Literal["anemoi.training.losses.EnergyScoreLoss"] = Field(..., alias="_target_")
     fair: bool = True
-    norm_over: Literal["spatial", "variables", "spatial_and_variables"] = "spatial"
+    norm_over: list[EnergyScoreDimension] = Field(default=["grid"], min_length=1)
 
 
 class GraphVariogramScoreLossSchema(GraphScoreLossSchema):
@@ -745,10 +746,10 @@ class BaseDDPStrategySchema(BaseModel):
     "Use synchronization local to the group when creating process groups."
     broadcast_buffers: bool = Field(default=False, example=False)
     "Broadcast model buffers at the start of each iteration. Defaults to False."
-    static_graph: bool = Field(default=True, example=True)
-    """Tell DDP that the same parameters are trained in every step. Must be false when
-    training.accum_grad_batches > 1."""
-    find_unused_parameters: bool = Field(default=False, example=False)
+    static_graph: bool = Field(default=False, example=False)
+    """Tell DDP that the same parameters are trained in every step. Can be faster for large models, but must be
+    false when training.accum_grad_batches > 1."""
+    find_unused_parameters: bool = Field(default=True, example=True)
     """Let DDP check every step for parameters that receive no gradient. Together with static_graph: false,
     DDP sums the gradients in the same groups in every step, so a resumed run continues bitwise identically."""
 

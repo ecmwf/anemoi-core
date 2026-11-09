@@ -680,6 +680,7 @@ def _make_target_routing_model(
     target_datasets: tuple[str, ...] = ("out_hres",),
     num_nodes: dict[str, int] | None = None,
     coordinates: dict[str, torch.Tensor] | None = None,
+    dataset2hidden: dict[str, str] | None = None,
 ) -> AnemoiTransportModelEncProcDec:
     """Routing state after ``_build_encoder_routing`` / ``_build_decoder_routing`` for one fused encoder."""
     model = AnemoiTransportModelEncProcDec.__new__(AnemoiTransportModelEncProcDec)
@@ -688,6 +689,7 @@ def _make_target_routing_model(
     model.dataset2anchor = {name: sources[0] for name in sources}
     model.target_datasets = list(target_datasets)
     num_nodes = num_nodes or {name: 4 for name in (*sources, *target_datasets)}
+    model.dataset2hidden = dataset2hidden or {name: "hidden" for name in num_nodes}
     model.node_attributes = SimpleNamespace(num_nodes=num_nodes)
     graph = HeteroData()
     for name, count in num_nodes.items():
@@ -773,6 +775,17 @@ def test_target_routing_rejects_an_anchor_on_a_different_grid_than_its_target(
     )
 
     with pytest.raises(ValueError, match=match):
+        model._build_target_routing()
+
+
+def test_target_routing_rejects_an_anchor_in_a_different_hidden_mesh_than_its_target() -> None:
+    """The target is decoded from the anchor's latent, so both must use the same hidden mesh."""
+    model = _make_target_routing_model(
+        target_anchors={"out_hres": "in_lres"},
+        dataset2hidden={"in_lres": "hidden", "in_hres": "hidden", "out_hres": "hidden_2"},
+    )
+
+    with pytest.raises(ValueError, match=r"hidden mesh 'hidden'.*'out_hres'.*'hidden_2'"):
         model._build_target_routing()
 
 

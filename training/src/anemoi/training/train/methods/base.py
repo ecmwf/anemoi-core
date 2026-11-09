@@ -888,6 +888,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.target_dataset_names:
+            if dataset_name not in y:
+                continue
             if dataset_name not in y_pred:
                 err_msg = (
                     f"Your model is not predicting dataset '{dataset_name}' (not included in any decoder) but "
@@ -1006,7 +1008,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.grid_shard_sizes = {}
         self.grid_shard_slice = {}
 
-        for dataset_name in self.dataset_names:
+        for dataset_name in batch:
             if self.keep_batch_sharded and self.model_comm_group_size > 1:
                 self.grid_shard_sizes[dataset_name] = self.shard_sizes[dataset_name]
                 start, end = get_partition_range(
@@ -1147,6 +1149,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
         without_scalers: list[str] | list[int] | None = None,
+        skip_metrics_across_time: bool = False,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
@@ -1169,6 +1172,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Variable layout of the targets.
         without_scalers : list[str] | list[int] | None, optional
             Scalers to omit from metric calculation.
+        skip_metrics_across_time : bool, optional
+            Leave out metrics whose score spans several output steps, for callers
+            that pass a single step at a time.
         **_kwargs
             Additional arguments.
 
@@ -1196,6 +1202,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 metric,
                 BaseLoss,
             ), f"Validation metric {metric_name!r} must inherit BaseLoss, got {type(metric)}"
+            if skip_metrics_across_time and metric.scores_across_time:
+                continue
 
             for mkey, indices in val_metric_ranges.items():
                 metric_step_name = f"{metric_name}_metric/{dataset_name}/{mkey}{suffix}"
