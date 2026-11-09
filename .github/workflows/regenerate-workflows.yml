@@ -20,7 +20,6 @@ jobs:
     uses: ecmwf/ci-infrastructure/.github/workflows/regenerate-workflows.yml@main
     secrets: inherit
     with:
-      # Added to the default labels downstream-ci-not-needed,hpc-ci-not-needed; generated workflows need no ATS approval.
       add-labels: ATS Approval Not Needed,expensive-tests-not-needed
       # PR titles must follow conventional commits.
       title: "chore: Regenerate downstream-CI workflows"
