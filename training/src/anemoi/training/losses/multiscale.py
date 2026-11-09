@@ -305,6 +305,7 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         """Apply smoothing matrix to predictions and targets for loss computation."""
         if self.smoothing_matrices[i] is not None:
             projection_matrix = self.smoothing_matrices[i].get_edges(device=x.device)
+            projection_matrix = projection_matrix.to(dtype=x.dtype)
             x = self.projector(
                 x,
                 projection_matrix,
