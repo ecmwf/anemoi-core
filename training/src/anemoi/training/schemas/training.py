@@ -666,6 +666,8 @@ class SpectralIncrementSmoothnessLossSchema(BaseLossSchema):
     "Number of Laplacians: 1 = Laplacian, 2 = biharmonic."
     length_scale_km: float = Field(default=100.0, gt=0.0)
     "Length unit of the operator (penalty in length_scale^(4*order))."
+    min_wavenumber: int = Field(default=0, ge=0)
+    "Total wavenumbers below this are not penalised (high-pass); 0 penalises all."
     penalty_weight: float = 1.0
     "Multiplier on the penalty."
     ignore_nans: bool = False

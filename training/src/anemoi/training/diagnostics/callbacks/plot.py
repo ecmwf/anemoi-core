@@ -729,6 +729,16 @@ class LossCurvePlot(BasePerBatchPlotCallback):
                     data_indices=pl_module.data_indices,
                     **task_kwargs,
                 )[dataset_name]
+                # The residual base is not available here, so increment losses
+                # (needs_reference) are passed reference=None and contribute zero:
+                # the plot shows the data-fit terms only.
+                reference_kwargs = (
+                    {"reference": None}
+                    if any(
+                        getattr(leaf, "needs_reference", False) for leaf in self.loss[dataset_name].iter_leaf_losses()
+                    )
+                    else {}
+                )
                 loss = reduce_to_last_dim(
                     self.loss[dataset_name](
                         y_hat,
@@ -736,6 +746,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
                         pred_layout=IndexSpace.MODEL_OUTPUT,
                         target_layout=IndexSpace.DATA_FULL,
                         squash=False,
+                        **reference_kwargs,
                     )
                     .detach()
                     .cpu()

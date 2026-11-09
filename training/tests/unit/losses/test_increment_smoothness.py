@@ -101,6 +101,21 @@ def test_biharmonic_is_more_scale_selective(o48: tuple[torch.Tensor, torch.Tenso
     assert fine_to_coarse(2) / fine_to_coarse(1) == pytest.approx(26.0**2, rel=1e-3)
 
 
+def test_min_wavenumber_high_pass(o48: tuple[torch.Tensor, torch.Tensor]) -> None:
+    """Wavenumbers below min_wavenumber are free; those at or above it are unchanged."""
+    lat, lon = o48
+    coarse = _field(torch.cos(lat) ** 2 * torch.cos(2 * lon))  # l = 2
+    fine = _field(torch.cos(lat) ** 12 * torch.cos(12 * lon))  # l = 12
+    zero = torch.zeros_like(fine)
+    full, cut = _loss(), _loss(min_wavenumber=10)
+    assert float(cut(coarse, coarse, reference=zero)) == pytest.approx(0.0, abs=1e-12)
+    assert float(cut(fine, fine, reference=zero)) == pytest.approx(float(full(fine, fine, reference=zero)), rel=1e-5)
+    with pytest.raises(ValueError, match="min_wavenumber"):
+        _loss(min_wavenumber=-1)
+    with pytest.raises(ValueError, match="min_wavenumber"):
+        _loss(min_wavenumber=100_000)
+
+
 # ── reference contract ────────────────────────────────────────────────────
 
 
@@ -122,6 +137,22 @@ def test_gradient_flows_to_pred_not_reference() -> None:
     reference = torch.randn(1, 1, 1, N48, 1)
     _loss()(pred, pred, reference=reference).backward()
     assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+
+def test_runs_under_bf16_autocast() -> None:
+    """bf16 inputs under autocast give a finite float32 loss and gradient.
+
+    Smoke test only: CPU autocast does not downcast einsum, so the CUDA failure (SHT einsum autocast to bf16,
+    then view_as_complex rejecting it) is not reproduced here.
+    """
+    pred = torch.randn(1, 1, 1, N48, 1, dtype=torch.bfloat16, requires_grad=True)
+    reference = torch.randn(1, 1, 1, N48, 1, dtype=torch.bfloat16)
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        out = _loss()(pred, pred, reference=reference)
+    assert out.dtype == torch.float32
+    assert torch.isfinite(out)
+    out.backward()
     assert torch.isfinite(pred.grad).all()
 
 

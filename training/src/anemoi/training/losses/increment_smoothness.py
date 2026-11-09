@@ -86,6 +86,7 @@ class SpectralIncrementSmoothnessLoss(SpectralLoss):
         *,
         order: int = 2,
         length_scale_km: float = 100.0,
+        min_wavenumber: int = 0,
         penalty_weight: float = 1.0,
         ignore_nans: bool = False,
         **kwargs,
@@ -101,6 +102,11 @@ class SpectralIncrementSmoothnessLoss(SpectralLoss):
             Number of Laplacians: 1 = Laplacian, 2 = biharmonic.
         length_scale_km : float
             Length unit of the operator; the penalty is in units of ``length_scale^(4*order)``.
+        min_wavenumber : int
+            Total wavenumbers ``l < min_wavenumber`` are not penalised (high-pass). The ``~l^8``
+            weight already makes them cheap but not free; with a cutoff (e.g. 20-30 at O96) the
+            penalty cannot trade grid-scale roughness against planetary-scale / global-mean drift.
+            0 (default) penalises every wavenumber.
         penalty_weight : float
             Multiplier on the penalty (on top of the CombinedLoss weight).
         ignore_nans : bool
@@ -116,6 +122,9 @@ class SpectralIncrementSmoothnessLoss(SpectralLoss):
             raise ValueError(msg)
         if length_scale_km <= 0:
             msg = f"length_scale_km must be > 0, got {length_scale_km}"
+            raise ValueError(msg)
+        if min_wavenumber < 0:
+            msg = f"min_wavenumber must be >= 0, got {min_wavenumber}"
             raise ValueError(msg)
         super().__init__(transform=transform, ignore_nans=ignore_nans, **kwargs)
         self.order = int(order)
@@ -133,16 +142,22 @@ class SpectralIncrementSmoothnessLoss(SpectralLoss):
         eigen = (ell * (ell + 1) * (self.length_scale_km / EARTH_RADIUS_KM) ** 2) ** (2 * self.order)
         m_factor = torch.full((n_m,), 2.0, dtype=torch.float64)
         m_factor[0] = 1.0
+        if min_wavenumber >= n_l:
+            msg = f"min_wavenumber {min_wavenumber} >= number of resolved wavenumbers {n_l}: penalty would be zero."
+            raise ValueError(msg)
+        self.min_wavenumber = int(min_wavenumber)
+        eigen[: self.min_wavenumber] = 0.0
         weight = eigen.view(-1, 1) * m_factor.view(1, -1) / norm
         self.register_buffer("mode_weight", weight.float(), persistent=False)
         LOGGER.info(
-            "%s: %s, %d grid points, lmax %d, order %d, length scale %.0f km.",
+            "%s: %s, %d grid points, lmax %d, order %d, length scale %.0f km, min wavenumber %d.",
             type(self).__name__,
             transform,
             n_points,
             n_l - 1,
             self.order,
             self.length_scale_km,
+            self.min_wavenumber,
         )
 
     @property
@@ -242,8 +257,10 @@ class SpectralIncrementSmoothnessLoss(SpectralLoss):
         is_sharded = channel_shard_sizes is not None
         group = group if is_sharded else None
 
-        # float32: the transform and the l^(4 order) weights are not bf16-safe.
-        out = self.penalty_weight * self.spectrum(pred.float() - reference.float())
+        # float32 with autocast off: the transform and the l^(4 order) weights are not bf16-safe, and under
+        # bf16-mixed autocast the SHT einsum would otherwise downcast back to bf16 (view_as_complex rejects it).
+        with torch.amp.autocast(device_type=pred.device.type, enabled=False):
+            out = self.penalty_weight * self.spectrum(pred.float() - reference.float())
 
         out, spectral_shard_slice, global_spectral_size = self._reshard_spectral_loss(
             out,
