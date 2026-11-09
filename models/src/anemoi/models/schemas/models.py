@@ -367,11 +367,8 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "GNN decoder schema.",
-    residual: ResidualConnectionSchema = Field(
-        ...,
-        discriminator="target_",
-    )
-    "Residual connection schema."
+    residual: Union[ResidualConnectionSchema, dict[str, ResidualConnectionSchema]] = Field(...)
+    "Residual connection schema: one config shared by every dataset, or a mapping {dataset_name: config}."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"
     recompile_limit: PositiveInt = 8

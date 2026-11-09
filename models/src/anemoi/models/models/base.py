@@ -327,17 +327,37 @@ class BaseGraphModel(nn.Module):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         pass
 
+    def _residual_configs_per_dataset(self, residual_config: DotDict) -> dict[str, DotDict]:
+        """Map each dataset to its residual config.
+
+        ``residual_config`` is either one residual config (has ``_target_``), shared by every dataset,
+        or a mapping ``{dataset_name: residual config}`` that must name every dataset exactly.
+        """
+        if "_target_" in residual_config:
+            return {dataset_name: residual_config for dataset_name in self.dataset_names}
+
+        missing = sorted(set(self.dataset_names) - set(residual_config))
+        unknown = sorted(set(residual_config) - set(self.dataset_names))
+        if missing or unknown:
+            msg = (
+                "model.residual must be a single residual config (with _target_) or a mapping with one entry "
+                f"per dataset {sorted(self.dataset_names)}; missing {missing}, unknown {unknown}."
+            )
+            raise ValueError(msg)
+        return {dataset_name: residual_config[dataset_name] for dataset_name in self.dataset_names}
+
     def _build_residual(self, residual_config: DotDict, sparse_projector_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
         sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
+        residual_configs = self._residual_configs_per_dataset(residual_config)
         for dataset_name in self.dataset_names:
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
             # _recursive_=False so composite residuals (e.g. PerVariableGroupResidual)
             # receive their nested sub-residual configs unresolved and can instantiate
             # them with the shared kwargs forwarded here.
             self.residual[dataset_name] = instantiate(
-                residual_config,
+                residual_configs[dataset_name],
                 _recursive_=False,
                 graph=self._graph_data,
                 data_node_name=data_node_name,
