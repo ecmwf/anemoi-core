@@ -973,17 +973,21 @@ is compiled; the DTCWT transform, input validation, scaler alignment and
 distributed collectives remain eager. A fully compilable loss path is planned
 once custom Triton DTCWT kernels are available.
 
-Grid-sharded inputs are transposed to variable shards with complete grids before
-selection and transformation. Only the small per-variable scores are gathered
-back. ``transform_prediction_and_target_separately`` and
+``scaler_indices`` selects fields before redistribution, projection and
+transformation; matching non-spatial scaler weights follow the same selection
+and ordering. Grid-sharded inputs are then transposed to variable shards with
+complete grids before spatial subgrid selection and transformation. Only the
+small per-variable scores are gathered back.
+``transform_prediction_and_target_separately`` and
 ``transform_field_chunk_size`` control working memory use; separate transforms
 are selected automatically above one million selected grid points by default.
 Set ``separate_transform_gridpoint_threshold`` to change that threshold.
 Band statistics are reduced immediately rather than keeping spatial power and
 cross maps alive together.
 
-Chunking bounds these forward preparation and transform working buffers, but
-autograd can still retain coefficients across all chunks until backward.
+Chunking bounds the FP32 preparation, projection and transform working buffers,
+but not the initial selected-input copies. Autograd can still retain coefficients
+across all chunks until backward.
 
 
 *********

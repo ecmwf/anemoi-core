@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from typing import Literal
 
 import pytest
 import torch
@@ -70,6 +71,43 @@ def test_public_dtcwt_2d_name_and_factory_target() -> None:
     loss = get_loss_function(OmegaConf.create(config))
     assert isinstance(loss, DTCWT2DLoss)
     assert loss.name == "dtcwt_2d"
+
+
+def test_variable_selection_precedes_transform_and_preserves_weighted_gradients() -> None:
+    pred, target = _data(batch=2, time=2, ensemble=2, variables=4)
+    pred.requires_grad_()
+    loss = DTCWT2DLoss([8, 10], J=2)
+    loss.add_scaler(4, torch.tensor([1.0, 2.0, 3.0, 4.0]), name="variable")
+    loss.add_scaler(1, torch.tensor([0.25, 0.75]), name="time")
+    selected_variables = torch.tensor([3, 1])
+    expected_scores = loss(pred, target, squash=False)[..., selected_variables]
+    expected = expected_scores.mean()
+    transformed_fields = []
+
+    def record_transform(_module: torch.nn.Module, inputs: tuple[torch.Tensor, ...]) -> None:
+        transformed_fields.append(inputs[0].shape[0])
+
+    with loss.transform.register_forward_pre_hook(record_transform):
+        actual = loss(pred, target, scaler_indices=(..., selected_variables))
+
+    torch.testing.assert_close(actual, expected)
+    torch.testing.assert_close(torch.autograd.grad(actual, pred)[0], torch.autograd.grad(expected, pred)[0])
+    n_fields = pred.shape[0] * pred.shape[1] * pred.shape[2] * selected_variables.numel()
+    assert transformed_fields == [2 * n_fields]
+
+
+def test_batch_selection_preserves_scaler_alignment() -> None:
+    pred, target = _data(batch=3, time=2)
+    pred.requires_grad_()
+    loss = DTCWT2DLoss([8, 10], J=2)
+    loss.add_scaler((0, 4), torch.arange(1, 7).reshape(3, 2).float(), name="batch_variable")
+    selected_batches = torch.tensor([2, 0])
+    scores = loss._scale_scores(loss._compute_fields(pred, target), None)
+    expected = loss.reduce(scores.index_select(0, selected_batches))
+    actual = loss(pred, target, scaler_indices=(selected_batches,))
+    torch.testing.assert_close(actual, expected)
+    torch.testing.assert_close(torch.autograd.grad(actual, pred)[0], torch.autograd.grad(expected, pred)[0])
+    assert loss.scaler.tensors["batch_variable"][1].shape == (3, 2)
 
 
 def test_field_gathering_and_fp32_casting_are_chunk_local(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -348,6 +386,45 @@ def _projection_graph(matrix: torch.Tensor) -> tuple[HeteroData, dict[str, Any]]
     }
 
 
+@pytest.mark.parametrize("nan_handling", [None, "strict", "pooled"])
+def test_variable_selection_precedes_projection(
+    nan_handling: Literal["strict", "pooled"] | None,
+) -> None:
+    graph, config = _projection_graph(_projection_matrix())
+    pred, target = _data((1, 13), batch=2, time=2, ensemble=2, variables=4)
+    target = target[:, :, :1].squeeze(2)
+    if nan_handling is not None:
+        target[..., 3, 0] = float("nan")
+    pred.requires_grad_()
+    loss = DTCWT2DLoss(
+        [6, 8],
+        J=2,
+        projection_config=config,
+        graph_data=graph,
+        nan_handling=nan_handling,
+        transform_field_chunk_size=3,
+    )
+    weights = torch.arange(1, 17).reshape(2, 2, 4).float()
+    loss.add_scaler((0, 1, 4), weights, name="batch_time_variable")
+    loss.add_scaler(4, torch.tensor([0.5]), name="shared")
+    selected_variables = torch.tensor([3, 0, 3])
+    expected = loss(pred, target, squash=False)[selected_variables].mean()
+    projected_fields = []
+
+    def record_projection(_module: torch.nn.Module, inputs: tuple[torch.Tensor, ...]) -> None:
+        projected_fields.append(inputs[0].shape[0])
+
+    with loss.projector.register_forward_pre_hook(record_projection):
+        actual = loss(pred, target, scaler_indices=(..., selected_variables))
+
+    torch.testing.assert_close(actual, expected)
+    torch.testing.assert_close(torch.autograd.grad(actual, pred)[0], torch.autograd.grad(expected, pred)[0])
+    n_fields = pred.shape[0] * pred.shape[1] * pred.shape[2] * selected_variables.numel()
+    assert sum(projected_fields) == (2 if nan_handling is None else 3) * n_fields
+    assert max(projected_fields) <= 3
+    torch.testing.assert_close(loss.scaler.tensors["batch_time_variable"][1], weights)
+
+
 def test_projection_uses_the_selected_subgrid_source_nodes() -> None:
     graph, config = _projection_graph(_projection_matrix())
     pred, target = _data((1, 17), variables=1)
@@ -563,7 +640,13 @@ def test_nan_handling_options_are_accepted_by_constructor_and_factory() -> None:
         TypeAdapter(LossSchemas).validate_python({**pooled_config, "nan_handling": "fractional"})
 
 
-def _distributed_projection_worker(rank: int, rendezvous: str, variables: int, nonfinite: bool) -> None:
+def _distributed_projection_worker(
+    rank: int,
+    rendezvous: str,
+    variables: int,
+    nonfinite: bool,
+    selected_variables: tuple[int, ...] | None,
+) -> None:
     """Compare sharded projection scoring, including nonfinite inputs on one rank."""
     torch.set_num_threads(1)
     torch.distributed.init_process_group(
@@ -596,6 +679,7 @@ def _distributed_projection_worker(rank: int, rendezvous: str, variables: int, n
             "grid_shard_slice": shard_slice,
             "grid_shard_sizes": sizes,
             "group": torch.distributed.group.WORLD,
+            "scaler_indices": None if selected_variables is None else (..., selected_variables),
         }
         if nonfinite:
             actual = loss(local_pred, local_target, **kwargs)
@@ -603,9 +687,23 @@ def _distributed_projection_worker(rank: int, rendezvous: str, variables: int, n
             torch.distributed.barrier()
         else:
             full_pred = pred.clone().requires_grad_()
-            expected = loss(full_pred, target)
+            full_scores = loss(full_pred, target, squash=False)
+            expected = (
+                full_scores.mean() if selected_variables is None else full_scores[list(selected_variables)].mean()
+            )
             expected.backward()
-            actual = loss(local_pred, local_target, **kwargs)
+            transformed_fields = []
+
+            def record_transform(_module: torch.nn.Module, inputs: tuple[torch.Tensor, ...]) -> None:
+                transformed_fields.append(inputs[0].shape[0])
+
+            with loss.transform.register_forward_pre_hook(record_transform):
+                actual = loss(local_pred, local_target, **kwargs)
+
+            field_count = torch.tensor(sum(transformed_fields))
+            torch.distributed.all_reduce(field_count)
+            selected_count = variables if selected_variables is None else len(selected_variables)
+            assert field_count.item() == 2 * pred.shape[0] * pred.shape[1] * pred.shape[2] * selected_count
             torch.testing.assert_close(actual, expected)
             actual.backward()
             torch.testing.assert_close(local_pred.grad, full_pred.grad[:, :, :, shard_slice], atol=2e-6, rtol=2e-5)
@@ -614,15 +712,19 @@ def _distributed_projection_worker(rank: int, rendezvous: str, variables: int, n
 
 
 @pytest.mark.skipif(not torch.distributed.is_gloo_available(), reason="Gloo is unavailable")
-@pytest.mark.parametrize(("variables", "nonfinite"), [(3, False), (1, True)])
+@pytest.mark.parametrize(
+    ("variables", "nonfinite", "selected_variables"),
+    [(3, False, None), (1, True, None), (3, False, (2, 0, 2)), (3, False, (2,))],
+)
 def test_projection_multiprocess_unequal_grids_with_nonfinite_inputs(
     tmp_path: Path,
     variables: int,
     nonfinite: bool,
+    selected_variables: tuple[int, ...] | None,
 ) -> None:
     torch.multiprocessing.spawn(
         _distributed_projection_worker,
-        args=(str(tmp_path / "projection-rendezvous"), variables, nonfinite),
+        args=(str(tmp_path / "projection-rendezvous"), variables, nonfinite, selected_variables),
         nprocs=2,
         join=True,
     )

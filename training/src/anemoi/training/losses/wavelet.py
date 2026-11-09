@@ -284,14 +284,11 @@ class DTCWT2DLoss(BaseLoss):
         grid_shard_sizes: list[int] | None,
         group: ProcessGroup | None,
     ) -> tuple[torch.Tensor, torch.Tensor, list[int] | None]:
-        """Broadcast the target and reconstruct grid-sharded inputs.
+        """Reconstruct grid-sharded inputs after target broadcasting and selection.
 
         Sharded inputs are transposed from grid shards to variable shards.
         Return their variable-shard sizes, or None for unsharded inputs.
         """
-        if target.ndim == 4:
-            target = target.unsqueeze(2)
-        target = target.detach().expand_as(pred)
         if (grid_shard_slice is None) != (grid_shard_sizes is None):
             msg = "grid_shard_slice and grid_shard_sizes must be provided together"
             raise ValueError(msg)
@@ -323,13 +320,18 @@ class DTCWT2DLoss(BaseLoss):
         self,
         scores: torch.Tensor,
         without_scalers: list[str] | list[int] | None,
+        *,
+        input_shape: torch.Size | None = None,
+        subset_index: torch.Tensor | None = None,
+        subset_dim: int | None = None,
     ) -> torch.Tensor:
         """Apply non-spatial scalers to the collapsed wavelet scores.
 
         ``BaseLoss.scale`` requires a GRID scaler, but wavelet scores have
         already collapsed that dimension. Use ``ScaleTensor`` directly on the
         retained batch/time/ensemble/variable axes, after gathering variable
-        shards so variable scalers remain globally aligned.
+        shards so variable scalers remain globally aligned. Validate scalers
+        against the original input shape, then select matching weights.
         """
         scaler_specs = self.scaler.tensors
         for name, (scaler_dimensions, scaler) in scaler_specs.items():
@@ -341,17 +343,23 @@ class DTCWT2DLoss(BaseLoss):
         if without_scalers:
             scalers = scalers.without(without_scalers)
         scalers = scalers.to(device=scores.device, dtype=scores.dtype)
+        scaler_shape = scores.shape if input_shape is None else input_shape
         for name, (scaler_dimensions, scaler) in scalers.tensors.items():
             scaler_dimensions = tuple(int(dim) % scores.ndim for dim in scaler_dimensions)
             if len(scaler_dimensions) != scaler.ndim or len(set(scaler_dimensions)) != len(scaler_dimensions):
                 msg = f"Scaler {name!r} has incompatible dimensions {scaler_dimensions} and shape {scaler.shape}"
                 raise ValueError(msg)
             if any(
-                scaler_size not in (1, scores.shape[dimension])
+                scaler_size not in (1, scaler_shape[dimension])
                 for dimension, scaler_size in zip(scaler_dimensions, scaler.shape, strict=True)
             ):
                 msg = f"Scaler {name!r} does not broadcast to the wavelet score dimensions"
                 raise ValueError(msg)
+            if subset_index is not None and subset_dim is not None and subset_dim % scores.ndim in scaler_dimensions:
+                scaler_axis = scaler_dimensions.index(subset_dim % scores.ndim)
+                if scaler.shape[scaler_axis] != 1:
+                    scaler = torch.index_select(scaler, scaler_axis, subset_index)
+                    scalers.update_scaler(name, scaler, override=True)
         return scalers.scale_iteratively(scores)
 
     def _band_score(
@@ -615,9 +623,9 @@ class DTCWT2DLoss(BaseLoss):
     ) -> torch.Tensor:
         """Compute the wavelet score with optional projection, scalers and final reduction.
 
-        Reconstructs sharded grids before subgrid selection and scores FP32 chunks.
-        Gathers variable scores before applying non-spatial scalers, then
-        applies optional result subsetting and the BaseLoss reduction.
+        Selects fields before sharded redistribution, projection and transformation.
+        Gathers variable scores before applying aligned non-spatial scalers and
+        the BaseLoss reduction.
         """
         if grid_dim not in (None, 3, -2):
             msg = "DTCWT2DLoss requires grid_dim=3 for [B,T,E,G,V] inputs"
@@ -625,6 +633,12 @@ class DTCWT2DLoss(BaseLoss):
         if scaler_indices is not None and not isinstance(scaler_indices, tuple):
             msg = "scaler_indices must be a tuple"
             raise TypeError(msg)
+        input_shape = pred.shape
+        if target.ndim == 4:
+            target = target.unsqueeze(2)
+        target = target.detach().expand_as(pred)
+        pred, subset_index, subset_dim = subset_tensor(pred, scaler_indices)
+        target, _, _ = subset_tensor(target, scaler_indices)
         pred, target, variable_shard_sizes = self._prepare_inputs(
             pred,
             target,
@@ -661,6 +675,11 @@ class DTCWT2DLoss(BaseLoss):
             )
         if variable_shard_sizes is not None:
             result = gather_tensor(result, 4, variable_shard_sizes, group)
-        result = self._scale_scores(result, without_scalers)
-        result, _, _ = subset_tensor(result, scaler_indices)
+        result = self._scale_scores(
+            result,
+            without_scalers,
+            input_shape=input_shape,
+            subset_index=subset_index,
+            subset_dim=subset_dim,
+        )
         return self.reduce(result, squash=squash, squash_mode=squash_mode)
