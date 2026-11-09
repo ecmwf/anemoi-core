@@ -34,7 +34,9 @@ def get_coordinates_ordering(coords: np.ndarray) -> np.ndarray:
 
 
 @typechecked
-def convert_list_to_adjacency_matrix(list_matrix: np.ndarray, ncols: int = 0) -> scipy.sparse.csr_matrix:
+def convert_list_to_adjacency_matrix(
+    list_matrix: np.ndarray, ncols: int = 0
+) -> scipy.sparse.csr_matrix:
     """Convert an edge list into an adjacency matrix.
 
     Parameters
@@ -52,7 +54,11 @@ def convert_list_to_adjacency_matrix(list_matrix: np.ndarray, ncols: int = 0) ->
     nrows, ncols_per_row = list_matrix.shape
     indptr = np.arange(ncols_per_row * (nrows + 1), step=ncols_per_row)
     indices = list_matrix.ravel()
-    return scipy.sparse.csr_matrix((np.ones(nrows * ncols_per_row), indices, indptr), dtype=bool, shape=(nrows, ncols))
+    return scipy.sparse.csr_matrix(
+        (np.ones(nrows * ncols_per_row), indices, indptr),
+        dtype=bool,
+        shape=(nrows, ncols),
+    )
 
 
 @typechecked
@@ -104,4 +110,8 @@ def selection_matrix(idx: np.ndarray, num_diagonals: int) -> scipy.sparse.csr_ma
     scipy.sparse.csr_matrix
         diagonal matrix with ones at selected indices (idx,idx).
     """
-    return scipy.sparse.csr_matrix((np.ones(len(idx)), (idx, idx)), dtype=bool, shape=(num_diagonals, num_diagonals))
+    return scipy.sparse.csr_matrix(
+        (np.ones(len(idx)), (idx, idx)),
+        dtype=bool,
+        shape=(num_diagonals, num_diagonals),
+    )

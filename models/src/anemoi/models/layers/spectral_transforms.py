@@ -15,9 +15,11 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 
-from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
-from anemoi.models.layers.spectral_helpers import LatitudeGrid
-from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
+from anemoi.models.layers.spectral_helpers import (
+    InverseSphericalHarmonicTransform,
+    LatitudeGrid,
+    SphericalHarmonicTransform,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -99,19 +101,27 @@ class Cartesian2DTransform(SpectralTransform):
         Requires :meth:`register_radial_bands` to have been called on the transform.
         """
         # torch.real(c * conj(c)) == |c|^2 for complex (FFT) and c^2 for real (DCT) coeffs.
-        return self._sum_over_radial_bands(torch.real(spectral_coeffs * torch.conj(spectral_coeffs)))
+        return self._sum_over_radial_bands(
+            torch.real(spectral_coeffs * torch.conj(spectral_coeffs))
+        )
 
-    def cross_spectral_density(self, spectral_coeffs_a: torch.Tensor, spectral_coeffs_b: torch.Tensor) -> torch.Tensor:
+    def cross_spectral_density(
+        self, spectral_coeffs_a: torch.Tensor, spectral_coeffs_b: torch.Tensor
+    ) -> torch.Tensor:
         """Return per-band cross-spectral density: sum of ``Re[a conj(b)]`` within each band.
 
         Requires :meth:`register_radial_bands` to have been called on the transform.
         """
-        return self._sum_over_radial_bands(torch.real(spectral_coeffs_a * torch.conj(spectral_coeffs_b)))
+        return self._sum_over_radial_bands(
+            torch.real(spectral_coeffs_a * torch.conj(spectral_coeffs_b))
+        )
 
     def _sum_over_radial_bands(self, per_mode: torch.Tensor) -> torch.Tensor:
         """Collapse the two spectral dims ``[..., ky, kx, v] -> [..., L, v]``."""
         *lead, ky, kx, v = per_mode.shape
-        index = self.radial_band_index  # raises the informative RuntimeError if bands are not registered
+        index = (
+            self.radial_band_index
+        )  # raises the informative RuntimeError if bands are not registered
         flat = per_mode.reshape(*lead, ky * kx, v)
         out = per_mode.new_zeros(*lead, self.n_radial_bands, v)
         out.index_add_(-2, index, flat)
@@ -201,7 +211,9 @@ class FFT2D(Cartesian2DTransform):
         """Reshape data from flat ``(nodes, vars)`` to ``(y, x, vars)``."""
         var = data.shape[-1]
         try:
-            return einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
+            return einops.rearrange(
+                data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var
+            )
         except Exception as e:
             raise einops.EinopsError(
                 f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
@@ -241,7 +253,9 @@ class FFT2D(Cartesian2DTransform):
         if self.patch_pad_y > 0 or self.patch_pad_x > 0:
             # Pad only bottom/right to preserve top-left alignment.
             flat = F.pad(flat, (0, self.patch_pad_x, 0, self.patch_pad_y))
-        unfolded = F.unfold(flat, kernel_size=(patch_y, patch_x), stride=(stride_y, stride_x))
+        unfolded = F.unfold(
+            flat, kernel_size=(patch_y, patch_x), stride=(stride_y, stride_x)
+        )
         n_patches = unfolded.shape[-1]
         patches = unfolded.transpose(1, 2).reshape(-1, n_patches, var, patch_y, patch_x)
         fft = torch.fft.fft2(patches, dim=(-2, -1))
@@ -293,11 +307,14 @@ class SHT(SpectralTransform):
         """Return per-L power spectral density: sum over M of |coeff|^2."""
         return (spectral_coeffs.real**2 + spectral_coeffs.imag**2).sum(dim=-2)
 
-    def cross_spectral_density(self, spectral_coeffs_a: torch.Tensor, spectral_coeffs_b: torch.Tensor) -> torch.Tensor:
+    def cross_spectral_density(
+        self, spectral_coeffs_a: torch.Tensor, spectral_coeffs_b: torch.Tensor
+    ) -> torch.Tensor:
         """Return per-L cross-spectral density."""
-        return (spectral_coeffs_a.real * spectral_coeffs_b.real + spectral_coeffs_a.imag * spectral_coeffs_b.imag).sum(
-            dim=-2
-        )
+        return (
+            spectral_coeffs_a.real * spectral_coeffs_b.real
+            + spectral_coeffs_a.imag * spectral_coeffs_b.imag
+        ).sum(dim=-2)
 
 
 class RegularSHT(SHT):
@@ -337,12 +354,16 @@ class RegularSHT(SHT):
             raise ValueError("Require 2 * truncation < nlon to resolve all zonal modes")
         self.lons_per_lat = [self.nlon] * self.nlat
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation, latitude_grid=latitude_grid
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation,
+            latitude_grid=latitude_grid,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, t, e, p, v = data.shape
-        assert p == self._sht.n_grid_points, f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
+        assert p == self._sht.n_grid_points, (
+            f"Input points={p} does not match expected nlat*nlon={self.nlat * self.nlon}"
+        )
         x = einops.rearrange(data, "b t e p v -> b t e v p")
         coeffs = self._sht(x)
 
@@ -396,7 +417,9 @@ class ReducedSHT(SHT):
         unique_lats = sorted(set(lats))
 
         # Calculate longitudes per latitude
-        self.lons_per_lat = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
+        self.lons_per_lat = [
+            int((lats == unique_lat).sum()) for unique_lat in unique_lats
+        ]
 
         self._sht = SphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
@@ -406,12 +429,16 @@ class ReducedSHT(SHT):
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, t, e, p, v = data.shape
-        assert p == self._sht.n_grid_points, f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
+        assert p == self._sht.n_grid_points, (
+            f"Input points={p} does not match expected nlat*nlon={self.nlat * self.nlon}"
+        )
         x = einops.rearrange(data, "b t e p v -> b t e v p")
         coeffs = self._sht(x)
 
         # -> [b,t,e,L,M,v] == [b,t,e,y_freq,x_freq,v]
-        return einops.rearrange(coeffs, "b t e v yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
+        return einops.rearrange(
+            coeffs, "b t e v yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t
+        )
 
 
 class OctahedralSHT(SHT):
@@ -448,14 +475,16 @@ class OctahedralSHT(SHT):
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, t, e, p, v = data.shape
-        assert (
-            p == self._sht.n_grid_points
-        ), f"Input points={p} does not match expected octahedral flattened rings={self._sht.n_grid_points}"
+        assert p == self._sht.n_grid_points, (
+            f"Input points={p} does not match expected octahedral flattened rings={self._sht.n_grid_points}"
+        )
 
         # expects [..., points] where points is flattened spatial dim
         x = einops.rearrange(data, "b t e p v -> (b t e v) p")
         coeffs = self._sht(x)  # complex: (b*t*e*v, L, M)
-        return einops.rearrange(coeffs, "(b t e v) yF xF -> b t e yF xF v", b=b, t=t, e=e, v=v)
+        return einops.rearrange(
+            coeffs, "(b t e v) yF xF -> b t e yF xF v", b=b, t=t, e=e, v=v
+        )
 
 
 class InverseSpectralTransform(torch.nn.Module):
@@ -508,7 +537,9 @@ class InverseRegularSHT(InverseSpectralTransform):
             raise ValueError("Require 2 * truncation < nlon to resolve all zonal modes")
         self.lons_per_lat = [self.nlon] * self.nlat
         self._isht = InverseSphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation, latitude_grid=latitude_grid
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation,
+            latitude_grid=latitude_grid,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -561,7 +592,9 @@ class InverseReducedSHT(InverseSpectralTransform):
         unique_lats = sorted(set(lats))
 
         # Calculate longitudes per latitude
-        self.lons_per_lat = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
+        self.lons_per_lat = [
+            int((lats == unique_lat).sum()) for unique_lat in unique_lats
+        ]
 
         self._isht = InverseSphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,

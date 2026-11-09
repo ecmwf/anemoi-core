@@ -10,11 +10,9 @@
 
 import logging
 from abc import ABC
-from typing import Optional
 
 import torch
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
@@ -30,8 +28,8 @@ class BaseImputer(BasePreprocessor, ABC):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         """Initialize the imputer.
 
@@ -51,11 +49,19 @@ class BaseImputer(BasePreprocessor, ABC):
         self.loss_mask_training: torch.Tensor | None = None
 
     def _validate_indices(self):
-        assert len(self.index_training_input) == len(self.index_inference_input) <= len(self.replacement), (
+        assert (
+            len(self.index_training_input)
+            == len(self.index_inference_input)
+            <= len(self.replacement)
+        ), (
             f"Error creating imputation indices {len(self.index_training_input)}, "
             f"{len(self.index_inference_input)}, {len(self.replacement)}"
         )
-        assert len(self.index_training_output) == len(self.index_inference_output) <= len(self.replacement), (
+        assert (
+            len(self.index_training_output)
+            == len(self.index_inference_output)
+            <= len(self.replacement)
+        ), (
             f"Error creating imputation indices {len(self.index_training_output)}, "
             f"{len(self.index_inference_output)}, {len(self.replacement)}"
         )
@@ -85,10 +91,11 @@ class BaseImputer(BasePreprocessor, ABC):
 
         # Create indices for imputation
         for name in name_to_index_training_input:
-
             method = self.methods.get(name, self.default)
             if method == "none":
-                LOGGER.debug(f"Imputer: skipping {name} as no imputation method is specified")
+                LOGGER.debug(
+                    f"Imputer: skipping {name} as no imputation method is specified"
+                )
                 continue
 
             if name_to_index_inference_input.get(name, None) is None:
@@ -99,19 +106,33 @@ class BaseImputer(BasePreprocessor, ABC):
                     )
 
             self.index_training_input.append(name_to_index_training_input[name])
-            self.index_training_output.append(name_to_index_training_output.get(name, None))
-            self.index_inference_input.append(name_to_index_inference_input.get(name, None))
-            self.index_inference_output.append(name_to_index_inference_output.get(name, None))
+            self.index_training_output.append(
+                name_to_index_training_output.get(name, None)
+            )
+            self.index_inference_input.append(
+                name_to_index_inference_input.get(name, None)
+            )
+            self.index_inference_output.append(
+                name_to_index_inference_output.get(name, None)
+            )
 
             if statistics is None:
                 self.replacement.append(method)
             elif isinstance(statistics, dict):
-                assert method in statistics, f"{method} is not a method in the statistics metadata"
-                self.replacement.append(statistics[method][name_to_index_training_input[name]])
+                assert method in statistics, (
+                    f"{method} is not a method in the statistics metadata"
+                )
+                self.replacement.append(
+                    statistics[method][name_to_index_training_input[name]]
+                )
             else:
-                raise TypeError(f"Statistics {type(statistics)} is optional and not a dictionary")
+                raise TypeError(
+                    f"Statistics {type(statistics)} is optional and not a dictionary"
+                )
 
-            LOGGER.info(f"Imputer: replacing NaNs in {name} with value {self.replacement[-1]}")
+            LOGGER.info(
+                f"Imputer: replacing NaNs in {name} with value {self.replacement[-1]}"
+            )
 
     def get_nans(self, x: torch.Tensor) -> torch.Tensor:
         """Get NaN mask from data
@@ -130,10 +151,14 @@ class BaseImputer(BasePreprocessor, ABC):
         torch.Tensor
             Tensor with NaN locations of shape (batch, time, ..., grid)
         """
-        idx = [slice(None), slice(None)] + [0] * (x.ndim - 4) + [slice(None), slice(None)]
+        idx = (
+            [slice(None), slice(None)] + [0] * (x.ndim - 4) + [slice(None), slice(None)]
+        )
         return torch.isnan(x[tuple(idx)])
 
-    def _expand_subset_mask(self, x: torch.Tensor, idx_src: int, nan_locations: torch.Tensor) -> torch.Tensor:
+    def _expand_subset_mask(
+        self, x: torch.Tensor, idx_src: int, nan_locations: torch.Tensor
+    ) -> torch.Tensor:
         """Expand the subset of the nan location mask to the correct shape.
 
         The mask is only saved for the first dimension (batch) and the last two dimensions (grid, variable).
@@ -158,7 +183,11 @@ class BaseImputer(BasePreprocessor, ABC):
         return nan_locations[..., idx_src].expand(-1, *x.shape[1:-2], -1)
 
     def fill_with_value(
-        self, x: torch.Tensor, index_x: list[int], nan_locations: torch.Tensor, index_nl: list[int]
+        self,
+        x: torch.Tensor,
+        index_x: list[int],
+        nan_locations: torch.Tensor,
+        index_nl: list[int],
     ) -> torch.Tensor:
         """Fill NaN locations in the input tensor with the specified values.
 
@@ -207,20 +236,31 @@ class BaseImputer(BasePreprocessor, ABC):
             # training input
 
             # Select the first timestep used by the loss mask and postprocessing.
-            self.nan_locations = nan_locations[:, 0, ..., self.data_indices.data.input.full]
+            self.nan_locations = nan_locations[
+                :, 0, ..., self.data_indices.data.input.full
+            ]
 
             # data indices for training input
             index = self.index_training_input
 
             # set training loss mask to match shape of training input
             self.loss_mask_training = torch.ones(
-                (x.shape[0], x.shape[-2], len(self.data_indices.model.output.name_to_index)), device=x.device
+                (
+                    x.shape[0],
+                    x.shape[-2],
+                    len(self.data_indices.model.output.name_to_index),
+                ),
+                device=x.device,
             )  # shape (batchsize, grid, n_outputs)
 
             # for all variables that are imputed and part of the model output, set the loss weight to zero at NaN location
-            for idx_src, idx_dst in zip(self.index_training_input, self.index_inference_output):
+            for idx_src, idx_dst in zip(
+                self.index_training_input, self.index_inference_output
+            ):
                 if idx_src is not None and idx_dst is not None:
-                    self.loss_mask_training[..., idx_dst] = (~nan_locations[:, 0, ..., idx_src]).int()
+                    self.loss_mask_training[..., idx_dst] = (
+                        ~nan_locations[:, 0, ..., idx_src]
+                    ).int()
 
         elif x.shape[-1] == self.num_inference_input_vars:
             # inference input
@@ -268,14 +308,16 @@ class BaseImputer(BasePreprocessor, ABC):
             msg = "Cannot inverse-transform before the corresponding input has been transformed."
             raise RuntimeError(msg)
 
-        assert (
-            x.shape[0] == self.nan_locations.shape[0]
-        ), f"Batch dimension of input tensor ({x.shape[0]}) does not match the batch dimension of nan locations ({self.nan_locations.shape[0]}). Are you using the postprocessors without running the preprocessor first?"
+        assert x.shape[0] == self.nan_locations.shape[0], (
+            f"Batch dimension of input tensor ({x.shape[0]}) does not match the batch dimension of nan locations ({self.nan_locations.shape[0]}). Are you using the postprocessors without running the preprocessor first?"
+        )
 
         # Replace values
         for idx_src, idx_dst in zip(self.index_inference_input, index):
             if idx_src is not None and idx_dst is not None:
-                x[..., idx_dst][self._expand_subset_mask(x, idx_src, self.nan_locations)] = torch.nan
+                x[..., idx_dst][
+                    self._expand_subset_mask(x, idx_src, self.nan_locations)
+                ] = torch.nan
         return x
 
 
@@ -298,8 +340,8 @@ class InputImputer(BaseImputer):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
@@ -329,8 +371,8 @@ class ConstantImputer(BaseImputer):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
@@ -352,8 +394,8 @@ class CopyImputer(BaseImputer):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
@@ -388,20 +430,34 @@ class CopyImputer(BaseImputer):
             key_to_copy = self.methods.get(name, self.default)
 
             if key_to_copy == "none":
-                LOGGER.debug(f"Imputer: skipping {name} as no imputation method is specified")
+                LOGGER.debug(
+                    f"Imputer: skipping {name} as no imputation method is specified"
+                )
                 continue
 
             self.index_training_input.append(name_to_index_training_input[name])
-            self.index_training_output.append(name_to_index_training_output.get(name, None))
-            self.index_inference_input.append(name_to_index_inference_input.get(name, None))
-            self.index_inference_output.append(name_to_index_inference_output.get(name, None))
+            self.index_training_output.append(
+                name_to_index_training_output.get(name, None)
+            )
+            self.index_inference_input.append(
+                name_to_index_inference_input.get(name, None)
+            )
+            self.index_inference_output.append(
+                name_to_index_inference_output.get(name, None)
+            )
 
             self.replacement.append(key_to_copy)
 
-            LOGGER.debug(f"Imputer: replacing NaNs in {name} with value coming from variable :{self.replacement[-1]}")
+            LOGGER.debug(
+                f"Imputer: replacing NaNs in {name} with value coming from variable :{self.replacement[-1]}"
+            )
 
     def fill_with_value(
-        self, x: torch.Tensor, index_x: list[int], nan_locations: torch.Tensor, index_nl: list[int]
+        self,
+        x: torch.Tensor,
+        index_x: list[int],
+        nan_locations: torch.Tensor,
+        index_nl: list[int],
     ) -> torch.Tensor:
         for i in x.shape[2:-2]:
             nan_locations = nan_locations.unsqueeze(2)
@@ -409,7 +465,9 @@ class CopyImputer(BaseImputer):
         for idx_src, (idx_dst, value) in zip(index_nl, zip(index_x, self.replacement)):
             if idx_dst is not None:
                 assert not torch.isnan(
-                    x[..., self.data_indices.data.input.name_to_index[value]][nan_locations[..., idx_src]]
+                    x[..., self.data_indices.data.input.name_to_index[value]][
+                        nan_locations[..., idx_src]
+                    ]
                 ).any(), f"NaNs found in variable {value} to be copied."
                 x[..., idx_dst][nan_locations[..., idx_src]] = x[
                     ..., self.data_indices.data.input.name_to_index[value]

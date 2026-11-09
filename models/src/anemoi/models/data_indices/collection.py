@@ -14,12 +14,12 @@ import operator
 import yaml
 from omegaconf import OmegaConf
 
-from anemoi.models.data_indices.index import BaseIndex
-from anemoi.models.data_indices.index import DataIndex
-from anemoi.models.data_indices.index import ModelIndex
-from anemoi.models.data_indices.tensor import BaseTensorIndex
-from anemoi.models.data_indices.tensor import InputTensorIndex
-from anemoi.models.data_indices.tensor import OutputTensorIndex
+from anemoi.models.data_indices.index import BaseIndex, DataIndex, ModelIndex
+from anemoi.models.data_indices.tensor import (
+    BaseTensorIndex,
+    InputTensorIndex,
+    OutputTensorIndex,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +40,9 @@ class IndexCollection:
 
     def __init__(self, data_config, name_to_index) -> None:
         self.config = OmegaConf.to_container(data_config, resolve=True)
-        self.name_to_index = dict(sorted(name_to_index.items(), key=operator.itemgetter(1)))
+        self.name_to_index = dict(
+            sorted(name_to_index.items(), key=operator.itemgetter(1))
+        )
         self.forcing = (
             []
             if data_config.get("forcing", None) is None
@@ -52,10 +54,16 @@ class IndexCollection:
             else OmegaConf.to_container(data_config.diagnostic, resolve=True)
         )
         self.target = (
-            [] if data_config.get("target", None) is None else OmegaConf.to_container(data_config.target, resolve=True)
+            []
+            if data_config.get("target", None) is None
+            else OmegaConf.to_container(data_config.target, resolve=True)
         )
-        defined_variables = set.union(set(self.forcing), set(self.diagnostic), set(self.target))
-        self.prognostic = [v for v in self.name_to_index.keys() if v not in defined_variables]
+        defined_variables = set.union(
+            set(self.forcing), set(self.diagnostic), set(self.target)
+        )
+        self.prognostic = [
+            v for v in self.name_to_index.keys() if v not in defined_variables
+        ]
 
         assert set(self.diagnostic).isdisjoint(self.forcing), (
             f"Diagnostic and forcing variables overlap: {set(self.diagnostic).intersection(self.forcing)}. ",
@@ -67,12 +75,18 @@ class IndexCollection:
         )
         name_to_index_model_input = {
             name: i
-            for i, name in enumerate(key for key in self.name_to_index if key in self.forcing or key in self.prognostic)
+            for i, name in enumerate(
+                key
+                for key in self.name_to_index
+                if key in self.forcing or key in self.prognostic
+            )
         }
         name_to_index_model_output = {
             name: i
             for i, name in enumerate(
-                key for key in self.name_to_index if key in self.prognostic or key in self.diagnostic
+                key
+                for key in self.name_to_index
+                if key in self.prognostic or key in self.diagnostic
             )
         }
         self.data = DataIndex(
@@ -89,22 +103,31 @@ class IndexCollection:
             name_to_index_model_output=name_to_index_model_output,
         )
         self.data_full_ordered_names = [
-            name for name, _ in sorted(self.name_to_index.items(), key=operator.itemgetter(1))
+            name
+            for name, _ in sorted(
+                self.name_to_index.items(), key=operator.itemgetter(1)
+            )
         ]
-        self.data_full_name_to_position = {name: position for position, name in enumerate(self.data_full_ordered_names)}
+        self.data_full_name_to_position = {
+            name: position for position, name in enumerate(self.data_full_ordered_names)
+        }
         self.data_output_positions_in_data_full = [
-            self.data_full_name_to_position[name] for name in self.data.output.ordered_names
+            self.data_full_name_to_position[name]
+            for name in self.data.output.ordered_names
         ]
         self.model_output_positions_in_data_full = [
-            self.data_full_name_to_position[name] for name in self.model.output.ordered_names
+            self.data_full_name_to_position[name]
+            for name in self.model.output.ordered_names
         ]
-        self.model_output_positions_in_data_output = self.data.output.positions_for_names(
-            self.model.output.ordered_names
+        self.model_output_positions_in_data_output = (
+            self.data.output.positions_for_names(self.model.output.ordered_names)
         )
         data_output_size = len(self.data.output.ordered_names)
         self.model_output_in_data_output_is_identity = len(
             self.model_output_positions_in_data_output
-        ) == data_output_size and self.model_output_positions_in_data_output == list(range(data_output_size))
+        ) == data_output_size and self.model_output_positions_in_data_output == list(
+            range(data_output_size)
+        )
         (
             self.model_output_in_data_output_is_contiguous,
             self.model_output_in_data_output_contiguous_start,
@@ -175,7 +198,9 @@ class IndexCollection:
             return
 
         if ckpt_name_to_index == data_name_to_index:
-            LOGGER.info("The order of the variables in the model matches the order in the data.")
+            LOGGER.info(
+                "The order of the variables in the model matches the order in the data."
+            )
             LOGGER.debug("%s, %s", ckpt_name_to_index, data_name_to_index)
             return
 

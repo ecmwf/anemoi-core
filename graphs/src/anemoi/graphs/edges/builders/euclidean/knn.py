@@ -31,9 +31,15 @@ class BaseKNNEdges(BaseDistanceEdgeBuilders):
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
     ) -> None:
-        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
-        assert isinstance(num_nearest_neighbours, int), "Number of nearest neighbours must be an integer."
-        assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive."
+        super().__init__(
+            source_name, target_name, source_mask_attr_name, target_mask_attr_name
+        )
+        assert isinstance(num_nearest_neighbours, int), (
+            "Number of nearest neighbours must be an integer."
+        )
+        assert num_nearest_neighbours > 0, (
+            "Number of nearest neighbours must be positive."
+        )
         self.num_nearest_neighbours = num_nearest_neighbours
 
         LOGGER.info(
@@ -79,7 +85,10 @@ class BaseKNNEdges(BaseDistanceEdgeBuilders):
         return edge_index
 
     def _compute_adj_matrix_sklearn(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor, num_nearest_neighbours: int
+        self,
+        source_coords: torch.Tensor,
+        target_coords: torch.Tensor,
+        num_nearest_neighbours: int,
     ) -> np.ndarray:
         """Compute the adjacency matrix using sklearn's KNN implementation.
 
@@ -170,7 +179,9 @@ class ReversedKNNEdges(KNNEdges):
         target_coords: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        return super().compute_edge_index_from_coords(target_coords, source_coords, skip_flip=True, **kwargs)
+        return super().compute_edge_index_from_coords(
+            target_coords, source_coords, skip_flip=True, **kwargs
+        )
 
 
 class MutualKNNEdges(BaseDistanceEdgeBuilders):
@@ -222,16 +233,24 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
     ) -> None:
-        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
-        assert isinstance(num_nearest_neighbours, int), "Number of nearest neighbours must be an integer."
-        assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive."
+        super().__init__(
+            source_name, target_name, source_mask_attr_name, target_mask_attr_name
+        )
+        assert isinstance(num_nearest_neighbours, int), (
+            "Number of nearest neighbours must be an integer."
+        )
+        assert num_nearest_neighbours > 0, (
+            "Number of nearest neighbours must be positive."
+        )
 
         if reversed_num_nearest_neighbours is None:
             reversed_num_nearest_neighbours = num_nearest_neighbours
-        assert isinstance(
-            reversed_num_nearest_neighbours, int
-        ), "Reversed number of nearest neighbours must be an integer."
-        assert reversed_num_nearest_neighbours > 0, "Reversed number of nearest neighbours must be positive."
+        assert isinstance(reversed_num_nearest_neighbours, int), (
+            "Reversed number of nearest neighbours must be an integer."
+        )
+        assert reversed_num_nearest_neighbours > 0, (
+            "Reversed number of nearest neighbours must be positive."
+        )
 
         self.num_nearest_neighbours = num_nearest_neighbours
         self.reversed_num_nearest_neighbours = reversed_num_nearest_neighbours
@@ -260,7 +279,9 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
     ) -> torch.Tensor:
         # Forward: for each target node, its nearest source nodes.
         # knn(x=source, y=target) -> rows (target_idx, source_idx); flip -> (source, target).
-        forward = torch.flip(knn(source_coords, target_coords, k=num_nearest_neighbours), [0])
+        forward = torch.flip(
+            knn(source_coords, target_coords, k=num_nearest_neighbours), [0]
+        )
         # Reversed: for each source node, its nearest target nodes.
         # knn(x=target, y=source) -> rows (source_idx, target_idx); already (source, target).
         reversed_ = knn(target_coords, source_coords, k=reversed_num_nearest_neighbours)
@@ -276,7 +297,9 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         # Forward adjacency: rows = target, cols = source.
         forward_nn = NearestNeighbors(metric="euclidean", n_jobs=4)
         forward_nn.fit(source_coords.cpu())
-        forward = forward_nn.kneighbors_graph(target_coords.cpu(), n_neighbors=num_nearest_neighbours).tocsr()
+        forward = forward_nn.kneighbors_graph(
+            target_coords.cpu(), n_neighbors=num_nearest_neighbours
+        ).tocsr()
 
         # Reversed adjacency: rows = source, cols = target.
         reversed_nn = NearestNeighbors(metric="euclidean", n_jobs=4)

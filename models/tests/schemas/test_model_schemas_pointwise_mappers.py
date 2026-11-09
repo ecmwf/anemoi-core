@@ -56,7 +56,14 @@ def test_base_model_schema_accepts_pointwise_mapper_configuration():
             },
         },
         node_trainable_parameters={"data": 0, "hidden": 0},
-        residual={"datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection", "step": -1}}},
+        residual={
+            "datasets": {
+                "data": {
+                    "_target_": "anemoi.models.layers.residual.SkipConnection",
+                    "step": -1,
+                }
+            }
+        },
         output_mask={
             "datasets": {
                 "data": {
@@ -66,15 +73,29 @@ def test_base_model_schema_accepts_pointwise_mapper_configuration():
         },
         bounding={
             "datasets": {
-                "data": [{"_target_": "anemoi.models.layers.bounding.ReluBounding", "variables": ["tp"]}],
+                "data": [
+                    {
+                        "_target_": "anemoi.models.layers.bounding.ReluBounding",
+                        "variables": ["tp"],
+                    }
+                ],
             },
         },
     )
 
-    assert schema.processor.target_ == "anemoi.models.layers.processor.PointWiseMLPProcessor"
+    assert (
+        schema.processor.target_
+        == "anemoi.models.layers.processor.PointWiseMLPProcessor"
+    )
     assert schema.processor.dropout_p == 0.0
-    assert schema.encoders["0"].mapper.target_ == "anemoi.models.layers.mapper.PointWiseForwardMapper"
-    assert schema.decoders["0"].mapper.target_ == "anemoi.models.layers.mapper.PointWiseBackwardMapper"
+    assert (
+        schema.encoders["0"].mapper.target_
+        == "anemoi.models.layers.mapper.PointWiseForwardMapper"
+    )
+    assert (
+        schema.decoders["0"].mapper.target_
+        == "anemoi.models.layers.mapper.PointWiseBackwardMapper"
+    )
     assert schema.recompile_limit == 8
 
 
@@ -125,13 +146,24 @@ def test_base_model_schema_accepts_sparse_projector_configuration():
             },
         },
         node_trainable_parameters={"data": 0, "hidden": 0},
-        residual={"_target_": "anemoi.models.layers.residual.SkipConnection", "step": -1},
+        residual={
+            "_target_": "anemoi.models.layers.residual.SkipConnection",
+            "step": -1,
+        },
         output_mask={"_target_": "anemoi.training.utils.masks.NoOutputMask"},
-        bounding=[{"_target_": "anemoi.models.layers.bounding.ReluBounding", "variables": ["tp"]}],
+        bounding=[
+            {
+                "_target_": "anemoi.models.layers.bounding.ReluBounding",
+                "variables": ["tp"],
+            }
+        ],
     )
 
     assert schema.sparse_projector.num_chunks == 4
 
 
 def test_base_model_schema_defaults_sparse_projector_num_chunks():
-    assert BaseModelSchema.model_fields["sparse_projector"].default_factory().num_chunks == 1
+    assert (
+        BaseModelSchema.model_fields["sparse_projector"].default_factory().num_chunks
+        == 1
+    )

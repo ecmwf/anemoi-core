@@ -38,7 +38,9 @@ class _SharedEncoder(nn.Module):
 
 
 class _CaptureAggregator(nn.Module):
-    def forward(self, hidden_latent: torch.Tensor, latents: dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(
+        self, hidden_latent: torch.Tensor, latents: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
         self.latents = dict(latents)
         raise _AggregationReached
 
@@ -86,8 +88,12 @@ def test_shared_encoder_preserves_each_dataset_latent() -> None:
         model(inputs)
 
     assert list(model.latent_aggregator.latents) == ["dataset_a", "dataset_b"]
-    torch.testing.assert_close(model.latent_aggregator.latents["dataset_a"], torch.full((1, 4), 1.0))
-    torch.testing.assert_close(model.latent_aggregator.latents["dataset_b"], torch.full((1, 4), 2.0))
+    torch.testing.assert_close(
+        model.latent_aggregator.latents["dataset_a"], torch.full((1, 4), 1.0)
+    )
+    torch.testing.assert_close(
+        model.latent_aggregator.latents["dataset_b"], torch.full((1, 4), 2.0)
+    )
 
 
 def test_build_latent_aggregator_passes_layer_kernels_to_aggregator() -> None:

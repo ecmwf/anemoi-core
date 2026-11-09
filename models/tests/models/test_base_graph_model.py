@@ -11,8 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-import torch.nn as nn
 from omegaconf import OmegaConf
+from torch import nn
 from torch_geometric.data import HeteroData
 
 import anemoi.models.models.base as base_model_module
@@ -24,7 +24,9 @@ class DummyGraphModel(BaseGraphModel):
     def _build_networks(self, model_config) -> None:
         self.seen_hidden_name = model_config.model.hidden_nodes_name
 
-    def _assemble_input(self, x, batch_size, grid_shard_sizes=None, model_comm_group=None):
+    def _assemble_input(
+        self, x, batch_size, grid_shard_sizes=None, model_comm_group=None
+    ):
         return x
 
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
@@ -35,7 +37,9 @@ class DummyGraphModel(BaseGraphModel):
 
 
 class DummyHierarchicalGraphModel(DummyGraphModel):
-    _build_hidden_node_routing = AnemoiModelEncProcDecHierarchical._build_hidden_node_routing
+    _build_hidden_node_routing = (
+        AnemoiModelEncProcDecHierarchical._build_hidden_node_routing
+    )
 
 
 class _IndexGroup(SimpleNamespace):
@@ -47,7 +51,9 @@ def _make_data_indices() -> dict:
     dataset_indices = SimpleNamespace(
         model=SimpleNamespace(
             input=_IndexGroup(prognostic=[0], forcing=[]),
-            output=_IndexGroup(prognostic=[0], full=[0], diagnostic=[], name_to_index={"var": 0}),
+            output=_IndexGroup(
+                prognostic=[0], full=[0], diagnostic=[], name_to_index={"var": 0}
+            ),
             _forcing=[],
         ),
         data=SimpleNamespace(
@@ -105,7 +111,9 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
                 },
             },
             "residual": {
-                "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
+                "datasets": {
+                    "data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}
+                },
             },
             "bounding": {"datasets": {"data": []}},
         },
@@ -151,7 +159,9 @@ def test_hierarchical_routing_accepts_omegaconf_hidden_node_lists() -> None:
                 },
             },
             "residual": {
-                "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
+                "datasets": {
+                    "data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}
+                },
             },
             "bounding": {"datasets": {"data": []}},
         },
@@ -197,7 +207,9 @@ def _make_minimal_model():
                 },
             },
             "residual": {
-                "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
+                "datasets": {
+                    "data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}
+                },
             },
             "bounding": {"datasets": {"data": []}},
         }
@@ -212,7 +224,9 @@ def _make_minimal_model():
     )
 
 
-def _route_hidden_nodes(hidden_nodes_name, dataset_names=("a", "b"), model_class=BaseGraphModel) -> SimpleNamespace:
+def _route_hidden_nodes(
+    hidden_nodes_name, dataset_names=("a", "b"), model_class=BaseGraphModel
+) -> SimpleNamespace:
     """Run the hidden-node routing on a bare namespace, without building a model."""
     model = SimpleNamespace(dataset_names=list(dataset_names))
     model_class._build_hidden_node_routing(model, hidden_nodes_name)
@@ -229,14 +243,18 @@ def test_hidden_node_routing_string_applies_to_all_datasets() -> None:
 @pytest.mark.parametrize("as_omegaconf", [False, True])
 def test_hidden_node_routing_mapping_keeps_order_and_deduplicates(as_omegaconf) -> None:
     mapping = {"a": "hidden_1", "b": "hidden_2", "c": "hidden_1"}
-    model = _route_hidden_nodes(OmegaConf.create(mapping) if as_omegaconf else mapping, ("a", "b", "c"))
+    model = _route_hidden_nodes(
+        OmegaConf.create(mapping) if as_omegaconf else mapping, ("a", "b", "c")
+    )
 
     assert model.dataset2hidden == mapping
     assert model.hidden_names == ["hidden_1", "hidden_2"]
 
 
 @pytest.mark.parametrize("as_omegaconf", [False, True])
-def test_hierarchical_routing_encodes_every_dataset_into_the_first_level(as_omegaconf) -> None:
+def test_hierarchical_routing_encodes_every_dataset_into_the_first_level(
+    as_omegaconf,
+) -> None:
     levels = ["hidden_1", "hidden_2"]
     model = _route_hidden_nodes(
         OmegaConf.create(levels) if as_omegaconf else levels,
@@ -264,7 +282,9 @@ def test_hidden_node_routing_rejects_unsupported_type() -> None:
 
 
 def test_active_hidden_name_for_datasets_sharing_a_mesh() -> None:
-    model = _route_hidden_nodes({"a": "hidden_1", "b": "hidden_2", "c": "hidden_1"}, ("a", "b", "c"))
+    model = _route_hidden_nodes(
+        {"a": "hidden_1", "b": "hidden_2", "c": "hidden_1"}, ("a", "b", "c")
+    )
 
     assert BaseGraphModel._get_active_hidden_name(model, ["a"]) == "hidden_1"
     assert BaseGraphModel._get_active_hidden_name(model, ["a", "c"]) == "hidden_1"
@@ -324,7 +344,9 @@ def test_predict_step_spatial_preprocessors_called_before_normalization(monkeypa
             spatial_pre_processors=spatial_processors,
         )
 
-    assert call_order == ["spatial", "pre"], f"Expected spatial before pre, got order: {call_order}"
+    assert call_order == ["spatial", "pre"], (
+        f"Expected spatial before pre, got order: {call_order}"
+    )
 
 
 def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
@@ -345,8 +367,14 @@ def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
         return x
 
     monkeypatch.setattr(model, "forward", forward)
-    monkeypatch.setattr(base_model_module, "get_shard_sizes", lambda *_args, **_kwargs: source_grid_shard_sizes)
-    monkeypatch.setattr(base_model_module, "shard_tensor", lambda tensor, *_args, **_kwargs: tensor)
+    monkeypatch.setattr(
+        base_model_module,
+        "get_shard_sizes",
+        lambda *_args, **_kwargs: source_grid_shard_sizes,
+    )
+    monkeypatch.setattr(
+        base_model_module, "shard_tensor", lambda tensor, *_args, **_kwargs: tensor
+    )
 
     out = model.predict_step(
         {"data": torch.zeros(1, 1, 8, 1)},
@@ -366,12 +394,22 @@ def test_predict_step_skips_input_only_datasets(monkeypatch):
     model = _make_minimal_model()
 
     # `forcing` feeds an encoder but has no decoder, so forward only returns `data`
-    monkeypatch.setattr(model, "forward", lambda x, **kw: {"data": x["data"][:, -1:] + 1.0})
+    monkeypatch.setattr(
+        model, "forward", lambda x, **kw: {"data": x["data"][:, -1:] + 1.0}
+    )
 
-    processors = {"data": _identity_pre_processor(), "forcing": _identity_pre_processor()}
-    batch = {"data": torch.zeros(1, 1, 4, 1), "forcing": torch.zeros(1, 1, 4, 2)}  # (batch, time, grid, vars)
+    processors = {
+        "data": _identity_pre_processor(),
+        "forcing": _identity_pre_processor(),
+    }
+    batch = {
+        "data": torch.zeros(1, 1, 4, 1),
+        "forcing": torch.zeros(1, 1, 4, 2),
+    }  # (batch, time, grid, vars)
 
-    out = model.predict_step(batch, pre_processors=processors, post_processors=processors, n_step_input=1)
+    out = model.predict_step(
+        batch, pre_processors=processors, post_processors=processors, n_step_input=1
+    )
 
     assert set(out) == {"data"}
     assert torch.equal(out["data"], torch.ones(1, 1, 1, 4, 1))

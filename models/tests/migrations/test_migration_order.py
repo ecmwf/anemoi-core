@@ -7,8 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.commands.migration import in_incorrect_order
-from anemoi.models.commands.migration import new_migrations_from_main_branch
+from anemoi.models.commands.migration import (
+    in_incorrect_order,
+    new_migrations_from_main_branch,
+)
 from anemoi.models.migrations import MIGRATION_PATH
 
 
@@ -42,7 +44,11 @@ def test_in_incorrect_order_wrong_order_between():
 def test_migration_order():
     new_migrations = new_migrations_from_main_branch()
     all_migrations = sorted(
-        [file.name for file in MIGRATION_PATH.iterdir() if file.is_file() and file.name != "__init__.py"]
+        [
+            file.name
+            for file in MIGRATION_PATH.iterdir()
+            if file.is_file() and file.name != "__init__.py"
+        ]
     )
     incorrect_names, _ = in_incorrect_order(all_migrations, new_migrations)
     error_message = "New migrations were added in the main branch. Use `anemoi-models migration fix-order` to update the name of your scripts."

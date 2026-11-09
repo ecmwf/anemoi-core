@@ -7,13 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from dataclasses import asdict
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import asdict, dataclass, field
 from unittest.mock import Mock
 
 import pytest
 import torch
+from anemoi.utils.config import DotDict
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.halo import HaloInfo
@@ -22,9 +21,7 @@ from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.processor import GraphTransformerProcessor
-from anemoi.models.layers.utils import compute_mlp_hidden_dim
-from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.config import DotDict
+from anemoi.models.layers.utils import compute_mlp_hidden_dim, load_layer_kernels
 
 
 @dataclass
@@ -59,8 +56,12 @@ class TestGraphTransformerProcessor:
         graph[("nodes", "to", "nodes")].edge_index = torch.randint(
             0, self.NUM_NODES, (2, self.NUM_EDGES), device=device
         )
-        graph[("nodes", "to", "nodes")].edge_attr1 = torch.rand((self.NUM_EDGES, 3), device=device)
-        graph[("nodes", "to", "nodes")].edge_attr2 = torch.rand((self.NUM_EDGES, 4), device=device)
+        graph[("nodes", "to", "nodes")].edge_attr1 = torch.rand(
+            (self.NUM_EDGES, 3), device=device
+        )
+        graph[("nodes", "to", "nodes")].edge_attr2 = torch.rand(
+            (self.NUM_EDGES, 4), device=device
+        )
         return graph
 
     @pytest.fixture
@@ -84,9 +85,14 @@ class TestGraphTransformerProcessor:
         config["edge_dim"] = graph_provider.edge_dim
         return GraphTransformerProcessor(**config).to(device)
 
-    def test_graphtransformer_processor_init(self, graphtransformer_processor, graphtransformer_init, graph_provider):
+    def test_graphtransformer_processor_init(
+        self, graphtransformer_processor, graphtransformer_init, graph_provider
+    ):
         assert graphtransformer_processor.num_chunks == graphtransformer_init.num_chunks
-        assert graphtransformer_processor.num_channels == graphtransformer_init.num_channels
+        assert (
+            graphtransformer_processor.num_channels
+            == graphtransformer_init.num_channels
+        )
         assert (
             graphtransformer_processor.chunk_size
             == graphtransformer_init.num_layers // graphtransformer_init.num_chunks
@@ -94,7 +100,10 @@ class TestGraphTransformerProcessor:
         assert isinstance(graph_provider.trainable, TrainableTensor)
 
     def test_all_blocks(self, graphtransformer_processor):
-        assert all(isinstance(block, GraphTransformerProcessorBlock) for block in graphtransformer_processor.proc)
+        assert all(
+            isinstance(block, GraphTransformerProcessorBlock)
+            for block in graphtransformer_processor.proc
+        )
 
     def test_custom_attn_channels(self, graphtransformer_init, graph_provider, device):
         config = asdict(graphtransformer_init)
@@ -104,18 +113,27 @@ class TestGraphTransformerProcessor:
         processor = GraphTransformerProcessor(**config).to(device)
 
         assert processor.proc[0].attn_channels == 96
-        assert processor.proc[0].out_channels_conv == 96 // graphtransformer_init.num_heads
+        assert (
+            processor.proc[0].out_channels_conv == 96 // graphtransformer_init.num_heads
+        )
         assert processor.proc[0].projection.in_features == 96
-        assert processor.proc[0].projection.out_features == graphtransformer_init.num_channels
+        assert (
+            processor.proc[0].projection.out_features
+            == graphtransformer_init.num_channels
+        )
 
-    def test_forward(self, graphtransformer_processor, graphtransformer_init, graph_provider):
+    def test_forward(
+        self, graphtransformer_processor, graphtransformer_init, graph_provider
+    ):
         batch_size = 1
 
         x = torch.rand(
             (self.NUM_NODES, graphtransformer_init.num_channels),
             device=next(graphtransformer_processor.parameters()).device,
         )
-        shard_info = GraphShardInfo(nodes=[self.NUM_NODES], edges=[self.NUM_EDGES * batch_size])
+        shard_info = GraphShardInfo(
+            nodes=[self.NUM_NODES], edges=[self.NUM_EDGES * batch_size]
+        )
 
         # Run forward pass of processor
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
@@ -130,7 +148,9 @@ class TestGraphTransformerProcessor:
 
         # Generate dummy target and loss function
         loss_fn = torch.nn.MSELoss()
-        target = torch.rand((self.NUM_NODES, graphtransformer_init.num_channels), device=output.device)
+        target = torch.rand(
+            (self.NUM_NODES, graphtransformer_init.num_channels), device=output.device
+        )
         loss = loss_fn(output, target)
 
         # Check loss
@@ -148,12 +168,16 @@ class TestGraphTransformerProcessor:
         # Check gradients of processor
         for param in graphtransformer_processor.parameters():
             assert param.grad is not None, f"param.grad is None for {param}"
-            assert (
-                param.grad.shape == param.shape
-            ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            assert param.grad.shape == param.shape, (
+                f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            )
 
     def test_processor_shares_one_halo_info_across_layers(
-        self, graphtransformer_processor, graphtransformer_init, graph_provider, monkeypatch
+        self,
+        graphtransformer_processor,
+        graphtransformer_init,
+        graph_provider,
+        monkeypatch,
     ):
         batch_size = 1
         x = torch.rand(
@@ -179,7 +203,9 @@ class TestGraphTransformerProcessor:
         received_halo_info = []
         hooks = [
             block.register_forward_pre_hook(
-                lambda module, args, kwargs: received_halo_info.append(kwargs["halo_info"]),
+                lambda module, args, kwargs: received_halo_info.append(
+                    kwargs["halo_info"]
+                ),
                 with_kwargs=True,
             )
             for block in graphtransformer_processor.proc
@@ -203,20 +229,41 @@ class TestGraphTransformerProcessor:
         block = graphtransformer_processor.proc[0]
         group = Mock()
         group.size.return_value = 2
-        x = torch.empty(0, graphtransformer_processor.num_channels, device=next(block.parameters()).device)
+        x = torch.empty(
+            0,
+            graphtransformer_processor.num_channels,
+            device=next(block.parameters()).device,
+        )
         with pytest.raises(ValueError, match="requires halo_info"):
             block._forward_edges_shard_strategy(
-                x, torch.empty(0), torch.empty(2, 0, dtype=torch.long), GraphShardInfo(), 1, group, 1, True
+                x,
+                torch.empty(0),
+                torch.empty(2, 0, dtype=torch.long),
+                GraphShardInfo(),
+                1,
+                group,
+                1,
+                True,
             )
 
-    def test_distributed_halo_requires_sharded_nodes(self, graphtransformer_processor, graph_provider):
+    def test_distributed_halo_requires_sharded_nodes(
+        self, graphtransformer_processor, graph_provider
+    ):
         _, edge_index, _ = graph_provider.get_edges(batch_size=1)
-        x = torch.empty(self.NUM_NODES, graphtransformer_processor.num_channels, device=edge_index.device)
+        x = torch.empty(
+            self.NUM_NODES,
+            graphtransformer_processor.num_channels,
+            device=edge_index.device,
+        )
         group = Mock()
         group.size.return_value = 2
         with pytest.raises(ValueError, match="sharded nodes"):
             graphtransformer_processor._get_or_build_cached_halo_info(
-                x, edge_index, GraphShardInfo(nodes=None, edges=[self.NUM_EDGES, 0]), 1, group
+                x,
+                edge_index,
+                GraphShardInfo(nodes=None, edges=[self.NUM_EDGES, 0]),
+                1,
+                group,
             )
 
     def test_unsorted_edges_are_sorted_before_forward(
@@ -227,7 +274,9 @@ class TestGraphTransformerProcessor:
             (self.NUM_NODES, graphtransformer_init.num_channels),
             device=next(graphtransformer_processor.parameters()).device,
         )
-        shard_info = GraphShardInfo(nodes=[self.NUM_NODES], edges=[self.NUM_EDGES * batch_size])
+        shard_info = GraphShardInfo(
+            nodes=[self.NUM_NODES], edges=[self.NUM_EDGES * batch_size]
+        )
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
 
         with torch.no_grad():
@@ -259,5 +308,7 @@ class TestGraphTransformerProcessor:
         config["mlp_hidden_ratio"] = 2.67
         processor = GraphTransformerProcessor(**config).to(device)
 
-        expected_hidden_dim = compute_mlp_hidden_dim(graphtransformer_init.num_channels, 2.67)
+        expected_hidden_dim = compute_mlp_hidden_dim(
+            graphtransformer_init.num_channels, 2.67
+        )
         assert processor.proc[0].node_dst_mlp.mlp[0].out_features == expected_hidden_dim

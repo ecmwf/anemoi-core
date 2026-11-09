@@ -10,7 +10,6 @@
 
 import logging
 from abc import abstractmethod
-from typing import Optional
 
 import torch
 
@@ -31,8 +30,8 @@ class Postprocessor(BasePreprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         """Initialize the Postprocessor.
 
@@ -54,7 +53,9 @@ class Postprocessor(BasePreprocessor):
 
     def _validate_indices(self):
         assert (
-            len(self.index_training_output) == len(self.index_inference_output) <= len(self.postprocessorfunctions)
+            len(self.index_training_output)
+            == len(self.index_inference_output)
+            <= len(self.postprocessorfunctions)
         ), (
             f"Error creating postprocessing indices {len(self.index_training_output)}, "
             f"{len(self.index_inference_output)}, {len(self.postprocessorfunctions)}"
@@ -63,7 +64,9 @@ class Postprocessor(BasePreprocessor):
     def _prepare_postprocessing_indices_list(self):
         """Prepare the postprocessor indices list."""
         self.num_training_output_vars = len(self.data_indices.data.output.name_to_index)
-        self.num_inference_output_vars = len(self.data_indices.model.output.name_to_index)
+        self.num_inference_output_vars = len(
+            self.data_indices.model.output.name_to_index
+        )
 
         (
             self.index_training_output,
@@ -76,19 +79,26 @@ class Postprocessor(BasePreprocessor):
 
         # Create indices for postprocessing
         for name in self.data_indices.data.output.name_to_index:
-
             method = self.methods.get(name, self.default)
             if method == "none":
-                LOGGER.debug(f"Postprocessor: skipping {name} as no postprocessing method is specified")
+                LOGGER.debug(
+                    f"Postprocessor: skipping {name} as no postprocessing method is specified"
+                )
                 continue
             assert name in self.data_indices.model.output.name_to_index, (
                 f"Postprocessor: {name} not found in inference output indices. "
                 f"Postprocessors cannot be applied to forcing variables."
             )
 
-            self.index_training_output.append(self._get_index(self.data_indices.data.output.name_to_index, name))
-            self.index_inference_output.append(self._get_index(self.data_indices.model.output.name_to_index, name))
-            self.postprocessorfunctions.append(self._get_postprocessor_function(method, name))
+            self.index_training_output.append(
+                self._get_index(self.data_indices.data.output.name_to_index, name)
+            )
+            self.index_inference_output.append(
+                self._get_index(self.data_indices.model.output.name_to_index, name)
+            )
+            self.postprocessorfunctions.append(
+                self._get_postprocessor_function(method, name)
+            )
 
     def _get_index(self, name_to_index_dict, name):
         return name_to_index_dict.get(name, None)
@@ -97,7 +107,9 @@ class Postprocessor(BasePreprocessor):
         if method == "relu":
             postprocessor_function = torch.nn.functional.relu
         elif method == "hardtanh":
-            postprocessor_function = torch.nn.Hardtanh(min_val=-1, max_val=1)  # default hardtanh
+            postprocessor_function = torch.nn.Hardtanh(
+                min_val=-1, max_val=1
+            )  # default hardtanh
         elif method == "hardtanh_0_1":
             postprocessor_function = torch.nn.Hardtanh(min_val=0, max_val=1)
         else:
@@ -163,8 +175,8 @@ class NormalizedReluPostprocessor(Postprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
 
         self.statistics = statistics
@@ -213,8 +225,8 @@ class ConditionalPostprocessor(Postprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
@@ -225,14 +237,18 @@ class ConditionalPostprocessor(Postprocessor):
 
         # retrieve index of masking variable
         self.masking_variable = self.remap
-        self.masking_variable_training_output = self.data_indices.data.output.name_to_index.get(
-            self.masking_variable, None
+        self.masking_variable_training_output = (
+            self.data_indices.data.output.name_to_index.get(self.masking_variable, None)
         )
-        self.masking_variable_inference_output = self.data_indices.model.output.name_to_index.get(
-            self.masking_variable, None
+        self.masking_variable_inference_output = (
+            self.data_indices.model.output.name_to_index.get(
+                self.masking_variable, None
+            )
         )
 
-    def fill_with_value(self, x: torch.Tensor, index: list[int], fill_mask: torch.tensor):
+    def fill_with_value(
+        self, x: torch.Tensor, index: list[int], fill_mask: torch.tensor
+    ):
         for idx_dst, value in zip(index, self.postprocessorfunctions):
             if idx_dst is not None:
                 x[..., idx_dst][fill_mask] = value
@@ -249,7 +265,6 @@ class ConditionalPostprocessor(Postprocessor):
         Returns:
             torch.Tensor: A mask tensor indicating the locations for postprocessing of shape x.shape.
         """
-        pass
 
     def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
         """Set values in the output tensor."""

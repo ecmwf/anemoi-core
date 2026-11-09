@@ -13,16 +13,17 @@ import logging
 import os
 
 import torch
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.normalization import ConditionalLayerNorm
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.models.utils.compile import _get_compile_entry
-from anemoi.models.utils.compile import _meets_library_versions_for_compile
-from anemoi.models.utils.compile import mark_for_compilation
+from anemoi.models.utils.compile import (
+    _get_compile_entry,
+    _meets_library_versions_for_compile,
+    mark_for_compilation,
+)
 
 HAS_ANEMOI_TRAINING = False
 if importlib.util.find_spec("anemoi.training") is not None:
@@ -180,7 +181,9 @@ def test_compile_layer_kernel() -> None:
 
     # Skip this test if library versions aren't met
     if not _meets_library_versions_for_compile():
-        LOGGER.warning("triton not installed. skipping 'test_compile.py::test_compile_layer_kernel'")
+        LOGGER.warning(
+            "triton not installed. skipping 'test_compile.py::test_compile_layer_kernel'"
+        )
         return
 
     cfg = layer_kernel_compile_config()
@@ -213,7 +216,9 @@ def test_compile_save_checkpoint() -> None:
     """Tests that a compiled module can be pickled and saved as a checkpoint"""
     # Skip this test if library versions aren't met
     if not _meets_library_versions_for_compile():
-        LOGGER.warning("triton not installed. skipping 'test_compile.py::test_compile_save_checkpoint'")
+        LOGGER.warning(
+            "triton not installed. skipping 'test_compile.py::test_compile_save_checkpoint'"
+        )
         return
 
     num_channels = 64
@@ -237,7 +242,9 @@ def test_compile_load_checkpoint() -> None:
     """Tests that a compiled checkpoint can be loaded by a non-compiled model"""
     # Skip this test if library versions aren't met
     if not _meets_library_versions_for_compile():
-        LOGGER.warning("triton not installed. skipping 'test_compile.py::test_compile_load_checkpoint'")
+        LOGGER.warning(
+            "triton not installed. skipping 'test_compile.py::test_compile_load_checkpoint'"
+        )
         return
 
     cfg = layer_kernel_compile_config()

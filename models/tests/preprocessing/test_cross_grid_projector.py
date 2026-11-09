@@ -24,8 +24,7 @@ def _make_projector(n_src: int = 8, n_dst: int = 4) -> CrossGridProjector:
     import tempfile
 
     import numpy as np
-    from scipy.sparse import csr_matrix
-    from scipy.sparse import save_npz
+    from scipy.sparse import csr_matrix, save_npz
 
     ratio = n_src // n_dst
     # Rows are destinations and columns are sources, matching W @ x.
@@ -67,7 +66,9 @@ class TestCrossGridProjector:
 
     def test_no_trainable_parameters(self, projector):
         params = list(projector.parameters())
-        assert len(params) == 0, "CrossGridProjector should have no trainable parameters"
+        assert len(params) == 0, (
+            "CrossGridProjector should have no trainable parameters"
+        )
 
     def test_values_match_sparse_matmul(self, projector):
         """Each dst node should sum its src contributions (row_normalize=False)."""

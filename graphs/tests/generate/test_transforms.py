@@ -9,15 +9,16 @@
 
 import torch
 
-from anemoi.graphs.generate.transforms import latlon_rad_to_sincos
-from anemoi.graphs.generate.transforms import sincos_to_latlon_rad
+from anemoi.graphs.generate.transforms import latlon_rad_to_sincos, sincos_to_latlon_rad
 
 NUM_POINTS = 40
 
 
 def test_latlon_rad_to_sincos():
     """Test conversion from lat-lon in radians to sin-cos representation."""
-    coords = torch.rand(NUM_POINTS, 2) * torch.tensor([torch.pi, 2 * torch.pi]) - torch.tensor([torch.pi / 2, 0])
+    coords = torch.rand(NUM_POINTS, 2) * torch.tensor(
+        [torch.pi, 2 * torch.pi]
+    ) - torch.tensor([torch.pi / 2, 0])
     # lat in [-pi/2, pi/2], lon in [0, 2 * pi]
 
     sincos = latlon_rad_to_sincos(coords)
@@ -33,7 +34,9 @@ def test_latlon_rad_to_sincos():
 
 def test_sincos_to_latlon_rad():
     """Test conversion from sin-cos representation to lat-lon in radians."""
-    sincos = torch.rand(NUM_POINTS, 4) * torch.tensor([2, 2, 1, 2]) - torch.tensor([1, 1, 0, 1])
+    sincos = torch.rand(NUM_POINTS, 4) * torch.tensor([2, 2, 1, 2]) - torch.tensor(
+        [1, 1, 0, 1]
+    )
     # sin(lat), sin(lon), cos(lon) in [-1, 1], cos(lat) in [0, 1]
 
     coords = sincos_to_latlon_rad(sincos)
@@ -42,13 +45,19 @@ def test_sincos_to_latlon_rad():
     assert coords.device == sincos.device
     assert coords.requires_grad == sincos.requires_grad
 
-    assert torch.all((coords[:, 0] >= -torch.pi / 2) & (coords[:, 0] <= torch.pi / 2))  # lat in [-pi/2, pi/2]
-    assert torch.all((coords[:, 1] >= 0) & (coords[:, 1] <= 2 * torch.pi))  # lon in [0, 2 * pi]
+    assert torch.all(
+        (coords[:, 0] >= -torch.pi / 2) & (coords[:, 0] <= torch.pi / 2)
+    )  # lat in [-pi/2, pi/2]
+    assert torch.all(
+        (coords[:, 1] >= 0) & (coords[:, 1] <= 2 * torch.pi)
+    )  # lon in [0, 2 * pi]
 
 
 def test_latlon_rad_to_sincos_and_back():
     """Test conversion from lat-lon in radians to sin-cos representation and back."""
-    coords = torch.rand(NUM_POINTS, 2) * torch.tensor([torch.pi, 2 * torch.pi]) - torch.tensor([torch.pi / 2, 0])
+    coords = torch.rand(NUM_POINTS, 2) * torch.tensor(
+        [torch.pi, 2 * torch.pi]
+    ) - torch.tensor([torch.pi / 2, 0])
 
     sincos = latlon_rad_to_sincos(coords)
     assert sincos.shape == (NUM_POINTS, 4)

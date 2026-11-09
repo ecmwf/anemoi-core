@@ -46,7 +46,9 @@ def _test_cross_grid_projector_returns_target_shards_rank(
         row_normalize=False,
     )
 
-    full = torch.arange(source_grid_size * variables, dtype=torch.float32, device=device).reshape(
+    full = torch.arange(
+        source_grid_size * variables, dtype=torch.float32, device=device
+    ).reshape(
         1,
         1,
         1,
@@ -64,7 +66,9 @@ def _test_cross_grid_projector_returns_target_shards_rank(
     )
 
     expected_full = full.reshape(1, 1, 1, target_grid_size, 2, variables).sum(dim=-2)
-    expected_local = torch.split(expected_full, target_grid_shard_sizes, dim=-2)[rank].contiguous()
+    expected_local = torch.split(expected_full, target_grid_shard_sizes, dim=-2)[
+        rank
+    ].contiguous()
     assert returned_grid_shard_sizes == target_grid_shard_sizes
     torch.testing.assert_close(projected, expected_local)
 
@@ -112,7 +116,9 @@ def _test_cross_grid_projector_fewer_vars_than_ranks_rank(
         row_normalize=False,
     )
 
-    full = torch.arange(source_grid_size * variables, dtype=torch.float32, device=device).reshape(
+    full = torch.arange(
+        source_grid_size * variables, dtype=torch.float32, device=device
+    ).reshape(
         1,
         1,
         1,
@@ -131,7 +137,9 @@ def _test_cross_grid_projector_fewer_vars_than_ranks_rank(
 
     # Each target node sums 2 source nodes (ratio = source_grid_size // target_grid_size = 2).
     expected_full = full.reshape(1, 1, 1, target_grid_size, 2, variables).sum(dim=-2)
-    expected_local = torch.split(expected_full, target_grid_shard_sizes, dim=-2)[rank].contiguous()
+    expected_local = torch.split(expected_full, target_grid_shard_sizes, dim=-2)[
+        rank
+    ].contiguous()
     assert returned_grid_shard_sizes == target_grid_shard_sizes
     torch.testing.assert_close(projected, expected_local)
 
@@ -151,7 +159,9 @@ def test_cross_grid_projector_fewer_vars_than_ranks(
 _GRADIENT_TOLERANCE = 64 * torch.finfo(torch.float64).eps
 
 
-def _build_overlapping_projector(source_grid_size: int, target_grid_size: int) -> CrossGridProjector:
+def _build_overlapping_projector(
+    source_grid_size: int, target_grid_size: int
+) -> CrossGridProjector:
     """Build a projector whose target nodes have edges across shard boundaries."""
 
     ratio = source_grid_size // target_grid_size
@@ -165,7 +175,9 @@ def _build_overlapping_projector(source_grid_size: int, target_grid_size: int) -
         )
     )
     # Deterministic, strictly positive, non-uniform weights: identical on every rank.
-    edge_attr = 1.0 + torch.sin(torch.arange(edge_index.shape[1], dtype=torch.float32)) ** 2
+    edge_attr = (
+        1.0 + torch.sin(torch.arange(edge_index.shape[1], dtype=torch.float32)) ** 2
+    )
 
     graph = HeteroData()
     graph["source"].num_nodes = source_grid_size
@@ -225,14 +237,20 @@ def _test_cross_grid_projector_gradients_rank(
     ).to(device)
 
     reference_input = full.clone().requires_grad_(True)
-    reference_output, reference_shard_sizes = projector(reference_input, model_comm_group=None, grid_shard_sizes=None)
+    reference_output, reference_shard_sizes = projector(
+        reference_input, model_comm_group=None, grid_shard_sizes=None
+    )
     assert reference_shard_sizes is None
     (reference_output * grad_weights).sum().backward()
 
     source_grid_shard_sizes = get_balanced_partition_sizes(source_grid_size, world_size)
     target_grid_shard_sizes = get_balanced_partition_sizes(target_grid_size, world_size)
 
-    local_input = torch.split(full, source_grid_shard_sizes, dim=-2)[rank].contiguous().requires_grad_(True)
+    local_input = (
+        torch.split(full, source_grid_shard_sizes, dim=-2)[rank]
+        .contiguous()
+        .requires_grad_(True)
+    )
     local_output, returned_grid_shard_sizes = projector(
         local_input,
         model_comm_group=group,
@@ -242,11 +260,17 @@ def _test_cross_grid_projector_gradients_rank(
 
     # Summing the per-rank losses reproduces the reference loss, so each rank's
     # local gradient must equal the matching slice of the reference gradient.
-    local_grad_weights = torch.split(grad_weights, target_grid_shard_sizes, dim=-2)[rank]
+    local_grad_weights = torch.split(grad_weights, target_grid_shard_sizes, dim=-2)[
+        rank
+    ]
     (local_output * local_grad_weights).sum().backward()
 
-    expected_output = torch.split(reference_output.detach(), target_grid_shard_sizes, dim=-2)[rank]
-    expected_grad = torch.split(reference_input.grad, source_grid_shard_sizes, dim=-2)[rank]
+    expected_output = torch.split(
+        reference_output.detach(), target_grid_shard_sizes, dim=-2
+    )[rank]
+    expected_grad = torch.split(reference_input.grad, source_grid_shard_sizes, dim=-2)[
+        rank
+    ]
 
     torch.testing.assert_close(
         local_output.detach(),

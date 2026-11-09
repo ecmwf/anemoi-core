@@ -46,14 +46,20 @@ def _brownian_bridge_variance(t: torch.Tensor) -> torch.Tensor:
     return 2.0 * t * (1.0 - t)
 
 
-def stochastic_interpolant_alpha(t: torch.Tensor, schedule: str = "linear") -> torch.Tensor:
+def stochastic_interpolant_alpha(
+    t: torch.Tensor, schedule: str = "linear"
+) -> torch.Tensor:
     """Weight applied to the source field along the stochastic-interpolant bridge."""
     if schedule != "linear":
-        raise ValueError(f"Unsupported stochastic interpolant alpha schedule: {schedule}")
+        raise ValueError(
+            f"Unsupported stochastic interpolant alpha schedule: {schedule}"
+        )
     return 1.0 - t
 
 
-def stochastic_interpolant_beta(t: torch.Tensor, schedule: str = "linear") -> torch.Tensor:
+def stochastic_interpolant_beta(
+    t: torch.Tensor, schedule: str = "linear"
+) -> torch.Tensor:
     """Weight applied to the target field along the stochastic-interpolant bridge."""
     if schedule == "linear":
         return t
@@ -74,14 +80,20 @@ def stochastic_interpolant_sigma(
     raise ValueError(f"Unsupported stochastic interpolant sigma schedule: {schedule}")
 
 
-def stochastic_interpolant_alpha_dot(t: torch.Tensor, schedule: str = "linear") -> torch.Tensor:
+def stochastic_interpolant_alpha_dot(
+    t: torch.Tensor, schedule: str = "linear"
+) -> torch.Tensor:
     """Rate of change of the source weight with interpolation time."""
     if schedule != "linear":
-        raise ValueError(f"Unsupported stochastic interpolant alpha schedule: {schedule}")
+        raise ValueError(
+            f"Unsupported stochastic interpolant alpha schedule: {schedule}"
+        )
     return -torch.ones_like(t)
 
 
-def stochastic_interpolant_beta_dot(t: torch.Tensor, schedule: str = "linear") -> torch.Tensor:
+def stochastic_interpolant_beta_dot(
+    t: torch.Tensor, schedule: str = "linear"
+) -> torch.Tensor:
     """Rate of change of the target weight with interpolation time."""
     if schedule == "linear":
         return torch.ones_like(t)
@@ -118,7 +130,8 @@ def stochastic_interpolant_clean_mean(
 ) -> torch.Tensor:
     """Recover the clean target from the current bridge state and model prediction."""
     assert all(
-        x.dtype in (torch.float32, torch.float64) for x in (drift, interpolant, anchor, t)
+        x.dtype in (torch.float32, torch.float64)
+        for x in (drift, interpolant, anchor, t)
     ), "SI clean reconstruction requires at least float32 precision."
     alpha = stochastic_interpolant_alpha(t, alpha_schedule)
     beta = stochastic_interpolant_beta(t, beta_schedule)
@@ -128,8 +141,12 @@ def stochastic_interpolant_clean_mean(
         use_drift = beta_dot.abs() > reconstruction_eps
         use_interpolant = beta.abs() > reconstruction_eps
 
-        clean_from_drift = (drift - alpha_dot * anchor) / torch.clamp(beta_dot, min=reconstruction_eps)
-        clean_from_interpolant = (interpolant - alpha * anchor) / torch.clamp(beta, min=reconstruction_eps)
+        clean_from_drift = (drift - alpha_dot * anchor) / torch.clamp(
+            beta_dot, min=reconstruction_eps
+        )
+        clean_from_interpolant = (interpolant - alpha * anchor) / torch.clamp(
+            beta, min=reconstruction_eps
+        )
 
         fallback_clean = torch.where(use_interpolant, clean_from_interpolant, anchor)
         return torch.where(use_drift, clean_from_drift, fallback_clean)

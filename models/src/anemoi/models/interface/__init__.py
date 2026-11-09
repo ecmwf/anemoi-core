@@ -16,8 +16,7 @@ from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.preprocessing import Processors
-from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.models.preprocessing import Processors, StepwiseProcessors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
 
@@ -78,7 +77,9 @@ class AnemoiModelInterface(torch.nn.Module):
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
         self.metadata = metadata
-        self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
+        self.supporting_arrays = (
+            supporting_arrays if supporting_arrays is not None else {}
+        )
         self.data_indices = data_indices
         self._build_model()
         self._update_metadata()
@@ -118,12 +119,19 @@ class AnemoiModelInterface(torch.nn.Module):
             data_indices,
             statistics,
         )
-        pre_processors_tendencies, post_processors_tendencies = self._build_tendency_processors(
-            processors_configs,
-            data_indices,
-            statistics_tendencies,
+        pre_processors_tendencies, post_processors_tendencies = (
+            self._build_tendency_processors(
+                processors_configs,
+                data_indices,
+                statistics_tendencies,
+            )
         )
-        return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
+        return (
+            pre_processors,
+            post_processors,
+            pre_processors_tendencies,
+            post_processors_tendencies,
+        )
 
     @staticmethod
     def _build_processor_pair(
@@ -132,7 +140,12 @@ class AnemoiModelInterface(torch.nn.Module):
         statistics: dict,
     ) -> tuple[Processors, Processors]:
         processors = [
-            [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
+            [
+                name,
+                instantiate(
+                    processor, data_indices=data_indices, statistics=statistics
+                ),
+            ]
             for name, processor in processors_configs.items()
         ]
         return Processors(processors), Processors(processors, inverse=True)
@@ -142,18 +155,26 @@ class AnemoiModelInterface(torch.nn.Module):
         processors_configs: dict,
         data_indices: dict,
         statistics_tendencies: dict | None,
-    ) -> tuple[Processors | StepwiseProcessors | None, Processors | StepwiseProcessors | None]:
+    ) -> tuple[
+        Processors | StepwiseProcessors | None, Processors | StepwiseProcessors | None
+    ]:
         if statistics_tendencies is None:
             return None, None
 
         if "lead_times" not in statistics_tendencies:
-            return self._build_processor_pair(processors_configs, data_indices, statistics_tendencies)
+            return self._build_processor_pair(
+                processors_configs, data_indices, statistics_tendencies
+            )
 
         lead_times = list(statistics_tendencies.get("lead_times") or [])
         if self.n_step_output == 1:
-            step_stats = statistics_tendencies.get(lead_times[0]) if lead_times else None
+            step_stats = (
+                statistics_tendencies.get(lead_times[0]) if lead_times else None
+            )
             stats_for_tendencies = step_stats or statistics_tendencies
-            return self._build_processor_pair(processors_configs, data_indices, stats_for_tendencies)
+            return self._build_processor_pair(
+                processors_configs, data_indices, stats_for_tendencies
+            )
 
         pre_processors_tendencies = StepwiseProcessors(lead_times)
         post_processors_tendencies = StepwiseProcessors(lead_times)
@@ -161,7 +182,9 @@ class AnemoiModelInterface(torch.nn.Module):
             step_stats = statistics_tendencies.get(lead_time)
             if step_stats is None:
                 continue
-            pre_step, post_step = self._build_processor_pair(processors_configs, data_indices, step_stats)
+            pre_step, post_step = self._build_processor_pair(
+                processors_configs, data_indices, step_stats
+            )
             pre_processors_tendencies.set(lead_time, pre_step)
             post_processors_tendencies.set(lead_time, post_step)
         return pre_processors_tendencies, post_processors_tendencies
@@ -181,7 +204,9 @@ class AnemoiModelInterface(torch.nn.Module):
                 data_config[dataset_name].processors,
                 self.statistics[dataset_name],
                 self.data_indices[dataset_name],
-                self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,
+                self.statistics_tendencies[dataset_name]
+                if self.statistics_tendencies is not None
+                else None,
             )
             self.pre_processors[dataset_name] = pre
             self.post_processors[dataset_name] = post
@@ -228,7 +253,7 @@ class AnemoiModelInterface(torch.nn.Module):
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         gather_out: bool = True,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
@@ -263,7 +288,9 @@ class AnemoiModelInterface(torch.nn.Module):
         if hasattr(self, "pre_processors_tendencies"):
             predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies
         if hasattr(self, "post_processors_tendencies"):
-            predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
+            predict_kwargs["post_processors_tendencies"] = (
+                self.post_processors_tendencies
+            )
         if getattr(self, "spatial_pre_processors", None):
             predict_kwargs["spatial_pre_processors"] = self.spatial_pre_processors
 

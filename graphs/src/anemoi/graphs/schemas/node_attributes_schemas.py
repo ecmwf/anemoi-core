@@ -11,10 +11,10 @@
 import logging
 from typing import Literal
 
+from anemoi.utils.schemas import BaseModel
 from pydantic import Field
 
 from anemoi.graphs.schemas.normalise import ImplementedNormalisationSchema
-from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,7 +32,9 @@ class PlanarAreaWeightSchema(BaseModel):
 
 
 class MaskedPlanarAreaWeightsSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.attributes.MaskedPlanarAreaWeights"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.graphs.nodes.attributes.MaskedPlanarAreaWeights"] = Field(
+        ..., alias="_target_"
+    )
     "Implementation of the area of the nodes as the weights from anemoi.graphs.nodes.attributes."
     mask_node_attr_name: str = Field(examples="cutout_mask")
     "Attribute name to mask the area weights."
@@ -41,7 +43,9 @@ class MaskedPlanarAreaWeightsSchema(BaseModel):
 
 
 class SphericalAreaWeightSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.attributes.SphericalAreaWeights"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.graphs.nodes.attributes.SphericalAreaWeights"] = Field(
+        ..., alias="_target_"
+    )
     "Implementation of the 3D area of the nodes as the weights from anemoi.graphs.nades.attributes."
     norm: ImplementedNormalisationSchema = Field(example="unit-max")
     "Normalisation of the weights."
@@ -50,21 +54,26 @@ class SphericalAreaWeightSchema(BaseModel):
 
 
 class CutOutMaskSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.attributes.CutOutMask", "anemoi.graphs.nodes.attributes.LimitedAreaMask"] = (
-        Field(..., alias="_target_")
-    )
+    target_: Literal[
+        "anemoi.graphs.nodes.attributes.CutOutMask",
+        "anemoi.graphs.nodes.attributes.LimitedAreaMask",
+    ] = Field(..., alias="_target_")
     "Implementation of the area masks from anemoi.graphs.nodes.attributes."
 
 
 class GridsMaskSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.attributes.GridsMask"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.graphs.nodes.attributes.GridsMask"] = Field(
+        ..., alias="_target_"
+    )
     "Implementation of the grids mask from anemoi.graphs.nodes.attributes."
     grids: list[int] | int = Field(examples=[0, [0]])
     "Position of the grids to consider as True."
 
 
 class NonmissingAnemoiDatasetVariableSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable"] = Field(..., alias="_target_")
+    target_: Literal[
+        "anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable"
+    ] = Field(..., alias="_target_")
     (
         "Implementation of a mask from the nonmissing values of a anemoi-datasets variable "
         "from anemoi.graphs.nodes.attributes."

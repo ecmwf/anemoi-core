@@ -20,7 +20,11 @@ def _make_sparse_csr(n_rows: int, n_cols: int, nnz: int, seed: int = 0) -> torch
     rows = flat_indices // n_cols
     cols = flat_indices % n_cols
     values = torch.rand(nnz, generator=rng)
-    return torch.sparse_coo_tensor(torch.stack([rows, cols]), values, (n_rows, n_cols)).coalesce().to_sparse_csr()
+    return (
+        torch.sparse_coo_tensor(torch.stack([rows, cols]), values, (n_rows, n_cols))
+        .coalesce()
+        .to_sparse_csr()
+    )
 
 
 @pytest.fixture
@@ -33,7 +37,9 @@ def csr_matrix() -> torch.Tensor:
     return _make_sparse_csr(n_rows=8, n_cols=16, nnz=32, seed=0)
 
 
-def test_forward_matches_dense_matmul(projector: SparseProjector, csr_matrix: torch.Tensor) -> None:
+def test_forward_matches_dense_matmul(
+    projector: SparseProjector, csr_matrix: torch.Tensor
+) -> None:
     """forward result matches the equivalent dense matrix multiplication."""
     x = torch.rand(2, csr_matrix.shape[1], 4)
     out = projector(x, csr_matrix)
@@ -42,7 +48,9 @@ def test_forward_matches_dense_matmul(projector: SparseProjector, csr_matrix: to
     assert torch.allclose(out, expected, atol=1e-5)
 
 
-def test_forward_handles_arbitrary_leading_dims(projector: SparseProjector, csr_matrix: torch.Tensor) -> None:
+def test_forward_handles_arbitrary_leading_dims(
+    projector: SparseProjector, csr_matrix: torch.Tensor
+) -> None:
     """forward correctly handles inputs with extra leading dimensions."""
     # Shape: [batch, timesteps, nodes, vars]
     x = torch.rand(2, 3, csr_matrix.shape[1], 5)
@@ -66,7 +74,13 @@ def test_forward_uses_configured_num_chunks(csr_matrix: torch.Tensor) -> None:
 @pytest.mark.parametrize(
     "shape",
     [(16, 0), (2, 3, 16, 0), (0, 16, 4), (16, 1), (3, 16, 1)],
-    ids=["no_leading_axes_no_channels", "no_channels", "empty_leading_axis", "one_channel", "fewer_rows_than_chunks"],
+    ids=[
+        "no_leading_axes_no_channels",
+        "no_channels",
+        "empty_leading_axis",
+        "one_channel",
+        "fewer_rows_than_chunks",
+    ],
 )
 def test_forward_and_gradient_match_dense_for_awkward_shapes(
     csr_matrix: torch.Tensor,

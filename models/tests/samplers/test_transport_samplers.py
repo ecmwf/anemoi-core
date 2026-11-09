@@ -12,16 +12,20 @@ from collections.abc import Callable
 import pytest
 import torch
 
-from anemoi.models.samplers.transport_samplers import DPMpp2MSampler
-from anemoi.models.samplers.transport_samplers import EDMHeunSampler
-from anemoi.models.samplers.transport_samplers import VectorFieldEulerSampler
-from anemoi.models.samplers.transport_samplers import VectorFieldHeunSampler
-from anemoi.models.transport.schedules import DEFAULT_FINAL_SIGMA_EPS
-from anemoi.models.transport.schedules import CosineSigmaSchedule
-from anemoi.models.transport.schedules import ExponentialSigmaSchedule
-from anemoi.models.transport.schedules import KarrasSigmaSchedule
-from anemoi.models.transport.schedules import LinearSigmaSchedule
-from anemoi.models.transport.schedules import SigmaSchedule
+from anemoi.models.samplers.transport_samplers import (
+    DPMpp2MSampler,
+    EDMHeunSampler,
+    VectorFieldEulerSampler,
+    VectorFieldHeunSampler,
+)
+from anemoi.models.transport.schedules import (
+    DEFAULT_FINAL_SIGMA_EPS,
+    CosineSigmaSchedule,
+    ExponentialSigmaSchedule,
+    KarrasSigmaSchedule,
+    LinearSigmaSchedule,
+    SigmaSchedule,
+)
 
 DATASET_NAME = "test_dataset"
 
@@ -67,10 +71,14 @@ class RecordingZeroDenoiser:
         self.call_count += 1
         if self.validator is not None:
             self.validator(x, y, sigma)
-        return {dataset_name: torch.zeros_like(y_data) for dataset_name, y_data in y.items()}
+        return {
+            dataset_name: torch.zeros_like(y_data) for dataset_name, y_data in y.items()
+        }
 
 
-def make_inputs(dtype: torch.dtype = torch.float32) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+def make_inputs(
+    dtype: torch.dtype = torch.float32,
+) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
     x = {DATASET_NAME: torch.randn(2, 3, 1, 5, 4, dtype=dtype)}
     y = {DATASET_NAME: torch.randn(2, 3, 1, 5, 4, dtype=dtype)}
     return x, y
@@ -148,8 +156,12 @@ def test_sigma_schedule_validates_common_constructor_contract() -> None:
     with pytest.raises(ValueError, match="sigma_max must be strictly positive"):
         DummySigmaSchedule(torch.linspace(1.0, 0.1, 4), num_steps=4, sigma_max=0.0)
 
-    with pytest.raises(ValueError, match="sigma_max must be greater than or equal to sigma_min"):
-        DummySigmaSchedule(torch.linspace(1.0, 0.1, 4), num_steps=4, sigma_max=0.05, sigma_min=0.1)
+    with pytest.raises(
+        ValueError, match="sigma_max must be greater than or equal to sigma_min"
+    ):
+        DummySigmaSchedule(
+            torch.linspace(1.0, 0.1, 4), num_steps=4, sigma_max=0.05, sigma_min=0.1
+        )
 
     with pytest.raises(ValueError, match="num_steps must be at least 1"):
         DummySigmaSchedule(torch.empty(0), num_steps=0)
@@ -180,7 +192,9 @@ def test_sigma_schedule_canonicalizes_explicit_near_zero_final_value_to_zero() -
 
 def test_sigma_schedule_rejects_explicit_final_value_outside_tolerance() -> None:
     scheduler = DummySigmaSchedule(
-        torch.tensor([1.0, 0.7, 0.4, 0.1, DEFAULT_FINAL_SIGMA_EPS * 10], dtype=torch.float64),
+        torch.tensor(
+            [1.0, 0.7, 0.4, 0.1, DEFAULT_FINAL_SIGMA_EPS * 10], dtype=torch.float64
+        ),
         num_steps=4,
     )
 
@@ -233,7 +247,9 @@ def test_heun_uses_corrector_before_final_step() -> None:
     assert denoiser.call_count == 3
 
 
-@pytest.mark.parametrize("sampler_cls", [VectorFieldEulerSampler, VectorFieldHeunSampler])
+@pytest.mark.parametrize(
+    "sampler_cls", [VectorFieldEulerSampler, VectorFieldHeunSampler]
+)
 def test_vector_field_samplers_integrate_constant_velocity(
     sampler_cls: type[VectorFieldEulerSampler] | type[VectorFieldHeunSampler],
 ) -> None:
@@ -257,7 +273,9 @@ def test_vector_field_samplers_integrate_constant_velocity(
             1,
             1,
         )
-        return {dataset_name: torch.ones_like(y_data) for dataset_name, y_data in y.items()}
+        return {
+            dataset_name: torch.ones_like(y_data) for dataset_name, y_data in y.items()
+        }
 
     sampler = sampler_cls(dtype=torch.float64)
     result = sampler.sample(x=x, y=y, times=times, vector_field_fn=velocity_fn)

@@ -7,22 +7,21 @@
 # nor does it submit to any jurisdiction.
 #
 
-from typing import Any
-from typing import Literal
-from typing import Union
+from typing import Any, Literal
 
-from pydantic import Field
-from pydantic import NonNegativeFloat
-from pydantic import NonNegativeInt
-from pydantic import model_validator
+from pydantic import Field, NonNegativeFloat, NonNegativeInt, model_validator
 
-from .common_components import GNNModelComponent
-from .common_components import PointWiseMapperComponent
-from .common_components import TransformerModelComponent
+from .common_components import (
+    GNNModelComponent,
+    PointWiseMapperComponent,
+    TransformerModelComponent,
+)
 
 
 class GNNEncoderSchema(GNNModelComponent):
-    target_: Literal["anemoi.models.layers.mapper.GNNForwardMapper"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.mapper.GNNForwardMapper"] = Field(
+        ..., alias="_target_"
+    )
     "GNN encoder object from anemoi.models.layers.mapper."
     num_channels: NonNegativeInt = Field(example=512)
     "Hidden dimension of the GNN encoder. Default to 512."
@@ -33,7 +32,9 @@ class GNNEncoderSchema(GNNModelComponent):
 
 
 class GraphTransformerEncoderSchema(TransformerModelComponent):
-    target_: Literal["anemoi.models.layers.mapper.GraphTransformerForwardMapper"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.mapper.GraphTransformerForwardMapper"] = (
+        Field(..., alias="_target_")
+    )
     "Graph Transfromer Encoder object from anemoi.models.layers.mapper."
     num_channels: NonNegativeInt = Field(example=512)
     "Hidden dimension of the Graph Transformer encoder. Default to 512."
@@ -66,11 +67,13 @@ class GraphTransformerEncoderSchema(TransformerModelComponent):
 
 
 class TransformerEncoderSchema(TransformerModelComponent):
-    target_: Literal["anemoi.models.layers.mapper.TransformerForwardMapper"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.mapper.TransformerForwardMapper"] = Field(
+        ..., alias="_target_"
+    )
     "Transformer Encoder object from anemoi.models.layers.mapper."
     num_channels: NonNegativeInt = Field(example=512)
     "Hidden dimension of the Transformer encoder. Default to 512."
-    window_size: Union[NonNegativeInt, None] = Field(example=512)
+    window_size: NonNegativeInt | None = Field(example=512)
     "Attention window size along the longitude axis. Default to 512."
     dropout_p: NonNegativeFloat = Field(example=0.0)
     "Dropout probability used for multi-head self attention, default 0.0"
@@ -83,7 +86,9 @@ class TransformerEncoderSchema(TransformerModelComponent):
 
 
 class PointWiseForwardMapperSchema(PointWiseMapperComponent):
-    target_: Literal["anemoi.models.layers.mapper.PointWiseForwardMapper"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.mapper.PointWiseForwardMapper"] = Field(
+        ..., alias="_target_"
+    )
     "Point-wise encoder object from anemoi.models.layers.mapper."
     num_channels: NonNegativeInt = Field(example=512)
     "Hidden dimension of the Point-wise encoder. Default to 512."

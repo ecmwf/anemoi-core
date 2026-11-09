@@ -11,8 +11,7 @@ import logging
 from typing import Optional
 
 import torch
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 
 from anemoi.models.data_indices.collection import IndexCollection
 
@@ -25,8 +24,8 @@ class BasePreprocessor(nn.Module):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         """Initialize the preprocessor.
 
@@ -57,7 +56,13 @@ class BasePreprocessor(nn.Module):
 
         super().__init__()
 
-        self.default, self.remap, self.normalizer, self.method_config, self.method_kwargs = self._process_config(config)
+        (
+            self.default,
+            self.remap,
+            self.normalizer,
+            self.method_config,
+            self.method_kwargs,
+        ) = self._process_config(config)
         self.methods = self._invert_key_value_list(self.method_config)
 
         self.data_indices = data_indices
@@ -74,7 +79,11 @@ class BasePreprocessor(nn.Module):
         remap = config.get("remap", {})
         normalizer = config.get("normalizer", "none")
         method_kwargs = config.get("method_kwargs", {})
-        method_config = {k: v for k, v in config.items() if k not in _special_keys and v is not None and v != "none"}
+        method_config = {
+            k: v
+            for k, v in config.items()
+            if k not in _special_keys and v is not None and v != "none"
+        }
 
         if not method_config:
             LOGGER.warning(
@@ -84,7 +93,9 @@ class BasePreprocessor(nn.Module):
             if isinstance(method_config[m], str):
                 method_config[m] = {method_config[m]: f"{m}_{method_config[m]}"}
             elif isinstance(method_config[m], list):
-                method_config[m] = {method: f"{m}_{method}" for method in method_config[m]}
+                method_config[m] = {
+                    method: f"{m}_{method}" for method in method_config[m]
+                }
 
         return default, remap, normalizer, method_config, method_kwargs
 
@@ -109,7 +120,9 @@ class BasePreprocessor(nn.Module):
             for variable in variables
         }
 
-    def forward(self, x, in_place: bool = True, inverse: bool = False, **kwargs) -> Tensor:
+    def forward(
+        self, x, in_place: bool = True, inverse: bool = False, **kwargs
+    ) -> Tensor:
         """Process the input tensor.
 
         Parameters
@@ -128,8 +141,12 @@ class BasePreprocessor(nn.Module):
         torch.Tensor
             Processed tensor
         """
-        if "skip_imputation" in kwargs and not getattr(self, "supports_skip_imputation", False):
-            kwargs = {key: value for key, value in kwargs.items() if key != "skip_imputation"}
+        if "skip_imputation" in kwargs and not getattr(
+            self, "supports_skip_imputation", False
+        ):
+            kwargs = {
+                key: value for key, value in kwargs.items() if key != "skip_imputation"
+            }
         if inverse:
             return self.inverse_transform(x, in_place=in_place, **kwargs)
         return self.transform(x, in_place=in_place, **kwargs)
@@ -202,9 +219,9 @@ class Processors(nn.Module):
         """Run checks on the processed tensor."""
         if not self.inverse:
             # Forward transformation checks:
-            assert not torch.isnan(
-                x
-            ).any(), f"NaNs ({torch.isnan(x).sum()}) found in processed tensor after {self.__class__.__name__}."
+            assert not torch.isnan(x).any(), (
+                f"NaNs ({torch.isnan(x).sum()}) found in processed tensor after {self.__class__.__name__}."
+            )
 
 
 class StepwiseProcessors(nn.Module):

@@ -90,10 +90,18 @@ def test_dataindices_init(data_indices) -> None:
 
 
 def test_dataindices_max(data_indices) -> None:
-    assert max(data_indices.data.input.full) == max(data_indices.data.input.name_to_index.values())
-    assert max(data_indices.data.output.full) == max(data_indices.data.output.name_to_index.values())
-    assert max(data_indices.model.input.full) == max(data_indices.model.input.name_to_index.values())
-    assert max(data_indices.model.output.full) == max(data_indices.model.output.name_to_index.values())
+    assert max(data_indices.data.input.full) == max(
+        data_indices.data.input.name_to_index.values()
+    )
+    assert max(data_indices.data.output.full) == max(
+        data_indices.data.output.name_to_index.values()
+    )
+    assert max(data_indices.model.input.full) == max(
+        data_indices.model.input.name_to_index.values()
+    )
+    assert max(data_indices.model.output.full) == max(
+        data_indices.model.output.name_to_index.values()
+    )
 
 
 def test_dataindices_todict(data_indices) -> None:
@@ -175,7 +183,9 @@ def test_data_indices_with_target(data_indices_with_target) -> None:
         "dem",
     }
     assert set(data_indices_with_target.model.input.excludes) == set()
-    assert set(data_indices_with_target.model.output.includes) == {"tp"}  # the model only predicts tp
+    assert set(data_indices_with_target.model.output.includes) == {
+        "tp"
+    }  # the model only predicts tp
     assert set(data_indices_with_target.model.output.excludes) == set()
     assert (
         data_indices_with_target.data.input.name_to_index

@@ -10,9 +10,11 @@
 import pytest
 import torch
 
-from anemoi.models.transport.schedules import KarrasSigmaTrainingDistribution
-from anemoi.models.transport.schedules import UniformTimeTrainingDistribution
-from anemoi.models.transport.schedules import UnitTimeSchedule
+from anemoi.models.transport.schedules import (
+    KarrasSigmaTrainingDistribution,
+    UniformTimeTrainingDistribution,
+    UnitTimeSchedule,
+)
 
 
 def test_unit_time_schedule_returns_monotonic_time_grid() -> None:
@@ -49,7 +51,9 @@ def test_training_condition_distribution_samples_one_shared_condition_per_sample
         "b": (2, 2, 3, 7, 1),
     }
 
-    condition = distribution.sample(shapes, device=torch.device("cpu"), dtype=torch.float64)
+    condition = distribution.sample(
+        shapes, device=torch.device("cpu"), dtype=torch.float64
+    )
 
     assert set(condition) == set(shapes)
     assert condition["a"].shape == condition["b"].shape == (2, 1, 3, 1, 1)

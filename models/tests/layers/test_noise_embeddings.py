@@ -12,8 +12,7 @@ import math
 import pytest
 import torch
 
-from anemoi.models.layers.diffusion import RandomFourierEmbeddings
-from anemoi.models.layers.diffusion import SinusoidalEmbeddings
+from anemoi.models.layers.diffusion import RandomFourierEmbeddings, SinusoidalEmbeddings
 
 
 class TestRandomFourierEmbeddings:
@@ -140,7 +139,9 @@ class TestSinusoidalEmbeddings:
         """Test SinusoidalEmbeddings initialization with custom parameters."""
         num_channels = 64
         max_period = 5000
-        embedder = SinusoidalEmbeddings(num_channels=num_channels, max_period=max_period)
+        embedder = SinusoidalEmbeddings(
+            num_channels=num_channels, max_period=max_period
+        )
 
         assert embedder.frequencies.shape == (num_channels // 2,)
 
@@ -179,10 +180,14 @@ class TestSinusoidalEmbeddings:
         """Test that frequencies are computed correctly."""
         num_channels = 32
         max_period = 10000
-        embedder = SinusoidalEmbeddings(num_channels=num_channels, max_period=max_period)
+        embedder = SinusoidalEmbeddings(
+            num_channels=num_channels, max_period=max_period
+        )
 
         zdim = num_channels // 2
-        expected_frequencies = torch.exp(-math.log(max_period) * torch.arange(0, zdim) / zdim)
+        expected_frequencies = torch.exp(
+            -math.log(max_period) * torch.arange(0, zdim) / zdim
+        )
 
         assert torch.allclose(embedder.frequencies, expected_frequencies)
 
@@ -293,7 +298,9 @@ class TestNoiseEmbeddingsComparison:
         # Outputs should be different
         assert not torch.allclose(random_output, sinusoidal_output)
 
-    @pytest.mark.parametrize("device", ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"])
+    @pytest.mark.parametrize(
+        "device", ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+    )
     def test_device_compatibility(self, device):
         """Test that both embedders work on different devices."""
         if device == "cuda" and not torch.cuda.is_available():

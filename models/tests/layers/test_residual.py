@@ -14,10 +14,12 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.models.layers.residual import ScalarOrnsteinConnection
-from anemoi.models.layers.residual import SkipConnection
-from anemoi.models.layers.residual import SpectralOrnsteinConnection
-from anemoi.models.layers.residual import TruncatedConnection
+from anemoi.models.layers.residual import (
+    ScalarOrnsteinConnection,
+    SkipConnection,
+    SpectralOrnsteinConnection,
+    TruncatedConnection,
+)
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -165,8 +167,13 @@ def test_truncated_connection_shard_sizes_calls_all_to_all(graph_data, monkeypat
         )
         return x
 
-    monkeypatch.setattr("anemoi.models.layers.residual.all_to_all_transpose", fake_all_to_all)
-    monkeypatch.setattr("anemoi.models.layers.residual.get_shard_sizes", lambda x, dim, group: [x.shape[dim]])
+    monkeypatch.setattr(
+        "anemoi.models.layers.residual.all_to_all_transpose", fake_all_to_all
+    )
+    monkeypatch.setattr(
+        "anemoi.models.layers.residual.get_shard_sizes",
+        lambda x, dim, group: [x.shape[dim]],
+    )
 
     x = torch.randn(3, 2, 1, 2, 3)  # (batch, dates, ensemble, grid, features)
     mapper.forward(x, grid_shard_sizes=[1, 1])
@@ -182,7 +189,9 @@ def test_skipconnection(flat_data):
     out = mapper.forward(flat_data)
     expected_out = flat_data[:, -1, ...]
 
-    assert torch.allclose(out, expected_out), "SkipConnection did not return the expected output."
+    assert torch.allclose(out, expected_out), (
+        "SkipConnection did not return the expected output."
+    )
 
 
 # ── ScalarOrnsteinConnection tests ───────────────────────────────────────

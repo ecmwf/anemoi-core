@@ -16,11 +16,15 @@ from scipy.spatial import cKDTree
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
-from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
-from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
-from anemoi.graphs.utils import current_device_context
-from anemoi.graphs.utils import get_distributed_device
-from anemoi.graphs.utils import is_pyg_lib_available
+from anemoi.graphs.generate.transforms import (
+    latlon_rad_to_cartesian,
+    latlon_rad_to_cartesian_np,
+)
+from anemoi.graphs.utils import (
+    current_device_context,
+    get_distributed_device,
+    is_pyg_lib_available,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,10 +49,14 @@ class _PYGAreaMaskBackend:
 
         self._ref_vectors = latlon_rad_to_cartesian(coords_rad.to(self.device))
 
-    def get_mask(self, coords_rad: torch.Tensor | np.ndarray, chord_threshold: float) -> torch.Tensor:
+    def get_mask(
+        self, coords_rad: torch.Tensor | np.ndarray, chord_threshold: float
+    ) -> torch.Tensor:
         from torch_geometric.nn import radius
 
-        assert self._ref_vectors is not None, "The model must be fitted before calling get_mask."
+        assert self._ref_vectors is not None, (
+            "The model must be fitted before calling get_mask."
+        )
 
         LOGGER.debug(
             "%s: Getting the query coordinate mask with Eucl. chord threshold %.4f",
@@ -60,7 +68,10 @@ class _PYGAreaMaskBackend:
             coords_rad = torch.from_numpy(coords_rad)
 
         LOGGER.debug(
-            "%s: Moving query vector coordinates from %s to %s", self.__class__.__name__, coords_rad.device, self.device
+            "%s: Moving query vector coordinates from %s to %s",
+            self.__class__.__name__,
+            coords_rad.device,
+            self.device,
         )
         coords_rad = coords_rad.to(self.device)
 
@@ -74,7 +85,9 @@ class _PYGAreaMaskBackend:
                 max_num_neighbors=1,
             )
 
-        mask = torch.zeros(len(query_vectors), dtype=torch.bool, device=self._ref_vectors.device)
+        mask = torch.zeros(
+            len(query_vectors), dtype=torch.bool, device=self._ref_vectors.device
+        )
         mask[edge_index[0]] = True
         return mask.cpu()
 
@@ -89,14 +102,22 @@ class _KDTreeAreaMaskBackend:
 
     def fit(self, coords_rad: torch.Tensor) -> None:
         if coords_rad.device != "cpu":
-            LOGGER.debug("%s: Moving reference coordinates from %s to cpu", self.__class__.__name__, coords_rad.device)
+            LOGGER.debug(
+                "%s: Moving reference coordinates from %s to cpu",
+                self.__class__.__name__,
+                coords_rad.device,
+            )
             coords_rad = coords_rad.cpu()
 
         self._ref_vectors = latlon_rad_to_cartesian_np(coords_rad.numpy())
         self._kdtree = cKDTree(self._ref_vectors)
 
-    def get_mask(self, coords_rad: torch.Tensor | np.ndarray, chord_threshold: float) -> torch.Tensor:
-        assert self._kdtree is not None, "The model must be fitted before calling get_mask."
+    def get_mask(
+        self, coords_rad: torch.Tensor | np.ndarray, chord_threshold: float
+    ) -> torch.Tensor:
+        assert self._kdtree is not None, (
+            "The model must be fitted before calling get_mask."
+        )
 
         LOGGER.debug(
             "%s: Getting the query coordinate mask with Eucl. chord threshold %.4f",
@@ -106,12 +127,16 @@ class _KDTreeAreaMaskBackend:
 
         if isinstance(coords_rad, torch.Tensor):
             LOGGER.debug(
-                "%s: Moving query vector coordinates from %s to cpu", self.__class__.__name__, coords_rad.device
+                "%s: Moving query vector coordinates from %s to cpu",
+                self.__class__.__name__,
+                coords_rad.device,
             )
             coords_rad = coords_rad.cpu().numpy()
 
         query_vectors = latlon_rad_to_cartesian_np(coords_rad)
-        counts = self._kdtree.query_ball_point(query_vectors, r=chord_threshold, workers=-1, return_length=True)
+        counts = self._kdtree.query_ball_point(
+            query_vectors, r=chord_threshold, workers=-1, return_length=True
+        )
         return torch.from_numpy(counts > 0)
 
 
@@ -139,7 +164,9 @@ class AreaMaskBuilder:
         mask_attr_name: str | None = None,
     ):
         """Initialisation of the AreaMaskBuilder."""
-        assert isinstance(margin_radius_km, (int, float)), "The margin radius must be a number."
+        assert isinstance(margin_radius_km, (int, float)), (
+            "The margin radius must be a number."
+        )
         assert margin_radius_km > 0, "The margin radius must be positive."
 
         self.margin_radius_km = margin_radius_km
@@ -170,15 +197,17 @@ class AreaMaskBuilder:
         torch.Tensor of shape (N_ref, 2)
             Latitude and longitude of the reference nodes in radians.
         """
-        assert (
-            self.reference_node_name in graph.node_types
-        ), f'Reference node "{self.reference_node_name}" not found in the graph.'
+        assert self.reference_node_name in graph.node_types, (
+            f'Reference node "{self.reference_node_name}" not found in the graph.'
+        )
 
         coords_rad = graph[self.reference_node_name].x
         if self.mask_attr_name is not None:
             assert (
                 self.mask_attr_name in graph[self.reference_node_name].node_attrs()
-            ), f'Mask attribute "{self.mask_attr_name}" not found in the reference nodes.'
+            ), (
+                f'Mask attribute "{self.mask_attr_name}" not found in the reference nodes.'
+            )
             mask = graph[self.reference_node_name][self.mask_attr_name].squeeze()
             coords_rad = coords_rad[mask]
 

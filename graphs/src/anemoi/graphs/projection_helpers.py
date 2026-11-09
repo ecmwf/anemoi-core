@@ -36,7 +36,9 @@ def get_graph_node_names(
     return set(nodes.keys()) if nodes else set()
 
 
-def uses_fused_dataset_graph(graph_or_config: HeteroData | DictConfig | Mapping, dataset_names: list[str]) -> bool:
+def uses_fused_dataset_graph(
+    graph_or_config: HeteroData | DictConfig | Mapping, dataset_names: list[str]
+) -> bool:
     """Return whether the graph has one node group per dataset.
 
     In this form each dataset name is itself a node group in the graph,
@@ -48,4 +50,7 @@ def uses_fused_dataset_graph(graph_or_config: HeteroData | DictConfig | Mapping,
     if not set(dataset_names).issubset(node_names):
         return False
 
-    return dataset_names != [DEFAULT_DATASET_NAME] or DEFAULT_DATASET_NAME not in node_names
+    return (
+        dataset_names != [DEFAULT_DATASET_NAME]
+        or DEFAULT_DATASET_NAME not in node_names
+    )

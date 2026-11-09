@@ -8,21 +8,18 @@
 # nor does it submit to any jurisdiction.
 
 
-from typing import List
-from typing import Optional
-
 import torch
 import torch.distributed as dist
 from torch import Tensor
-from torch.distributed.distributed_c10d import ProcessGroup
-from torch.distributed.distributed_c10d import _resolve_process_group
+from torch.distributed.distributed_c10d import ProcessGroup, _resolve_process_group
 
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import expand_shard_sizes_to_shapes
+from anemoi.models.distributed.shapes import ShardSizes, expand_shard_sizes_to_shapes
 from anemoi.models.distributed.utils import get_memory_format
 
 
-def _split(input_: Tensor, dim_: int, sizes_: ShardSizes, group: Optional[ProcessGroup] = None) -> Tensor:
+def _split(
+    input_: Tensor, dim_: int, sizes_: ShardSizes, group: ProcessGroup | None = None
+) -> Tensor:
     """Split the tensor along dim and keep the relevant slice."""
     # Modified from
     # Copyright (c) 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -68,7 +65,11 @@ def _gather_into_tensor(
     out_shape[dim_] = sum(sizes)  # expand shard sizes in dim_ to summed shape
 
     output = torch.empty(
-        out_shape, dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
+        out_shape,
+        dtype=input_.dtype,
+        layout=input_.layout,
+        device=input_.device,
+        memory_format=input_format,
     )
 
     dist.all_gather_into_tensor(output, input_, group=group)
@@ -92,7 +93,11 @@ def _gather_with_padding(
 
     tensor_list = [
         torch.empty(
-            padded_shape, dtype=input_.dtype, layout=input_.layout, device=input_.device, memory_format=input_format
+            padded_shape,
+            dtype=input_.dtype,
+            layout=input_.layout,
+            device=input_.device,
+            memory_format=input_format,
         )
         for _ in range(len(sizes))
     ]
@@ -143,7 +148,7 @@ def _gather(
     input_: Tensor,
     dim_: int,
     sizes: ShardSizes,
-    group: Optional[ProcessGroup] = None,
+    group: ProcessGroup | None = None,
 ) -> Tensor:
     """Gather tensors and concatenate along the last dimension."""
     # Modified from
@@ -180,7 +185,7 @@ def _expand_sharded_tensor(
     input_: Tensor,
     dim_: int,
     sizes: ShardSizes,
-    group: Optional[ProcessGroup] = None,
+    group: ProcessGroup | None = None,
 ) -> Tensor:
     """Expand a local shard to the gathered shape without communication.
 
@@ -217,7 +222,9 @@ def _expand_sharded_tensor(
     return output
 
 
-def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup] = None) -> Tensor:
+def _reduce(
+    input_: Tensor, use_fp32: bool = True, group: ProcessGroup | None = None
+) -> Tensor:
     """All-reduce the input tensor across model parallel group."""
     # Modified from
     # Copyright (c) 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -265,23 +272,28 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
 
     """
     comm_size = dist.get_world_size(group=group)
-    assert len(input_list) == comm_size, f"Expected {comm_size} all-to-all input tensors, but got {len(input_list)}."
-    assert len(output_list) == comm_size, f"Expected {comm_size} all-to-all output tensors, but got {len(output_list)}."
+    assert len(input_list) == comm_size, (
+        f"Expected {comm_size} all-to-all input tensors, but got {len(input_list)}."
+    )
+    assert len(output_list) == comm_size, (
+        f"Expected {comm_size} all-to-all output tensors, but got {len(output_list)}."
+    )
 
     # cant call dist.get_backend(group) in torch.compile() so we check is_compiling first
     if (not torch.compiler.is_compiling()) and dist.get_backend(group) == "gloo":
-
         # Need to check torch version here bc the syntax for dist.send/recv changed in torch v2.6
         torch_version = torch.__version__.split(".")
         torch_major_version = int(torch_version[0])
         torch_minor_version = int(torch_version[1])
         if torch_major_version <= 2 and torch_minor_version < 6:
-            raise NotImplementedError("Gloo all_to_all not implemented for torch < v2.6")
+            raise NotImplementedError(
+                "Gloo all_to_all not implemented for torch < v2.6"
+            )
 
         reqs = []
         rank = dist.get_rank(group=group)
         # Here we implement the linear shift algorithm from Hofmann and Ruenger, 2013
-        for i in range(0, comm_size):
+        for i in range(comm_size):
             j = (i - rank + comm_size) % comm_size
             if j != rank:
                 # exchange data with rank j
@@ -298,11 +310,11 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
 
 @torch.library.custom_op("anemoi_distributed::alltoall", mutates_args=())
 def _alltoall_op(
-    input_list: List[Tensor],
-    output_shapes_flat: List[int],
+    input_list: list[Tensor],
+    output_shapes_flat: list[int],
     ndim: int,
     group_name: str,
-) -> List[Tensor]:
+) -> list[Tensor]:
     """torch.compile-traceable wrapper around the list-based ``dist.all_to_all``.
 
     torch.compile() cannot trace ``dist.all_to_all`` with list inputs.
@@ -312,7 +324,10 @@ def _alltoall_op(
     ref = input_list[0]
     input_format = get_memory_format(ref)
 
-    output_shapes = [output_shapes_flat[i * ndim : (i + 1) * ndim] for i in range(len(output_shapes_flat) // ndim)]
+    output_shapes = [
+        output_shapes_flat[i * ndim : (i + 1) * ndim]
+        for i in range(len(output_shapes_flat) // ndim)
+    ]
     output_list = [
         torch.empty(
             shape,
@@ -338,11 +353,14 @@ def _(
 ) -> list[Tensor]:
     # Output shapes are provided explicitly, so the fake result is fully determined.
     ref = input_list[0]
-    output_shapes = [output_shapes_flat[i * ndim : (i + 1) * ndim] for i in range(len(output_shapes_flat) // ndim)]
+    output_shapes = [
+        output_shapes_flat[i * ndim : (i + 1) * ndim]
+        for i in range(len(output_shapes_flat) // ndim)
+    ]
     return [ref.new_empty(shape) for shape in output_shapes]
 
 
-def _resolve_group_name(group: Optional[ProcessGroup]) -> str:
+def _resolve_group_name(group: ProcessGroup | None) -> str:
     if group is None:
         group = dist.distributed_c10d._get_default_group()
     return group.group_name
@@ -354,7 +372,7 @@ def _alltoall_transpose(
     split_sizes: list[int] | tuple[int, ...],
     dim_concat: int,
     concat_sizes: list[int] | tuple[int, ...],
-    group: Optional[ProcessGroup] = None,
+    group: ProcessGroup | None = None,
 ) -> Tensor:
     """Unified all-to-all distributed transpose along arbitrary dimensions.
 
@@ -395,7 +413,9 @@ def _alltoall_transpose(
     myrank = dist.get_rank(group=group)
     input_format = get_memory_format(input_)
 
-    input_list = [x.contiguous() for x in torch.split(input_, split_sizes, dim=dim_split)]
+    input_list = [
+        x.contiguous() for x in torch.split(input_, split_sizes, dim=dim_split)
+    ]
 
     # shape received from each rank: dim_split = this rank's split size,
     # dim_concat = that rank's concat size. Flattened into a single list[int]
@@ -407,7 +427,9 @@ def _alltoall_transpose(
         out_shape[dim_concat] = concat_sizes[rank]
         output_shapes_flat.extend(out_shape)
 
-    output_list = _alltoall_op(input_list, output_shapes_flat, ndim, _resolve_group_name(group))
+    output_list = _alltoall_op(
+        input_list, output_shapes_flat, ndim, _resolve_group_name(group)
+    )
 
     return torch.cat(output_list, dim=dim_concat).contiguous(memory_format=input_format)
 
@@ -446,7 +468,10 @@ def _halo_exchange(
         return x
 
     send_list = [x[idx].contiguous() for idx in send_indices]
-    recv_list = [torch.empty((count, *x.shape[1:]), dtype=x.dtype, device=x.device) for count in recv_counts]
+    recv_list = [
+        torch.empty((count, *x.shape[1:]), dtype=x.dtype, device=x.device)
+        for count in recv_counts
+    ]
 
     _alltoallwrapper(recv_list, send_list, group=group)
 
@@ -492,13 +517,19 @@ def _halo_exchange_bwd(
     grad_local = grad_output[:num_local_nodes].clone()
 
     # split halo portion into per-rank chunks (same ordering as forward recv)
-    halo_grads = list(torch.split(grad_output[num_local_nodes:], list(recv_counts), dim=0))
+    halo_grads = list(
+        torch.split(grad_output[num_local_nodes:], list(recv_counts), dim=0)
+    )
 
     # reverse exchange: send halo grads to originating ranks,
     # receive grads for inner nodes we sent in the forward pass
     send_counts = [idx.size(0) for idx in send_indices]
     recv_list = [
-        torch.empty((count, *grad_output.shape[1:]), dtype=grad_output.dtype, device=grad_output.device)
+        torch.empty(
+            (count, *grad_output.shape[1:]),
+            dtype=grad_output.dtype,
+            device=grad_output.device,
+        )
         for count in send_counts
     ]
     send_list = [g.contiguous() for g in halo_grads]

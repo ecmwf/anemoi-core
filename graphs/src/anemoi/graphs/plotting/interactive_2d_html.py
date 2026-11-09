@@ -9,8 +9,6 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
-from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,14 +17,23 @@ import torch
 from matplotlib.colors import rgb2hex
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.plotting.prepare import compute_isolated_nodes
-from anemoi.graphs.plotting.prepare import compute_node_adjacencies
-from anemoi.graphs.plotting.prepare import coordinates_to_lat_lon
-from anemoi.graphs.plotting.prepare import edge_list
-from anemoi.graphs.plotting.prepare import edge_list_from_coordinates
-from anemoi.graphs.plotting.prepare import node_list
+from anemoi.graphs.plotting.prepare import (
+    compute_isolated_nodes,
+    compute_node_adjacencies,
+    coordinates_to_lat_lon,
+    edge_list,
+    edge_list_from_coordinates,
+    node_list,
+)
 
-annotations_style = {"text": "", "showarrow": False, "xref": "paper", "yref": "paper", "x": 0.005, "y": -0.002}
+annotations_style = {
+    "text": "",
+    "showarrow": False,
+    "xref": "paper",
+    "yref": "paper",
+    "x": 0.005,
+    "y": -0.002,
+}
 plotly_axis_config = {"showgrid": False, "zeroline": False, "showticklabels": False}
 
 LOGGER = logging.getLogger(__name__)
@@ -36,10 +43,10 @@ def plot_edges_2d(
     source_coords: np.ndarray | torch.Tensor,
     target_coords: np.ndarray | torch.Tensor,
     edge_index: np.ndarray | torch.Tensor,
-    out_file: Optional[Union[str, Path]] = None,
+    out_file: str | Path | None = None,
     source_name: str = "source",
     target_name: str = "target",
-    title: Optional[str] = None,
+    title: str | None = None,
     show_nodes: bool = True,
     show: bool = True,
 ) -> go.Figure:
@@ -71,7 +78,9 @@ def plot_edges_2d(
     go.Figure
         Plotly figure containing the edge traces and, optionally, node traces.
     """
-    edge_latitudes, edge_longitudes = edge_list_from_coordinates(source_coords, target_coords, edge_index)
+    edge_latitudes, edge_longitudes = edge_list_from_coordinates(
+        source_coords, target_coords, edge_index
+    )
 
     traces = [
         go.Scattergeo(
@@ -85,8 +94,12 @@ def plot_edges_2d(
     ]
 
     if show_nodes:
-        source_latitudes, source_longitudes = coordinates_to_lat_lon(source_coords, "source_coords")
-        target_latitudes, target_longitudes = coordinates_to_lat_lon(target_coords, "target_coords")
+        source_latitudes, source_longitudes = coordinates_to_lat_lon(
+            source_coords, "source_coords"
+        )
+        target_latitudes, target_longitudes = coordinates_to_lat_lon(
+            target_coords, "target_coords"
+        )
         traces.extend(
             [
                 go.Scattergeo(
@@ -95,7 +108,12 @@ def plot_edges_2d(
                     mode="markers",
                     hoverinfo="text",
                     name=source_name,
-                    marker={"showscale": False, "color": "red", "size": 4, "line_width": 1},
+                    marker={
+                        "showscale": False,
+                        "color": "red",
+                        "size": 4,
+                        "line_width": 1,
+                    },
                 ),
                 go.Scattergeo(
                     lat=target_latitudes,
@@ -103,7 +121,12 @@ def plot_edges_2d(
                     mode="markers",
                     hoverinfo="text",
                     name=target_name,
-                    marker={"showscale": False, "color": "blue", "size": 4, "line_width": 1},
+                    marker={
+                        "showscale": False,
+                        "color": "blue",
+                        "size": 4,
+                        "line_width": 1,
+                    },
                 ),
             ]
         )
@@ -133,7 +156,7 @@ def plot_edges_2d(
 def plot_interactive_subgraph_2d(
     graph: HeteroData,
     edges_to_plot: tuple[str, str, str],
-    out_file: Optional[Union[str, Path]] = None,
+    out_file: str | Path | None = None,
 ) -> None:
     """Plots a bipartite graph (bi-graph).
 
@@ -149,9 +172,15 @@ def plot_interactive_subgraph_2d(
         Name of the file to save the plot. Default is None.
     """
     source_name, _, target_name = edges_to_plot
-    edge_x, edge_y = edge_list(graph, source_nodes_name=source_name, target_nodes_name=target_name)
-    assert source_name in graph.node_types, f"edges_to_plot ({source_name}) should be in the graph"
-    assert target_name in graph.node_types, f"edges_to_plot ({target_name}) should be in the graph"
+    edge_x, edge_y = edge_list(
+        graph, source_nodes_name=source_name, target_nodes_name=target_name
+    )
+    assert source_name in graph.node_types, (
+        f"edges_to_plot ({source_name}) should be in the graph"
+    )
+    assert target_name in graph.node_types, (
+        f"edges_to_plot ({target_name}) should be in the graph"
+    )
     lats_source_nodes, lons_source_nodes = node_list(graph, source_name)
     lats_target_nodes, lons_target_nodes = node_list(graph, target_name)
 
@@ -195,7 +224,12 @@ def plot_interactive_subgraph_2d(
             "reversescale": True,
             "color": list(node_adjacencies),
             "size": 10,
-            "colorbar": {"thickness": 15, "title": "Node Connections", "xanchor": "left", "title_side": "right"},
+            "colorbar": {
+                "thickness": 15,
+                "title": "Node Connections",
+                "xanchor": "left",
+                "title_side": "right",
+            },
             "line_width": 2,
         },
     )
@@ -210,7 +244,9 @@ def plot_interactive_subgraph_2d(
         xaxis=plotly_axis_config,
         yaxis=plotly_axis_config,
     )
-    fig = go.Figure(data=[edge_trace, source_node_trace, target_node_trace], layout=layout)
+    fig = go.Figure(
+        data=[edge_trace, source_node_trace, target_node_trace], layout=layout
+    )
     fig.update_geos(fitbounds="locations")
 
     if out_file is not None:
@@ -219,7 +255,9 @@ def plot_interactive_subgraph_2d(
         fig.show()
 
 
-def plot_isolated_nodes_2d(graph: HeteroData, out_file: Optional[Union[str, Path]] = None) -> None:
+def plot_isolated_nodes_2d(
+    graph: HeteroData, out_file: str | Path | None = None
+) -> None:
     """Plot isolated nodes.
 
     This method creates an interactive visualization of the isolated nodes in the graph.
@@ -247,7 +285,11 @@ def plot_isolated_nodes_2d(graph: HeteroData, out_file: Optional[Union[str, Path
                 mode="markers",
                 hoverinfo="text",
                 name=name,
-                marker={"showscale": False, "color": rgb2hex(colorbar[len(nodes)]), "size": 10},
+                marker={
+                    "showscale": False,
+                    "color": rgb2hex(colorbar[len(nodes)]),
+                    "size": 10,
+                },
             ),
         )
 
@@ -271,7 +313,9 @@ def plot_isolated_nodes_2d(graph: HeteroData, out_file: Optional[Union[str, Path
         fig.show()
 
 
-def plot_interactive_nodes_2d(graph: HeteroData, nodes_name: str, out_file: Optional[str] = None) -> None:
+def plot_interactive_nodes_2d(
+    graph: HeteroData, nodes_name: str, out_file: str | None = None
+) -> None:
     """Plot nodes.
 
     This method creates an interactive visualization of a set of nodes.
@@ -313,7 +357,11 @@ def plot_interactive_nodes_2d(graph: HeteroData, nodes_name: str, out_file: Opti
                     "color": node_attr_values[:, attr_dim].squeeze().tolist(),
                     "showscale": True,
                     "colorscale": "RdBu",
-                    "colorbar": {"thickness": 15, "title": node_attr + suffix, "xanchor": "left"},
+                    "colorbar": {
+                        "thickness": 15,
+                        "title": node_attr + suffix,
+                        "xanchor": "left",
+                    },
                     "size": 5,
                 },
                 visible=False,
@@ -335,7 +383,14 @@ def plot_interactive_nodes_2d(graph: HeteroData, nodes_name: str, out_file: Opti
         layout=go.Layout(
             title=f"<br>Map of {nodes_name} nodes",
             sliders=[
-                dict(active=0, currentvalue={"visible": False}, len=0.4, x=0.5, xanchor="center", steps=slider_steps)
+                dict(
+                    active=0,
+                    currentvalue={"visible": False},
+                    len=0.4,
+                    x=0.5,
+                    xanchor="center",
+                    steps=slider_steps,
+                )
             ],
             title_font_size=16,
             showlegend=False,

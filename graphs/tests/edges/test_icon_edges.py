@@ -12,11 +12,12 @@ import netCDF4
 import pytest
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.edges import ICONTopologicalDecoderEdges
-from anemoi.graphs.edges import ICONTopologicalEncoderEdges
-from anemoi.graphs.edges import ICONTopologicalProcessorEdges
-from anemoi.graphs.nodes import ICONCellGridNodes
-from anemoi.graphs.nodes import ICONMultiMeshNodes
+from anemoi.graphs.edges import (
+    ICONTopologicalDecoderEdges,
+    ICONTopologicalEncoderEdges,
+    ICONTopologicalProcessorEdges,
+)
+from anemoi.graphs.nodes import ICONCellGridNodes, ICONMultiMeshNodes
 
 
 class TestEdgeBuilderDependencies:
@@ -26,8 +27,12 @@ class TestEdgeBuilderDependencies:
     def icon_graph(self, monkeypatch, icon_dataset_mock) -> HeteroData:
         """Return a HeteroData object with ICON node builders."""
         monkeypatch.setattr(netCDF4, "Dataset", icon_dataset_mock)
-        data_node_builder = ICONCellGridNodes(name="data", grid_filename="test.nc", max_level=1)
-        hidden_node_builder = ICONMultiMeshNodes(name="hidden", grid_filename="test.nc", max_level=1)
+        data_node_builder = ICONCellGridNodes(
+            name="data", grid_filename="test.nc", max_level=1
+        )
+        hidden_node_builder = ICONMultiMeshNodes(
+            name="hidden", grid_filename="test.nc", max_level=1
+        )
 
         graph = HeteroData()
         graph = data_node_builder.update_graph(graph, {})
@@ -37,7 +42,9 @@ class TestEdgeBuilderDependencies:
 
     def test_encoder(self, icon_graph: HeteroData):
         """Test that the `ICONTopologicalEncoderEdges` depends on the presence of ICON node builders."""
-        edge_builder = ICONTopologicalEncoderEdges(source_name="data", target_name="hidden")
+        edge_builder = ICONTopologicalEncoderEdges(
+            source_name="data", target_name="hidden"
+        )
         assert ("data", "to", "hidden") not in icon_graph.edge_types
 
         icon_graph = edge_builder.update_graph(icon_graph)
@@ -47,14 +54,18 @@ class TestEdgeBuilderDependencies:
 
     def test_wrong_encoder(self, icon_graph: HeteroData):
         """Test that the `ICONTopologicalEncoderEdges` depends on the presence of ICON node builders."""
-        edge_builder = ICONTopologicalEncoderEdges(source_name="hidden", target_name="data")
+        edge_builder = ICONTopologicalEncoderEdges(
+            source_name="hidden", target_name="data"
+        )
 
         with pytest.raises(AssertionError):
             edge_builder.update_graph(icon_graph)
 
     def test_decoder(self, icon_graph: HeteroData):
         """Test that the `ICONTopologicalDecoderEdges` depends on the presence of ICON node builders."""
-        edge_builder = ICONTopologicalDecoderEdges(source_name="hidden", target_name="data")
+        edge_builder = ICONTopologicalDecoderEdges(
+            source_name="hidden", target_name="data"
+        )
         assert ("hidden", "to", "data") not in icon_graph.edge_types
 
         icon_graph = edge_builder.update_graph(icon_graph)
@@ -64,14 +75,18 @@ class TestEdgeBuilderDependencies:
 
     def test_wrong_decoder(self, icon_graph: HeteroData):
         """Test that the `ICONTopologicalDecoderEdges` depends on the presence of ICON node builders."""
-        edge_builder = ICONTopologicalDecoderEdges(source_name="data", target_name="hidden")
+        edge_builder = ICONTopologicalDecoderEdges(
+            source_name="data", target_name="hidden"
+        )
 
         with pytest.raises(AssertionError):
             edge_builder.update_graph(icon_graph)
 
     def test_processor(self, icon_graph: HeteroData):
         """Test that the `ICONTopologicalProcessorEdges` depends on the presence of ICON node builders."""
-        edge_builder = ICONTopologicalProcessorEdges(source_name="hidden", target_name="hidden")
+        edge_builder = ICONTopologicalProcessorEdges(
+            source_name="hidden", target_name="hidden"
+        )
         assert ("hidden", "to", "hidden") not in icon_graph.edge_types
 
         icon_graph = edge_builder.update_graph(icon_graph)
@@ -81,7 +96,9 @@ class TestEdgeBuilderDependencies:
 
     def test_wrong_processor(self, icon_graph: HeteroData):
         """Test that the `ICONTopologicalProcessorEdges` depends on the presence of ICON node builders."""
-        edge_builder = ICONTopologicalProcessorEdges(source_name="data", target_name="hidden")
+        edge_builder = ICONTopologicalProcessorEdges(
+            source_name="data", target_name="hidden"
+        )
 
         with pytest.raises(AssertionError):
             edge_builder.update_graph(icon_graph)

@@ -10,35 +10,37 @@
 
 import logging
 from abc import ABC
-from typing import Optional
 
-from torch import Tensor
-from torch import nn
+from anemoi.utils.config import DotDict
+from torch import Tensor, nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.halo import HaloInfo
-from anemoi.models.distributed.halo import build_halo_info
+from anemoi.models.distributed.halo import HaloInfo, build_halo_info
 from anemoi.models.distributed.halo import cache_specs as halo_cache_specs
-from anemoi.models.distributed.khop_edges import ANEMOI_DEBUG_SHARDING
-from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
-from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
-from anemoi.models.distributed.khop_edges import shard_edges_1hop
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.distributed.khop_edges import (
+    ANEMOI_DEBUG_SHARDING,
+    build_graph_partition_from_shard_info,
+    ensure_edges_are_dst_sorted,
+    shard_edges_1hop,
+)
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, GraphShardInfo
 from anemoi.models.distributed.utils import model_is_distributed
-from anemoi.models.layers.block import GraphConvProcessorBlock
-from anemoi.models.layers.block import GraphTransformerProcessorBlock
-from anemoi.models.layers.block import PointWiseMLPProcessorBlock
-from anemoi.models.layers.block import TransformerProcessorBlock
+from anemoi.models.layers.block import (
+    GraphConvProcessorBlock,
+    GraphTransformerProcessorBlock,
+    PointWiseMLPProcessorBlock,
+    TransformerProcessorBlock,
+)
 from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.models.layers.utils import compute_mlp_hidden_dim
-from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.models.layers.utils import maybe_checkpoint
-from anemoi.models.layers.utils import refuse_dropout_when_sharded
-from anemoi.utils.config import DotDict
+from anemoi.models.layers.utils import (
+    compute_mlp_hidden_dim,
+    load_layer_kernels,
+    maybe_checkpoint,
+    refuse_dropout_when_sharded,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -101,9 +103,9 @@ class BaseProcessor(nn.Module, ABC):
 
         self.layer_factory = load_layer_kernels(layer_kernels)
 
-        assert (
-            num_layers % num_chunks == 0
-        ), f"Number of processor layers ({num_layers}) has to be divisible by the number of processor chunks ({num_chunks})."
+        assert num_layers % num_chunks == 0, (
+            f"Number of processor layers ({num_layers}) has to be divisible by the number of processor chunks ({num_chunks})."
+        )
 
     def offload_layers(self, cpu_offload):
         if cpu_offload:
@@ -189,15 +191,15 @@ class PointWiseMLPProcessor(BaseProcessor):
         x: Tensor,
         batch_size: int,
         shard_info: GraphShardInfo,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         *args,
         **kwargs,
     ) -> Tensor:
         refuse_dropout_when_sharded(self, model_comm_group)
         if model_comm_group:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), f"Only batch size of 1 is supported when model is sharded accross {model_comm_group.size()} GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                f"Only batch size of 1 is supported when model is sharded accross {model_comm_group.size()} GPUs"
+            )
 
         (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group, **kwargs)
 
@@ -215,14 +217,14 @@ class TransformerProcessor(BaseProcessor):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: float,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         qk_norm=False,
         dropout_p: float = 0.0,
         attention_implementation: str = "triton_attention",
         mlp_implementation: MLPImplementation = "mlp",
-        softcap: Optional[float] = None,
+        softcap: float | None = None,
         use_alibi_slopes: bool = False,
-        window_size: Optional[int] = None,
+        window_size: int | None = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -303,19 +305,21 @@ class TransformerProcessor(BaseProcessor):
         x: Tensor,
         batch_size: int,
         shard_info: GraphShardInfo,
-        edge_attr: Optional[Tensor] = None,
-        edge_index: Optional[Adj] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        edge_attr: Tensor | None = None,
+        edge_index: Adj | None = None,
+        model_comm_group: ProcessGroup | None = None,
         *args,
         **kwargs,
     ) -> Tensor:
         refuse_dropout_when_sharded(self, model_comm_group)
         if model_comm_group:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded accross GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                "Only batch size of 1 is supported when model is sharded accross GPUs"
+            )
 
-        (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
+        (x,) = self.run_layers(
+            (x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs
+        )
 
         return x
 
@@ -405,7 +409,7 @@ class GNNProcessor(BaseProcessor):
         shard_info: GraphShardInfo,
         edge_attr: Tensor,
         edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         edges_are_dst_sorted: bool = True,
         *args,
         **kwargs,
@@ -455,7 +459,9 @@ class GNNProcessor(BaseProcessor):
             )
             shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
 
-        x, edge_attr = self.run_layers((x, edge_attr), edge_index, shard_info, model_comm_group, **kwargs)
+        x, edge_attr = self.run_layers(
+            (x, edge_attr), edge_index, shard_info, model_comm_group, **kwargs
+        )
 
         return x
 
@@ -472,7 +478,7 @@ class GraphTransformerProcessor(BaseProcessor):
         num_heads: int,
         mlp_hidden_ratio: float,
         edge_dim: int,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
@@ -562,8 +568,8 @@ class GraphTransformerProcessor(BaseProcessor):
         edge_index: Adj,
         shard_info: GraphShardInfo,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup],
-    ) -> Optional[HaloInfo]:
+        model_comm_group: ProcessGroup | None,
+    ) -> HaloInfo | None:
         """Return one halo plan shared by all processor layers.
 
         The plan is kept for as long as the shard sizes stay the same, so the
@@ -580,13 +586,20 @@ class GraphTransformerProcessor(BaseProcessor):
             raise ValueError(
                 "GraphTransformerProcessor halo exchange requires sharded nodes when model sharding is enabled."
             )
-        assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
+        assert shard_info.edges_are_sharded(), (
+            "Halo strategy requires edges to be sharded"
+        )
 
         cache_specs = halo_cache_specs(shard_info, model_comm_group)
-        if self._cached_halo_info is not None and self._cached_halo_cache_specs == cache_specs:
+        if (
+            self._cached_halo_info is not None
+            and self._cached_halo_cache_specs == cache_specs
+        ):
             return self._cached_halo_info
 
-        LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
+        LOGGER.info(
+            f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'"
+        )
 
         bipartite_shard_info = BipartiteGraphShardInfo(
             src_nodes=shard_info.nodes,
@@ -618,7 +631,7 @@ class GraphTransformerProcessor(BaseProcessor):
         shard_info: GraphShardInfo,
         edge_attr: Tensor,
         edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         edges_are_dst_sorted: bool = True,
         *args,
         **kwargs,
@@ -667,14 +680,21 @@ class GraphTransformerProcessor(BaseProcessor):
 
         if not shard_info.edges_are_sharded():  # ensure edges are sharded
             edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
-                edge_attr, edge_index, size, size, model_comm_group, edges_are_dst_sorted=edges_are_dst_sorted
+                edge_attr,
+                edge_index,
+                size,
+                size,
+                model_comm_group,
+                edges_are_dst_sorted=edges_are_dst_sorted,
             )
             shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
 
         # Heads sharding needs full edge_index (nodes are full, only heads are sharded)
         halo_info = None
         if self.shard_strategy == "heads":
-            edge_index = gather_tensor(edge_index, 1, shard_info.edges, model_comm_group)
+            edge_index = gather_tensor(
+                edge_index, 1, shard_info.edges, model_comm_group
+            )
         else:  # shard strategy "edges" w/ halo-exchange
             halo_info = self._get_or_build_cached_halo_info(
                 x,

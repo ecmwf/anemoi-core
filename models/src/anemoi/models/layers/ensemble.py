@@ -8,27 +8,22 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from abc import ABC
-from abc import abstractmethod
-from typing import Optional
+from abc import ABC, abstractmethod
 
 import einops
 import torch
-from torch import Tensor
-from torch import nn
+from anemoi.utils.config import DotDict
+from torch import Tensor, nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.graph import all_to_all_transpose, shard_tensor
+from anemoi.models.distributed.shapes import ShardSizes, get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -49,8 +44,8 @@ class BaseNoiseInjector(nn.Module, ABC):
         grid_size: int,
         grid_shard_sizes: ShardSizes,
         noise_dtype: torch.dtype = torch.float32,
-        model_comm_group: Optional[ProcessGroup] = None,
-    ) -> tuple[Tensor, Optional[Tensor]]:
+        model_comm_group: ProcessGroup | None = None,
+    ) -> tuple[Tensor, Tensor | None]:
         """Forward pass for noise injection.
 
         Parameters
@@ -99,7 +94,7 @@ class NoOpNoiseInjector(BaseNoiseInjector):
         grid_size: int,
         grid_shard_sizes: ShardSizes,
         noise_dtype: torch.dtype = torch.float32,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> tuple[Tensor, None]:
         """Pass through input unchanged with no noise."""
         return x, None
@@ -115,14 +110,14 @@ class NoiseConditioning(BaseNoiseInjector):
         noise_channels_dim: int,
         noise_mlp_hidden_dim: int,
         layer_kernels: DotDict,
-        noise_matrix: Optional[str] = None,
-        noise_edges_name: Optional[tuple[str, str, str]] = None,
-        edge_weight_attribute: Optional[str] = None,
+        noise_matrix: str | None = None,
+        noise_edges_name: tuple[str, str, str] | None = None,
+        edge_weight_attribute: str | None = None,
         row_normalize_noise_matrix: bool = False,
         autocast: bool = False,
         sparse_projector_num_chunks: int = 1,
-        num_channels: Optional[int] = None,
-        graph_data: Optional[HeteroData] = None,
+        num_channels: int | None = None,
+        graph_data: HeteroData | None = None,
     ) -> None:
         """Initialize NoiseConditioning."""
         super().__init__()
@@ -148,28 +143,40 @@ class NoiseConditioning(BaseNoiseInjector):
 
         self.noise_graph_provider = None
         self._sparse_projector = None
-        assert not (
-            noise_matrix is not None and noise_edges_name is not None
-        ), "Specify either noise_matrix or noise_edges_name, not both."
+        assert not (noise_matrix is not None and noise_edges_name is not None), (
+            "Specify either noise_matrix or noise_edges_name, not both."
+        )
 
         if noise_edges_name is not None:
-            assert graph_data is not None, "graph_data must be provided when using noise_edges_name."
+            assert graph_data is not None, (
+                "graph_data must be provided when using noise_edges_name."
+            )
             self.noise_graph_provider = ProjectionGraphProvider(
                 graph=graph_data,
                 edges_name=tuple(noise_edges_name),
                 edge_weight_attribute=edge_weight_attribute,
                 row_normalize=row_normalize_noise_matrix,
             )
-            self._sparse_projector = SparseProjector(autocast=autocast, num_chunks=sparse_projector_num_chunks)
-            LOGGER.info("Noise projector matrix shape = %s", self.noise_graph_provider.projection_matrix.shape)
+            self._sparse_projector = SparseProjector(
+                autocast=autocast, num_chunks=sparse_projector_num_chunks
+            )
+            LOGGER.info(
+                "Noise projector matrix shape = %s",
+                self.noise_graph_provider.projection_matrix.shape,
+            )
 
         if noise_matrix is not None:
             self.noise_graph_provider = ProjectionGraphProvider(
                 file_path=noise_matrix,
                 row_normalize=row_normalize_noise_matrix,
             )
-            self._sparse_projector = SparseProjector(autocast=autocast, num_chunks=sparse_projector_num_chunks)
-            LOGGER.info("Noise projector matrix shape = %s", self.noise_graph_provider.projection_matrix.shape)
+            self._sparse_projector = SparseProjector(
+                autocast=autocast, num_chunks=sparse_projector_num_chunks
+            )
+            LOGGER.info(
+                "Noise projector matrix shape = %s",
+                self.noise_graph_provider.projection_matrix.shape,
+            )
 
         LOGGER.info("processor noise channels = %d", self.noise_channels)
 
@@ -181,42 +188,61 @@ class NoiseConditioning(BaseNoiseInjector):
         grid_size: int,
         grid_shard_sizes: ShardSizes,
         noise_dtype: torch.dtype = torch.float32,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> tuple[Tensor, Tensor]:
 
         noise_shape = (
             batch_size,
             ensemble_size,
-            grid_size if self.noise_graph_provider is None else self.noise_graph_provider.projection_matrix.shape[1],
+            grid_size
+            if self.noise_graph_provider is None
+            else self.noise_graph_provider.projection_matrix.shape[1],
             self.noise_channels,
         )
 
-        noise = torch.randn(size=noise_shape, dtype=noise_dtype, device=x.device) * self.noise_std
+        noise = (
+            torch.randn(size=noise_shape, dtype=noise_dtype, device=x.device)
+            * self.noise_std
+        )
         noise.requires_grad = False
 
         if self.noise_graph_provider is not None:
             channel_shard_sizes = get_shard_sizes(noise, -1, model_comm_group)
-            noise = shard_tensor(noise, -1, channel_shard_sizes, model_comm_group)  # split across channels
+            noise = shard_tensor(
+                noise, -1, channel_shard_sizes, model_comm_group
+            )  # split across channels
 
             noise = einops.rearrange(
                 noise, "batch ensemble grid vars -> (batch ensemble) grid vars"
             )  # batch and ensemble always 1 when sharded
 
             projection_matrix = self.noise_graph_provider.get_edges(device=noise.device)
-            noise = self._sparse_projector(noise, projection_matrix)  # to shape of hidden grid
+            noise = self._sparse_projector(
+                noise, projection_matrix
+            )  # to shape of hidden grid
 
-            noise = einops.rearrange(noise, "bse grid vars -> (bse grid) vars")  # shape of x
+            noise = einops.rearrange(
+                noise, "bse grid vars -> (bse grid) vars"
+            )  # shape of x
             noise = all_to_all_transpose(
                 noise, 0, grid_shard_sizes, -1, channel_shard_sizes, model_comm_group
             )  # sharded grid dim, full channels
         else:
-            noise = einops.rearrange(noise, "batch ensemble grid vars -> (batch ensemble grid) vars")  # shape of x
+            noise = einops.rearrange(
+                noise, "batch ensemble grid vars -> (batch ensemble grid) vars"
+            )  # shape of x
             noise_shard_sizes = get_shard_sizes(noise, 0, model_comm_group)
-            noise = shard_tensor(noise, 0, noise_shard_sizes, model_comm_group)  # sharded grid dim, full channels
+            noise = shard_tensor(
+                noise, 0, noise_shard_sizes, model_comm_group
+            )  # sharded grid dim, full channels
 
         noise = checkpoint(self.noise_mlp, noise, use_reentrant=False)
 
-        LOGGER.debug("Noise noise.shape = %s, noise.norm: %.9e", noise.shape, torch.linalg.norm(noise))
+        LOGGER.debug(
+            "Noise noise.shape = %s, noise.norm: %.9e",
+            noise.shape,
+            torch.linalg.norm(noise),
+        )
 
         return x, noise
 
@@ -236,8 +262,8 @@ class NoiseInjector(BaseNoiseInjector):
         noise_mlp_hidden_dim: int,
         num_channels: int,
         layer_kernels: DotDict,
-        noise_matrix: Optional[str] = None,
-        graph_data: Optional[HeteroData] = None,
+        noise_matrix: str | None = None,
+        graph_data: HeteroData | None = None,
     ) -> None:
         """Initialize NoiseInjector.
 
@@ -279,7 +305,7 @@ class NoiseInjector(BaseNoiseInjector):
         grid_size: int,
         grid_shard_sizes: ShardSizes,
         noise_dtype: torch.dtype = torch.float32,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> tuple[Tensor, None]:
         """Generate noise and inject it into the input tensor.
 

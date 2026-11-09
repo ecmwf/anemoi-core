@@ -13,8 +13,7 @@ from collections import defaultdict
 
 import einops
 import torch
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 from torch_geometric.data import HeteroData
 
 LOGGER = logging.getLogger(__name__)
@@ -42,7 +41,13 @@ class TrainableTensor(nn.Module):
     def forward(self, x: Tensor, batch_size: int) -> Tensor:
         latent = [einops.repeat(x, "e f -> (repeat e) f", repeat=batch_size)]
         if self.trainable is not None:
-            latent.append(einops.repeat(self.trainable.to(x.device), "e f -> (repeat e) f", repeat=batch_size))
+            latent.append(
+                einops.repeat(
+                    self.trainable.to(x.device),
+                    "e f -> (repeat e) f",
+                    repeat=batch_size,
+                )
+            )
         return torch.cat(
             latent,
             dim=-1,  # feature dimension
@@ -74,7 +79,9 @@ class NamedNodesAttributes(nn.Module):
     attr_ndims: dict[str, int]
     trainable_tensors: dict[str, TrainableTensor]
 
-    def __init__(self, trainable_parameters: dict[str, int], graph_data: HeteroData) -> None:
+    def __init__(
+        self, trainable_parameters: dict[str, int], graph_data: HeteroData
+    ) -> None:
         """Initialize NamedNodesAttributes."""
         super().__init__()
 
@@ -86,7 +93,9 @@ class NamedNodesAttributes(nn.Module):
             self.register_coordinates(nodes_name, nodes.x)
             self.register_tensor(nodes_name, self.num_trainable_parameters[nodes_name])
 
-    def define_fixed_attributes(self, graph_data: HeteroData, trainable_parameters: dict[str, int]) -> None:
+    def define_fixed_attributes(
+        self, graph_data: HeteroData, trainable_parameters: dict[str, int]
+    ) -> None:
         """Define fixed attributes."""
         nodes_names = list(graph_data.node_types)
 
@@ -94,17 +103,23 @@ class NamedNodesAttributes(nn.Module):
         self.attr_ndims = {}
         for nodes_name in nodes_names:
             if nodes_name not in trainable_parameters:
-                LOGGER.warning(f"Nodes `{nodes_name}` not found in trainable parameters. Setting to 0.")
+                LOGGER.warning(
+                    f"Nodes `{nodes_name}` not found in trainable parameters. Setting to 0."
+                )
 
             self.num_nodes[nodes_name] = graph_data[nodes_name].num_nodes
-            self.attr_ndims[nodes_name] = 2 * graph_data[nodes_name].x.shape[1] + trainable_parameters[nodes_name]
+            self.attr_ndims[nodes_name] = (
+                2 * graph_data[nodes_name].x.shape[1] + trainable_parameters[nodes_name]
+            )
             LOGGER.info(
                 f"{self.__class__.__name__} | Nodes `{nodes_name}` will have {trainable_parameters[nodes_name]} trainable parameters."
             )
 
     def register_coordinates(self, name: str, node_coords: Tensor) -> None:
         """Register coordinates."""
-        sin_cos_coords = torch.cat([torch.sin(node_coords), torch.cos(node_coords)], dim=-1)
+        sin_cos_coords = torch.cat(
+            [torch.sin(node_coords), torch.cos(node_coords)], dim=-1
+        )
         self.register_buffer(f"latlons_{name}", sin_cos_coords, persistent=True)
 
     def get_coordinates(self, name: str) -> Tensor:
@@ -117,7 +132,9 @@ class NamedNodesAttributes(nn.Module):
 
     def register_tensor(self, name: str, num_trainable_params: int) -> None:
         """Register a trainable tensor."""
-        self.trainable_tensors[name] = TrainableTensor(self.num_nodes[name], num_trainable_params)
+        self.trainable_tensors[name] = TrainableTensor(
+            self.num_nodes[name], num_trainable_params
+        )
 
     def forward(self, name: str, batch_size: int) -> Tensor:
         """Returns the node attributes to be passed trough the graph neural network.

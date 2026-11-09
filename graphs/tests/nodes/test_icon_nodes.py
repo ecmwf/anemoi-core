@@ -13,10 +13,8 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid
-from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
-from anemoi.graphs.nodes import ICONCellGridNodes
-from anemoi.graphs.nodes import ICONMultiMeshNodes
+from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid, ICONMultiMesh
+from anemoi.graphs.nodes import ICONCellGridNodes, ICONMultiMeshNodes
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 from anemoi.graphs.testing import _DatasetMock
 
@@ -40,10 +38,14 @@ def test_init(monkeypatch, max_level: int, node_builder_cls: type[BaseNodeBuilde
 
 
 @pytest.mark.parametrize("node_builder_cls", [ICONCellGridNodes, ICONMultiMeshNodes])
-def test_node_builder_dependencies(monkeypatch, node_builder_cls: type[BaseNodeBuilder]):
+def test_node_builder_dependencies(
+    monkeypatch, node_builder_cls: type[BaseNodeBuilder]
+):
     """Test that the `node_builder` depends on the presence of ICON node builders."""
     monkeypatch.setattr(netCDF4, "Dataset", _DatasetMock)
-    node_builder = node_builder_cls(name="data_nodes", max_level=0, grid_filename="test.nc")
+    node_builder = node_builder_cls(
+        name="data_nodes", max_level=0, grid_filename="test.nc"
+    )
 
     graph = HeteroData()
     graph = node_builder.update_graph(graph)
@@ -55,26 +57,36 @@ def test_node_builder_dependencies(monkeypatch, node_builder_cls: type[BaseNodeB
 @pytest.mark.parametrize("node_builder_cls", [ICONCellGridNodes, ICONMultiMeshNodes])
 def test_wrong_filename(node_builder_cls: type[BaseNodeBuilder]):
     with pytest.raises(FileNotFoundError):
-        node_builder_cls(name="data_nodes2", max_level=0, grid_filename="missing_icon_nodes")
+        node_builder_cls(
+            name="data_nodes2", max_level=0, grid_filename="missing_icon_nodes"
+        )
 
 
 def test_register_nodes(monkeypatch):
     """Test ICON node builders register correctly the nodes."""
     monkeypatch.setattr(netCDF4, "Dataset", _DatasetMock)
 
-    node_builder = ICONMultiMeshNodes(name="test_icon_nodes", grid_filename="test.nc", max_level=0)
+    node_builder = ICONMultiMeshNodes(
+        name="test_icon_nodes", grid_filename="test.nc", max_level=0
+    )
 
     graph = node_builder.register_nodes(HeteroData())
 
     assert graph["test_icon_nodes"].x is not None
     assert isinstance(graph["test_icon_nodes"].x, torch.Tensor)
     assert graph["test_icon_nodes"].x.shape[1] == 2
-    assert graph["test_icon_nodes"].num_nodes == 3, "number of vertices at refinement_level_v == 0"
+    assert graph["test_icon_nodes"].num_nodes == 3, (
+        "number of vertices at refinement_level_v == 0"
+    )
     assert graph["test_icon_nodes"].node_type == "ICONMultiMeshNodes"
 
-    node_builder2 = ICONMultiMeshNodes(name="test_icon_nodes", grid_filename="test.nc", max_level=1)
+    node_builder2 = ICONMultiMeshNodes(
+        name="test_icon_nodes", grid_filename="test.nc", max_level=1
+    )
     graph = node_builder2.register_nodes(HeteroData())
-    assert graph["test_icon_nodes"].num_nodes == 4, "number of vertices at refinement_level_v == 1"
+    assert graph["test_icon_nodes"].num_nodes == 4, (
+        "number of vertices at refinement_level_v == 1"
+    )
     assert graph["test_icon_nodes"].node_type == "ICONMultiMeshNodes"
 
 
@@ -85,7 +97,9 @@ def test_register_attributes(
     """Test ICONNodes register correctly the weights."""
     monkeypatch.setattr(netCDF4, "Dataset", _DatasetMock)
     nodes = ICONCellGridNodes(name="test_nodes", max_level=0, grid_filename="test.nc")
-    config = {"test_attr": {"_target_": "anemoi.graphs.nodes.attributes.UniformWeights"}}
+    config = {
+        "test_attr": {"_target_": "anemoi.graphs.nodes.attributes.UniformWeights"}
+    }
 
     graph = nodes.register_attributes(graph_with_nodes, config)
 

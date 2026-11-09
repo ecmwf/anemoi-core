@@ -8,15 +8,15 @@
 # nor does it submit to any jurisdiction.
 """Configuration utilities for handling dataset-specific configurations."""
 
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
-
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from omegaconf import DictConfig, OmegaConf
 
 
 # This function retrieves the configuration for multiple datasets, supporting both new and old config formats.
 # Its location in the codebase may be revisited in the near future.
-def get_multiple_datasets_config(config: DictConfig, default_dataset_name: str = DEFAULT_DATASET_NAME) -> dict:
+def get_multiple_datasets_config(
+    config: DictConfig, default_dataset_name: str = DEFAULT_DATASET_NAME
+) -> dict:
     """Get multiple datasets configuration for old configs.
     Use /'data/' as the default dataset name.
     """

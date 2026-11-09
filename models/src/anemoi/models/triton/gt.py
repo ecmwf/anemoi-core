@@ -32,13 +32,17 @@ try:
     import triton
     import triton.language as tl
 except ImportError as e:
-    LOGGER.warning("Triton failed to import, do NOT attempt to use Triton backend: %s", e)
+    LOGGER.warning(
+        "Triton failed to import, do NOT attempt to use Triton backend: %s", e
+    )
     triton = DummyModule()
     tl = DummyModule()
 
 
 @triton.jit
-def build_masks_and_offsets(H: tl.constexpr, C: tl.constexpr, H_pad: tl.constexpr, C_pad: tl.constexpr):
+def build_masks_and_offsets(
+    H: tl.constexpr, C: tl.constexpr, H_pad: tl.constexpr, C_pad: tl.constexpr
+):
     """Pads H and C to the nearest power of 2 if needed.
 
     This is required to support non-square numbers of heads and/or channels.
@@ -135,9 +139,13 @@ def _gt_fwd(
         return
 
     q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-    acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
+    acc = tl.zeros(
+        (H_pad, C_pad), dtype=tl.float32
+    )  # output accumulator, pending normalization by l_i
     l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
-    m_i = tl.full((H_pad,), value=-float("inf"), dtype=tl.float32)  # running max for stability
+    m_i = tl.full(
+        (H_pad,), value=-float("inf"), dtype=tl.float32
+    )  # running max for stability
 
     # helpers to avoid repeated computations/indexing:
     edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
@@ -152,8 +160,16 @@ def _gt_fwd(
         src_idx = tl.load(ROW_ptr + e_idx)
 
         src_off = src_idx * H * C + H_C_off
-        k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-        v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        k = (
+            tl.load(K_ptr + src_off, mask=H_C_mask)
+            .to(tl.float32)
+            .reshape((H_pad, C_pad))
+        )
+        v = (
+            tl.load(V_ptr + src_off, mask=H_C_mask)
+            .to(tl.float32)
+            .reshape((H_pad, C_pad))
+        )
 
         k_e = k + e
         v_e = v + e
@@ -235,7 +251,11 @@ def _gt_bwd_dst_pass(
         tl.store(D_Q_ptr + dst_off, zeros, mask=H_C_mask)
         return
 
-    d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    d_out = (
+        tl.load(D_OUT_ptr + dst_off, mask=H_C_mask)
+        .to(tl.float32)
+        .reshape((H_pad, C_pad))
+    )
     out = tl.load(OUT_ptr + dst_off, H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
     # D_j = <d_out, out> for one-pass computation of dQ
@@ -254,15 +274,25 @@ def _gt_bwd_dst_pass(
 
         src = tl.load(ROW_ptr + e_idx)
         src_off = src * H * C + H_C_off
-        k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        k = (
+            tl.load(K_ptr + src_off, mask=H_C_mask)
+            .to(tl.float32)
+            .reshape((H_pad, C_pad))
+        )
 
         ke = k + e
         # score and alpha using saved M
-        m_j = tl.load(M_ptr + dst_idx * H + tl.arange(0, H_pad), mask=H_mask).to(tl.float32)
+        m_j = tl.load(M_ptr + dst_idx * H + tl.arange(0, H_pad), mask=H_mask).to(
+            tl.float32
+        )
         s_ij = tl.sum(q * ke, axis=-1) * qk_scale
         alpha_ij = tl.exp(s_ij - m_j)
 
-        v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        v = (
+            tl.load(V_ptr + src_off, mask=H_C_mask)
+            .to(tl.float32)
+            .reshape((H_pad, C_pad))
+        )
         ve = v + e
 
         dalpha = tl.sum(d_out * ve, axis=-1)
@@ -342,8 +372,16 @@ def _gt_bwd_src_pass(
 
         # get saved tensors for dst node
         dst_off = dst * H * C + H_C_off
-        q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-        d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        q = (
+            tl.load(Q_ptr + dst_off, mask=H_C_mask)
+            .to(tl.float32)
+            .reshape((H_pad, C_pad))
+        )
+        d_out = (
+            tl.load(D_OUT_ptr + dst_off, mask=H_C_mask)
+            .to(tl.float32)
+            .reshape((H_pad, C_pad))
+        )
         m_j = tl.load(M_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
         Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
 
@@ -403,7 +441,9 @@ def _gt_bwd_src_pass(
 # for more details on pytorch custom ops see https://docs.pytorch.org/tutorials/advanced/python_custom_ops_functional.html
 
 
-@torch.library.custom_op("anemoi::graph_transformer_attention", mutates_args=(), device_types="cuda")
+@torch.library.custom_op(
+    "anemoi::graph_transformer_attention", mutates_args=(), device_types="cuda"
+)
 def graph_transformer_attention(
     q: Tensor,
     k: Tensor,
@@ -464,7 +504,9 @@ def _graph_transformer_attention_fake(
 
 
 # TODO(Jan): single bwd pass for non-bipartite graphs
-@torch.library.custom_op("anemoi::graph_transformer_attention_backward", mutates_args=(), device_types="cuda")
+@torch.library.custom_op(
+    "anemoi::graph_transformer_attention_backward", mutates_args=(), device_types="cuda"
+)
 def graph_transformer_attention_backward(
     d_out: Tensor,
     q: Tensor,
@@ -508,10 +550,30 @@ def graph_transformer_attention_backward(
     D = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
 
     # Pass A: destination nodes (computes D and dQ)
-    _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out_saved, m, row, colptr, d_out, dQ, D, N_dst, H, C, grad_dtype)
+    _gt_bwd_dst_pass[(N_dst,)](
+        q, k, v, e, out_saved, m, row, colptr, d_out, dQ, D, N_dst, H, C, grad_dtype
+    )
 
     # Pass B: source nodes (accumulate dK, dV, dE)
-    _gt_bwd_src_pass[(N_src,)](q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, grad_dtype)
+    _gt_bwd_src_pass[(N_src,)](
+        q,
+        k,
+        v,
+        e,
+        rowptr,
+        edge_ids,
+        edge_dst,
+        D,
+        m,
+        d_out,
+        dK,
+        dV,
+        dE,
+        N_src,
+        H,
+        C,
+        grad_dtype,
+    )
 
     return dQ, dK, dV, dE
 
@@ -542,7 +604,9 @@ def _graph_transformer_attention_backward_fake(
 def _graph_transformer_attention_backward(ctx, d_out, _d_out_saved, _d_m):
     # Only the gradient w.r.t. the user-facing ``out`` is used; ``out_saved`` and
     # ``m`` are internal saved tensors that are not consumed downstream.
-    q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
+    q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst = (
+        ctx.saved_tensors
+    )
 
     dQ, dK, dV, dE = graph_transformer_attention_backward(
         d_out, q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst
@@ -561,9 +625,13 @@ def _graph_transformer_attention_setup_context(ctx, inputs, output):
     # versions so the Triton backward kernels, which assume a contiguous layout, receive
     # contiguous inputs.
     q, k, v, e = (x.contiguous() for x in (q, k, v, e))
-    row, colptr, rowptr, edge_ids, edge_dst = (x.contiguous() for x in (row, colptr, rowptr, edge_ids, edge_dst))
+    row, colptr, rowptr, edge_ids, edge_dst = (
+        x.contiguous() for x in (row, colptr, rowptr, edge_ids, edge_dst)
+    )
 
-    ctx.save_for_backward(q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst)
+    ctx.save_for_backward(
+        q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst
+    )
 
 
 graph_transformer_attention.register_autograd(
@@ -588,5 +656,7 @@ def graph_transformer_attention_conv(
     """torch.compile-friendly GraphTransformer attention."""
     row, colptr = csc
     rowptr, edge_ids, edge_dst = reverse
-    out, _out_saved, _m = graph_transformer_attention(query, key, value, edges, row, colptr, rowptr, edge_ids, edge_dst)
+    out, _out_saved, _m = graph_transformer_attention(
+        query, key, value, edges, row, colptr, rowptr, edge_ids, edge_dst
+    )
     return out

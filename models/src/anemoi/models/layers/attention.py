@@ -13,24 +13,22 @@ from __future__ import annotations
 import logging
 import math
 import os
-from typing import Optional
-from typing import Union
 
 import einops
 import torch
+from anemoi.utils.config import DotDict
 from packaging import version
-from torch import Tensor
-from torch import nn
-from torch import where
+from torch import Tensor, nn, where
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import PairTensor
 
 from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.utils.config import DotDict
+from anemoi.models.distributed.shapes import (
+    BipartiteGraphShardInfo,
+    GraphShardInfo,
+    ShardSizes,
+    get_shard_sizes,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -50,7 +48,9 @@ class AttentionWrapper(nn.Module):
 
     def check_supported(self, **options: bool) -> None:
         """Raises if any of the options that are switched on is one this backend cannot honour."""
-        requested = sorted(name for name, used in options.items() if used and name in self.unsupported)
+        requested = sorted(
+            name for name, used in options.items() if used and name in self.unsupported
+        )
         if requested:
             raise NotImplementedError(
                 f"{type(self).__name__} does not support: {', '.join(requested)}. "
@@ -85,14 +85,14 @@ class MultiHeadSelfAttention(nn.Module):
         num_heads: int,
         embed_dim: int,
         layer_kernels: DotDict,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         qkv_bias: bool = False,
         qk_norm: bool = False,
         is_causal: bool = False,
-        window_size: Optional[int] = None,
+        window_size: int | None = None,
         dropout_p: float = 0.0,
         attention_implementation: str = "scaled_dot_product_attention",
-        softcap: Optional[float] = None,
+        softcap: float | None = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):
@@ -138,7 +138,9 @@ class MultiHeadSelfAttention(nn.Module):
         if self.attn_channels <= 0:
             raise ValueError(f"attn_channels must be > 0, got {self.attn_channels}")
         if self.attn_channels % num_heads != 0:
-            raise ValueError(f"attn_channels ({self.attn_channels}) must be divisible by number of heads ({num_heads})")
+            raise ValueError(
+                f"attn_channels ({self.attn_channels}) must be divisible by number of heads ({num_heads})"
+            )
 
         self.attention_implementation = attention_implementation
         self._attention_backend_applied = False
@@ -157,7 +159,9 @@ class MultiHeadSelfAttention(nn.Module):
 
         if self.use_alibi_slopes:
             self.alibi_slopes = get_alibi_slopes(num_heads)
-            assert self.alibi_slopes.shape[0] == num_heads, "Error: Number of alibi_slopes must match number of heads"
+            assert self.alibi_slopes.shape[0] == num_heads, (
+                "Error: Number of alibi_slopes must match number of heads"
+            )
         else:
             self.alibi_slopes = None
 
@@ -191,8 +195,10 @@ class MultiHeadSelfAttention(nn.Module):
             )
             self.attention_implementation = ATTENTION_BACKEND
 
-        assert self.attention_implementation in attn_funcs, f"backend '{self.attention_implementation}' not supported. \
+        assert self.attention_implementation in attn_funcs, (
+            f"backend '{self.attention_implementation}' not supported. \
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
+        )
 
         # initalise the attn func here
         if self.attention_implementation == "flash_attention":
@@ -214,14 +220,14 @@ class MultiHeadSelfAttention(nn.Module):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        grid_shard_sizes: Union[ShardSizes, tuple[ShardSizes, ShardSizes]],
+        grid_shard_sizes: ShardSizes | tuple[ShardSizes, ShardSizes],
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> Tensor:
         if model_comm_group:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded accross GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                "Only batch size of 1 is supported when model is sharded accross GPUs"
+            )
 
         query, key, value = (
             einops.rearrange(
@@ -234,13 +240,26 @@ class MultiHeadSelfAttention(nn.Module):
         )
 
         # Shard heads: split along heads (dim -3), gather along sequence/grid (dim -2)
-        q_shard_sizes = grid_shard_sizes[1] if isinstance(grid_shard_sizes, tuple) else grid_shard_sizes
-        kv_shard_sizes = grid_shard_sizes[0] if isinstance(grid_shard_sizes, tuple) else grid_shard_sizes
+        q_shard_sizes = (
+            grid_shard_sizes[1]
+            if isinstance(grid_shard_sizes, tuple)
+            else grid_shard_sizes
+        )
+        kv_shard_sizes = (
+            grid_shard_sizes[0]
+            if isinstance(grid_shard_sizes, tuple)
+            else grid_shard_sizes
+        )
         head_shard_sizes = get_shard_sizes(query, -3, model_comm_group)
 
-        query = all_to_all_transpose(query, -3, head_shard_sizes, -2, q_shard_sizes, model_comm_group)
+        query = all_to_all_transpose(
+            query, -3, head_shard_sizes, -2, q_shard_sizes, model_comm_group
+        )
         key, value = (
-            all_to_all_transpose(t, -3, head_shard_sizes, -2, kv_shard_sizes, model_comm_group) for t in (key, value)
+            all_to_all_transpose(
+                t, -3, head_shard_sizes, -2, kv_shard_sizes, model_comm_group
+            )
+            for t in (key, value)
         )
 
         dropout_p = self.dropout_p if self.training else 0.0
@@ -262,9 +281,13 @@ class MultiHeadSelfAttention(nn.Module):
         )
 
         # Shard sequence: split along sequence/grid (dim -2), gather along heads (dim -3)
-        out = all_to_all_transpose(out, -2, q_shard_sizes, -3, head_shard_sizes, model_comm_group)
+        out = all_to_all_transpose(
+            out, -2, q_shard_sizes, -3, head_shard_sizes, model_comm_group
+        )
 
-        out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")
+        out = einops.rearrange(
+            out, "batch heads grid vars -> (batch grid) (heads vars)"
+        )
 
         out = self.projection(out)
 
@@ -275,7 +298,7 @@ class MultiHeadSelfAttention(nn.Module):
         x: Tensor,
         grid_shard_sizes: GraphShardInfo,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> Tensor:
 
         query = self.lin_q(x)
@@ -287,7 +310,9 @@ class MultiHeadSelfAttention(nn.Module):
             self.set_attention_function()
             self._attention_backend_applied = True
 
-        return self.attention_computation(query, key, value, grid_shard_sizes.nodes, batch_size, model_comm_group)
+        return self.attention_computation(
+            query, key, value, grid_shard_sizes.nodes, batch_size, model_comm_group
+        )
 
 
 class SDPAAttentionWrapper(AttentionWrapper):
@@ -310,7 +335,9 @@ class SDPAAttentionWrapper(AttentionWrapper):
 
         self.create_mask = create_mask
 
-    def create_sliding_window_mask(self, B, H, Q_LEN, KV_LEN, window_size, device="cpu") -> Tensor:
+    def create_sliding_window_mask(
+        self, B, H, Q_LEN, KV_LEN, window_size, device="cpu"
+    ) -> Tensor:
         """Create a mask for sliding window attention compatible with SDPA.
 
         Parameters
@@ -365,7 +392,12 @@ class SDPAAttentionWrapper(AttentionWrapper):
             if isinstance(window_size, int):
                 window_size = (window_size, window_size)
             self.attn_mask = self.create_sliding_window_mask(
-                1, query.shape[1], query.shape[2], key.shape[2], window_size, device=query.device
+                1,
+                query.shape[1],
+                query.shape[2],
+                key.shape[2],
+                window_size,
+                device=query.device,
             )
 
         out = self.attention(
@@ -397,17 +429,24 @@ class FlashAttentionWrapper(AttentionWrapper):
         flash_attn_func = self._import_flash_attn()
 
         if self.use_flash_attn_v4:
-            self.unsupported = frozenset({"dropout_p", "softcap", "use_alibi_slopes", "use_rotary_embeddings"})
+            self.unsupported = frozenset(
+                {"dropout_p", "softcap", "use_alibi_slopes", "use_rotary_embeddings"}
+            )
         elif self.use_flash_attn_v3:
-            self.unsupported = frozenset({"dropout_p", "use_alibi_slopes", "use_rotary_embeddings"})
+            self.unsupported = frozenset(
+                {"dropout_p", "use_alibi_slopes", "use_rotary_embeddings"}
+            )
 
         self._init_rotary_embeddings(
-            use_rotary_embeddings and "use_rotary_embeddings" not in self.unsupported, head_dim
+            use_rotary_embeddings and "use_rotary_embeddings" not in self.unsupported,
+            head_dim,
         )
 
         self.attention = flash_attn_func
 
-    def _init_rotary_embeddings(self, use_rotary_embeddings: bool, head_dim: int) -> None:
+    def _init_rotary_embeddings(
+        self, use_rotary_embeddings: bool, head_dim: int
+    ) -> None:
         """Enables rotary embeddings, which need flash attention v2.6.0 or newer."""
         self.use_rotary_embeddings = False
         if use_rotary_embeddings:
@@ -415,7 +454,9 @@ class FlashAttentionWrapper(AttentionWrapper):
             import flash_attn
 
             if version.parse(flash_attn.__version__) < version.parse("2.6"):
-                raise RuntimeError("Rotary Embeddings not supported with flash attention v2 < v2.6.0")
+                raise RuntimeError(
+                    "Rotary Embeddings not supported with flash attention v2 < v2.6.0"
+                )
 
             from flash_attn.layers.rotary import RotaryEmbedding
 
@@ -481,16 +522,21 @@ class FlashAttentionWrapper(AttentionWrapper):
         value,
         batch_size: int,
         causal: bool = False,
-        window_size: Optional[int] = None,
+        window_size: int | None = None,
         dropout_p: float = 0.0,
-        softcap: Optional[float] = None,
+        softcap: float | None = None,
         alibi_slopes: torch.Tensor = None,
     ):
         query, key, value = (
-            einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
+            einops.rearrange(t, "batch heads grid vars -> batch grid heads vars")
+            for t in (query, key, value)
         )
 
-        alibi_slopes = alibi_slopes.repeat(batch_size, 1).to(query.device) if alibi_slopes is not None else None
+        alibi_slopes = (
+            alibi_slopes.repeat(batch_size, 1).to(query.device)
+            if alibi_slopes is not None
+            else None
+        )
 
         if self.use_rotary_embeddings:
             key = key.unsqueeze(-3)
@@ -509,7 +555,9 @@ class FlashAttentionWrapper(AttentionWrapper):
                 value,
                 softmax_scale=1.0 / math.sqrt(query.shape[-1]),
                 causal=False,
-                window_size=(window_size, window_size) if window_size is not None else (-1, -1),
+                window_size=(window_size, window_size)
+                if window_size is not None
+                else (-1, -1),
             )[0]
         elif self.use_flash_attn_v3:
             out = self.attention(
@@ -517,7 +565,9 @@ class FlashAttentionWrapper(AttentionWrapper):
                 key,
                 value,
                 causal=False,
-                window_size=(window_size, window_size) if window_size is not None else (-1, -1),
+                window_size=(window_size, window_size)
+                if window_size is not None
+                else (-1, -1),
                 softcap=softcap,
             )
             if isinstance(out, tuple):
@@ -530,7 +580,9 @@ class FlashAttentionWrapper(AttentionWrapper):
                 key,
                 value,
                 causal=False,
-                window_size=(window_size, window_size) if window_size is not None else (-1, -1),
+                window_size=(window_size, window_size)
+                if window_size is not None
+                else (-1, -1),
                 dropout_p=dropout_p,
                 softcap=softcap,
                 alibi_slopes=alibi_slopes,
@@ -542,7 +594,9 @@ class FlashAttentionWrapper(AttentionWrapper):
 class TritonAttentionWrapper(AttentionWrapper):
     """Wrapper for Anemoi Triton attention. An implementation of the flash attention algorithm, intended to be a portable alternative when flash attention is not available"""
 
-    unsupported = frozenset({"dropout_p", "softcap", "use_alibi_slopes", "use_rotary_embeddings"})
+    unsupported = frozenset(
+        {"dropout_p", "softcap", "use_alibi_slopes", "use_rotary_embeddings"}
+    )
 
     def __init__(self):
         super().__init__()
@@ -583,7 +637,9 @@ class TritonAttentionWrapper(AttentionWrapper):
 
         softmax_scale = 1 / math.sqrt(query.size(-1))
 
-        out = self.attention.apply(query, key, value, causal, window_size, softmax_scale).to(query.dtype)
+        out = self.attention.apply(
+            query, key, value, causal, window_size, softmax_scale
+        ).to(query.dtype)
 
         return out
 
@@ -599,7 +655,7 @@ class MultiHeadCrossAttention(MultiHeadSelfAttention):
         x: PairTensor,
         shard_info: BipartiteGraphShardInfo,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> Tensor:
         query = self.lin_q(x[1])
         key = self.lin_k(x[0])
@@ -607,7 +663,9 @@ class MultiHeadCrossAttention(MultiHeadSelfAttention):
 
         shard_sizes = (shard_info.src_nodes, shard_info.dst_nodes)
 
-        return self.attention_computation(query, key, value, shard_sizes, batch_size, model_comm_group)
+        return self.attention_computation(
+            query, key, value, shard_sizes, batch_size, model_comm_group
+        )
 
 
 def get_alibi_slopes(num_heads: int) -> Tensor:
@@ -628,7 +686,9 @@ def get_alibi_slopes(num_heads: int) -> Tensor:
     alibi_slopes = torch.pow(slope_0, torch.arange(1, 1 + n))
     if n < num_heads:
         slope_hat_0 = 2 ** (-4 / n)
-        alibi_slopes_hat = torch.pow(slope_hat_0, torch.arange(1, 1 + 2 * (num_heads - n), 2))
+        alibi_slopes_hat = torch.pow(
+            slope_hat_0, torch.arange(1, 1 + 2 * (num_heads - n), 2)
+        )
         alibi_slopes = torch.cat([alibi_slopes, alibi_slopes_hat])
     return alibi_slopes
 
@@ -641,7 +701,7 @@ class PointwiseMultiHeadCrossAttention(nn.Module):
         num_heads: int,
         embed_dim: int,
         layer_kernels: DotDict,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         qkv_bias: bool = False,
         qk_norm: bool = False,
         dropout_p: float = 0.0,
@@ -670,9 +730,17 @@ class PointwiseMultiHeadCrossAttention(nn.Module):
 
     def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
         """Apply cross-attention over source tokens at each hidden node."""
-        query = einops.rearrange(self.lin_q(query), "grid (heads vars) -> grid heads vars", heads=self.num_heads)
+        query = einops.rearrange(
+            self.lin_q(query),
+            "grid (heads vars) -> grid heads vars",
+            heads=self.num_heads,
+        )
         key, value = (
-            einops.rearrange(tensor, "grid sources (heads vars) -> grid heads sources vars", heads=self.num_heads)
+            einops.rearrange(
+                tensor,
+                "grid sources (heads vars) -> grid heads sources vars",
+                heads=self.num_heads,
+            )
             for tensor in (self.lin_k(key), self.lin_v(value))
         )
 
@@ -683,7 +751,11 @@ class PointwiseMultiHeadCrossAttention(nn.Module):
         # Score each source against the node's query: (g,h,s,v) @ (g,h,v,1) -> (g,h,s)
         scores = (key @ query.unsqueeze(-1)).squeeze(-1) / math.sqrt(self.head_dim)
         # Turn the scores into weights over the sources that sum to 1 at each node and head.
-        weights = nn.functional.dropout(scores.softmax(dim=-1), p=self.dropout_p, training=self.training)
+        weights = nn.functional.dropout(
+            scores.softmax(dim=-1), p=self.dropout_p, training=self.training
+        )
         # Weighted average of the source values: (g,h,1,s) @ (g,h,s,v) -> (g,h,v)
         output = (weights.unsqueeze(-2) @ value).squeeze(-2)
-        return self.projection(einops.rearrange(output, "grid heads vars -> grid (heads vars)"))
+        return self.projection(
+            einops.rearrange(output, "grid heads vars -> grid (heads vars)")
+        )

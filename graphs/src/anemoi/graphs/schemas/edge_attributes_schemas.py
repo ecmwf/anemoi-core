@@ -11,10 +11,10 @@
 from enum import Enum
 from typing import Literal
 
+from anemoi.utils.schemas import BaseModel
 from pydantic import Field
 
 from anemoi.graphs.schemas.normalise import ImplementedNormalisationSchema
-from anemoi.utils.schemas import BaseModel
 
 
 class ImplementedEdgeAttributeSchema(str, Enum):
@@ -44,23 +44,39 @@ class EdgeAttributeFromNodeSchema(BaseModel):
 
 
 class DirectionalHarmonicsSchema(BaseModel):
-    target_: Literal["anemoi.graphs.edges.attributes.DirectionalHarmonics"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.graphs.edges.attributes.DirectionalHarmonics"] = Field(
+        ..., alias="_target_"
+    )
     "Directional harmonics from edge directions"
     order: int = Field(default=3, description="Maximum order of harmonics to compute")
-    norm: ImplementedNormalisationSchema | None = Field(default=None, description="Normalization method")
+    norm: ImplementedNormalisationSchema | None = Field(
+        default=None, description="Normalization method"
+    )
     dtype: str = Field(default="float32", description="Data type for computations")
 
 
 class RadialBasisFeaturesSchema(BaseModel):
-    target_: Literal["anemoi.graphs.edges.attributes.RadialBasisFeatures"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.graphs.edges.attributes.RadialBasisFeatures"] = Field(
+        ..., alias="_target_"
+    )
     "Radial basis function features from edge distances"
-    r_scale: float | None = Field(default=None, description="Global scale factor (None for adaptive per-node scaling)")
-    centers: list[float] | None = Field(default=None, description="RBF center positions [0, 1]")
+    r_scale: float | None = Field(
+        default=None,
+        description="Global scale factor (None for adaptive per-node scaling)",
+    )
+    centers: list[float] | None = Field(
+        default=None, description="RBF center positions [0, 1]"
+    )
     sigma: float = Field(default=0.2, description="Width of Gaussian RBF functions")
-    epsilon: float = Field(default=1e-10, description="Small constant to avoid division by zero")
+    epsilon: float = Field(
+        default=1e-10, description="Small constant to avoid division by zero"
+    )
     dtype: str = Field(default="float32", description="Data type for computations")
 
 
 EdgeAttributeSchema = (
-    BaseEdgeAttributeSchema | EdgeAttributeFromNodeSchema | DirectionalHarmonicsSchema | RadialBasisFeaturesSchema
+    BaseEdgeAttributeSchema
+    | EdgeAttributeFromNodeSchema
+    | DirectionalHarmonicsSchema
+    | RadialBasisFeaturesSchema
 )

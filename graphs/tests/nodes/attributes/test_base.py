@@ -23,7 +23,9 @@ class ExtendedBaseNodeAttribute(BaseNodeAttribute):
 
 
 @pytest.mark.parametrize("nodes_name", ["invalid_nodes", 4])
-def test_base_node_attribute_invalid_nodes_name(graph_with_nodes: HeteroData, nodes_name: str):
+def test_base_node_attribute_invalid_nodes_name(
+    graph_with_nodes: HeteroData, nodes_name: str
+):
     """Test BaseNodeAttribute raises error with invalid nodes name."""
     with pytest.raises(AssertionError):
         ExtendedBaseNodeAttribute().compute(graph_with_nodes, nodes_name)

@@ -7,19 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from abc import ABC
-from abc import abstractmethod
-from collections.abc import Mapping
-from collections.abc import Sequence
+from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
 
 import torch
-from torch import Tensor
-from torch import nn
+from anemoi.utils.config import DotDict
+from torch import Tensor, nn
 
 from anemoi.models.layers.attention import PointwiseMultiHeadCrossAttention
-from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.models.layers.utils import maybe_checkpoint
-from anemoi.utils.config import DotDict
+from anemoi.models.layers.utils import load_layer_kernels, maybe_checkpoint
 
 
 class BaseLatentAggregator(nn.Module, ABC):
@@ -35,10 +31,14 @@ class BaseLatentAggregator(nn.Module, ABC):
         super().__init__()
 
         if input_channels <= 0:
-            raise ValueError(f"{self.__class__.__name__}: input_channels must be positive, got {input_channels}.")
+            raise ValueError(
+                f"{self.__class__.__name__}: input_channels must be positive, got {input_channels}."
+            )
 
         if not source_channels:
-            raise ValueError(f"{self.__class__.__name__}: At least one latent source is required.")
+            raise ValueError(
+                f"{self.__class__.__name__}: At least one latent source is required."
+            )
 
         self.input_channels = input_channels
         self.source_channels = dict(source_channels)
@@ -98,10 +98,14 @@ class BaseLatentAggregator(nn.Module, ABC):
 class SumAggregator(BaseLatentAggregator):
     """Sum latents element-wise."""
 
-    def __init__(self, *, input_channels: int, source_channels: Mapping[str, int]) -> None:
+    def __init__(
+        self, *, input_channels: int, source_channels: Mapping[str, int]
+    ) -> None:
         super().__init__(input_channels=input_channels, source_channels=source_channels)
         self._hidden_dim = next(iter(self.source_channels.values()))
-        if any(channels != self._hidden_dim for channels in self.source_channels.values()):
+        if any(
+            channels != self._hidden_dim for channels in self.source_channels.values()
+        ):
             raise ValueError(
                 f"All latent sources must have the same channel dimension for {self.__class__.__name__}, "
                 f"got {self.source_channels}.",
@@ -125,10 +129,14 @@ class SumAggregator(BaseLatentAggregator):
 class MeanAggregator(BaseLatentAggregator):
     """Average latents element-wise."""
 
-    def __init__(self, *, input_channels: int, source_channels: Mapping[str, int]) -> None:
+    def __init__(
+        self, *, input_channels: int, source_channels: Mapping[str, int]
+    ) -> None:
         super().__init__(input_channels=input_channels, source_channels=source_channels)
         self._hidden_dim = next(iter(self.source_channels.values()))
-        if any(channels != self._hidden_dim for channels in self.source_channels.values()):
+        if any(
+            channels != self._hidden_dim for channels in self.source_channels.values()
+        ):
             raise ValueError(
                 f"All latent sources must have the same channel dimension for {self.__class__.__name__}, "
                 f"got {self.source_channels}.",
@@ -205,7 +213,10 @@ class PointwiseCrossAttentionAggregator(BaseLatentAggregator):
             },
         )
         self.source_embeddings = nn.ParameterDict(
-            {source_name: nn.Parameter(0.02 * torch.randn(num_channels)) for source_name in self.source_names},
+            {
+                source_name: nn.Parameter(0.02 * torch.randn(num_channels))
+                for source_name in self.source_names
+            },
         )
         self.attention = PointwiseMultiHeadCrossAttention(
             num_heads=num_heads,
@@ -228,10 +239,13 @@ class PointwiseCrossAttentionAggregator(BaseLatentAggregator):
         source_latents: Sequence[Tensor],
     ) -> Tensor:
         projected_latents = tuple(
-            self.source_projections[name](latent) for name, latent in zip(source_names, source_latents, strict=True)
+            self.source_projections[name](latent)
+            for name, latent in zip(source_names, source_latents, strict=True)
         )
         values = self.source_norm(torch.stack(projected_latents, dim=-2))
-        keys = values + torch.stack([self.source_embeddings[name] for name in source_names])
+        keys = values + torch.stack(
+            [self.source_embeddings[name] for name in source_names]
+        )
         residual = self.hidden_projection(hidden_latent)
         query = self.hidden_norm(residual)
         update = self.attention(query, keys, values)

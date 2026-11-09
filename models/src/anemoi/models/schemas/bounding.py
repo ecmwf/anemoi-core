@@ -9,30 +9,32 @@
 
 from __future__ import annotations
 
-from typing import Annotated
-from typing import Literal
-from typing import Union
-
-from pydantic import Field
-from pydantic import model_validator
+from typing import Annotated, Literal
 
 from anemoi.utils.schemas import BaseModel
+from pydantic import Field, model_validator
 
 
 class ReluBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.ReluBounding"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.bounding.ReluBounding"] = Field(
+        ..., alias="_target_"
+    )
     "Relu bounding object defined in anemoi.models.layers.bounding."
     variables: list[str]
     "List of variables to bound using the Relu method."
 
 
 class LeakyReluBoundingSchema(ReluBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.LeakyReluBounding"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.bounding.LeakyReluBounding"] = Field(
+        ..., alias="_target_"
+    )
     "Leaky Relu bounding object defined in anemoi.models.layers.bounding."
 
 
 class FractionBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.FractionBounding"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.bounding.FractionBounding"] = Field(
+        ..., alias="_target_"
+    )
     "Fraction bounding object defined in anemoi.models.layers.bounding."
     variables: list[str]
     "List of variables to bound using the hard tanh fraction method."
@@ -46,12 +48,16 @@ class FractionBoundingSchema(BaseModel):
 
 
 class LeakyFractionBoundingSchema(FractionBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.LeakyFractionBounding"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.bounding.LeakyFractionBounding"] = Field(
+        ..., alias="_target_"
+    )
     "Leaky fraction bounding object defined in anemoi.models.layers.bounding."
 
 
 class HardtanhBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.HardtanhBounding"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.bounding.HardtanhBounding"] = Field(
+        ..., alias="_target_"
+    )
     "Hard tanh bounding method function from anemoi.models.layers.bounding."
     variables: list[str]
     "List of variables to bound using the hard tanh method."
@@ -62,12 +68,16 @@ class HardtanhBoundingSchema(BaseModel):
 
 
 class LeakyHardtanhBoundingSchema(HardtanhBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.LeakyHardtanhBounding"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.bounding.LeakyHardtanhBounding"] = Field(
+        ..., alias="_target_"
+    )
     "Leaky hard tanh bounding method function from anemoi.models.layers.bounding."
 
 
 class NormalizedReluBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.NormalizedReluBounding"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.bounding.NormalizedReluBounding"] = Field(
+        ..., alias="_target_"
+    )
     variables: list[str]
     min_val: list[float]
     normalizer: list[str]
@@ -86,20 +96,20 @@ class NormalizedReluBoundingSchema(BaseModel):
 
 
 class NormalizedLeakyReluBoundingSchema(NormalizedReluBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.NormalizedLeakyReluBounding"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.bounding.NormalizedLeakyReluBounding"] = (
+        Field(..., alias="_target_")
+    )
     "Leaky normalized Relu bounding object defined in anemoi.models.layers.bounding."
 
 
 BoundingSchema = Annotated[
-    Union[
-        ReluBoundingSchema,
-        LeakyReluBoundingSchema,
-        FractionBoundingSchema,
-        LeakyFractionBoundingSchema,
-        HardtanhBoundingSchema,
-        LeakyHardtanhBoundingSchema,
-        NormalizedReluBoundingSchema,
-        NormalizedLeakyReluBoundingSchema,
-    ],
+    ReluBoundingSchema
+    | LeakyReluBoundingSchema
+    | FractionBoundingSchema
+    | LeakyFractionBoundingSchema
+    | HardtanhBoundingSchema
+    | LeakyHardtanhBoundingSchema
+    | NormalizedReluBoundingSchema
+    | NormalizedLeakyReluBoundingSchema,
     Field(discriminator="target_"),
 ]

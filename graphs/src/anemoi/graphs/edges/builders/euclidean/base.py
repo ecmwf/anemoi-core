@@ -9,8 +9,7 @@
 
 
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
@@ -18,9 +17,7 @@ from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
-from anemoi.graphs.utils import PYG_INSTRUCTIONS
-from anemoi.graphs.utils import cuda_device_of
-from anemoi.graphs.utils import is_pyg_lib_available
+from anemoi.graphs.utils import PYG_INSTRUCTIONS, cuda_device_of, is_pyg_lib_available
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,13 +25,19 @@ LOGGER = logging.getLogger(__name__)
 class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
     """Base class for edge builders based on distance."""
 
-    def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
+    def prepare_method_kwargs(
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor
+    ) -> dict:
         """Prepare keyword arguments."""
         return {}
 
     @abstractmethod
     def _compute_edge_index_pyg(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor, skip_flip: bool = False, **kwargs
+        self,
+        source_coords: torch.Tensor,
+        target_coords: torch.Tensor,
+        skip_flip: bool = False,
+        **kwargs,
     ) -> torch.Tensor: ...
 
     @abstractmethod
@@ -43,7 +46,11 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
     ) -> np.ndarray: ...
 
     def compute_edge_index_from_coords(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor, skip_flip: bool = False, **kwargs
+        self,
+        source_coords: torch.Tensor,
+        target_coords: torch.Tensor,
+        skip_flip: bool = False,
+        **kwargs,
     ) -> torch.Tensor:
         """Compute edge index using pyg-lib (if available) or sklearn.
 
@@ -75,19 +82,29 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         if is_pyg_lib_available():
             # pyg-lib's kernels install no device guard of their own; see cuda_device_of.
             with cuda_device_of(source_coords.device):
-                edge_index = self._compute_edge_index_pyg(source_coords, target_coords, skip_flip=skip_flip, **kwargs)
+                edge_index = self._compute_edge_index_pyg(
+                    source_coords, target_coords, skip_flip=skip_flip, **kwargs
+                )
         else:
             LOGGER.warning(PYG_INSTRUCTIONS)
-            adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords, **kwargs)
+            adj_matrix = self._compute_adj_matrix_sklearn(
+                source_coords, target_coords, **kwargs
+            )
 
             if skip_flip:
-                edge_index = torch.from_numpy(np.stack([adj_matrix.row, adj_matrix.col], axis=0))
+                edge_index = torch.from_numpy(
+                    np.stack([adj_matrix.row, adj_matrix.col], axis=0)
+                )
             else:
-                edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
+                edge_index = torch.from_numpy(
+                    np.stack([adj_matrix.col, adj_matrix.row], axis=0)
+                )
 
         return edge_index
 
-    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+    def compute_edge_index(
+        self, source_nodes: NodeStorage, target_nodes: NodeStorage
+    ) -> torch.Tensor:
         """Compute the edge indices.
 
         Parameters
@@ -102,8 +119,14 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         torch.Tensor of shape (2, num_edges)
             Indices of source and target nodes connected by an edge.
         """
-        source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)  # 3d coords
+        source_coords, target_coords = self.get_cartesian_node_coordinates(
+            source_nodes, target_nodes
+        )  # 3d coords
         method_kwargs = self.prepare_method_kwargs(source_coords, target_coords)
-        edge_index = self.compute_edge_index_from_coords(source_coords, target_coords, **method_kwargs)
-        edge_index = self.undo_masking_edge_index(edge_index, source_nodes, target_nodes)
+        edge_index = self.compute_edge_index_from_coords(
+            source_coords, target_coords, **method_kwargs
+        )
+        edge_index = self.undo_masking_edge_index(
+            edge_index, source_nodes, target_nodes
+        )
         return edge_index

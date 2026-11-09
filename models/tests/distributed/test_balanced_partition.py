@@ -9,9 +9,11 @@
 
 import pytest
 
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.models.distributed.balanced_partition import (
+    get_balanced_partition_range,
+    get_balanced_partition_sizes,
+    get_partition_range,
+)
 
 
 @pytest.mark.parametrize(
@@ -85,11 +87,16 @@ def test_get_balanced_partition_range(
     expected_start: int,
     expected_end: int,
 ) -> None:
-    start, end = get_balanced_partition_range(total_size, n_partitions, partition_id, offset)
+    start, end = get_balanced_partition_range(
+        total_size, n_partitions, partition_id, offset
+    )
 
     assert start == expected_start
     assert end == expected_end
-    assert end - start == get_balanced_partition_sizes(total_size, n_partitions)[partition_id]
+    assert (
+        end - start
+        == get_balanced_partition_sizes(total_size, n_partitions)[partition_id]
+    )
 
 
 def test_get_partition_range_invalid_partition_id() -> None:

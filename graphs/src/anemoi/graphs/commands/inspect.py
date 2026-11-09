@@ -20,7 +20,9 @@ def parse_str_area(area_str: str) -> tuple[float, float, float, float]:
     area_str = area_str.strip("()")
     parts = area_str.split(",")
     if len(parts) != 4:
-        raise argparse.ArgumentTypeError("Area must be four comma-separated values: north,west,south,east")
+        raise argparse.ArgumentTypeError(
+            "Area must be four comma-separated values: north,west,south,east"
+        )
     try:
         return [float(x) for x in parts]
     except ValueError:
@@ -71,7 +73,9 @@ class Inspect(Command):
             help="Hide the description of the graph.",
         )
         command_parser.add_argument("path", help="Path to the graph (a .PT file).")
-        command_parser.add_argument("output_path", help="Path to store the inspection results.")
+        command_parser.add_argument(
+            "output_path", help="Path to store the inspection results."
+        )
 
     def run(self, args):
         kwargs = vars(args)

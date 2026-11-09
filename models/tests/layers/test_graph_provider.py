@@ -9,8 +9,7 @@
 
 import pytest
 import torch
-from scipy.sparse import csr_matrix
-from scipy.sparse import save_npz
+from scipy.sparse import csr_matrix, save_npz
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
@@ -84,7 +83,9 @@ def test_projection_graph_provider_does_not_mutate_graph_weights() -> None:
         src_node_weight_attribute="area",
     )
 
-    torch.testing.assert_close(graph["data", "to", "target"].gauss_weight, original_weights)
+    torch.testing.assert_close(
+        graph["data", "to", "target"].gauss_weight, original_weights
+    )
 
 
 @pytest.mark.parametrize(
@@ -130,12 +131,16 @@ def test_from_config_file_mode(mocker) -> None:
         return_value=csr_matrix(np.array([[2.0, 2.0], [1.0, 3.0]])),
     )
 
-    normalized = ProjectionGraphProvider.from_config({"matrix_path": "/fake/path.npz", "row_normalize": True})
+    normalized = ProjectionGraphProvider.from_config(
+        {"matrix_path": "/fake/path.npz", "row_normalize": True}
+    )
     assert isinstance(normalized, ProjectionGraphProvider)
     row_sums = normalized.get_edges().to_dense().sum(dim=1)
     assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-6)
 
-    unnormalized = ProjectionGraphProvider.from_config({"matrix_path": "/fake/path.npz", "row_normalize": False})
+    unnormalized = ProjectionGraphProvider.from_config(
+        {"matrix_path": "/fake/path.npz", "row_normalize": False}
+    )
     row_sums = unnormalized.get_edges().to_dense().sum(dim=1)
     assert torch.allclose(row_sums, torch.tensor([4.0, 4.0]), atol=1e-6)
 

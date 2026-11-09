@@ -9,22 +9,17 @@
 
 
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import torch
 from torch_geometric.data.storage import NodeStorage
 from torch_geometric.nn.conv import MessagePassing
-from torch_geometric.typing import Adj
-from torch_geometric.typing import PairTensor
-from torch_geometric.typing import Size
+from torch_geometric.typing import Adj, PairTensor, Size
 from torch_geometric.utils import scatter
 
 from anemoi.graphs.edges.directional import compute_directions
 from anemoi.graphs.normalise import NormaliserMixin
-from anemoi.graphs.utils import NodesAxis
-from anemoi.graphs.utils import get_distributed_device
-from anemoi.graphs.utils import haversine_distance
+from anemoi.graphs.utils import NodesAxis, get_distributed_device, haversine_distance
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,22 +39,30 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
             error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
             raise TypeError(error_msg)
 
-    def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
+    def subset_node_information(
+        self, source_nodes: NodeStorage, target_nodes: NodeStorage
+    ) -> PairTensor:
         if self.node_attr_name in source_nodes:
             source_nodes_data = source_nodes[self.node_attr_name].to(self.device)
         else:
             source_nodes_data = None
-            LOGGER.warning("The attribute %s is not in the source nodes.", self.node_attr_name)
+            LOGGER.warning(
+                "The attribute %s is not in the source nodes.", self.node_attr_name
+            )
 
         if self.node_attr_name in target_nodes:
             target_nodes_data = target_nodes[self.node_attr_name].to(self.device)
         else:
             target_nodes_data = None
-            LOGGER.warning("The attribute %s is not in the target nodes.", self.node_attr_name)
+            LOGGER.warning(
+                "The attribute %s is not in the target nodes.", self.node_attr_name
+            )
 
         return source_nodes_data, target_nodes_data
 
-    def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
+    def forward(
+        self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None
+    ) -> torch.Tensor:
         x = self.subset_node_information(*x)
         return self.propagate(edge_index.to(self.device), x=x, size=size)
 
@@ -74,7 +77,9 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
 
         return edge_features
 
-    def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
+    def aggregate(
+        self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None
+    ) -> torch.Tensor:
         return self.normalise(edge_features, index, dim_size)
 
 
@@ -119,7 +124,9 @@ class DirectionalHarmonics(EdgeDirection):
         Compute directional harmonics from edge directions.
     """
 
-    def __init__(self, order: int = 3, norm: str | None = None, dtype: str = "float32") -> None:
+    def __init__(
+        self, order: int = 3, norm: str | None = None, dtype: str = "float32"
+    ) -> None:
         self.order = order
         super().__init__(norm=norm, dtype=dtype)
 
@@ -169,7 +176,9 @@ class Azimuth(BasePositionalBuilder):
             * torch.cos(x_j[..., self._idx_lon] - x_i[..., self._idx_lon])
         )
         a1 = a11 - a12
-        a2 = torch.sin(x_j[..., self._idx_lon] - x_i[..., self._idx_lon]) * torch.cos(x_j[:, self._idx_lat])
+        a2 = torch.sin(x_j[..., self._idx_lon] - x_i[..., self._idx_lon]) * torch.cos(
+            x_j[:, self._idx_lat]
+        )
         edge_dirs = torch.atan2(a2, a1)
 
         return edge_dirs
@@ -191,13 +200,15 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
         self.node_attr_name = node_attr_name
         super().__init__()
         if self.nodes_axis is None:
-            raise AttributeError(f"{self.__class__.__name__} class must set 'nodes_axis' attribute.")
+            raise AttributeError(
+                f"{self.__class__.__name__} class must set 'nodes_axis' attribute."
+            )
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         node_attr = (x_j, x_i)[self.nodes_axis.value]
-        assert (
-            node_attr is not None
-        ), f"The node attribute specified for {self.node_attr_name} cannot be found in the nodes."
+        assert node_attr is not None, (
+            f"The node attribute specified for {self.node_attr_name} cannot be found in the nodes."
+        )
         return node_attr
 
 
@@ -299,14 +310,16 @@ class RadialBasisFeatures(EdgeLength):
             self.centers = [c / self.r_scale for c in self.centers]
 
         # Check that centers are in the range [0, 1]
-        assert all(
-            0.0 <= c <= 1.0 for c in self.centers
-        ), f"RBF centers must be in range [0, 1] (or [0, r_scale] if r_scale is set). Got centers: {centers}, r_scale: {r_scale}"
+        assert all(0.0 <= c <= 1.0 for c in self.centers), (
+            f"RBF centers must be in range [0, 1] (or [0, r_scale] if r_scale is set). Got centers: {centers}, r_scale: {r_scale}"
+        )
 
         self.sigma = sigma
         super().__init__(norm=norm, dtype=dtype)
 
-    def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
+    def aggregate(
+        self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None
+    ) -> torch.Tensor:
         """Aggregate edge features with per-node scaling and per-target-node normalization.
 
         Parameters
@@ -333,7 +346,9 @@ class RadialBasisFeatures(EdgeLength):
         # Compute scale factor per destination node
         if self.r_scale is None:
             # Per-node max edge length scaling
-            max_dists = scatter(edge_features, index.long(), dim=0, dim_size=dim_size, reduce="max")
+            max_dists = scatter(
+                edge_features, index.long(), dim=0, dim_size=dim_size, reduce="max"
+            )
 
             # Clamp to epsilon to avoid division by zero
             max_dists = torch.clamp(max_dists, min=self.epsilon)

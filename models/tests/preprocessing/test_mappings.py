@@ -10,18 +10,20 @@
 import pytest
 import torch
 
-from anemoi.models.preprocessing.mappings import affine_transform
-from anemoi.models.preprocessing.mappings import asinh_converter
-from anemoi.models.preprocessing.mappings import atanh_converter
-from anemoi.models.preprocessing.mappings import boxcox_converter
-from anemoi.models.preprocessing.mappings import displace_boundary_atoms
-from anemoi.models.preprocessing.mappings import inverse_affine_transform
-from anemoi.models.preprocessing.mappings import inverse_asinh_converter
-from anemoi.models.preprocessing.mappings import inverse_atanh_converter
-from anemoi.models.preprocessing.mappings import inverse_boxcox_converter
-from anemoi.models.preprocessing.mappings import inverse_displace_boundary_atoms
-from anemoi.models.preprocessing.mappings import inverse_power_transform
-from anemoi.models.preprocessing.mappings import power_transform
+from anemoi.models.preprocessing.mappings import (
+    affine_transform,
+    asinh_converter,
+    atanh_converter,
+    boxcox_converter,
+    displace_boundary_atoms,
+    inverse_affine_transform,
+    inverse_asinh_converter,
+    inverse_atanh_converter,
+    inverse_boxcox_converter,
+    inverse_displace_boundary_atoms,
+    inverse_power_transform,
+    power_transform,
+)
 
 
 @pytest.mark.parametrize("lambd", [0.0, 0.25, 0.75, 1.5])
@@ -56,7 +58,9 @@ def test_power_roundtrip(lambd: float) -> None:
 def test_power_roundtrip_tangent_linear_above_one(lambd: float) -> None:
     x = torch.tensor([0.0, 0.01, 0.1, 1.0, 1.5, 3.0], dtype=torch.float32)
     y = power_transform(x.clone(), lambd=lambd, tangent_linear_above_one=True)
-    x_back = inverse_power_transform(y.clone(), lambd=lambd, tangent_linear_above_one=True)
+    x_back = inverse_power_transform(
+        y.clone(), lambd=lambd, tangent_linear_above_one=True
+    )
     assert torch.allclose(x_back, x, atol=1e-6, rtol=1e-5)
 
 
@@ -76,7 +80,9 @@ def test_inverse_power_transform_clip_negative_parameter() -> None:
     y = inverse_power_transform(x.clone(), lambd=0.5, clip_negative=True)
     assert torch.isfinite(y).all()
     # With clip_negative=False should also work
-    y2 = inverse_power_transform(x.clone(), lambd=0.5)  # clip_negative=False as default kwarg
+    y2 = inverse_power_transform(
+        x.clone(), lambd=0.5
+    )  # clip_negative=False as default kwarg
     assert torch.isfinite(y2).all()
     # Results should be the same (clip_negative is accepted for symmetry)
     assert torch.allclose(y, y2)
@@ -85,7 +91,9 @@ def test_inverse_power_transform_clip_negative_parameter() -> None:
 def test_inverse_power_transform_clip_negative_tangent_linear() -> None:
     """Test inverse_power_transform with clip_negative and tangent_linear_above_one."""
     x = torch.tensor([-0.01, 0.0, 0.01, 0.1, 1.0, 1.5, 3.0], dtype=torch.float32)
-    y = inverse_power_transform(x.clone(), lambd=0.5, clip_negative=True, tangent_linear_above_one=True)
+    y = inverse_power_transform(
+        x.clone(), lambd=0.5, clip_negative=True, tangent_linear_above_one=True
+    )
     assert torch.isfinite(y).all()
 
 
@@ -133,7 +141,9 @@ def test_displace_boundary_atoms_and_inverse() -> None:
         upper_target=2.0,
         eps=1e-4,
     )
-    expected_displaced = torch.tensor([-1.0, -1.0, 0.25, 0.75, 2.0], dtype=torch.float32)
+    expected_displaced = torch.tensor(
+        [-1.0, -1.0, 0.25, 0.75, 2.0], dtype=torch.float32
+    )
     assert torch.allclose(displaced, expected_displaced)
 
     restored = inverse_displace_boundary_atoms(

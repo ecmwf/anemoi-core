@@ -17,7 +17,9 @@ import torch
 from anemoi.graphs.create import GraphCreator
 from anemoi.graphs.utils import FORCE_CPU_ENV_VAR
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+pytestmark = pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="CUDA not available"
+)
 
 
 def test_inspect_on_gpu(
@@ -38,11 +40,20 @@ def test_inspect_on_gpu(
     assert graph_path.exists()
 
     result = subprocess.run(
-        [sys.executable, "-m", "anemoi.graphs", "inspect", str(graph_path), str(output_path)],
+        [
+            sys.executable,
+            "-m",
+            "anemoi.graphs",
+            "inspect",
+            str(graph_path),
+            str(output_path),
+        ],
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, f"anemoi-graphs inspect failed:\n{result.stdout}\n{result.stderr}"
+    assert result.returncode == 0, (
+        f"anemoi-graphs inspect failed:\n{result.stdout}\n{result.stderr}"
+    )
 
     # The graph has no isolated nodes and no node attributes.
     # Thus the command does not create "isolated_nodes.html" and "distribution_node_attributes.png".

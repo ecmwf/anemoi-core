@@ -7,8 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import MigrationMetadata
+from anemoi.models.migrations import CkptType, MigrationMetadata
 
 # DO NOT CHANGE -->
 metadata = MigrationMetadata(
@@ -38,7 +37,9 @@ def migrate(ckpt: CkptType) -> CkptType:
     for block in ["encoder", "processor", "decoder"]:
         old_block, new_block = block, f"{block}_graph_provider"
         for layer in update_layers:
-            ckpt["state_dict"][layer.format(block=new_block)] = ckpt["state_dict"].pop(layer.format(block=old_block))
+            ckpt["state_dict"][layer.format(block=new_block)] = ckpt["state_dict"].pop(
+                layer.format(block=old_block)
+            )
 
     delete_layers = ["model.model.{block}.edge_inc"]
     for block in ["encoder", "processor", "decoder"]:

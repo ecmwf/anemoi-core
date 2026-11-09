@@ -13,20 +13,26 @@ import pytest
 import torch
 
 import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
-from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
-from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
+from anemoi.models.models.transport_encoder_processor_decoder import (
+    AnemoiTransportModelEncProcDec,
+    AnemoiTransportTendModelEncProcDec,
+)
 from anemoi.models.samplers import transport_samplers
-from anemoi.models.transport import EDMDiffusionModelObjective
-from anemoi.models.transport import EdmSettings
-from anemoi.models.transport import StochasticInterpolantModelObjective
-from anemoi.models.transport import TransportSourceBuilder
-from anemoi.models.transport import TransportSourceRequest
-from anemoi.models.transport import TransportSourceSettings
-from anemoi.models.transport import schedules
+from anemoi.models.transport import (
+    EDMDiffusionModelObjective,
+    EdmSettings,
+    StochasticInterpolantModelObjective,
+    TransportSourceBuilder,
+    TransportSourceRequest,
+    TransportSourceSettings,
+    schedules,
+)
 
 
 class IdentityProcessor(torch.nn.Module):
-    def forward(self, x: torch.Tensor, in_place: bool = True, inverse: bool = False, **kwargs):
+    def forward(
+        self, x: torch.Tensor, in_place: bool = True, inverse: bool = False, **kwargs
+    ):
         del inverse, kwargs
         if not in_place:
             x = x.clone()
@@ -53,12 +59,19 @@ def test_transport_conditioning_embedding_uses_compact_condition_width() -> None
     x = {"data": torch.empty(2, 2, 3, 7, 1)}
     condition = {"data": torch.zeros(2, 1, 3, 1, 1)}
 
-    fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = model._build_conditioning_kwargs(x, condition)
+    fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = (
+        model._build_conditioning_kwargs(x, condition)
+    )
 
     data_cond, hidden_cond = fwd_mapper_kwargs["data"]["cond"]
     hidden_back_cond, data_back_cond = bwd_mapper_kwargs["data"]["cond"]
     assert data_cond.shape == data_back_cond.shape == (2 * 3 * 4, cond_dim)
-    assert hidden_cond.shape == hidden_back_cond.shape == processor_kwargs["cond"].shape == (2 * 3 * 5, cond_dim)
+    assert (
+        hidden_cond.shape
+        == hidden_back_cond.shape
+        == processor_kwargs["cond"].shape
+        == (2 * 3 * 5, cond_dim)
+    )
 
 
 def test_transport_conditioning_rejects_expanded_condition_shape() -> None:
@@ -103,14 +116,18 @@ def test_before_sampling_replaces_source_grid_shard_sizes(monkeypatch) -> None:
         "get_shard_sizes",
         lambda *_args, **_kwargs: source_grid_shard_sizes,
     )
-    monkeypatch.setattr(transport_model_module, "shard_tensor", lambda tensor, *_args, **_kwargs: tensor)
+    monkeypatch.setattr(
+        transport_model_module, "shard_tensor", lambda tensor, *_args, **_kwargs: tensor
+    )
 
     (xs,), grid_shard_sizes = model._before_sampling(
         {"data": torch.randn(1, 2, 8, 1)},
         {"data": IdentityProcessor()},
         n_step_input=1,
         model_comm_group=comm_group,
-        spatial_pre_processors=torch.nn.ModuleDict({"data": RegriddingSpatialProcessor()}),
+        spatial_pre_processors=torch.nn.ModuleDict(
+            {"data": RegriddingSpatialProcessor()}
+        ),
     )
 
     assert grid_shard_sizes == {"data": target_grid_shard_sizes}
@@ -167,10 +184,16 @@ def test_sample_passes_zero_terminated_schedule_to_sampler(
 ) -> None:
     class DummySchedule(schedules.SigmaSchedule):
         def __init__(self, sigma_max: float, sigma_min: float, num_steps: int):
-            super().__init__(sigma_max=sigma_max, sigma_min=sigma_min, num_steps=num_steps)
+            super().__init__(
+                sigma_max=sigma_max, sigma_min=sigma_min, num_steps=num_steps
+            )
 
-        def _build_schedule(self, device=None, dtype_compute: torch.dtype = torch.float64):
-            return torch.linspace(1.0, 0.1, self.num_steps, device=device, dtype=dtype_compute)
+        def _build_schedule(
+            self, device=None, dtype_compute: torch.dtype = torch.float64
+        ):
+            return torch.linspace(
+                1.0, 0.1, self.num_steps, device=device, dtype=dtype_compute
+            )
 
     class DummySampler:
         def __init__(self, dtype: torch.dtype = torch.float64, **kwargs):
@@ -281,7 +304,9 @@ def test_sample_dispatches_stochastic_interpolant_to_default_heun_sampler(
         )
     }
 
-    monkeypatch.setitem(transport_samplers.VECTOR_FIELD_SAMPLERS, "heun", DummyVectorFieldSampler)
+    monkeypatch.setitem(
+        transport_samplers.VECTOR_FIELD_SAMPLERS, "heun", DummyVectorFieldSampler
+    )
 
     x = {"ds_a": torch.randn(1, 3, 1, 5, 6, dtype=torch.float32)}
 
@@ -343,7 +368,11 @@ def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interp
         )
     }
 
-    monkeypatch.setitem(transport_samplers.VECTOR_FIELD_SAMPLERS, "dummy_vector", DummyVectorFieldSampler)
+    monkeypatch.setitem(
+        transport_samplers.VECTOR_FIELD_SAMPLERS,
+        "dummy_vector",
+        DummyVectorFieldSampler,
+    )
 
     x = {"ds_a": torch.randn(1, 3, 1, 5, 6, dtype=torch.float32)}
 
@@ -356,7 +385,9 @@ def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interp
 def test_transport_source_builder_does_not_build_unselected_reference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    builder = TransportSourceBuilder(TransportSourceSettings(kind="gaussian", scale=2.0))
+    builder = TransportSourceBuilder(
+        TransportSourceSettings(kind="gaussian", scale=2.0)
+    )
     target = {"data": torch.zeros(1, 1, 1, 2, 1)}
 
     def reference_source_factory() -> dict[str, torch.Tensor]:
@@ -378,13 +409,21 @@ def test_transport_source_builder_does_not_build_unselected_reference(
     torch.testing.assert_close(source["data"], torch.full_like(target["data"], 6.0))
 
 
-def test_transport_source_builder_postprocesses_reference_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    builder = TransportSourceBuilder(TransportSourceSettings(kind="reference_state", scale=0.5, noise_scale=0.25))
+def test_transport_source_builder_postprocesses_reference_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    builder = TransportSourceBuilder(
+        TransportSourceSettings(kind="reference_state", scale=0.5, noise_scale=0.25)
+    )
     target = {"data": torch.zeros(1, 1, 1, 2, 1, dtype=torch.float64)}
     reference = {"data": torch.full_like(target["data"], 4.0)}
 
     monkeypatch.setattr(
-        torch, "randn", lambda shape, device=None, dtype=None: torch.full(shape, 2.0, device=device, dtype=dtype)
+        torch,
+        "randn",
+        lambda shape, device=None, dtype=None: torch.full(
+            shape, 2.0, device=device, dtype=dtype
+        ),
     )
 
     source = builder.build(
@@ -401,8 +440,12 @@ def test_transport_source_builder_postprocesses_reference_source(monkeypatch: py
 
 
 def test_tendency_sampling_source_can_use_reference_state() -> None:
-    model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
-    model.transport_source = TransportSourceBuilder(TransportSourceSettings(kind="reference_state"))
+    model = AnemoiTransportTendModelEncProcDec.__new__(
+        AnemoiTransportTendModelEncProcDec
+    )
+    model.transport_source = TransportSourceBuilder(
+        TransportSourceSettings(kind="reference_state")
+    )
     model.n_step_output = 2
     model.num_output_channels = {"ds_a": 2}
     model.data_indices = {
@@ -418,7 +461,11 @@ def test_tendency_sampling_source_can_use_reference_state() -> None:
 
     source = model.build_sampling_source(x)
 
-    expected = x_data[:, -1:, :, :, :].index_select(-1, torch.tensor([0, 2])).expand(-1, 2, -1, -1, -1)
+    expected = (
+        x_data[:, -1:, :, :, :]
+        .index_select(-1, torch.tensor([0, 2]))
+        .expand(-1, 2, -1, -1, -1)
+    )
     torch.testing.assert_close(source["ds_a"], expected)
 
 

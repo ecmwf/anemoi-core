@@ -9,10 +9,10 @@
 
 
 import logging
-from typing import Optional
 
 import einops
 import torch
+from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch import Tensor
@@ -20,13 +20,14 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.shapes import (
+    BipartiteGraphShardInfo,
+    DatasetShardSizes,
+    GraphShardInfo,
+    ShardSizes,
+    get_shard_sizes,
+)
 from anemoi.models.models import AnemoiModelEncProcDec
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,7 +62,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             model_config.noise_injector,
             _recursive_=False,
             graph_data=self._graph_data,
-            sparse_projector_num_chunks=model_config.get("sparse_projector", {}).get("num_chunks", 1),
+            sparse_projector_num_chunks=model_config.get("sparse_projector", {}).get(
+                "num_chunks", 1
+            ),
         )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
@@ -80,9 +83,15 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, ShardSizes]:
-        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_ens_size)
-        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+        assert dataset_name is not None, (
+            "dataset_name must be provided when using multiple datasets."
+        )
+        node_attributes_data = self.node_attributes(
+            dataset_name, batch_size=batch_ens_size
+        )
+        grid_shard_sizes = (
+            grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+        )
 
         x_skip = self.residual[dataset_name](
             x,
@@ -92,14 +101,20 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         )
 
         if grid_shard_sizes is not None:
-            node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
+            node_attributes_data = shard_tensor(
+                node_attributes_data, 0, grid_shard_sizes, model_comm_group
+            )
 
         # add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                einops.rearrange(
+                    x,
+                    "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
+                ),
                 node_attributes_data,
-                torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1) * fcstep,
+                torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1)
+                * fcstep,
             ),
             dim=-1,  # feature dimension
         )
@@ -143,13 +158,19 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         )
 
         # residual connection (just for the prognostic variables)
-        assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
+        assert dataset_name is not None, (
+            "dataset_name must be provided for multi-dataset case"
+        )
         if x_skip is not None:
-            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
-            assert (
-                x_skip.shape[1] == x_out.shape[1]
-            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
-            x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+            assert x_skip.ndim == 5, (
+                "Residual must be (batch, time, ensemble, grid, vars)."
+            )
+            assert x_skip.shape[1] == x_out.shape[1], (
+                f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+            )
+            x_out[..., self._internal_output_idx[dataset_name]] += x_skip[
+                ..., self._internal_input_idx[dataset_name]
+            ]
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
@@ -161,7 +182,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x: dict[str, torch.Tensor],
         *,
         fcstep: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:
@@ -192,13 +213,20 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         batch_size = self._get_consistent_dim(x, 0)
         ensemble_size = self._get_consistent_dim(x, 2)
 
-        batch_ens_size = batch_size * ensemble_size  # batch and ensemble dimensions are merged
+        batch_ens_size = (
+            batch_size * ensemble_size
+        )  # batch and ensemble dimensions are merged
         in_out_sharded = self._resolve_in_out_sharded(
             dataset_names=dataset_names,
             grid_shard_sizes=grid_shard_sizes,
         )
         for dataset_name in dataset_names:
-            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
+            self._assert_valid_sharding(
+                batch_size,
+                ensemble_size,
+                in_out_sharded[dataset_name],
+                model_comm_group,
+            )
 
         fcstep = min(1, fcstep)
         # Process each dataset through its corresponding encoder
@@ -210,8 +238,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         x_hidden_latent = self.node_attributes(hidden_name, batch_size=batch_ens_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
-        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
-        for dataset_name in x.keys():
+        x_hidden_latent = shard_tensor(
+            x_hidden_latent, 0, shard_sizes_hidden, model_comm_group
+        )
+        for dataset_name in x:
             if dataset_name not in self.input_datasets:
                 continue
 
@@ -281,7 +311,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_latent_proc = self.processor(
             x=x_latent_proc,
             batch_size=batch_ens_size,
-            shard_info=GraphShardInfo(nodes=shard_sizes_hidden, edges=proc_edge_shard_sizes),
+            shard_info=GraphShardInfo(
+                nodes=shard_sizes_hidden, edges=proc_edge_shard_sizes
+            ),
             edge_attr=processor_edge_attr,
             edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
@@ -328,7 +360,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 edge_attr=decoder_edge_attr,
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
-                keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
+                keep_x_dst_sharded=in_out_sharded[
+                    dataset_name
+                ],  # keep x_out sharded iff in_out_sharded
             )
 
             x_out_dict[dataset_name] = self._assemble_output(

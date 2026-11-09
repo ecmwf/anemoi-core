@@ -31,7 +31,9 @@ def inverse_affine_transform(x, scale=1.0, shift=0.0):
 # --------------------------------------------------------
 # Displace boundary atoms
 # --------------------------------------------------------
-def displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=None, upper_target=None, eps=0.0):
+def displace_boundary_atoms(
+    x, lower_atom=None, upper_atom=None, lower_target=None, upper_target=None, eps=0.0
+):
     """Displaces exact boundary values to target values (outside of the original range) to give model flexibility to model them as imprecise peaks, instead of delta functions. Reverse transform clamps the imprecise predicted values back to the original range to the original boundary values. Can be used on lower bound, upper bound, or both.
 
     Parameters
@@ -52,11 +54,15 @@ def displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=No
     """
 
     if lower_atom is not None:
-        assert lower_target is not None, "To displace lower boundary atom, lower_target must be specified"
+        assert lower_target is not None, (
+            "To displace lower boundary atom, lower_target must be specified"
+        )
         assert lower_target < lower_atom, "lower_target must be less than lower_atom"
         x.masked_fill_(x <= lower_atom + eps, lower_target)
     if upper_atom is not None:
-        assert upper_target is not None, "To displace upper boundary atom, upper_target must be specified"
+        assert upper_target is not None, (
+            "To displace upper boundary atom, upper_target must be specified"
+        )
         assert upper_target > upper_atom, "upper_target must be greater than upper_atom"
         x.masked_fill_(x >= upper_atom - eps, upper_target)
     return x
@@ -98,14 +104,14 @@ def boxcox_converter(x, lambd=0.5, clip_negative=False):
 
     # Check domain of input
     if lambd == 0:
-        assert x.gt(0.0).all(), "input x must be strictly positive for parameter lambd == 0"
+        assert x.gt(0.0).all(), (
+            "input x must be strictly positive for parameter lambd == 0"
+        )
     else:
         if clip_negative:
             x = torch.clamp_(x, min=0.0)
         else:
-            assert x.ge(
-                0.0
-            ).all(), (
+            assert x.ge(0.0).all(), (
                 "input x must me greater or equal to 0, or use with clip_negative=True to clip negative values to 0"
             )
 
@@ -138,14 +144,14 @@ def power_transform(x, lambd=0.33, clip_negative=False, tangent_linear_above_one
     tangent_linear_above_one : bool, optional
         Whether to use a tangent-linear extension above 1 instead of the power transform. Useful for max-scaled variables where we still might want to predict values above max without clamping them to max and without blowing them up with the power-transform. Default is False.
     """
-    assert lambd > 0, f"For power transform, parameter lambd {lambd} must satisfy lambd > 0."
+    assert lambd > 0, (
+        f"For power transform, parameter lambd {lambd} must satisfy lambd > 0."
+    )
 
     if clip_negative:
         x = torch.clamp_(x, min=0.0)
     else:
-        assert x.ge(
-            0.0
-        ).all(), (
+        assert x.ge(0.0).all(), (
             "Power transform input x must satisfy x >= 0, or use with clip_negative=True to clip negative values to 0."
         )
     if tangent_linear_above_one:
@@ -155,7 +161,9 @@ def power_transform(x, lambd=0.33, clip_negative=False, tangent_linear_above_one
     return x.pow_(lambd)
 
 
-def inverse_power_transform(x, lambd=0.33, clip_negative=False, tangent_linear_above_one=False):
+def inverse_power_transform(
+    x, lambd=0.33, clip_negative=False, tangent_linear_above_one=False
+):
     """Inverse power transform with optional inverse tangent-linear branch above 1.
 
     Parameters
@@ -170,7 +178,9 @@ def inverse_power_transform(x, lambd=0.33, clip_negative=False, tangent_linear_a
     tangent_linear_above_one : bool, optional
         Whether to use the inverse tangent-linear extension above 1. Default is False.
     """
-    assert lambd > 0, f"For inverse power transform, parameter lambd {lambd} must satisfy lambd > 0."
+    assert lambd > 0, (
+        f"For inverse power transform, parameter lambd {lambd} must satisfy lambd > 0."
+    )
     if tangent_linear_above_one:
         lin_branch = x.clone().sub_(1.0 - lambd).div_(lambd)
         pow_branch = torch.clamp_(x, min=0.0).pow_(1 / lambd)
@@ -209,7 +219,11 @@ def atanh_converter(x, rho=2.0):
 def inverse_atanh_converter(y, rho=2.0):
     if rho == 0:
         return y.clamp_(0.0, 1.0)
-    return torch.clamp_(torch.tanh_(y.mul_(rho)).div_(math.tanh(rho)).add_(1.0).mul_(0.5), min=0.0, max=1.0)
+    return torch.clamp_(
+        torch.tanh_(y.mul_(rho)).div_(math.tanh(rho)).add_(1.0).mul_(0.5),
+        min=0.0,
+        max=1.0,
+    )
 
 
 # --------------------------------------------------------

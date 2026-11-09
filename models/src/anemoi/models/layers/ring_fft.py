@@ -63,7 +63,11 @@ class RingFFT(Module):
             ("mode_lengths", mode_lengths),
             ("multiplicity", multiplicities),
         ):
-            self.register_buffer(name, torch.as_tensor(np.concatenate(values), dtype=torch.int64), persistent=False)
+            self.register_buffer(
+                name,
+                torch.as_tensor(np.concatenate(values), dtype=torch.int64),
+                persistent=False,
+            )
 
     def _pack_spectrum(self, x: Tensor) -> Tensor:
         # Match irfft: zero-pad missing modes and discard modes beyond Nyquist.
@@ -84,7 +88,9 @@ class RingFFT(Module):
         result = []
         offset = 0
         for n, count in self.groups:
-            block = packed[..., offset : offset + count * n].reshape(*packed.shape[:-1], count, n)
+            block = packed[..., offset : offset + count * n].reshape(
+                *packed.shape[:-1], count, n
+            )
             result.append(torch.fft.rfft(block, norm="backward").flatten(-2))
             offset += count * n
         return torch.cat(result, dim=-1)
@@ -94,7 +100,9 @@ class RingFFT(Module):
         offset = 0
         for n, count in self.groups:
             modes = n // 2 + 1
-            block = packed[..., offset : offset + count * modes].reshape(*packed.shape[:-1], count, modes)
+            block = packed[..., offset : offset + count * modes].reshape(
+                *packed.shape[:-1], count, modes
+            )
             result.append(torch.fft.irfft(block, n=n, norm="forward").flatten(-2))
             offset += count * modes
         return torch.cat(result, dim=-1)
@@ -146,4 +154,6 @@ class _RingIRFFT(torch.autograd.Function):
         # and is not doubled. Surplus input modes receive zero gradients.
         packed = fft._rfft_groups(grad.index_select(-1, fft.grid_order))
         spectrum = fft._unpack_spectrum(packed * fft.multiplicity)
-        return F.pad(spectrum[..., : ctx.input_modes], (0, max(0, ctx.input_modes - fft.modes))), None
+        return F.pad(
+            spectrum[..., : ctx.input_modes], (0, max(0, ctx.input_modes - fft.modes))
+        ), None

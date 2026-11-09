@@ -77,7 +77,10 @@ def to_nodes_json(lats, lons, prefix="P"):
     """Convert nodes dictionary to JSON format for HTML rendering."""
     assert len(lats) == len(lons)
     names = [f"{prefix}_{i}" for i in range(len(lats))]
-    points = [{"name": n, "pos": [float(lat), float(lon)]} for n, lat, lon in zip(names, lats, lons)]
+    points = [
+        {"name": n, "pos": [float(lat), float(lon)]}
+        for n, lat, lon in zip(names, lats, lons)
+    ]
     return points
 
 
@@ -130,7 +133,14 @@ def plot_interactive_graph_3d(
 
     nodes_embed = []
     for i, (node_set, pts) in enumerate(nodes.items()):
-        nodes_embed.append({"name": node_set, "points": pts, "color": colors[i % len(colors)], "radius": 20.1 + i * 2})
+        nodes_embed.append(
+            {
+                "name": node_set,
+                "points": pts,
+                "color": colors[i % len(colors)],
+                "radius": 20.1 + i * 2,
+            }
+        )
 
     edges_embed = []
     for i, (edge_set, eds) in enumerate(edges.items()):
@@ -141,6 +151,8 @@ def plot_interactive_graph_3d(
         HTML_TEMPLATE = f.read()
 
     template = Template(HTML_TEMPLATE)
-    html_output = template.render(nodes=nodes_embed, edges=edges_embed, max_degree=50, min_degree=1)
+    html_output = template.render(
+        nodes=nodes_embed, edges=edges_embed, max_degree=50, min_degree=1
+    )
     with open(out_file, "w") as f:
         f.write(html_output)

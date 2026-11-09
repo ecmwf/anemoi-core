@@ -10,13 +10,15 @@
 import pytest
 import torch
 
-from anemoi.models.transport.paths import karras_sigma_from_unit_time
-from anemoi.models.transport.paths import stochastic_interpolant_beta
-from anemoi.models.transport.paths import stochastic_interpolant_beta_dot
-from anemoi.models.transport.paths import stochastic_interpolant_bridge_noise_velocity_ratio
-from anemoi.models.transport.paths import stochastic_interpolant_clean_mean
-from anemoi.models.transport.paths import stochastic_interpolant_sigma
-from anemoi.models.transport.paths import unit_time_grid
+from anemoi.models.transport.paths import (
+    karras_sigma_from_unit_time,
+    stochastic_interpolant_beta,
+    stochastic_interpolant_beta_dot,
+    stochastic_interpolant_bridge_noise_velocity_ratio,
+    stochastic_interpolant_clean_mean,
+    stochastic_interpolant_sigma,
+    unit_time_grid,
+)
 from anemoi.models.transport.schedules import KarrasSigmaSchedule
 
 
@@ -35,9 +37,7 @@ def test_karras_sigma_helper_matches_scheduler_prefinal_values() -> None:
         sigma_min=0.02,
         num_steps=num_steps,
         rho=7.0,
-    ).get_schedule(
-        dtype_compute=torch.float64
-    )[:-1]
+    ).get_schedule(dtype_compute=torch.float64)[:-1]
 
     torch.testing.assert_close(helper_sigmas, scheduler_sigmas)
 
@@ -50,23 +50,37 @@ def test_unit_time_grid_validates_num_steps() -> None:
         unit_time_grid(0)
 
 
-def test_stochastic_interpolant_brownian_bridge_ratio_matches_noise_velocity_interior() -> None:
+def test_stochastic_interpolant_brownian_bridge_ratio_matches_noise_velocity_interior() -> (
+    None
+):
     time = torch.tensor([0.25, 0.5, 0.75], dtype=torch.float64)
     noise_scale = 2.0
 
-    sigma = stochastic_interpolant_sigma(time, schedule="brownian_bridge", noise_scale=noise_scale)
-    ratio = stochastic_interpolant_bridge_noise_velocity_ratio(time, schedule="brownian_bridge", eps=0.0)
-    expected_velocity = noise_scale * (1.0 - 2.0 * time) / torch.sqrt(2.0 * time * (1.0 - time))
+    sigma = stochastic_interpolant_sigma(
+        time, schedule="brownian_bridge", noise_scale=noise_scale
+    )
+    ratio = stochastic_interpolant_bridge_noise_velocity_ratio(
+        time, schedule="brownian_bridge", eps=0.0
+    )
+    expected_velocity = (
+        noise_scale * (1.0 - 2.0 * time) / torch.sqrt(2.0 * time * (1.0 - time))
+    )
 
     torch.testing.assert_close(ratio * sigma, expected_velocity)
 
 
-def test_stochastic_interpolant_quadratic_bridge_ratio_matches_noise_velocity_interior() -> None:
+def test_stochastic_interpolant_quadratic_bridge_ratio_matches_noise_velocity_interior() -> (
+    None
+):
     time = torch.tensor([0.25, 0.5, 0.75], dtype=torch.float64)
     noise_scale = 2.0
 
-    sigma = stochastic_interpolant_sigma(time, schedule="quadratic_bridge", noise_scale=noise_scale)
-    ratio = stochastic_interpolant_bridge_noise_velocity_ratio(time, schedule="quadratic_bridge", eps=0.0)
+    sigma = stochastic_interpolant_sigma(
+        time, schedule="quadratic_bridge", noise_scale=noise_scale
+    )
+    ratio = stochastic_interpolant_bridge_noise_velocity_ratio(
+        time, schedule="quadratic_bridge", eps=0.0
+    )
 
     torch.testing.assert_close(
         ratio * sigma,
@@ -84,7 +98,9 @@ def test_quadratic_bridge_reconstructs_clean_endpoint_near_source_endpoint() -> 
     sigma = stochastic_interpolant_sigma(time_level, schedule="quadratic_bridge")
     interpolant = (1.0 - time_level) * anchor + beta * clean + sigma * noise
     drift_noise = (
-        stochastic_interpolant_bridge_noise_velocity_ratio(time_level, schedule="quadratic_bridge", eps=1e-8)
+        stochastic_interpolant_bridge_noise_velocity_ratio(
+            time_level, schedule="quadratic_bridge", eps=1e-8
+        )
         * sigma
         * noise
     )
@@ -130,17 +146,23 @@ def test_stochastic_interpolant_reconstructs_clean_endpoint_with_bridge_noise(
     anchor = torch.randn((2, 3, 1, 4, 5), dtype=torch.float64)
     clean = torch.randn_like(anchor)
     noise = torch.randn_like(anchor)
-    time_level = torch.rand((2, 1, 1, 1, 1), dtype=torch.float64).clamp(1e-4, 1.0 - 1e-4)
+    time_level = torch.rand((2, 1, 1, 1, 1), dtype=torch.float64).clamp(
+        1e-4, 1.0 - 1e-4
+    )
     noise_scale = 0.7
 
     alpha = 1.0 - time_level
     beta = stochastic_interpolant_beta(time_level, beta_schedule)
-    sigma = stochastic_interpolant_sigma(time_level, schedule=sigma_schedule, noise_scale=noise_scale)
+    sigma = stochastic_interpolant_sigma(
+        time_level, schedule=sigma_schedule, noise_scale=noise_scale
+    )
     interpolant = alpha * anchor + beta * clean + sigma * noise
 
     alpha_dot = -torch.ones_like(time_level)
     beta_dot = stochastic_interpolant_beta_dot(time_level, beta_schedule)
-    ratio = stochastic_interpolant_bridge_noise_velocity_ratio(time_level, schedule=sigma_schedule, eps=1e-8)
+    ratio = stochastic_interpolant_bridge_noise_velocity_ratio(
+        time_level, schedule=sigma_schedule, eps=1e-8
+    )
     drift = alpha_dot * anchor + beta_dot * clean + ratio * sigma * noise
 
     reconstructed = stochastic_interpolant_clean_mean(

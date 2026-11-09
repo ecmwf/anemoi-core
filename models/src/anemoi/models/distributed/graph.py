@@ -12,22 +12,29 @@ import torch
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.distributed.primitives import _alltoall_transpose
-from anemoi.models.distributed.primitives import _expand_sharded_tensor
-from anemoi.models.distributed.primitives import _gather
-from anemoi.models.distributed.primitives import _halo_exchange
-from anemoi.models.distributed.primitives import _halo_exchange_bwd
-from anemoi.models.distributed.primitives import _reduce
-from anemoi.models.distributed.primitives import _split
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.distributed.shapes import validate_dim
-from anemoi.models.distributed.shapes import validate_shard_sizes
+from anemoi.models.distributed.primitives import (
+    _alltoall_transpose,
+    _expand_sharded_tensor,
+    _gather,
+    _halo_exchange,
+    _halo_exchange_bwd,
+    _reduce,
+    _split,
+)
+from anemoi.models.distributed.shapes import (
+    ShardSizes,
+    get_shard_sizes,
+    validate_dim,
+    validate_shard_sizes,
+)
 from anemoi.models.distributed.utils import model_is_distributed
 
 
 def ensure_sharded(
-    x: Tensor, dim: int, shard_sizes: ShardSizes, model_comm_group: ProcessGroup | None = None
+    x: Tensor,
+    dim: int,
+    shard_sizes: ShardSizes,
+    model_comm_group: ProcessGroup | None = None,
 ) -> tuple[Tensor, ShardSizes]:
     """Ensure that the input tensor is sharded along the specified dimension.
 
@@ -70,7 +77,11 @@ def ensure_sharded(
 
 
 def shard_tensor(
-    input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None, gather_in_backward: bool = True
+    input_: Tensor,
+    dim: int,
+    sizes: ShardSizes,
+    mgroup: ProcessGroup | None,
+    gather_in_backward: bool = True,
 ) -> Tensor:
     """Shard tensor.
 
@@ -108,7 +119,9 @@ def shard_tensor(
     return _ShardParallelSection.apply(input_, dim, sizes, gather_in_backward, mgroup)
 
 
-def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None) -> Tensor:
+def gather_tensor(
+    input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None
+) -> Tensor:
     """Gather tensor.
 
     Gathers tensor shards from ranks.
@@ -209,7 +222,9 @@ def sync_tensor(
     return _SyncParallelSection.apply(input_, dim, sizes, mgroup, gather_in_fwd)
 
 
-def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None) -> Tensor:
+def reduce_shard_tensor(
+    input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None
+) -> Tensor:
     """Reduces and then shards tensor.
 
     Perform an allreduce followed by a split in the forward pass and a gather in the backward pass.
@@ -282,7 +297,9 @@ def all_to_all_transpose(
         validate_dim(input_, dim_concat)
         ndim = input_.dim()
         if dim_split % ndim == dim_concat % ndim:
-            raise ValueError(f"dim_split and dim_concat can not be the same, got {dim_split} and {dim_concat}")
+            raise ValueError(
+                f"dim_split and dim_concat can not be the same, got {dim_split} and {dim_concat}"
+            )
 
         validate_shard_sizes(split_sizes, mgroup)
         validate_shard_sizes(concat_sizes, mgroup)
@@ -301,7 +318,9 @@ def all_to_all_transpose(
                 f"({concat_sizes[rank]}), but got {concat_size}"
             )
 
-    return _AllToAllParallelSection.apply(input_, dim_split, split_sizes, dim_concat, concat_sizes, mgroup)
+    return _AllToAllParallelSection.apply(
+        input_, dim_split, split_sizes, dim_concat, concat_sizes, mgroup
+    )
 
 
 class _SyncParallelSection(torch.autograd.Function):
@@ -414,7 +433,9 @@ class _ShardParallelSection(torch.autograd.Function):
                 )
             else:
                 return (
-                    _expand_sharded_tensor(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group),
+                    _expand_sharded_tensor(
+                        grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group
+                    ),
                     None,
                     None,
                     None,
@@ -484,14 +505,23 @@ class _AllToAllParallelSection(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, input_, dim_split_, split_sizes_, dim_concat_, concat_sizes_, mgroup_=None):
+    def forward(
+        ctx, input_, dim_split_, split_sizes_, dim_concat_, concat_sizes_, mgroup_=None
+    ):
         ctx.dim_split = dim_split_
         ctx.split_sizes = split_sizes_
         ctx.dim_concat = dim_concat_
         ctx.concat_sizes = concat_sizes_
         ctx.comm_group = mgroup_
         if mgroup_:
-            return _alltoall_transpose(input_, dim_split_, split_sizes_, dim_concat_, concat_sizes_, group=mgroup_)
+            return _alltoall_transpose(
+                input_,
+                dim_split_,
+                split_sizes_,
+                dim_concat_,
+                concat_sizes_,
+                group=mgroup_,
+            )
         return input_
 
     @staticmethod
@@ -570,7 +600,9 @@ class _HaloExchangeParallelSection(torch.autograd.Function):
         ctx.num_local_src_nodes = halo_info_.num_local_src_nodes
         ctx.comm_group = mgroup_
         if mgroup_:
-            return _halo_exchange(input_, halo_info_.send_indices, halo_info_.recv_counts, mgroup_)
+            return _halo_exchange(
+                input_, halo_info_.send_indices, halo_info_.recv_counts, mgroup_
+            )
         return input_
 
     @staticmethod

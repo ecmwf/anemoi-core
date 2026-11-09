@@ -9,7 +9,6 @@
 
 
 from dataclasses import dataclass
-from typing import Optional
 from typing import Union
 
 import torch.distributed as dist
@@ -46,7 +45,9 @@ def validate_dim(tensor: Tensor, dim: int) -> None:
 
     ndim = tensor.dim()
     if not -ndim <= dim < ndim:
-        raise IndexError(f"Dimension out of range (expected to be in range of [-{ndim}, {ndim - 1}], but got {dim})")
+        raise IndexError(
+            f"Dimension out of range (expected to be in range of [-{ndim}, {ndim - 1}], but got {dim})"
+        )
 
 
 def validate_shard_sizes(sizes: ShardSizes, mgroup: ProcessGroup) -> None:
@@ -71,10 +72,14 @@ def validate_shard_sizes(sizes: ShardSizes, mgroup: ProcessGroup) -> None:
         If there is not one non-negative size per process.
     """
     comm_size = mgroup.size()
-    assert comm_size > 1, f"Sharding metadata can't be verified for communication groups of size: {comm_size} < 2"
+    assert comm_size > 1, (
+        f"Sharding metadata can't be verified for communication groups of size: {comm_size} < 2"
+    )
 
     if not isinstance(sizes, (list, tuple)):
-        raise TypeError(f"Shard sizes must be a list or tuple of integers, but got {type(sizes).__name__}")
+        raise TypeError(
+            f"Shard sizes must be a list or tuple of integers, but got {type(sizes).__name__}"
+        )
     if any(not isinstance(size, int) or isinstance(size, bool) for size in sizes):
         raise TypeError("Shard sizes must contain only integers")
 
@@ -84,7 +89,9 @@ def validate_shard_sizes(sizes: ShardSizes, mgroup: ProcessGroup) -> None:
             f"for a process group of size {comm_size}"
         )
     if any(size < 0 for size in sizes):
-        raise ValueError(f"Shard sizes must contain only non-negative entries, but got {sizes}")
+        raise ValueError(
+            f"Shard sizes must contain only non-negative entries, but got {sizes}"
+        )
 
 
 @dataclass(frozen=True)
@@ -115,11 +122,15 @@ class BipartiteGraphShardInfo:
         return self.edges is not None
 
 
-def get_shard_sizes(tensor: Tensor, dim: int, model_comm_group: Optional[ProcessGroup] = None) -> ShardSizes:
+def get_shard_sizes(
+    tensor: Tensor, dim: int, model_comm_group: ProcessGroup | None = None
+) -> ShardSizes:
     """Get per-rank shard sizes for a tensor split along a specific dimension."""
     validate_dim(tensor, dim)
 
-    comm_size = 1 if not model_comm_group else dist.get_world_size(group=model_comm_group)
+    comm_size = (
+        1 if not model_comm_group else dist.get_world_size(group=model_comm_group)
+    )
     return get_balanced_partition_sizes(tensor.shape[dim], comm_size)
 
 

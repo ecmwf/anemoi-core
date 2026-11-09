@@ -17,8 +17,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import GraphPartition
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import GraphShardInfo, ShardSizes
 
 
 @dataclass(frozen=True)
@@ -99,11 +98,15 @@ def _node_id_to_partition_id(node_ids: Tensor, partition_sizes: list[int]) -> Te
     Tensor
         Partition ID for each input node.
     """
-    cumulative = torch.cumsum(torch.tensor(partition_sizes, device=node_ids.device, dtype=torch.long), dim=0)
+    cumulative = torch.cumsum(
+        torch.tensor(partition_sizes, device=node_ids.device, dtype=torch.long), dim=0
+    )
     return torch.searchsorted(cumulative, node_ids, right=True)
 
 
-def _request_send_nodes(recv_nodes_by_rank: tuple[Tensor, ...], model_comm_group: ProcessGroup) -> tuple[Tensor, ...]:
+def _request_send_nodes(
+    recv_nodes_by_rank: tuple[Tensor, ...], model_comm_group: ProcessGroup
+) -> tuple[Tensor, ...]:
     """Tell every rank which of its nodes this rank needs, and learn which nodes the other ranks need from us.
 
     This is a **collective** operation — all ranks in the group must call it.
@@ -122,7 +125,9 @@ def _request_send_nodes(recv_nodes_by_rank: tuple[Tensor, ...], model_comm_group
         that rank asked for them.
     """
     device = recv_nodes_by_rank[0].device
-    recv_counts = torch.tensor([nodes.size(0) for nodes in recv_nodes_by_rank], dtype=torch.long, device=device)
+    recv_counts = torch.tensor(
+        [nodes.size(0) for nodes in recv_nodes_by_rank], dtype=torch.long, device=device
+    )
     send_counts = torch.empty_like(recv_counts)
     dist.all_to_all_single(send_counts, recv_counts, group=model_comm_group)
 
@@ -185,14 +190,20 @@ def build_halo_info(
     num_parts = model_comm_group.size()
 
     if partition.num_parts != num_parts:
-        raise ValueError(f"Partition num_parts ({partition.num_parts}) != comm group size ({num_parts})")
+        raise ValueError(
+            f"Partition num_parts ({partition.num_parts}) != comm group size ({num_parts})"
+        )
     if partition.src_splits is None:
-        raise ValueError("Halo exchange needs sharded source nodes (partition.src_splits is None)")
+        raise ValueError(
+            "Halo exchange needs sharded source nodes (partition.src_splits is None)"
+        )
 
     if edge_shard_sizes is not None:
         local_edge_index = edge_index
     else:
-        local_edge_index = shard_tensor(edge_index, 1, partition.edge_splits, model_comm_group)
+        local_edge_index = shard_tensor(
+            edge_index, 1, partition.edge_splits, model_comm_group
+        )
 
     src_start, src_stop = get_partition_range(partition.src_splits, my_rank)
     dst_start, dst_stop = get_partition_range(partition.dst_splits, my_rank)
@@ -200,23 +211,25 @@ def build_halo_info(
 
     if debug:
         local_dst = local_edge_index[1]
-        assert (
-            (local_dst >= dst_start) & (local_dst < dst_stop)
-        ).all(), f"Rank {my_rank}: local edges must end on this rank's destination nodes [{dst_start}, {dst_stop})"
+        assert ((local_dst >= dst_start) & (local_dst < dst_stop)).all(), (
+            f"Rank {my_rank}: local edges must end on this rank's destination nodes [{dst_start}, {dst_stop})"
+        )
 
     # Halo nodes are the sources of local edges that another rank owns, grouped by owner.
     local_src = local_edge_index[0]
     is_remote_src = (local_src < src_start) | (local_src >= src_stop)
     remote_src = local_src[is_remote_src]
     owners = _node_id_to_partition_id(remote_src, partition.src_splits)
-    recv_nodes_by_rank = tuple(remote_src[owners == rank].unique(sorted=True) for rank in range(num_parts))
+    recv_nodes_by_rank = tuple(
+        remote_src[owners == rank].unique(sorted=True) for rank in range(num_parts)
+    )
 
     send_nodes_by_rank = _request_send_nodes(recv_nodes_by_rank, model_comm_group)
     if debug:
         for rank, nodes in enumerate(send_nodes_by_rank):
-            assert (
-                (nodes >= src_start) & (nodes < src_stop)
-            ).all(), f"Rank {my_rank}: rank {rank} asked for source nodes this rank does not own"
+            assert ((nodes >= src_start) & (nodes < src_stop)).all(), (
+                f"Rank {my_rank}: rank {rank} asked for source nodes this rank does not own"
+            )
 
     halo_nodes = torch.cat(recv_nodes_by_rank)
     num_halo_nodes = halo_nodes.size(0)
@@ -226,8 +239,12 @@ def build_halo_info(
     edge_index_local[1] -= dst_start
     edge_index_local[0, ~is_remote_src] = local_src[~is_remote_src] - src_start
     if num_halo_nodes > 0:
-        halo_relabel = torch.empty(partition.num_nodes[0], dtype=torch.long, device=edge_index.device)
-        halo_relabel[halo_nodes] = torch.arange(num_halo_nodes, device=edge_index.device) + num_local_src_nodes
+        halo_relabel = torch.empty(
+            partition.num_nodes[0], dtype=torch.long, device=edge_index.device
+        )
+        halo_relabel[halo_nodes] = (
+            torch.arange(num_halo_nodes, device=edge_index.device) + num_local_src_nodes
+        )
         edge_index_local[0, is_remote_src] = halo_relabel[remote_src]
 
     return HaloInfo(

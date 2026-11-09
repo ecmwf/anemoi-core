@@ -7,18 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from typing import Tuple
 
 import pytest
 import torch
 
 from anemoi.models.layers.conv import GraphTransformerConv
-from anemoi.models.triton.utils import edge_index_to_csc
-from anemoi.models.triton.utils import is_triton_available
+from anemoi.models.triton.utils import edge_index_to_csc, is_triton_available
 
 if is_triton_available():
-    from anemoi.models.triton.gt import graph_transformer_attention
-    from anemoi.models.triton.gt import graph_transformer_attention_conv
+    from anemoi.models.triton.gt import (
+        graph_transformer_attention,
+        graph_transformer_attention_conv,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +33,7 @@ def setup_torch():
     yield
 
 
-def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
+def build_bipartite_graph(n_src: int, n_dst: int) -> tuple[torch.Tensor, int]:
     """Build random bipartite graph and return edge_index and number of edges."""
     edges = []
     for dst in range(n_dst):
@@ -58,7 +58,9 @@ def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
 def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
     """Test forward pass of Triton GT."""
     edge_index, m = build_bipartite_graph(n_src, n_dst)
-    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
+    csc, perm, reverse = edge_index_to_csc(
+        edge_index, num_nodes=(n_src, n_dst), reverse=True
+    )
 
     query = torch.randn((n_dst, h, d), requires_grad=True)
     key = torch.randn((n_src, h, d), requires_grad=True)
@@ -66,10 +68,14 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
     edge_attr_csc = edge_attr[perm]
-    out_triton = graph_transformer_attention_conv(query, key, value, edge_attr_csc, csc, reverse)
+    out_triton = graph_transformer_attention_conv(
+        query, key, value, edge_attr_csc, csc, reverse
+    )
 
     # Verify output shape
-    assert out_triton.shape == (n_dst, h, d), f"Expected shape {(n_dst, h, d)}, got {out_triton.shape}"
+    assert out_triton.shape == (n_dst, h, d), (
+        f"Expected shape {(n_dst, h, d)}, got {out_triton.shape}"
+    )
 
     # Verify output is not NaN or Inf
     assert torch.isfinite(out_triton).all(), "Output contains NaN or Inf"
@@ -85,7 +91,9 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
 def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
     """Test backward pass of Triton GT."""
     edge_index, m = build_bipartite_graph(n_src, n_dst)
-    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
+    csc, perm, reverse = edge_index_to_csc(
+        edge_index, num_nodes=(n_src, n_dst), reverse=True
+    )
 
     query = torch.randn((n_dst, h, d), requires_grad=True)
     key = torch.randn((n_src, h, d), requires_grad=True)
@@ -93,7 +101,9 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
     edge_attr_csc = edge_attr[perm]
-    out_triton = graph_transformer_attention_conv(query, key, value, edge_attr_csc, csc, reverse)
+    out_triton = graph_transformer_attention_conv(
+        query, key, value, edge_attr_csc, csc, reverse
+    )
     loss = out_triton.pow(2).sum()
     loss.backward()
 
@@ -117,7 +127,9 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
 def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, d: int):
     """Test that triton Triton GT matches reference implementation."""
     edge_index, m = build_bipartite_graph(n_src, n_dst)
-    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
+    csc, perm, reverse = edge_index_to_csc(
+        edge_index, num_nodes=(n_src, n_dst), reverse=True
+    )
 
     # Custom implementation
     query = torch.randn((n_dst, h, d), requires_grad=True)
@@ -126,7 +138,9 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
     edge_attr_csc = edge_attr[perm]
-    out_triton = graph_transformer_attention_conv(query, key, value, edge_attr_csc, csc, reverse)
+    out_triton = graph_transformer_attention_conv(
+        query, key, value, edge_attr_csc, csc, reverse
+    )
 
     # Reference pyg implementation
     gt_ref = GraphTransformerConv(out_channels=d)
@@ -146,10 +160,14 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
         (4, 10, 6, 6),
     ],
 )
-def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int, d: int):
+def test_graph_transformer_vs_reference_backward(
+    n_src: int, n_dst: int, h: int, d: int
+):
     """Test that triton Triton GT matches reference implementation."""
     edge_index, m = build_bipartite_graph(n_src, n_dst)
-    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
+    csc, perm, reverse = edge_index_to_csc(
+        edge_index, num_nodes=(n_src, n_dst), reverse=True
+    )
 
     # Custom implementation
     query = torch.randn((n_dst, h, d), requires_grad=True)
@@ -158,10 +176,17 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
     edge_attr_csc = edge_attr[perm]
-    out_triton = graph_transformer_attention_conv(query, key, value, edge_attr_csc, csc, reverse)
+    out_triton = graph_transformer_attention_conv(
+        query, key, value, edge_attr_csc, csc, reverse
+    )
     loss_triton = out_triton.pow(2).sum()
     loss_triton.backward()
-    grads_triton = (query.grad.clone(), key.grad.clone(), value.grad.clone(), edge_attr.grad.clone())
+    grads_triton = (
+        query.grad.clone(),
+        key.grad.clone(),
+        value.grad.clone(),
+        edge_attr.grad.clone(),
+    )
 
     query.grad.zero_()
     key.grad.zero_()
@@ -173,15 +198,28 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     out_ref = gt_ref.forward(query, key, value, edge_attr, edge_index)
     loss_ref = out_ref.pow(2).sum()
     loss_ref.backward()
-    grads_ref = (query.grad.clone(), key.grad.clone(), value.grad.clone(), edge_attr.grad.clone())
+    grads_ref = (
+        query.grad.clone(),
+        key.grad.clone(),
+        value.grad.clone(),
+        edge_attr.grad.clone(),
+    )
 
     # Compare outputs and gradients
     tolerance = 1e-4
     torch.testing.assert_close(out_triton, out_ref, atol=tolerance, rtol=0)
-    torch.testing.assert_close(grads_triton[0], grads_ref[0], atol=tolerance, rtol=0)  # queries
-    torch.testing.assert_close(grads_triton[1], grads_ref[1], atol=tolerance, rtol=0)  # keys
-    torch.testing.assert_close(grads_triton[2], grads_ref[2], atol=tolerance, rtol=0)  # values
-    torch.testing.assert_close(grads_triton[3], grads_ref[3], atol=tolerance, rtol=0)  # edges
+    torch.testing.assert_close(
+        grads_triton[0], grads_ref[0], atol=tolerance, rtol=0
+    )  # queries
+    torch.testing.assert_close(
+        grads_triton[1], grads_ref[1], atol=tolerance, rtol=0
+    )  # keys
+    torch.testing.assert_close(
+        grads_triton[2], grads_ref[2], atol=tolerance, rtol=0
+    )  # values
+    torch.testing.assert_close(
+        grads_triton[3], grads_ref[3], atol=tolerance, rtol=0
+    )  # edges
 
 
 @pytest.mark.slow

@@ -31,7 +31,10 @@ class SinusoidalEmbeddings(torch.nn.Module):
     def __init__(self, num_channels: int = 32, max_period: int = 10000):
         super().__init__()
         zdim = num_channels // 2
-        self.register_buffer("frequencies", torch.exp(-math.log(max_period) * torch.arange(0, zdim) / zdim))
+        self.register_buffer(
+            "frequencies",
+            torch.exp(-math.log(max_period) * torch.arange(0, zdim) / zdim),
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = x[:] * self.frequencies

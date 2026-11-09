@@ -53,11 +53,26 @@ def test_assemble_input_conditions_on_prognostic_residual_variables() -> None:
         dataset_name="data",
     )
 
-    expected_num_features = input_steps * num_variables + node_features + 1 + len(prognostic_indices)
+    expected_num_features = (
+        input_steps * num_variables + node_features + 1 + len(prognostic_indices)
+    )
     assert model._calculate_input_dim("data") == expected_num_features
-    assert x_data_latent.shape == (batch_size * ensemble_size * num_nodes, expected_num_features)
-    assert x_skip.shape == (batch_size, model.n_step_output, ensemble_size, num_nodes, num_variables)
+    assert x_data_latent.shape == (
+        batch_size * ensemble_size * num_nodes,
+        expected_num_features,
+    )
+    assert x_skip.shape == (
+        batch_size,
+        model.n_step_output,
+        ensemble_size,
+        num_nodes,
+        num_variables,
+    )
     assert grid_shard_sizes is None
 
-    expected_conditioning = x[:, -1, ..., prognostic_indices].reshape(-1, len(prognostic_indices))
-    torch.testing.assert_close(x_data_latent[:, -len(prognostic_indices) :], expected_conditioning)
+    expected_conditioning = x[:, -1, ..., prognostic_indices].reshape(
+        -1, len(prognostic_indices)
+    )
+    torch.testing.assert_close(
+        x_data_latent[:, -len(prognostic_indices) :], expected_conditioning
+    )

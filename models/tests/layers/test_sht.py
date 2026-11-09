@@ -14,15 +14,19 @@ import pytest
 import torch
 from torch.nn import functional as F
 
-from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
-from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
-from anemoi.models.layers.spectral_helpers import latitude_quadrature
-from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
-from anemoi.models.layers.spectral_transforms import InverseReducedSHT
-from anemoi.models.layers.spectral_transforms import InverseRegularSHT
-from anemoi.models.layers.spectral_transforms import OctahedralSHT
-from anemoi.models.layers.spectral_transforms import ReducedSHT
-from anemoi.models.layers.spectral_transforms import RegularSHT
+from anemoi.models.layers.spectral_helpers import (
+    InverseSphericalHarmonicTransform,
+    SphericalHarmonicTransform,
+    latitude_quadrature,
+)
+from anemoi.models.layers.spectral_transforms import (
+    InverseOctahedralSHT,
+    InverseReducedSHT,
+    InverseRegularSHT,
+    OctahedralSHT,
+    ReducedSHT,
+    RegularSHT,
+)
 
 """
 Random array of complex spectral coefficients.
@@ -36,7 +40,9 @@ that inverse transformed fields are also real.
 def random_spectral_array(truncation: int, dtype: torch.dtype) -> torch.Tensor:
     # Shape: [batch index, ensemble member, l, m]
     shape = (1, 1, truncation + 1, truncation + 1)
-    spectral_array = torch.complex(torch.randn(shape, dtype=dtype), torch.randn(shape, dtype=dtype))
+    spectral_array = torch.complex(
+        torch.randn(shape, dtype=dtype), torch.randn(shape, dtype=dtype)
+    )
     spectral_array[0, 0, :, 0].imag = 0.0  # m = 0 modes must be real
 
     # Zero the lower triangle, which has no meaning
@@ -51,7 +57,9 @@ def _lons_per_lat(nlat: int, grid_kind: str) -> list[int]:
         return [2 * nlat] * nlat
     if grid_kind == "reduced":
         if nlat != 640:
-            raise ValueError("Only the N320 reduced Gaussian grid SHT (nlat = 640) is supported.")
+            raise ValueError(
+                "Only the N320 reduced Gaussian grid SHT (nlat = 640) is supported."
+            )
         # Fetch regular grid data
         from anemoi.transform.grids.named import lookup
 
@@ -94,33 +102,46 @@ def test_sht_wrappers_preserve_axes_and_gradients(
         # small grid. The existing core tests cover the full N320 grid.
         lengths = [8, 12, 16, 20, 20, 16, 12, 8]
         latitudes = np.repeat(np.arange(nlat), lengths)
-        monkeypatch.setattr("anemoi.transform.grids.named.lookup", lambda grid: {"latitudes": latitudes})
+        monkeypatch.setattr(
+            "anemoi.transform.grids.named.lookup", lambda grid: {"latitudes": latitudes}
+        )
     else:
         lengths = _lons_per_lat(nlat, "octahedral")
     direct = direct_cls(**grid_kwargs, truncation=truncation).to(device)
     inverse = inverse_cls(**grid_kwargs, truncation=truncation).to(device)
     cdtype = torch.complex64 if dtype == torch.float32 else torch.complex128
     # [batch, time, ensemble, variable, l, m], with physically meaningful modes.
-    coefficients = torch.randn(2, 3, 2, 4, truncation + 1, truncation + 1, device=device, dtype=cdtype).tril()
+    coefficients = torch.randn(
+        2, 3, 2, 4, truncation + 1, truncation + 1, device=device, dtype=cdtype
+    ).tril()
     coefficients[..., 0].imag = 0
     tolerance = 3e-6 if dtype == torch.float32 else 2e-13
     if direction == "forward":
         reference = SphericalHarmonicTransform(lengths, truncation).to(device)
         x = inverse(coefficients).movedim(-2, -1).detach().requires_grad_()
         actual = direct(x)
-        torch.testing.assert_close(actual, coefficients.movedim(-3, -1), rtol=tolerance, atol=tolerance)
+        torch.testing.assert_close(
+            actual, coefficients.movedim(-3, -1), rtol=tolerance, atol=tolerance
+        )
         # Transform each variable independently to check the wrapper's axis handling.
-        expected = torch.stack([reference(x[..., variable]) for variable in range(x.shape[-1])], dim=-1)
+        expected = torch.stack(
+            [reference(x[..., variable]) for variable in range(x.shape[-1])], dim=-1
+        )
     else:
         reference = InverseSphericalHarmonicTransform(lengths, truncation).to(device)
         x = coefficients.requires_grad_()
         actual = inverse(x)
-        expected = torch.stack([reference(x[..., variable, :, :]) for variable in range(x.shape[-3])], dim=-2)
+        expected = torch.stack(
+            [reference(x[..., variable, :, :]) for variable in range(x.shape[-3])],
+            dim=-2,
+        )
     torch.testing.assert_close(actual, expected, rtol=tolerance, atol=tolerance)
     grad = torch.randn_like(actual)
     actual_grad = torch.autograd.grad(actual, x, grad)[0]
     expected_grad = torch.autograd.grad(expected, x, grad)[0]
-    torch.testing.assert_close(actual_grad, expected_grad, rtol=tolerance, atol=tolerance)
+    torch.testing.assert_close(
+        actual_grad, expected_grad, rtol=tolerance, atol=tolerance
+    )
 
 
 @pytest.fixture
@@ -143,8 +164,12 @@ def sht_setup(request):
         nlat = 2 * (truncation + 1)
         lons_per_lat = _lons_per_lat(nlat=nlat, grid_kind=request.param)
 
-        direct = SphericalHarmonicTransform(lons_per_lat=lons_per_lat, truncation=truncation).to(device)
-        inverse = InverseSphericalHarmonicTransform(lons_per_lat=lons_per_lat, truncation=truncation).to(device)
+        direct = SphericalHarmonicTransform(
+            lons_per_lat=lons_per_lat, truncation=truncation
+        ).to(device)
+        inverse = InverseSphericalHarmonicTransform(
+            lons_per_lat=lons_per_lat, truncation=truncation
+        ).to(device)
 
         yield {
             "grid_kind": request.param,
@@ -156,7 +181,9 @@ def sht_setup(request):
         }
 
 
-@pytest.mark.parametrize("sht_setup", ["regular", "reduced", "octahedral"], indirect=True)
+@pytest.mark.parametrize(
+    "sht_setup", ["regular", "reduced", "octahedral"], indirect=True
+)
 def test_idempotency_direct_inverse(sht_setup):
     """Direct followed by inverse returns the original (band-limited) field."""
     truncation = sht_setup["truncation"]
@@ -174,7 +201,9 @@ def test_idempotency_direct_inverse(sht_setup):
     assert torch.allclose(before, after, rtol=tolerance)
 
 
-@pytest.mark.parametrize("sht_setup", ["regular", "reduced", "octahedral"], indirect=True)
+@pytest.mark.parametrize(
+    "sht_setup", ["regular", "reduced", "octahedral"], indirect=True
+)
 def test_idempotency_inverse_direct(sht_setup):
     """Inverse followed by direct returns the original spectral coefficients."""
     truncation = sht_setup["truncation"]
@@ -196,7 +225,9 @@ def test_idempotency_inverse_direct(sht_setup):
     assert maxdiff < tolerance
 
 
-@pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
+@pytest.mark.skip(
+    reason="CUDA graphs are experimental so this test is disabled by default"
+)
 @pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
 def test_multiple_direct_calls(sht_setup):
     """Test direct transform can be called multiple times, to verify the CUDA graph functionality works correctly.
@@ -214,7 +245,9 @@ def test_multiple_direct_calls(sht_setup):
     assert torch.all(once == twice)
 
 
-@pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
+@pytest.mark.skip(
+    reason="CUDA graphs are experimental so this test is disabled by default"
+)
 @pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
 def test_direct_with_graphed_reduced_fft(sht_setup):
     """Check gradients still work for reduced-grid FFT with CUDA graphs on."""
@@ -237,7 +270,12 @@ def test_direct_with_graphed_reduced_fft(sht_setup):
     "direct_cls,inverse_cls,grid_kwargs",
     [
         pytest.param(RegularSHT, InverseRegularSHT, {"nlat": 8}, id="regular-gaussian"),
-        pytest.param(RegularSHT, InverseRegularSHT, {"nlat": 8, "nlon": 11}, id="regular-gaussian-odd-nlon"),
+        pytest.param(
+            RegularSHT,
+            InverseRegularSHT,
+            {"nlat": 8, "nlon": 11},
+            id="regular-gaussian-odd-nlon",
+        ),
         pytest.param(
             RegularSHT,
             InverseRegularSHT,
@@ -266,26 +304,41 @@ def test_regular_sht_wrappers_preserve_axes_and_gradients(
     inverse = inverse_cls(**grid_kwargs, truncation=truncation).to(device)
     cdtype = torch.complex64 if dtype == torch.float32 else torch.complex128
     # [batch, time, ensemble, variable, l, m], with physically meaningful modes.
-    coefficients = torch.randn(2, 3, 2, 4, truncation + 1, truncation + 1, device=device, dtype=cdtype).tril()
+    coefficients = torch.randn(
+        2, 3, 2, 4, truncation + 1, truncation + 1, device=device, dtype=cdtype
+    ).tril()
     coefficients[..., 0].imag = 0
     tolerance = 3e-6 if dtype == torch.float32 else 2e-13
     if direction == "forward":
-        reference = SphericalHarmonicTransform(lengths, truncation, latitude_grid=latitude_grid).to(device)
+        reference = SphericalHarmonicTransform(
+            lengths, truncation, latitude_grid=latitude_grid
+        ).to(device)
         x = inverse(coefficients).movedim(-2, -1).detach().requires_grad_()
         actual = direct(x)
-        torch.testing.assert_close(actual, coefficients.movedim(-3, -1), rtol=tolerance, atol=tolerance)
+        torch.testing.assert_close(
+            actual, coefficients.movedim(-3, -1), rtol=tolerance, atol=tolerance
+        )
         # Transform each variable independently to check the wrapper's axis handling.
-        expected = torch.stack([reference(x[..., variable]) for variable in range(x.shape[-1])], dim=-1)
+        expected = torch.stack(
+            [reference(x[..., variable]) for variable in range(x.shape[-1])], dim=-1
+        )
     else:
-        reference = InverseSphericalHarmonicTransform(lengths, truncation, latitude_grid=latitude_grid).to(device)
+        reference = InverseSphericalHarmonicTransform(
+            lengths, truncation, latitude_grid=latitude_grid
+        ).to(device)
         x = coefficients.requires_grad_()
         actual = inverse(x)
-        expected = torch.stack([reference(x[..., variable, :, :]) for variable in range(x.shape[-3])], dim=-2)
+        expected = torch.stack(
+            [reference(x[..., variable, :, :]) for variable in range(x.shape[-3])],
+            dim=-2,
+        )
     torch.testing.assert_close(actual, expected, rtol=tolerance, atol=tolerance)
     grad = torch.randn_like(actual)
     actual_grad = torch.autograd.grad(actual, x, grad)[0]
     expected_grad = torch.autograd.grad(expected, x, grad)[0]
-    torch.testing.assert_close(actual_grad, expected_grad, rtol=tolerance, atol=tolerance)
+    torch.testing.assert_close(
+        actual_grad, expected_grad, rtol=tolerance, atol=tolerance
+    )
 
 
 @pytest.mark.parametrize("nlat", [2, 3, 8, 9, 181])
@@ -293,10 +346,14 @@ def test_equiangular_quadrature_polynomial_integrals(nlat):
     """Check the sampling and exact integrals of an independent polynomial basis."""
     theta, weights = latitude_quadrature(nlat, "equiangular-poles")
     expected_latitudes = np.linspace(90.0, -90.0, nlat)
-    np.testing.assert_allclose(90.0 - np.rad2deg(theta), expected_latitudes, rtol=0, atol=3e-14)
+    np.testing.assert_allclose(
+        90.0 - np.rad2deg(theta), expected_latitudes, rtol=0, atol=3e-14
+    )
     polynomials = np.polynomial.legendre.legvander(np.cos(theta), nlat - 1)
     expected = np.zeros(nlat)
-    expected[0] = 2.0  # Integral of P_0 is two; every higher Legendre polynomial integrates to zero.
+    expected[0] = (
+        2.0  # Integral of P_0 is two; every higher Legendre polynomial integrates to zero.
+    )
     np.testing.assert_allclose(weights @ polynomials, expected, rtol=0, atol=3e-14)
     assert np.all(weights > 0)
 
@@ -309,19 +366,26 @@ def _dense_equiangular_transforms(nlat, nlon, truncation, device, dtype):
     longitude = np.arange(nlon) * 2.0 * np.pi / nlon
     moments = np.zeros(nlat)
     moments[0] = 2.0
-    weights = np.linalg.solve(np.polynomial.legendre.legvander(np.cos(theta), nlat - 1).T, moments)
+    weights = np.linalg.solve(
+        np.polynomial.legendre.legvander(np.cos(theta), nlat - 1).T, moments
+    )
     basis = np.zeros((nlat, nlon, truncation + 1, truncation + 1), dtype=np.complex128)
     for ell in range(truncation + 1):
         for m in range(ell + 1):
-            norm = (-1) ** m * np.sqrt((2 * ell + 1) * math.factorial(ell - m) / math.factorial(ell + m))
-            basis[..., ell, m] = norm * lpmv(m, ell, np.cos(theta))[:, None] * np.exp(1j * m * longitude)
+            norm = (-1) ** m * np.sqrt(
+                (2 * ell + 1) * math.factorial(ell - m) / math.factorial(ell + m)
+            )
+            basis[..., ell, m] = (
+                norm * lpmv(m, ell, np.cos(theta))[:, None] * np.exp(1j * m * longitude)
+            )
     forward = basis.conj() * weights[:, None, None, None] * (2 * np.pi / nlon)
     multiplicity = np.full(truncation + 1, 2.0)
     multiplicity[0] = 1.0
     inverse = basis * multiplicity / (4 * np.pi)
     cdtype = torch.complex64 if dtype == torch.float32 else torch.complex128
     return tuple(
-        torch.tensor(matrix.reshape(nlat * nlon, -1), dtype=cdtype, device=device) for matrix in (forward, inverse)
+        torch.tensor(matrix.reshape(nlat * nlon, -1), dtype=cdtype, device=device)
+        for matrix in (forward, inverse)
     )
 
 
@@ -334,16 +398,29 @@ def test_equiangular_sht_against_dense_reference(device, dtype, direction):
         pytest.skip("CUDA is unavailable")
     torch.manual_seed(43)
     nlat, nlon, truncation = 9, 14, 4
-    forward, inverse = _dense_equiangular_transforms(nlat, nlon, truncation, device, dtype)
+    forward, inverse = _dense_equiangular_transforms(
+        nlat, nlon, truncation, device, dtype
+    )
     if direction == "forward":
-        transform = SphericalHarmonicTransform([nlon] * nlat, truncation, latitude_grid="equiangular-poles").to(device)
+        transform = SphericalHarmonicTransform(
+            [nlon] * nlat, truncation, latitude_grid="equiangular-poles"
+        ).to(device)
         x = torch.randn(2, nlat * nlon, dtype=dtype, device=device, requires_grad=True)
-        expected = (x.to(forward.dtype) @ forward).reshape(2, truncation + 1, truncation + 1)
-    else:
-        transform = InverseSphericalHarmonicTransform([nlon] * nlat, truncation, latitude_grid="equiangular-poles").to(
-            device
+        expected = (x.to(forward.dtype) @ forward).reshape(
+            2, truncation + 1, truncation + 1
         )
-        x = torch.randn(2, truncation + 1, truncation + 1, dtype=inverse.dtype, device=device, requires_grad=True)
+    else:
+        transform = InverseSphericalHarmonicTransform(
+            [nlon] * nlat, truncation, latitude_grid="equiangular-poles"
+        ).to(device)
+        x = torch.randn(
+            2,
+            truncation + 1,
+            truncation + 1,
+            dtype=inverse.dtype,
+            device=device,
+            requires_grad=True,
+        )
         expected = (x.flatten(-2) @ inverse.T).real
     actual = transform(x)
     tolerance = 5e-6 if dtype == torch.float32 else 3e-13
@@ -370,7 +447,9 @@ def test_equiangular_poles_360_by_181_roundtrip_and_gradient(device, dtype):
     cdtype = torch.complex64 if dtype == torch.float32 else torch.complex128
     raw = torch.randn(2, 91, 91, device=device, dtype=cdtype, requires_grad=True)
     coefficients = raw.tril()
-    coefficients = torch.complex(coefficients.real, F.pad(coefficients.imag[..., 1:], (1, 0)))
+    coefficients = torch.complex(
+        coefficients.real, F.pad(coefficients.imag[..., 1:], (1, 0))
+    )
     field = inverse(coefficients)
     poles = field.reshape(2, 181, 360)[:, [0, -1], :]
     torch.testing.assert_close(poles, poles[..., :1].expand_as(poles), rtol=0, atol=0)
@@ -381,14 +460,19 @@ def test_equiangular_poles_360_by_181_roundtrip_and_gradient(device, dtype):
     grad = torch.randn_like(actual)
     actual_grad = torch.autograd.grad(actual, raw, grad, retain_graph=True)[0]
     expected_grad = torch.autograd.grad(coefficients, raw, grad)[0]
-    torch.testing.assert_close(actual_grad, expected_grad, rtol=tolerance, atol=tolerance)
+    torch.testing.assert_close(
+        actual_grad, expected_grad, rtol=tolerance, atol=tolerance
+    )
 
 
 @pytest.mark.parametrize("cls", [RegularSHT, InverseRegularSHT])
 @pytest.mark.parametrize(
     "kwargs,match",
     [
-        ({"nlat": 8, "truncation": 4, "latitude_grid": "equiangular-poles"}, "Truncation"),
+        (
+            {"nlat": 8, "truncation": 4, "latitude_grid": "equiangular-poles"},
+            "Truncation",
+        ),
         ({"nlat": 8, "nlon": 6, "truncation": 3}, "zonal modes"),
         ({"nlat": 8, "latitude_grid": "unknown"}, "Unknown latitude_grid"),
         ({"nlat": 0}, "at least 2"),

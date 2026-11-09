@@ -13,12 +13,12 @@ from pathlib import Path
 
 import scipy.sparse as sp
 import torch
+from anemoi.utils.config import DotDict
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
 from anemoi.graphs.utils import load_graph_from_file
-from anemoi.utils.config import DotDict
 
 
 class GraphExporter:
@@ -51,7 +51,9 @@ class GraphExporter:
         self.edge_attribute_name = edge_attribute_name
         self.output_path = output_path
 
-    def get_edges_info(self, source_name: str, target_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_edges_info(
+        self, source_name: str, target_name: str
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Get the edges info from the graph."""
         edge_index = self.graph[(source_name, "to", target_name)]["edge_index"]
 
@@ -60,10 +62,16 @@ class GraphExporter:
         else:
             assert (
                 self.edge_attribute_name in self.graph[(source_name, "to", target_name)]
-            ), f"Edge attribute {self.edge_attribute_name} not found in graph edges from {source_name} to {target_name}"
-            edge_attribute = self.graph[(source_name, "to", target_name)][self.edge_attribute_name].squeeze()
+            ), (
+                f"Edge attribute {self.edge_attribute_name} not found in graph edges from {source_name} to {target_name}"
+            )
+            edge_attribute = self.graph[(source_name, "to", target_name)][
+                self.edge_attribute_name
+            ].squeeze()
 
-        assert edge_attribute.ndim == 1, f"Edge attribute {self.edge_attribute_name} should be 1D."
+        assert edge_attribute.ndim == 1, (
+            f"Edge attribute {self.edge_attribute_name} should be 1D."
+        )
         return edge_index, edge_attribute
 
     def get_nodes_info(self, source_name: str, target_name: str) -> tuple[int, int]:
@@ -73,7 +81,9 @@ class GraphExporter:
         return num_source_nodes, num_target_nodes
 
     @staticmethod
-    def get_sparse_matrix(edge_index, edge_attribute, num_source_nodes, num_target_nodes):
+    def get_sparse_matrix(
+        edge_index, edge_attribute, num_source_nodes, num_target_nodes
+    ):
         """Create sparse matrix for y = A x.
 
         x is defined on source nodes, and output is on target nodes.
@@ -129,9 +139,16 @@ class GraphExporter:
         os.makedirs(self.output_path, exist_ok=True)
         for source_nodes, _, target_nodes in self.edges_name:
             edge_index, edge_attribute = self.get_edges_info(source_nodes, target_nodes)
-            num_source_nodes, num_target_nodes = self.get_nodes_info(source_nodes, target_nodes)
-            A = GraphExporter.get_sparse_matrix(edge_index, edge_attribute, num_source_nodes, num_target_nodes)
+            num_source_nodes, num_target_nodes = self.get_nodes_info(
+                source_nodes, target_nodes
+            )
+            A = GraphExporter.get_sparse_matrix(
+                edge_index, edge_attribute, num_source_nodes, num_target_nodes
+            )
             A = GraphExporter.convert_to_scipy_sparse(A)
 
-            output_path = Path(self.output_path) / f"{self.edge_attribute_name}-{source_nodes}_to_{target_nodes}.npz"
+            output_path = (
+                Path(self.output_path)
+                / f"{self.edge_attribute_name}-{source_nodes}_to_{target_nodes}.npz"
+            )
             sp.save_npz(output_path, A)

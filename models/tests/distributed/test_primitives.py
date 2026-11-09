@@ -27,18 +27,19 @@ import torch
 import torch.distributed as dist
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.primitives import _alltoall_transpose
-from anemoi.models.distributed.primitives import _alltoallwrapper
-from anemoi.models.distributed.primitives import _expand_sharded_tensor
-from anemoi.models.distributed.primitives import _gather
-from anemoi.models.distributed.primitives import _halo_exchange
-from anemoi.models.distributed.primitives import _halo_exchange_bwd
-from anemoi.models.distributed.primitives import _reduce
-from anemoi.models.distributed.primitives import _split
+from anemoi.models.distributed.primitives import (
+    _alltoall_transpose,
+    _alltoallwrapper,
+    _expand_sharded_tensor,
+    _gather,
+    _halo_exchange,
+    _halo_exchange_bwd,
+    _reduce,
+    _split,
+)
 
 from ._distributed_runner import _run_distributed_test
-from .distributed_test_utils import shard_sizes_from_pattern
-from .distributed_test_utils import torch_version_less_than
+from .distributed_test_utils import shard_sizes_from_pattern, torch_version_less_than
 
 GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12
@@ -56,7 +57,9 @@ def _test_split_rank(
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
-    full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
+    full = torch.arange(
+        torch.Size(shape).numel(), dtype=torch.float32, device=device
+    ).reshape(shape)
     if shard_sizes is None:
         shard_sizes = get_balanced_partition_sizes(full.size(dim), world_size)
 
@@ -99,8 +102,12 @@ def test_split_distributes_full_tensor_to_rank_local_slice(
 @pytest.mark.parametrize(
     "shard_size_pattern",
     [
-        pytest.param((127, 257, 63, 577), id="dim=0,irregular-shard-sizes=[127,257,63,577]"),
-        pytest.param((1, 127, 257, 639), id="dim=0,singleton-shard-sizes=[1,127,257,639]"),
+        pytest.param(
+            (127, 257, 63, 577), id="dim=0,irregular-shard-sizes=[127,257,63,577]"
+        ),
+        pytest.param(
+            (1, 127, 257, 639), id="dim=0,singleton-shard-sizes=[1,127,257,639]"
+        ),
         pytest.param((256, 0, 256, 256), id="dim=0,empty-shard-sizes=[256,0,256,256]"),
     ],
 )
@@ -132,7 +139,9 @@ def _test_gather_rank(
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
-    full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
+    full = torch.arange(
+        torch.Size(shape).numel(), dtype=torch.float32, device=device
+    ).reshape(shape)
     if shard_sizes is None:
         shard_sizes = get_balanced_partition_sizes(full.size(dim), world_size)
     local = torch.split(full, shard_sizes, dim=dim)[rank].contiguous()
@@ -176,8 +185,12 @@ def test_gather_reconstructs_full_tensor_from_rank_local_slices(
 @pytest.mark.parametrize(
     "shard_size_pattern",
     [
-        pytest.param((127, 257, 63, 577), id="dim=0,irregular-shard-sizes=[127,257,63,577]"),
-        pytest.param((1, 127, 257, 639), id="dim=0,singleton-shard-sizes=[1,127,257,639]"),
+        pytest.param(
+            (127, 257, 63, 577), id="dim=0,irregular-shard-sizes=[127,257,63,577]"
+        ),
+        pytest.param(
+            (1, 127, 257, 639), id="dim=0,singleton-shard-sizes=[1,127,257,639]"
+        ),
         pytest.param((256, 0, 256, 256), id="dim=0,empty-shard-sizes=[256,0,256,256]"),
     ],
 )
@@ -210,15 +223,21 @@ def _test_reduce_rank(
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
     if dtype == torch.float32:
-        base = torch.arange(torch.Size(shape).numel(), dtype=dtype, device=device).reshape(shape)
+        base = torch.arange(
+            torch.Size(shape).numel(), dtype=dtype, device=device
+        ).reshape(shape)
     elif dtype == torch.float64:
         # Values that float32 cannot hold exactly, so a sum done in float32 would not match.
-        base = torch.linspace(0, 1, torch.Size(shape).numel(), dtype=dtype, device=device).reshape(shape)
+        base = torch.linspace(
+            0, 1, torch.Size(shape).numel(), dtype=dtype, device=device
+        ).reshape(shape)
     else:
         # Keep low-precision values bounded: large arange values overflow float16
         # and are heavily quantized in bfloat16. Build in float32, then cast so
         # the reduce input still has the requested dtype.
-        base = torch.linspace(0, 1, torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
+        base = torch.linspace(
+            0, 1, torch.Size(shape).numel(), dtype=torch.float32, device=device
+        ).reshape(shape)
         base = base.to(dtype=dtype)
 
     local = base + rank
@@ -226,10 +245,14 @@ def _test_reduce_rank(
 
     # Build the conceptual per-rank inputs as a leading "rank" dimension:
     # inputs[q] == base + q. Summing over dim=0 gives the all-reduce result.
-    rank_offsets = torch.arange(world_size, dtype=dtype, device=device).reshape(world_size, *([1] * base.ndim))
+    rank_offsets = torch.arange(world_size, dtype=dtype, device=device).reshape(
+        world_size, *([1] * base.ndim)
+    )
     inputs = base.unsqueeze(0) + rank_offsets
     if use_fp32:
-        expected = torch.sum(inputs.to(torch.promote_types(dtype, torch.float32)), dim=0).to(dtype)
+        expected = torch.sum(
+            inputs.to(torch.promote_types(dtype, torch.float32)), dim=0
+        ).to(dtype)
     else:
         expected = torch.sum(inputs, dim=0)
 
@@ -243,11 +266,15 @@ def _test_reduce_rank(
 @pytest.mark.parametrize(
     ("shape", "dtype", "use_fp32"),
     [
-        pytest.param((1024, 1024), torch.float64, True, id="float64_fp32_path_keeps_precision_1m"),
+        pytest.param(
+            (1024, 1024), torch.float64, True, id="float64_fp32_path_keeps_precision_1m"
+        ),
         pytest.param((1024, 1024), torch.float32, True, id="float32_fp32_path_1m"),
         pytest.param((1024, 1024), torch.float32, False, id="float32_native_path_1m"),
         pytest.param((64, 128, 129), torch.float32, True, id="float32_fp32_path_3d_1m"),
-        pytest.param((64, 128, 129), torch.float32, False, id="float32_native_path_3d_1m"),
+        pytest.param(
+            (64, 128, 129), torch.float32, False, id="float32_native_path_3d_1m"
+        ),
     ],
 )
 def test_reduce_sums_same_shape_rank_local_tensors(
@@ -276,7 +303,10 @@ def test_reduce_sums_same_shape_rank_local_tensors(
     ],
 )
 def test_reduce_fp32_accumulation_supports_low_precision_inputs(
-    shape: tuple[int, ...], dtype: torch.dtype, distributed_backend: str, distributed_world_size: int
+    shape: tuple[int, ...],
+    dtype: torch.dtype,
+    distributed_backend: str,
+    distributed_world_size: int,
 ) -> None:
     _run_distributed_test(
         _test_reduce_rank,
@@ -294,7 +324,10 @@ def test_expand_sharded_tensor_assertions() -> None:
     local = torch.empty((1, 4))
 
     # Mock group queries to test the assertion without initializing distributed communication.
-    with patch.object(dist, "get_world_size", return_value=2), patch.object(dist, "get_rank", return_value=0):
+    with (
+        patch.object(dist, "get_world_size", return_value=2),
+        patch.object(dist, "get_rank", return_value=0),
+    ):
         with pytest.raises(AssertionError, match="expected local shard size 2"):
             _expand_sharded_tensor(local, dim_=0, sizes=[2, 2], group=None)
 
@@ -311,7 +344,9 @@ def _test_expand_sharded_tensor_rank(
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
-    full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
+    full = torch.arange(
+        torch.Size(shape).numel(), dtype=torch.float32, device=device
+    ).reshape(shape)
     if shard_sizes is None:
         shard_sizes = get_balanced_partition_sizes(full.size(dim), world_size)
     local = torch.split(full, shard_sizes, dim=dim)[rank].contiguous().clone()
@@ -361,8 +396,12 @@ def test_expand_sharded_tensor_populates_only_rank_local_slice(
 @pytest.mark.parametrize(
     "shard_size_pattern",
     [
-        pytest.param((127, 257, 63, 577), id="dim=0,irregular-shard-sizes=[127,257,63,577]"),
-        pytest.param((1, 127, 257, 639), id="dim=0,singleton-shard-sizes=[1,127,257,639]"),
+        pytest.param(
+            (127, 257, 63, 577), id="dim=0,irregular-shard-sizes=[127,257,63,577]"
+        ),
+        pytest.param(
+            (1, 127, 257, 639), id="dim=0,singleton-shard-sizes=[1,127,257,639]"
+        ),
         pytest.param((256, 0, 256, 256), id="dim=0,empty-shard-sizes=[256,0,256,256]"),
     ],
 )
@@ -396,11 +435,17 @@ def _test_alltoall_transpose_rank(
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
-    full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
+    full = torch.arange(
+        torch.Size(shape).numel(), dtype=torch.float32, device=device
+    ).reshape(shape)
     if split_shard_sizes is None:
-        split_shard_sizes = get_balanced_partition_sizes(full.size(dim_split), world_size)
+        split_shard_sizes = get_balanced_partition_sizes(
+            full.size(dim_split), world_size
+        )
     if concat_shard_sizes is None:
-        concat_shard_sizes = get_balanced_partition_sizes(full.size(dim_concat), world_size)
+        concat_shard_sizes = get_balanced_partition_sizes(
+            full.size(dim_concat), world_size
+        )
     local = torch.split(full, concat_shard_sizes, dim=dim_concat)[rank].contiguous()
 
     actual = _alltoall_transpose(
@@ -474,7 +519,8 @@ def test_alltoall_transpose_redistributes_between_sharded_layouts(
             (256, 0, 256, 256),
             (0, 256, 256, 256),
             id=(
-                "split-dim=0,empty-split-shard-sizes=[256,0,256,256]," "concat-dim=1,concat-shard-sizes=[0,256,256,256]"
+                "split-dim=0,empty-split-shard-sizes=[256,0,256,256],"
+                "concat-dim=1,concat-shard-sizes=[0,256,256,256]"
             ),
         ),
     ],
@@ -487,8 +533,12 @@ def test_alltoall_transpose_supports_explicit_shard_sizes(
 ) -> None:
     if distributed_backend == "gloo" and torch_version_less_than(2, 6):
         pytest.skip("Gloo alltoall_transpose requires torch >= 2.6.")
-    split_shard_sizes = shard_sizes_from_pattern(split_shard_size_pattern, distributed_world_size)
-    concat_shard_sizes = shard_sizes_from_pattern(concat_shard_size_pattern, distributed_world_size)
+    split_shard_sizes = shard_sizes_from_pattern(
+        split_shard_size_pattern, distributed_world_size
+    )
+    concat_shard_sizes = shard_sizes_from_pattern(
+        concat_shard_size_pattern, distributed_world_size
+    )
     _run_distributed_test(
         _test_alltoall_transpose_rank,
         backend=distributed_backend,
@@ -512,7 +562,11 @@ def _test_split_non_contiguous_rank(
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
-    full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape[1], shape[0]).t()
+    full = (
+        torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device)
+        .reshape(shape[1], shape[0])
+        .t()
+    )
     assert full.size() == torch.Size(shape)
     assert not full.is_contiguous()
 
@@ -534,7 +588,10 @@ NON_CONTIGUOUS_PARTITION_CASES = [
 @pytest.mark.distributed
 @pytest.mark.parametrize(("shape", "dim"), NON_CONTIGUOUS_PARTITION_CASES)
 def test_split_accepts_non_contiguous_input(
-    shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
+    shape: tuple[int, ...],
+    dim: int,
+    distributed_backend: str,
+    distributed_world_size: int,
 ) -> None:
     _run_distributed_test(
         _test_split_non_contiguous_rank,
@@ -556,7 +613,11 @@ def _test_gather_non_contiguous_rank(
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
-    full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape[1], shape[0]).t()
+    full = (
+        torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device)
+        .reshape(shape[1], shape[0])
+        .t()
+    )
     assert full.size() == torch.Size(shape)
     assert not full.is_contiguous()
 
@@ -576,7 +637,10 @@ def _test_gather_non_contiguous_rank(
 @pytest.mark.distributed
 @pytest.mark.parametrize(("shape", "dim"), NON_CONTIGUOUS_PARTITION_CASES)
 def test_gather_accepts_non_contiguous_input(
-    shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
+    shape: tuple[int, ...],
+    dim: int,
+    distributed_backend: str,
+    distributed_world_size: int,
 ) -> None:
     _run_distributed_test(
         _test_gather_non_contiguous_rank,
@@ -598,7 +662,11 @@ def _test_reduce_non_contiguous_rank(
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
-    base = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape[1], shape[0]).t()
+    base = (
+        torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device)
+        .reshape(shape[1], shape[0])
+        .t()
+    )
     assert base.size() == torch.Size(shape)
     assert not base.is_contiguous()
 
@@ -609,7 +677,9 @@ def _test_reduce_non_contiguous_rank(
 
     # Build the conceptual per-rank inputs as a leading "rank" dimension:
     # inputs[q] == base + q. Summing over dim=0 gives the all-reduce result.
-    rank_offsets = torch.arange(world_size, dtype=torch.float32, device=device).reshape(world_size, *([1] * base.ndim))
+    rank_offsets = torch.arange(world_size, dtype=torch.float32, device=device).reshape(
+        world_size, *([1] * base.ndim)
+    )
     inputs = base.unsqueeze(0) + rank_offsets
     if use_fp32:
         expected = torch.sum(inputs.float(), dim=0).to(local.dtype)
@@ -631,7 +701,10 @@ NON_CONTIGUOUS_REDUCE_CASES = [
 @pytest.mark.distributed
 @pytest.mark.parametrize(("shape", "use_fp32"), NON_CONTIGUOUS_REDUCE_CASES)
 def test_reduce_accepts_non_contiguous_input(
-    shape: tuple[int, ...], use_fp32: bool, distributed_backend: str, distributed_world_size: int
+    shape: tuple[int, ...],
+    use_fp32: bool,
+    distributed_backend: str,
+    distributed_world_size: int,
 ) -> None:
     _run_distributed_test(
         _test_reduce_non_contiguous_rank,
@@ -653,13 +726,17 @@ def _test_split_channels_last_rank(
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
-    full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
+    full = torch.arange(
+        torch.Size(shape).numel(), dtype=torch.float32, device=device
+    ).reshape(shape)
     full = full.contiguous(memory_format=torch.channels_last)
     assert full.is_contiguous(memory_format=torch.channels_last)
 
     sizes = get_balanced_partition_sizes(full.size(dim), world_size)
     actual = _split(full, dim_=dim, sizes_=sizes, group=group)
-    expected = torch.split(full, sizes, dim=dim)[rank].contiguous(memory_format=torch.channels_last)
+    expected = torch.split(full, sizes, dim=dim)[rank].contiguous(
+        memory_format=torch.channels_last
+    )
 
     assert actual.is_contiguous(memory_format=torch.channels_last)
     assert actual.size() == expected.size()
@@ -676,7 +753,10 @@ CHANNELS_LAST_CASES = [
 @pytest.mark.distributed
 @pytest.mark.parametrize(("shape", "dim"), CHANNELS_LAST_CASES)
 def test_split_preserves_channels_last_memory_format(
-    shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
+    shape: tuple[int, ...],
+    dim: int,
+    distributed_backend: str,
+    distributed_world_size: int,
 ) -> None:
     _run_distributed_test(
         _test_split_channels_last_rank,
@@ -698,12 +778,16 @@ def _test_gather_channels_last_rank(
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
-    full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
+    full = torch.arange(
+        torch.Size(shape).numel(), dtype=torch.float32, device=device
+    ).reshape(shape)
     full = full.contiguous(memory_format=torch.channels_last)
     assert full.is_contiguous(memory_format=torch.channels_last)
 
     sizes = get_balanced_partition_sizes(full.size(dim), world_size)
-    local = torch.split(full, sizes, dim=dim)[rank].contiguous(memory_format=torch.channels_last)
+    local = torch.split(full, sizes, dim=dim)[rank].contiguous(
+        memory_format=torch.channels_last
+    )
 
     actual = _gather(local, dim_=dim, sizes=sizes, group=group)
 
@@ -717,7 +801,10 @@ def _test_gather_channels_last_rank(
 @pytest.mark.distributed
 @pytest.mark.parametrize(("shape", "dim"), CHANNELS_LAST_CASES)
 def test_gather_preserves_channels_last_memory_format(
-    shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
+    shape: tuple[int, ...],
+    dim: int,
+    distributed_backend: str,
+    distributed_world_size: int,
 ) -> None:
     _run_distributed_test(
         _test_gather_channels_last_rank,
@@ -739,12 +826,16 @@ def _test_expand_channels_last_rank(
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
-    full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
+    full = torch.arange(
+        torch.Size(shape).numel(), dtype=torch.float32, device=device
+    ).reshape(shape)
     full = full.contiguous(memory_format=torch.channels_last)
     assert full.is_contiguous(memory_format=torch.channels_last)
 
     sizes = get_balanced_partition_sizes(full.size(dim), world_size)
-    local = torch.split(full, sizes, dim=dim)[rank].contiguous(memory_format=torch.channels_last)
+    local = torch.split(full, sizes, dim=dim)[rank].contiguous(
+        memory_format=torch.channels_last
+    )
 
     actual = _expand_sharded_tensor(local, dim_=dim, sizes=sizes, group=group)
 
@@ -766,7 +857,10 @@ def _test_expand_channels_last_rank(
 @pytest.mark.distributed
 @pytest.mark.parametrize(("shape", "dim"), CHANNELS_LAST_CASES)
 def test_expand_sharded_tensor_preserves_channels_last_memory_format(
-    shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
+    shape: tuple[int, ...],
+    dim: int,
+    distributed_backend: str,
+    distributed_world_size: int,
 ) -> None:
     _run_distributed_test(
         _test_expand_channels_last_rank,
@@ -781,9 +875,15 @@ def test_alltoallwrapper_assertions() -> None:
     # Mock the group query to test the assertions without initializing distributed communication.
     with patch.object(dist, "get_world_size", return_value=2):
         with pytest.raises(AssertionError, match="Expected 2 all-to-all input tensors"):
-            _alltoallwrapper([torch.empty(1), torch.empty(1)], [torch.empty(1)], group=None)
-        with pytest.raises(AssertionError, match="Expected 2 all-to-all output tensors"):
-            _alltoallwrapper([torch.empty(1)], [torch.empty(1), torch.empty(1)], group=None)
+            _alltoallwrapper(
+                [torch.empty(1), torch.empty(1)], [torch.empty(1)], group=None
+            )
+        with pytest.raises(
+            AssertionError, match="Expected 2 all-to-all output tensors"
+        ):
+            _alltoallwrapper(
+                [torch.empty(1)], [torch.empty(1), torch.empty(1)], group=None
+            )
 
 
 def _test_alltoallwrapper_rank(
@@ -796,7 +896,8 @@ def _test_alltoallwrapper_rank(
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
     input_list = [
-        torch.full((128, 128), rank * 10 + dst, dtype=torch.float32, device=device) for dst in range(world_size)
+        torch.full((128, 128), rank * 10 + dst, dtype=torch.float32, device=device)
+        for dst in range(world_size)
     ]
     output_list = [torch.empty_like(input_list[0]) for _ in range(world_size)]
 
@@ -834,11 +935,20 @@ def _test_alltoallwrapper_custom_message_sizes_rank(
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
     input_list = [
-        torch.full((message_sizes[dst], message_sizes[rank]), rank * 10 + dst, dtype=torch.float32, device=device)
+        torch.full(
+            (message_sizes[dst], message_sizes[rank]),
+            rank * 10 + dst,
+            dtype=torch.float32,
+            device=device,
+        )
         for dst in range(world_size)
     ]
     output_list = [
-        torch.empty((message_sizes[rank], message_sizes[src]), dtype=torch.float32, device=device)
+        torch.empty(
+            (message_sizes[rank], message_sizes[src]),
+            dtype=torch.float32,
+            device=device,
+        )
         for src in range(world_size)
     ]
 
@@ -853,17 +963,23 @@ def _test_alltoallwrapper_custom_message_sizes_rank(
 @pytest.mark.parametrize(
     "message_size_pattern",
     [
-        pytest.param((127, 257, 63, 577), id="irregular-message-sizes=[127,257,63,577]"),
+        pytest.param(
+            (127, 257, 63, 577), id="irregular-message-sizes=[127,257,63,577]"
+        ),
         pytest.param((1, 127, 257, 639), id="singleton-message-sizes=[1,127,257,639]"),
         pytest.param((256, 0, 256, 256), id="empty-message-sizes=[256,0,256,256]"),
     ],
 )
 def test_alltoallwrapper_supports_custom_message_sizes(
-    message_size_pattern: tuple[int, ...], distributed_backend: str, distributed_world_size: int
+    message_size_pattern: tuple[int, ...],
+    distributed_backend: str,
+    distributed_world_size: int,
 ) -> None:
     if distributed_backend == "gloo" and torch_version_less_than(2, 6):
         pytest.skip("Gloo alltoallwrapper requires torch >= 2.6.")
-    message_sizes = shard_sizes_from_pattern(message_size_pattern, distributed_world_size)
+    message_sizes = shard_sizes_from_pattern(
+        message_size_pattern, distributed_world_size
+    )
     _run_distributed_test(
         _test_alltoallwrapper_custom_message_sizes_rank,
         backend=distributed_backend,
@@ -889,7 +1005,9 @@ def _test_halo_exchange_rank(
     for dst_rank in range(world_size):
         rows = send_rows.get((rank, dst_rank), ())
         send_indices.append(torch.tensor(rows, dtype=torch.long, device=device))
-    recv_counts = [len(send_rows.get((src_rank, rank), ())) for src_rank in range(world_size)]
+    recv_counts = [
+        len(send_rows.get((src_rank, rank), ())) for src_rank in range(world_size)
+    ]
 
     shape = (sum(shard_sizes), *feature_shape)
     full = torch.arange(
@@ -902,7 +1020,9 @@ def _test_halo_exchange_rank(
     # Local rows first, then the rows received from each src_rank, in rank order.
     received = []
     for src_rank in range(world_size):
-        rows = list(send_rows.get((src_rank, rank), ()))  # list: a tuple index is multi-dim
+        rows = list(
+            send_rows.get((src_rank, rank), ())
+        )  # list: a tuple index is multi-dim
         received.append(features_by_rank[src_rank][rows])
     expected = torch.cat([features_by_rank[rank], *received])
 
@@ -929,7 +1049,13 @@ def _test_halo_exchange_rank(
         # Rank 0 sends different, equal-sized rows to ranks 1 and 2; row 2 goes to both.
         pytest.param(
             (4, 3, 5),
-            {(0, 1): (0, 2), (0, 2): (1, 2), (1, 0): (2,), (2, 0): (4, 0, 3), (2, 1): (1,)},
+            {
+                (0, 1): (0, 2),
+                (0, 2): (1, 2),
+                (1, 0): (2,),
+                (2, 0): (4, 0, 3),
+                (2, 1): (1,),
+            },
             id="three-rank-irregular",
         ),
         pytest.param((3, 2, 2), {(0, 1): (1,), (1, 0): (0, 1)}, id="isolated-rank"),
@@ -990,7 +1116,9 @@ def test_halo_exchange_supports_feature_shapes(
     world_size = distributed_world_size
     num_rows = 3
     rows = (num_rows - 1, 0)
-    send_rows = {(src_rank, (src_rank + 1) % world_size): rows for src_rank in range(world_size)}
+    send_rows = {
+        (src_rank, (src_rank + 1) % world_size): rows for src_rank in range(world_size)
+    }
     _run_distributed_test(
         _test_halo_exchange_rank,
         backend=distributed_backend,
@@ -1028,7 +1156,9 @@ def _test_halo_exchange_bwd_rank(
     num_local_nodes = shard_sizes[rank]
 
     # Each rank's grad_output covers its local rows followed by the halo rows it receives.
-    output_sizes = [size + sum(counts) for size, counts in zip(shard_sizes, recv_counts_by_rank)]
+    output_sizes = [
+        size + sum(counts) for size, counts in zip(shard_sizes, recv_counts_by_rank)
+    ]
     shape = (sum(output_sizes), *feature_shape)
     full = torch.arange(
         torch.Size(shape).numel(),
@@ -1041,7 +1171,9 @@ def _test_halo_exchange_bwd_rank(
     expected = grad_outputs_by_rank[rank][:num_local_nodes].clone()
     for dst_rank in range(world_size):
         dst_halo_grads = grad_outputs_by_rank[dst_rank][shard_sizes[dst_rank] :]
-        grad_from_dst = torch.split(dst_halo_grads, recv_counts_by_rank[dst_rank], dim=0)[rank]
+        grad_from_dst = torch.split(
+            dst_halo_grads, recv_counts_by_rank[dst_rank], dim=0
+        )[rank]
         expected.index_add_(0, send_indices[dst_rank], grad_from_dst)
 
     grad_output = grad_outputs_by_rank[rank]
@@ -1050,7 +1182,9 @@ def _test_halo_exchange_bwd_rank(
         assert not grad_output.is_contiguous()
     grad_output_before = grad_output.clone()
 
-    actual = _halo_exchange_bwd(grad_output, send_indices, recv_counts, num_local_nodes, group)
+    actual = _halo_exchange_bwd(
+        grad_output, send_indices, recv_counts, num_local_nodes, group
+    )
 
     assert actual.size() == expected.size()
     assert actual.dtype == expected.dtype
@@ -1067,7 +1201,13 @@ def _test_halo_exchange_bwd_rank(
         # Rank 0 sends different, equal-sized rows to ranks 1 and 2; row 2 goes to both.
         pytest.param(
             (4, 3, 5),
-            {(0, 1): (0, 2), (0, 2): (1, 2), (1, 0): (2,), (2, 0): (4, 0, 3), (2, 1): (1,)},
+            {
+                (0, 1): (0, 2),
+                (0, 2): (1, 2),
+                (1, 0): (2,),
+                (2, 0): (4, 0, 3),
+                (2, 1): (1,),
+            },
             id="three-rank-irregular",
         ),
         pytest.param((3, 2, 2), {(0, 1): (1,), (1, 0): (0, 1)}, id="isolated-rank"),
@@ -1128,7 +1268,9 @@ def test_halo_exchange_bwd_supports_feature_shapes(
     world_size = distributed_world_size
     num_rows = 3
     rows = (num_rows - 1, 0)
-    send_rows = {(src_rank, (src_rank + 1) % world_size): rows for src_rank in range(world_size)}
+    send_rows = {
+        (src_rank, (src_rank + 1) % world_size): rows for src_rank in range(world_size)
+    }
     _run_distributed_test(
         _test_halo_exchange_bwd_rank,
         backend=distributed_backend,

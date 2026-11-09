@@ -19,7 +19,9 @@ class Describe(Command):
     timestamp = True
 
     def add_arguments(self, command_parser):
-        command_parser.add_argument("graph_file", help="Path to the graph (a .PT file).")
+        command_parser.add_argument(
+            "graph_file", help="Path to the graph (a .PT file)."
+        )
 
     def run(self, args):
         kwargs = vars(args)

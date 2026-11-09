@@ -10,17 +10,15 @@
 
 import logging
 import time
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import torch
+from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
-from anemoi.graphs.utils import concat_edges
-from anemoi.graphs.utils import get_distributed_device
-from anemoi.utils.config import DotDict
+from anemoi.graphs.utils import concat_edges, get_distributed_device
 
 LOGGER = logging.getLogger(__name__)
 
@@ -47,7 +45,9 @@ class BaseEdgeBuilder(ABC):
         return self.source_name, "to", self.target_name
 
     @abstractmethod
-    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor: ...
+    def compute_edge_index(
+        self, source_nodes: NodeStorage, target_nodes: NodeStorage
+    ) -> torch.Tensor: ...
 
     @abstractmethod
     def compute_edge_index_from_coords(
@@ -82,9 +82,13 @@ class BaseEdgeBuilder(ABC):
 
         if "edge_index" in graph[self.name]:
             # Expand current edge indices
-            graph[self.name].edge_index = concat_edges(graph[self.name].edge_index, edge_index)
+            graph[self.name].edge_index = concat_edges(
+                graph[self.name].edge_index, edge_index
+            )
             if edge_type not in graph[self.name].edge_type:
-                graph[self.name].edge_type = graph[self.name].edge_type + "," + edge_type
+                graph[self.name].edge_type = (
+                    graph[self.name].edge_type + "," + edge_type
+                )
             return graph
 
         # Register new edge indices
@@ -115,7 +119,9 @@ class BaseEdgeBuilder(ABC):
             )
         return graph
 
-    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
+    def update_graph(
+        self, graph: HeteroData, attrs_config: DotDict | None = None
+    ) -> HeteroData:
         """Update the graph with the edges.
 
         Parameters
@@ -133,12 +139,20 @@ class BaseEdgeBuilder(ABC):
         t0 = time.time()
         graph = self.register_edges(graph)
         t1 = time.time()
-        LOGGER.debug("Time to register edge indices (%s): %.2f s", self.__class__.__name__, t1 - t0)
+        LOGGER.debug(
+            "Time to register edge indices (%s): %.2f s",
+            self.__class__.__name__,
+            t1 - t0,
+        )
 
         if attrs_config is not None:
             t0 = time.time()
             graph = self.register_attributes(graph, attrs_config)
             t1 = time.time()
-            LOGGER.debug("Time to register edge attribute (%s): %.2f s", self.__class__.__name__, t1 - t0)
+            LOGGER.debug(
+                "Time to register edge attribute (%s): %.2f s",
+                self.__class__.__name__,
+                t1 - t0,
+            )
 
         return graph

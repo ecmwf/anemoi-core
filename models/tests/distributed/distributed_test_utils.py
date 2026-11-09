@@ -12,9 +12,13 @@ from __future__ import annotations
 import torch
 
 
-def shard_sizes_from_pattern(shard_size_pattern: tuple[int, ...], world_size: int) -> list[int]:
+def shard_sizes_from_pattern(
+    shard_size_pattern: tuple[int, ...], world_size: int
+) -> list[int]:
     """Repeat a shard-size pattern until there is one size per rank."""
-    return [shard_size_pattern[rank % len(shard_size_pattern)] for rank in range(world_size)]
+    return [
+        shard_size_pattern[rank % len(shard_size_pattern)] for rank in range(world_size)
+    ]
 
 
 def torch_version_less_than(major: int, minor: int) -> bool:

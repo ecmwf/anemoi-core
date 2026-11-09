@@ -8,20 +8,18 @@
 # nor does it submit to any jurisdiction.
 
 from enum import Enum
-from typing import Annotated
-from typing import Literal
-from typing import Self
-
-from pydantic import Field
-from pydantic import model_validator
+from typing import Annotated, Literal, Self
 
 from anemoi.utils.schemas import BaseModel
+from pydantic import Field, model_validator
 
 
 class SkipConnectionSchema(BaseModel):
     """Schema for skip connection residuals."""
 
-    target_: Literal["anemoi.models.layers.residual.SkipConnection"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.residual.SkipConnection"] = Field(
+        ..., alias="_target_"
+    )
     step: int = Field(
         -1,
         description="Timestep index to use for the skip connection. "
@@ -55,10 +53,14 @@ class TruncationConfigOnTheFlySchema(BaseModel):
 class TruncatedConnectionSchema(BaseModel):
     """Schema for truncated connection residuals."""
 
-    target_: Literal["anemoi.models.layers.residual.TruncatedConnection"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.residual.TruncatedConnection"] = Field(
+        ..., alias="_target_"
+    )
     # Hydra merges `step` from the default SkipConnection config when _target_ is overridden; ignore it.
     step: int = Field(-1, exclude=True)
-    truncation_config: TruncationConfigDiskSchema | TruncationConfigOnTheFlySchema | None = None
+    truncation_config: (
+        TruncationConfigDiskSchema | TruncationConfigOnTheFlySchema | None
+    ) = None
     edge_weight_attribute: str | None = None
     src_node_weight_attribute: str | None = None
     truncation_down_edges_name: tuple[str, str, str] | None = None
@@ -74,7 +76,9 @@ class TruncatedConnectionSchema(BaseModel):
 class ScalarOrnsteinConnectionSchema(BaseModel):
     """Schema for scalar Ornstein residual connections."""
 
-    target_: Literal["anemoi.models.layers.residual.ScalarOrnsteinConnection"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.residual.ScalarOrnsteinConnection"] = Field(
+        ..., alias="_target_"
+    )
     theta_init: float = Field(
         0.0,
         description="Initial value for theta. If 0 and statistics are available, auto-initialized from tendency statistics.",
@@ -103,7 +107,9 @@ class SpectralOrnsteinSupportedGrids(str, Enum):
 class SpectralOrnsteinConnectionSchema(BaseModel):
     """Schema for spectral Ornstein residual connections."""
 
-    target_: Literal["anemoi.models.layers.residual.SpectralOrnsteinConnection"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.residual.SpectralOrnsteinConnection"] = (
+        Field(..., alias="_target_")
+    )
     lmax: int = Field(
         2,
         description="Maximum spherical harmonic degree for the theta/mu coefficients.",

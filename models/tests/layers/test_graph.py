@@ -15,8 +15,7 @@ import torch
 from torch import nn
 from torch_geometric.data import HeteroData
 
-from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.graph import TrainableTensor
+from anemoi.models.layers.graph import NamedNodesAttributes, TrainableTensor
 
 
 class TestTrainableTensor:
@@ -77,13 +76,19 @@ class TestNamedNodesAttributes:
 
     nodes_names: list[str] = ["nodes1", "nodes2"]
     ndim: int = 2
-    num_trainable_params: dict[str, int] = {"nodes1": 3, "nodes2": 5, "nodes1tonodes2": 4}
+    num_trainable_params: dict[str, int] = {
+        "nodes1": 3,
+        "nodes2": 5,
+        "nodes1tonodes2": 4,
+    }
 
     @pytest.fixture
     def graph_data(self):
         graph = HeteroData()
         for i, nodes_name in enumerate(TestNamedNodesAttributes.nodes_names):
-            graph[nodes_name].x = TestNamedNodesAttributes.get_n_random_coords(10 + 5 ** (i + 1))
+            graph[nodes_name].x = TestNamedNodesAttributes.get_n_random_coords(
+                10 + 5 ** (i + 1)
+            )
         return graph
 
     @staticmethod
@@ -95,7 +100,9 @@ class TestNamedNodesAttributes:
 
     @pytest.fixture
     def nodes_attributes(self, graph_data: HeteroData) -> NamedNodesAttributes:
-        return NamedNodesAttributes(TestNamedNodesAttributes.num_trainable_params, graph_data)
+        return NamedNodesAttributes(
+            TestNamedNodesAttributes.num_trainable_params, graph_data
+        )
 
     def test_init(self, nodes_attributes):
         assert isinstance(nodes_attributes, NamedNodesAttributes)
@@ -103,10 +110,13 @@ class TestNamedNodesAttributes:
         for nodes_name in self.nodes_names:
             assert isinstance(nodes_attributes.num_nodes[nodes_name], int)
             assert (
-                nodes_attributes.attr_ndims[nodes_name] - 2 * TestNamedNodesAttributes.ndim
+                nodes_attributes.attr_ndims[nodes_name]
+                - 2 * TestNamedNodesAttributes.ndim
                 == TestNamedNodesAttributes.num_trainable_params[nodes_name]
             )
-            assert isinstance(nodes_attributes.trainable_tensors[nodes_name], TrainableTensor)
+            assert isinstance(
+                nodes_attributes.trainable_tensors[nodes_name], TrainableTensor
+            )
 
     def test_forward(self, nodes_attributes, graph_data):
         batch_size = 3
@@ -115,14 +125,17 @@ class TestNamedNodesAttributes:
 
             expected_shape = (
                 batch_size * graph_data[nodes_name].num_nodes,
-                2 * TestNamedNodesAttributes.ndim + TestNamedNodesAttributes.num_trainable_params[nodes_name],
+                2 * TestNamedNodesAttributes.ndim
+                + TestNamedNodesAttributes.num_trainable_params[nodes_name],
             )
             assert output.shape == expected_shape
 
             # Check if the first part of the output matches the sin-cos transformed coordinates
             latlons = getattr(nodes_attributes, f"latlons_{nodes_name}")
             repeated_latlons = einops.repeat(latlons, "n f -> (b n) f", b=batch_size)
-            assert torch.allclose(output[:, : 2 * TestNamedNodesAttributes.ndim], repeated_latlons)
+            assert torch.allclose(
+                output[:, : 2 * TestNamedNodesAttributes.ndim], repeated_latlons
+            )
 
             # Check if the last part of the output is trainable (requires grad)
             assert output[:, 2 * TestNamedNodesAttributes.ndim :].requires_grad
@@ -134,7 +147,10 @@ class TestNamedNodesAttributes:
         for nodes_name in self.nodes_names:
             output = no_trainable_attributes(nodes_name, batch_size)
 
-            expected_shape = batch_size * graph_data[nodes_name].num_nodes, 2 * TestNamedNodesAttributes.ndim
+            expected_shape = (
+                batch_size * graph_data[nodes_name].num_nodes,
+                2 * TestNamedNodesAttributes.ndim,
+            )
             assert output.shape == expected_shape
 
             # Check if the output exactly matches the sin-cos transformed coordinates

@@ -54,7 +54,9 @@ def latlon_rad_to_cartesian_np(locations: np.ndarray, radius: float = 1) -> np.n
     return np.stack((x, y, z), axis=-1)
 
 
-def latlon_rad_to_cartesian(locations: torch.Tensor | tuple, radius: float = 1) -> torch.Tensor:
+def latlon_rad_to_cartesian(
+    locations: torch.Tensor | tuple, radius: float = 1
+) -> torch.Tensor:
     """Convert planar coordinates to 3D coordinates in a sphere.
 
     Parameters

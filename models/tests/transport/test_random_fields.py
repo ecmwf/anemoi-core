@@ -11,7 +11,9 @@ import torch
 from anemoi.models.transport import random_fields
 
 
-def test_randn_with_grid_sharding_creates_full_grid_before_sharding(monkeypatch) -> None:
+def test_randn_with_grid_sharding_creates_full_grid_before_sharding(
+    monkeypatch,
+) -> None:
     calls = {}
 
     def fake_randn(shape, device=None, dtype=None):
@@ -36,7 +38,9 @@ def test_randn_with_grid_sharding_creates_full_grid_before_sharding(monkeypatch)
         grid_shard_sizes=[3, 5],
     )
 
-    expected_full = torch.arange(1 * 2 * 1 * 8 * 4, dtype=torch.float32).reshape(1, 2, 1, 8, 4)
+    expected_full = torch.arange(1 * 2 * 1 * 8 * 4, dtype=torch.float32).reshape(
+        1, 2, 1, 8, 4
+    )
     torch.testing.assert_close(noise, expected_full.narrow(-2, 0, 3))
     assert calls["shape"] == (1, 2, 1, 8, 4)
     assert calls["sizes"] == [3, 5]

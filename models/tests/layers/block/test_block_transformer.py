@@ -12,16 +12,17 @@ import logging
 
 import pytest
 import torch
-from hypothesis import given
-from hypothesis import settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from torch import nn
 
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadSelfAttention
-from anemoi.models.layers.block import MLP
-from anemoi.models.layers.block import GraphConvProcessorBlock
-from anemoi.models.layers.block import TransformerProcessorBlock
+from anemoi.models.layers.block import (
+    MLP,
+    GraphConvProcessorBlock,
+    TransformerProcessorBlock,
+)
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.utils import load_layer_kernels
 
@@ -55,7 +56,16 @@ class TestTransformerProcessorBlock:
         qk_norm=st.booleans(),
     )
     @settings(max_examples=10)
-    def test_init(self, factor_attention_heads, hidden_dim, num_heads, activation, window_size, dropout_p, qk_norm):
+    def test_init(
+        self,
+        factor_attention_heads,
+        hidden_dim,
+        num_heads,
+        activation,
+        window_size,
+        dropout_p,
+        qk_norm,
+    ):
         num_channels = num_heads * factor_attention_heads
 
         layer_kernels = load_layer_kernels({"Activation": {"_target_": activation}})
@@ -117,7 +127,9 @@ class TestTransformerProcessorBlock:
             qk_norm=qk_norm,
         )
 
-        x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)
+        x = torch.randn(
+            (batch_size, num_channels)
+        )  # .to(torch.float16, non_blocking=True)
         shape_info = GraphShardInfo(nodes=[batch_size])
         output = block.forward(x, shape_info, batch_size)
         assert isinstance(output[0], torch.Tensor)
