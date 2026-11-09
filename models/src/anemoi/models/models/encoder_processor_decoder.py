@@ -59,12 +59,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         self.encoder = torch.nn.ModuleDict()
         for encoder_name, encoder_config in model_config.encoders.items():
-            encoder_in_channels_src = [self.input_dim[d] for d in self.encoder2datasets[encoder_name]]
+            # Fused source datasets have no node set of their own, so only the
+            # anchors carry an encoder input dimension and encoder edges.
+            encoder_anchors = self.encoder2anchors[encoder_name]
+            encoder_in_channels_src = [self.input_dim[d] for d in encoder_anchors]
             assert all(ch == encoder_in_channels_src[0] for ch in encoder_in_channels_src), (
                 f"All datasets for encoder {encoder_name} must have the same input dimension, "
                 f"but got {encoder_in_channels_src}."
             )
-            encoder_edge_dims = [self.encoder_graph_provider[d].edge_dim for d in encoder_config.source_datasets]
+            encoder_edge_dims = [self.encoder_graph_provider[d].edge_dim for d in encoder_anchors]
             assert all(dim == encoder_edge_dims[0] for dim in encoder_edge_dims), (
                 f"All datasets for encoder {encoder_name} must have the same edge dimension, "
                 f"but got {encoder_edge_dims}."
@@ -498,6 +501,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         return x_out_dict
 
     def fill_metadata(self, md_dict) -> None:
+        super().fill_metadata(md_dict)
         for dataset in self.input_dim.keys():
             shapes = {
                 "variables": self.input_dim[dataset],

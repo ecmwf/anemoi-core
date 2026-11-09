@@ -45,6 +45,7 @@ class FakeModelConfig:
     n_step_input: int = 2
     num_vars: int = 7
     input_datasets: list[str] | None = None  # defaults to every dataset in `specs`
+    target2anchor: dict[str, str] | None = None  # defaults to every dataset decoded from itself
 
     def build(self) -> SimpleNamespace:
         """Build a stand-in for `BaseGraphModel` exposing only what the target features read."""
@@ -59,6 +60,7 @@ class FakeModelConfig:
             input_dim={},
             input_datasets=list(self.specs) if self.input_datasets is None else self.input_datasets,
             dataset2decoder={name: f"decoder_{name}" for name in self.specs},
+            target2anchor={name: name for name in self.specs} if self.target2anchor is None else self.target2anchor,
         )
 
         for name, spec in self.specs.items():
@@ -221,6 +223,19 @@ class TestTargetFeatureValidate(TargetFeatureTestCase):
 
         with pytest.raises(ValueError, match=f'requires dataset "{self.DATASET}" to have an encoder'):
             feature.validate()
+
+    def test_encoded_data_of_an_attached_target_comes_from_its_anchor(self, model_init: FakeModelConfig) -> None:
+        """A target decoded from another dataset's anchor takes that anchor's encoded width."""
+        model_init = replace(
+            model_init,
+            specs={self.DATASET: DatasetSpec(input_dim=11), "anchor": DatasetSpec(input_dim=17)},
+            input_datasets=["anchor"],
+            target2anchor={self.DATASET: "anchor"},
+        )
+        feature = create_decoding_target_features(["encoded_data"], [self.DATASET], model_init.build())
+
+        feature.validate()
+        assert feature.dim == 17
 
     def test_composite_validate_propagates_child_failures(self, model_init: FakeModelConfig) -> None:
         """Test that a composite feature propagates validation failures from its child features."""

@@ -67,11 +67,29 @@ callbacks can use the same interface across task types:
 
 - forecaster tasks use ``ForecasterPlotAdapter``;
 - autoencoder tasks use ``AutoencoderPlotAdapter``;
-- temporal downscaler tasks use ``TemporalDownscalerPlotAdapter``.
+- temporal downscaler tasks use ``TemporalDownscalerPlotAdapter``;
+- spatial downscaler tasks use ``SpatialDownscalerPlotAdapter``.
 
 These adapters rely on the shared task ``_step`` return format
 ``(loss, metrics, predictions)`` where ``predictions`` is always a list
 of dataset-keyed dictionaries.
+
+Only datasets the model predicts (its target datasets) can be plotted by
+the per-batch callbacks (``BatchOutputPlot``, ``LossCurvePlot``); other
+entries in ``diagnostics.plot.datasets_to_plot`` are rejected at fit
+start. ``GraphFeaturePlot`` accepts any dataset.
+
+By default the input panel (``x`` of the ``BatchOutputPlot`` ``plot_fn``)
+is read from the plotted dataset's own batch entry. An adapter can
+override ``prepare_plot_input`` to supply it from other datasets; it is
+then passed to ``iter_plot_samples`` as ``input_data``. The spatial
+downscaler uses this to plot the low-resolution residual reference,
+already projected onto the target grid by its spatial pre-processor, in
+the target's variable layout. The increments ``pred - input`` and
+``truth - input`` are then the predicted and true residuals. Target
+variables without a low-resolution counterpart (diagnostics) are zero
+in the input. See ``config/spatial_downscaler_transport_edm_diffusion.yaml``
+for an example plot configuration.
 
 **Focus Area**
 

@@ -21,6 +21,7 @@ INIT_HYPERPARAMETERS = frozenset(
         "graph_data",
         "statistics",
         "statistics_tendencies",
+        "residual_statistics",
         "data_indices",
         "metadata",
         "supporting_arrays",

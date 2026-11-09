@@ -222,6 +222,75 @@ def test_samplers_expand_sigma_to_model_dtype_and_return_model_dtype(
     assert torch.allclose(result[DATASET_NAME], torch.zeros_like(result[DATASET_NAME]))
 
 
+@pytest.mark.parametrize("sampler_cls", [EDMHeunSampler, DPMpp2MSampler])
+def test_diffusion_samplers_take_the_model_dtype_from_output_dtypes(
+    sampler_cls: type[EDMHeunSampler] | type[DPMpp2MSampler],
+) -> None:
+    """A downscaler samples a target that is not one of its inputs.
+
+    ``x`` then has no entry for the sampled dataset, so the dtype the solver
+    casts back to for every model evaluation must come from ``output_dtypes``
+    rather than from ``x[dataset_name]``.
+    """
+    x = {"in_lres": torch.randn(2, 3, 1, 5, 4, dtype=torch.float32)}
+    y = {"out_hres": torch.randn(2, 3, 1, 5, 4, dtype=torch.float64)}
+    sigmas = torch.tensor([1.0, 0.0], dtype=torch.float64)
+
+    def _validate_dtype(
+        _x: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        _sigma: dict[str, torch.Tensor],
+    ) -> None:
+        assert y["out_hres"].dtype == torch.float32
+
+    denoiser = RecordingZeroDenoiser(validator=_validate_dtype)
+    sampler = sampler_cls(dtype=torch.float64)
+
+    result = sampler.sample(
+        x=x,
+        y=y,
+        sigmas=sigmas,
+        denoising_fn=denoiser,
+        output_dtypes={"out_hres": torch.float32},
+    )
+
+    assert denoiser.call_count == 1
+    assert result["out_hres"].dtype == torch.float32
+
+
+@pytest.mark.parametrize("sampler_cls", [VectorFieldEulerSampler, VectorFieldHeunSampler])
+def test_vector_field_samplers_take_the_model_dtype_from_output_dtypes(
+    sampler_cls: type[VectorFieldEulerSampler] | type[VectorFieldHeunSampler],
+) -> None:
+    x = {"in_lres": torch.randn(2, 3, 1, 5, 4, dtype=torch.float32)}
+    y = {"out_hres": torch.randn(2, 3, 1, 5, 4, dtype=torch.float64)}
+    times = torch.linspace(0.0, 1.0, 3, dtype=torch.float64)
+
+    seen_dtypes: list[torch.dtype] = []
+
+    def velocity_fn(
+        _x: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        _time: dict[str, torch.Tensor],
+        model_comm_group=None,
+        grid_shard_sizes=None,
+    ) -> dict[str, torch.Tensor]:
+        del model_comm_group, grid_shard_sizes
+        seen_dtypes.append(y["out_hres"].dtype)
+        return {dataset_name: torch.zeros_like(y_data) for dataset_name, y_data in y.items()}
+
+    result = sampler_cls(dtype=torch.float64).sample(
+        x=x,
+        y=y,
+        times=times,
+        vector_field_fn=velocity_fn,
+        output_dtypes={"out_hres": torch.float32},
+    )
+
+    assert seen_dtypes and all(dtype == torch.float32 for dtype in seen_dtypes)
+    assert result["out_hres"].dtype == torch.float32
+
+
 def test_heun_uses_corrector_before_final_step() -> None:
     x, y = make_inputs(dtype=torch.float64)
     sigmas = torch.tensor([1.0, 0.5, 0.0], dtype=torch.float64)

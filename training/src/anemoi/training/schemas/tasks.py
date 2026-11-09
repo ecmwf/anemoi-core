@@ -87,7 +87,29 @@ class TemporalDownscalerSchema(BaseModel):
     "Whether to include the right boundary in the output."
 
 
+class SpatialDownscalerSchema(BaseModel):
+    """Configuration for the spatial downscaling task."""
+
+    target_: Literal["anemoi.training.tasks.SpatialDownscaler"] = Field(..., alias="_target_")
+    "Task class path for the spatial downscaling task."
+    input_datasets: list[str] = Field(example=["in_lres", "in_hres"])
+    "Datasets fed to the encoder. Split from targets by name, not by time position."
+    target_datasets: list[str] = Field(example=["out_hres"])
+    "Datasets the model predicts."
+    input_offsets: list[str] = Field(default=["0H"], example=["0H", "6H"], min_length=1)
+    "Input time offsets as duration strings."
+    output_offsets: list[str] = Field(default=["0H"], example=["0H", "6H"], min_length=1)
+    """Output time offsets as duration strings.
+
+    Residual prediction requires ``output_offsets == input_offsets``.
+    """
+
+
 TaskSchema = Annotated[
-    ForecasterSchema | OffsetForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
+    ForecasterSchema
+    | OffsetForecasterSchema
+    | AutoencoderTaskSchema
+    | TemporalDownscalerSchema
+    | SpatialDownscalerSchema,
     Discriminator("target_"),
 ]

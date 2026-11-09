@@ -1,0 +1,76 @@
+# Modifications for the spatial downscaler template "spatial_downscaler_transport_edm_diffusion.yaml"
+#
+# in_lres:  O48 ERA5 (10u, 10v, 2t prognostic; tp forcing), projected onto O96
+# in_hres:  O96 forcings from the ERA5 testing dataset
+# out_hres: O96 targets from the ERA5 testing dataset (10u, 10v, 2t as residuals; tp diagnostic)
+system:
+  input:
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    dataset_lres: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o48-2017-2017-6h-v1-testing.zarr
+    truncation: anemoi-integration-tests/training/assets/o48-o96-linear.mat.npz
+    # Written to a temporary directory by the fixture.
+    residual_statistics: null
+
+data:
+  frequency: 6h
+  datasets:
+    in_lres:
+      forcing: [tp]
+      processors:
+        normalizer:
+          config:
+            default: mean-std
+            none: []
+    out_hres:
+      diagnostic: [tp]
+
+task:
+  input_offsets: ["0H", "6H"]
+  output_offsets: ["0H", "6H"]
+
+dataloader:
+  training:
+    datasets:
+      in_lres:
+        dataset_config:
+          select: [10u, 10v, 2t, tp]
+        start: null
+        end: 2017-01-08 12:00:00
+      in_hres:
+        start: null
+        end: 2017-01-08 12:00:00
+      out_hres:
+        dataset_config:
+          select: [10u, 10v, 2t, tp]
+        start: null
+        end: 2017-01-08 12:00:00
+  validation:
+    datasets:
+      in_lres:
+        dataset_config:
+          select: [10u, 10v, 2t, tp]
+        start: 2017-01-08 18:00:00
+        end: null
+      in_hres:
+        start: 2017-01-08 18:00:00
+        end: null
+      out_hres:
+        dataset_config:
+          select: [10u, 10v, 2t, tp]
+        start: 2017-01-08 18:00:00
+        end: null
+  test:
+    datasets:
+      in_lres:
+        dataset_config:
+          select: [10u, 10v, 2t, tp]
+        start: 2017-01-08 18:00:00
+        end: null
+      in_hres:
+        start: 2017-01-08 18:00:00
+        end: null
+      out_hres:
+        dataset_config:
+          select: [10u, 10v, 2t, tp]
+        start: 2017-01-08 18:00:00
+        end: null

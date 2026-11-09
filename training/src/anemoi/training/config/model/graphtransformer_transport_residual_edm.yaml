@@ -1,0 +1,172 @@
+---
+# Model config for spatial downscaling with AnemoiTransportSpatialDownscalerModelEncProcDec.
+#
+# The encoder below fuses the inputs onto the in_lres node set (the first source dataset is
+# the anchor): in_lres is remapped onto the target grid by data.datasets.in_lres.spatial_processor
+# and in_hres is native. out_hres is not an encoder source: residual_reference below
+# attaches it to its reference in_lres, so the noised target is encoded on the in_lres node set
+# and decoded from there. Only the anchor (in_lres) owns encoder edges.
+
+num_channels: 1024
+cpu_offload: False
+recompile_limit: 32
+
+keep_batch_sharded: True
+
+# Residual baseline of each target, as {target: reference}. The model learns target - reference
+# for prognostic variables, and the target is encoded on its reference's encoder node set.
+residual_reference:
+  out_hres: in_lres
+
+model:
+  _target_: anemoi.models.models.AnemoiTransportSpatialDownscalerModelEncProcDec
+  hidden_nodes_name: "hidden"
+  latent_skip: True
+  transport:
+    objective: edm_diffusion
+    sigma_data: 1.0
+    noise_channels: 32
+    noise_cond_dim: 16
+    sigma_max: 100.0
+    sigma_min: 0.02
+    rho: 7.0
+    noise_embedder:
+      _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
+      num_channels: ${model.model.transport.noise_channels}
+      max_period: 1000
+    training_condition:
+      distribution: "karras"
+      sigma_max: ${model.model.transport.sigma_max}
+      sigma_min: ${model.model.transport.sigma_min}
+      rho: ${model.model.transport.rho}
+    inference_defaults:
+      sampling_schedule:
+        schedule_type: "karras"
+        sigma_max: 100.0
+        sigma_min: 0.02
+        rho: 7.0
+        num_steps: 50
+      sampler:
+        sampler: "heun"
+
+layer_kernels:
+  # The layer_kernels can be adjusted per model component, but are defined here for convenience.
+  LayerNorm:
+    _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
+    normalized_shape: ${model.num_channels}
+    condition_shape: 16
+    zero_init: True
+    autocast: false
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
+  QueryNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+  KeyNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+
+processor:
+  _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+  num_channels: ${model.num_channels}
+  trainable_size: ${model.edge_trainable_parameters.hidden2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  num_layers: 16
+  num_chunks: 4
+  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
+  num_heads: 16 # GraphTransformer or Transformer only
+  qk_norm: True
+  cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+  graph_attention_backend: "triton"  # Options: "triton", "pyg"
+
+encoders:
+  "0":
+    # Both inputs are encoded together on the in_lres node set, which is built on the target grid.
+    # Use "not_supported" with one encoder per input to encode them separately instead.
+    source_datasets: [ "in_lres", "in_hres" ]
+    dataset_fusing_strategy:  "concatenate_inputs_along_variable_dim" # Options: "not_supported", "concatenate_inputs_along_variable_dim" (model-class dependent)
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+      num_channels: ${model.num_channels}
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
+      sub_graph_edge_attributes: ${model.attributes.edges}
+      num_chunks: 4
+      mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16 # GraphTransformer or Transformer only
+      qk_norm: True
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"  # Options: "triton", "pyg"
+
+latent_aggregator:
+  _target_: anemoi.models.layers.aggregator.SumAggregator
+
+decoders:
+  "0":
+    target_datasets: [ "out_hres" ]
+    target_node_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+      num_channels: ${model.num_channels}
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
+      sub_graph_edge_attributes: ${model.attributes.edges}
+      num_chunks: 4
+      mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16 # GraphTransformer or Transformer only
+      initialise_data_extractor_zero: False
+      qk_norm: True
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"  # Options: "triton", "pyg"
+
+# The residual baseline is the projected reference (ResidualPredictionMode), so the
+# downscaler's _assemble_input returns no x_skip and never indexes self.residual.
+residual:
+  datasets: {}
+
+output_mask:
+  datasets:
+    out_hres:
+      _target_: anemoi.training.utils.masks.NoOutputMask
+
+node_trainable_parameters:
+  in_lres: 8
+  in_hres: 8
+  out_hres: 8
+  hidden: 8
+
+edge_trainable_parameters:
+  data2hidden: 8
+  hidden2hidden: 8
+  hidden2data: 8
+
+attributes:
+  edges:
+  - edge_length
+  - edge_dirs
+  nodes: []
+
+# Torch compile configuration
+# A list of modules present in the model, which will be compiled
+compile:
+  - module: anemoi.models.layers.conv.GraphTransformerConv
+  - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+
+# Bounding configuration
+bounding:
+  datasets:
+    in_lres: []
+    in_hres: []
+    out_hres: []
