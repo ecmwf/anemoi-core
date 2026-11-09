@@ -29,9 +29,12 @@ jobs:
   ci-approval:
     runs-on: ubuntu-slim
     permissions:
+      contents: read
       pull-requests: write
     steps:
       - uses: ecmwf/ci-infrastructure/actions/require-ci-approval@main
+        with:
+          check-workflows: 'true'
 
   resolve:
     needs: ci-approval
