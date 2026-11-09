@@ -13,7 +13,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.generate.masks import AreaMaskBuilder
@@ -44,9 +45,7 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
 
     def __init__(self, dataset: DictConfig, name: str) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
-        self.dataset = (
-            dataset if isinstance(dataset, str) else OmegaConf.to_container(dataset)
-        )
+        self.dataset = dataset if isinstance(dataset, str) else OmegaConf.to_container(dataset)
         super().__init__(name)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
 
@@ -77,9 +76,7 @@ class TextNodes(BaseNodeBuilder):
         The index of the latitude in the dataset.
     """
 
-    def __init__(
-        self, dataset: str | Path, name: str, idx_lon: int = 0, idx_lat: int = 1
-    ) -> None:
+    def __init__(self, dataset: str | Path, name: str, idx_lon: int = 0, idx_lat: int = 1) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
         self.dataset = dataset
         self.idx_lon = idx_lon
@@ -157,9 +154,7 @@ class NPZFileNodes(BaseNodeBuilder):
         torch.Tensor of shape (num_nodes, 2)
             A 2D tensor with the coordinates, in radians.
         """
-        assert self.npz_file.exists(), (
-            f"{self.__class__.__name__}.file does not exists: {self.npz_file}"
-        )
+        assert self.npz_file.exists(), f"{self.__class__.__name__}.file does not exists: {self.npz_file}"
         grid_data = np.load(self.npz_file)
         coords = self.reshape_coords(grid_data[self.lat_key], grid_data[self.lon_key])
         return coords
@@ -180,9 +175,7 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
     ) -> None:
         super().__init__(npz_file, name, lat_key, lon_key)
 
-        self.area_mask_builder = AreaMaskBuilder(
-            reference_node_name, margin_radius_km, mask_attr_name
-        )
+        self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
     def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)
@@ -232,9 +225,7 @@ class XArrayNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(
-        self, dataset: str, name: str, lat_key: str = "lat", lon_key: str = "lon"
-    ) -> None:
+    def __init__(self, dataset: str, name: str, lat_key: str = "lat", lon_key: str = "lon") -> None:
 
         super().__init__(name)
         self.dataset = dataset

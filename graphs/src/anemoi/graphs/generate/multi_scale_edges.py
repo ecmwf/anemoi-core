@@ -9,7 +9,8 @@
 
 
 import logging
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 
 import networkx as nx
 import numpy as np
@@ -22,9 +23,7 @@ class BaseIcosahedronEdgeStrategy(ABC):
     """Abstract base class for different edge-building strategies."""
 
     @abstractmethod
-    def get_edges(
-        self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]
-    ) -> NodeStorage: ...
+    def get_edges(self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]) -> NodeStorage: ...
 
 
 class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
@@ -39,9 +38,7 @@ class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
         from anemoi.graphs.generate import tri_icosahedron
 
         if x_hops == 1:
-            LOGGER.debug(
-                "The 1-hop edges are obtained directly from the trimesh.Trimesh object's 'edges' attribute."
-            )
+            LOGGER.debug("The 1-hop edges are obtained directly from the trimesh.Trimesh object's 'edges' attribute.")
             # Compute the multiscale edges directly and store them in the node storage
             # No need of the networkx graph
             multiscale_edges = tri_icosahedron.add_1_hop_edges(
@@ -69,9 +66,7 @@ class TriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
 class HexNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
     """Edge builder for HexNodes and LimitedAreaHexNodes."""
 
-    def get_edges(
-        self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]
-    ) -> NodeStorage:
+    def get_edges(self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]) -> NodeStorage:
         from anemoi.graphs.generate import hex_icosahedron
 
         nx_graph = hex_icosahedron.add_edges_to_nx_graph(
@@ -89,9 +84,7 @@ class HexNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
 class StretchedTriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
     """Edge builder for StretchedTriNodes."""
 
-    def get_edges(
-        self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]
-    ) -> NodeStorage:
+    def get_edges(self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]) -> NodeStorage:
         from anemoi.graphs.generate import tri_icosahedron
         from anemoi.graphs.generate.masks import AreaMaskBuilder
 
@@ -99,9 +92,7 @@ class StretchedTriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
         all_points_mask_builder.fit_coords(nodes.x)
 
         if x_hops == 1:
-            LOGGER.debug(
-                "Using tri-mesh only strategy for x_hops=1 multiscale-edge building."
-            )
+            LOGGER.debug("Using tri-mesh only strategy for x_hops=1 multiscale-edge building.")
             # Compute the multiscale edges directly and store them in the node storage
             # No need of the networkx graph
             multiscale_edges = tri_icosahedron.add_1_hop_edges(

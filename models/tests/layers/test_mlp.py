@@ -11,7 +11,8 @@
 import pytest
 import torch
 
-from anemoi.models.layers.mlp import MLP, GatedMLPLayer
+from anemoi.models.layers.mlp import MLP
+from anemoi.models.layers.mlp import GatedMLPLayer
 from anemoi.models.layers.utils import load_layer_kernels
 
 
@@ -69,13 +70,7 @@ class TestMLP:
         ],
     )
     def test_init_gated_implementation(
-        self,
-        num_features,
-        hdim,
-        num_out_feature,
-        layer_kernels,
-        mlp_implementation,
-        gate_type,
+        self, num_features, hdim, num_out_feature, layer_kernels, mlp_implementation, gate_type
     ):
         mlp = MLP(
             num_features,
@@ -93,9 +88,7 @@ class TestMLP:
     def test_gated_implementation_ignores_activation_kernel(
         self, num_features, hdim, num_out_feature, mlp_implementation
     ):
-        layer_kernels = load_layer_kernels(
-            {"Activation": {"_target_": "torch.nn.ReLU"}}
-        )
+        layer_kernels = load_layer_kernels({"Activation": {"_target_": "torch.nn.ReLU"}})
         import warnings
 
         with warnings.catch_warnings(record=True) as caught:
@@ -109,13 +102,9 @@ class TestMLP:
                 layer_norm=False,
                 mlp_implementation=mlp_implementation,
             )
-        assert any(
-            "layer_kernels.Activation is ignored" in str(w.message) for w in caught
-        )
+        assert any("layer_kernels.Activation is ignored" in str(w.message) for w in caught)
 
-    def test_glu_activation_requires_mlp_implementation(
-        self, num_features, hdim, num_out_feature, layer_kernels
-    ):
+    def test_glu_activation_requires_mlp_implementation(self, num_features, hdim, num_out_feature, layer_kernels):
         class FakeGLU(torch.nn.Module):
             def forward(self, x):
                 return x
@@ -132,21 +121,11 @@ class TestMLP:
                 mlp_implementation="mlp",
             )
 
-    def test_forwards(
-        self, batch_size, nlatlon, num_features, hdim, num_out_feature, layer_kernels
-    ):
+    def test_forwards(self, batch_size, nlatlon, num_features, hdim, num_out_feature, layer_kernels):
         """Test MLP forward pass."""
 
-        mlp = MLP(
-            num_features,
-            hdim,
-            num_out_feature,
-            layer_kernels=layer_kernels,
-            layer_norm=True,
-        )
-        x_in = torch.randn(
-            (batch_size, nlatlon, num_features), dtype=torch.float32, requires_grad=True
-        )
+        mlp = MLP(num_features, hdim, num_out_feature, layer_kernels=layer_kernels, layer_norm=True)
+        x_in = torch.randn((batch_size, nlatlon, num_features), dtype=torch.float32, requires_grad=True)
 
         out = mlp(x_in)
         assert out.shape == (
@@ -158,9 +137,7 @@ class TestMLP:
     def test_backward(self, batch_size, nlatlon, num_features, hdim, layer_kernels):
         """Test MLP backward pass."""
 
-        x_in = torch.randn(
-            (batch_size, nlatlon, num_features), dtype=torch.float32, requires_grad=True
-        )
+        x_in = torch.randn((batch_size, nlatlon, num_features), dtype=torch.float32, requires_grad=True)
         mlp_1 = MLP(num_features, hdim, hdim, layer_kernels, layer_norm=True)
 
         y = mlp_1(x_in)
@@ -172,6 +149,6 @@ class TestMLP:
 
         for param in mlp_1.parameters():
             assert param.grad is not None, f"param.grad is None for {param}"
-            assert param.grad.shape == param.shape, (
-                f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
-            )
+            assert (
+                param.grad.shape == param.shape
+            ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"

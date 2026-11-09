@@ -10,14 +10,16 @@
 
 import pytest
 import torch
+import torch.nn as nn
 from hydra.utils import instantiate
-from hypothesis import given, settings
+from hypothesis import given
+from hypothesis import settings
 from hypothesis import strategies as st
-from torch import nn
 
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.layers.attention import MultiHeadCrossAttention
-from anemoi.models.layers.block import MLP, TransformerMapperBlock
+from anemoi.models.layers.block import MLP
+from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.utils import load_layer_kernels
 
 
@@ -81,9 +83,7 @@ def mapper_block(init):
 
 def test_TransformerMapperBlock_init(mapper_block):
     block = mapper_block
-    assert isinstance(block, TransformerMapperBlock), (
-        "block is not an instance of GraphTransformerMapperBlock"
-    )
+    assert isinstance(block, TransformerMapperBlock), "block is not an instance of GraphTransformerMapperBlock"
     assert isinstance(block.layer_norm_attention_src, nn.LayerNorm)
     assert isinstance(block.layer_norm_attention_dst, nn.LayerNorm)
     assert isinstance(block.layer_norm_mlp, nn.LayerNorm)
@@ -94,20 +94,13 @@ def test_TransformerMapperBlock_init(mapper_block):
 def test_TransformerMapperBlock_all_parameters_receive_gradients(mapper_block):
     num_src_nodes, num_dst_nodes = 3, 5
     num_channels = mapper_block.layer_norm_mlp.normalized_shape[0]
-    x = (
-        torch.randn(num_src_nodes, num_channels),
-        torch.randn(num_dst_nodes, num_channels),
-    )
-    shard_info = BipartiteGraphShardInfo(
-        src_nodes=[num_src_nodes], dst_nodes=[num_dst_nodes]
-    )
+    x = (torch.randn(num_src_nodes, num_channels), torch.randn(num_dst_nodes, num_channels))
+    shard_info = BipartiteGraphShardInfo(src_nodes=[num_src_nodes], dst_nodes=[num_dst_nodes])
 
     (_, x_dst), _ = mapper_block(x, shard_info, batch_size=1)
     x_dst.sum().backward()
 
-    no_grad = [
-        name for name, param in mapper_block.named_parameters() if param.grad is None
-    ]
+    no_grad = [name for name, param in mapper_block.named_parameters() if param.grad is None]
     assert not no_grad, f"parameters not used in the forward pass: {no_grad}"
 
 

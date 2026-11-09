@@ -9,7 +9,8 @@
 
 
 import logging
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 
 import torch
 from torch_geometric.data.storage import NodeStorage
@@ -25,21 +26,17 @@ class BooleanOperation(BooleanBaseNodeAttribute, ABC):
 
     def __init__(self, masks: MaskAttributeType | list[MaskAttributeType]) -> None:
         super().__init__()
-        assert masks is not None, (
-            f"{self.__class__.__name__} requires a valid masks argument."
-        )
+        assert masks is not None, f"{self.__class__.__name__} requires a valid masks argument."
         self.masks = masks if isinstance(masks, list) else [masks]
 
     @staticmethod
-    def get_mask_values(
-        mask: MaskAttributeType, nodes: NodeStorage, **kwargs
-    ) -> torch.Tensor:
+    def get_mask_values(mask: MaskAttributeType, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         if isinstance(mask, str):
             assert mask in nodes, f"Nodes have no attribute named {mask}."
             attributes = nodes[mask]
-            assert attributes.dtype == torch.bool, (
-                f"The mask attribute '{mask}' must be a boolean but is {attributes.dtype}."
-            )
+            assert (
+                attributes.dtype == torch.bool
+            ), f"The mask attribute '{mask}' must be a boolean but is {attributes.dtype}."
             return attributes
 
         return mask.get_raw_values(nodes, **kwargs)
@@ -48,10 +45,7 @@ class BooleanOperation(BooleanBaseNodeAttribute, ABC):
     def reduce_op(self, masks: list[torch.Tensor]) -> torch.Tensor: ...
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
-        mask_values = [
-            BooleanOperation.get_mask_values(mask, nodes, **kwargs)
-            for mask in self.masks
-        ]
+        mask_values = [BooleanOperation.get_mask_values(mask, nodes, **kwargs) for mask in self.masks]
         return self.reduce_op(torch.stack(mask_values))
 
 
@@ -59,9 +53,7 @@ class BooleanNot(BooleanOperation):
     """Boolean NOT mask."""
 
     def reduce_op(self, masks: list[torch.Tensor]) -> torch.Tensor:
-        assert len(self.masks) == 1, (
-            f"The {self.__class__.__name__} can only be aplied to one mask."
-        )
+        assert len(self.masks) == 1, f"The {self.__class__.__name__} can only be aplied to one mask."
         return ~masks[0]
 
 

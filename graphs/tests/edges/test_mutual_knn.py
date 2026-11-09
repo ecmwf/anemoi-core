@@ -12,7 +12,9 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.edges import KNNEdges, MutualKNNEdges, ReversedKNNEdges
+from anemoi.graphs.edges import KNNEdges
+from anemoi.graphs.edges import MutualKNNEdges
+from anemoi.graphs.edges import ReversedKNNEdges
 
 
 def _edge_set(edge_index: torch.Tensor) -> set:
@@ -27,9 +29,7 @@ def test_init():
 
 def test_init_with_reversed_k():
     """An explicit reversed k is stored as given."""
-    builder = MutualKNNEdges(
-        "test_nodes1", "test_nodes2", 3, reversed_num_nearest_neighbours=5
-    )
+    builder = MutualKNNEdges("test_nodes1", "test_nodes2", 3, reversed_num_nearest_neighbours=5)
     assert builder.num_nearest_neighbours == 3
     assert builder.reversed_num_nearest_neighbours == 5
 
@@ -51,12 +51,7 @@ def test_fail_init(num_nearest_neighbours):
 def test_fail_init_reversed(reversed_num_nearest_neighbours):
     """Invalid reversed_num_nearest_neighbours raises AssertionError."""
     with pytest.raises(AssertionError):
-        MutualKNNEdges(
-            "test_nodes1",
-            "test_nodes2",
-            3,
-            reversed_num_nearest_neighbours=reversed_num_nearest_neighbours,
-        )
+        MutualKNNEdges("test_nodes1", "test_nodes2", 3, reversed_num_nearest_neighbours=reversed_num_nearest_neighbours)
 
 
 def test_mutual_knn(graph_with_nodes):
@@ -70,13 +65,9 @@ def test_mutual_equals_intersection(graph_with_nodes):
     """Mutual edges are exactly KNN edges intersected with ReversedKNN edges."""
     k = 3
     nodes = graph_with_nodes["test_nodes"]
-    mutual = MutualKNNEdges("test_nodes", "test_nodes", k).compute_edge_index(
-        nodes, nodes
-    )
+    mutual = MutualKNNEdges("test_nodes", "test_nodes", k).compute_edge_index(nodes, nodes)
     forward = KNNEdges("test_nodes", "test_nodes", k).compute_edge_index(nodes, nodes)
-    reversed_ = ReversedKNNEdges("test_nodes", "test_nodes", k).compute_edge_index(
-        nodes, nodes
-    )
+    reversed_ = ReversedKNNEdges("test_nodes", "test_nodes", k).compute_edge_index(nodes, nodes)
 
     assert _edge_set(mutual) == _edge_set(forward) & _edge_set(reversed_)
 
@@ -85,9 +76,7 @@ def test_mutual_is_subset_of_knn(graph_with_nodes):
     """Every mutual edge is also a plain KNN edge."""
     k = 4
     nodes = graph_with_nodes["test_nodes"]
-    mutual = MutualKNNEdges("test_nodes", "test_nodes", k).compute_edge_index(
-        nodes, nodes
-    )
+    mutual = MutualKNNEdges("test_nodes", "test_nodes", k).compute_edge_index(nodes, nodes)
     forward = KNNEdges("test_nodes", "test_nodes", k).compute_edge_index(nodes, nodes)
 
     assert _edge_set(mutual).issubset(_edge_set(forward))
@@ -128,16 +117,12 @@ def test_mutual_knn_sklearn_fallback(graph_with_nodes):
 # src_nodes: 3x4 grid (same layout as the global fixture), scaled to radians.
 _SRC_LATS = np.array([-0.15, 0.0, 0.15])
 _SRC_LONS = np.array([0.0, 0.25, 0.5, 0.75])
-_SRC_COORDS = np.array(
-    [[lat, lon] for lat in _SRC_LATS for lon in _SRC_LONS]
-)  # 12 nodes
+_SRC_COORDS = np.array([[lat, lon] for lat in _SRC_LATS for lon in _SRC_LONS])  # 12 nodes
 
 # tgt_nodes: 2x4 coarser grid — different shape and values from src_nodes.
 _TGT_LATS = np.array([-0.3, 0.3])
 _TGT_LONS = np.array([0.125, 0.375, 0.625, 0.875])
-_TGT_COORDS = np.array(
-    [[lat, lon] for lat in _TGT_LATS for lon in _TGT_LONS]
-)  # 8 nodes
+_TGT_COORDS = np.array([[lat, lon] for lat in _TGT_LATS for lon in _TGT_LONS])  # 8 nodes
 
 
 @pytest.fixture
@@ -155,13 +140,11 @@ def test_mutual_equals_intersection_heterogeneous(graph_with_two_node_sets):
     src = graph_with_two_node_sets["src_nodes"]
     tgt = graph_with_two_node_sets["tgt_nodes"]
 
-    mutual = MutualKNNEdges(
-        "src_nodes", "tgt_nodes", k_fwd, reversed_num_nearest_neighbours=k_rev
-    ).compute_edge_index(src, tgt)
-    forward = KNNEdges("src_nodes", "tgt_nodes", k_fwd).compute_edge_index(src, tgt)
-    reversed_ = ReversedKNNEdges("src_nodes", "tgt_nodes", k_rev).compute_edge_index(
+    mutual = MutualKNNEdges("src_nodes", "tgt_nodes", k_fwd, reversed_num_nearest_neighbours=k_rev).compute_edge_index(
         src, tgt
     )
+    forward = KNNEdges("src_nodes", "tgt_nodes", k_fwd).compute_edge_index(src, tgt)
+    reversed_ = ReversedKNNEdges("src_nodes", "tgt_nodes", k_rev).compute_edge_index(src, tgt)
 
     assert _edge_set(mutual) == _edge_set(forward) & _edge_set(reversed_)
 
@@ -172,9 +155,7 @@ def test_mutual_knn_sklearn_fallback_heterogeneous(graph_with_two_node_sets):
     k_fwd, k_rev = 3, 2
     src = graph_with_two_node_sets["src_nodes"]
     tgt = graph_with_two_node_sets["tgt_nodes"]
-    builder = MutualKNNEdges(
-        "src_nodes", "tgt_nodes", k_fwd, reversed_num_nearest_neighbours=k_rev
-    )
+    builder = MutualKNNEdges("src_nodes", "tgt_nodes", k_fwd, reversed_num_nearest_neighbours=k_rev)
 
     primary = builder.compute_edge_index(src, tgt)
 
@@ -203,18 +184,14 @@ def test_schema_validates_mutual_knn():
 
 def test_schema_rejects_invalid_mutual_knn():
     """An invalid MutualKNNEdges block fails schema validation."""
-    from pydantic import TypeAdapter, ValidationError
+    from pydantic import TypeAdapter
+    from pydantic import ValidationError
 
     from anemoi.graphs.schemas.edge_schemas import EdgeBuilderSchemas
 
     adapter = TypeAdapter(EdgeBuilderSchemas)
     with pytest.raises(ValidationError):
-        adapter.validate_python(
-            {
-                "_target_": "anemoi.graphs.edges.MutualKNNEdges",
-                "num_nearest_neighbours": -1,
-            }
-        )
+        adapter.validate_python({"_target_": "anemoi.graphs.edges.MutualKNNEdges", "num_nearest_neighbours": -1})
 
 
 def test_mutual_knn_graph_creation(tmp_path, mock_grids_path):

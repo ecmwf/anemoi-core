@@ -9,29 +9,33 @@
 
 
 import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
+from dataclasses import replace
+from typing import Optional
+from typing import Tuple
+from typing import Union
 
 import torch
 import torch.distributed as dist
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.typing import Adj, PairTensor
-from torch_geometric.utils import degree, index_sort
+from torch_geometric.typing import Adj
+from torch_geometric.typing import PairTensor
+from torch_geometric.utils import degree
+from torch_geometric.utils import index_sort
 
-from anemoi.models.distributed.balanced_partition import (
-    get_balanced_partition_sizes,
-    get_partition_range,
-)
-from anemoi.models.distributed.graph import shard_tensor, sync_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, ShardSizes
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
+from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.graph import sync_tensor
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.utils import model_is_distributed
 
 ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
 
 
-def sort_edge_index_by_dst(
-    edge_index: Adj, max_value: int = None
-) -> tuple[Adj, Tensor]:
+def sort_edge_index_by_dst(edge_index: Adj, max_value: int = None) -> Tuple[Adj, Tensor]:
     """Sort edge indices by destination node."""
     _, perm = index_sort(edge_index[1], max_value=max_value, stable=True)
     return edge_index[:, perm], perm
@@ -75,7 +79,7 @@ class GraphPartition:
     num_parts: int
     dst_splits: list[int]
     edge_splits: list[int]
-    src_splits: list[int] | None = None
+    src_splits: Optional[list[int]] = None
 
     def materialise(
         self,
@@ -83,8 +87,8 @@ class GraphPartition:
         x: PairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        cond: PairTensor | None = None,
-    ) -> tuple[PairTensor, Tensor, Adj, Tensor, PairTensor | None]:
+        cond: Optional[PairTensor] = None,
+    ) -> tuple[PairTensor, Tensor, Adj, Tensor, Optional[PairTensor]]:
         """Materialise a single partition by slicing nodes, edges and conditioning.
 
         Pure local operation — no communication. Suitable for chunking within
@@ -114,9 +118,7 @@ class GraphPartition:
         # slice edges and dst nodes for this partition
         edge_range = self._get_edge_range(partition_id)
         edge_attr_subset = edge_attr[edge_range]
-        edge_index_subset = edge_index[
-            :, edge_range
-        ].clone()  # clone to avoid in-place corruption
+        edge_index_subset = edge_index[:, edge_range].clone()  # clone to avoid in-place corruption
 
         dst_range = self._get_dst_range(partition_id)
         x_dst_subset = x_dst[dst_range]
@@ -125,9 +127,7 @@ class GraphPartition:
         self._relabel_dst_nodes(edge_index_subset, partition_id)
 
         # drop src nodes with no edges in this partition
-        x_src_subset, edge_index_subset, src_ids = _drop_unconnected_src_nodes(
-            x_src, edge_index_subset
-        )
+        x_src_subset, edge_index_subset, src_ids = _drop_unconnected_src_nodes(x_src, edge_index_subset)
 
         # subset conditioning if provided
         cond_subset = None
@@ -135,12 +135,7 @@ class GraphPartition:
             cond_src, cond_dst = cond
             cond_subset = (cond_src[src_ids], cond_dst[dst_range])
 
-        return (
-            (x_src_subset, x_dst_subset),
-            edge_attr_subset,
-            edge_index_subset,
-            cond_subset,
-        )
+        return (x_src_subset, x_dst_subset), edge_attr_subset, edge_index_subset, cond_subset
 
     def _get_edge_range(self, partition_id: int) -> slice:
         start, end = get_partition_range(self.edge_splits, partition_id)
@@ -150,9 +145,7 @@ class GraphPartition:
         start, end = get_partition_range(self.dst_splits, partition_id)
         return slice(start, end)
 
-    def _relabel_dst_nodes(
-        self, edge_index: Adj, partition_id: int, in_place: bool = True
-    ) -> Adj:
+    def _relabel_dst_nodes(self, edge_index: Adj, partition_id: int, in_place: bool = True) -> Adj:
         """Relabel dst indices from global to partition-local.
 
         Modifies edge_index in-place by default, but can return a relabeled copy if in_place=False.
@@ -164,9 +157,7 @@ class GraphPartition:
         return edge_index_
 
 
-def build_graph_partition(
-    edge_index: Adj, num_parts: int, num_nodes: tuple[int, int]
-) -> GraphPartition:
+def build_graph_partition(edge_index: Adj, num_parts: int, num_nodes: tuple[int, int]) -> GraphPartition:
     """Build graph partitioning information from a dst-sorted edge_index.
 
     Parameters
@@ -187,16 +178,13 @@ def build_graph_partition(
 
     if ANEMOI_DEBUG_SHARDING:
         assert is_edge_index_dst_sorted(edge_index), (
-            "build_graph_partition requires edge_index sorted by destination node, "
-            "but received unsorted edges."
+            "build_graph_partition requires edge_index sorted by destination node, " "but received unsorted edges."
         )
 
     dst_splits = get_balanced_partition_sizes(n_dst, num_parts)
     degree_per_dst = degree(edge_index[1], num_nodes=n_dst, dtype=torch.long)
     # use torch.split with dst_splits to match the balanced partitioning exactly
-    edge_splits = [
-        chunk.sum().item() for chunk in torch.split(degree_per_dst, dst_splits)
-    ]
+    edge_splits = [chunk.sum().item() for chunk in torch.split(degree_per_dst, dst_splits)]
 
     return GraphPartition(
         num_nodes=num_nodes,
@@ -211,7 +199,7 @@ def build_graph_partition_from_shard_info(
     edge_index: Adj,
     x: PairTensor,
     shard_info: BipartiteGraphShardInfo,
-    model_comm_group: ProcessGroup | None = None,
+    model_comm_group: Optional[ProcessGroup] = None,
 ) -> GraphPartition:
     """Build a GraphPartition for distributed sharding from current shard metadata.
 
@@ -243,9 +231,7 @@ def build_graph_partition_from_shard_info(
     if shard_info.edges_are_sharded():  # build partition from existing edge shard info:
         n_edges = sum(shard_info.edges)
         dst_splits = (
-            shard_info.dst_nodes
-            if shard_info.dst_is_sharded()
-            else get_balanced_partition_sizes(n_dst, comm_size)
+            shard_info.dst_nodes if shard_info.dst_is_sharded() else get_balanced_partition_sizes(n_dst, comm_size)
         )
         edge_splits = shard_info.edges
         return GraphPartition(
@@ -258,9 +244,7 @@ def build_graph_partition_from_shard_info(
         )
 
     # otherwise: edge_index is not sharded, so we can build the partition directly from it
-    partition = build_graph_partition(
-        edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst)
-    )
+    partition = build_graph_partition(edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst))
     return replace(partition, src_splits=src_splits)
 
 
@@ -293,7 +277,7 @@ def shard_edges_1hop(
     edge_index: Adj,
     src_size: int,
     dst_size: int,
-    model_comm_group: ProcessGroup | None,
+    model_comm_group: Optional[ProcessGroup],
     edges_are_dst_sorted: bool = True,
 ) -> tuple[Tensor, Adj, ShardSizes]:
     """Sort and shard edges for 1-hop sharding.
@@ -327,9 +311,7 @@ def shard_edges_1hop(
     if model_is_distributed(model_comm_group):
         if edges_are_dst_sorted:  # fast path: compute splits from degree
             num_parts = model_comm_group.size()
-            edge_shard_sizes = build_graph_partition(
-                edge_index, num_parts, num_nodes
-            ).edge_splits
+            edge_shard_sizes = build_graph_partition(edge_index, num_parts, num_nodes).edge_splits
         else:  # slow path: sort edges into 1-hop chunks via subgraph extraction
             edge_attr, edge_index, edge_shard_sizes = _sort_edges_1hop_sharding(
                 num_nodes, edge_attr, edge_index, model_comm_group
@@ -347,9 +329,9 @@ def shard_graph_to_local(
     edge_attr: Tensor,
     edge_index: Adj,
     shard_info: BipartiteGraphShardInfo,
-    model_comm_group: ProcessGroup | None = None,
-    cond: PairTensor | None = None,
-) -> tuple[PairTensor, Tensor, Adj, BipartiteGraphShardInfo, PairTensor | None]:
+    model_comm_group: Optional[ProcessGroup] = None,
+    cond: Optional[PairTensor] = None,
+) -> tuple[PairTensor, Tensor, Adj, BipartiteGraphShardInfo, Optional[PairTensor]]:
     """Shard graph tensors to the local rank using precomputed partition metadata.
 
     Handles all communication (sync src, shard dst/edges) and returns
@@ -381,31 +363,29 @@ def shard_graph_to_local(
     if not model_is_distributed(model_comm_group):
         return x, edge_attr, edge_index, shard_info, cond
 
-    assert model_comm_group.size() == partition.num_parts, (
-        f"Expected comm group size {partition.num_parts} but got {model_comm_group.size()}"
-    )
+    assert (
+        model_comm_group.size() == partition.num_parts
+    ), f"Expected comm group size {partition.num_parts} but got {model_comm_group.size()}"
 
     x_src, x_dst = x
     my_rank = torch.distributed.get_rank(group=model_comm_group)
 
     # shard or validate dst nodes
     if shard_info.dst_is_sharded():
-        assert shard_info.dst_nodes == partition.dst_splits, (
-            f"Expected dst shard shapes {partition.dst_splits} but got {shard_info.dst_nodes}"
-        )
+        assert (
+            shard_info.dst_nodes == partition.dst_splits
+        ), f"Expected dst shard shapes {partition.dst_splits} but got {shard_info.dst_nodes}"
     else:
         x_dst = shard_tensor(x_dst, 0, partition.dst_splits, model_comm_group)
 
     # shard or validate edges
     if shard_info.edges_are_sharded():
-        assert shard_info.edges == partition.edge_splits, (
-            f"Expected edge shard shapes {partition.edge_splits} but got {shard_info.edges}"
-        )
+        assert (
+            shard_info.edges == partition.edge_splits
+        ), f"Expected edge shard shapes {partition.edge_splits} but got {shard_info.edges}"
     else:
         edge_attr = shard_tensor(edge_attr, 0, partition.edge_splits, model_comm_group)
-        edge_index = shard_tensor(
-            edge_index, 1, partition.edge_splits, model_comm_group
-        )
+        edge_index = shard_tensor(edge_index, 1, partition.edge_splits, model_comm_group)
 
     # relabel dst indices to local
     edge_index = edge_index.clone()
@@ -420,9 +400,7 @@ def shard_graph_to_local(
         gather_in_fwd=shard_info.src_is_sharded(),
     )
 
-    x_src_local, edge_index, src_ids = _drop_unconnected_src_nodes(
-        x_src_full, edge_index
-    )
+    x_src_local, edge_index, src_ids = _drop_unconnected_src_nodes(x_src_full, edge_index)
 
     # same for conditioning [if cond is not None]
     cond_local = None
@@ -441,7 +419,7 @@ def shard_graph_to_local(
 
 
 def sort_edges_1hop_chunks(
-    num_nodes: int | tuple[int, int],
+    num_nodes: Union[int, tuple[int, int]],
     edge_attr: Tensor,
     edge_index: Adj,
     num_chunks: int,
@@ -474,16 +452,12 @@ def sort_edges_1hop_chunks(
         List of edge attribute chunks and edge index chunks.
     """
     if edges_are_dst_sorted:
-        return _sort_edges_1hop_chunks_fast(
-            num_nodes, edge_attr, edge_index, num_chunks
-        )
-    return _sort_edges_1hop_chunks_subgraph(
-        num_nodes, edge_attr, edge_index, num_chunks
-    )
+        return _sort_edges_1hop_chunks_fast(num_nodes, edge_attr, edge_index, num_chunks)
+    return _sort_edges_1hop_chunks_subgraph(num_nodes, edge_attr, edge_index, num_chunks)
 
 
 def _sort_edges_1hop_chunks_fast(
-    num_nodes: int | tuple[int, int],
+    num_nodes: Union[int, tuple[int, int]],
     edge_attr: Tensor,
     edge_index: Adj,
     num_chunks: int,
@@ -493,9 +467,7 @@ def _sort_edges_1hop_chunks_fast(
     Since edges are sorted by destination node, we can partition them by
     simply computing the cumulative degree per destination chunk.
     """
-    num_nodes_tuple = (
-        (num_nodes, num_nodes) if isinstance(num_nodes, int) else num_nodes
-    )
+    num_nodes_tuple = (num_nodes, num_nodes) if isinstance(num_nodes, int) else num_nodes
     partition = build_graph_partition(edge_index, num_chunks, num_nodes_tuple)
 
     edge_attr_list = []
@@ -508,9 +480,7 @@ def _sort_edges_1hop_chunks_fast(
     return edge_attr_list, edge_index_list
 
 
-def _drop_unconnected_src_nodes(
-    x_src: Tensor, edge_index: Adj, in_place: bool = True
-) -> tuple[Tensor, Adj, Tensor]:
+def _drop_unconnected_src_nodes(x_src: Tensor, edge_index: Adj, in_place: bool = True) -> tuple[Tensor, Adj, Tensor]:
     """Drop src nodes with no edges and relabel src indices to be contiguous.
 
     Parameters
@@ -533,9 +503,7 @@ def _drop_unconnected_src_nodes(
     x_src_subset = x_src[connected_src_nodes]
 
     relabel_map = torch.empty(x_src.shape[0], dtype=torch.long, device=x_src.device)
-    relabel_map[connected_src_nodes] = torch.arange(
-        connected_src_nodes.size(0), device=x_src.device
-    )
+    relabel_map[connected_src_nodes] = torch.arange(connected_src_nodes.size(0), device=x_src.device)
     edge_index[0] = relabel_map[edge_index[0]]
 
     return x_src_subset, edge_index, connected_src_nodes
@@ -545,10 +513,10 @@ def _drop_unconnected_src_nodes(
 
 
 def _sort_edges_1hop_sharding(
-    num_nodes: int | tuple[int, int],
+    num_nodes: Union[int, tuple[int, int]],
     edge_attr: Tensor,
     edge_index: Adj,
-    mgroup: ProcessGroup | None = None,
+    mgroup: Optional[ProcessGroup] = None,
 ) -> tuple[Tensor, Adj, ShardSizes]:
     """Rearrange edges into 1-hop neighbourhoods for sharding across GPUs.
 
@@ -584,17 +552,13 @@ def _sort_edges_1hop_sharding(
 
         edge_shard_sizes = [e.shape[0] for e in edge_attr_list]
 
-        return (
-            torch.cat(edge_attr_list, dim=0),
-            torch.cat(edge_index_list, dim=1),
-            edge_shard_sizes,
-        )
+        return torch.cat(edge_attr_list, dim=0), torch.cat(edge_index_list, dim=1), edge_shard_sizes
 
     return edge_attr, edge_index, None
 
 
 def _sort_edges_1hop_chunks_subgraph(
-    num_nodes: int | tuple[int, int],
+    num_nodes: Union[int, tuple[int, int]],
     edge_attr: Tensor,
     edge_index: Adj,
     num_chunks: int,
@@ -624,22 +588,16 @@ def _sort_edges_1hop_chunks_subgraph(
     from torch_geometric.utils import bipartite_subgraph
 
     if isinstance(num_nodes, int):
-        node_chunks = torch.arange(num_nodes, device=edge_index.device).tensor_split(
-            num_chunks
-        )
+        node_chunks = torch.arange(num_nodes, device=edge_index.device).tensor_split(num_chunks)
     else:
         nodes_src = torch.arange(num_nodes[0], device=edge_index.device)
-        node_chunks = torch.arange(num_nodes[1], device=edge_index.device).tensor_split(
-            num_chunks
-        )
+        node_chunks = torch.arange(num_nodes[1], device=edge_index.device).tensor_split(num_chunks)
 
     edge_index_list = []
     edge_attr_list = []
     for node_chunk in node_chunks:
         if isinstance(num_nodes, int):
-            edge_attr_chunk, edge_index_chunk = _get_k_hop_edges(
-                node_chunk, edge_attr, edge_index, num_nodes=num_nodes
-            )
+            edge_attr_chunk, edge_index_chunk = _get_k_hop_edges(node_chunk, edge_attr, edge_index, num_nodes=num_nodes)
         else:
             edge_index_chunk, edge_attr_chunk = bipartite_subgraph(
                 (nodes_src, node_chunk),
@@ -659,7 +617,7 @@ def _get_k_hop_edges(
     edge_attr: Tensor,
     edge_index: Adj,
     num_hops: int = 1,
-    num_nodes: int | None = None,
+    num_nodes: Optional[int] = None,
 ) -> tuple[Adj, Tensor]:
     """Return k-hop subgraph edges.
 
@@ -681,7 +639,8 @@ def _get_k_hop_edges(
     tuple[Adj, Tensor]
         K-hop subgraph of edge attributes and edge index.
     """
-    from torch_geometric.utils import k_hop_subgraph, mask_to_index
+    from torch_geometric.utils import k_hop_subgraph
+    from torch_geometric.utils import mask_to_index
 
     _, edge_index_k, _, edge_mask_k = k_hop_subgraph(
         node_idx=nodes,

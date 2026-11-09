@@ -13,8 +13,9 @@ import warnings
 from typing import Literal
 
 import torch
-from anemoi.utils.config import DotDict
 from torch import nn
+
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,20 +32,14 @@ def _build_gating_activation(mlp_implementation: MLPImplementation) -> nn.Module
     if mlp_implementation == "reglu":
         return nn.ReLU()
     valid = ("glu", "swiglu", "geglu", "reglu")
-    raise ValueError(
-        f"`mlp_implementation` must be one of {valid}, got '{mlp_implementation}'."
-    )
+    raise ValueError(f"`mlp_implementation` must be one of {valid}, got '{mlp_implementation}'.")
 
 
 class GatedMLPLayer(nn.Module):
     """Single gated feed-forward layer used by GLU variants."""
 
     def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        layer_kernels: DotDict,
-        mlp_implementation: MLPImplementation,
+        self, in_features: int, out_features: int, layer_kernels: DotDict, mlp_implementation: MLPImplementation
     ):
         super().__init__()
         Linear = layer_kernels.Linear

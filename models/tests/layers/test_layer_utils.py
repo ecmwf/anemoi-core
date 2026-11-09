@@ -9,17 +9,15 @@
 
 import pytest
 import torch
+import torch.nn as nn
 from hydra.errors import InstantiationException
 from hypothesis import given
 from hypothesis import strategies as st
 from omegaconf import OmegaConf
-from torch import nn
 
-from anemoi.models.layers.utils import (
-    CheckpointWrapper,
-    compute_mlp_hidden_dim,
-    load_layer_kernels,
-)
+from anemoi.models.layers.utils import CheckpointWrapper
+from anemoi.models.layers.utils import compute_mlp_hidden_dim
+from anemoi.models.layers.utils import load_layer_kernels
 
 
 class TestLayerUtils:
@@ -29,16 +27,9 @@ class TestLayerUtils:
     def default_layer_kernels(self):
         return load_layer_kernels(None)
 
-    @given(
-        in_features=st.integers(min_value=1, max_value=100),
-        out_features=st.integers(min_value=1, max_value=100),
-    )
-    def test_default_kernels_init(
-        self, default_layer_kernels, in_features, out_features
-    ):
-        linear_layer = default_layer_kernels.Linear(
-            in_features=in_features, out_features=out_features
-        )
+    @given(in_features=st.integers(min_value=1, max_value=100), out_features=st.integers(min_value=1, max_value=100))
+    def test_default_kernels_init(self, default_layer_kernels, in_features, out_features):
+        linear_layer = default_layer_kernels.Linear(in_features=in_features, out_features=out_features)
         layer_norm = default_layer_kernels.LayerNorm(normalized_shape=out_features)
         activation = default_layer_kernels.Activation()
 
@@ -51,11 +42,7 @@ class TestLayerUtils:
         assert linear_layer.bias.shape == torch.Size([out_features])
         assert layer_norm.normalized_shape == (out_features,)
 
-    @given(
-        eps=st.floats(min_value=1e-6, max_value=1e-3),
-        elementwise_affine=st.booleans(),
-        bias=st.booleans(),
-    )
+    @given(eps=st.floats(min_value=1e-6, max_value=1e-3), elementwise_affine=st.booleans(), bias=st.booleans())
     def test_custom_kernels(self, eps, elementwise_affine, bias):
         kernels_config = OmegaConf.create(
             {
@@ -126,9 +113,7 @@ class TestLayerUtils:
     def test_compute_mlp_hidden_dim(self, num_channels, mlp_hidden_ratio, expected):
         assert compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio) == expected
 
-    @pytest.mark.parametrize(
-        "mlp_hidden_ratio", [0.0, -1.0, float("nan"), float("inf"), float("-inf")]
-    )
+    @pytest.mark.parametrize("mlp_hidden_ratio", [0.0, -1.0, float("nan"), float("inf"), float("-inf")])
     def test_compute_mlp_hidden_dim_invalid_ratio(self, mlp_hidden_ratio):
         with pytest.raises(ValueError):
             compute_mlp_hidden_dim(128, mlp_hidden_ratio)

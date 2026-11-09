@@ -16,23 +16,17 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.edges import MultiScaleEdges
 from anemoi.graphs.generate import tri_icosahedron
 from anemoi.graphs.generate.masks import AreaMaskBuilder
-from anemoi.graphs.nodes import HexNodes, StretchedTriNodes, TriNodes
+from anemoi.graphs.nodes import HexNodes
+from anemoi.graphs.nodes import StretchedTriNodes
+from anemoi.graphs.nodes import TriNodes
 
 
 class TestMultiScaleEdgesInit:
     def test_init(self):
         """Test MultiScaleEdges initialization."""
-        assert isinstance(
-            MultiScaleEdges("test_nodes", "test_nodes", 1, None), MultiScaleEdges
-        )
-        assert isinstance(
-            MultiScaleEdges("test_nodes", "test_nodes", 1, scale_resolutions=4),
-            MultiScaleEdges,
-        )
-        assert isinstance(
-            MultiScaleEdges("test_nodes", "test_nodes", 1, scale_resolutions=[1, 2, 3]),
-            MultiScaleEdges,
-        )
+        assert isinstance(MultiScaleEdges("test_nodes", "test_nodes", 1, None), MultiScaleEdges)
+        assert isinstance(MultiScaleEdges("test_nodes", "test_nodes", 1, scale_resolutions=4), MultiScaleEdges)
+        assert isinstance(MultiScaleEdges("test_nodes", "test_nodes", 1, scale_resolutions=[1, 2, 3]), MultiScaleEdges)
 
     @pytest.mark.parametrize("x_hops", [-0.5, "hello", None, -4])
     def test_fail_init_invalid_x_hops(self, x_hops: str):
@@ -44,9 +38,7 @@ class TestMultiScaleEdgesInit:
     def test_fail_init_invalid_scale_resolutions(self, scale_resolutions):
         """Test MultiScaleEdges initialization with invalid scale_resolutions."""
         with pytest.raises(AssertionError):
-            MultiScaleEdges(
-                "test_nodes", "test_nodes", 1, scale_resolutions=scale_resolutions
-            )
+            MultiScaleEdges("test_nodes", "test_nodes", 1, scale_resolutions=scale_resolutions)
 
     def test_fail_init_diff_nodes(self):
         """Test MultiScaleEdges initialization with invalid nodes."""
@@ -55,6 +47,7 @@ class TestMultiScaleEdgesInit:
 
 
 class TestMultiScaleEdgesTransform:
+
     @pytest.fixture()
     def tri_ico_graph(self) -> HeteroData:
         """Return a HeteroData object with MultiScaleEdges."""
@@ -111,13 +104,9 @@ class TestMultiScaleEdgesTransform:
         assert ("test_hex_nodes", "to", "test_hex_nodes") in graph.edge_types
 
     @pytest.mark.parametrize("scale_resolutions", [1, [1], [1, 2], None])
-    def test_transform_with_scale_resolutions(
-        self, tri_ico_graph: HeteroData, scale_resolutions
-    ):
+    def test_transform_with_scale_resolutions(self, tri_ico_graph: HeteroData, scale_resolutions):
         """Test MultiScaleEdges with different scale_resolutions configurations."""
-        edges = MultiScaleEdges(
-            "test_tri_nodes", "test_tri_nodes", 1, scale_resolutions=scale_resolutions
-        )
+        edges = MultiScaleEdges("test_tri_nodes", "test_tri_nodes", 1, scale_resolutions=scale_resolutions)
         graph = edges.update_graph(tri_ico_graph)
 
         assert ("test_tri_nodes", "to", "test_tri_nodes") in graph.edge_types
@@ -132,6 +121,7 @@ class TestMultiScaleEdgesTransform:
 
 
 class TestMultiScaleEdgesStretched:
+
     @pytest.fixture()
     def tri_graph(self, mocker) -> HeteroData:
         """Return a HeteroData object with stretched Tri nodes."""
@@ -154,9 +144,7 @@ class TestMultiScaleEdgesStretched:
         assert ("hidden", "to", "hidden") in graph.edge_types
         assert len(graph[("hidden", "to", "hidden")].edge_index) > 0
 
-    @pytest.mark.parametrize(
-        "edge_resolutions", [[1], [0, 1, 2, 3, 4, 5, 6], [4, 6], [6]]
-    )
+    @pytest.mark.parametrize("edge_resolutions", [[1], [0, 1, 2, 3, 4, 5, 6], [4, 6], [6]])
     def test_fast_1_hop_method(selg, tri_graph: HeteroData, edge_resolutions):
         nodes = tri_graph["hidden"]
         all_points_mask_builder = AreaMaskBuilder("all_nodes", 1.0)

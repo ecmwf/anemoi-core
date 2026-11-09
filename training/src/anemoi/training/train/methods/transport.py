@@ -112,9 +112,9 @@ class TendencyPredictionMode(PredictionMode):
 
         pre_processors_tendencies = getattr(self.module.model, "pre_processors_tendencies", None)
         post_processors_tendencies = getattr(self.module.model, "post_processors_tendencies", None)
-        assert pre_processors_tendencies is not None and post_processors_tendencies is not None, (
-            "Per-step tendency processors are required for multi-output tendency-based transport models."
-        )
+        assert (
+            pre_processors_tendencies is not None and post_processors_tendencies is not None
+        ), "Per-step tendency processors are required for multi-output tendency-based transport models."
 
         def _wrap_if_needed(
             kind: str,
@@ -128,9 +128,9 @@ class TendencyPredictionMode(PredictionMode):
             # Processors object. We wrap it so the rest so we can always
             # here iterate over per-step processors. Multi-output models
             # need an explicit processor for each lead time.
-            assert self.module.n_step_output == 1, (
-                "Per-step tendency processors are required for multi-output tendency-based transport models."
-            )
+            assert (
+                self.module.n_step_output == 1
+            ), "Per-step tendency processors are required for multi-output tendency-based transport models."
             lead_time = lead_times[0]
             wrapped = StepwiseProcessors([lead_time])
             wrapped.set(lead_time, proc)
@@ -146,33 +146,33 @@ class TendencyPredictionMode(PredictionMode):
             assert dataset_stats is not None, f"Tendency statistics are required for dataset '{dataset_name}'."
             lead_times = dataset_stats.get("lead_times") if isinstance(dataset_stats, dict) else None
             assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
-            assert len(lead_times) == self.module.n_step_output, (
-                f"Expected {self.module.n_step_output} tendency statistics entries, got {len(lead_times)}."
-            )
-            assert all(lead_time in dataset_stats for lead_time in lead_times), (
-                "Missing tendency statistics for one or more output steps."
-            )
+            assert (
+                len(lead_times) == self.module.n_step_output
+            ), f"Expected {self.module.n_step_output} tendency statistics entries, got {len(lead_times)}."
+            assert all(
+                lead_time in dataset_stats for lead_time in lead_times
+            ), "Missing tendency statistics for one or more output steps."
 
-            assert dataset_name in pre_processors_tendencies, (
-                "Per-step tendency processors are required for multi-output tendency-based transport models."
-            )
-            assert dataset_name in post_processors_tendencies, (
-                "Per-step tendency processors are required for multi-output tendency-based transport models."
-            )
+            assert (
+                dataset_name in pre_processors_tendencies
+            ), "Per-step tendency processors are required for multi-output tendency-based transport models."
+            assert (
+                dataset_name in post_processors_tendencies
+            ), "Per-step tendency processors are required for multi-output tendency-based transport models."
 
             pre_tend = pre_processors_tendencies[dataset_name]
             post_tend = post_processors_tendencies[dataset_name]
             pre_tend = _wrap_if_needed("pre", pre_tend, dataset_name, lead_times)
             post_tend = _wrap_if_needed("post", post_tend, dataset_name, lead_times)
-            assert len(pre_tend) == self.module.n_step_output and len(post_tend) == self.module.n_step_output, (
-                "Per-step tendency processors must match n_step_output."
-            )
-            assert all(proc is not None for proc in pre_tend), (
-                "Missing tendency pre-processors for one or more output steps."
-            )
-            assert all(proc is not None for proc in post_tend), (
-                "Missing tendency post-processors for one or more output steps."
-            )
+            assert (
+                len(pre_tend) == self.module.n_step_output and len(post_tend) == self.module.n_step_output
+            ), "Per-step tendency processors must match n_step_output."
+            assert all(
+                proc is not None for proc in pre_tend
+            ), "Missing tendency pre-processors for one or more output steps."
+            assert all(
+                proc is not None for proc in post_tend
+            ), "Missing tendency post-processors for one or more output steps."
 
             self._tendency_pre_processors[dataset_name] = pre_tend
             self._tendency_post_processors[dataset_name] = post_tend

@@ -134,12 +134,12 @@ def test_on_train_start_initializes_timer(tmp_path: Path) -> None:
     callback.on_train_start(trainer, pl_module)
     after = time.monotonic()
 
-    assert callback._last_time_checked is not None, (
-        "_last_time_checked is still None after on_train_start — super().on_train_start() is probably missing"
-    )
-    assert before <= callback._last_time_checked <= after, (
-        "_last_time_checked value is outside the expected time window"
-    )
+    assert (
+        callback._last_time_checked is not None
+    ), "_last_time_checked is still None after on_train_start — super().on_train_start() is probably missing"
+    assert (
+        before <= callback._last_time_checked <= after
+    ), "_last_time_checked value is outside the expected time window"
 
 
 def test_time_based_checkpoint_skip_logic_after_interval(tmp_path: Path) -> None:

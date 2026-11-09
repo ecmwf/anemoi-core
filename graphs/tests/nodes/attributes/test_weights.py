@@ -13,14 +13,12 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import (
-    CosineLatWeightedAttribute,
-    IsolatitudeAreaWeights,
-    MaskedPlanarAreaWeights,
-    PlanarAreaWeights,
-    SphericalAreaWeights,
-    UniformWeights,
-)
+from anemoi.graphs.nodes.attributes import CosineLatWeightedAttribute
+from anemoi.graphs.nodes.attributes import IsolatitudeAreaWeights
+from anemoi.graphs.nodes.attributes import MaskedPlanarAreaWeights
+from anemoi.graphs.nodes.attributes import PlanarAreaWeights
+from anemoi.graphs.nodes.attributes import SphericalAreaWeights
+from anemoi.graphs.nodes.attributes import UniformWeights
 from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 
 
@@ -73,13 +71,9 @@ def test_spherical_area_weights_wrong_fill_value(fill_value: str):
         SphericalAreaWeights(fill_value=fill_value)
 
 
-@pytest.mark.parametrize(
-    "attr_class", [IsolatitudeAreaWeights, CosineLatWeightedAttribute]
-)
+@pytest.mark.parametrize("attr_class", [IsolatitudeAreaWeights, CosineLatWeightedAttribute])
 @pytest.mark.parametrize("norm", [None, "l1", "unit-max"])
-def test_latweighted(
-    attr_class: type[BaseNodeAttribute], graph_with_rectilinear_nodes, norm: str
-):
+def test_latweighted(attr_class: type[BaseNodeAttribute], graph_with_rectilinear_nodes, norm: str):
     """Test attribute builder for Lat with different fill values."""
     node_attr_builder = attr_class(norm=norm)
     weights = node_attr_builder.compute(graph_with_rectilinear_nodes, "test_nodes")
@@ -124,9 +118,7 @@ def test_planar_area_weights_exact_on_lattices():
 def test_planar_area_weights_degenerate_inputs():
     """Collinear nodes fall back to uniform weights; duplicated nodes stay finite."""
     collinear = np.column_stack([np.arange(50) * 0.1, np.zeros(50)])
-    np.testing.assert_array_equal(
-        PlanarAreaWeights().compute_area_weights(collinear), 1.0
-    )
+    np.testing.assert_array_equal(PlanarAreaWeights().compute_area_weights(collinear), 1.0)
 
     x, y = np.meshgrid(np.arange(20) * 0.1, np.arange(20) * 0.1)
     duplicated = np.vstack([np.column_stack([x.ravel(), y.ravel()]), [[0.5, 0.5]]])
@@ -140,9 +132,7 @@ def test_masked_planar_area_weights_subset():
     fine = np.meshgrid(np.arange(4, 6, 0.1), np.arange(4, 6, 0.1))
     background = np.column_stack([coarse[0].ravel(), coarse[1].ravel()])
     patch = np.column_stack([fine[0].ravel(), fine[1].ravel()])
-    inside = ((background - 5.0) ** 2).sum(
-        axis=1
-    ) > 2.0**2  # drop background nodes under the patch
+    inside = ((background - 5.0) ** 2).sum(axis=1) > 2.0**2  # drop background nodes under the patch
     latlons = np.vstack([background[inside], patch])
     mask = np.zeros(len(latlons), dtype=bool)
     mask[len(background[inside]) :] = True
@@ -150,47 +140,29 @@ def test_masked_planar_area_weights_subset():
     graph = HeteroData()
     graph["test_nodes"].x = torch.tensor(latlons)
     graph["test_nodes"]["patch"] = torch.tensor(mask).unsqueeze(-1)
-    graph["test_nodes"]["patch_half"] = 0.5 * torch.tensor(
-        mask, dtype=torch.float64
-    ).unsqueeze(-1)
+    graph["test_nodes"]["patch_half"] = 0.5 * torch.tensor(mask, dtype=torch.float64).unsqueeze(-1)
 
-    weights = MaskedPlanarAreaWeights(mask_node_attr_name="patch").compute(
-        graph, "test_nodes"
-    )
+    weights = MaskedPlanarAreaWeights(mask_node_attr_name="patch").compute(graph, "test_nodes")
     assert torch.all(weights[~mask] == 0)
-    np.testing.assert_allclose(
-        weights[mask].cpu().numpy(), weights[mask].max().item(), rtol=1e-6
-    )
+    np.testing.assert_allclose(weights[mask].cpu().numpy(), weights[mask].max().item(), rtol=1e-6)
 
-    halved = MaskedPlanarAreaWeights(mask_node_attr_name="patch_half").compute(
-        graph, "test_nodes"
-    )
-    np.testing.assert_allclose(
-        halved.cpu().numpy(), 0.5 * weights.cpu().numpy(), rtol=1e-6
-    )
+    halved = MaskedPlanarAreaWeights(mask_node_attr_name="patch_half").compute(graph, "test_nodes")
+    np.testing.assert_allclose(halved.cpu().numpy(), 0.5 * weights.cpu().numpy(), rtol=1e-6)
 
 
 def test_voronoi_region_areas_matches_convexhull():
     """`_voronoi_region_areas` matches per-cell ConvexHull volumes, non-convex regions included."""
-    from scipy.spatial import ConvexHull, Voronoi
+    from scipy.spatial import ConvexHull
+    from scipy.spatial import Voronoi
 
     rng = np.random.default_rng(0)
-    latlons = np.column_stack(
-        [rng.uniform(0.6, 0.9, 2000), rng.uniform(0.0, 0.4, 2000)]
-    )
+    latlons = np.column_stack([rng.uniform(0.6, 0.9, 2000), rng.uniform(0.0, 0.4, 2000)])
     attr = PlanarAreaWeights()
     v = Voronoi(latlons, qhull_options="Qbb Qc Qz Pp")
     trusted_idx = np.flatnonzero(attr._trusted_cells(v, latlons))
 
-    reference = np.array(
-        [
-            ConvexHull(v.vertices[v.regions[v.point_region[idx]]]).volume
-            for idx in trusted_idx
-        ]
-    )
-    np.testing.assert_allclose(
-        attr._voronoi_region_areas(v, trusted_idx), reference, rtol=1e-9, atol=0.0
-    )
+    reference = np.array([ConvexHull(v.vertices[v.regions[v.point_region[idx]]]).volume for idx in trusted_idx])
+    np.testing.assert_allclose(attr._voronoi_region_areas(v, trusted_idx), reference, rtol=1e-9, atol=0.0)
 
     # Inject the centroid into a region's stored vertex order: re-entrant polygon, same hull.
     target = next(int(i) for i in trusted_idx if len(v.regions[v.point_region[i]]) >= 4)

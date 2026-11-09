@@ -19,16 +19,10 @@ def test_edge_list_from_coordinates_converts_edge_index_to_line_segments() -> No
     target_coords = torch.tensor([[np.pi / 2, np.pi], [-np.pi / 4, 3 * np.pi / 2]])
     edge_index = torch.tensor([[0, 1], [1, 0]])
 
-    latitudes, longitudes = edge_list_from_coordinates(
-        source_coords, target_coords, edge_index
-    )
+    latitudes, longitudes = edge_list_from_coordinates(source_coords, target_coords, edge_index)
 
-    np.testing.assert_allclose(
-        latitudes, np.array([0.0, -45.0, np.nan, 45.0, 90.0, np.nan])
-    )
-    np.testing.assert_allclose(
-        longitudes, np.array([0.0, 270.0, np.nan, 90.0, 180.0, np.nan])
-    )
+    np.testing.assert_allclose(latitudes, np.array([0.0, -45.0, np.nan, 45.0, 90.0, np.nan]))
+    np.testing.assert_allclose(longitudes, np.array([0.0, 270.0, np.nan, 90.0, 180.0, np.nan]))
 
 
 def test_edge_list_from_coordinates_validates_coordinate_shape() -> None:

@@ -26,9 +26,9 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 
 
 @pytest.fixture
-def fake_data() -> tuple[
-    DictConfig, IndexCollection, dict[str, list[float]], dict[str, dict[str, list[float]] | list[str]]
-]:
+def fake_data() -> (
+    tuple[DictConfig, IndexCollection, dict[str, list[float]], dict[str, dict[str, list[float]] | list[str]]]
+):
     config = DictConfig(
         {
             "data": {
@@ -67,9 +67,9 @@ def fake_data() -> tuple[
 
 
 @pytest.fixture
-def fake_data_combined_loss() -> tuple[
-    DictConfig, IndexCollection, dict[str, list[float]], dict[str, dict[str, list[float]] | list[str]]
-]:
+def fake_data_combined_loss() -> (
+    tuple[DictConfig, IndexCollection, dict[str, list[float]], dict[str, dict[str, list[float]] | list[str]]]
+):
     config = DictConfig(
         {
             "data": {
@@ -123,9 +123,9 @@ def fake_data_combined_loss() -> tuple[
 
 
 @pytest.fixture
-def fake_data_single_variable() -> tuple[
-    DictConfig, IndexCollection, dict[str, list[float]], dict[str, dict[str, list[float]] | list[str]]
-]:
+def fake_data_single_variable() -> (
+    tuple[DictConfig, IndexCollection, dict[str, list[float]], dict[str, dict[str, list[float]] | list[str]]]
+):
     config = DictConfig(
         {
             "data": {

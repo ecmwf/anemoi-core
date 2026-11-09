@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 from functools import cached_property
 from typing import TYPE_CHECKING
 
@@ -82,11 +83,7 @@ class DecodingTargetFeature(ABC):
 
     @abstractmethod
     def _compute(
-        self,
-        x_input_data: Tensor,
-        x_encoded_data: Tensor | None,
-        batch_size: int,
-        dataset_name: str,
+        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
     ) -> Tensor:
         """Compute the (unsharded) feature tensor of shape ``(batch*ensemble*grid, dim)``."""
 
@@ -100,15 +97,10 @@ class DecodingTargetFeature(ABC):
         dataset_name: str | None = None,
     ) -> Tensor:
         """Return the feature tensor, sharding it iff the feature is defined on full-size nodes."""
-        assert dataset_name is not None, (
-            f"dataset_name must be provided to {self.__class__.__name__}.tensor() for sharding and validation."
-        )
-        out = self._compute(
-            x_input_data,
-            x_encoded_data,
-            batch_size=batch_size,
-            dataset_name=dataset_name,
-        )
+        assert (
+            dataset_name is not None
+        ), f"dataset_name must be provided to {self.__class__.__name__}.tensor() for sharding and validation."
+        out = self._compute(x_input_data, x_encoded_data, batch_size=batch_size, dataset_name=dataset_name)
         if self.needs_sharding and grid_shard_sizes is not None:
             out = shard_tensor(out, 0, grid_shard_sizes, model_comm_group)
         return out
@@ -123,9 +115,7 @@ class CoordinatesFeature(DecodingTargetFeature):
     def validate(self) -> None:
         num_coords_dim = {}
         for dataset_name in self.datasets_names:
-            num_coords_dim[dataset_name] = getattr(
-                self.model.node_attributes, f"latlons_{dataset_name}"
-            ).shape[1]
+            num_coords_dim[dataset_name] = getattr(self.model.node_attributes, f"latlons_{dataset_name}").shape[1]
 
         assert len(set(num_coords_dim.values())) == 1, (
             f"Coordinates feature must have the same dimension across all datasets encoded with the same encoder. "
@@ -134,16 +124,10 @@ class CoordinatesFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return getattr(
-            self.model.node_attributes, f"latlons_{self.datasets_names[0]}"
-        ).shape[1]
+        return getattr(self.model.node_attributes, f"latlons_{self.datasets_names[0]}").shape[1]
 
     def _compute(
-        self,
-        x_input_data: Tensor,
-        x_encoded_data: Tensor | None,
-        batch_size: int,
-        dataset_name: str,
+        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
     ) -> Tensor:
         coords = getattr(self.model.node_attributes, f"latlons_{dataset_name}")
         return einops.repeat(coords, "e f -> (repeat e) f", repeat=batch_size)
@@ -158,9 +142,7 @@ class InputForcingsFeature(DecodingTargetFeature):
     def validate(self) -> None:
         num_trainable_params = {}
         for dataset_name in self.datasets_names:
-            num_trainable_params[dataset_name] = self.model.num_input_channels_forcings[
-                dataset_name
-            ]
+            num_trainable_params[dataset_name] = self.model.num_input_channels_forcings[dataset_name]
 
         assert len(set(num_trainable_params.values())) == 1, (
             f"Forcings feature must have the same dimension across all datasets encoded with the same encoder. "
@@ -169,23 +151,13 @@ class InputForcingsFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return (
-            self.model.n_step_input
-            * self.model.num_input_channels_forcings[self.datasets_names[0]]
-        )
+        return self.model.n_step_input * self.model.num_input_channels_forcings[self.datasets_names[0]]
 
     def _compute(
-        self,
-        x_input_data: Tensor,
-        x_encoded_data: Tensor | None,
-        batch_size: int,
-        dataset_name: str,
+        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
     ) -> Tensor:
         x_forcing = x_input_data[..., self.model._forcing_input_idx[dataset_name]]
-        return einops.rearrange(
-            x_forcing,
-            "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
-        )
+        return einops.rearrange(x_forcing, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
 
 
 @register_target_feature("prognostics")
@@ -197,9 +169,7 @@ class PrognosticsFeature(DecodingTargetFeature):
     def validate(self) -> None:
         num_trainable_params = {}
         for dataset_name in self.datasets_names:
-            num_trainable_params[dataset_name] = (
-                self.model.num_input_channels_prognostic[dataset_name]
-            )
+            num_trainable_params[dataset_name] = self.model.num_input_channels_prognostic[dataset_name]
 
         assert len(set(num_trainable_params.values())) == 1, (
             f"Prognostics feature must have the same dimension across all datasets encoded with the same encoder. "
@@ -208,22 +178,13 @@ class PrognosticsFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return (
-            self.model.n_step_input
-            * self.model.num_input_channels_prognostic[self.datasets_names[0]]
-        )
+        return self.model.n_step_input * self.model.num_input_channels_prognostic[self.datasets_names[0]]
 
     def _compute(
-        self,
-        x_input_data: Tensor,
-        x_encoded_data: Tensor | None,
-        batch_size: int,
-        dataset_name: str,
+        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
     ) -> Tensor:
         x_prog = x_input_data[..., self.model._internal_input_idx[dataset_name]]
-        return einops.rearrange(
-            x_prog, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"
-        )
+        return einops.rearrange(x_prog, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
 
 
 @register_target_feature("trainable_parameters")
@@ -235,10 +196,7 @@ class TrainableParametersFeature(DecodingTargetFeature):
     def validate(self) -> None:
         num_trainable_params = {}
         for dataset_name in self.datasets_names:
-            if (
-                self.model.node_attributes.trainable_tensors[dataset_name].trainable
-                is None
-            ):
+            if self.model.node_attributes.trainable_tensors[dataset_name].trainable is None:
                 decoder_name = self.model.dataset2decoder[dataset_name]
                 error_msg = (
                     f"No trainable parameters configured for dataset '{dataset_name}'. "
@@ -246,9 +204,7 @@ class TrainableParametersFeature(DecodingTargetFeature):
                     f"or remove '{self.name}' from decoder.{decoder_name}.target_node_features."
                 )
                 raise ValueError(error_msg)
-            num_trainable_params[dataset_name] = (
-                self.model.node_attributes.num_trainable_parameters[dataset_name]
-            )
+            num_trainable_params[dataset_name] = self.model.node_attributes.num_trainable_parameters[dataset_name]
 
         assert len(set(num_trainable_params.values())) == 1, (
             f"Trainable parameters feature must have the same dimension across all datasets encoded with the"
@@ -257,16 +213,10 @@ class TrainableParametersFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return self.model.node_attributes.num_trainable_parameters[
-            self.datasets_names[0]
-        ]
+        return self.model.node_attributes.num_trainable_parameters[self.datasets_names[0]]
 
     def _compute(
-        self,
-        x_input_data: Tensor,
-        x_encoded_data: Tensor | None,
-        batch_size: int,
-        dataset_name: str,
+        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
     ) -> Tensor:
         trainable = self.model.node_attributes.trainable_tensors[dataset_name].trainable
         return einops.repeat(trainable, "e f -> (repeat e) f", repeat=batch_size)
@@ -298,16 +248,10 @@ class EncodedDataFeature(DecodingTargetFeature):
         return self.model.input_dim[self.datasets_names[0]]
 
     def _compute(
-        self,
-        x_input_data: Tensor,
-        x_encoded_data: Tensor | None,
-        batch_size: int,
-        dataset_name: str,
+        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
     ) -> Tensor:
         if x_encoded_data is None:
-            raise ValueError(
-                f"'{self.name}' requires the encoder output for dataset '{dataset_name}'."
-            )
+            raise ValueError(f"'{self.name}' requires the encoder output for dataset '{dataset_name}'.")
 
         return x_encoded_data
 
@@ -321,16 +265,11 @@ class CompositeTargetFeature(DecodingTargetFeature):
     owned here.
     """
 
-    def __init__(
-        self, model: BaseGraphModel, datasets_names: list[str], feature_names: list[str]
-    ) -> None:
-        assert feature_names, (
-            f"Decoder for datasets {', '.join(datasets_names)} must declare at least one target feature."
-        )
-        self.features = [
-            TARGET_FEATURE_REGISTRY[name](model, datasets_names)
-            for name in feature_names
-        ]
+    def __init__(self, model: BaseGraphModel, datasets_names: list[str], feature_names: list[str]) -> None:
+        assert (
+            feature_names
+        ), f"Decoder for datasets {', '.join(datasets_names)} must declare at least one target feature."
+        self.features = [TARGET_FEATURE_REGISTRY[name](model, datasets_names) for name in feature_names]
 
     def validate(self) -> None:
         """Assert the decoder's target features are valid and consistent across all its datasets.
@@ -345,12 +284,8 @@ class CompositeTargetFeature(DecodingTargetFeature):
     def dim(self) -> int:
         return sum(feature.dim for feature in self.features)
 
-    def _compute(
-        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int
-    ) -> Tensor:
-        raise NotImplementedError(
-            f"{self.__class__.__name__} shards per child feature, use tensor()."
-        )
+    def _compute(self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int) -> Tensor:
+        raise NotImplementedError(f"{self.__class__.__name__} shards per child feature, use tensor().")
 
     def tensor(
         self,
@@ -363,12 +298,7 @@ class CompositeTargetFeature(DecodingTargetFeature):
     ) -> Tensor:
         parts = [
             feature.tensor(
-                x_input_data,
-                x_encoded_data,
-                batch_size,
-                grid_shard_sizes,
-                model_comm_group,
-                dataset_name=dataset_name,
+                x_input_data, x_encoded_data, batch_size, grid_shard_sizes, model_comm_group, dataset_name=dataset_name
             )
             for feature in self.features
         ]
@@ -387,13 +317,10 @@ def create_decoding_target_features(
     """Create a dict of :class:`DecodingTargetFeature` instances from a list of registry keys."""
     invalid = set(features) - VALID_TARGET_FEATURES
     assert not invalid, (
-        f"Decoder has invalid target_node_features: {invalid}. "
-        f"Valid options: {sorted(VALID_TARGET_FEATURES)}"
+        f"Decoder has invalid target_node_features: {invalid}. " f"Valid options: {sorted(VALID_TARGET_FEATURES)}"
     )
 
-    return CompositeTargetFeature(
-        model, datasets_names=decoder_datasets_names, feature_names=features
-    )
+    return CompositeTargetFeature(model, datasets_names=decoder_datasets_names, feature_names=features)
 
 
 VALID_TARGET_FEATURES = set(TARGET_FEATURE_REGISTRY)

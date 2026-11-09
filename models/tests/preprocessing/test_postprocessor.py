@@ -15,12 +15,10 @@ from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing.normalizer import InputNormalizer
-from anemoi.models.preprocessing.postprocessor import (
-    ConditionalNaNPostprocessor,
-    ConditionalZeroPostprocessor,
-    NormalizedReluPostprocessor,
-    Postprocessor,
-)
+from anemoi.models.preprocessing.postprocessor import ConditionalNaNPostprocessor
+from anemoi.models.preprocessing.postprocessor import ConditionalZeroPostprocessor
+from anemoi.models.preprocessing.postprocessor import NormalizedReluPostprocessor
+from anemoi.models.preprocessing.postprocessor import Postprocessor
 
 
 @pytest.fixture()
@@ -29,12 +27,7 @@ def postprocessor():
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
-                "postprocessor": {
-                    "default": "none",
-                    "relu": ["q"],
-                    "hardtanh": ["x"],
-                    "hardtanh_0_1": ["y"],
-                },
+                "postprocessor": {"default": "none", "relu": ["q"], "hardtanh": ["x"], "hardtanh_0_1": ["y"]},
                 "forcing": ["z"],
                 "diagnostic": ["other"],
             },
@@ -65,12 +58,7 @@ def normmrelupostprocessor():
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
-                "normmrelupostprocessor": {
-                    "default": "none",
-                    0: ["q"],
-                    -1.5: ["x"],
-                    "normalizer": "none",
-                },
+                "normmrelupostprocessor": {"default": "none", 0: ["q"], -1.5: ["x"], "normalizer": "none"},
                 "forcing": ["z"],
                 "diagnostic": ["other"],
             },
@@ -112,12 +100,7 @@ def conditionalzeropostprocessor():
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
-                "conditionalzeropostprocessor": {
-                    "default": "none",
-                    0: ["q"],
-                    -1.5: ["x"],
-                    "remap": "y",
-                },
+                "conditionalzeropostprocessor": {"default": "none", 0: ["q"], -1.5: ["x"], "remap": "y"},
                 "forcing": ["z"],
                 "diagnostic": ["other"],
             },
@@ -125,9 +108,7 @@ def conditionalzeropostprocessor():
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
     data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
-    return ConditionalZeroPostprocessor(
-        config=config.data.conditionalzeropostprocessor, data_indices=data_indices
-    )
+    return ConditionalZeroPostprocessor(config=config.data.conditionalzeropostprocessor, data_indices=data_indices)
 
 
 @pytest.fixture()
@@ -150,11 +131,7 @@ def conditionalnanpostprocessor():
         {
             "diagnostics": {"log": {"code": {"level": "DEBUG"}}},
             "data": {
-                "conditionalnanpostprocessor": {
-                    "default": "none",
-                    "nan": ["other", "y"],
-                    "remap": "x",
-                },
+                "conditionalnanpostprocessor": {"default": "none", "nan": ["other", "y"], "remap": "x"},
                 "forcing": ["z"],
                 "diagnostic": ["other"],
             },
@@ -162,26 +139,20 @@ def conditionalnanpostprocessor():
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
     data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
-    return ConditionalNaNPostprocessor(
-        config=config.data.conditionalnanpostprocessor, data_indices=data_indices
-    )
+    return ConditionalNaNPostprocessor(config=config.data.conditionalnanpostprocessor, data_indices=data_indices)
 
 
 @pytest.fixture()
 def conditionalnan_output_data():
     base = torch.Tensor([[[1.0, 0.0, 3.0, -1, 5.0], [torch.nan, 1, 8.0, 9.0, 10.0]]])
-    expected = torch.Tensor(
-        [[[1.0, 0.0, 3.0, -1, 5.0], [torch.nan, torch.nan, 8.0, 9.0, torch.nan]]]
-    )
+    expected = torch.Tensor([[[1.0, 0.0, 3.0, -1, 5.0], [torch.nan, torch.nan, 8.0, 9.0, torch.nan]]])
     return base, expected
 
 
 @pytest.fixture()
 def conditionalnan_inference_output_data():
     base = torch.Tensor([[[1.0, 0.0, -1, 5.0], [torch.nan, 1, 9.0, 10.0]]])
-    expected = torch.Tensor(
-        [[[1.0, 0.0, -1, 5.0], [torch.nan, torch.nan, 9.0, torch.nan]]]
-    )
+    expected = torch.Tensor([[[1.0, 0.0, -1, 5.0], [torch.nan, torch.nan, 9.0, torch.nan]]])
     return base, expected
 
 
@@ -201,17 +172,13 @@ fixture_combinations = (
     ("postprocessor_fixture", "data_fixture"),
     fixture_combinations,
 )
-def test_postprocessor_not_inplace(
-    postprocessor_fixture, data_fixture, request
-) -> None:
+def test_postprocessor_not_inplace(postprocessor_fixture, data_fixture, request) -> None:
     """Check that the postprocessor does not modify the input tensor when in_place=False."""
     x, _ = request.getfixturevalue(data_fixture)
     postprocessor = request.getfixturevalue(postprocessor_fixture)
     x_old = x.clone()
     postprocessor.inverse_transform(x, in_place=False)
-    assert torch.allclose(x, x_old, equal_nan=True), (
-        "Postprocessor does not handle in_place=False correctly."
-    )
+    assert torch.allclose(x, x_old, equal_nan=True), "Postprocessor does not handle in_place=False correctly."
 
 
 @pytest.mark.parametrize(
@@ -224,15 +191,9 @@ def test_postprocessor_inplace(postprocessor_fixture, data_fixture, request) -> 
     postprocessor = request.getfixturevalue(postprocessor_fixture)
     x_old = x.clone()
     out = postprocessor.inverse_transform(x, in_place=True)
-    assert not torch.allclose(x, x_old, equal_nan=True), (
-        "Postprocessor does not handle in_place=True correctly."
-    )
-    assert torch.allclose(x, out, equal_nan=True), (
-        "Postprocessor does not handle in_place=True correctly."
-    )
-    assert torch.allclose(x_processed, out, equal_nan=True), (
-        "Postprocessor produces wrong outputs."
-    )
+    assert not torch.allclose(x, x_old, equal_nan=True), "Postprocessor does not handle in_place=True correctly."
+    assert torch.allclose(x, out, equal_nan=True), "Postprocessor does not handle in_place=True correctly."
+    assert torch.allclose(x_processed, out, equal_nan=True), "Postprocessor produces wrong outputs."
 
 
 @pytest.fixture()
@@ -248,16 +209,8 @@ def input_normalizer_postprocessor():
                     "none": ["z", "other"],
                     "mean-std": ["q"],
                 },
-                "normmrelupostprocessor_ms": {
-                    "default": "none",
-                    0: ["q"],
-                    "normalizer": "mean-std",
-                },
-                "normmrelupostprocessor_mm": {
-                    "default": "none",
-                    -1.5: ["x"],
-                    "normalizer": "min-max",
-                },
+                "normmrelupostprocessor_ms": {"default": "none", 0: ["q"], "normalizer": "mean-std"},
+                "normmrelupostprocessor_mm": {"default": "none", -1.5: ["x"], "normalizer": "min-max"},
                 "forcing": ["z"],
                 "diagnostic": ["other"],
             },
@@ -272,11 +225,7 @@ def input_normalizer_postprocessor():
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
     data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return (
-        InputNormalizer(
-            config=config.data.normalizer,
-            data_indices=data_indices,
-            statistics=statistics,
-        ),
+        InputNormalizer(config=config.data.normalizer, data_indices=data_indices, statistics=statistics),
         NormalizedReluPostprocessor(
             config=config.data.normmrelupostprocessor_ms,
             data_indices=data_indices,
@@ -293,9 +242,7 @@ def input_normalizer_postprocessor():
 @pytest.fixture()
 def chained_processors_input_data():
     base = torch.Tensor([[1.0, 2.0, 3.0, -1, 5.0], [-2, 1, 8.0, 9.0, 10.0]])
-    base_normalized = torch.Tensor(
-        [[0.0, 0.2, 3.0, -5.5, 5.0], [-0.3, 0.1, 8.0, 4.5, 10.0]]
-    )
+    base_normalized = torch.Tensor([[0.0, 0.2, 3.0, -5.5, 5.0], [-0.3, 0.1, 8.0, 4.5, 10.0]])
     expected = torch.Tensor([[1.0, 2.0, 3.0, 0.0, 5.0], [-1.5, 1, 8.0, 9.0, 10.0]])
     return base, base_normalized, expected
 
@@ -318,9 +265,7 @@ fixture_combinations = (
     ("postprocessor_fixture", "data_fixture"),
     fixture_combinations,
 )
-def test_chained_postprocessor_inplace(
-    postprocessor_fixture, data_fixture, request
-) -> None:
+def test_chained_postprocessor_inplace(postprocessor_fixture, data_fixture, request) -> None:
     """Check that the postprocessor does not modify the input tensor when in_place=False."""
     x, x_norm, out = request.getfixturevalue(data_fixture)
     postprocessors = request.getfixturevalue(postprocessor_fixture)

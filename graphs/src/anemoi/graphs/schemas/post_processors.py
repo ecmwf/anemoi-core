@@ -9,19 +9,19 @@
 
 
 import logging
-from collections.abc import Iterable
-from typing import Annotated, Literal
+from typing import Annotated
+from typing import Iterable
+from typing import Literal
+
+from pydantic import Field
 
 from anemoi.utils.schemas import BaseModel
-from pydantic import Field
 
 LOGGER = logging.getLogger(__name__)
 
 
 class RemoveUnconnectedNodesSchema(BaseModel):
-    target_: Literal["anemoi.graphs.processors.RemoveUnconnectedNodes"] = Field(
-        ..., alias="_target_"
-    )
+    target_: Literal["anemoi.graphs.processors.RemoveUnconnectedNodes"] = Field(..., alias="_target_")
     "Post processor to remove unconnected nodes."
     nodes_name: str | Iterable[str]
     "Nodes from which to remove the unconnected nodes."
@@ -32,9 +32,7 @@ class RemoveUnconnectedNodesSchema(BaseModel):
 
 
 class SubsetNodesInAreaSchema(BaseModel):
-    target_: Literal["anemoi.graphs.processors.SubsetNodesInArea"] = Field(
-        ..., alias="_target_"
-    )
+    target_: Literal["anemoi.graphs.processors.SubsetNodesInArea"] = Field(..., alias="_target_")
     "Post processor to remove unconnected nodes."
     nodes_name: str | Iterable[str]
     "Nodes from which to remove the unconnected nodes."
@@ -45,9 +43,7 @@ class SubsetNodesInAreaSchema(BaseModel):
 
 
 class RestrictEdgeLengthSchema(BaseModel):
-    target_: Literal["anemoi.graphs.processors.RestrictEdgeLength"] = Field(
-        ..., alias="_target_"
-    )
+    target_: Literal["anemoi.graphs.processors.RestrictEdgeLength"] = Field(..., alias="_target_")
     "Post processor to edges longer than a threshold."
     source_name: str
     "Source nodes of edges to be post-processed."
@@ -62,9 +58,7 @@ class RestrictEdgeLengthSchema(BaseModel):
 
 
 class RemoveSelfEdgesSchema(BaseModel):
-    target_: Literal["anemoi.graphs.processors.RemoveSelfEdges"] = Field(
-        ..., alias="_target_"
-    )
+    target_: Literal["anemoi.graphs.processors.RemoveSelfEdges"] = Field(..., alias="_target_")
     "Post processor to remove self edges."
     source_name: str
     "Source nodes of edges to be post-processed."

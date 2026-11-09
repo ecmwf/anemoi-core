@@ -10,7 +10,8 @@
 
 import torch
 
-from anemoi.models.preprocessing import Processors, StepwiseProcessors
+from anemoi.models.preprocessing import Processors
+from anemoi.models.preprocessing import StepwiseProcessors
 
 
 class DummyProcessor(torch.nn.Module):
@@ -18,9 +19,7 @@ class DummyProcessor(torch.nn.Module):
         super().__init__()
         self.register_buffer("scale", torch.rand(1))
 
-    def forward(
-        self, x, in_place: bool = True, inverse: bool = False, **kwargs
-    ) -> torch.Tensor:
+    def forward(self, x, in_place: bool = True, inverse: bool = False, **kwargs) -> torch.Tensor:
         del in_place, inverse, kwargs
         return x * self.scale
 

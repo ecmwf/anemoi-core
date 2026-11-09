@@ -9,7 +9,8 @@
 
 import logging
 
-from torch import Tensor, nn
+from torch import Tensor
+from torch import nn
 
 from anemoi.models.distributed.shapes import ShardSizes
 
@@ -69,6 +70,4 @@ class SpatialPreprocessor(nn.Module):
         raise NotImplementedError
 
     def inverse(self, x: Tensor) -> Tensor:
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support inverse projection."
-        )
+        raise NotImplementedError(f"{self.__class__.__name__} does not support inverse projection.")

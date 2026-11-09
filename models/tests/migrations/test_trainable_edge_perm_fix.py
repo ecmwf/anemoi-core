@@ -15,9 +15,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import StaticGraphProvider
 
-migrate = importlib.import_module(
-    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix"
-).migrate
+migrate = importlib.import_module("anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix").migrate
 
 
 def _make_static_graph_provider(trainable_size: int = 2) -> StaticGraphProvider:
@@ -37,9 +35,7 @@ def _make_static_graph_provider(trainable_size: int = 2) -> StaticGraphProvider:
 class _InnerModel(nn.Module):
     def __init__(self, trainable_size: int = 2) -> None:
         super().__init__()
-        self.encoder_graph_provider = nn.ModuleDict(
-            {"data": _make_static_graph_provider(trainable_size)}
-        )
+        self.encoder_graph_provider = nn.ModuleDict({"data": _make_static_graph_provider(trainable_size)})
         self.processor_graph_provider = _make_static_graph_provider(trainable_size)
 
 
@@ -90,18 +86,8 @@ def test_migration_permutes_static_graph_provider_trainables() -> None:
         checkpoint["state_dict"][processor_key],
         processor_legacy.index_select(0, processor_provider.perm),
     )
-    assert (
-        checkpoint["state_dict"][
-            "model.model.encoder_graph_provider.data.trainable_layout_version"
-        ].item()
-        == 1
-    )
-    assert (
-        checkpoint["state_dict"][
-            "model.model.processor_graph_provider.trainable_layout_version"
-        ].item()
-        == 1
-    )
+    assert checkpoint["state_dict"]["model.model.encoder_graph_provider.data.trainable_layout_version"].item() == 1
+    assert checkpoint["state_dict"]["model.model.processor_graph_provider.trainable_layout_version"].item() == 1
 
 
 def test_migration_does_not_repermute_current_layout() -> None:
@@ -126,26 +112,12 @@ def test_migration_does_not_repermute_current_layout() -> None:
     assert torch.equal(checkpoint["state_dict"][processor_key], current_trainable)
 
 
-def test_migration_adds_layout_version_for_zero_trainable_static_graph_provider() -> (
-    None
-):
+def test_migration_adds_layout_version_for_zero_trainable_static_graph_provider() -> None:
     model = _RootModel(trainable_size=0)
     checkpoint = {"state_dict": {}}
 
     migrate(checkpoint, model)
 
-    assert (
-        checkpoint["state_dict"][
-            "model.model.encoder_graph_provider.data.trainable_layout_version"
-        ].item()
-        == 1
-    )
-    assert (
-        checkpoint["state_dict"][
-            "model.model.processor_graph_provider.trainable_layout_version"
-        ].item()
-        == 1
-    )
-    assert not any(
-        key.endswith("trainable.trainable") for key in checkpoint["state_dict"]
-    )
+    assert checkpoint["state_dict"]["model.model.encoder_graph_provider.data.trainable_layout_version"].item() == 1
+    assert checkpoint["state_dict"]["model.model.processor_graph_provider.trainable_layout_version"].item() == 1
+    assert not any(key.endswith("trainable.trainable") for key in checkpoint["state_dict"])

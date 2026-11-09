@@ -23,14 +23,12 @@ from anemoi.models.triton.utils import is_triton_available
 if is_triton_available():
     import triton
 
-    from anemoi.models.triton.attention import (
-        TritonAttention,
-        _attn_bwd_dkdv,
-        _attn_bwd_dq,
-        _attn_fwd,
-        _host_descriptor_pre_hook,
-        is_hip,
-    )
+    from anemoi.models.triton.attention import TritonAttention
+    from anemoi.models.triton.attention import _attn_bwd_dkdv
+    from anemoi.models.triton.attention import _attn_bwd_dq
+    from anemoi.models.triton.attention import _attn_fwd
+    from anemoi.models.triton.attention import _host_descriptor_pre_hook
+    from anemoi.models.triton.attention import is_hip
 
 try:
     from flash_attn import flash_attn_func
@@ -39,9 +37,7 @@ try:
 except BaseException:
     HAS_FLASH = False
 
-pytestmark = pytest.mark.skipif(
-    not is_triton_available(), reason="CUDA and Triton needed"
-)
+pytestmark = pytest.mark.skipif(not is_triton_available(), reason="CUDA and Triton needed")
 
 
 def attention_ref(
@@ -61,17 +57,13 @@ def attention_ref(
     scores = torch.matmul(q_fp32, k_fp32.transpose(-1, -2)) * sm_scale
 
     if causal:
-        causal_mask = torch.triu(
-            torch.ones(scores.shape[-2:], device=q.device), diagonal=1
-        ).bool()
+        causal_mask = torch.triu(torch.ones(scores.shape[-2:], device=q.device), diagonal=1).bool()
         scores = scores.masked_fill(causal_mask, float("-inf"))
 
     if window_size != -1:
         q_positions = torch.arange(scores.shape[-2], device=q.device)
         k_positions = torch.arange(scores.shape[-1], device=q.device)
-        window_mask = (
-            torch.abs(q_positions[:, None] - k_positions[None, :]) > window_size
-        )
+        window_mask = torch.abs(q_positions[:, None] - k_positions[None, :]) > window_size
         scores = scores.masked_fill(window_mask, float("-inf"))
 
     attn_weights = torch.softmax(scores, dim=-1)
@@ -114,17 +106,11 @@ def test_triton_attention_sharp_softmax_dv(dtype, causal, window):
 
     out = TritonAttention.apply(q, k, v, causal, window, scale)
     dv = torch.autograd.grad(out, v, do)[0]
-    torch.testing.assert_close(
-        out[0, 0, row].double(), expected_out, atol=1e-3, rtol=1e-2
-    )
+    torch.testing.assert_close(out[0, 0, row].double(), expected_out, atol=1e-3, rtol=1e-2)
     torch.testing.assert_close(dv[0, 0].double(), expected_dv, atol=1e-3, rtol=1e-2)
 
 
-MASKINGS = [
-    (False, -1),
-    (True, -1),
-    (False, 32),
-]  # (causal, window): global, causal, sliding window
+MASKINGS = [(False, -1), (True, -1), (False, 32)]  # (causal, window): global, causal, sliding window
 
 
 def _attention_fp64_grads(q, k, v, grad_out, sm_scale, causal, window):
@@ -150,9 +136,7 @@ def _triton_grads(q, k, v, grad_out, sm_scale, causal, window):
 @pytest.mark.gpu
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("causal,window", MASKINGS)
-def test_triton_attention_low_precision_gradients_with_offset_keys(
-    dtype, causal, window
-):
+def test_triton_attention_low_precision_gradients_with_offset_keys(dtype, causal, window):
     """Keys sharing an offset 100 times their spread still give gradients as accurate as the precision allows.
 
     The exact gradients do not depend on such an offset; rounding the score gradient to 16 bits before the
@@ -161,9 +145,7 @@ def test_triton_attention_low_precision_gradients_with_offset_keys(
 
     generator = torch.Generator(device="cuda").manual_seed(0)
     shape = (1, 2, 512, 64)
-    q, k, v, grad_out = (
-        torch.randn(shape, device="cuda", generator=generator) for _ in range(4)
-    )
+    q, k, v, grad_out = (torch.randn(shape, device="cuda", generator=generator) for _ in range(4))
     offset = torch.randn(shape[-1], device="cuda", generator=generator)
     k = k + 100 * shape[-1] ** 0.5 * offset / offset.norm()
     q, k, v, grad_out = (t.to(dtype) for t in (q, k, v, grad_out))
@@ -179,16 +161,12 @@ def test_triton_attention_low_precision_gradients_with_offset_keys(
 @pytest.mark.gpu
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("causal,window", MASKINGS)
-def test_triton_attention_dq_ignores_a_key_coordinate_the_queries_do_not_see(
-    dtype, causal, window
-):
+def test_triton_attention_dq_ignores_a_key_coordinate_the_queries_do_not_see(dtype, causal, window):
     """With every query 0 in one coordinate and every key sharing a large value there, dQ is 0 in it."""
 
     generator = torch.Generator(device="cuda").manual_seed(0)
     shape = (1, 2, 512, 64)
-    q, k, v, grad_out = (
-        torch.randn(shape, device="cuda", generator=generator) for _ in range(4)
-    )
+    q, k, v, grad_out = (torch.randn(shape, device="cuda", generator=generator) for _ in range(4))
     q[..., 0] = 0.0
     k[..., 0] = 2048.0
     q, k, v, grad_out = (t.to(dtype) for t in (q, k, v, grad_out))
@@ -246,9 +224,7 @@ def block_sizes(request):
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize(
-    "block_sizes", BLOCK_SIZES, indirect=True, ids=[f"{f}x{i}" for f, i in BLOCK_SIZES]
-)
+@pytest.mark.parametrize("block_sizes", BLOCK_SIZES, indirect=True, ids=[f"{f}x{i}" for f, i in BLOCK_SIZES])
 @pytest.mark.parametrize("n_ctx", [97, 256, 1025])
 @pytest.mark.parametrize("window", [-1, 1, 37, 300])
 def test_triton_attention_block_sizes(block_sizes, n_ctx, window):
@@ -260,10 +236,7 @@ def test_triton_attention_block_sizes(block_sizes, n_ctx, window):
     """
     generator = torch.Generator(device="cuda").manual_seed(0)
     shape = (2, 3, n_ctx, 64)
-    q, k, v, grad_out = (
-        torch.randn(shape, device="cuda", generator=generator).to(torch.bfloat16)
-        for _ in range(4)
-    )
+    q, k, v, grad_out = (torch.randn(shape, device="cuda", generator=generator).to(torch.bfloat16) for _ in range(4))
     sm_scale = shape[-1] ** -0.5
 
     q_run, k_run, v_run = (t.detach().clone().requires_grad_() for t in (q, k, v))
@@ -271,18 +244,11 @@ def test_triton_attention_block_sizes(block_sizes, n_ctx, window):
     results = (out, *torch.autograd.grad(out, (q_run, k_run, v_run), grad_out))
 
     positions = torch.arange(n_ctx, device="cuda")
-    visible = (
-        (positions[:, None] - positions[None, :]).abs() <= window
-        if window >= 0
-        else None
-    )
+    visible = (positions[:, None] - positions[None, :]).abs() <= window if window >= 0 else None
     reference_out = torch.nn.functional.scaled_dot_product_attention(
         q.double(), k.double(), v.double(), attn_mask=visible, scale=sm_scale
     )
-    references = (
-        reference_out,
-        *_attention_fp64_grads(q, k, v, grad_out, sm_scale, False, window),
-    )
+    references = (reference_out, *_attention_fp64_grads(q, k, v, grad_out, sm_scale, False, window))
 
     for name, result, reference in zip(("out", "dq", "dk", "dv"), results, references):
         error = ((result.double() - reference).norm() / reference.norm()).item()
@@ -350,9 +316,7 @@ def test_triton_attention_deterministic():
                     f"uninitialized memory access in the kernel."
                 ) from e
 
-    print(
-        f"[triton-attn deterministic] All {num_runs} runs produced identical results ✓"
-    )
+    print(f"[triton-attn deterministic] All {num_runs} runs produced identical results ✓")
 
 
 @pytest.mark.gpu
@@ -364,9 +328,7 @@ def test_triton_attention_deterministic():
     [97, 128, 200, 257, 384, 512, 768, 1025, 2048],
 )
 @pytest.mark.parametrize("HEAD_DIM", [64])
-@pytest.mark.parametrize(
-    "causal", [False]
-)  # TODO(cathal) fix 0.0% mismatch for causal=True for some configurations
+@pytest.mark.parametrize("causal", [False])  # TODO(cathal) fix 0.0% mismatch for causal=True for some configurations
 @pytest.mark.parametrize(
     "window",
     [True, False],
@@ -407,9 +369,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
 
     # Compute reference values
     if not HAS_FLASH:
-        ref_out = attention_ref(
-            q, k, v, sm_scale, causal=causal, window_size=window_size
-        ).to(dtype)
+        ref_out = attention_ref(q, k, v, sm_scale, causal=causal, window_size=window_size).to(dtype)
 
         if mode == "bwd":
             dout = torch.randn_like(q)
@@ -419,20 +379,13 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
             ref_dk, k.grad = k.grad.clone(), None
     else:
         # Flash attention references
-        q_flash, k_flash, v_flash = (
-            einops.rearrange(t, "b h s d -> b s h d") for t in (q, k, v)
-        )
+        q_flash, k_flash, v_flash = (einops.rearrange(t, "b h s d -> b s h d") for t in (q, k, v))
         q_flash.retain_grad()
         k_flash.retain_grad()
         v_flash.retain_grad()
         flash_window = (-1, -1) if not window else (window_size, window_size)
         ref_out = flash_attn_func(
-            q_flash,
-            k_flash,
-            v_flash,
-            causal=causal,
-            window_size=flash_window,
-            softmax_scale=sm_scale,
+            q_flash, k_flash, v_flash, causal=causal, window_size=flash_window, softmax_scale=sm_scale
         )
 
         if mode == "bwd":
@@ -472,10 +425,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
                 # Max error per (batch, head) to see if only some batches/heads are affected.
                 # Shape: [Z, H]
                 per_bh_max = diff.amax(dim=(-1, -2))
-                print(
-                    "[triton-attn debug] max abs error per (batch, head):",
-                    per_bh_max.detach().cpu(),
-                )
+                print("[triton-attn debug] max abs error per (batch, head):", per_bh_max.detach().cpu())
 
                 # Global max and its location
                 max_err = diff.max()
@@ -489,14 +439,8 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
                 )
 
                 # Print a small slice around the offending token to inspect cross-batch/head behaviour.
-                print(
-                    "[triton-attn debug] tri_out[z, h, t, :8] =",
-                    tri_out[z, h, t, :8].detach().cpu(),
-                )
-                print(
-                    "[triton-attn debug] ref_out[z, h, t, :8] =",
-                    ref_out[z, h, t, :8].detach().cpu(),
-                )
+                print("[triton-attn debug] tri_out[z, h, t, :8] =", tri_out[z, h, t, :8].detach().cpu())
+                print("[triton-attn debug] ref_out[z, h, t, :8] =", ref_out[z, h, t, :8].detach().cpu())
 
                 # Additional debug: check error pattern across tokens
                 per_token_max = diff[z, h, :, :].amax(dim=-1)
@@ -506,9 +450,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
 
                 # Check if error is concentrated at boundaries
                 boundary_errors = (per_token_max > atol).sum()
-                print(
-                    f"[triton-attn debug] {boundary_errors}/{len(per_token_max)} tokens exceed tolerance"
-                )
+                print(f"[triton-attn debug] {boundary_errors}/{len(per_token_max)} tokens exceed tolerance")
 
             # Re-raise so the test still fails, but with extra context.
             raise
@@ -540,10 +482,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
             # Max error per (batch, head) to see if only some batches/heads are affected.
             # Shape: [Z, H]
             per_bh_max = diff.amax(dim=(-1, -2))
-            print(
-                "[triton-attn debug] max abs error per (batch, head):",
-                per_bh_max.detach().cpu(),
-            )
+            print("[triton-attn debug] max abs error per (batch, head):", per_bh_max.detach().cpu())
 
             # Global max and its location
             max_err = diff.max()
@@ -557,14 +496,8 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
             )
 
             # Print a small slice around the offending token to inspect cross-batch/head behaviour.
-            print(
-                "[triton-attn debug] tri_dv[z, h, t, :8] =",
-                tri_dv[z, h, t, :8].detach().cpu(),
-            )
-            print(
-                "[triton-attn debug] ref_dv[z, h, t, :8] =",
-                ref_dv[z, h, t, :8].detach().cpu(),
-            )
+            print("[triton-attn debug] tri_dv[z, h, t, :8] =", tri_dv[z, h, t, :8].detach().cpu())
+            print("[triton-attn debug] ref_dv[z, h, t, :8] =", ref_dv[z, h, t, :8].detach().cpu())
 
         # Re-raise so the test still fails, but with extra context.
         raise
@@ -580,9 +513,7 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
 @pytest.mark.parametrize("causal", [False])
 @pytest.mark.parametrize("window", [True, False])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-def test_triton_attention_cumulative_loss_vs_flash(
-    Z, H, N_CTX, HEAD_DIM, causal, window, dtype, seed
-):
+def test_triton_attention_cumulative_loss_vs_flash(Z, H, N_CTX, HEAD_DIM, causal, window, dtype, seed):
     """Runs 50 cumulative forward+backward steps (simulating a training loop) and
     compares the final loss trajectory between Triton attention and Flash Attention 2.
 
@@ -662,14 +593,7 @@ def test_triton_attention_cumulative_loss_vs_flash(
         k_f = k_fa.to(dtype).detach().requires_grad_()
         v_f = v_fa.to(dtype).detach().requires_grad_()
 
-        out_fa = flash_attn_func(
-            q_f,
-            k_f,
-            v_f,
-            causal=causal,
-            window_size=flash_window,
-            softmax_scale=sm_scale,
-        )
+        out_fa = flash_attn_func(q_f, k_f, v_f, causal=causal, window_size=flash_window, softmax_scale=sm_scale)
         loss_fa = ((out_fa.float() - target_fa) ** 2).mean()
         loss_fa.backward()
 
@@ -698,12 +622,8 @@ def test_triton_attention_cumulative_loss_vs_flash(
     print(f"  Triton final loss : {triton_final:.6f}")
     print(f"  Flash  final loss : {flash_final:.6f}")
     print(f"  Relative diff     : {rel_diff:.6e}")
-    print(
-        f"  Triton loss curve : {triton_losses[0]:.4f} -> {triton_losses[24]:.4f} -> {triton_final:.4f}"
-    )
-    print(
-        f"  Flash  loss curve : {flash_losses[0]:.4f} -> {flash_losses[24]:.4f} -> {flash_final:.4f}"
-    )
+    print(f"  Triton loss curve : {triton_losses[0]:.4f} -> {triton_losses[24]:.4f} -> {triton_final:.4f}")
+    print(f"  Flash  loss curve : {flash_losses[0]:.4f} -> {flash_losses[24]:.4f} -> {flash_final:.4f}")
 
     # Both should be decreasing (sanity check that training is working)
     # assert triton_losses[-1] < triton_losses[0], (
@@ -715,12 +635,8 @@ def test_triton_attention_cumulative_loss_vs_flash(
     #    f"(first={flash_losses[0]:.6f}, last={flash_losses[-1]:.6f})"
     # )
 
-    if not (triton_losses[-1] < triton_losses[0]) and not (
-        flash_losses[-1] < flash_losses[0]
-    ):
-        pytest.skip(
-            "Warning: Neither loss decreased, so final loss comparison may be meaningless. Skipping test"
-        )
+    if not (triton_losses[-1] < triton_losses[0]) and not (flash_losses[-1] < flash_losses[0]):
+        pytest.skip("Warning: Neither loss decreased, so final loss comparison may be meaningless. Skipping test")
 
     # Final losses should be close
     torch.testing.assert_close(

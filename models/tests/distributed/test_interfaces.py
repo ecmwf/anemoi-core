@@ -23,11 +23,9 @@ import torch
 import torch.distributed as dist
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.primitives import (
-    _alltoall_op,
-    _alltoall_transpose,
-    _resolve_group_name,
-)
+from anemoi.models.distributed.primitives import _alltoall_op
+from anemoi.models.distributed.primitives import _alltoall_transpose
+from anemoi.models.distributed.primitives import _resolve_group_name
 
 from ._distributed_runner import _run_distributed_test
 
@@ -53,9 +51,7 @@ def _test_alltoall_opcheck_rank(
 ) -> None:
     from torch._subclasses.fake_tensor import FakeTensorMode
 
-    full = torch.arange(
-        torch.Size(shape).numel(), dtype=torch.float32, device=device
-    ).reshape(shape)
+    full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
     split_sizes = get_balanced_partition_sizes(full.size(dim_split), world_size)
     concat_sizes = get_balanced_partition_sizes(full.size(dim_concat), world_size)
     local = torch.split(full, concat_sizes, dim=dim_concat)[rank].contiguous()
@@ -65,9 +61,7 @@ def _test_alltoall_opcheck_rank(
     ndim = local.dim()
     norm_split = dim_split % ndim
     norm_concat = dim_concat % ndim
-    input_list = [
-        x.contiguous() for x in torch.split(local, split_sizes, dim=norm_split)
-    ]
+    input_list = [x.contiguous() for x in torch.split(local, split_sizes, dim=norm_split)]
 
     # shape received from each rank: dim_split = this rank's split size,
     # dim_concat = that rank's concat size. Flattened into a single list[int]
@@ -93,19 +87,11 @@ def _test_alltoall_opcheck_rank(
         fake_input_list = [fake_mode.from_tensor(t) for t in input_list]
         fake = _alltoall_op(fake_input_list, output_shapes_flat, ndim, group_name)
 
-    assert len(fake) == len(real), (
-        f"fake returned {len(fake)} tensors, real returned {len(real)}"
-    )
+    assert len(fake) == len(real), f"fake returned {len(fake)} tensors, real returned {len(real)}"
     for i, (fake_t, real_t) in enumerate(zip(fake, real)):
-        assert fake_t.shape == real_t.shape, (
-            f"output {i}: fake shape {fake_t.shape} != real shape {real_t.shape}"
-        )
-        assert fake_t.dtype == real_t.dtype, (
-            f"output {i}: fake dtype {fake_t.dtype} != real dtype {real_t.dtype}"
-        )
-        assert fake_t.device == real_t.device, (
-            f"output {i}: fake device {fake_t.device} != real device {real_t.device}"
-        )
+        assert fake_t.shape == real_t.shape, f"output {i}: fake shape {fake_t.shape} != real shape {real_t.shape}"
+        assert fake_t.dtype == real_t.dtype, f"output {i}: fake dtype {fake_t.dtype} != real dtype {real_t.dtype}"
+        assert fake_t.device == real_t.device, f"output {i}: fake device {fake_t.device} != real device {real_t.device}"
 
 
 @pytest.mark.distributed
@@ -154,9 +140,7 @@ def _test_alltoall_transpose_compile_matches_eager_rank(
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
-    full = torch.arange(
-        torch.Size(shape).numel(), dtype=torch.float32, device=device
-    ).reshape(shape)
+    full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
     split_sizes = get_balanced_partition_sizes(full.size(dim_split), world_size)
     concat_sizes = get_balanced_partition_sizes(full.size(dim_concat), world_size)
     local = torch.split(full, concat_sizes, dim=dim_concat)[rank].contiguous()

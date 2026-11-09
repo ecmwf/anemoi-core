@@ -276,6 +276,7 @@ def _convert_npint_to_int(obj: Any) -> dict | list | int | str | float:
 
 
 class PatchedProfile(profile):
+
     def _get_distributed_info(self) -> dict[str, str]:
         dist_info = super()._get_distributed_info()
         return _convert_npint_to_int(dist_info)
@@ -294,9 +295,9 @@ class BenchmarkProfiler(Profiler):
         self.num_steps = self.config.diagnostics.benchmark_profiler.memory.steps
 
         if self.config.diagnostics.benchmark_profiler.memory.extra_plots:
-            assert self.num_steps <= self.config.training.num_sanity_val_steps, (
-                "Sanity steps should be less than snapshot steps, to avoid memory issues"
-            )
+            assert (
+                self.num_steps <= self.config.training.num_sanity_val_steps
+            ), "Sanity steps should be less than snapshot steps, to avoid memory issues"
 
         self.dirpath = None
         self.create_output_path()
@@ -357,9 +358,9 @@ class BenchmarkProfiler(Profiler):
             if not (self.config.diagnostics.benchmark_profiler.memory.trace_rank0_only and global_rank != 0):
                 from pytorch_lightning.profilers.pytorch import _KINETO_AVAILABLE
 
-                assert _KINETO_AVAILABLE, (
-                    "Kineto is not available. Please ensure Kineto is avaialble to be able to use the memory profiler"
-                )
+                assert (
+                    _KINETO_AVAILABLE
+                ), "Kineto is not available. Please ensure Kineto is avaialble to be able to use the memory profiler"
 
                 torch.profiler.profile = (
                     PatchedProfile  # patch the profile(KinetoProfile) object to serialise the distributed info

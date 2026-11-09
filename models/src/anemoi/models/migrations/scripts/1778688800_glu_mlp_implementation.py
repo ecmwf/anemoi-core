@@ -7,7 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.migrations import CkptType, MigrationMetadata
+from anemoi.models.migrations import CkptType
+from anemoi.models.migrations import MigrationMetadata
 
 # DO NOT CHANGE -->
 metadata = MigrationMetadata(
@@ -42,9 +43,7 @@ def migrate(ckpt: CkptType) -> CkptType:
     """
     state_dict = ckpt["state_dict"]
     renames = {
-        k: k.replace(".node_dst_mlp.", ".node_dst_mlp.mlp.").replace(
-            ".node_src_mlp.", ".node_src_mlp.mlp."
-        )
+        k: k.replace(".node_dst_mlp.", ".node_dst_mlp.mlp.").replace(".node_src_mlp.", ".node_src_mlp.mlp.")
         for k in list(state_dict)
         if ".node_dst_mlp." in k or ".node_src_mlp." in k
     }

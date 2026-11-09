@@ -7,7 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.migrations import CkptType, MigrationMetadata
+from anemoi.models.migrations import CkptType
+from anemoi.models.migrations import MigrationMetadata
 
 # DO NOT CHANGE -->
 metadata = MigrationMetadata(
@@ -49,9 +50,7 @@ def migrate(ckpt: CkptType) -> CkptType:
 
     state_dict = ckpt["state_dict"]
     renames = {
-        key: key.replace(_PROVIDER, f"{_PROVIDER}{hidden_nodes_name}.", 1)
-        for key in state_dict
-        if _PROVIDER in key
+        key: key.replace(_PROVIDER, f"{_PROVIDER}{hidden_nodes_name}.", 1) for key in state_dict if _PROVIDER in key
     }
     for old_key, new_key in renames.items():
         state_dict[new_key] = state_dict.pop(old_key)

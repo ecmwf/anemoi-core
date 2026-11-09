@@ -23,9 +23,7 @@ def test_init():
     mask_builder1 = AreaMaskBuilder("nodes")
     mask_builder2 = AreaMaskBuilder("nodes", margin_radius_km=120)
     mask_builder3 = AreaMaskBuilder("nodes", mask_attr_name="mask")
-    mask_builder4 = AreaMaskBuilder(
-        "nodes", margin_radius_km=120, mask_attr_name="mask"
-    )
+    mask_builder4 = AreaMaskBuilder("nodes", margin_radius_km=120, mask_attr_name="mask")
 
     assert isinstance(mask_builder1, AreaMaskBuilder)
     assert isinstance(mask_builder2, AreaMaskBuilder)
@@ -43,12 +41,7 @@ def test_chord_threshold():
     """Test AreaMaskBuilder chord threshold conversion."""
     margin_radius_km = 120
     mask_builder = AreaMaskBuilder("nodes", margin_radius_km=margin_radius_km)
-    expected = float(
-        2
-        * torch.sin(
-            torch.tensor(margin_radius_km / (2 * EARTH_RADIUS), dtype=torch.float64)
-        )
-    )
+    expected = float(2 * torch.sin(torch.tensor(margin_radius_km / (2 * EARTH_RADIUS), dtype=torch.float64)))
 
     assert mask_builder._chord_threshold == pytest.approx(expected)
 
@@ -68,7 +61,7 @@ def test_fit(graph_with_nodes: HeteroData, mask: str):
 
     mask_builder.fit(graph_with_nodes)
 
-    assert mask_builder._backend._ref_vectors is not None
+    assert getattr(mask_builder._backend, "_ref_vectors") is not None
     if is_pyg_lib_available():
         assert mask_builder._backend._ref_vectors.shape[1] == 3
         assert isinstance(mask_builder._backend._ref_vectors, torch.Tensor)
@@ -108,9 +101,7 @@ def test_get_mask(graph_with_nodes: HeteroData):
 
 def test_get_mask_respects_reference_mask(graph_with_nodes: HeteroData):
     """Test AreaMaskBuilder get_mask uses only masked-in references."""
-    mask_builder = AreaMaskBuilder(
-        "test_nodes", margin_radius_km=100, mask_attr_name="interior_mask"
-    )
+    mask_builder = AreaMaskBuilder("test_nodes", margin_radius_km=100, mask_attr_name="interior_mask")
     mask_builder.fit(graph_with_nodes)
 
     masked_out_ref = graph_with_nodes["test_nodes"].x[0].cpu().numpy()

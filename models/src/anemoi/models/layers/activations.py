@@ -37,12 +37,8 @@ def leaky_hardtanh(
     # Standard hardtanh behavior for the middle region
     result = torch.clamp(input, min_val, max_val)
     # Add leaky behavior for regions outside the clamped range
-    result = torch.where(
-        below_min, min_val + negative_slope * (input - min_val), result
-    )
-    result = torch.where(
-        above_max, max_val + positive_slope * (input - max_val), result
-    )
+    result = torch.where(below_min, min_val + negative_slope * (input - min_val), result)
+    result = torch.where(above_max, max_val + positive_slope * (input - max_val), result)
     return result
 
 

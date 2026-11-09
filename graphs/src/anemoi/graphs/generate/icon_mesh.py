@@ -11,18 +11,16 @@ import itertools
 import logging
 import uuid
 from functools import cached_property
-from typing import Self
 
 import netCDF4
 import numpy as np
 import scipy
 from typeguard import typechecked
+from typing_extensions import Self
 
-from anemoi.graphs.generate.utils import (
-    convert_adjacency_matrix_to_list,
-    convert_list_to_adjacency_matrix,
-    selection_matrix,
-)
+from anemoi.graphs.generate.utils import convert_adjacency_matrix_to_list
+from anemoi.graphs.generate.utils import convert_list_to_adjacency_matrix
+from anemoi.graphs.generate.utils import selection_matrix
 
 LOGGER = logging.getLogger(__name__)
 
@@ -64,9 +62,7 @@ class NodeSet:
     def _gc_to_cartesian(self, radius: float = 1.0) -> np.ndarray:
         """Returns Cartesian coordinates of the node set, shape [:,3]."""
         xyz = (
-            radius
-            * np.cos(lat_rad := self.gc_vertices[:, 1])
-            * np.cos(lon_rad := self.gc_vertices[:, 0]),
+            radius * np.cos(lat_rad := self.gc_vertices[:, 1]) * np.cos(lon_rad := self.gc_vertices[:, 0]),
             radius * np.cos(lat_rad) * np.sin(lon_rad),
             radius * np.sin(lat_rad),
         )
@@ -87,9 +83,7 @@ class ICONMultiMesh:
         self.grid_filename = icon_grid_filename
 
         # open file, representing the finest level
-        LOGGER.debug(
-            f"{type(self).__name__}: read coordinates from ICON grid file '{self.grid_filename}'"
-        )
+        LOGGER.debug(f"{type(self).__name__}: read coordinates from ICON grid file '{self.grid_filename}'")
         with netCDF4.Dataset(self.grid_filename, "r") as ncfile:
             # read vertex coordinates
             vlon = read_coordinate_array(ncfile, "vlon", "vertex")
@@ -112,14 +106,10 @@ class ICONMultiMesh:
     def _vertices(self) -> tuple[list[np.ndarray], np.ndarray]:
         edge_vertices_fine, cell_vertices_fine = self._read_vertices_data()
 
-        edge_vertices, cell_vertices = self._get_hierarchy_of_icon_edge_graphs(
-            edge_vertices_fine, cell_vertices_fine
-        )
+        edge_vertices, cell_vertices = self._get_hierarchy_of_icon_edge_graphs(edge_vertices_fine, cell_vertices_fine)
 
         if self.max_level < len(edge_vertices):
-            edge_vertices, cell_vertices = self._restrict_multi_mesh_edges_and_cells(
-                edge_vertices, cell_vertices
-            )
+            edge_vertices, cell_vertices = self._restrict_multi_mesh_edges_and_cells(edge_vertices, cell_vertices)
         return edge_vertices, cell_vertices
 
     @property
@@ -140,18 +130,13 @@ class ICONMultiMesh:
         return np.concatenate([edges, np.fliplr(edges)])
 
     def _read_vertices_data(self):
-        LOGGER.debug(
-            f"{type(self).__name__}: read vertices data from ICON grid file '{self.grid_filename}'"
-        )
+        LOGGER.debug(f"{type(self).__name__}: read vertices data from ICON grid file '{self.grid_filename}'")
         with netCDF4.Dataset(self.grid_filename, "r") as ncfile:
-            edge_vertices_fine = np.asarray(
-                ncfile.variables["edge_vertices"][:] - 1, dtype=np.int64
-            ).transpose()
+
+            edge_vertices_fine = np.asarray(ncfile.variables["edge_vertices"][:] - 1, dtype=np.int64).transpose()
             assert ncfile.variables["edge_vertices"].dimensions == ("nc", "edge")
 
-            cell_vertices_fine = np.asarray(
-                ncfile.variables["vertex_of_cell"][:] - 1, dtype=np.int64
-            ).transpose()
+            cell_vertices_fine = np.asarray(ncfile.variables["vertex_of_cell"][:] - 1, dtype=np.int64).transpose()
             assert ncfile.variables["vertex_of_cell"].dimensions == ("nv", "cell")
 
         return edge_vertices_fine, cell_vertices_fine
@@ -167,10 +152,7 @@ class ICONMultiMesh:
         vertex_glb2loc = np.full(num_vertices, -1, dtype=int)
         vertex_glb2loc[vertex_mask] = np.arange(vertex_mask.sum())
         return (
-            [
-                vertex_glb2loc[vertices]
-                for vertices in edge_vertices[: self.max_level + 1]
-            ],
+            [vertex_glb2loc[vertices] for vertices in edge_vertices[: self.max_level + 1]],
             # cell_vertices: preserve negative indices (incomplete cells)
             np.where(cell_vertices >= 0, vertex_glb2loc[cell_vertices], cell_vertices),
         )
@@ -182,29 +164,21 @@ class ICONMultiMesh:
     ) -> tuple[list[np.ndarray], np.ndarray]:
         """Returns a list of edge-vertex relations (coarsest to finest level)."""
 
-        edge_vertices = [
-            edge_vertices_fine
-        ]  # list of edge-vertex relations (coarsest to finest level).
+        edge_vertices = [edge_vertices_fine]  # list of edge-vertex relations (coarsest to finest level).
 
         num_vertices = self.reflvl_vertex.shape[0]
         # edge-to-vertex adjacency matrix with 2 non-zero entries per row:
-        edge2vertex_matrix = convert_list_to_adjacency_matrix(
-            edge_vertices_fine, num_vertices
-        )
+        edge2vertex_matrix = convert_list_to_adjacency_matrix(edge_vertices_fine, num_vertices)
         # cell-to-vertex adjacency matrix with 3 non-zero entries per row:
-        cell2vertex_matrix = convert_list_to_adjacency_matrix(
-            cell_vertices_fine, num_vertices
-        )
+        cell2vertex_matrix = convert_list_to_adjacency_matrix(cell_vertices_fine, num_vertices)
         vertex2vertex_matrix = edge2vertex_matrix.transpose() * edge2vertex_matrix
-        vertex2vertex_matrix.setdiag(
-            np.ones(num_vertices)
-        )  # vertices are self-connected
+        vertex2vertex_matrix.setdiag(np.ones(num_vertices))  # vertices are self-connected
 
         selected_vertex_coarse = scipy.sparse.diags(np.ones(num_vertices), dtype=bool)
 
         # coarsen edge-vertex list from level `ilevel -> ilevel - 1`:
         for ilevel in reversed(range(1, self.reflvl_vertex.max() + 1)):
-            LOGGER.debug(f"  edges[{ilevel}] = {edge_vertices[0].shape[0]: >9}")
+            LOGGER.debug(f"  edges[{ilevel}] = {edge_vertices[0].shape[0] : >9}")
 
             # define edge selection matrix (selecting only edges of which have
             # exactly one coarse vertex):
@@ -212,9 +186,7 @@ class ICONMultiMesh:
             # get a boolean mask, matching all edges where one of its vertices
             # has refinement level index `ilevel`:
             ref_level_mask = self.reflvl_vertex[edge_vertices[0]] == ilevel
-            edges_coarse = np.logical_xor(
-                ref_level_mask[:, 0], ref_level_mask[:, 1]
-            )  # = bisected coarse edges
+            edges_coarse = np.logical_xor(ref_level_mask[:, 0], ref_level_mask[:, 1])  # = bisected coarse edges
             idx_edge2edge = np.argwhere(edges_coarse).flatten()
             selected_edges = selection_matrix(idx_edge2edge, edges_coarse.shape[0])
 
@@ -228,39 +200,27 @@ class ICONMultiMesh:
 
             # create an adjacency matrix which links each fine level
             # vertex to its two coarser neighbor vertices:
-            vertex2vertex_fine2coarse = (
-                selected_vertex_fine * vertex2vertex_matrix * selected_vertex_coarse
-            )
+            vertex2vertex_fine2coarse = selected_vertex_fine * vertex2vertex_matrix * selected_vertex_coarse
             # remove rows that have only one non-zero entry
             # (corresponding to incomplete parent triangles in LAM grids):
-            csum = vertex2vertex_fine2coarse * np.ones(
-                (vertex2vertex_fine2coarse.shape[1], 1)
-            )
+            csum = vertex2vertex_fine2coarse * np.ones((vertex2vertex_fine2coarse.shape[1], 1))
             selected_vertex2vertex = selection_matrix(
                 np.argwhere(csum == 2).flatten(), vertex2vertex_fine2coarse.shape[0]
             )
-            vertex2vertex_fine2coarse = (
-                selected_vertex2vertex * vertex2vertex_fine2coarse
-            )
+            vertex2vertex_fine2coarse = selected_vertex2vertex * vertex2vertex_fine2coarse
 
             # then construct the edges-to-parent-vertex adjacency matrix:
-            parent_edge_vertices = (
-                selected_edges * edge2vertex_matrix * vertex2vertex_fine2coarse
-            )
+            parent_edge_vertices = selected_edges * edge2vertex_matrix * vertex2vertex_fine2coarse
             # again, we have might have selected edges within
             # `selected_edges` which are part of an incomplete parent edge
             # (LAM case). We filter these here:
             csum = parent_edge_vertices * np.ones((parent_edge_vertices.shape[1], 1))
-            selected_edge2edge = selection_matrix(
-                np.argwhere(csum == 2).flatten(), parent_edge_vertices.shape[0]
-            )
+            selected_edge2edge = selection_matrix(np.argwhere(csum == 2).flatten(), parent_edge_vertices.shape[0])
             parent_edge_vertices = selected_edge2edge * parent_edge_vertices
 
             # note: the edges-vertex adjacency matrix still has duplicate
             # rows, since two child edges have the same parent edge.
-            edge_vertices_coarse = convert_adjacency_matrix_to_list(
-                parent_edge_vertices, ncols_per_row=2
-            )
+            edge_vertices_coarse = convert_adjacency_matrix_to_list(parent_edge_vertices, ncols_per_row=2)
             edge_vertices.insert(0, edge_vertices_coarse)
 
             # store cell-to-vert adjacency matrix
@@ -269,36 +229,24 @@ class ICONMultiMesh:
                 # similar to the treatment above, we need to handle
                 # coarse LAM cells which are incomplete.
                 csum = cell2vertex_matrix * np.ones((cell2vertex_matrix.shape[1], 1))
-                selected_cell2cell = selection_matrix(
-                    np.argwhere(csum == 3).flatten(), cell2vertex_matrix.shape[0]
-                )
+                selected_cell2cell = selection_matrix(np.argwhere(csum == 3).flatten(), cell2vertex_matrix.shape[0])
                 cell2vertex_matrix = selected_cell2cell * cell2vertex_matrix
 
             # replace edge-to-vertex and vert-to-vert adjacency matrices (for next level):
             if ilevel > 1:
-                vertex2vertex_matrix = (
-                    selected_vertex_coarse
-                    * vertex2vertex_matrix
-                    * vertex2vertex_fine2coarse
-                )
-                edge2vertex_matrix = convert_list_to_adjacency_matrix(
-                    edge_vertices_coarse, num_vertices
-                )
+                vertex2vertex_matrix = selected_vertex_coarse * vertex2vertex_matrix * vertex2vertex_fine2coarse
+                edge2vertex_matrix = convert_list_to_adjacency_matrix(edge_vertices_coarse, num_vertices)
 
         # Fine-level cells outside of multi-mesh (LAM boundary)
         # correspond to empty rows in the adjacency matrix. We
         # substitute these by three additional, non-existent vertices:
         csum = 3 - cell2vertex_matrix * np.ones((cell2vertex_matrix.shape[1], 1))
         nvmax = cell2vertex_matrix.shape[1]
-        cell2vertex_matrix = scipy.sparse.csr_matrix(
-            scipy.sparse.hstack((cell2vertex_matrix, csum, csum, csum))
-        )
+        cell2vertex_matrix = scipy.sparse.csr_matrix(scipy.sparse.hstack((cell2vertex_matrix, csum, csum, csum)))
 
         # build a list of cell-vertices [1..num_cells,1..3] for all
         # fine-level cells:
-        cell_vertices = convert_adjacency_matrix_to_list(
-            cell2vertex_matrix, remove_duplicates=False, ncols_per_row=3
-        )
+        cell_vertices = convert_adjacency_matrix_to_list(cell2vertex_matrix, remove_duplicates=False, ncols_per_row=3)
 
         # finally, translate non-existent vertices into "-1" indices:
         cell_vertices = np.where(
@@ -326,9 +274,7 @@ class ICONCellDataGrid:
         self.grid_filename = icon_grid_filename
 
         # open file, representing the finest level
-        LOGGER.debug(
-            f"{type(self).__name__}: read ICON grid file '{self.grid_filename}'"
-        )
+        LOGGER.debug(f"{type(self).__name__}: read ICON grid file '{self.grid_filename}'")
         with netCDF4.Dataset(self.grid_filename, "r") as ncfile:
             # read cell circumcenter coordinates
             clon = read_coordinate_array(ncfile, "clon", "cell")
@@ -352,9 +298,7 @@ class ICONCellDataGrid:
         """
         num_cells = self.select_c.shape[0]
         num_vertices_per_cell = multi_mesh.cell_vertices.shape[1]
-        src_list = np.kron(
-            np.arange(num_cells), np.ones((1, num_vertices_per_cell), dtype=np.int64)
-        ).flatten()
+        src_list = np.kron(np.arange(num_cells), np.ones((1, num_vertices_per_cell), dtype=np.int64)).flatten()
         dst_list = multi_mesh.cell_vertices[self.select_c[:, 0], :].flatten()
         edge_vertices = np.stack((src_list, dst_list), axis=1, dtype=np.int64)
         return edge_vertices

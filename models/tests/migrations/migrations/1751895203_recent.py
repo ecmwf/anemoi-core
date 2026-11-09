@@ -7,7 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.migrations import CkptType, MigrationMetadata
+from anemoi.models.migrations import CkptType
+from anemoi.models.migrations import MigrationMetadata
 
 metadata = MigrationMetadata(
     versions={

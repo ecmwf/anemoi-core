@@ -10,12 +10,10 @@
 import pytest
 import torch
 
-from anemoi.models.layers.aggregator import (
-    ConcatAggregator,
-    MeanAggregator,
-    PointwiseCrossAttentionAggregator,
-    SumAggregator,
-)
+from anemoi.models.layers.aggregator import ConcatAggregator
+from anemoi.models.layers.aggregator import MeanAggregator
+from anemoi.models.layers.aggregator import PointwiseCrossAttentionAggregator
+from anemoi.models.layers.aggregator import SumAggregator
 
 
 def test_sum_and_mean_aggregators_accept_active_source_subsets() -> None:
@@ -24,37 +22,27 @@ def test_sum_and_mean_aggregators_accept_active_source_subsets() -> None:
     b = torch.randn(6, 4)
     source_channels = {"a": 4, "b": 4}
 
-    summed = SumAggregator(input_channels=3, source_channels=source_channels)(
-        hidden, {"b": b, "a": a}
-    )
-    mean = MeanAggregator(input_channels=3, source_channels=source_channels)(
-        hidden, {"b": b}
-    )
+    summed = SumAggregator(input_channels=3, source_channels=source_channels)(hidden, {"b": b, "a": a})
+    mean = MeanAggregator(input_channels=3, source_channels=source_channels)(hidden, {"b": b})
 
     torch.testing.assert_close(summed, a + b)
     torch.testing.assert_close(mean, b)
 
 
 def test_concat_aggregator_uses_configured_source_order_and_widths() -> None:
-    aggregator = ConcatAggregator(
-        input_channels=3, source_channels={"global": 2, "regional": 3}
-    )
+    aggregator = ConcatAggregator(input_channels=3, source_channels={"global": 2, "regional": 3})
     hidden = torch.randn(6, 3)
     global_latent = torch.randn(6, 2)
     regional_latent = torch.randn(6, 3)
 
     output = aggregator(hidden, {"regional": regional_latent, "global": global_latent})
 
-    torch.testing.assert_close(
-        output, torch.cat((global_latent, regional_latent), dim=-1)
-    )
+    torch.testing.assert_close(output, torch.cat((global_latent, regional_latent), dim=-1))
     assert aggregator.hidden_dim == 5
 
 
 def test_concat_aggregator_requires_every_configured_source() -> None:
-    aggregator = ConcatAggregator(
-        input_channels=3, source_channels={"global": 2, "regional": 3}
-    )
+    aggregator = ConcatAggregator(input_channels=3, source_channels={"global": 2, "regional": 3})
 
     with pytest.raises(ValueError, match="missing.*regional"):
         aggregator(torch.randn(6, 3), {"global": torch.randn(6, 2)})
@@ -68,9 +56,7 @@ def test_concat_aggregator_requires_every_configured_source() -> None:
         ({"a": torch.randn(7, 4)}, "matching leading dimensions"),
     ],
 )
-def test_aggregator_validates_named_source_shapes(
-    latents: dict[str, torch.Tensor], error: str
-) -> None:
+def test_aggregator_validates_named_source_shapes(latents: dict[str, torch.Tensor], error: str) -> None:
     aggregator = SumAggregator(input_channels=3, source_channels={"a": 4})
 
     with pytest.raises(ValueError, match=error):
@@ -136,12 +122,8 @@ def test_pointwise_cross_attention_aggregator_is_shard_local() -> None:
     full_output = aggregator(hidden, latents)
     sharded_output = torch.cat(
         [
-            aggregator(
-                hidden[:4], {name: latent[:4] for name, latent in latents.items()}
-            ),
-            aggregator(
-                hidden[4:], {name: latent[4:] for name, latent in latents.items()}
-            ),
+            aggregator(hidden[:4], {name: latent[:4] for name, latent in latents.items()}),
+            aggregator(hidden[4:], {name: latent[4:] for name, latent in latents.items()}),
         ],
     )
 

@@ -9,7 +9,11 @@
 
 from __future__ import annotations
 
-from torch import Size, Tensor, nn
+from typing import Union
+
+from torch import Size
+from torch import Tensor
+from torch import nn
 
 
 class AutocastLayerNorm(nn.LayerNorm):
@@ -36,7 +40,7 @@ class ConditionalLayerNorm(nn.Module):
 
     def __init__(
         self,
-        normalized_shape: int | list | Size,
+        normalized_shape: Union[int, list, Size],
         condition_shape: int = 16,
         zero_init: bool = True,
         autocast: bool = True,
@@ -57,9 +61,7 @@ class ConditionalLayerNorm(nn.Module):
             If True, automatically cast output to match input dtype, by default True.
         """
         super().__init__()
-        self.norm = nn.LayerNorm(
-            normalized_shape, elementwise_affine=False
-        )  # no learnable parameters
+        self.norm = nn.LayerNorm(normalized_shape, elementwise_affine=False)  # no learnable parameters
         self.scale = nn.Linear(condition_shape, normalized_shape)  # , bias=False)
         self.bias = nn.Linear(condition_shape, normalized_shape)  # , bias=False)
         self.autocast = autocast

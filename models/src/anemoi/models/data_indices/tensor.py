@@ -45,31 +45,21 @@ class BaseTensorIndex:
         self.includes = sorted(includes)
         assert set(includes).issubset(
             self.name_to_index.keys(),
-        ), (
-            f"Data indexing has invalid entries {[var for var in includes if var not in self.name_to_index]}, not in dataset."
-        )
+        ), f"Data indexing has invalid entries {[var for var in includes if var not in self.name_to_index]}, not in dataset."
         self.prognostic = self._build_idx_from_list(prognostic)
         self.diagnostic = self._build_idx_from_list(diagnostic)
         self.forcing = self._build_idx_from_list(forcing)
         self.target = self._build_idx_from_list(target)
         self.full = self._build_idx_from_list(includes)
-        self.excludes = sorted(
-            list(set(self.name_to_index.keys()) - set(self.includes))
-        )
-        self.full_index_to_name = {
-            int(index): name for name, index in self.name_to_index.items()
-        }
-        self.ordered_names = [
-            self.full_index_to_name[int(index)] for index in self.full.tolist()
-        ]
-        self.name_to_position = {
-            name: position for position, name in enumerate(self.ordered_names)
-        }
+        self.excludes = sorted(list(set(self.name_to_index.keys()) - set(self.includes)))
+        self.full_index_to_name = {int(index): name for name, index in self.name_to_index.items()}
+        self.ordered_names = [self.full_index_to_name[int(index)] for index in self.full.tolist()]
+        self.name_to_position = {name: position for position, name in enumerate(self.ordered_names)}
 
     def _build_idx_from_list(self, var_list):
-        sorted_variables = torch.Tensor(
-            sorted(i for name, i in self.name_to_index.items() if name in var_list)
-        ).to(torch.int)
+        sorted_variables = torch.Tensor(sorted(i for name, i in self.name_to_index.items() if name in var_list)).to(
+            torch.int
+        )
         return sorted_variables
 
     def positions_for_names(self, names: list[str]) -> list[int]:

@@ -35,60 +35,44 @@ def input_remapper_1d():
     statistics = {}
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "d": 4, "other": 5}
     data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
-    return Remapper(
-        config=config.data.remapper, data_indices=data_indices, statistics=statistics
-    )
+    return Remapper(config=config.data.remapper, data_indices=data_indices, statistics=statistics)
 
 
 def test_monomap_transform(input_remapper_1d) -> None:
-    x = torch.Tensor(
-        [[1.0, 2.0, 3.0, 4.0, 150.0, 5.0], [6.0, 7.0, 8.0, 9.0, 201.0, 10.0]]
-    )
+    x = torch.Tensor([[1.0, 2.0, 3.0, 4.0, 150.0, 5.0], [6.0, 7.0, 8.0, 9.0, 201.0, 10.0]])
     expected_output = torch.Tensor(
         [
             [1.0, 2.0, 3.0, np.sqrt(4.0), np.log1p(150.0), 5.0],
             [6.0, 7.0, 8.0, np.sqrt(9.0), np.log1p(201.0), 10.0],
         ]
     )
-    assert torch.allclose(
-        input_remapper_1d.transform(x, in_place=False), expected_output
-    )
+    assert torch.allclose(input_remapper_1d.transform(x, in_place=False), expected_output)
     # inference mode (without prognostic variables)
     assert torch.allclose(
         input_remapper_1d.transform(
-            x[..., input_remapper_1d.data_indices.data.todict()["input"]["full"]],
-            in_place=False,
+            x[..., input_remapper_1d.data_indices.data.todict()["input"]["full"]], in_place=False
         ),
-        expected_output[
-            ..., input_remapper_1d.data_indices.data.todict()["input"]["full"]
-        ],
+        expected_output[..., input_remapper_1d.data_indices.data.todict()["input"]["full"]],
     )
     # this one actually changes the values in x so need to be last
     assert torch.allclose(input_remapper_1d.transform(x), expected_output)
 
 
 def test_monomap_inverse_transform(input_remapper_1d) -> None:
-    expected_output = torch.Tensor(
-        [[1.0, 2.0, 3.0, 4.0, 150.0, 5.0], [6.0, 7.0, 8.0, 9.0, 201.0, 10.0]]
-    )
+    expected_output = torch.Tensor([[1.0, 2.0, 3.0, 4.0, 150.0, 5.0], [6.0, 7.0, 8.0, 9.0, 201.0, 10.0]])
     y = torch.Tensor(
         [
             [1.0, 2.0, 3.0, np.sqrt(4.0), np.log1p(150.0), 5.0],
             [6.0, 7.0, 8.0, np.sqrt(9.0), np.log1p(201.0), 10.0],
         ]
     )
-    assert torch.allclose(
-        input_remapper_1d.inverse_transform(y, in_place=False), expected_output
-    )
+    assert torch.allclose(input_remapper_1d.inverse_transform(y, in_place=False), expected_output)
     # inference mode (without prognostic variables)
     assert torch.allclose(
         input_remapper_1d.inverse_transform(
-            y[..., input_remapper_1d.data_indices.data.todict()["output"]["full"]],
-            in_place=False,
+            y[..., input_remapper_1d.data_indices.data.todict()["output"]["full"]], in_place=False
         ),
-        expected_output[
-            ..., input_remapper_1d.data_indices.data.todict()["output"]["full"]
-        ],
+        expected_output[..., input_remapper_1d.data_indices.data.todict()["output"]["full"]],
     )
 
 

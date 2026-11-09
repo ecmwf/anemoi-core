@@ -12,18 +12,14 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.processors.post_process import (
-    RemoveSelfEdges,
-    RemoveUnconnectedNodes,
-    RestrictEdgeLength,
-    SubsetNodesInArea,
-)
+from anemoi.graphs.processors.post_process import RemoveSelfEdges
+from anemoi.graphs.processors.post_process import RemoveUnconnectedNodes
+from anemoi.graphs.processors.post_process import RestrictEdgeLength
+from anemoi.graphs.processors.post_process import SubsetNodesInArea
 
 
 def test_remove_unconnected_nodes(graph_with_isolated_nodes: HeteroData):
-    processor = RemoveUnconnectedNodes(
-        nodes_name="test_nodes", ignore=None, save_mask_indices_to_attr=None
-    )
+    processor = RemoveUnconnectedNodes(nodes_name="test_nodes", ignore=None, save_mask_indices_to_attr=None)
 
     graph = processor.update_graph(graph_with_isolated_nodes)
 
@@ -32,41 +28,27 @@ def test_remove_unconnected_nodes(graph_with_isolated_nodes: HeteroData):
     assert "original_indices" not in graph["test_nodes"]
 
 
-def test_remove_unconnected_nodes_with_indices_attr(
-    graph_with_isolated_nodes: HeteroData,
-):
+def test_remove_unconnected_nodes_with_indices_attr(graph_with_isolated_nodes: HeteroData):
     processor = RemoveUnconnectedNodes(
-        nodes_name="test_nodes",
-        ignore=None,
-        save_mask_indices_to_attr="original_indices",
+        nodes_name="test_nodes", ignore=None, save_mask_indices_to_attr="original_indices"
     )
 
     graph = processor.update_graph(graph_with_isolated_nodes)
 
     assert graph["test_nodes"].num_nodes == 4
     assert torch.equal(graph["test_nodes"].x, torch.tensor([[2], [3], [4], [5]]))
-    assert torch.equal(
-        graph["test_nodes", "to", "test_nodes"].edge_index,
-        torch.tensor([[1, 2, 3], [0, 1, 2]]),
-    )
-    assert torch.equal(
-        graph["test_nodes"].original_indices, torch.tensor([[1], [2], [3], [4]])
-    )
+    assert torch.equal(graph["test_nodes", "to", "test_nodes"].edge_index, torch.tensor([[1, 2, 3], [0, 1, 2]]))
+    assert torch.equal(graph["test_nodes"].original_indices, torch.tensor([[1], [2], [3], [4]]))
 
 
 def test_remove_unconnected_nodes_with_ignore(graph_with_isolated_nodes: HeteroData):
-    processor = RemoveUnconnectedNodes(
-        nodes_name="test_nodes", ignore="mask_attr", save_mask_indices_to_attr=None
-    )
+    processor = RemoveUnconnectedNodes(nodes_name="test_nodes", ignore="mask_attr", save_mask_indices_to_attr=None)
 
     graph = processor.update_graph(graph_with_isolated_nodes)
 
     assert graph["test_nodes"].num_nodes == 5
     assert torch.equal(graph["test_nodes"].x, torch.tensor([[1], [2], [3], [4], [5]]))
-    assert torch.equal(
-        graph["test_nodes", "to", "test_nodes"].edge_index,
-        torch.tensor([[2, 3, 4], [1, 2, 3]]),
-    )
+    assert torch.equal(graph["test_nodes", "to", "test_nodes"].edge_index, torch.tensor([[2, 3, 4], [1, 2, 3]]))
 
 
 @pytest.mark.parametrize(
@@ -84,9 +66,7 @@ def test_remove_unconnected_nodes_parametrized(
     save_mask_indices_to_attr: str | None,
 ):
     processor = RemoveUnconnectedNodes(
-        nodes_name=nodes_name,
-        ignore=ignore,
-        save_mask_indices_to_attr=save_mask_indices_to_attr,
+        nodes_name=nodes_name, ignore=ignore, save_mask_indices_to_attr=save_mask_indices_to_attr
     )
 
     graph = processor.update_graph(graph_with_isolated_nodes)
@@ -99,10 +79,7 @@ def test_remove_unconnected_nodes_parametrized(
         assert save_mask_indices_to_attr in graph[nodes_name]
         assert graph[nodes_name][save_mask_indices_to_attr].ndim == 2
     else:
-        assert (
-            graph[nodes_name].node_attrs()
-            == graph_with_isolated_nodes[nodes_name].node_attrs()
-        )
+        assert graph[nodes_name].node_attrs() == graph_with_isolated_nodes[nodes_name].node_attrs()
 
 
 def test_sort_edge_index_by_source_nodes(graph_nodes_and_edges: HeteroData):
@@ -150,17 +127,12 @@ def test_restrict_edge_length(graph_long_and_short_edges: HeteroData):
     expected_nodes_x = graph["test_nodes"].x
 
     short_mask = torch.tensor([1, 0, 0, 1], dtype=torch.bool)
-    expected_edge_index = graph["test_nodes", "to", "test_nodes"].edge_index[
-        :, short_mask
-    ]
+    expected_edge_index = graph["test_nodes", "to", "test_nodes"].edge_index[:, short_mask]
 
     processor = RestrictEdgeLength("test_nodes", "test_nodes", 1000)
     restricted_graph = processor.update_graph(graph)
 
-    assert torch.equal(
-        restricted_graph["test_nodes", "to", "test_nodes"].edge_index,
-        expected_edge_index,
-    )
+    assert torch.equal(restricted_graph["test_nodes", "to", "test_nodes"].edge_index, expected_edge_index)
     assert torch.equal(restricted_graph["test_nodes"].x, expected_nodes_x)
 
 
@@ -170,22 +142,12 @@ def test_restrict_edge_length_source_mask(graph_long_and_short_edges: HeteroData
     expected_nodes_x = graph["test_nodes"].x
 
     long_southern_source_mask = torch.tensor([0, 1, 0, 0], dtype=torch.bool)
-    expected_edge_index = graph["test_nodes", "to", "test_nodes"].edge_index[
-        :, ~long_southern_source_mask
-    ]
+    expected_edge_index = graph["test_nodes", "to", "test_nodes"].edge_index[:, ~long_southern_source_mask]
 
-    processor = RestrictEdgeLength(
-        "test_nodes",
-        "test_nodes",
-        1000,
-        source_mask_attr_name="southern_hemisphere_mask",
-    )
+    processor = RestrictEdgeLength("test_nodes", "test_nodes", 1000, source_mask_attr_name="southern_hemisphere_mask")
     restricted_graph = processor.update_graph(graph)
 
-    assert torch.equal(
-        restricted_graph["test_nodes", "to", "test_nodes"].edge_index,
-        expected_edge_index,
-    )
+    assert torch.equal(restricted_graph["test_nodes", "to", "test_nodes"].edge_index, expected_edge_index)
     assert torch.equal(restricted_graph["test_nodes"].x, expected_nodes_x)
 
 
@@ -195,46 +157,26 @@ def test_restrict_edge_length_target_mask(graph_long_and_short_edges: HeteroData
     expected_nodes_x = graph["test_nodes"].x
 
     long_southern_target_mask = torch.tensor([0, 0, 1, 0], dtype=torch.bool)
-    expected_edge_index = graph["test_nodes", "to", "test_nodes"].edge_index[
-        :, ~long_southern_target_mask
-    ]
+    expected_edge_index = graph["test_nodes", "to", "test_nodes"].edge_index[:, ~long_southern_target_mask]
 
-    processor = RestrictEdgeLength(
-        "test_nodes",
-        "test_nodes",
-        1000,
-        target_mask_attr_name="southern_hemisphere_mask",
-    )
+    processor = RestrictEdgeLength("test_nodes", "test_nodes", 1000, target_mask_attr_name="southern_hemisphere_mask")
     restricted_graph = processor.update_graph(graph)
 
-    assert torch.equal(
-        restricted_graph["test_nodes", "to", "test_nodes"].edge_index,
-        expected_edge_index,
-    )
+    assert torch.equal(restricted_graph["test_nodes", "to", "test_nodes"].edge_index, expected_edge_index)
     assert torch.equal(restricted_graph["test_nodes"].x, expected_nodes_x)
 
 
 def test_remove_self_edges():
     graph = HeteroData()
     graph["test_nodes"].x = torch.tensor([[0], [1], [2]])
-    graph["test_nodes", "to", "test_nodes"].edge_index = torch.tensor(
-        [[0, 1, 1, 2], [0, 0, 1, 2]]
-    )
-    graph["test_nodes", "to", "test_nodes"].edge_attr = torch.tensor(
-        [[10], [11], [12], [13]]
-    )
+    graph["test_nodes", "to", "test_nodes"].edge_index = torch.tensor([[0, 1, 1, 2], [0, 0, 1, 2]])
+    graph["test_nodes", "to", "test_nodes"].edge_attr = torch.tensor([[10], [11], [12], [13]])
 
     processor = RemoveSelfEdges("test_nodes", "test_nodes")
     processed_graph = processor.update_graph(graph)
 
-    assert torch.equal(
-        processed_graph["test_nodes", "to", "test_nodes"].edge_index,
-        torch.tensor([[1], [0]]),
-    )
-    assert torch.equal(
-        processed_graph["test_nodes", "to", "test_nodes"].edge_attr,
-        torch.tensor([[11]]),
-    )
+    assert torch.equal(processed_graph["test_nodes", "to", "test_nodes"].edge_index, torch.tensor([[1], [0]]))
+    assert torch.equal(processed_graph["test_nodes", "to", "test_nodes"].edge_attr, torch.tensor([[11]]))
 
 
 def test_subset_nodes_in_area(graph_long_and_short_edges: HeteroData):
@@ -244,6 +186,4 @@ def test_subset_nodes_in_area(graph_long_and_short_edges: HeteroData):
     # test the processor removes the nodes outside
     assert graph["test_nodes"].num_nodes == 2
     # test the processor removes the edges from/to removed nodes
-    assert torch.all(
-        graph["test_nodes", "to", "test_nodes"].edge_index == torch.tensor([[0], [1]])
-    )
+    assert torch.all(graph["test_nodes", "to", "test_nodes"].edge_index == torch.tensor([[0], [1]]))

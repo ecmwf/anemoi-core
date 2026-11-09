@@ -10,15 +10,17 @@
 
 import logging
 import time
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 
 import numpy as np
 import torch
-from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.utils import get_distributed_device, get_grid_reference_distance
+from anemoi.graphs.utils import get_distributed_device
+from anemoi.graphs.utils import get_grid_reference_distance
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -56,26 +58,18 @@ class BaseNodeBuilder(ABC):
         HeteroData
             The graph with the registered nodes.
         """
-        graph[self.name].x = self.get_coordinates().to(
-            dtype=torch.float32, device=self.device
-        )
+        graph[self.name].x = self.get_coordinates().to(dtype=torch.float32, device=self.device)
         graph[self.name].node_type = type(self).__name__
 
         if graph[self.name].num_nodes >= 2:
             # At least 2 nodes are needed to compute the grid_reference_distance
-            graph[self.name]["_grid_reference_distance"] = get_grid_reference_distance(
-                graph[self.name].x.cpu()
-            )
+            graph[self.name]["_grid_reference_distance"] = get_grid_reference_distance(graph[self.name].x.cpu())
         else:
-            LOGGER.warning(
-                f"{self.__class__.__name__} registered {graph[self.name].num_nodes} nodes."
-            )
+            LOGGER.warning(f"{self.__class__.__name__} registered {graph[self.name].num_nodes} nodes.")
 
         return graph
 
-    def register_attributes(
-        self, graph: HeteroData, config: DotDict | None = None
-    ) -> HeteroData:
+    def register_attributes(self, graph: HeteroData, config: DotDict | None = None) -> HeteroData:
         """Register attributes in the nodes of the graph specified.
 
         Parameters
@@ -94,9 +88,7 @@ class BaseNodeBuilder(ABC):
             graph[self.name][f"_{hidden_attr}"] = getattr(self, hidden_attr)
 
         for attr_name, attr_config in config.items():
-            graph[self.name][attr_name] = instantiate(attr_config).compute(
-                graph, self.name
-            )
+            graph[self.name][attr_name] = instantiate(attr_config).compute(graph, self.name)
 
         return graph
 
@@ -104,9 +96,7 @@ class BaseNodeBuilder(ABC):
     def get_coordinates(self) -> torch.Tensor: ...
 
     def reshape_coords(
-        self,
-        latitudes: np.ndarray | torch.Tensor,
-        longitudes: np.ndarray | torch.Tensor,
+        self, latitudes: np.ndarray | torch.Tensor, longitudes: np.ndarray | torch.Tensor
     ) -> torch.Tensor:
         """Reshape latitude and longitude coordinates.
 
@@ -131,9 +121,7 @@ class BaseNodeBuilder(ABC):
         coords = torch.stack([latitudes, longitudes], axis=-1).reshape((-1, 2))
         return torch.deg2rad(coords)
 
-    def update_graph(
-        self, graph: HeteroData, attrs_config: DotDict | None = None
-    ) -> HeteroData:
+    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
         """Update the graph with new nodes.
 
         Parameters
@@ -151,19 +139,11 @@ class BaseNodeBuilder(ABC):
         t0 = time.time()
         graph = self.register_nodes(graph)
         t1 = time.time()
-        LOGGER.debug(
-            "Time to register node coordinates (%s): %.2f s",
-            self.__class__.__name__,
-            t1 - t0,
-        )
+        LOGGER.debug("Time to register node coordinates (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
         t0 = time.time()
         graph = self.register_attributes(graph, attrs_config or {})
         t1 = time.time()
-        LOGGER.debug(
-            "Time to register node coordinates (%s): %.2f s",
-            self.__class__.__name__,
-            t1 - t0,
-        )
+        LOGGER.debug("Time to register node coordinates (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
         return graph

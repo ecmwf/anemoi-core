@@ -8,7 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
-from anemoi.models.data_indices.tensor import InputTensorIndex, OutputTensorIndex
+from anemoi.models.data_indices.tensor import InputTensorIndex
+from anemoi.models.data_indices.tensor import OutputTensorIndex
 
 
 class BaseIndex:
@@ -49,11 +50,7 @@ class DataIndex(BaseIndex):
         self._diagnostic = diagnostic
         self._forcing = forcing
         self._target = target
-        self._prognostic = [
-            v
-            for v in name_to_index.keys()
-            if v not in set(forcing + diagnostic + target)
-        ]
+        self._prognostic = [v for v in name_to_index.keys() if v not in set(forcing + diagnostic + target)]
         self._name_to_index = name_to_index
         self.input = InputTensorIndex(
             includes=forcing + self._prognostic,
@@ -91,11 +88,7 @@ class ModelIndex(BaseIndex):
         self._diagnostic = diagnostic
         self._forcing = forcing
         self._target = target
-        self._prognostic = [
-            v
-            for v in name_to_index_model_input.keys()
-            if v not in set(forcing + diagnostic + target)
-        ]
+        self._prognostic = [v for v in name_to_index_model_input.keys() if v not in set(forcing + diagnostic + target)]
         self._name_to_index_model_input = name_to_index_model_input
         self._name_to_index_model_output = name_to_index_model_output
         self.input = InputTensorIndex(

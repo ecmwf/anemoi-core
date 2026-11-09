@@ -12,7 +12,8 @@ import logging
 import torch
 
 from anemoi.models.layers.graph_provider import StaticGraphProvider
-from anemoi.models.migrations import CkptType, MigrationMetadata
+from anemoi.models.migrations import CkptType
+from anemoi.models.migrations import MigrationMetadata
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,9 +46,7 @@ def migrate(ckpt: CkptType, model: torch.nn.Module | None = None) -> CkptType:
     """
 
     if model is None:
-        LOGGER.info(
-            "Skipping trainable edge permutation migration because no model was provided."
-        )
+        LOGGER.info("Skipping trainable edge permutation migration because no model was provided.")
         return ckpt
 
     state_dict = ckpt.get("state_dict", {})
@@ -55,9 +54,7 @@ def migrate(ckpt: CkptType, model: torch.nn.Module | None = None) -> CkptType:
     try:
         named_modules = list(model.named_modules())
     except AttributeError:
-        LOGGER.info(
-            "Model does not support named_modules(). Skipping trainable edge permutation migration."
-        )
+        LOGGER.info("Model does not support named_modules(). Skipping trainable edge permutation migration.")
         return ckpt
 
     for provider_path, graph_provider in named_modules:
@@ -65,12 +62,8 @@ def migrate(ckpt: CkptType, model: torch.nn.Module | None = None) -> CkptType:
             continue
 
         layout_key = graph_provider._TRAINABLE_LAYOUT_VERSION_KEY
-        trainable_key = (
-            f"{provider_path}.{_TRAINABLE_KEY}" if provider_path else _TRAINABLE_KEY
-        )
-        layout_version_key = (
-            f"{provider_path}.{layout_key}" if provider_path else layout_key
-        )
+        trainable_key = f"{provider_path}.{_TRAINABLE_KEY}" if provider_path else _TRAINABLE_KEY
+        layout_version_key = f"{provider_path}.{layout_key}" if provider_path else layout_key
         layout_version = state_dict.get(layout_version_key, 0)
         if isinstance(layout_version, torch.Tensor):
             layout_version = int(layout_version.item())
@@ -80,9 +73,7 @@ def migrate(ckpt: CkptType, model: torch.nn.Module | None = None) -> CkptType:
         if layout_version < graph_provider._TRAINABLE_LAYOUT_VERSION:
             trainable = state_dict.get(trainable_key, None)
             if trainable is None:
-                state_dict[layout_version_key] = (
-                    graph_provider.trainable_layout_version.clone()
-                )
+                state_dict[layout_version_key] = graph_provider.trainable_layout_version.clone()
                 continue
 
             if trainable.shape[0] != graph_provider.perm.shape[0]:
@@ -94,12 +85,8 @@ def migrate(ckpt: CkptType, model: torch.nn.Module | None = None) -> CkptType:
                     graph_provider.perm.shape[0],
                 )
             else:
-                LOGGER.info(
-                    "Permuting legacy trainable edge parameters for %s", provider_path
-                )
-                state_dict[trainable_key] = trainable.index_select(
-                    0, graph_provider.perm.to(device=trainable.device)
-                )
+                LOGGER.info("Permuting legacy trainable edge parameters for %s", provider_path)
+                state_dict[trainable_key] = trainable.index_select(0, graph_provider.perm.to(device=trainable.device))
 
         state_dict[layout_version_key] = graph_provider.trainable_layout_version.clone()
 

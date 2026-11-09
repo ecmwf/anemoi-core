@@ -134,6 +134,7 @@ class AdEMAMix(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
+
             lr = group["lr"]
             lmbda = group["weight_decay"]
             eps = group["eps"]

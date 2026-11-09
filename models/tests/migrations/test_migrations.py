@@ -13,13 +13,11 @@ from pathlib import Path
 import pytest
 import torch
 
-from anemoi.models.migrations import (
-    CkptType,
-    IncompatibleCheckpointException,
-    MigrationOp,
-    Migrator,
-    SaveCkpt,
-)
+from anemoi.models.migrations import CkptType
+from anemoi.models.migrations import IncompatibleCheckpointException
+from anemoi.models.migrations import MigrationOp
+from anemoi.models.migrations import Migrator
+from anemoi.models.migrations import SaveCkpt
 
 
 def test_run_all_migrations(old_migrator: Migrator, empty_ckpt: Path):
@@ -43,10 +41,7 @@ def rollback_fn_extra_migration(ckpt: CkptType) -> CkptType:
 def test_extra_migration(old_migrator: Migrator, save_ckpt: SaveCkpt):
     dummy_model = save_ckpt(
         {"foo": "foo"},
-        migrations=[
-            {"name": "1750840837_add_foo"},
-            {"name": "dummy", "rollback": rollback_fn_extra_migration},
-        ],
+        migrations=[{"name": "1750840837_add_foo"}, {"name": "dummy", "rollback": rollback_fn_extra_migration}],
     )
 
     with pytest.raises(IncompatibleCheckpointException):

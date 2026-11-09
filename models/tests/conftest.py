@@ -39,17 +39,13 @@ def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
     return None
 
 
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item]
-) -> None:
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     if not config.getoption("--distributed"):
         _skip_distributed_tests(items)
 
 
 def _skip_distributed_tests(items: list[pytest.Item]) -> None:
-    skip_distributed = pytest.mark.skip(
-        reason="Skipping distributed tests, use --distributed to enable"
-    )
+    skip_distributed = pytest.mark.skip(reason="Skipping distributed tests, use --distributed to enable")
     for item in items:
         if item.get_closest_marker("distributed"):
             item.add_marker(skip_distributed)

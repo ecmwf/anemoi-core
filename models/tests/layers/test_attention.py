@@ -14,15 +14,15 @@ import hypothesis.strategies as st
 import psutil
 import pytest
 import torch
-from hypothesis import given, settings
-from torch import nn
+import torch.nn as nn
+from hypothesis import given
+from hypothesis import settings
 
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, GraphShardInfo
-from anemoi.models.layers.attention import (
-    MultiHeadCrossAttention,
-    MultiHeadSelfAttention,
-    PointwiseMultiHeadCrossAttention,
-)
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.layers.attention import MultiHeadCrossAttention
+from anemoi.models.layers.attention import MultiHeadSelfAttention
+from anemoi.models.layers.attention import PointwiseMultiHeadCrossAttention
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.triton.utils import is_triton_available
 
@@ -32,19 +32,10 @@ def layer_kernels():
     return load_layer_kernels()
 
 
-def test_pointwise_cross_attention_weights_sources_and_disables_dropout_in_eval(
-    layer_kernels,
-):
-    attention = PointwiseMultiHeadCrossAttention(
-        num_heads=1, embed_dim=2, layer_kernels=layer_kernels, dropout_p=1.0
-    )
+def test_pointwise_cross_attention_weights_sources_and_disables_dropout_in_eval(layer_kernels):
+    attention = PointwiseMultiHeadCrossAttention(num_heads=1, embed_dim=2, layer_kernels=layer_kernels, dropout_p=1.0)
     with torch.no_grad():
-        for linear in (
-            attention.lin_q,
-            attention.lin_k,
-            attention.lin_v,
-            attention.projection,
-        ):
+        for linear in (attention.lin_q, attention.lin_k, attention.lin_v, attention.projection):
             linear.weight.copy_(torch.eye(2))
         attention.projection.bias.zero_()
 
@@ -55,9 +46,7 @@ def test_pointwise_cross_attention_weights_sources_and_disables_dropout_in_eval(
     torch.testing.assert_close(attention(query, key, value), torch.zeros(2, 2))
     attention.eval()
     # The first node has source weights (3/4, 1/4); the second has (1/2, 1/2).
-    torch.testing.assert_close(
-        attention(query, key, value), torch.tensor([[1.5, 1.0], [3.0, 4.0]])
-    )
+    torch.testing.assert_close(attention(query, key, value), torch.tensor([[1.5, 1.0], [3.0, 4.0]]))
 
 
 @given(
@@ -68,12 +57,7 @@ def test_pointwise_cross_attention_weights_sources_and_disables_dropout_in_eval(
     attention_implementation=st.sampled_from(["scaled_dot_product_attention"]),
 )
 def test_multi_head_self_attention_init(
-    num_heads,
-    embed_dim_multiplier,
-    dropout_p,
-    attention_module,
-    attention_implementation,
-    layer_kernels,
+    num_heads, embed_dim_multiplier, dropout_p, attention_module, attention_implementation, layer_kernels
 ):
     embed_dim = num_heads * embed_dim_multiplier
 
@@ -96,12 +80,8 @@ def test_multi_head_self_attention_init(
     assert mhsa.k_norm.bias is None
 
 
-@pytest.mark.parametrize(
-    "attention_module", [MultiHeadSelfAttention, MultiHeadCrossAttention]
-)
-def test_attention_raises_when_embed_dim_not_divisible_by_num_heads(
-    attention_module, layer_kernels
-):
+@pytest.mark.parametrize("attention_module", [MultiHeadSelfAttention, MultiHeadCrossAttention])
+def test_attention_raises_when_embed_dim_not_divisible_by_num_heads(attention_module, layer_kernels):
     with pytest.raises(ValueError, match="must be divisible by number of heads"):
         attention_module(
             num_heads=3,
@@ -111,9 +91,7 @@ def test_attention_raises_when_embed_dim_not_divisible_by_num_heads(
         )
 
 
-requires_triton = pytest.mark.skipif(
-    not is_triton_available(), reason="Triton and a GPU are needed"
-)
+requires_triton = pytest.mark.skipif(not is_triton_available(), reason="Triton and a GPU are needed")
 
 
 @pytest.mark.parametrize(
@@ -124,17 +102,11 @@ requires_triton = pytest.mark.skipif(
         ("scaled_dot_product_attention", {"use_rotary_embeddings": True}),
         pytest.param("triton_attention", {"dropout_p": 0.1}, marks=requires_triton),
         pytest.param("triton_attention", {"softcap": 0.5}, marks=requires_triton),
-        pytest.param(
-            "triton_attention", {"use_alibi_slopes": True}, marks=requires_triton
-        ),
-        pytest.param(
-            "triton_attention", {"use_rotary_embeddings": True}, marks=requires_triton
-        ),
+        pytest.param("triton_attention", {"use_alibi_slopes": True}, marks=requires_triton),
+        pytest.param("triton_attention", {"use_rotary_embeddings": True}, marks=requires_triton),
     ],
 )
-@pytest.mark.parametrize(
-    "attention_module", [MultiHeadSelfAttention, MultiHeadCrossAttention]
-)
+@pytest.mark.parametrize("attention_module", [MultiHeadSelfAttention, MultiHeadCrossAttention])
 def test_attention_rejects_unsupported_options_when_built(
     attention_module, attention_implementation, option, layer_kernels
 ):
@@ -157,9 +129,7 @@ def test_attention_rejects_unsupported_options_when_built(
     dropout_p=st.floats(min_value=0.0, max_value=1.0),
 )
 @settings(deadline=None)
-def test_multi_head_self_attention_forward_sdpa(
-    batch_size, num_heads, embed_dim_multiplier, dropout_p, layer_kernels
-):
+def test_multi_head_self_attention_forward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p, layer_kernels):
     embed_dim = num_heads * embed_dim_multiplier
 
     mhsa = MultiHeadSelfAttention(
@@ -185,9 +155,7 @@ def test_multi_head_self_attention_forward_sdpa(
     dropout_p=st.floats(min_value=0.0, max_value=1.0),
 )
 @settings(deadline=None)
-def test_multi_head_self_attention_backward_sdpa(
-    batch_size, num_heads, embed_dim_multiplier, dropout_p, layer_kernels
-):
+def test_multi_head_self_attention_backward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p, layer_kernels):
     embed_dim = num_heads * embed_dim_multiplier
 
     mhsa = MultiHeadSelfAttention(
@@ -218,9 +186,7 @@ def test_multi_head_self_attention_backward_sdpa(
     dropout_p=st.floats(min_value=0.0, max_value=1.0),
 )
 @settings(deadline=None)
-def test_multi_head_cross_attention_forward_sdpa(
-    batch_size, num_heads, embed_dim_multiplier, dropout_p
-):
+def test_multi_head_cross_attention_forward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
     embed_dim = num_heads * embed_dim_multiplier
 
     layer_kernels = load_layer_kernels(kernel_config={})
@@ -247,9 +213,7 @@ def test_multi_head_cross_attention_forward_sdpa(
     dropout_p=st.floats(min_value=0.0, max_value=1.0),
 )
 @settings(deadline=None)
-def test_multi_head_cross_attention_backward_sdpa(
-    batch_size, num_heads, embed_dim_multiplier, dropout_p
-):
+def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_dim_multiplier, dropout_p):
     embed_dim = num_heads * embed_dim_multiplier
 
     layer_kernels = load_layer_kernels(kernel_config={})
@@ -298,16 +262,10 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels, re
     shard_info = GraphShardInfo(nodes=[grid])
     output = mhsa.forward(x, shard_info, batch_size)
     if device == "cuda":
-        peak_alloc_memory_after_sliding_window_mb = (
-            torch.cuda.max_memory_allocated() / (1024**2)
-        )
+        peak_alloc_memory_after_sliding_window_mb = torch.cuda.max_memory_allocated() / (1024**2)
     else:
-        peak_alloc_memory_after_sliding_window_mb = (
-            psutil.Process().memory_info().rss / (1024**2)
-        )  # RSS size in MB
-    print(
-        f"Peak memory allocated during sliding window attention: {peak_alloc_memory_after_sliding_window_mb:.2f} MB"
-    )
+        peak_alloc_memory_after_sliding_window_mb = psutil.Process().memory_info().rss / (1024**2)  # RSS size in MB
+    print(f"Peak memory allocated during sliding window attention: {peak_alloc_memory_after_sliding_window_mb:.2f} MB")
 
     # Output shape must match input shape
     assert output.shape == x.shape
@@ -325,21 +283,15 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels, re
     output_global = mhsa_global.forward(x, shard_info, batch_size)
 
     if device == "cuda":
-        peak_alloc_memory_after_global_mb = torch.cuda.max_memory_allocated() / (
-            1024**2
-        )
+        peak_alloc_memory_after_global_mb = torch.cuda.max_memory_allocated() / (1024**2)
     else:
-        peak_alloc_memory_after_global_mb = psutil.Process().memory_info().rss / (
-            1024**2
-        )  # RSS size in MB
-    print(
-        f"Peak memory allocated during global attention: {peak_alloc_memory_after_global_mb:.2f} MB"
-    )
+        peak_alloc_memory_after_global_mb = psutil.Process().memory_info().rss / (1024**2)  # RSS size in MB
+    print(f"Peak memory allocated during global attention: {peak_alloc_memory_after_global_mb:.2f} MB")
 
     # With a small window on a 16-token sequence, outputs should differ
-    assert not torch.allclose(output, output_global, atol=1e-5), (
-        "Sliding window output should differ from global attention output"
-    )
+    assert not torch.allclose(
+        output, output_global, atol=1e-5
+    ), "Sliding window output should differ from global attention output"
 
     # Memory usage using sliding window should not be greater then using global attention
     # Since flex_attentions block mask funciton is used to handle the sliding window,

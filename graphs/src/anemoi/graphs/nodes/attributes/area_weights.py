@@ -9,14 +9,19 @@
 
 
 import logging
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 
 import numpy as np
 import torch
-from anemoi.datasets import open_dataset
-from scipy.spatial import ConvexHull, QhullError, SphericalVoronoi, Voronoi, cKDTree
+from scipy.spatial import ConvexHull
+from scipy.spatial import QhullError
+from scipy.spatial import SphericalVoronoi
+from scipy.spatial import Voronoi
+from scipy.spatial import cKDTree
 from torch_geometric.data.storage import NodeStorage
 
+from anemoi.datasets import open_dataset
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
@@ -111,9 +116,7 @@ class PlanarAreaWeights(BaseAreaWeights):
 
         counts = np.bincount(owner, minlength=len(points))
         starts = np.concatenate([[0], np.cumsum(counts)[:-1]])
-        median = np.full(
-            len(points), np.inf
-        )  # a point without neighbours trusts nothing
+        median = np.full(len(points), np.inf)  # a point without neighbours trusts nothing
         occupied = counts > 0
         lower = distance[starts[occupied] + (counts[occupied] - 1) // 2]
         upper = distance[starts[occupied] + counts[occupied] // 2]
@@ -121,9 +124,7 @@ class PlanarAreaWeights(BaseAreaWeights):
         return median
 
     @staticmethod
-    def _flatten_regions(
-        v: Voronoi, point_indices: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def _flatten_regions(v: Voronoi, point_indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Vertex indices of the given points' regions, flattened, with each region's length."""
         region_indices = v.point_region[point_indices]
         regions = [v.regions[idx] if idx >= 0 else [] for idx in region_indices]
@@ -173,9 +174,9 @@ class PlanarAreaWeights(BaseAreaWeights):
         lengths, flat = PlanarAreaWeights._flatten_regions(v, point_indices)
 
         # Regions must be bounded polygons (>= 3 vertices); trusted cells all are.
-        assert n_points == 0 or lengths.min() >= 3, (
-            "Voronoi regions must be bounded polygons with >= 3 vertices (were untrusted cells passed?)."
-        )
+        assert (
+            n_points == 0 or lengths.min() >= 3
+        ), "Voronoi regions must be bounded polygons with >= 3 vertices (were untrusted cells passed?)."
 
         # Per-region offsets and a wrap-around "next vertex" index.
         starts = np.zeros(n_points, dtype=np.intp)
@@ -287,16 +288,14 @@ class MaskedPlanarAreaWeights(PlanarAreaWeights):
         dtype: str = "float32",
     ) -> None:
         super().__init__(norm, dtype)
-        assert isinstance(mask_node_attr_name, str), (
-            f"{self.__class__.__name__} requires a string for 'mask_node_attr_name' variable."
-        )
+        assert isinstance(
+            mask_node_attr_name, str
+        ), f"{self.__class__.__name__} requires a string for 'mask_node_attr_name' variable."
         self.mask_node_attr_name = mask_node_attr_name
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         """Compute the weights over the masked nodes tessellated on their own, and zero elsewhere."""
-        assert self.mask_node_attr_name in nodes, (
-            f"Node attribute '{self.mask_node_attr_name}' not found in nodes."
-        )
+        assert self.mask_node_attr_name in nodes, f"Node attribute '{self.mask_node_attr_name}' not found in nodes."
         mask = nodes[self.mask_node_attr_name].squeeze()
         selected = mask.cpu().numpy() != 0
         latlons = self.get_latlon_coordinates(nodes).cpu().numpy()
@@ -338,12 +337,12 @@ class SphericalAreaWeights(BaseAreaWeights):
         fill_value: float = 0.0,
         dtype: str = "float32",
     ) -> None:
-        assert isinstance(fill_value, float) or isinstance(fill_value, int), (
-            f"fill_value must be float or nan but it is {type(fill_value)}"
-        )
-        assert (isinstance(radius, float) or isinstance(radius, int)) and radius > 0, (
-            f"radius must be a positive value, but radius={radius}"
-        )
+        assert isinstance(fill_value, float) or isinstance(
+            fill_value, int
+        ), f"fill_value must be float or nan but it is {type(fill_value)}"
+        assert (
+            isinstance(radius, float) or isinstance(radius, int)
+        ) and radius > 0, f"radius must be a positive value, but radius={radius}"
         super().__init__(norm, dtype)
         self.radius = radius
         self.centre = centre
@@ -493,9 +492,7 @@ class AnemoiDatasetVariableWeights(BaseNodeAttribute):
         Extract the data and convert it to a Torch tensor object.
     """
 
-    def __init__(
-        self, variable: str, norm: str | None = None, dtype: str = "float32"
-    ) -> None:
+    def __init__(self, variable: str, norm: str | None = None, dtype: str = "float32") -> None:
         super().__init__(norm, dtype)
         self.variable = variable
 

@@ -66,14 +66,10 @@ class HEALPixNodes(BaseNodeBuilder):
         import healpy as hp
 
         spatial_res_degrees = hp.nside2resol(2**self.resolution, arcmin=True) / 60
-        LOGGER.info(
-            f"Creating HEALPix nodes with resolution {spatial_res_degrees:.2} deg."
-        )
+        LOGGER.info(f"Creating HEALPix nodes with resolution {spatial_res_degrees:.2} deg.")
 
         npix = hp.nside2npix(2**self.resolution)
-        hpxlon, hpxlat = hp.pix2ang(
-            2**self.resolution, range(npix), nest=self.nest_ordering, lonlat=True
-        )
+        hpxlon, hpxlat = hp.pix2ang(2**self.resolution, range(npix), nest=self.nest_ordering, lonlat=True)
 
         return self.reshape_coords(hpxlat, hpxlon)
 
@@ -90,9 +86,7 @@ class LimitedAreaHEALPixNodes(HEALPixNodes):
         margin_radius_km: float = 100.0,
     ) -> None:
         super().__init__(resolution, name)
-        self.area_mask_builder = AreaMaskBuilder(
-            reference_node_name, margin_radius_km, mask_attr_name
-        )
+        self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
     def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)
@@ -108,11 +102,7 @@ class LimitedAreaHEALPixNodes(HEALPixNodes):
         )
         area_mask = self.area_mask_builder.get_mask(coords)
 
-        LOGGER.info(
-            'Masking out %d nodes from "%s".',
-            len(area_mask) - area_mask.sum(),
-            self.name,
-        )
+        LOGGER.info('Masking out %d nodes from "%s".', len(area_mask) - area_mask.sum(), self.name)
         coords = coords[area_mask]
 
         return coords

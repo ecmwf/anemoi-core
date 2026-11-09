@@ -86,9 +86,9 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         torch.Tensor
             Accumulated loss across all aggregation types.
         """
-        assert pred.shape[1] > 1, (
-            "TimeAggregateLossWrapper requires an output time dimension of size > 1 for aggregation."
-        )
+        assert (
+            pred.shape[1] > 1
+        ), "TimeAggregateLossWrapper requires an output time dimension of size > 1 for aggregation."
         loss = torch.tensor(0.0, dtype=pred.dtype, device=pred.device, requires_grad=False)
 
         # Exclude the TIME scaler from inner loss calls since we iterate per-step

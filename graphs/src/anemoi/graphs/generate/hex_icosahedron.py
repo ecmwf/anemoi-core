@@ -57,9 +57,7 @@ def create_hex_nodes(
     return graph, coords_rad, list(node_ordering)
 
 
-def create_nx_graph_from_hex_coords(
-    nodes: list[str], node_ordering: np.ndarray
-) -> nx.Graph:
+def create_nx_graph_from_hex_coords(nodes: list[str], node_ordering: np.ndarray) -> nx.Graph:
     """Add all nodes at a specified refinement level to a graph.
 
     Parameters
@@ -183,14 +181,12 @@ def add_edges_to_children(
     elif depth_children == 0:
         return graph
 
-    for i_level, resolution_parent in enumerate(sorted(refinement_levels)[0:-1]):
+    for i_level, resolution_parent in enumerate(list(sorted(refinement_levels))[0:-1]):
         parent_nodes = select_nodes_from_graph_at_resolution(graph, resolution_parent)
 
         for parent_idx in parent_nodes:
             # add own children
-            for resolution_child in refinement_levels[
-                i_level + 1 : i_level + depth_children + 1
-            ]:
+            for resolution_child in refinement_levels[i_level + 1 : i_level + depth_children + 1]:
                 for child_idx in h3.h3_to_children(parent_idx, res=resolution_child):
                     graph = add_edge(
                         graph,
@@ -203,9 +199,7 @@ def add_edges_to_children(
 
 def select_nodes_from_graph_at_resolution(graph: nx.Graph, resolution: int) -> set[str]:
     """Select nodes from a graph at a specified resolution level."""
-    nodes_at_lower_resolution = [
-        n for n in h3.compact_cells(graph.nodes) if h3.get_resolution(n) <= resolution
-    ]
+    nodes_at_lower_resolution = [n for n in h3.compact_cells(graph.nodes) if h3.get_resolution(n) <= resolution]
     nodes_at_resolution = h3.uncompact_cells(nodes_at_lower_resolution, resolution)
     return nodes_at_resolution
 

@@ -9,7 +9,8 @@
 
 """Halo metadata unit tests with mocked process groups and communication."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
+from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
@@ -175,10 +176,7 @@ def _make_graph(case: str) -> tuple[GraphPartition, torch.Tensor]:
     edge_index = torch.tensor(sorted(edges, key=lambda edge: edge[1]), dtype=torch.long)
     edge_index = edge_index.reshape(-1, 2).T.contiguous()
     dst_owners = _owners(dst_splits)
-    edge_splits = [
-        sum(dst_owners[dst] == rank for _, dst in edges)
-        for rank in range(len(dst_splits))
-    ]
+    edge_splits = [sum(dst_owners[dst] == rank for _, dst in edges) for rank in range(len(dst_splits))]
     partition = GraphPartition(
         num_nodes=(sum(src_splits), sum(dst_splits)),
         num_edges=len(edges),
@@ -191,9 +189,7 @@ def _make_graph(case: str) -> tuple[GraphPartition, torch.Tensor]:
 
 
 @pytest.fixture(params=GRAPH_HALO_REFERENCES)
-def collective_halo_case(
-    request: pytest.FixtureRequest,
-) -> tuple[GraphPartition, torch.Tensor, _GraphHaloReference]:
+def collective_halo_case(request: pytest.FixtureRequest) -> tuple[GraphPartition, torch.Tensor, _GraphHaloReference]:
     """Prepare a graph's partition, full CPU edges, and reference metadata."""
     partition, edge_index = _make_graph(request.param)
     return partition, edge_index, GRAPH_HALO_REFERENCES[request.param]
@@ -203,28 +199,17 @@ def _owners(splits: list[int]) -> list[int]:
     return [rank for rank, size in enumerate(splits) for _ in range(size)]
 
 
-def _remote_nodes(
-    partition: GraphPartition, edge_index: torch.Tensor, sender: int, receiver: int
-) -> list[int]:
+def _remote_nodes(partition: GraphPartition, edge_index: torch.Tensor, sender: int, receiver: int) -> list[int]:
     """Sorted global IDs of the sender's source nodes that have an edge to one of the receiver's destination nodes."""
     if sender == receiver:
         return []
-    src_owners, dst_owners = (
-        _owners(partition.src_splits),
-        _owners(partition.dst_splits),
-    )
+    src_owners, dst_owners = _owners(partition.src_splits), _owners(partition.dst_splits)
     return sorted(
-        {
-            src
-            for src, dst in edge_index.T.tolist()
-            if src_owners[src] == sender and dst_owners[dst] == receiver
-        }
+        {src for src, dst in edge_index.T.tolist() if src_owners[src] == sender and dst_owners[dst] == receiver}
     )
 
 
-def _fake_request_send_nodes(
-    partition: GraphPartition, edge_index: torch.Tensor, rank: int, requests: list
-) -> Mock:
+def _fake_request_send_nodes(partition: GraphPartition, edge_index: torch.Tensor, rank: int, requests: list) -> Mock:
     """Stand-in for the all-to-all: records this rank's requests and answers with what the peers would ask for."""
 
     def request(recv_nodes_by_rank, model_comm_group):
@@ -237,31 +222,18 @@ def _fake_request_send_nodes(
     return Mock(side_effect=request)
 
 
-def _assert_halo_info(
-    info: halo.HaloInfo, partition: GraphPartition, edge_index: torch.Tensor, rank: int
-) -> None:
+def _assert_halo_info(info: halo.HaloInfo, partition: GraphPartition, edge_index: torch.Tensor, rank: int) -> None:
     """Check exact metadata against a reference built from node ownership."""
-    src_owners, dst_owners = (
-        _owners(partition.src_splits),
-        _owners(partition.dst_splits),
-    )
+    src_owners, dst_owners = _owners(partition.src_splits), _owners(partition.dst_splits)
     local_src_ids = [node for node, owner in enumerate(src_owners) if owner == rank]
     local_dst_ids = [node for node, owner in enumerate(dst_owners) if owner == rank]
-    expected_recv = [
-        _remote_nodes(partition, edge_index, peer, rank)
-        for peer in range(partition.num_parts)
-    ]
-    expected_send = [
-        _remote_nodes(partition, edge_index, rank, peer)
-        for peer in range(partition.num_parts)
-    ]
+    expected_recv = [_remote_nodes(partition, edge_index, peer, rank) for peer in range(partition.num_parts)]
+    expected_send = [_remote_nodes(partition, edge_index, rank, peer) for peer in range(partition.num_parts)]
     halo_ids = [node for peer_nodes in expected_recv for node in peer_nodes]
     src_to_local = {node: index for index, node in enumerate(local_src_ids + halo_ids)}
     dst_to_local = {node: index for index, node in enumerate(local_dst_ids)}
     expected_edges = [
-        (src_to_local[src], dst_to_local[dst])
-        for src, dst in edge_index.T.tolist()
-        if dst_owners[dst] == rank
+        (src_to_local[src], dst_to_local[dst]) for src, dst in edge_index.T.tolist() if dst_owners[dst] == rank
     ]
     expected_edge_index = edge_index.new_tensor(expected_edges).reshape(-1, 2).T
 
@@ -273,9 +245,7 @@ def _assert_halo_info(
     assert info.send_counts == tuple(map(len, expected_send))
     assert len(info.send_indices) == partition.num_parts
     for actual, nodes in zip(info.send_indices, expected_send):
-        torch.testing.assert_close(
-            actual, edge_index.new_tensor([src_to_local[node] for node in nodes])
-        )
+        torch.testing.assert_close(actual, edge_index.new_tensor([src_to_local[node] for node in nodes]))
     torch.testing.assert_close(info.edge_index_local, expected_edge_index)
 
 
@@ -289,9 +259,7 @@ def _mock_group(monkeypatch: pytest.MonkeyPatch, size: int, rank: int) -> Mock:
 @pytest.mark.parametrize("case", GRAPH_CASES)
 @pytest.mark.parametrize("sharded", [False, True])
 @pytest.mark.parametrize("debug", [False, True])
-def test_build_halo_info(
-    case: str, sharded: bool, debug: bool, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_build_halo_info(case: str, sharded: bool, debug: bool, monkeypatch: pytest.MonkeyPatch) -> None:
     partition, edge_index = _make_graph(case)
     original_edges = edge_index.clone()
     for rank in range(partition.num_parts):
@@ -302,9 +270,7 @@ def test_build_halo_info(
         requests = []
         monkeypatch.setattr(halo, "shard_tensor", shard)
         monkeypatch.setattr(
-            halo,
-            "_request_send_nodes",
-            _fake_request_send_nodes(partition, edge_index, rank, requests),
+            halo, "_request_send_nodes", _fake_request_send_nodes(partition, edge_index, rank, requests)
         )
         info = halo.build_halo_info(
             partition,
@@ -316,10 +282,7 @@ def test_build_halo_info(
         _assert_halo_info(info, partition, edge_index, rank)
         (sent_requests,) = requests
         for peer, actual in enumerate(sent_requests):
-            torch.testing.assert_close(
-                actual,
-                edge_index.new_tensor(_remote_nodes(partition, edge_index, peer, rank)),
-            )
+            torch.testing.assert_close(actual, edge_index.new_tensor(_remote_nodes(partition, edge_index, peer, rank)))
         torch.testing.assert_close(edge_index, original_edges)
         torch.testing.assert_close(local_edges, original_local_edges)
         if sharded:
@@ -331,24 +294,18 @@ def test_build_halo_info(
 def test_partition_must_match_group_size(monkeypatch: pytest.MonkeyPatch) -> None:
     partition, edge_index = _make_graph("directed")
     group = _mock_group(monkeypatch, partition.num_parts + 1, 0)
-    with pytest.raises(
-        ValueError, match=r"Partition num_parts \(3\) != comm group size \(4\)"
-    ):
+    with pytest.raises(ValueError, match=r"Partition num_parts \(3\) != comm group size \(4\)"):
         halo.build_halo_info(partition, edge_index, group)
 
 
 def test_requires_sharded_source_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     partition, edge_index = _make_graph("directed")
     group = _mock_group(monkeypatch, partition.num_parts, 0)
-    with pytest.raises(
-        ValueError, match=r"sharded source nodes \(partition.src_splits is None\)"
-    ):
+    with pytest.raises(ValueError, match=r"sharded source nodes \(partition.src_splits is None\)"):
         halo.build_halo_info(replace(partition, src_splits=None), edge_index, group)
 
 
-def test_debug_rejects_edges_to_other_ranks_nodes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_debug_rejects_edges_to_other_ranks_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     partition, edge_index = _make_graph("directed")
     group = _mock_group(monkeypatch, partition.num_parts, 0)
     request = _fake_request_send_nodes(partition, edge_index, 0, [])
@@ -356,32 +313,18 @@ def test_debug_rejects_edges_to_other_ranks_nodes(
     # Rank 0 owns destinations 0 and 1; node 2 belongs to rank 1.
     foreign_edges = edge_index.new_tensor([[0], [2]])
     with pytest.raises(AssertionError, match="destination nodes"):
-        halo.build_halo_info(
-            partition, foreign_edges, group, edge_shard_sizes=[1, 0, 0], debug=True
-        )
+        halo.build_halo_info(partition, foreign_edges, group, edge_shard_sizes=[1, 0, 0], debug=True)
 
 
-def test_debug_rejects_requests_for_nodes_owned_elsewhere(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_debug_rejects_requests_for_nodes_owned_elsewhere(monkeypatch: pytest.MonkeyPatch) -> None:
     partition, edge_index = _make_graph("directed")
     group = _mock_group(monkeypatch, partition.num_parts, 0)
     # Rank 0 owns sources 0 and 1; rank 1 asks it for node 3.
-    requested = (
-        edge_index.new_tensor([]),
-        edge_index.new_tensor([3]),
-        edge_index.new_tensor([]),
-    )
+    requested = (edge_index.new_tensor([]), edge_index.new_tensor([3]), edge_index.new_tensor([]))
     monkeypatch.setattr(halo, "_request_send_nodes", Mock(return_value=requested))
     local_edges = edge_index.split(partition.edge_splits, dim=1)[0]
     with pytest.raises(AssertionError, match="does not own"):
-        halo.build_halo_info(
-            partition,
-            local_edges,
-            group,
-            edge_shard_sizes=partition.edge_splits,
-            debug=True,
-        )
+        halo.build_halo_info(partition, local_edges, group, edge_shard_sizes=partition.edge_splits, debug=True)
 
 
 def _test_build_halo_info_collective_rank(
@@ -416,9 +359,7 @@ def _test_build_halo_info_collective_rank(
 
     if pre_sharded:
         edge_start = sum(edge_splits[:rank])
-        input_edges = edge_index[
-            :, edge_start : edge_start + edge_splits[rank]
-        ].contiguous()
+        input_edges = edge_index[:, edge_start : edge_start + edge_splits[rank]].contiguous()
         edge_shard_sizes = partition.edge_splits
     else:
         input_edges = edge_index
@@ -433,21 +374,11 @@ def _test_build_halo_info_collective_rank(
         debug=debug,
     )
 
-    base_send_indices = (
-        expected.send_indices_by_rank[rank] if rank < case_world_size else ()
-    )
-    expected_send_indices = base_send_indices + ((),) * (
-        world_size - len(base_send_indices)
-    )
-    base_recv_counts = (
-        expected.recv_counts_by_rank[rank] if rank < case_world_size else ()
-    )
-    expected_recv_counts = base_recv_counts + (0,) * (
-        world_size - len(base_recv_counts)
-    )
-    expected_edge_rows = (
-        expected.local_edge_rows_by_rank[rank] if rank < case_world_size else ((), ())
-    )
+    base_send_indices = expected.send_indices_by_rank[rank] if rank < case_world_size else ()
+    expected_send_indices = base_send_indices + ((),) * (world_size - len(base_send_indices))
+    base_recv_counts = expected.recv_counts_by_rank[rank] if rank < case_world_size else ()
+    expected_recv_counts = base_recv_counts + (0,) * (world_size - len(base_recv_counts))
+    expected_edge_rows = expected.local_edge_rows_by_rank[rank] if rank < case_world_size else ((), ())
     expected_edges = torch.tensor(expected_edge_rows, dtype=torch.long, device=device)
 
     assert info.num_local_src_nodes == src_splits[rank]

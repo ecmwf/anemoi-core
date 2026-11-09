@@ -11,7 +11,8 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import SphericalAreaWeights, UniformWeights
+from anemoi.graphs.nodes.attributes import SphericalAreaWeights
+from anemoi.graphs.nodes.attributes import UniformWeights
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 from anemoi.graphs.nodes.builders.from_reduced_gaussian import ReducedGaussianGridNodes
 
@@ -57,11 +58,7 @@ def test_register_nodes(grid: str):
 def test_register_attributes(graph_with_nodes: HeteroData, attr_class, grid: str):
     """Test ReducedGaussianGridNodes register correctly the weights."""
     node_builder = ReducedGaussianGridNodes(grid, "test_nodes")
-    config = {
-        "test_attr": {
-            "_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"
-        }
-    }
+    config = {"test_attr": {"_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"}}
 
     graph = node_builder.register_attributes(graph_with_nodes, config)
 

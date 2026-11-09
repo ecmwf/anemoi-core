@@ -12,10 +12,10 @@ from itertools import chain
 from pathlib import Path
 
 import torch
-from anemoi.utils.humanize import bytes
-from anemoi.utils.text import table
 
 from anemoi.graphs.utils import load_graph_from_file
+from anemoi.utils.humanize import bytes
+from anemoi.utils.text import table
 
 
 class GraphDescriptor:
@@ -63,11 +63,7 @@ class GraphDescriptor:
                     name,
                     nodes.num_nodes,
                     ", ".join(attributes),
-                    sum(
-                        nodes[attr].shape[1]
-                        for attr in attributes
-                        if isinstance(nodes[attr], torch.Tensor)
-                    ),
+                    sum(nodes[attr].shape[1] for attr in attributes if isinstance(nodes[attr], torch.Tensor)),
                     nodes.x[:, 0].min().item() / 2 / math.pi * 360,
                     nodes.x[:, 0].max().item() / 2 / math.pi * 360,
                     nodes.x[:, 1].min().item() / 2 / math.pi * 360,
@@ -99,37 +95,23 @@ class GraphDescriptor:
             attributes.remove("edge_index")
 
             # Compute edge counts per target node
-            target_edge_counts = torch.bincount(
-                edges.edge_index[1], minlength=self.graph[dst_name].num_nodes
-            )
+            target_edge_counts = torch.bincount(edges.edge_index[1], minlength=self.graph[dst_name].num_nodes)
             # Only consider nodes that have at least one edge
             connected_target_counts = target_edge_counts[target_edge_counts > 0]
-            min_edges_per_target = (
-                connected_target_counts.min().item()
-                if len(connected_target_counts) > 0
-                else 0
-            )
-            max_edges_per_target = (
-                connected_target_counts.max().item()
-                if len(connected_target_counts) > 0
-                else 0
-            )
+            min_edges_per_target = connected_target_counts.min().item() if len(connected_target_counts) > 0 else 0
+            max_edges_per_target = connected_target_counts.max().item() if len(connected_target_counts) > 0 else 0
 
             edge_summary.append(
                 [
                     src_name,
                     dst_name,
                     edges.num_edges,
-                    self.graph[src_name].num_nodes
-                    - len(torch.unique(edges.edge_index[0])),
-                    self.graph[dst_name].num_nodes
-                    - len(torch.unique(edges.edge_index[1])),
+                    self.graph[src_name].num_nodes - len(torch.unique(edges.edge_index[0])),
+                    self.graph[dst_name].num_nodes - len(torch.unique(edges.edge_index[1])),
                     min_edges_per_target,
                     max_edges_per_target,
                     sum(edges[attr].shape[1] for attr in attributes),
-                    ", ".join(
-                        [f"{attr}({edges[attr].shape[1]}D)" for attr in attributes]
-                    ),
+                    ", ".join([f"{attr}({edges[attr].shape[1]}D)" for attr in attributes]),
                 ]
             )
         return edge_summary
@@ -158,9 +140,7 @@ class GraphDescriptor:
         edge_attributes = []
         for (source_name, _, target_name), edge_store in self.graph.edge_items():
             edge_attr_names = edge_store.edge_attrs()
-            edge_attr_names.remove(
-                "edge_index"
-            )  # Remove the edge index from statistics table
+            edge_attr_names.remove("edge_index")  # Remove the edge index from statistics table
             for edge_attr_name in edge_attr_names:
                 edge_attributes.append(
                     [

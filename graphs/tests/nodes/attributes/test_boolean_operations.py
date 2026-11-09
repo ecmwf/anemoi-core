@@ -11,7 +11,9 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import BooleanAndMask, BooleanNot, BooleanOrMask
+from anemoi.graphs.nodes.attributes import BooleanAndMask
+from anemoi.graphs.nodes.attributes import BooleanNot
+from anemoi.graphs.nodes.attributes import BooleanOrMask
 
 
 def test_boolean_not(graph_with_nodes: HeteroData):

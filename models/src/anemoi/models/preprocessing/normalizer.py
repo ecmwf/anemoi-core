@@ -10,6 +10,7 @@
 
 import logging
 import warnings
+from typing import Optional
 
 import numpy as np
 import torch
@@ -26,8 +27,8 @@ class InputNormalizer(BasePreprocessor):
     def __init__(
         self,
         config=None,
-        data_indices: IndexCollection | None = None,
-        statistics: dict | None = None,
+        data_indices: Optional[IndexCollection] = None,
+        statistics: Optional[dict] = None,
     ) -> None:
         """Initialize the normalizer.
 
@@ -52,24 +53,14 @@ class InputNormalizer(BasePreprocessor):
         # Optionally reuse statistic of one variable for another variable
         statistics_remap = {}
         for remap, source in self.remap.items():
-            idx_src, idx_remap = (
-                name_to_index_training_input[source],
-                name_to_index_training_input[remap],
-            )
-            statistics_remap[idx_remap] = (
-                minimum[idx_src],
-                maximum[idx_src],
-                mean[idx_src],
-                stdev[idx_src],
-            )
+            idx_src, idx_remap = name_to_index_training_input[source], name_to_index_training_input[remap]
+            statistics_remap[idx_remap] = (minimum[idx_src], maximum[idx_src], mean[idx_src], stdev[idx_src])
 
         # Two-step to avoid overwriting the original statistics in the loop (this reduces dependence on order)
         for idx, new_stats in statistics_remap.items():
             minimum[idx], maximum[idx], mean[idx], stdev[idx] = new_stats
 
-        self._validate_normalization_inputs(
-            name_to_index_training_input, minimum, maximum, mean, stdev
-        )
+        self._validate_normalization_inputs(name_to_index_training_input, minimum, maximum, mean, stdev)
 
         _norm_add = np.zeros((minimum.size,), dtype=np.float32)
         _norm_mul = np.ones((minimum.size,), dtype=np.float32)
@@ -80,18 +71,14 @@ class InputNormalizer(BasePreprocessor):
             if method == "mean-std":
                 LOGGER.debug(f"Normalizing: {name} is mean-std-normalised.")
                 if stdev[i] < (mean[i] * 1e-6):
-                    warnings.warn(
-                        f"Normalizing: the field seems to have only one value {mean[i]}"
-                    )
+                    warnings.warn(f"Normalizing: the field seems to have only one value {mean[i]}")
                 _norm_mul[i] = 1 / stdev[i]
                 _norm_add[i] = -mean[i] / stdev[i]
 
             elif method == "std":
                 LOGGER.debug(f"Normalizing: {name} is std-normalised.")
                 if stdev[i] < (mean[i] * 1e-6):
-                    warnings.warn(
-                        f"Normalizing: the field seems to have only one value {mean[i]}"
-                    )
+                    warnings.warn(f"Normalizing: the field seems to have only one value {mean[i]}")
                 _norm_mul[i] = 1 / stdev[i]
                 _norm_add[i] = 0
 
@@ -99,9 +86,7 @@ class InputNormalizer(BasePreprocessor):
                 LOGGER.debug(f"Normalizing: {name} is min-max-normalised to [0, 1].")
                 x = maximum[i] - minimum[i]
                 if x < 1e-9:
-                    warnings.warn(
-                        f"Normalizing: the field {name} seems to have only one value {maximum[i]}."
-                    )
+                    warnings.warn(f"Normalizing: the field {name} seems to have only one value {maximum[i]}.")
                 _norm_mul[i] = 1 / x
                 _norm_add[i] = -minimum[i] / x
 
@@ -118,12 +103,8 @@ class InputNormalizer(BasePreprocessor):
         # register buffer - this will ensure they get copied to the correct device(s)
         self.register_buffer("_norm_mul", torch.from_numpy(_norm_mul), persistent=True)
         self.register_buffer("_norm_add", torch.from_numpy(_norm_add), persistent=True)
-        self.register_buffer(
-            "_input_idx", data_indices.data.input.full, persistent=True
-        )
-        self.register_buffer(
-            "_output_idx", self.data_indices.data.output.full, persistent=True
-        )
+        self.register_buffer("_input_idx", data_indices.data.input.full, persistent=True)
+        self.register_buffer("_output_idx", self.data_indices.data.output.full, persistent=True)
 
         # We need some special handling when target variables are defined.
         model_output_names = list(self.data_indices.model.output.name_to_index.keys())
@@ -135,15 +116,9 @@ class InputNormalizer(BasePreprocessor):
         for i, var_name in enumerate(data_output_names):
             if var_name in model_output_names:
                 # Get the index value for this variable in data.output
-                index_in_data_output = self.data_indices.data.output.name_to_index[
-                    var_name
-                ]
+                index_in_data_output = self.data_indices.data.output.name_to_index[var_name]
                 # Find which position in _output_idx has this index value
-                position_in_output_idx = (
-                    (self._output_idx == index_in_data_output)
-                    .nonzero(as_tuple=True)[0]
-                    .item()
-                )
+                position_in_output_idx = (self._output_idx == index_in_data_output).nonzero(as_tuple=True)[0].item()
                 # Mark this position as True (keep it for model output)
                 model_mask[position_in_output_idx] = True
 
@@ -151,9 +126,7 @@ class InputNormalizer(BasePreprocessor):
 
         self.register_buffer("_model_output_idx", _model_output_idx, persistent=True)
 
-    def _validate_normalization_inputs(
-        self, name_to_index_training_input: dict, minimum, maximum, mean, stdev
-    ):
+    def _validate_normalization_inputs(self, name_to_index_training_input: dict, minimum, maximum, mean, stdev):
         assert len(self.methods) == sum(len(v) for v in self.method_config.values()), (
             f"Error parsing methods in InputNormalizer methods ({len(self.methods)}) "
             f"and entries in config ({sum(len(v) for v in self.method_config)}) do not match."
@@ -168,9 +141,7 @@ class InputNormalizer(BasePreprocessor):
         # Check for typos in method config
         assert isinstance(self.methods, dict)
         for name, method in self.methods.items():
-            assert name in name_to_index_training_input, (
-                f"{name} is not a valid variable name"
-            )
+            assert name in name_to_index_training_input, f"{name} is not a valid variable name"
             assert method in [
                 "mean-std",
                 "std",
@@ -181,10 +152,7 @@ class InputNormalizer(BasePreprocessor):
             ], f"{method} is not a valid normalisation method"
 
     def transform(
-        self,
-        x: torch.Tensor,
-        in_place: bool = True,
-        data_index: torch.Tensor | None = None,
+        self, x: torch.Tensor, in_place: bool = True, data_index: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """Normalizes an input tensor x of shape [..., nvars].
 
@@ -213,19 +181,14 @@ class InputNormalizer(BasePreprocessor):
         if data_index is not None:
             x.mul_(self._norm_mul[data_index]).add_(self._norm_add[data_index])
         elif x.shape[-1] == len(self._input_idx):
-            x.mul_(self._norm_mul[self._input_idx]).add_(
-                self._norm_add[self._input_idx]
-            )
+            x.mul_(self._norm_mul[self._input_idx]).add_(self._norm_add[self._input_idx])
         else:
             x.mul_(self._norm_mul).add_(self._norm_add)
 
         return x
 
     def inverse_transform(
-        self,
-        x: torch.Tensor,
-        in_place: bool = True,
-        data_index: torch.Tensor | None = None,
+        self, x: torch.Tensor, in_place: bool = True, data_index: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """Denormalizes an input tensor x of shape [..., nvars | nvars_pred].
 
@@ -257,13 +220,9 @@ class InputNormalizer(BasePreprocessor):
         if data_index is not None:
             x.subtract_(self._norm_add[data_index]).div_(self._norm_mul[data_index])
         elif x.shape[-1] == len(self._output_idx):
-            x.subtract_(self._norm_add[self._output_idx]).div_(
-                self._norm_mul[self._output_idx]
-            )
+            x.subtract_(self._norm_add[self._output_idx]).div_(self._norm_mul[self._output_idx])
         elif x.shape[-1] == len(self._model_output_idx):
-            x.subtract_(self._norm_add[self._model_output_idx]).div_(
-                self._norm_mul[self._model_output_idx]
-            )
+            x.subtract_(self._norm_add[self._model_output_idx]).div_(self._norm_mul[self._model_output_idx])
         else:
             x.subtract_(self._norm_add).div_(self._norm_mul)
         return x

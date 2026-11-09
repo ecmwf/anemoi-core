@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 import math
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 
 import torch
 
@@ -47,6 +48,7 @@ class SamplingSchedule(ABC):
         dtype_compute: torch.dtype = torch.float64,
     ) -> torch.Tensor:
         """Generate schedule-specific values."""
+        pass
 
     @staticmethod
     def _validate_num_steps(num_steps: int) -> None:
@@ -55,9 +57,7 @@ class SamplingSchedule(ABC):
 
     def _validate_schedule(self, values: torch.Tensor) -> None:
         if values.ndim != 1:
-            raise ValueError(
-                f"Sampling schedule must be 1D, got shape {tuple(values.shape)}."
-            )
+            raise ValueError(f"Sampling schedule must be 1D, got shape {tuple(values.shape)}.")
         if values.numel() == 0:
             raise ValueError("Sampling schedule must contain at least one value.")
         if not torch.isfinite(values).all():
@@ -84,9 +84,7 @@ class SigmaSchedule(SamplingSchedule):
     @staticmethod
     def _validate_sigma_parameters(sigma_max: float, sigma_min: float) -> None:
         if sigma_min <= 0:
-            raise ValueError(
-                "sigma_min must be strictly positive; the final zero is added separately."
-            )
+            raise ValueError("sigma_min must be strictly positive; the final zero is added separately.")
         if sigma_max <= 0:
             raise ValueError("sigma_max must be strictly positive.")
         if sigma_max < sigma_min:
@@ -97,9 +95,7 @@ class SigmaSchedule(SamplingSchedule):
         if values.numel() == self.num_steps + 1:
             last = values[-1].item()
             if last < 0 or last > DEFAULT_FINAL_SIGMA_EPS:
-                raise ValueError(
-                    "Sigma schedule with an explicit final value must end at zero."
-                )
+                raise ValueError("Sigma schedule with an explicit final value must end at zero.")
 
     def _finalize_schedule(self, values: torch.Tensor) -> torch.Tensor:
         if values.numel() == self.num_steps + 1:
@@ -184,9 +180,7 @@ class CosineSigmaSchedule(SigmaSchedule):
         dtype_compute: torch.dtype = torch.float64,
     ) -> torch.Tensor:
         return cosine_sigma_from_unit_time(
-            torch.linspace(
-                0.0, 1.0, self.num_steps, device=device, dtype=dtype_compute
-            ),
+            torch.linspace(0.0, 1.0, self.num_steps, device=device, dtype=dtype_compute),
             sigma_max=self.sigma_max,
             sigma_min=self.sigma_min,
             s=self.s,
@@ -202,9 +196,7 @@ class ExponentialSigmaSchedule(SigmaSchedule):
         dtype_compute: torch.dtype = torch.float64,
     ) -> torch.Tensor:
         return exponential_sigma_from_unit_time(
-            torch.linspace(
-                0.0, 1.0, self.num_steps, device=device, dtype=dtype_compute
-            ),
+            torch.linspace(0.0, 1.0, self.num_steps, device=device, dtype=dtype_compute),
             sigma_max=self.sigma_max,
             sigma_min=self.sigma_min,
         )
@@ -233,9 +225,7 @@ class UnitTimeSchedule(TimeSchedule):
         device: torch.device = None,
         dtype_compute: torch.dtype = torch.float64,
     ) -> torch.Tensor:
-        return torch.linspace(
-            0.0, 1.0, self.num_steps + 1, device=device, dtype=dtype_compute
-        )
+        return torch.linspace(0.0, 1.0, self.num_steps + 1, device=device, dtype=dtype_compute)
 
 
 class TrainingConditionDistribution(ABC):
@@ -275,9 +265,7 @@ class SigmaTrainingDistribution(TrainingConditionDistribution):
     """Base class for EDM training sigma distributions."""
 
     def __init__(self, sigma_max: float, sigma_min: float) -> None:
-        SigmaSchedule._validate_sigma_parameters(
-            sigma_max=sigma_max, sigma_min=sigma_min
-        )
+        SigmaSchedule._validate_sigma_parameters(sigma_max=sigma_max, sigma_min=sigma_min)
         self.sigma_max = float(sigma_max)
         self.sigma_min = float(sigma_min)
 
@@ -396,18 +384,14 @@ def _validate_condition_shape(shape: dict[str, tuple[int, ...]]) -> tuple[int, i
         raise ValueError("Condition distribution requires at least one dataset shape.")
     ref_shape = shape[dataset_names[0]]
     if len(ref_shape) != 5:
-        raise ValueError(
-            "Expected 5D tensor shape (batch, time, ensemble, grid, vars) for transport conditions."
-        )
+        raise ValueError("Expected 5D tensor shape (batch, time, ensemble, grid, vars) for transport conditions.")
     batch_size = ref_shape[0]
     ensemble_size = ref_shape[2]
     for dataset_name, shape_x in shape.items():
         if len(shape_x) != 5:
             raise ValueError(f"Expected 5D tensor shape for dataset '{dataset_name}'.")
         if shape_x[0] != batch_size or shape_x[2] != ensemble_size:
-            raise ValueError(
-                "Batch or ensemble dimension mismatch across datasets when sampling conditions."
-            )
+            raise ValueError("Batch or ensemble dimension mismatch across datasets when sampling conditions.")
     return batch_size, ensemble_size
 
 

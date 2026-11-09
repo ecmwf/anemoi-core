@@ -15,9 +15,7 @@ import torch
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.utils import load_layer_kernels
 
-migrate = importlib.import_module(
-    "anemoi.models.migrations.scripts.1791277156_remove_unused_mapper_layernorms"
-).migrate
+migrate = importlib.import_module("anemoi.models.migrations.scripts.1791277156_remove_unused_mapper_layernorms").migrate
 
 MAPPER_PREFIX = "model.model.encoder.data.proc."
 PROCESSOR_NORM_KEY = "model.model.processor.proc.0.blocks.0.layer_norm_mlp.weight"
@@ -38,15 +36,13 @@ def _old_layout_state_dict(block: TransformerMapperBlock) -> dict[str, torch.Ten
     """State dict of ``block`` as an older anemoi-models would have saved it inside a full model."""
     state_dict = {}
     for key, value in block.state_dict().items():
-        state_dict[
-            MAPPER_PREFIX + key.replace("layer_norm_mlp.", "layer_norm_mpl.")
-        ] = value.clone()
+        state_dict[MAPPER_PREFIX + key.replace("layer_norm_mlp.", "layer_norm_mpl.")] = value.clone()
         if key.startswith("layer_norm_mlp."):
             # The two unused norms had the same layout as the MLP norm.
             state_dict[MAPPER_PREFIX + key] = torch.full_like(value, 99.0)
-            state_dict[
-                MAPPER_PREFIX + key.replace("layer_norm_mlp.", "layer_norm_attention.")
-            ] = torch.full_like(value, 99.0)
+            state_dict[MAPPER_PREFIX + key.replace("layer_norm_mlp.", "layer_norm_attention.")] = torch.full_like(
+                value, 99.0
+            )
     state_dict[PROCESSOR_NORM_KEY] = torch.ones(8)
     return state_dict
 
@@ -64,9 +60,7 @@ def _old_layout_state_dict(block: TransformerMapperBlock) -> dict[str, torch.Ten
     ],
     ids=["layer_norm", "conditional_layer_norm"],
 )
-def test_migrated_mapper_weights_load_into_current_block(
-    layer_kernels_config: dict | None,
-) -> None:
+def test_migrated_mapper_weights_load_into_current_block(layer_kernels_config: dict | None) -> None:
     source = _make_mapper_block(layer_kernels_config)
     checkpoint = {"state_dict": _old_layout_state_dict(source)}
 
@@ -86,9 +80,7 @@ def test_migrated_mapper_weights_load_into_current_block(
 def test_migration_leaves_checkpoint_without_mapper_norms_unchanged() -> None:
     state_dict = {
         PROCESSOR_NORM_KEY: torch.ones(8),
-        "model.model.processor.proc.0.blocks.0.layer_norm_attention.weight": torch.ones(
-            8
-        ),
+        "model.model.processor.proc.0.blocks.0.layer_norm_attention.weight": torch.ones(8),
     }
     checkpoint = {"state_dict": dict(state_dict)}
 

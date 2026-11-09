@@ -11,7 +11,8 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import SphericalAreaWeights, UniformWeights
+from anemoi.graphs.nodes.attributes import SphericalAreaWeights
+from anemoi.graphs.nodes.attributes import UniformWeights
 from anemoi.graphs.nodes.builders.from_vectors import LatLonNodes
 
 lats = [45.0, 45.0, 40.0, 40.0]
@@ -54,11 +55,7 @@ def test_register_nodes():
 def test_register_attributes(graph_with_nodes: HeteroData, attr_class):
     """Test LatLonNodes register correctly the weights."""
     node_builder = LatLonNodes(latitudes=lats, longitudes=lons, name="test_nodes")
-    config = {
-        "test_attr": {
-            "_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"
-        }
-    }
+    config = {"test_attr": {"_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"}}
 
     graph = node_builder.register_attributes(graph_with_nodes, config)
 

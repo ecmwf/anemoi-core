@@ -9,6 +9,4 @@
 
 from typing import Literal
 
-ImplementedNormalisationSchema = Literal[
-    "unit-max", "l1", "l2", "unit-sum", "unit-std", "log1p"
-]
+ImplementedNormalisationSchema = Literal["unit-max", "l1", "l2", "unit-sum", "unit-std", "log1p"]

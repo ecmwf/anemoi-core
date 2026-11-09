@@ -16,7 +16,8 @@ from torch_geometric.nn import radius as pyg_radius
 
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.builders.euclidean.base import BaseDistanceEdgeBuilders
-from anemoi.graphs.utils import crop_to_max_num_neighbours, get_grid_reference_distance
+from anemoi.graphs.utils import crop_to_max_num_neighbours
+from anemoi.graphs.utils import get_grid_reference_distance
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,33 +35,25 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
         target_mask_attr_name: str | None = None,
         max_num_neighbours: int = 64,
     ) -> None:
-        super().__init__(
-            source_name, target_name, source_mask_attr_name, target_mask_attr_name
-        )
+        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
 
         # Validate that exactly one of cutoff_factor or cutoff_distance_km is provided
-        assert not (cutoff_factor is None and cutoff_distance_km is None), (
-            "Either cutoff_factor or cutoff_distance_km must be provided."
-        )
-        assert not (cutoff_factor is not None and cutoff_distance_km is not None), (
-            "cutoff_factor and cutoff_distance_km are mutually exclusive. Provide only one."
-        )
+        assert not (
+            cutoff_factor is None and cutoff_distance_km is None
+        ), "Either cutoff_factor or cutoff_distance_km must be provided."
+        assert not (
+            cutoff_factor is not None and cutoff_distance_km is not None
+        ), "cutoff_factor and cutoff_distance_km are mutually exclusive. Provide only one."
 
         if cutoff_factor is not None:
-            assert isinstance(cutoff_factor, (int, float)), (
-                "Cutoff factor must be a float."
-            )
+            assert isinstance(cutoff_factor, (int, float)), "Cutoff factor must be a float."
             assert cutoff_factor > 0, "Cutoff factor must be positive."
 
         if cutoff_distance_km is not None:
-            assert isinstance(cutoff_distance_km, (int, float)), (
-                "Cutoff distance must be a float."
-            )
+            assert isinstance(cutoff_distance_km, (int, float)), "Cutoff distance must be a float."
             assert cutoff_distance_km > 0, "Cutoff distance must be positive."
 
-        assert isinstance(max_num_neighbours, int), (
-            "Number of nearest neighbours must be an integer."
-        )
+        assert isinstance(max_num_neighbours, int), "Number of nearest neighbours must be an integer."
         assert max_num_neighbours > 0, "Number of nearest neighbours must be positive."
 
         self.cutoff_factor = cutoff_factor
@@ -98,9 +91,7 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
             radius = self.cutoff_distance_km / EARTH_RADIUS
         else:
             # Use factor-based approach
-            reference_dist = get_grid_reference_distance(
-                reference_coords, use_cartesian=False
-            )
+            reference_dist = get_grid_reference_distance(reference_coords, use_cartesian=False)
             radius = reference_dist * self.cutoff_factor
             LOGGER.info(
                 "Using %s (with radius = %.1f km [factor=%.2f]) between %s and %s.",
@@ -113,9 +104,7 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
 
         return radius
 
-    def prepare_method_kwargs(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor
-    ) -> dict:
+    def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
         """Prepare keyword arguments for computing edge index."""
         return {"max_num_neighbours": self.max_num_neighbours}
 
@@ -151,9 +140,7 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
         torch.Tensor
             The computed edge index.
         """
-        edge_index = pyg_radius(
-            source_coords, target_coords, r=radius, max_num_neighbors=max_num_neighbours
-        )
+        edge_index = pyg_radius(source_coords, target_coords, r=radius, max_num_neighbors=max_num_neighbours)
 
         if not skip_flip:
             edge_index = torch.flip(edge_index, [0])
@@ -195,9 +182,7 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
             target_coords.cpu(), radius=radius, mode="distance"
         ).tocoo()
 
-        adj_matrix = crop_to_max_num_neighbours(
-            adj_matrix, max_num_neighbours=max_num_neighbours
-        )
+        adj_matrix = crop_to_max_num_neighbours(adj_matrix, max_num_neighbours=max_num_neighbours)
         return adj_matrix
 
 
@@ -234,14 +219,10 @@ class CutOffEdges(BaseCutOffEdges):
         Update the graph with the edges.
     """
 
-    def prepare_method_kwargs(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor
-    ) -> dict:
+    def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
         """Prepare keyword arguments for computing edge index."""
         radius = self.get_cutoff_radius(reference_coords=target_coords)
-        return {"radius": radius} | super().prepare_method_kwargs(
-            source_coords, target_coords
-        )
+        return {"radius": radius} | super().prepare_method_kwargs(source_coords, target_coords)
 
 
 class ReversedCutOffEdges(BaseCutOffEdges):
@@ -274,14 +255,10 @@ class ReversedCutOffEdges(BaseCutOffEdges):
         Update the graph with the edges.
     """
 
-    def prepare_method_kwargs(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor
-    ) -> dict:
+    def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
         """Prepare keyword arguments for computing edge index."""
         radius = self.get_cutoff_radius(reference_coords=source_coords)
-        return {"radius": radius} | super().prepare_method_kwargs(
-            source_coords, target_coords
-        )
+        return {"radius": radius} | super().prepare_method_kwargs(source_coords, target_coords)
 
     def compute_edge_index_from_coords(
         self,
@@ -289,6 +266,4 @@ class ReversedCutOffEdges(BaseCutOffEdges):
         target_coords: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        return super().compute_edge_index_from_coords(
-            target_coords, source_coords, skip_flip=True, **kwargs
-        )
+        return super().compute_edge_index_from_coords(target_coords, source_coords, skip_flip=True, **kwargs)

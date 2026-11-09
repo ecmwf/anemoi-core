@@ -52,9 +52,7 @@ You can install it using:
 LOGGER = logging.getLogger(__name__)
 
 
-def load_graph_from_file(
-    graph_filename: Path | str, map_location: str | torch.device | None = None
-) -> HeteroData:
+def load_graph_from_file(graph_filename: Path | str, map_location: str | torch.device | None = None) -> HeteroData:
     """Load a serialized graph on the given device (default: the currently active distributed device)."""
     if map_location is None:
         map_location = get_distributed_device()
@@ -62,9 +60,7 @@ def load_graph_from_file(
     return torch.load(graph_filename, map_location=map_location, weights_only=False)
 
 
-def validate_loaded_graph(
-    graph_data: HeteroData, required_dataset_names: list[str]
-) -> None:
+def validate_loaded_graph(graph_data: HeteroData, required_dataset_names: list[str]) -> None:
     """Ensure the loaded graph contains the required dataset node types."""
     missing = [n for n in required_dataset_names if n not in graph_data.node_types]
     if missing:
@@ -141,9 +137,7 @@ def is_pyg_lib_available() -> bool:
     return find_spec("torch_cluster") is not None
 
 
-def current_device_context(
-    device: torch.device | str,
-) -> contextlib.AbstractContextManager:
+def current_device_context(device: torch.device | str) -> contextlib.AbstractContextManager:
     """Scoped switch of the current CUDA device; no-op for CPU."""
     device = torch.device(device)
     if device.type == "cuda":
@@ -151,9 +145,7 @@ def current_device_context(
     return contextlib.nullcontext()
 
 
-def get_nearest_neighbour(
-    coords_rad: torch.Tensor, mask: torch.Tensor | None = None
-) -> NearestNeighbors:
+def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = None) -> NearestNeighbors:
     """Get NearestNeighbour object fitted to coordinates.
 
     Parameters
@@ -184,9 +176,7 @@ def get_nearest_neighbour(
 
 
 def get_grid_reference_distance(
-    coords_rad: torch.Tensor,
-    mask: torch.Tensor | None = None,
-    use_cartesian: bool = True,
+    coords_rad: torch.Tensor, mask: torch.Tensor | None = None, use_cartesian: bool = True
 ) -> float:
     """Get the reference distance of the grid.
 
@@ -210,9 +200,7 @@ def get_grid_reference_distance(
     if isinstance(points, torch.Tensor):
         points = points.detach().cpu()
     nearest_neighbours = get_nearest_neighbour(points, mask)
-    dists, _ = nearest_neighbours.kneighbors(
-        points, n_neighbors=2, return_distance=True
-    )
+    dists, _ = nearest_neighbours.kneighbors(points, n_neighbors=2, return_distance=True)
     return dists[dists > 0].max()
 
 
@@ -234,9 +222,7 @@ def crop_to_max_num_neighbours(adjmat, max_num_neighbours: int) -> coo_matrix:
     sorted_rows = adjmat.row[sort_idx]
 
     # Find where each row starts and ends
-    row_changes = np.concatenate(
-        ([0], np.where(np.diff(sorted_rows) != 0)[0] + 1, [len(sorted_rows)])
-    )
+    row_changes = np.concatenate(([0], np.where(np.diff(sorted_rows) != 0)[0] + 1, [len(sorted_rows)]))
 
     # Compute rank of each edge within its row
     edge_rank_in_row = np.zeros(len(sorted_rows), dtype=int)
@@ -252,14 +238,10 @@ def crop_to_max_num_neighbours(adjmat, max_num_neighbours: int) -> coo_matrix:
     mask[sort_idx] = mask_sorted
 
     # Define the new sparse matrix
-    return coo_matrix(
-        (adjmat.data[mask], (adjmat.row[mask], adjmat.col[mask])), shape=adjmat.shape
-    )
+    return coo_matrix((adjmat.data[mask], (adjmat.row[mask], adjmat.col[mask])), shape=adjmat.shape)
 
 
-def concat_edges(
-    edge_indices1: torch.Tensor, edge_indices2: torch.Tensor
-) -> torch.Tensor:
+def concat_edges(edge_indices1: torch.Tensor, edge_indices2: torch.Tensor) -> torch.Tensor:
     """Concat edges
 
     Parameters
@@ -277,9 +259,7 @@ def concat_edges(
     return torch.unique(torch.cat([edge_indices1, edge_indices2], axis=1), dim=1)
 
 
-def intersect_edges(
-    edge_indices1: torch.Tensor, edge_indices2: torch.Tensor
-) -> torch.Tensor:
+def intersect_edges(edge_indices1: torch.Tensor, edge_indices2: torch.Tensor) -> torch.Tensor:
     """Intersect two sets of edges, keeping only edges present in both.
 
     Parameters
@@ -312,9 +292,7 @@ def intersect_edges(
     return edge_indices1[:, mask]
 
 
-def haversine_distance(
-    source_coords: torch.Tensor, target_coords: torch.Tensor
-) -> torch.Tensor:
+def haversine_distance(source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
     """Haversine distance.
 
     Parameters
@@ -333,9 +311,7 @@ def haversine_distance(
     dlon = target_coords[:, 1] - source_coords[:, 1]
     a = (
         torch.sin(dlat / 2) ** 2
-        + torch.cos(source_coords[:, 0])
-        * torch.cos(target_coords[:, 0])
-        * torch.sin(dlon / 2) ** 2
+        + torch.cos(source_coords[:, 0]) * torch.cos(target_coords[:, 0]) * torch.sin(dlon / 2) ** 2
     )
     c = 2 * torch.atan2(torch.sqrt(a), torch.sqrt(1 - a))
     return c
@@ -364,9 +340,6 @@ def get_edge_attributes(config: dict, source_name: str, target_name: str) -> dic
     """
     attrs = {}
     for edges_config in config.get("edges", {}):
-        if (
-            edges_config["source_name"] == source_name
-            and edges_config["target_name"] == target_name
-        ):
+        if edges_config["source_name"] == source_name and edges_config["target_name"] == target_name:
             attrs.update(edges_config["attributes"])
     return attrs

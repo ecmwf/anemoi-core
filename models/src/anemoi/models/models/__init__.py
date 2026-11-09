@@ -16,10 +16,11 @@ from .transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec 
 from .transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec  # isort: skip
 
 __all__ = [
-    "AnemoiEnsModelEncProcDec",
+    "BaseGraphModel",
     "AnemoiModelEncProcDec",
-    "AnemoiModelEncProcDecHierarchical",
+    "AnemoiEnsModelEncProcDec",
     "AnemoiTransportModelEncProcDec",
     "AnemoiTransportTendModelEncProcDec",
-    "BaseGraphModel",
+    "AnemoiModelEncProcDecHierarchical",
+    "AnemoiEnsModelEncProcDec",
 ]

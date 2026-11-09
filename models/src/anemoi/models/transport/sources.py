@@ -10,17 +10,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 from typing import Any
+from typing import Optional
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.distributed.shapes import DatasetShardSizes, ShardSizes
-from anemoi.models.transport.random_fields import (
-    randn_like_with_grid_sharding,
-    randn_with_grid_sharding,
-)
+from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.transport.random_fields import randn_like_with_grid_sharding
+from anemoi.models.transport.random_fields import randn_with_grid_sharding
 from anemoi.models.transport.settings import TransportSourceSettings
 
 TRANSPORT_SOURCE_KINDS = frozenset({"zero", "gaussian", "reference_state"})
@@ -38,9 +39,7 @@ def reference_state_sampling_source(
     for dataset_name, x_data in x.items():
         output_names = data_indices[dataset_name].model.output.ordered_names
         try:
-            input_positions = data_indices[
-                dataset_name
-            ].model.input.positions_for_names(output_names)
+            input_positions = data_indices[dataset_name].model.input.positions_for_names(output_names)
         except ValueError as exc:
             msg = (
                 "reference_state transport sources require all model-output variables "
@@ -48,9 +47,7 @@ def reference_state_sampling_source(
                 "Choose a non-reference source when this is not true."
             )
             raise ValueError(msg) from exc
-        input_idx = torch.as_tensor(
-            input_positions, device=x_data.device, dtype=torch.long
-        )
+        input_idx = torch.as_tensor(input_positions, device=x_data.device, dtype=torch.long)
         source = x_data[:, -1:, :, :, :].index_select(-1, input_idx)
         if n_step_output > 1:
             source = source.expand(-1, n_step_output, -1, -1, -1)
@@ -68,9 +65,7 @@ class TransportSourceSpec:
     grid_shard_sizes: ShardSizes = None
 
     @classmethod
-    def from_tensor(
-        cls, tensor: torch.Tensor, grid_shard_sizes: ShardSizes = None
-    ) -> TransportSourceSpec:
+    def from_tensor(cls, tensor: torch.Tensor, grid_shard_sizes: ShardSizes = None) -> TransportSourceSpec:
         return cls(
             shape=tuple(tensor.shape),
             device=tensor.device,
@@ -98,9 +93,7 @@ def sampling_source_specs(
             ),
             device=x_data.device,
             dtype=x_data.dtype,
-            grid_shard_sizes=grid_shard_sizes.get(dataset_name)
-            if grid_shard_sizes is not None
-            else None,
+            grid_shard_sizes=grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None,
         )
         for dataset_name, x_data in x.items()
     }
@@ -112,19 +105,15 @@ class TransportSourceRequest:
 
     specs: dict[str, TransportSourceSpec]
     default_kind: str
-    custom_source_factories: dict[str, TransportSourceFactory] = field(
-        default_factory=dict
-    )
-    model_comm_group: ProcessGroup | None = None
+    custom_source_factories: dict[str, TransportSourceFactory] = field(default_factory=dict)
+    model_comm_group: Optional[ProcessGroup] = None
     allowed_kinds: frozenset[str] | None = None
     error_context: str = "transport source"
 
     def source_factories(self) -> dict[str, TransportSourceFactory]:
         return {
             "zero": lambda: self._zero(self.specs),
-            "gaussian": lambda: self._gaussian(
-                self.specs, model_comm_group=self.model_comm_group
-            ),
+            "gaussian": lambda: self._gaussian(self.specs, model_comm_group=self.model_comm_group),
             **self.custom_source_factories,
         }
 
@@ -135,7 +124,7 @@ class TransportSourceRequest:
         *,
         default_kind: str,
         custom_source_factories: dict[str, TransportSourceFactory] | None = None,
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         allowed_kinds: frozenset[str] | None = None,
         error_context: str = "transport source",
@@ -144,16 +133,12 @@ class TransportSourceRequest:
             specs={
                 name: TransportSourceSpec.from_tensor(
                     tensor,
-                    grid_shard_sizes=grid_shard_sizes.get(name)
-                    if grid_shard_sizes is not None
-                    else None,
+                    grid_shard_sizes=grid_shard_sizes.get(name) if grid_shard_sizes is not None else None,
                 )
                 for name, tensor in tensors.items()
             },
             default_kind=default_kind,
-            custom_source_factories={}
-            if custom_source_factories is None
-            else custom_source_factories,
+            custom_source_factories={} if custom_source_factories is None else custom_source_factories,
             model_comm_group=model_comm_group,
             allowed_kinds=allowed_kinds,
             error_context=error_context,
@@ -161,16 +146,13 @@ class TransportSourceRequest:
 
     @staticmethod
     def _zero(specs: dict[str, TransportSourceSpec]) -> dict[str, torch.Tensor]:
-        return {
-            name: torch.zeros(spec.shape, device=spec.device, dtype=spec.dtype)
-            for name, spec in specs.items()
-        }
+        return {name: torch.zeros(spec.shape, device=spec.device, dtype=spec.dtype) for name, spec in specs.items()}
 
     @staticmethod
     def _gaussian(
         specs: dict[str, TransportSourceSpec],
         *,
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> dict[str, torch.Tensor]:
         return {
             name: randn_with_grid_sharding(
@@ -212,9 +194,7 @@ class TransportSourceBuilder:
     def build(self, request: TransportSourceRequest) -> dict[str, torch.Tensor]:
         kind = self.resolve_kind(request.default_kind)
         source_factories = request.source_factories()
-        allowed_kinds = request.allowed_kinds or (
-            TRANSPORT_SOURCE_KINDS | frozenset(source_factories)
-        )
+        allowed_kinds = request.allowed_kinds or (TRANSPORT_SOURCE_KINDS | frozenset(source_factories))
         if kind not in allowed_kinds:
             msg = f"Transport source kind '{kind}' is not valid for {request.error_context}."
             raise ValueError(msg)
@@ -234,9 +214,7 @@ class TransportSourceBuilder:
         msg = f"Transport source kind '{kind}' requires a source factory."
         raise ValueError(msg)
 
-    def _scale_source(
-        self, sources: dict[str, torch.Tensor]
-    ) -> dict[str, torch.Tensor]:
+    def _scale_source(self, sources: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         if self.scale != 1.0:
             return {name: self.scale * source for name, source in sources.items()}
         return sources

@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
+from typing import Literal
 
 
 def _get_config_value(config: Any, name: str, default: Any) -> Any:
@@ -67,9 +68,7 @@ class TransportSourceSettings:
         return cls(
             kind=str(_get_config_value(source_config, "kind", cls.kind)),
             scale=float(_get_config_value(source_config, "scale", cls.scale)),
-            noise_scale=float(
-                _get_config_value(source_config, "noise_scale", cls.noise_scale)
-            ),
+            noise_scale=float(_get_config_value(source_config, "noise_scale", cls.noise_scale)),
         )
 
 
@@ -85,16 +84,8 @@ class StochasticInterpolantSettings:
     @classmethod
     def from_config(cls, config: Any) -> StochasticInterpolantSettings:
         return cls(
-            alpha_schedule=str(
-                _get_config_value(config, "si_alpha_schedule", cls.alpha_schedule)
-            ),
-            beta_schedule=str(
-                _get_config_value(config, "si_beta_schedule", cls.beta_schedule)
-            ),
-            sigma_schedule=str(
-                _get_config_value(config, "si_sigma_schedule", cls.sigma_schedule)
-            ),
-            noise_scale=float(
-                _get_config_value(config, "si_noise_scale", cls.noise_scale)
-            ),
+            alpha_schedule=str(_get_config_value(config, "si_alpha_schedule", cls.alpha_schedule)),
+            beta_schedule=str(_get_config_value(config, "si_beta_schedule", cls.beta_schedule)),
+            sigma_schedule=str(_get_config_value(config, "si_sigma_schedule", cls.sigma_schedule)),
+            noise_scale=float(_get_config_value(config, "si_noise_scale", cls.noise_scale)),
         )

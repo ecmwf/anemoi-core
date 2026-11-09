@@ -10,7 +10,8 @@
 
 import logging
 import subprocess
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser
+from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
 from shutil import copy2
@@ -18,7 +19,9 @@ from shutil import copy2
 from jinja2 import Environment
 from rich.console import Console
 
-from ..migrations import MIGRATION_PATH, IncompatibleCheckpointException, Migrator
+from ..migrations import MIGRATION_PATH
+from ..migrations import IncompatibleCheckpointException
+from ..migrations import Migrator
 from ..migrations.migrator import LOGGER as migrator_logger
 from . import Command
 
@@ -49,21 +52,12 @@ def new_migrations_from_main_branch():
         capture_output=True,
         shell=True,
     )
-    new_migrations = [
-        root_folder / file
-        for file in run_new_migrations.stdout.decode("utf-8").split("\n")
-    ]
-    new_migrations = [
-        file.name
-        for file in new_migrations
-        if file.is_file() and file.name != "__init__.py"
-    ]
+    new_migrations = [root_folder / file for file in run_new_migrations.stdout.decode("utf-8").split("\n")]
+    new_migrations = [file.name for file in new_migrations if file.is_file() and file.name != "__init__.py"]
     return sorted(new_migrations)
 
 
-def in_incorrect_order(
-    all_migrations: list[str], new_migrations: list[str]
-) -> tuple[list[str], str | None]:
+def in_incorrect_order(all_migrations: list[str], new_migrations: list[str]) -> tuple[list[str], str | None]:
     """Tests whether the order of the new migrations is correct.
     All new migrations should be at the end of all_migrations.
 
@@ -165,9 +159,7 @@ class Migration(Command):
         """
         subparsers = command_parser.add_subparsers(dest="subcommand", required=True)
         help_create = "Create a new migration script."
-        create_parser = subparsers.add_parser(
-            "create", help=help_create, description=help_create
-        )
+        create_parser = subparsers.add_parser("create", help=help_create, description=help_create)
         create_parser.add_argument("name", help="Name of the migration.")
         create_parser.add_argument(
             "--final",
@@ -185,9 +177,7 @@ class Migration(Command):
         )
 
         help_sync = "Apply migrations to a checkpoint."
-        sync_parser = subparsers.add_parser(
-            "sync", help=help_sync, description=help_sync
-        )
+        sync_parser = subparsers.add_parser("sync", help=help_sync, description=help_sync)
         sync_parser.add_argument("ckpt", help="Path to the checkpoint to migrate.")
         sync_parser.add_argument(
             "--dry-run",
@@ -195,29 +185,18 @@ class Migration(Command):
             action="store_true",
             help="Perform a dry-run, without saving the updated checkpoint.",
         )
+        sync_parser.add_argument("--no-color", action="store_true", help="Disables terminal colors.")
         sync_parser.add_argument(
-            "--no-color", action="store_true", help="Disables terminal colors."
-        )
-        sync_parser.add_argument(
-            "--log-level",
-            default="NOTSET",
-            choices=logging.getLevelNamesMapping(),
-            help="Log level",
+            "--log-level", default="NOTSET", choices=logging.getLevelNamesMapping(), help="Log level"
         )
 
         help_inspect = "Inspect migrations in a checkpoint."
-        inspect_parser = subparsers.add_parser(
-            "inspect", help=help_inspect, description=help_inspect
-        )
+        inspect_parser = subparsers.add_parser("inspect", help=help_inspect, description=help_inspect)
         inspect_parser.add_argument("ckpt", help="Path to the checkpoint to inspect.")
-        inspect_parser.add_argument(
-            "--no-color", action="store_true", help="Disables terminal colors."
-        )
+        inspect_parser.add_argument("--no-color", action="store_true", help="Disables terminal colors.")
 
         help_fix_order = "Fix the order of migrations after a git merge."
-        subparsers.add_parser(
-            "fix-order", help=help_fix_order, description=help_fix_order
-        )
+        subparsers.add_parser("fix-order", help=help_fix_order, description=help_fix_order)
 
     def run(self, args: Namespace) -> None:
         """Execute the command with the provided arguments.
@@ -257,9 +236,7 @@ class Migration(Command):
         if args.with_setup:
             imports.append("from anemoi.models.migrations import MigrationContext")
         imports.append("from anemoi.models.migrations import MigrationMetadata")
-        template = Environment(trim_blocks=True, lstrip_blocks=True).from_string(
-            migration_template_str
-        )
+        template = Environment(trim_blocks=True, lstrip_blocks=True).from_string(migration_template_str)
 
         with open(MIGRATION_PATH / name, "w") as f:
             f.write(
@@ -296,37 +273,18 @@ class Migration(Command):
                 registered_migrations = migrator.registered_migrations(old_ckpt)
                 version = ""
                 if len(registered_migrations):
-                    version = (
-                        registered_migrations[-1].metadata.versions["anemoi-models"]
-                        + "-"
-                    )
+                    version = registered_migrations[-1].metadata.versions["anemoi-models"] + "-"
                 version += f"{len(registered_migrations)}"
 
                 new_path = ckpt_path.with_stem(f"{ckpt_path.stem}-v{version}")
                 copy2(ckpt_path, new_path)
                 print("Saved backed-up checkpoint here:", str(new_path.resolve()))
                 torch.save(new_ckpt, ckpt_path)
-                print(
-                    "Executed ",
-                    len(done_ops),
-                    " ",
-                    maybe_plural(len(done_ops), "operation"),
-                    ":",
-                    sep="",
-                )
+                print("Executed ", len(done_ops), " ", maybe_plural(len(done_ops), "operation"), ":", sep="")
             if len(done_ops) and args.dry_run:
-                print(
-                    "Would execute ",
-                    len(done_ops),
-                    " ",
-                    maybe_plural(len(done_ops), "operation"),
-                    ":",
-                    sep="",
-                )
+                print("Would execute ", len(done_ops), " ", maybe_plural(len(done_ops), "operation"), ":", sep="")
             if not len(done_ops):
-                console.print(
-                    "Your checkpoint is already compatible :party_popper:! No missing migration to execute."
-                )
+                console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
             for op in done_ops:
                 console.print(
                     f"  [green]+ MIGRATE [bold]{op.migration.name}[/bold] \\[v{op.migration.metadata.versions['anemoi-models']}][/green]"
@@ -349,13 +307,9 @@ class Migration(Command):
         migrator = Migrator()
         console = Console(force_terminal=not args.no_color, highlight=False)
         try:
-            executed_migrations, missing_migrations, extra_migrations = (
-                migrator.inspect(args.ckpt)
-            )
+            executed_migrations, missing_migrations, extra_migrations = migrator.inspect(args.ckpt)
             if not len(missing_migrations) and not len(extra_migrations):
-                console.print(
-                    "Your checkpoint is already compatible :party_popper:! No missing migration to execute."
-                )
+                console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
             if len(executed_migrations):
                 print(
                     len(executed_migrations),
@@ -364,9 +318,7 @@ class Migration(Command):
                     ":",
                     sep="",
                 )
-                console.print(
-                    "  [italic]These migrations are already executed and part of the checkpoint[/italic]"
-                )
+                console.print("  [italic]These migrations are already executed and part of the checkpoint[/italic]")
             for migration in executed_migrations:
                 console.print(
                     f"  [cyan]* [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/cyan]"
@@ -397,9 +349,7 @@ class Migration(Command):
                 )
             if len(missing_migrations) and not len(extra_migrations):
                 console.print("\n[italic]To update your checkpoint, run:[/italic]")
-                console.print(
-                    f"  [italic]anemoi-models migration sync {args.ckpt}[/italic]"
-                )
+                console.print(f"  [italic]anemoi-models migration sync {args.ckpt}[/italic]")
         except IncompatibleCheckpointException as e:
             print(str(e))
 
@@ -409,15 +359,9 @@ class Migration(Command):
         """
         new_migrations = new_migrations_from_main_branch()
         all_migrations = sorted(
-            [
-                file.name
-                for file in MIGRATION_PATH.iterdir()
-                if file.is_file() and file.name != "__init__.py"
-            ]
+            [file.name for file in MIGRATION_PATH.iterdir() if file.is_file() and file.name != "__init__.py"]
         )
-        incorrect_order, last_upstream_name = in_incorrect_order(
-            all_migrations, new_migrations
-        )
+        incorrect_order, last_upstream_name = in_incorrect_order(all_migrations, new_migrations)
 
         if last_upstream_name is None or not len(incorrect_order):
             print("No migration to rename.")

@@ -100,9 +100,7 @@ def _run_rank(
     try:
         group = dist.group.WORLD
         _assert_distributed_context(rank, world_size, backend, device, group)
-        rank_fn(
-            rank=rank, world_size=world_size, device=device, group=group, **rank_kwargs
-        )
+        rank_fn(rank=rank, world_size=world_size, device=device, group=group, **rank_kwargs)
     finally:
         dist.destroy_process_group()
 
@@ -115,41 +113,27 @@ def _assert_distributed_context(
     group: dist.ProcessGroup,
 ) -> None:
     """Verify rank, backend, world size, and device placement."""
-    assert dist.is_initialized(), (
-        "Expected torch.distributed process group to be initialized."
-    )
-    assert dist.get_backend(group) == backend, (
-        f"Expected backend {backend}, got {dist.get_backend(group)}."
-    )
-    assert dist.get_world_size(group=group) == world_size, (
-        f"Expected world_size={world_size}, got {dist.get_world_size(group=group)}."
-    )
-    assert dist.get_rank(group=group) == rank, (
-        f"Expected rank={rank}, got {dist.get_rank(group=group)}."
-    )
+    assert dist.is_initialized(), "Expected torch.distributed process group to be initialized."
+    assert dist.get_backend(group) == backend, f"Expected backend {backend}, got {dist.get_backend(group)}."
+    assert (
+        dist.get_world_size(group=group) == world_size
+    ), f"Expected world_size={world_size}, got {dist.get_world_size(group=group)}."
+    assert dist.get_rank(group=group) == rank, f"Expected rank={rank}, got {dist.get_rank(group=group)}."
 
     if backend == "nccl":
-        assert device.type == "cuda", (
-            f"Expected NCCL rank {rank} to use a CUDA device, got {device}."
-        )
-        assert torch.cuda.is_available(), (
-            "Expected CUDA to be available for NCCL tests."
-        )
-        assert torch.cuda.device_count() >= world_size, (
-            f"Expected at least {world_size} CUDA devices, got {torch.cuda.device_count()}."
-        )
-        assert torch.cuda.current_device() == rank, (
-            f"Expected current CUDA device {rank}, got {torch.cuda.current_device()}."
-        )
+        assert device.type == "cuda", f"Expected NCCL rank {rank} to use a CUDA device, got {device}."
+        assert torch.cuda.is_available(), "Expected CUDA to be available for NCCL tests."
+        assert (
+            torch.cuda.device_count() >= world_size
+        ), f"Expected at least {world_size} CUDA devices, got {torch.cuda.device_count()}."
+        assert (
+            torch.cuda.current_device() == rank
+        ), f"Expected current CUDA device {rank}, got {torch.cuda.current_device()}."
         probe = torch.empty(1, device=device)
         assert probe.is_cuda, "Expected NCCL probe tensor to be a CUDA tensor."
-        assert probe.device.index == rank, (
-            f"Expected probe on cuda:{rank}, got {probe.device}."
-        )
+        assert probe.device.index == rank, f"Expected probe on cuda:{rank}, got {probe.device}."
     else:
-        assert device.type == "cpu", (
-            f"Expected {backend} rank {rank} to use CPU, got {device}."
-        )
+        assert device.type == "cpu", f"Expected {backend} rank {rank} to use CPU, got {device}."
 
     if os.getenv("ANEMOI_DISTRIBUTED_TEST_DEBUG", "0") == "1":
         cuda_device = torch.cuda.current_device() if device.type == "cuda" else "n/a"

@@ -23,10 +23,8 @@ from typing import Any
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.projection_helpers import (
-    DEFAULT_EDGE_WEIGHT_ATTRIBUTE,
-    DEFAULT_GAUSSIAN_NORM,
-)
+from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+from anemoi.graphs.projection_helpers import DEFAULT_GAUSSIAN_NORM
 
 LOGGER = logging.getLogger(__name__)
 
@@ -107,9 +105,7 @@ def build_node_to_node_projection_subgraph(
     if OmegaConf.is_config(config):
         config = OmegaConf.to_container(config, resolve=True)
 
-    missing = [
-        key for key in ("num_nearest_neighbours", "sigma") if config.get(key) is None
-    ]
+    missing = [key for key in ("num_nearest_neighbours", "sigma") if config.get(key) is None]
     if missing:
         msg = (
             f"build_node_to_node_projection_subgraph requires config keys {missing}: "
@@ -126,11 +122,7 @@ def build_node_to_node_projection_subgraph(
 
     graph_config: dict = {
         "nodes": {},
-        "edges": [
-            _knn_edge_cfg(
-                source_node_name, target_node_name, num_nearest_neighbours, sigma
-            )
-        ],
+        "edges": [_knn_edge_cfg(source_node_name, target_node_name, num_nearest_neighbours, sigma)],
     }
 
     if source_node_name == target_node_name:
@@ -143,12 +135,11 @@ def build_node_to_node_projection_subgraph(
         if node_builder_cfg is None:
             grid = config.get("grid")
             if grid is None:
-                msg = f"Target node '{target_node_name}' not in graph_data; config must provide 'node_builder' or 'grid'."
+                msg = (
+                    f"Target node '{target_node_name}' not in graph_data; config must provide 'node_builder' or 'grid'."
+                )
                 raise ValueError(msg)
-            node_builder_cfg = {
-                "_target_": "anemoi.graphs.nodes.ReducedGaussianGridNodes",
-                "grid": grid,
-            }
+            node_builder_cfg = {"_target_": "anemoi.graphs.nodes.ReducedGaussianGridNodes", "grid": grid}
         graph_config["nodes"][target_node_name] = {"node_builder": node_builder_cfg}
 
     return GraphCreator(OmegaConf.create(graph_config)).update_graph(subgraph)
@@ -195,10 +186,7 @@ def build_truncation_subgraph(
         if grid is None:
             msg = "truncation_config must specify 'grid' or 'node_builder'."
             raise ValueError(msg)
-        node_builder_cfg = {
-            "_target_": "anemoi.graphs.nodes.ReducedGaussianGridNodes",
-            "grid": grid,
-        }
+        node_builder_cfg = {"_target_": "anemoi.graphs.nodes.ReducedGaussianGridNodes", "grid": grid}
 
     num_nearest_neighbours = truncation_config.get("num_nearest_neighbours", 3)
     sigma = truncation_config.get("sigma", 1.0)
@@ -211,12 +199,8 @@ def build_truncation_subgraph(
         {
             "nodes": {"truncation": {"node_builder": node_builder_cfg}},
             "edges": [
-                _knn_edge_cfg(
-                    data_node_name, "truncation", num_nearest_neighbours, sigma
-                ),
-                _knn_edge_cfg(
-                    "truncation", data_node_name, num_nearest_neighbours, sigma
-                ),
+                _knn_edge_cfg(data_node_name, "truncation", num_nearest_neighbours, sigma),
+                _knn_edge_cfg("truncation", data_node_name, num_nearest_neighbours, sigma),
             ],
         }
     )
@@ -267,9 +251,7 @@ def build_smoother_subgraph(
         {
             "nodes": {},
             "edges": [
-                _knn_edge_cfg(
-                    data_node_name, data_node_name, num_nearest_neighbours, sigma
-                ),
+                _knn_edge_cfg(data_node_name, data_node_name, num_nearest_neighbours, sigma),
             ],
         }
     )

@@ -69,10 +69,7 @@ class SparseProjector(torch.nn.Module):
                 out = self._project_flattened(x, projection_matrix)
             else:
                 out = torch.cat(
-                    [
-                        self._project_flattened(chunk, projection_matrix)
-                        for chunk in torch.chunk(x, num_chunks, dim=0)
-                    ],
+                    [self._project_flattened(chunk, projection_matrix) for chunk in torch.chunk(x, num_chunks, dim=0)],
                     dim=0,
                 )
         except torch.cuda.OutOfMemoryError as e:
@@ -82,9 +79,7 @@ class SparseProjector(torch.nn.Module):
 
         return out.reshape(*input_shape[:-2], *out.shape[-2:])
 
-    def _project_flattened(
-        self, x: torch.Tensor, projection_matrix: torch.Tensor
-    ) -> torch.Tensor:
+    def _project_flattened(self, x: torch.Tensor, projection_matrix: torch.Tensor) -> torch.Tensor:
         """Project an input whose leading dimensions have already been flattened.
 
         Expected x shape: [flat_batch, input_nodes, channels]

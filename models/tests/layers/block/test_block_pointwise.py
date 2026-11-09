@@ -11,7 +11,8 @@
 import logging
 
 import torch
-from hypothesis import given, settings
+from hypothesis import given
+from hypothesis import settings
 from hypothesis import strategies as st
 from torch import nn
 
@@ -80,9 +81,7 @@ class TestPointWiseMLPProcessorBlock:
             layer_kernels=layer_kernels,
         )
 
-        x = torch.randn(
-            (batch_size, num_channels)
-        )  # .to(torch.float16, non_blocking=True)
+        x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)
         shard_info = GraphShardInfo(nodes=[batch_size])
         output = block.forward(x, shard_info, batch_size)
         assert isinstance(output[0], torch.Tensor)

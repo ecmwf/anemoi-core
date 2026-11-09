@@ -7,7 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.migrations import CkptType, MigrationContext, MigrationMetadata
+from anemoi.models.migrations import CkptType
+from anemoi.models.migrations import MigrationContext
+from anemoi.models.migrations import MigrationMetadata
 
 # DO NOT CHANGE -->
 metadata = MigrationMetadata(
@@ -28,20 +30,13 @@ def migrate_setup(context: MigrationContext) -> None:
        A MigrationContext instance
     """
     context.move_attribute(
-        "anemoi.training.schemas.hardware.HardwareSchema",
-        "anemoi.training.schemas.system.HardwareSchema",
+        "anemoi.training.schemas.hardware.HardwareSchema", "anemoi.training.schemas.system.HardwareSchema"
     )
+    context.move_attribute("anemoi.training.schemas.hardware.FilesSchema", "anemoi.training.schemas.system.InputSchema")
     context.move_attribute(
-        "anemoi.training.schemas.hardware.FilesSchema",
-        "anemoi.training.schemas.system.InputSchema",
+        "anemoi.training.schemas.hardware.PathsSchema", "anemoi.training.schemas.system.OutputSchema"
     )
-    context.move_attribute(
-        "anemoi.training.schemas.hardware.PathsSchema",
-        "anemoi.training.schemas.system.OutputSchema",
-    )
-    context.move_module(
-        "anemoi.training.schemas.hardware", "anemoi.training.schemas.system"
-    )
+    context.move_module("anemoi.training.schemas.hardware", "anemoi.training.schemas.system")
 
 
 def migrate(ckpt: CkptType) -> CkptType:

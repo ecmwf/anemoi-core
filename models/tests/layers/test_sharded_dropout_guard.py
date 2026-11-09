@@ -24,21 +24,19 @@ import pytest
 import torch
 from torch import nn
 
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, GraphShardInfo
-from anemoi.models.layers.mapper import (
-    BaseMapper,
-    GNNForwardMapper,
-    GraphTransformerForwardMapper,
-    TransformerForwardMapper,
-)
-from anemoi.models.layers.processor import (
-    BaseProcessor,
-    GNNProcessor,
-    GraphTransformerProcessor,
-    PointWiseMLPProcessor,
-    TransformerProcessor,
-)
-from anemoi.models.layers.utils import load_layer_kernels, refuse_dropout_when_sharded
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.layers.mapper import BaseMapper
+from anemoi.models.layers.mapper import GNNForwardMapper
+from anemoi.models.layers.mapper import GraphTransformerForwardMapper
+from anemoi.models.layers.mapper import TransformerForwardMapper
+from anemoi.models.layers.processor import BaseProcessor
+from anemoi.models.layers.processor import GNNProcessor
+from anemoi.models.layers.processor import GraphTransformerProcessor
+from anemoi.models.layers.processor import PointWiseMLPProcessor
+from anemoi.models.layers.processor import TransformerProcessor
+from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.models.layers.utils import refuse_dropout_when_sharded
 
 CHANNELS, EDGE_DIM, NODES = 16, 3, 4
 
@@ -118,9 +116,7 @@ def forward(processor: nn.Module, model_comm_group: object) -> torch.Tensor:
     if isinstance(processor, GNNProcessor | GraphTransformerProcessor):
         edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])
         edge_attr = torch.randn(edge_index.shape[1], EDGE_DIM)
-        return processor(
-            x, 1, shard_info, edge_attr, edge_index, model_comm_group=model_comm_group
-        )
+        return processor(x, 1, shard_info, edge_attr, edge_index, model_comm_group=model_comm_group)
     return processor(x, 1, shard_info, model_comm_group=model_comm_group)
 
 
@@ -130,13 +126,9 @@ def sharded_group() -> MagicMock:
     return group
 
 
-@pytest.mark.parametrize(
-    "build", [transformer, pointwise], ids=["transformer", "pointwise"]
-)
+@pytest.mark.parametrize("build", [transformer, pointwise], ids=["transformer", "pointwise"])
 def test_dropout_p_is_refused_when_sharded(build) -> None:
-    with pytest.raises(
-        ValueError, match="Dropout is not supported when the model is sharded"
-    ):
+    with pytest.raises(ValueError, match="Dropout is not supported when the model is sharded"):
         forward(build(dropout_p=0.1), sharded_group())
 
 
@@ -146,15 +138,11 @@ def test_dropout_p_is_refused_when_sharded(build) -> None:
     ids=["transformer", "pointwise", "gnn", "graph_transformer"],
 )
 def test_added_dropout_module_is_refused_when_sharded(build) -> None:
-    with pytest.raises(
-        ValueError, match="Dropout is not supported when the model is sharded"
-    ):
+    with pytest.raises(ValueError, match="Dropout is not supported when the model is sharded"):
         forward(with_injected_dropout(build()), sharded_group())
 
 
-@pytest.mark.parametrize(
-    "build", [transformer, pointwise], ids=["transformer", "pointwise"]
-)
+@pytest.mark.parametrize("build", [transformer, pointwise], ids=["transformer", "pointwise"])
 def test_dropout_is_allowed_without_sharding(build) -> None:
     output = forward(with_injected_dropout(build(dropout_p=0.1)), model_comm_group=None)
     assert output.shape == (NODES, CHANNELS)
@@ -220,9 +208,7 @@ def call_mapper(mapper: nn.Module, model_comm_group: object) -> object:
 
 
 def test_mapper_dropout_p_is_refused_when_sharded() -> None:
-    with pytest.raises(
-        ValueError, match="Dropout is not supported when the model is sharded"
-    ):
+    with pytest.raises(ValueError, match="Dropout is not supported when the model is sharded"):
         call_mapper(transformer_mapper(dropout_p=0.1), sharded_group())
 
 
@@ -231,32 +217,21 @@ def test_mapper_dropout_p_is_refused_when_sharded() -> None:
     [transformer_mapper, graph_transformer_mapper, gnn_mapper],
     ids=["transformer", "graph_transformer", "gnn"],
 )
-def test_mapper_added_dropout_module_is_refused_when_sharded(build) -> None:
-    with pytest.raises(
-        ValueError, match="Dropout is not supported when the model is sharded"
-    ):
+def test_mapper_added_dropout_module_is_refused_when_sharded(build) -> None:  # noqa: ANN001
+    with pytest.raises(ValueError, match="Dropout is not supported when the model is sharded"):
         call_mapper(with_injected_dropout(build()), sharded_group())
 
 
 def test_a_positional_model_comm_group_is_found() -> None:
-    with pytest.raises(
-        ValueError, match="Dropout is not supported when the model is sharded"
-    ):
+    with pytest.raises(ValueError, match="Dropout is not supported when the model is sharded"):
         transformer(dropout_p=0.1)(
-            torch.randn(NODES, CHANNELS),
-            1,
-            GraphShardInfo(nodes=[NODES]),
-            None,
-            None,
-            sharded_group(),
+            torch.randn(NODES, CHANNELS), 1, GraphShardInfo(nodes=[NODES]), None, None, sharded_group()
         )
 
 
 def test_the_check_refuses_only_sharded_training() -> None:
     processor = transformer(dropout_p=0.1)
-    with pytest.raises(
-        ValueError, match="Dropout is not supported when the model is sharded"
-    ):
+    with pytest.raises(ValueError, match="Dropout is not supported when the model is sharded"):
         refuse_dropout_when_sharded(processor.train(), sharded_group())
     # Dropout does nothing in eval mode, so sharded inference is not refused.
     refuse_dropout_when_sharded(processor.eval(), sharded_group())
@@ -301,26 +276,17 @@ def _concrete_subclasses(base: type) -> list[type]:
     while stack:
         for subclass in stack.pop().__subclasses__():
             stack.append(subclass)
-            if subclass.__module__.startswith(
-                "anemoi.models"
-            ) and not inspect.isabstract(subclass):
+            if subclass.__module__.startswith("anemoi.models") and not inspect.isabstract(subclass):
                 found.append(subclass)
     return sorted(set(found), key=lambda c: c.__qualname__)
 
 
-PROCESSORS_AND_MAPPERS = _concrete_subclasses(BaseProcessor) + _concrete_subclasses(
-    BaseMapper
-)
+PROCESSORS_AND_MAPPERS = _concrete_subclasses(BaseProcessor) + _concrete_subclasses(BaseMapper)
 
 
 def test_the_sweep_finds_the_processors_and_mappers() -> None:
     names = {cls.__name__ for cls in PROCESSORS_AND_MAPPERS}
-    assert {
-        "TransformerProcessor",
-        "GNNProcessor",
-        "TransformerForwardMapper",
-        "GNNBackwardMapper",
-    } <= names
+    assert {"TransformerProcessor", "GNNProcessor", "TransformerForwardMapper", "GNNBackwardMapper"} <= names
 
 
 @pytest.mark.parametrize("cls", PROCESSORS_AND_MAPPERS, ids=lambda cls: cls.__name__)
@@ -333,7 +299,7 @@ def test_every_processor_and_mapper_forward_reaches_the_check(cls: type) -> None
 
 def test_the_sweep_flags_a_forward_that_skips_the_check() -> None:
     class SkipsTheCheck(TransformerProcessor):
-        def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:  # noqa: ANN002, ANN003
             del args, kwargs
             return x
 

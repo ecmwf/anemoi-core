@@ -18,6 +18,7 @@ def say_hello(greetings, who):
 
 
 class Hello(Command):
+
     def add_arguments(self, command_parser):
         command_parser.add_argument("--greetings", default="hello")
         command_parser.add_argument("--who", default="world")

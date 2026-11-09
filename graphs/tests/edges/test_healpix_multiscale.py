@@ -17,28 +17,19 @@ from anemoi.graphs.nodes import HEALPixNodes
 class TestMultiScaleEdgesInit:
     def test_init(self):
         """Test MultiScaleEdges initialisation."""
+        assert isinstance(HEALPixMultiScaleEdges("test_nodes", "test_nodes", None), HEALPixMultiScaleEdges)
         assert isinstance(
-            HEALPixMultiScaleEdges("test_nodes", "test_nodes", None),
-            HEALPixMultiScaleEdges,
+            HEALPixMultiScaleEdges("test_nodes", "test_nodes", scale_resolutions=4), HEALPixMultiScaleEdges
         )
         assert isinstance(
-            HEALPixMultiScaleEdges("test_nodes", "test_nodes", scale_resolutions=4),
-            HEALPixMultiScaleEdges,
-        )
-        assert isinstance(
-            HEALPixMultiScaleEdges(
-                "test_nodes", "test_nodes", scale_resolutions=[1, 2, 3]
-            ),
-            HEALPixMultiScaleEdges,
+            HEALPixMultiScaleEdges("test_nodes", "test_nodes", scale_resolutions=[1, 2, 3]), HEALPixMultiScaleEdges
         )
 
     @pytest.mark.parametrize("scale_resolutions", [0, -1, [0], [-1], "invalid"])
     def test_fail_init_invalid_scale_resolutions(self, scale_resolutions):
         """Test MultiScaleEdges initialisation with invalid scale_resolutions."""
         with pytest.raises(AssertionError):
-            HEALPixMultiScaleEdges(
-                "test_nodes", "test_nodes", scale_resolutions=scale_resolutions
-            )
+            HEALPixMultiScaleEdges("test_nodes", "test_nodes", scale_resolutions=scale_resolutions)
 
     def test_fail_init_diff_nodes(self):
         """Test MultiScaleEdges initialisation with invalid nodes."""
@@ -47,6 +38,7 @@ class TestMultiScaleEdgesInit:
 
 
 class TestHEALPixMultiScaleEdgesTransform:
+
     @pytest.fixture()
     def healpix_graph(self) -> HeteroData:
         """Return a HeteroData object with HEALPixMultiScaleEdges."""
@@ -64,13 +56,9 @@ class TestHEALPixMultiScaleEdgesTransform:
         assert ("test_tri_nodes", "to", "test_tri_nodes") in graph.edge_types
 
     @pytest.mark.parametrize("scale_resolutions", [1, [1], [1, 2], None])
-    def test_transform_with_scale_resolutions(
-        self, healpix_graph: HeteroData, scale_resolutions
-    ):
+    def test_transform_with_scale_resolutions(self, healpix_graph: HeteroData, scale_resolutions):
         """Test HEALPixMultiScaleEdges with different scale_resolutions configurations."""
-        edges = HEALPixMultiScaleEdges(
-            "test_tri_nodes", "test_tri_nodes", scale_resolutions=scale_resolutions
-        )
+        edges = HEALPixMultiScaleEdges("test_tri_nodes", "test_tri_nodes", scale_resolutions=scale_resolutions)
         graph = edges.update_graph(healpix_graph)
 
         assert ("test_tri_nodes", "to", "test_tri_nodes") in graph.edge_types

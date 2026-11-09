@@ -50,9 +50,7 @@ def coordinates_to_lat_lon(
     return coords[:, 0].tolist(), coords[:, 1].tolist()
 
 
-def node_list(
-    graph: HeteroData, nodes_name: str, mask: list[bool] | None = None
-) -> tuple[list[float], list[float]]:
+def node_list(graph: HeteroData, nodes_name: str, mask: list[bool] | None = None) -> tuple[list[float], list[float]]:
     """Get the latitude and longitude of the nodes.
 
     Parameters
@@ -80,9 +78,7 @@ def node_list(
     return latitudes.tolist(), longitudes.tolist()
 
 
-def edge_list(
-    graph: HeteroData, source_nodes_name: str, target_nodes_name: str
-) -> tuple[np.ndarray, np.ndarray]:
+def edge_list(graph: HeteroData, source_nodes_name: str, target_nodes_name: str) -> tuple[np.ndarray, np.ndarray]:
     """Get the edge list.
 
     This method returns the edge list to be represented in a graph. It computes the coordinates of the points connected
@@ -163,12 +159,8 @@ def edge_list_from_coordinates(
     source_edge_coords = np.rad2deg(source[edges[0]])
     target_edge_coords = np.rad2deg(target[edges[1]])
     nans = np.full_like(source_edge_coords[:, :1], np.nan)
-    latitudes = np.concatenate(
-        [source_edge_coords[:, :1], target_edge_coords[:, :1], nans], axis=1
-    ).flatten()
-    longitudes = np.concatenate(
-        [source_edge_coords[:, 1:2], target_edge_coords[:, 1:2], nans], axis=1
-    ).flatten()
+    latitudes = np.concatenate([source_edge_coords[:, :1], target_edge_coords[:, :1], nans], axis=1).flatten()
+    longitudes = np.concatenate([source_edge_coords[:, 1:2], target_edge_coords[:, 1:2], nans], axis=1).flatten()
     return latitudes, longitudes
 
 
@@ -192,24 +184,17 @@ def compute_node_adjacencies(
         Number of adjacencies of each node.
     """
     node_adjacencies = np.zeros(graph[target_nodes_name].num_nodes, dtype=int)
-    vals, counts = np.unique(
-        graph[(source_nodes_name, "to", target_nodes_name)].edge_index[1],
-        return_counts=True,
-    )
+    vals, counts = np.unique(graph[(source_nodes_name, "to", target_nodes_name)].edge_index[1], return_counts=True)
     node_adjacencies[vals] = counts
     return node_adjacencies
 
 
-def get_node_adjancency_attributes(
-    graph: HeteroData,
-) -> dict[str, tuple[str, np.ndarray]]:
+def get_node_adjancency_attributes(graph: HeteroData) -> dict[str, tuple[str, np.ndarray]]:
     """Get the node adjacencies for each subgraph."""
     node_adj_attr = {}
     for (source_nodes_name, _, target_nodes_name), _ in graph.edge_items():
         attr_name = f"# connections from {source_nodes_name}"
-        node_adj_vector = compute_node_adjacencies(
-            graph, source_nodes_name, target_nodes_name
-        )
+        node_adj_vector = compute_node_adjacencies(graph, source_nodes_name, target_nodes_name)
         if target_nodes_name not in node_adj_attr:
             node_adj_attr[target_nodes_name] = {attr_name: node_adj_vector}
         else:
@@ -270,9 +255,9 @@ def get_node_attribute_dims(graph: HeteroData) -> dict[str, int]:
             elif attr not in attr_dims:
                 attr_dims[attr] = nodes[attr].shape[1]
             else:
-                assert nodes[attr].shape[1] == attr_dims[attr], (
-                    f"Attribute {attr} has different dimensions in different nodes."
-                )
+                assert (
+                    nodes[attr].shape[1] == attr_dims[attr]
+                ), f"Attribute {attr} has different dimensions in different nodes."
     return attr_dims
 
 
@@ -297,7 +282,7 @@ def get_edge_attribute_dims(graph: HeteroData) -> dict[str, int]:
             elif attr not in attr_dims:
                 attr_dims[attr] = edges[attr].shape[1]
             else:
-                assert edges[attr].shape[1] == attr_dims[attr], (
-                    f"Attribute {attr} has different dimensions in different edges."
-                )
+                assert (
+                    edges[attr].shape[1] == attr_dims[attr]
+                ), f"Attribute {attr} has different dimensions in different edges."
     return attr_dims

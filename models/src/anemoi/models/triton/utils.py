@@ -8,23 +8,23 @@
 # nor does it submit to any jurisdiction.
 
 import os
+from typing import Optional
+from typing import Tuple
 
 import torch
 from torch_geometric.typing import Adj
 from torch_geometric.utils import index_sort
 from torch_geometric.utils.sparse import index2ptr
 
-from anemoi.models.distributed.khop_edges import (
-    is_edge_index_dst_sorted,
-    sort_edge_index_by_dst,
-)
+from anemoi.models.distributed.khop_edges import is_edge_index_dst_sorted
+from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
 
 ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
 
 
 def edge_index_to_csc(
     edge_index: Adj,
-    num_nodes: tuple[int, int] | None = None,
+    num_nodes: Optional[Tuple[int, int]] = None,
     reverse: bool = True,
     edges_are_dst_sorted: bool = False,
 ):
@@ -90,19 +90,13 @@ def torch_dtype_to_triton(dtype):
 def is_hip():
     import triton
 
-    return (
-        torch.cuda.is_available()
-        and triton.runtime.driver.active.get_current_target().backend == "hip"
-    )
+    return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "hip"
 
 
 def is_cuda():
     import triton
 
-    return (
-        torch.cuda.is_available()
-        and triton.runtime.driver.active.get_current_target().backend == "cuda"
-    )
+    return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "cuda"
 
 
 def supports_host_descriptor():

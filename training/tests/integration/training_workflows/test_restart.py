@@ -35,9 +35,9 @@ def get_single_checkpoint_dir(cfg: DictConfig) -> Path:
     assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
 
     run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
-    assert len(run_dirs) == 1, (
-        f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
-    )
+    assert (
+        len(run_dirs) == 1
+    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
     return run_dirs[0]
 
 
@@ -166,14 +166,14 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     trainer.train()
 
     assert start.epoch == parent_epoch, f"resumed run started at epoch {start.epoch}, checkpoint has {parent_epoch}"
-    assert start.global_step == parent_global_step, (
-        f"resumed run started at step {start.global_step}, checkpoint has {parent_global_step}"
-    )
+    assert (
+        start.global_step == parent_global_step
+    ), f"resumed run started at step {start.global_step}, checkpoint has {parent_global_step}"
 
     expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
-    assert trainer.model.trainer.global_step == expected_global_step, (
-        f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
-    )
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
 
@@ -290,9 +290,9 @@ def test_restart_training_architectures(
     trainer.train()
 
     expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
-    assert trainer.model.trainer.global_step == expected_global_step, (
-        f"{config_fixture} resume: expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
-    )
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"{config_fixture} resume: expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
 
 
 @skip_if_offline
@@ -386,9 +386,9 @@ def test_loading_strategy_loads_real_checkpoint(
 
     # The pipeline applies weights at model-build and marks the model; if the strategy
     # had silently failed to load, this would be unset (or the run would have crashed).
-    assert getattr(trainer.model, "weights_initialized", False) is True, (
-        f"{loader} did not mark the model weights as initialised"
-    )
+    assert (
+        getattr(trainer.model, "weights_initialized", False) is True
+    ), f"{loader} did not mark the model weights as initialised"
 
 
 @skip_if_offline
@@ -498,9 +498,9 @@ def test_restart_training_with_rollout(
     trainer.train()
     assert_keys_exist(trainer.metadata, partial_metadata_schema)
     # The rollout step should be incremented after each epoch, so after 2 epochs it should be 3
-    assert trainer.task.rollout.step == 3, (
-        f"Expected rollout step after 2 epochs to be 1+2=3, got {trainer.task.rollout.step}"
-    )
+    assert (
+        trainer.task.rollout.step == 3
+    ), f"Expected rollout step after 2 epochs to be 1+2=3, got {trainer.task.rollout.step}"
 
     # Resume training from the checkpoint and verify the rollout counter is restored
     # correctly and continues to increment on further epochs.

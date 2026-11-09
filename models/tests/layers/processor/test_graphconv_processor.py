@@ -7,11 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
+from dataclasses import dataclass
+from dataclasses import field
 
 import pytest
 import torch
-from anemoi.utils.config import DotDict
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import GraphShardInfo
@@ -20,6 +21,7 @@ from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.processor import GNNProcessor
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.utils.config import DotDict
 
 
 @dataclass
@@ -49,12 +51,8 @@ class TestGNNProcessor:
         graph[("nodes", "to", "nodes")].edge_index = torch.randint(
             0, self.NUM_NODES, (2, self.NUM_EDGES), device=device
         )
-        graph[("nodes", "to", "nodes")].edge_attr1 = torch.rand(
-            (self.NUM_EDGES, 3), device=device
-        )
-        graph[("nodes", "to", "nodes")].edge_attr2 = torch.rand(
-            (self.NUM_EDGES, 4), device=device
-        )
+        graph[("nodes", "to", "nodes")].edge_attr1 = torch.rand((self.NUM_EDGES, 3), device=device)
+        graph[("nodes", "to", "nodes")].edge_attr2 = torch.rand((self.NUM_EDGES, 4), device=device)
         return graph
 
     @pytest.fixture
@@ -78,45 +76,30 @@ class TestGNNProcessor:
         config["edge_dim"] = graph_provider.edge_dim
         return GNNProcessor(**config).to(device)
 
-    def test_graphconv_processor_init(
-        self, graphconv_processor, graphconv_init, graph_provider
-    ):
+    def test_graphconv_processor_init(self, graphconv_processor, graphconv_init, graph_provider):
         assert graphconv_processor.num_chunks == graphconv_init.num_chunks
         assert graphconv_processor.num_channels == graphconv_init.num_channels
-        assert (
-            graphconv_processor.chunk_size
-            == graphconv_init.num_layers // graphconv_init.num_chunks
-        )
+        assert graphconv_processor.chunk_size == graphconv_init.num_layers // graphconv_init.num_chunks
         assert isinstance(graph_provider.trainable, TrainableTensor)
 
     def test_all_blocks(self, graphconv_processor):
-        assert all(
-            isinstance(block, GraphConvProcessorBlock)
-            for block in graphconv_processor.proc
-        )
+        assert all(isinstance(block, GraphConvProcessorBlock) for block in graphconv_processor.proc)
 
     def test_forward(self, graphconv_processor, graphconv_init, graph_provider):
         batch_size = 1
         x = torch.rand(
-            (self.NUM_NODES, graphconv_init.num_channels),
-            device=next(graphconv_processor.parameters()).device,
+            (self.NUM_NODES, graphconv_init.num_channels), device=next(graphconv_processor.parameters()).device
         )
-        shape_info = GraphShardInfo(
-            nodes=[self.NUM_NODES], edges=[self.NUM_EDGES * batch_size]
-        )
+        shape_info = GraphShardInfo(nodes=[self.NUM_NODES], edges=[self.NUM_EDGES * batch_size])
 
         # Run forward pass of processor
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
-        output = graphconv_processor.forward(
-            x, batch_size, shape_info, edge_attr, edge_index
-        )
+        output = graphconv_processor.forward(x, batch_size, shape_info, edge_attr, edge_index)
         assert output.shape == (self.NUM_NODES, graphconv_init.num_channels)
 
         # Generate dummy target and loss function
         loss_fn = torch.nn.MSELoss()
-        target = torch.rand(
-            (self.NUM_NODES, graphconv_init.num_channels), device=output.device
-        )
+        target = torch.rand((self.NUM_NODES, graphconv_init.num_channels), device=output.device)
         loss = loss_fn(output, target)
 
         # Check loss
@@ -134,22 +117,19 @@ class TestGNNProcessor:
         # Check gradients of processor
         for param in graphconv_processor.parameters():
             assert param.grad is not None, f"param.grad is None for {param}"
-            assert param.grad.shape == param.shape, (
-                f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
-            )
+            assert (
+                param.grad.shape == param.shape
+            ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
 
     def test_unsorted_edge_flag_reaches_sharding(
         self, graphconv_processor, graphconv_init, graph_provider, monkeypatch
     ):
         batch_size = 1
         x = torch.rand(
-            (self.NUM_NODES, graphconv_init.num_channels),
-            device=next(graphconv_processor.parameters()).device,
+            (self.NUM_NODES, graphconv_init.num_channels), device=next(graphconv_processor.parameters()).device
         )
         shape_info = GraphShardInfo(nodes=[self.NUM_NODES], edges=None)
-        edge_attr, edge_index, _ = graph_provider.get_edges(
-            batch_size=batch_size, shard_edges=False
-        )
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size, shard_edges=False)
         called = {}
 
         def fake_shard_edges_1hop(
@@ -163,9 +143,7 @@ class TestGNNProcessor:
             called["edges_are_dst_sorted"] = edges_are_dst_sorted
             return edge_attr, edge_index, None
 
-        monkeypatch.setattr(
-            "anemoi.models.layers.processor.shard_edges_1hop", fake_shard_edges_1hop
-        )
+        monkeypatch.setattr("anemoi.models.layers.processor.shard_edges_1hop", fake_shard_edges_1hop)
 
         output = graphconv_processor.forward(
             x,

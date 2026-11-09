@@ -493,6 +493,7 @@ def get_git_revision_hash() -> str:
 
 
 class LocalBenchmarkServer(BenchmarkServer):
+
     def __init__(self, store: Path, test_case: str = ""):
         super().__init__(store, test_case=test_case)
 
@@ -528,6 +529,7 @@ class LocalBenchmarkServer(BenchmarkServer):
 
 
 class RemoteBenchmarkServer(BenchmarkServer):
+
     def __init__(
         self,
         store: str,

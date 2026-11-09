@@ -10,7 +10,9 @@
 import pytest
 import torch
 
-from anemoi.models.layers.spectral_transforms import DCT2D, FFT2D, OctahedralSHT
+from anemoi.models.layers.spectral_transforms import DCT2D
+from anemoi.models.layers.spectral_transforms import FFT2D
+from anemoi.models.layers.spectral_transforms import OctahedralSHT
 
 _DENSITY_TRANSFORMS = ["fft2d", "dct2d", "sht"]
 
@@ -42,9 +44,7 @@ def test_radial_band_index() -> None:
     # flattened row-major (y outer, x inner).
     t = FFT2D(x_dim=3, y_dim=4)
     t.register_radial_bands()
-    assert torch.equal(
-        t.radial_band_index, torch.tensor([0, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1])
-    )
+    assert torch.equal(t.radial_band_index, torch.tensor([0, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1]))
     assert t.n_radial_bands == 3
 
 

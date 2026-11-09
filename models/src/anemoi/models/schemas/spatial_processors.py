@@ -9,10 +9,14 @@
 
 from __future__ import annotations
 
-from typing import Literal, Union
+from typing import Literal
+from typing import Optional
+from typing import Union
+
+from pydantic import Field
+from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
-from pydantic import Field, model_validator
 
 
 class CrossGridProjectorSchema(BaseModel):
@@ -23,17 +27,17 @@ class CrossGridProjectorSchema(BaseModel):
     is therefore not part of the config schema.
     """
 
-    target_: Literal[
-        "anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector"
-    ] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector"] = Field(
+        ..., alias="_target_"
+    )
     "CrossGridProjector class path."
-    edges_name: tuple[str, str, str] | None = Field(default=None)
+    edges_name: Optional[tuple[str, str, str]] = Field(default=None)
     "Edge type key ``(src_node_type, relation, dst_node_type)`` in the graph. Required when not using file_path."
-    edge_weight_attribute: str | None = Field(default=None)
+    edge_weight_attribute: Optional[str] = Field(default=None)
     "Edge attribute to use as interpolation weights."
-    src_node_weight_attribute: str | None = Field(default=None)
+    src_node_weight_attribute: Optional[str] = Field(default=None)
     "Source-node attribute to multiply into edge weights."
-    file_path: str | None = Field(default=None)
+    file_path: Optional[str] = Field(default=None)
     "Path to a pre-computed ``.npz`` sparse projection matrix. Alternative to ``edges_name``."
     row_normalize: bool = Field(default=True)
     "If ``True``, each row of the projection matrix is normalised to sum to 1."

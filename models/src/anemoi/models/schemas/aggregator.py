@@ -7,34 +7,30 @@
 # nor does it submit to any jurisdiction.
 #
 
-from typing import Annotated, Literal
+from typing import Annotated
+from typing import Literal
+
+from pydantic import Field
+from pydantic import NonNegativeFloat
+from pydantic import PositiveInt
 
 from anemoi.utils.schemas import BaseModel
-from pydantic import Field, NonNegativeFloat, PositiveInt
 
 
 class SumAggregatorSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.aggregator.SumAggregator"] = Field(
-        ..., alias="_target_"
-    )
+    target_: Literal["anemoi.models.layers.aggregator.SumAggregator"] = Field(..., alias="_target_")
 
 
 class MeanAggregatorSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.aggregator.MeanAggregator"] = Field(
-        ..., alias="_target_"
-    )
+    target_: Literal["anemoi.models.layers.aggregator.MeanAggregator"] = Field(..., alias="_target_")
 
 
 class ConcatAggregatorSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.aggregator.ConcatAggregator"] = Field(
-        ..., alias="_target_"
-    )
+    target_: Literal["anemoi.models.layers.aggregator.ConcatAggregator"] = Field(..., alias="_target_")
 
 
 class PointwiseCrossAttentionAggregatorSchema(BaseModel):
-    target_: Literal[
-        "anemoi.models.layers.aggregator.PointwiseCrossAttentionAggregator"
-    ] = Field(..., alias="_target_")
+    target_: Literal["anemoi.models.layers.aggregator.PointwiseCrossAttentionAggregator"] = Field(..., alias="_target_")
     num_channels: PositiveInt
     num_heads: PositiveInt
     layer_kernels: dict[str, dict] | None = Field(default_factory=dict)
@@ -46,9 +42,6 @@ class PointwiseCrossAttentionAggregatorSchema(BaseModel):
 
 
 AggregatorSchema = Annotated[
-    SumAggregatorSchema
-    | MeanAggregatorSchema
-    | ConcatAggregatorSchema
-    | PointwiseCrossAttentionAggregatorSchema,
+    SumAggregatorSchema | MeanAggregatorSchema | ConcatAggregatorSchema | PointwiseCrossAttentionAggregatorSchema,
     Field(discriminator="target_"),
 ]

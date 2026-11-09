@@ -16,9 +16,7 @@ from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 NORTH_POLE = [0.0, 0.0, 1.0]  # North pole in 3D coordinates
 
 
-def rotate_vectors(
-    v: torch.Tensor, axis: torch.Tensor, angle: torch.Tensor, eps=1e-8
-) -> torch.Tensor:
+def rotate_vectors(v: torch.Tensor, axis: torch.Tensor, angle: torch.Tensor, eps=1e-8) -> torch.Tensor:
     """Rotate points v around axis by the angle using Rodrigues' rotation formula in torch.
 
     Parameters
@@ -39,9 +37,7 @@ def rotate_vectors(
     -----
     - https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
     """
-    axis_norm = torch.norm(
-        axis, dim=-1, keepdim=True
-    )  # Ensure the axis is a unit vector
+    axis_norm = torch.norm(axis, dim=-1, keepdim=True)  # Ensure the axis is a unit vector
     axis = axis / torch.clamp(axis_norm, min=eps)
 
     cos_theta = torch.cos(angle).unsqueeze(-1)
@@ -55,9 +51,7 @@ def rotate_vectors(
     return v_rot
 
 
-def compute_directions(
-    source_coords: torch.Tensor, target_coords: torch.Tensor
-) -> torch.Tensor:
+def compute_directions(source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
     """Compute the direction of the edge on the tangent plane.
 
     1. Rotate coordinate system so target_coords is at north pole (0, 0, 1)
@@ -81,9 +75,7 @@ def compute_directions(
 
     source_coords_xyz = latlon_rad_to_cartesian(source_coords, 1.0)
     target_coords_xyz = latlon_rad_to_cartesian(target_coords, 1.0)
-    north_pole = torch.tensor(
-        [NORTH_POLE], dtype=source_coords.dtype, device=source_coords.device
-    )
+    north_pole = torch.tensor([NORTH_POLE], dtype=source_coords.dtype, device=source_coords.device)
 
     # Compute dot product with north pole -> pole cases
     dot = (target_coords_xyz * north_pole).sum(dim=1, keepdim=True)
@@ -95,17 +87,13 @@ def compute_directions(
 
     # init output
     direction = torch.zeros(
-        (source_coords_xyz.shape[0], 2),
-        dtype=source_coords_xyz.dtype,
-        device=source_coords_xyz.device,
+        (source_coords_xyz.shape[0], 2), dtype=source_coords_xyz.dtype, device=source_coords_xyz.device
     )
 
     # target at north pole - no rotation needed
     if at_north.any():
         xy = source_coords_xyz[at_north, :2]
-        direction[at_north] = xy / torch.clamp(
-            torch.linalg.norm(xy, dim=1, keepdim=True), min=epsilon
-        )
+        direction[at_north] = xy / torch.clamp(torch.linalg.norm(xy, dim=1, keepdim=True), min=epsilon)
 
     # target at south pole - rotate 180° around x-axis
     if at_south.any():
@@ -114,9 +102,7 @@ def compute_directions(
         rotated_south[:, 1] *= -1
         rotated_south[:, 2] *= -1
         xy = rotated_south[:, :2]
-        direction[at_south] = xy / torch.clamp(
-            torch.linalg.norm(xy, dim=1, keepdim=True), min=epsilon
-        )
+        direction[at_south] = xy / torch.clamp(torch.linalg.norm(xy, dim=1, keepdim=True), min=epsilon)
 
     # rotation via cross product
     if normal.any():
@@ -124,20 +110,14 @@ def compute_directions(
         source_normal = source_coords_xyz[normal]
 
         axis = torch.cross(target_normal, north_pole.expand_as(target_normal), dim=1)
-        sin_theta = torch.linalg.norm(
-            axis, dim=1, keepdim=True
-        )  # ||target x north_pole||
-        cos_theta = torch.clamp(
-            (target_normal * north_pole).sum(dim=1, keepdim=True), -1.0, 1.0
-        )
+        sin_theta = torch.linalg.norm(axis, dim=1, keepdim=True)  # ||target x north_pole||
+        cos_theta = torch.clamp((target_normal * north_pole).sum(dim=1, keepdim=True), -1.0, 1.0)
         theta = torch.atan2(sin_theta, cos_theta).squeeze(1)
 
         axis_unit = axis / torch.clamp(sin_theta, min=epsilon)
 
         rotated_normal = rotate_vectors(source_normal, axis_unit, theta)
         xy = rotated_normal[:, :2]
-        direction[normal] = xy / torch.clamp(
-            torch.linalg.norm(xy, dim=1, keepdim=True), min=epsilon
-        )
+        direction[normal] = xy / torch.clamp(torch.linalg.norm(xy, dim=1, keepdim=True), min=epsilon)
 
     return direction

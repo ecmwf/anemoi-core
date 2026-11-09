@@ -7,7 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.migrations import CkptType, MigrationMetadata
+from anemoi.models.migrations import CkptType
+from anemoi.models.migrations import MigrationMetadata
 
 # DO NOT CHANGE -->
 metadata = MigrationMetadata(
@@ -38,36 +39,24 @@ def migrate(ckpt: CkptType) -> CkptType:
     for key in list(ckpt["state_dict"].keys()):
         # Update pre-processors
         if key.startswith("model.pre_processors."):
-            new_key = key.replace(
-                "model.pre_processors.", f"model.pre_processors.{dummy_dataset_name}."
-            )
+            new_key = key.replace("model.pre_processors.", f"model.pre_processors.{dummy_dataset_name}.")
             updates[new_key] = ckpt["state_dict"][key]
             del ckpt["state_dict"][key]
 
         # Update post-processors
         if key.startswith("model.post_processors."):
-            new_key = key.replace(
-                "model.post_processors.", f"model.post_processors.{dummy_dataset_name}."
-            )
+            new_key = key.replace("model.post_processors.", f"model.post_processors.{dummy_dataset_name}.")
             updates[new_key] = ckpt["state_dict"][key]
             del ckpt["state_dict"][key]
 
         # Update node attributes
         if key.startswith("model.model.node_attributes."):
-            new_key = key.replace(
-                "model.model.node_attributes.",
-                f"model.model.node_attributes.{dummy_dataset_name}.",
-            )
+            new_key = key.replace("model.model.node_attributes.", f"model.model.node_attributes.{dummy_dataset_name}.")
             updates[new_key] = ckpt["state_dict"][key]
             del ckpt["state_dict"][key]
 
         # Adjust model components
-        for model_component in [
-            "encoder",
-            "encoder_graph_provider",
-            "decoder",
-            "decoder_graph_provider",
-        ]:
+        for model_component in ["encoder", "encoder_graph_provider", "decoder", "decoder_graph_provider"]:
             prefix = f"model.model.{model_component}."
 
             if key.startswith(prefix):
@@ -77,12 +66,8 @@ def migrate(ckpt: CkptType) -> CkptType:
 
     ckpt["state_dict"].update(updates)
 
-    ckpt["hyper_parameters"]["data_indices"] = {
-        dummy_dataset_name: ckpt["hyper_parameters"].pop("data_indices")
-    }
-    ckpt["hyper_parameters"]["statistics"] = {
-        dummy_dataset_name: ckpt["hyper_parameters"].pop("statistics")
-    }
+    ckpt["hyper_parameters"]["data_indices"] = {dummy_dataset_name: ckpt["hyper_parameters"].pop("data_indices")}
+    ckpt["hyper_parameters"]["statistics"] = {dummy_dataset_name: ckpt["hyper_parameters"].pop("statistics")}
     ckpt["hyper_parameters"]["statistics_tendencies"] = {
         dummy_dataset_name: ckpt["hyper_parameters"].pop("statistics_tendencies")
     }

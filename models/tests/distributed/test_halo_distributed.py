@@ -24,10 +24,8 @@ import torch
 import torch.distributed as dist
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.khop_edges import (
-    shard_edges_1hop,
-    sort_edge_index_by_dst,
-)
+from anemoi.models.distributed.khop_edges import shard_edges_1hop
+from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers import processor as processor_module
 from anemoi.models.layers.processor import GraphTransformerProcessor
@@ -92,18 +90,10 @@ def _build_case(graph: str, world_size: int, device: torch.device):
         edge_dim=EDGE_DIM,
         shard_strategy="edges",
     ).to(device)
-    return (
-        processor,
-        x.to(device),
-        edge_attr.to(device),
-        edge_index.to(device),
-        loss_weights.to(device),
-    )
+    return processor, x.to(device), edge_attr.to(device), edge_index.to(device), loss_weights.to(device)
 
 
-def _pairwise_send_counts(
-    send_counts: tuple[int, ...], device: torch.device, group: dist.ProcessGroup
-) -> torch.Tensor:
+def _pairwise_send_counts(send_counts: tuple[int, ...], device: torch.device, group: dist.ProcessGroup) -> torch.Tensor:
     """Matrix whose entry (i, j) is the number of nodes rank i sends to rank j."""
     local = torch.tensor(send_counts, dtype=torch.long, device=device)
     rows = [torch.empty_like(local) for _ in range(dist.get_world_size(group))]
@@ -122,19 +112,13 @@ def _test_processor_matches_single_process_rank(
     debug: bool,
 ) -> None:
     processor_module.ANEMOI_DEBUG_SHARDING = debug
-    processor, x, edge_attr, edge_index, loss_weights = _build_case(
-        graph, world_size, device
-    )
+    processor, x, edge_attr, edge_index, loss_weights = _build_case(graph, world_size, device)
 
     # Reference: the whole graph in one process.
     x_full = x.clone().requires_grad_(True)
-    y_full = processor(
-        x_full, 1, GraphShardInfo(), edge_attr, edge_index, model_comm_group=None
-    )
+    y_full = processor(x_full, 1, GraphShardInfo(), edge_attr, edge_index, model_comm_group=None)
     (y_full * loss_weights).sum().backward()
-    param_grads_full = {
-        name: param.grad.clone() for name, param in processor.named_parameters()
-    }
+    param_grads_full = {name: param.grad.clone() for name, param in processor.named_parameters()}
     processor.zero_grad(set_to_none=True)
 
     sizes = get_balanced_partition_sizes(NUM_NODES, world_size)
@@ -142,14 +126,10 @@ def _test_processor_matches_single_process_rank(
     x_local = x[start:stop].clone().requires_grad_(True)
     edge_shard_sizes = None
     if pre_sharded:
-        edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
-            edge_attr, edge_index, NUM_NODES, NUM_NODES, group
-        )
+        edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(edge_attr, edge_index, NUM_NODES, NUM_NODES, group)
     shard_info = GraphShardInfo(nodes=sizes, edges=edge_shard_sizes)
 
-    y_local = processor(
-        x_local, 1, shard_info, edge_attr, edge_index, model_comm_group=group
-    )
+    y_local = processor(x_local, 1, shard_info, edge_attr, edge_index, model_comm_group=group)
     (y_local * loss_weights[start:stop]).sum().backward()
 
     tolerances = {"rtol": 1e-4, "atol": 1e-5}
@@ -158,27 +138,19 @@ def _test_processor_matches_single_process_rank(
     for name, param in processor.named_parameters():
         grad = param.grad.clone()
         dist.all_reduce(grad, group=group)
-        torch.testing.assert_close(
-            grad, param_grads_full[name], **tolerances, msg=f"gradient of {name}"
-        )
+        torch.testing.assert_close(grad, param_grads_full[name], **tolerances, msg=f"gradient of {name}")
 
     halo_info = processor._cached_halo_info
     sends = _pairwise_send_counts(halo_info.send_counts, device, group)
     receives = _pairwise_send_counts(halo_info.recv_counts, device, group)
     torch.testing.assert_close(receives, sends.T)
     if graph == "directed":
-        assert not torch.equal(sends, sends.T), (
-            "expected the directed graph to give uneven sends between ranks"
-        )
+        assert not torch.equal(sends, sends.T), "expected the directed graph to give uneven sends between ranks"
     else:
-        assert (receives.sum(dim=1)[1:] == 0).all(), (
-            "expected only rank 0 to request nodes"
-        )
+        assert (receives.sum(dim=1)[1:] == 0).all(), "expected only rank 0 to request nodes"
 
     with torch.no_grad():
-        y_again = processor(
-            x_local, 1, shard_info, edge_attr, edge_index, model_comm_group=group
-        )
+        y_again = processor(x_local, 1, shard_info, edge_attr, edge_index, model_comm_group=group)
     assert processor._cached_halo_info is halo_info
     torch.testing.assert_close(y_again, y_local)
 
@@ -188,11 +160,7 @@ def _test_processor_matches_single_process_rank(
 @pytest.mark.parametrize("pre_sharded", [False, True])
 @pytest.mark.parametrize("debug", [False, True])
 def test_processor_matches_single_process(
-    distributed_backend: str,
-    distributed_world_size: int,
-    graph: str,
-    pre_sharded: bool,
-    debug: bool,
+    distributed_backend: str, distributed_world_size: int, graph: str, pre_sharded: bool, debug: bool
 ) -> None:
     _run_distributed_test(
         _test_processor_matches_single_process_rank,

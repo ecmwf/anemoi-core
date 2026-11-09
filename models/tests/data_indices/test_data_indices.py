@@ -12,7 +12,8 @@ import pytest
 import torch
 
 from anemoi.models.data_indices.index import DataIndex
-from anemoi.models.data_indices.tensor import InputTensorIndex, OutputTensorIndex
+from anemoi.models.data_indices.tensor import InputTensorIndex
+from anemoi.models.data_indices.tensor import OutputTensorIndex
 
 
 @pytest.fixture()
@@ -50,9 +51,7 @@ def output_tensor_index(fake_data):
 
 def test_dataindex_init(fake_data, input_tensor_index, output_tensor_index) -> None:
     forcing, _, diagnostic, name_to_index = fake_data
-    data_index = DataIndex(
-        forcing=forcing, diagnostic=diagnostic, name_to_index=name_to_index
-    )
+    data_index = DataIndex(forcing=forcing, diagnostic=diagnostic, name_to_index=name_to_index)
     assert data_index.input == input_tensor_index
     assert data_index.output == output_tensor_index
 

@@ -7,29 +7,28 @@
 # nor does it submit to any jurisdiction.
 #
 
-from typing import Any, Literal
+from typing import Any
+from typing import Literal
+from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Field, NonNegativeFloat, NonNegativeInt, model_validator
+from pydantic import Field
+from pydantic import NonNegativeFloat
+from pydantic import NonNegativeInt
+from pydantic import model_validator
 
-from .common_components import (
-    GNNModelComponent,
-    PointWiseModelComponent,
-    TransformerModelComponent,
-)
+from .common_components import GNNModelComponent
+from .common_components import PointWiseModelComponent
+from .common_components import TransformerModelComponent
 
 
 class NoOpProcessorSchema(PydanticBaseModel):
-    target_: Literal["anemoi.models.layers.processor.NoOpProcessor"] = Field(
-        ..., alias="_target_"
-    )
+    target_: Literal["anemoi.models.layers.processor.NoOpProcessor"] = Field(..., alias="_target_")
     "No-op processor, used for ablations."
 
 
 class GNNProcessorSchema(GNNModelComponent):
-    target_: Literal["anemoi.models.layers.processor.GNNProcessor"] = Field(
-        ..., alias="_target_"
-    )
+    target_: Literal["anemoi.models.layers.processor.GNNProcessor"] = Field(..., alias="_target_")
     "GNN Processor object from anemoi.models.layers.processor."
     num_channels: NonNegativeInt = Field(example=512)
     "Number of channels in the GNN processor. Default to 512."
@@ -40,9 +39,7 @@ class GNNProcessorSchema(GNNModelComponent):
 
 
 class GraphTransformerProcessorSchema(TransformerModelComponent):
-    target_: Literal["anemoi.models.layers.processor.GraphTransformerProcessor"] = (
-        Field(..., alias="_target_")
-    )
+    target_: Literal["anemoi.models.layers.processor.GraphTransformerProcessor"] = Field(..., alias="_target_")
     "Graph transformer processor object from anemoi.models.layers.processor."
     num_channels: NonNegativeInt = Field(example=512)
     "Number of channels in the Graph Transformer processor. Default to 512."
@@ -79,9 +76,7 @@ class GraphTransformerProcessorSchema(TransformerModelComponent):
 
 
 class TransformerProcessorSchema(TransformerModelComponent):
-    target_: Literal["anemoi.models.layers.processor.TransformerProcessor"] = Field(
-        ..., alias="_target_"
-    )
+    target_: Literal["anemoi.models.layers.processor.TransformerProcessor"] = Field(..., alias="_target_")
     "Transformer processor object from anemoi.models.layers.processor."
     num_channels: NonNegativeInt = Field(example=512)
     "Number of channels in the Transformer processor. Default to 512."
@@ -89,7 +84,7 @@ class TransformerProcessorSchema(TransformerModelComponent):
     "Number of layers of Transformer processor. Default to 16."
     num_chunks: NonNegativeInt = Field(example=2)
     "Number of chunks to divide the layer into. Default to 2."
-    window_size: NonNegativeInt | None = Field(example=512)
+    window_size: Union[NonNegativeInt, None] = Field(example=512)
     "Attention window size along the longitude axis. Default to 512."
     dropout_p: NonNegativeFloat = Field(example=0.0)
     "Dropout probability used for multi-head self attention, default 0.0"
@@ -120,9 +115,7 @@ class TransformerProcessorSchema(TransformerModelComponent):
 
 
 class PointWiseMLPProcessorSchema(PointWiseModelComponent):
-    target_: Literal["anemoi.models.layers.processor.PointWiseMLPProcessor"] = Field(
-        ..., alias="_target_"
-    )
+    target_: Literal["anemoi.models.layers.processor.PointWiseMLPProcessor"] = Field(..., alias="_target_")
     "PointWise MLP processor object from anemoi.models.layers.processor."
     num_channels: NonNegativeInt = Field(example=512)
     "Number of channels in the PointWise MLP processor. Default to 512."

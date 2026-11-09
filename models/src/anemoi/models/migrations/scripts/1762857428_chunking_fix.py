@@ -7,7 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.migrations import CkptType, MigrationMetadata
+from anemoi.models.migrations import CkptType
+from anemoi.models.migrations import MigrationMetadata
 
 # DO NOT CHANGE -->
 metadata = MigrationMetadata(
@@ -41,9 +42,7 @@ def migrate(ckpt: CkptType) -> CkptType:
 
     for key in [k for k in list(state_dict.keys()) if "processor.proc" in k]:
         parts = key.split(".")
-        if (
-            not parts[5] == "blocks"
-        ):  # expecting format model.model.processor.proc.i.blocks.j....
+        if not parts[5] == "blocks":  # expecting format model.model.processor.proc.i.blocks.j....
             continue
 
         chunk_idx = int(parts[4])

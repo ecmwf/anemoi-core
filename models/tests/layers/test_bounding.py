@@ -10,19 +10,17 @@
 import numpy as np
 import pytest
 import torch
-from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 
-from anemoi.models.layers.bounding import (
-    FractionBounding,
-    HardtanhBounding,
-    LeakyFractionBounding,
-    LeakyHardtanhBounding,
-    LeakyReluBounding,
-    NormalizedLeakyReluBounding,
-    NormalizedReluBounding,
-    ReluBounding,
-)
+from anemoi.models.layers.bounding import FractionBounding
+from anemoi.models.layers.bounding import HardtanhBounding
+from anemoi.models.layers.bounding import LeakyFractionBounding
+from anemoi.models.layers.bounding import LeakyHardtanhBounding
+from anemoi.models.layers.bounding import LeakyReluBounding
+from anemoi.models.layers.bounding import NormalizedLeakyReluBounding
+from anemoi.models.layers.bounding import NormalizedReluBounding
+from anemoi.models.layers.bounding import ReluBounding
+from anemoi.utils.config import DotDict
 
 
 @pytest.fixture
@@ -63,9 +61,7 @@ def test_relu_bounding(config, name_to_index, input_tensor):
     assert torch.equal(output, expected_output)
 
 
-def test_normalized_relu_bounding(
-    config, name_to_index, name_to_index_stats, input_tensor, statistics
-):
+def test_normalized_relu_bounding(config, name_to_index, name_to_index_stats, input_tensor, statistics):
     min_val = [2.0, 2.0]
     normalizer = ["mean-std", "min-max"]
     bounding = NormalizedReluBounding(
@@ -77,9 +73,7 @@ def test_normalized_relu_bounding(
         name_to_index_stats=name_to_index_stats,
     )
     output = bounding(input_tensor.clone())
-    expected_output = torch.tensor(
-        [[2.0, 2.0, 3.0], [4.0, 0.1111, 6.0], [2.0, 0.5, 0.5]]
-    )
+    expected_output = torch.tensor([[2.0, 2.0, 3.0], [4.0, 0.1111, 6.0], [2.0, 0.5, 0.5]])
     assert torch.allclose(output, expected_output, atol=1e-4)
 
     # test with order of variables in configuration different to input tensor
@@ -98,61 +92,41 @@ def test_normalized_relu_bounding(
 def test_hardtanh_bounding(config, name_to_index, input_tensor):
     minimum, maximum = -1.0, 1.0
     bounding = HardtanhBounding(
-        variables=config.variables,
-        name_to_index=name_to_index,
-        min_val=minimum,
-        max_val=maximum,
+        variables=config.variables, name_to_index=name_to_index, min_val=minimum, max_val=maximum
     )
     output = bounding(input_tensor.clone())
-    expected_output = torch.tensor(
-        [[minimum, maximum, 3.0], [maximum, minimum, 6.0], [0.5, 0.5, 0.5]]
-    )
+    expected_output = torch.tensor([[minimum, maximum, 3.0], [maximum, minimum, 6.0], [0.5, 0.5, 0.5]])
     assert torch.equal(output, expected_output)
 
 
 def test_fraction_bounding(config, name_to_index, input_tensor):
     bounding = FractionBounding(
-        variables=config.variables,
-        name_to_index=name_to_index,
-        min_val=0.0,
-        max_val=1.0,
-        total_var=config.total_var,
+        variables=config.variables, name_to_index=name_to_index, min_val=0.0, max_val=1.0, total_var=config.total_var
     )
     output = bounding(input_tensor.clone())
-    expected_output = torch.tensor(
-        [[0.0, 3.0, 3.0], [6.0, 0.0, 6.0], [0.25, 0.25, 0.5]]
-    )
+    expected_output = torch.tensor([[0.0, 3.0, 3.0], [6.0, 0.0, 6.0], [0.25, 0.25, 0.5]])
 
     assert torch.equal(output, expected_output)
 
 
 def test_multi_chained_bounding(config, name_to_index, input_tensor):
     # Apply Relu first on the first variable only
-    bounding1 = ReluBounding(
-        variables=config.variables[:-1], name_to_index=name_to_index
-    )
+    bounding1 = ReluBounding(variables=config.variables[:-1], name_to_index=name_to_index)
     expected_output = torch.tensor([[0.0, 2.0, 3.0], [4.0, -5.0, 6.0], [0.5, 0.5, 0.5]])
     # Check intemediate result
     assert torch.equal(bounding1(input_tensor.clone()), expected_output)
     minimum, maximum = 0.5, 1.75
     bounding2 = HardtanhBounding(
-        variables=config.variables,
-        name_to_index=name_to_index,
-        min_val=minimum,
-        max_val=maximum,
+        variables=config.variables, name_to_index=name_to_index, min_val=minimum, max_val=maximum
     )
     # Use full chaining on the input tensor
     output = bounding2(bounding1(input_tensor.clone()))
     # Data with Relu applied first and then Hardtanh
-    expected_output = torch.tensor(
-        [[minimum, maximum, 3.0], [maximum, minimum, 6.0], [0.5, 0.5, 0.5]]
-    )
+    expected_output = torch.tensor([[minimum, maximum, 3.0], [maximum, minimum, 6.0], [0.5, 0.5, 0.5]])
     assert torch.equal(output, expected_output)
 
 
-def test_hydra_instantiate_bounding(
-    config, name_to_index, name_to_index_stats, input_tensor, statistics
-):
+def test_hydra_instantiate_bounding(config, name_to_index, name_to_index_stats, input_tensor, statistics):
     layer_definitions = [
         {
             "_target_": "anemoi.models.layers.bounding.ReluBounding",
@@ -203,24 +177,17 @@ def test_hydra_instantiate_bounding(
 
 
 def test_leaky_relu_bounding(config, name_to_index, input_tensor):
-    bounding = LeakyReluBounding(
-        variables=config.variables, name_to_index=name_to_index
-    )
+    bounding = LeakyReluBounding(variables=config.variables, name_to_index=name_to_index)
     output = bounding(input_tensor.clone())
     # LeakyReLU should keep negative values but scale them by 0.01 (default negative_slope)
-    expected_output = torch.tensor(
-        [[-0.01, 2.0, 3.0], [4.0, -0.05, 6.0], [0.5, 0.5, 0.5]]
-    )
+    expected_output = torch.tensor([[-0.01, 2.0, 3.0], [4.0, -0.05, 6.0], [0.5, 0.5, 0.5]])
     assert torch.allclose(output, expected_output, atol=1e-4)
 
 
 def test_leaky_hardtanh_bounding(config, name_to_index, input_tensor):
     minimum, maximum = -1.0, 1.0
     bounding = LeakyHardtanhBounding(
-        variables=config.variables,
-        name_to_index=name_to_index,
-        min_val=minimum,
-        max_val=maximum,
+        variables=config.variables, name_to_index=name_to_index, min_val=minimum, max_val=maximum
     )
     output = bounding(input_tensor.clone())
     # Values below min_val should be min_val + 0.01 * (input - min_val)
@@ -237,31 +204,15 @@ def test_leaky_hardtanh_bounding(config, name_to_index, input_tensor):
 
 def test_leaky_fraction_bounding(config, name_to_index, input_tensor):
     bounding = LeakyFractionBounding(
-        variables=config.variables,
-        name_to_index=name_to_index,
-        min_val=0.0,
-        max_val=1.0,
-        total_var=config.total_var,
+        variables=config.variables, name_to_index=name_to_index, min_val=0.0, max_val=1.0, total_var=config.total_var
     )
     output = bounding(input_tensor.clone())
     # First apply leaky hardtanh, then multiply by total_var
     expected_output = torch.tensor(
         [
-            [
-                -0.03,
-                3.03,
-                3.0,
-            ],  # [-1, 2, 3] -> [leaky(0), leaky(1), 3] -> [leaky(0)*3, leaky(1)*3, 3]
-            [
-                6.18,
-                -0.3,
-                6.0,
-            ],  # [4, -5, 6] -> [leaky(1), leaky(0), 6] -> [leaky(1)*6, leaky(0)*6, 6]
-            [
-                0.25,
-                0.25,
-                0.5,
-            ],  # [0.5, 0.5, 0.5] -> [0.5, 0.5, 0.5] -> [0.5*0.5, 0.5*0.5, 0.5]
+            [-0.03, 3.03, 3.0],  # [-1, 2, 3] -> [leaky(0), leaky(1), 3] -> [leaky(0)*3, leaky(1)*3, 3]
+            [6.18, -0.3, 6.0],  # [4, -5, 6] -> [leaky(1), leaky(0), 6] -> [leaky(1)*6, leaky(0)*6, 6]
+            [0.25, 0.25, 0.5],  # [0.5, 0.5, 0.5] -> [0.5, 0.5, 0.5] -> [0.5*0.5, 0.5*0.5, 0.5]
         ]
     )
     assert torch.allclose(output, expected_output, atol=1e-4)
@@ -269,21 +220,14 @@ def test_leaky_fraction_bounding(config, name_to_index, input_tensor):
 
 def test_multi_chained_bounding_with_leaky(config, name_to_index, input_tensor):
     # Apply LeakyReLU first on the first variable only
-    bounding1 = LeakyReluBounding(
-        variables=config.variables[:-1], name_to_index=name_to_index
-    )
-    expected_output = torch.tensor(
-        [[-0.01, 2.0, 3.0], [4.0, -5.0, 6.0], [0.5, 0.5, 0.5]]
-    )
+    bounding1 = LeakyReluBounding(variables=config.variables[:-1], name_to_index=name_to_index)
+    expected_output = torch.tensor([[-0.01, 2.0, 3.0], [4.0, -5.0, 6.0], [0.5, 0.5, 0.5]])
     # Check intermediate result
     assert torch.allclose(bounding1(input_tensor.clone()), expected_output, atol=1e-4)
 
     minimum, maximum = 0.5, 1.75
     bounding2 = LeakyHardtanhBounding(
-        variables=config.variables,
-        name_to_index=name_to_index,
-        min_val=minimum,
-        max_val=maximum,
+        variables=config.variables, name_to_index=name_to_index, min_val=minimum, max_val=maximum
     )
     # Use full chaining on the input tensor
     output = bounding2(bounding1(input_tensor.clone()))
@@ -298,9 +242,7 @@ def test_multi_chained_bounding_with_leaky(config, name_to_index, input_tensor):
     assert torch.allclose(output, expected_output, atol=1e-4)
 
 
-def test_normalized_leaky_relu_bounding(
-    config, name_to_index, name_to_index_stats, input_tensor, statistics
-):
+def test_normalized_leaky_relu_bounding(config, name_to_index, name_to_index_stats, input_tensor, statistics):
     bounding = NormalizedLeakyReluBounding(
         variables=config.variables,
         name_to_index=name_to_index,
@@ -355,9 +297,7 @@ def test_normalized_leaky_relu_bounding(
         ),
     ],
 )
-def test_fail_with_missing_variables(
-    cls, extra_kwargs, statistics: dict, name_to_index_stats: dict
-):
+def test_fail_with_missing_variables(cls, extra_kwargs, statistics: dict, name_to_index_stats: dict):
     """Test that bounding layers raise an error when a variable is missing from the name_to_index mapping."""
     partial_name_to_index = {"var1": 0}
     kwargs = dict(

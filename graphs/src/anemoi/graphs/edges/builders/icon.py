@@ -15,7 +15,8 @@ from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
-from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid, ICONMultiMesh
+from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid
+from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
 
 LOGGER = logging.getLogger(__name__)
 
@@ -27,16 +28,12 @@ class ICONTopologicalProcessorEdges(BaseEdgeBuilder):
     from ICON grid vertices.
     """
 
-    def compute_edge_index_from_coords(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor
-    ) -> torch.Tensor:
+    def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError(
             f"{type(self).__name__} doesn't support computing edge index directly from its coordinates."
         )
 
-    def compute_edge_index(
-        self, source_nodes: NodeStorage, target_nodes: NodeStorage
-    ) -> torch.Tensor:
+    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Compute the edge indices for the ICON topological processor edges.
 
         Parameters
@@ -51,12 +48,12 @@ class ICONTopologicalProcessorEdges(BaseEdgeBuilder):
         torch.Tensor of shape (2, num_edges)
             Indices of source and target nodes connected by an edge.
         """
-        assert isinstance(source_nodes["_icon_nodes"], ICONMultiMesh), (
-            f"{self.__class__.__name__}: source nodes must be ICONMultiMesh"
-        )
-        assert isinstance(target_nodes["_icon_nodes"], ICONMultiMesh), (
-            f"{self.__class__.__name__}: target nodes must be ICONMultiMesh"
-        )
+        assert isinstance(
+            source_nodes["_icon_nodes"], ICONMultiMesh
+        ), f"{self.__class__.__name__}: source nodes must be ICONMultiMesh"
+        assert isinstance(
+            target_nodes["_icon_nodes"], ICONMultiMesh
+        ), f"{self.__class__.__name__}: target nodes must be ICONMultiMesh"
         edge_index = source_nodes["_icon_nodes"].multi_mesh_edges
         return torch.from_numpy(edge_index.T)
 
@@ -64,30 +61,22 @@ class ICONTopologicalProcessorEdges(BaseEdgeBuilder):
 class BaseICONEdgeBuilder(BaseEdgeBuilder):
     """Base ICON Edge Builder."""
 
-    def prepare_node_data(
-        self, graph: HeteroData
-    ) -> tuple[ICONCellDataGrid, ICONMultiMesh]:
+    def prepare_node_data(self, graph: HeteroData) -> tuple[ICONCellDataGrid, ICONMultiMesh]:
         nodes_names = self.source_name, self.target_name
         cell_grid = graph[nodes_names[self.vertex_index[0]]]["_icon_nodes"]
-        assert isinstance(cell_grid, ICONCellDataGrid), (
-            f"{self.__class__.__name__}: source nodes must be ICONCellDataGrid"
-        )
+        assert isinstance(
+            cell_grid, ICONCellDataGrid
+        ), f"{self.__class__.__name__}: source nodes must be ICONCellDataGrid"
         multi_mesh = graph[nodes_names[self.vertex_index[1]]]["_icon_nodes"]
-        assert isinstance(multi_mesh, ICONMultiMesh), (
-            f"{self.__class__.__name__}: target nodes must be ICONMultiMesh"
-        )
+        assert isinstance(multi_mesh, ICONMultiMesh), f"{self.__class__.__name__}: target nodes must be ICONMultiMesh"
         return cell_grid, multi_mesh
 
-    def compute_edge_index_from_coords(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor
-    ) -> torch.Tensor:
+    def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError(
             f"{type(self).__name__} doesn't support computing edge index directly from its coordinates."
         )
 
-    def compute_edge_index(
-        self, cell_grid: ICONCellDataGrid, multi_mesh: ICONMultiMesh
-    ) -> torch.Tensor:
+    def compute_edge_index(self, cell_grid: ICONCellDataGrid, multi_mesh: ICONMultiMesh) -> torch.Tensor:
         edge_vertices = cell_grid.get_grid2mesh_edges(multi_mesh)
         return torch.from_numpy(edge_vertices[:, self.vertex_index].T)
 

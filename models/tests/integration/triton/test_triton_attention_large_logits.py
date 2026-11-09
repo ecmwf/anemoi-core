@@ -42,11 +42,7 @@ pytestmark = [
     pytest.mark.skipif(not is_triton_available(), reason="CUDA and Triton needed"),
 ]
 
-MASKINGS = [
-    (False, -1),
-    (True, -1),
-    (False, 32),
-]  # (causal, window): global, causal, sliding window
+MASKINGS = [(False, -1), (True, -1), (False, 32)]  # (causal, window): global, causal, sliding window
 DTYPES = [torch.float16, torch.bfloat16, torch.float32]
 # A multiple of the largest block, and a length that takes the kernel's path for a partly filled last block.
 LENGTHS = [256, 203]
@@ -102,9 +98,7 @@ def _error(result, reference):
     return ((result.double() - reference).norm() / reference.norm()).item()
 
 
-def _clustered_inputs(
-    logit_size, dtype, n=512, heads=4, head_dim=64, jitter=3e-2, seed=0
-):
+def _clustered_inputs(logit_size, dtype, n=512, heads=4, head_dim=64, jitter=3e-2, seed=0):
     """KohakuFA's benchmark inputs (benchmarks/precision.py): queries and keys around 16 shared directions.
 
     Most rows are nearly one-hot, keys from the same direction nearly tie, and the largest scaled
@@ -116,12 +110,8 @@ def _clustered_inputs(
     pick = torch.randint(0, 16, (1, heads, n), device="cuda", generator=generator)
     base = torch.gather(centres, 2, pick[..., None].expand(-1, -1, -1, head_dim))
     radius = math.sqrt(logit_size * math.sqrt(head_dim))
-    q = radius * (
-        base + jitter * torch.randn(base.shape, device="cuda", generator=generator)
-    )
-    k = radius * (
-        base + jitter * torch.randn(base.shape, device="cuda", generator=generator)
-    )
+    q = radius * (base + jitter * torch.randn(base.shape, device="cuda", generator=generator))
+    k = radius * (base + jitter * torch.randn(base.shape, device="cuda", generator=generator))
     v = torch.randn(base.shape, device="cuda", generator=generator)
     grad_out = torch.randn(base.shape, device="cuda", generator=generator)
     return [t.to(dtype) for t in (q, k, v)], grad_out.to(dtype)
@@ -137,34 +127,25 @@ def test_two_keys_close_to_a_tie_at_large_scores(dtype, causal, window, n):
     gap exact, and keeping the row maximum and the row sum apart keeps the sum exact; scaling first,
     or saving one number m * scale + log2(l), changes the probabilities by a few percent.
     """
-    head_dim = (
-        32  # 1 / sqrt(32) is not a power of two, so scaling the scores rounds them
-    )
+    head_dim = 32  # 1 / sqrt(32) is not a power of two, so scaling the scores rounds them
     generator = torch.Generator(device="cuda").manual_seed(0)
     q = torch.zeros(1, 2, n, head_dim, device="cuda")
     k = torch.zeros_like(q)
     query, first, second = n // 2, n // 2 - 1, n // 2 - 3
     q[:, :, query, 0], q[:, :, query, 1] = 1024.0, 1.0
     k[:, :, first, 0] = 6400.0  # raw score 6553600
-    k[:, :, second, 0], k[:, :, second, 1] = (
-        6400.0,
-        -6.0,
-    )  # raw score 6 lower, scaled about 1.06 lower
+    k[:, :, second, 0], k[:, :, second, 1] = 6400.0, -6.0  # raw score 6 lower, scaled about 1.06 lower
     v = torch.randn(q.shape, device="cuda", generator=generator)
     grad_out = torch.randn(q.shape, device="cuda", generator=generator)
     qkv, grad_out = [t.to(dtype) for t in (q, k, v)], grad_out.to(dtype)
     sm_scale = head_dim**-0.5
 
-    reference = _dense(
-        qkv, grad_out, sm_scale, _visible(n, causal, window), torch.float64
-    )
+    reference = _dense(qkv, grad_out, sm_scale, _visible(n, causal, window), torch.float64)
     results = _kernel(qkv, grad_out, sm_scale, causal, window)
     tolerance = {torch.float16: 2e-3, torch.bfloat16: 1e-2, torch.float32: 1e-5}[dtype]
     for name, result, ref in zip(("out", "dq", "dk", "dv"), results, reference):
         scale = ref.abs().max()
-        torch.testing.assert_close(
-            result.double() / scale, ref / scale, rtol=0, atol=tolerance, msg=name
-        )
+        torch.testing.assert_close(result.double() / scale, ref / scale, rtol=0, atol=tolerance, msg=name)
 
 
 @pytest.mark.parametrize("causal,window", MASKINGS)
@@ -180,26 +161,16 @@ def test_kohakufa_huge_logits(dtype, causal, window):
     centres = torch.randn(1, 2, 8, 64, device="cuda", generator=generator)
     pick = torch.randint(0, 8, (1, 2, 269), device="cuda", generator=generator)
     base = torch.gather(centres, 2, pick[..., None].expand(-1, -1, -1, 64))
-    q = 400 * (
-        base + 1e-3 * torch.randn(base.shape, device="cuda", generator=generator)
-    )
-    k = 400 * (
-        base + 1e-3 * torch.randn(base.shape, device="cuda", generator=generator)
-    )
+    q = 400 * (base + 1e-3 * torch.randn(base.shape, device="cuda", generator=generator))
+    k = 400 * (base + 1e-3 * torch.randn(base.shape, device="cuda", generator=generator))
     v = torch.randn(base.shape, device="cuda", generator=generator)
     grad_out = torch.randn(base.shape, device="cuda", generator=generator)
     qkv, grad_out = [t.to(dtype) for t in (q, k, v)], grad_out.to(dtype)
 
-    reference = _dense(
-        qkv, grad_out, 64**-0.5, _visible(269, causal, window), torch.float64
-    )
+    reference = _dense(qkv, grad_out, 64**-0.5, _visible(269, causal, window), torch.float64)
     results = _kernel(qkv, grad_out, 64**-0.5, causal, window)
-    for name, result, ref, bound in zip(
-        ("dk", "dv"), results[2:], reference[2:], (0.995, 0.9999)
-    ):
-        cosine = torch.nn.functional.cosine_similarity(
-            result.double().flatten(), ref.flatten(), dim=0
-        )
+    for name, result, ref, bound in zip(("dk", "dv"), results[2:], reference[2:], (0.995, 0.9999)):
+        cosine = torch.nn.functional.cosine_similarity(result.double().flatten(), ref.flatten(), dim=0)
         assert cosine > bound, name
 
 
@@ -217,9 +188,7 @@ def test_gradients_track_dense_float32(dtype, causal, window, logit_size):
     reference = _dense(qkv, grad_out, 1 / 8, mask, torch.float64)
     plain = _dense(qkv, grad_out, 1 / 8, mask, torch.float32)
     results = _kernel(qkv, grad_out, 1 / 8, causal, window)
-    for name, result, ref, base in zip(
-        ("dq", "dk", "dv"), results[1:], reference[1:], plain[1:]
-    ):
+    for name, result, ref, base in zip(("dq", "dk", "dv"), results[1:], reference[1:], plain[1:]):
         assert torch.isfinite(result).all(), name
         assert _error(result, ref) <= 2.5 * _error(base.to(dtype), ref) + 1e-6, name
 
@@ -244,9 +213,7 @@ def test_float16_small_output_gradients(causal, window):
     floor = [((ds @ k) / 8).half(), ((ds.transpose(-1, -2) @ q) / 8).half()]
 
     results = _kernel(qkv, grad_out, 1 / 8, causal, window)
-    for name, result, ref, best in zip(
-        ("dq", "dk"), results[1:3], reference[1:3], floor
-    ):
+    for name, result, ref, best in zip(("dq", "dk"), results[1:3], reference[1:3], floor):
         assert _error(result, ref) <= 2 * _error(best, ref), name
 
 
@@ -266,17 +233,13 @@ def test_scores_far_below_zero(dtype, causal, window, n):
     q[..., 0], q[..., 1] = 16384.0, 1.0
     k[..., 0] = -9216.0
     # Raw scores -150994944 + 16 j are exact in float32; neighbouring ones are about 2.8 apart once scaled.
-    k[..., 1] = 16.0 * torch.randint(
-        -8, 9, k.shape[:-1], device="cuda", generator=generator
-    )
+    k[..., 1] = 16.0 * torch.randint(-8, 9, k.shape[:-1], device="cuda", generator=generator)
     v = torch.randn(q.shape, device="cuda", generator=generator)
     grad_out = torch.randn(q.shape, device="cuda", generator=generator)
     qkv, grad_out = [t.to(dtype) for t in (q, k, v)], grad_out.to(dtype)
     sm_scale = head_dim**-0.5
 
-    reference = _dense(
-        qkv, grad_out, sm_scale, _visible(n, causal, window), torch.float64
-    )
+    reference = _dense(qkv, grad_out, sm_scale, _visible(n, causal, window), torch.float64)
     results = _kernel(qkv, grad_out, sm_scale, causal, window)
     # In float32, dq of keys that share an offset 100 times their spread is the limit (about 1e-3).
     tolerance = {torch.float16: 2e-3, torch.bfloat16: 1e-2, torch.float32: 1e-3}[dtype]
@@ -298,8 +261,6 @@ def test_float32_follows_matmul_precision(causal, window):
     full = _kernel(qkv, grad_out, 1 / 8, causal, window)
     with _float32_matmul_precision("high"):
         tf32 = _kernel(qkv, grad_out, 1 / 8, causal, window)
-    for name, result, rounded, ref, base in zip(
-        ("out", "dq", "dk", "dv"), full, tf32, reference, plain
-    ):
+    for name, result, rounded, ref, base in zip(("out", "dq", "dk", "dv"), full, tf32, reference, plain):
         assert _error(result, ref) <= 2.5 * _error(base, ref), name
         assert _error(rounded, ref) >= 100 * _error(base, ref), name

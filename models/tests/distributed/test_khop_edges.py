@@ -14,21 +14,17 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from anemoi.models.distributed.khop_edges import (
-    _sort_edges_1hop_chunks_subgraph,
-    build_graph_partition,
-    build_graph_partition_from_shard_info,
-    sort_edge_index_by_dst,
-    sort_edges_1hop_chunks,
-)
+from anemoi.models.distributed.khop_edges import _sort_edges_1hop_chunks_subgraph
+from anemoi.models.distributed.khop_edges import build_graph_partition
+from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
+from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
+from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 
 
 @pytest.mark.parametrize("src_splits", [None, [2, 3, 1], [0, 6, 0]])
 @pytest.mark.parametrize("sharded_edges", [False, True])
-def test_partition_preserves_source_ownership(
-    src_splits: list[int] | None, sharded_edges: bool
-) -> None:
+def test_partition_preserves_source_ownership(src_splits: list[int] | None, sharded_edges: bool) -> None:
     edge_index = torch.tensor([[5, 2, 4, 0, 1, 4, 3, 5], [0, 0, 1, 3, 4, 6, 7, 7]])
     expected = build_graph_partition(edge_index, num_parts=3, num_nodes=(6, 8))
     assert expected.src_splits is None
@@ -37,15 +33,8 @@ def test_partition_preserves_source_ownership(
         dst_nodes=expected.dst_splits,
         edges=expected.edge_splits if sharded_edges else None,
     )
-    local_edges = (
-        edge_index.split(expected.edge_splits, dim=1)[1]
-        if sharded_edges
-        else edge_index
-    )
-    x = (
-        torch.empty(6 if src_splits is None else src_splits[1], 2),
-        torch.empty(expected.dst_splits[1], 2),
-    )
+    local_edges = edge_index.split(expected.edge_splits, dim=1)[1] if sharded_edges else edge_index
+    x = (torch.empty(6 if src_splits is None else src_splits[1], 2), torch.empty(expected.dst_splits[1], 2))
     group = Mock()
     group.size.return_value = 3
     actual = build_graph_partition_from_shard_info(local_edges, x, shard_info, group)
@@ -57,9 +46,7 @@ def test_partition_preserves_source_ownership(
     assert actual.num_parts == 3
 
 
-def _make_random_graph(
-    num_src: int, num_dst: int, num_edges: int, seed: int = 42
-) -> tuple:
+def _make_random_graph(num_src: int, num_dst: int, num_edges: int, seed: int = 42) -> tuple:
     """Create a random bipartite graph with random edge attributes."""
     gen = torch.Generator().manual_seed(seed)
     src = torch.randint(0, num_src, (num_edges,), generator=gen)
@@ -69,9 +56,7 @@ def _make_random_graph(
     return edge_attr, edge_index
 
 
-def _make_random_non_bipartite_graph(
-    num_nodes: int, num_edges: int, seed: int = 42
-) -> tuple:
+def _make_random_non_bipartite_graph(num_nodes: int, num_edges: int, seed: int = 42) -> tuple:
     """Create a random non-bipartite (self-loop) graph."""
     gen = torch.Generator().manual_seed(seed)
     src = torch.randint(0, num_nodes, (num_edges,), generator=gen)
@@ -90,9 +75,7 @@ def _edges_cover_same_set(
     """Assert two chunked edge lists cover the same set of edges per chunk (ignoring order within chunk)."""
     assert len(attr_list_a) == len(attr_list_b), "Different number of chunks"
 
-    for i, (attr_a, idx_a, attr_b, idx_b) in enumerate(
-        zip(attr_list_a, idx_list_a, attr_list_b, idx_list_b)
-    ):
+    for i, (attr_a, idx_a, attr_b, idx_b) in enumerate(zip(attr_list_a, idx_list_a, attr_list_b, idx_list_b)):
         # Both chunks should have the same dst nodes
         dst_a = torch.unique(idx_a[1])
         dst_b = torch.unique(idx_b[1])
@@ -102,9 +85,9 @@ def _edges_cover_same_set(
         )
 
         # Same number of edges (same dst nodes → same edges in 1-hop)
-        assert attr_a.shape[0] == attr_b.shape[0], (
-            f"Chunk {i}: different number of edges ({attr_a.shape[0]} vs {attr_b.shape[0]})"
-        )
+        assert (
+            attr_a.shape[0] == attr_b.shape[0]
+        ), f"Chunk {i}: different number of edges ({attr_a.shape[0]} vs {attr_b.shape[0]})"
 
         # Edges should be the same set (sort by (src, dst) to compare)
         def _sort_edges(edge_index, edge_attr):
@@ -116,9 +99,7 @@ def _edges_cover_same_set(
         idx_b_s, attr_b_s = _sort_edges(idx_b, attr_b)
 
         assert torch.equal(idx_a_s, idx_b_s), f"Chunk {i}: different edges"
-        assert torch.allclose(attr_a_s, attr_b_s), (
-            f"Chunk {i}: different edge attributes"
-        )
+        assert torch.allclose(attr_a_s, attr_b_s), f"Chunk {i}: different edge attributes"
 
 
 class TestSortEdges1hopChunksBipartite:
@@ -135,25 +116,17 @@ class TestSortEdges1hopChunksBipartite:
         num_nodes = (num_src, num_dst)
 
         # Slow path: works on unsorted edges
-        attr_list_slow, idx_list_slow = _sort_edges_1hop_chunks_subgraph(
-            num_nodes, edge_attr, edge_index, num_chunks
-        )
+        attr_list_slow, idx_list_slow = _sort_edges_1hop_chunks_subgraph(num_nodes, edge_attr, edge_index, num_chunks)
 
         # Fast path: sort first, then use fast chunking
         edge_index_sorted, perm = sort_edge_index_by_dst(edge_index, max_value=num_dst)
         edge_attr_sorted = edge_attr[perm]
 
         attr_list_fast, idx_list_fast = sort_edges_1hop_chunks(
-            num_nodes,
-            edge_attr_sorted,
-            edge_index_sorted,
-            num_chunks,
-            edges_are_dst_sorted=True,
+            num_nodes, edge_attr_sorted, edge_index_sorted, num_chunks, edges_are_dst_sorted=True
         )
 
-        _edges_cover_same_set(
-            attr_list_slow, idx_list_slow, attr_list_fast, idx_list_fast
-        )
+        _edges_cover_same_set(attr_list_slow, idx_list_slow, attr_list_fast, idx_list_fast)
 
     @pytest.mark.parametrize("num_chunks", [2, 4])
     def test_fast_path_edge_splits_match_partition(self, num_chunks):
@@ -167,17 +140,13 @@ class TestSortEdges1hopChunksBipartite:
 
         partition = build_graph_partition(edge_index_sorted, num_chunks, num_nodes)
         attr_list, idx_list = sort_edges_1hop_chunks(
-            num_nodes,
-            edge_attr_sorted,
-            edge_index_sorted,
-            num_chunks,
-            edges_are_dst_sorted=True,
+            num_nodes, edge_attr_sorted, edge_index_sorted, num_chunks, edges_are_dst_sorted=True
         )
 
         for i, (attr_chunk, idx_chunk) in enumerate(zip(attr_list, idx_list)):
-            assert attr_chunk.shape[0] == partition.edge_splits[i], (
-                f"Chunk {i}: attr size {attr_chunk.shape[0]} != partition split {partition.edge_splits[i]}"
-            )
+            assert (
+                attr_chunk.shape[0] == partition.edge_splits[i]
+            ), f"Chunk {i}: attr size {attr_chunk.shape[0]} != partition split {partition.edge_splits[i]}"
             assert idx_chunk.shape[1] == partition.edge_splits[i]
 
     def test_total_edges_preserved(self):
@@ -191,11 +160,7 @@ class TestSortEdges1hopChunksBipartite:
         edge_attr_sorted = edge_attr[perm]
 
         attr_list, idx_list = sort_edges_1hop_chunks(
-            num_nodes,
-            edge_attr_sorted,
-            edge_index_sorted,
-            num_chunks,
-            edges_are_dst_sorted=True,
+            num_nodes, edge_attr_sorted, edge_index_sorted, num_chunks, edges_are_dst_sorted=True
         )
 
         total_edges = sum(a.shape[0] for a in attr_list)
@@ -212,27 +177,17 @@ class TestSortEdges1hopChunksNonBipartite:
         edge_attr, edge_index = _make_random_non_bipartite_graph(num_nodes, num_edges)
 
         # Slow path: works on unsorted edges
-        attr_list_slow, idx_list_slow = _sort_edges_1hop_chunks_subgraph(
-            num_nodes, edge_attr, edge_index, num_chunks
-        )
+        attr_list_slow, idx_list_slow = _sort_edges_1hop_chunks_subgraph(num_nodes, edge_attr, edge_index, num_chunks)
 
         # Fast path: sort first, then use fast chunking
-        edge_index_sorted, perm = sort_edge_index_by_dst(
-            edge_index, max_value=num_nodes
-        )
+        edge_index_sorted, perm = sort_edge_index_by_dst(edge_index, max_value=num_nodes)
         edge_attr_sorted = edge_attr[perm]
 
         attr_list_fast, idx_list_fast = sort_edges_1hop_chunks(
-            num_nodes,
-            edge_attr_sorted,
-            edge_index_sorted,
-            num_chunks,
-            edges_are_dst_sorted=True,
+            num_nodes, edge_attr_sorted, edge_index_sorted, num_chunks, edges_are_dst_sorted=True
         )
 
-        _edges_cover_same_set(
-            attr_list_slow, idx_list_slow, attr_list_fast, idx_list_fast
-        )
+        _edges_cover_same_set(attr_list_slow, idx_list_slow, attr_list_fast, idx_list_fast)
 
     def test_total_edges_preserved(self):
         """Total edges across all chunks should equal original edge count."""
@@ -240,17 +195,11 @@ class TestSortEdges1hopChunksNonBipartite:
         num_chunks = 4
         edge_attr, edge_index = _make_random_non_bipartite_graph(num_nodes, num_edges)
 
-        edge_index_sorted, perm = sort_edge_index_by_dst(
-            edge_index, max_value=num_nodes
-        )
+        edge_index_sorted, perm = sort_edge_index_by_dst(edge_index, max_value=num_nodes)
         edge_attr_sorted = edge_attr[perm]
 
         attr_list, idx_list = sort_edges_1hop_chunks(
-            num_nodes,
-            edge_attr_sorted,
-            edge_index_sorted,
-            num_chunks,
-            edges_are_dst_sorted=True,
+            num_nodes, edge_attr_sorted, edge_index_sorted, num_chunks, edges_are_dst_sorted=True
         )
 
         total_edges = sum(a.shape[0] for a in attr_list)
@@ -287,9 +236,7 @@ class TestBuildGraphPartition:
 
         edge_index_sorted, _ = sort_edge_index_by_dst(edge_index, max_value=num_dst)
 
-        partition = build_graph_partition(
-            edge_index_sorted, num_parts, (num_src, num_dst)
-        )
+        partition = build_graph_partition(edge_index_sorted, num_parts, (num_src, num_dst))
         assert sum(partition.edge_splits) == num_edges
         assert sum(partition.dst_splits) == num_dst
 

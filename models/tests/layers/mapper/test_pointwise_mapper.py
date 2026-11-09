@@ -7,15 +7,17 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 
 import pytest
 import torch
-from anemoi.utils.config import DotDict
 
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.layers.mapper import PointWiseBackwardMapper, PointWiseForwardMapper
+from anemoi.models.layers.mapper import PointWiseBackwardMapper
+from anemoi.models.layers.mapper import PointWiseForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.utils.config import DotDict
 
 
 @dataclass
@@ -46,9 +48,7 @@ def pointwise_pair(mapper_init, device):
     )
 
 
-def test_pointwise_forward_mapper_only_embeds_source(
-    mapper_init, pointwise_pair, device
-):
+def test_pointwise_forward_mapper_only_embeds_source(mapper_init, pointwise_pair, device):
     mapper = PointWiseForwardMapper(
         in_channels_src=mapper_init.in_channels_src,
         in_channels_dst=mapper_init.in_channels_dst,
@@ -140,9 +140,7 @@ def test_pointwise_forward_mapper_accepts_pre_sharded_source(mapper_init, device
     assert torch.allclose(x_hidden, mapper.emb_nodes_src(x_src_local))
 
 
-def test_pointwise_backward_mapper_only_applies_extractor_and_gather(
-    mapper_init, device, monkeypatch
-):
+def test_pointwise_backward_mapper_only_applies_extractor_and_gather(mapper_init, device, monkeypatch):
     mapper = PointWiseBackwardMapper(
         in_channels_src=mapper_init.num_channels,
         in_channels_dst=mapper_init.in_channels_dst,
@@ -193,9 +191,7 @@ def test_pointwise_backward_mapper_only_applies_extractor_and_gather(
     assert torch.allclose(x_out, torch.cat([expected_local, expected_local], dim=0))
 
 
-def test_pointwise_backward_mapper_keeps_output_sharded_when_requested(
-    mapper_init, device
-):
+def test_pointwise_backward_mapper_keeps_output_sharded_when_requested(mapper_init, device):
     mapper = PointWiseBackwardMapper(
         in_channels_src=mapper_init.num_channels,
         in_channels_dst=mapper_init.in_channels_dst,

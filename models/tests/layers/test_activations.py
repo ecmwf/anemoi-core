@@ -20,34 +20,22 @@ from anemoi.models.layers.activations import Sine
 @st.composite
 def tensor_strategy(draw, min_dims=3, max_dims=5, min_size=1, max_size=10):
     """Generate random tensors with controlled precision and size."""
-    shape = draw(
-        st.lists(st.integers(min_size, max_size), min_size=min_dims, max_size=max_dims)
-    )
+    shape = draw(st.lists(st.integers(min_size, max_size), min_size=min_dims, max_size=max_dims))
     # Use width=32 to match float32 precision and avoid representation errors
     # Use allow_subnormal=False to prevent subnormal float issues
     array = draw(
         arrays(
             np.float32,
             shape,
-            elements=st.floats(
-                -10.0,
-                10.0,
-                allow_nan=False,
-                allow_infinity=False,
-                allow_subnormal=False,
-                width=32,
-            ),
+            elements=st.floats(-10.0, 10.0, allow_nan=False, allow_infinity=False, allow_subnormal=False, width=32),
         )
     )
     return torch.tensor(array, dtype=torch.float32)
 
 
 class TestSine:
-    @given(
-        w=st.floats(0.1, 10.0),
-        phi=st.floats(-np.pi, np.pi),
-        x=tensor_strategy(min_dims=1, max_dims=4),
-    )
+
+    @given(w=st.floats(0.1, 10.0), phi=st.floats(-np.pi, np.pi), x=tensor_strategy(min_dims=1, max_dims=4))
     def test_sine_properties(self, w, phi, x):
         sine = Sine(w=w, phi=phi)
         output = sine(x)
@@ -76,26 +64,14 @@ class TestSine:
     @pytest.mark.parametrize(
         "w,phi,x,expected",
         [
-            (
-                2.0,
-                0.0,
-                torch.tensor(0.0, dtype=torch.float32),
-                torch.tensor(0.0, dtype=torch.float32),
-            ),
+            (2.0, 0.0, torch.tensor(0.0, dtype=torch.float32), torch.tensor(0.0, dtype=torch.float32)),
             (
                 2.0,
                 0.0,
                 torch.tensor(torch.pi / 4, dtype=torch.float32),
-                torch.tensor(
-                    torch.sin(torch.tensor(torch.pi / 2)).item(), dtype=torch.float32
-                ),
+                torch.tensor(torch.sin(torch.tensor(torch.pi / 2)).item(), dtype=torch.float32),
             ),
-            (
-                1.0,
-                torch.pi / 2,
-                torch.tensor(0.0, dtype=torch.float32),
-                torch.tensor(1.0, dtype=torch.float32),
-            ),
+            (1.0, torch.pi / 2, torch.tensor(0.0, dtype=torch.float32), torch.tensor(1.0, dtype=torch.float32)),
         ],
     )
     def test_sine_parameterized(self, w, phi, x, expected):

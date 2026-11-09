@@ -170,7 +170,8 @@ def build_reader_layout(
 ) -> ReaderLayout:
     """Build reader rank layouts."""
     assert model_comm_group_size % read_group_size == 0, (
-        f"Number of GPUs per model ({model_comm_group_size}) must be divisible by read_group_size ({read_group_size})."
+        f"Number of GPUs per model ({model_comm_group_size}) must be divisible by read_group_size "
+        f"({read_group_size})."
     )
 
     reader_group_ranks = np.array(

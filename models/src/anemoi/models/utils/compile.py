@@ -83,11 +83,7 @@ def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Mo
         if entry is not None:
             options = entry.get("options", default_compile_options)
 
-            LOGGER.debug(
-                "%s will be compiled with the following options: %s",
-                str(module),
-                str(options),
-            )
+            LOGGER.debug("%s will be compiled with the following options: %s", str(module), str(options))
             # It is just marked for JIT-compilation later
             # It will be compiled before its first forward pass
 
@@ -104,8 +100,6 @@ def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Mo
 
             compiled_modules.append(entry.module)
 
-    LOGGER.info(
-        "The following modules will be compiled: %s", str(unique(compiled_modules))
-    )
+    LOGGER.info("The following modules will be compiled: %s", str(unique(compiled_modules)))
 
     return model

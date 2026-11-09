@@ -252,9 +252,9 @@ class ScaleTensor(nn.Module):
         """
         if not isinstance(scaler, torch.Tensor):
             scaler = torch.tensor([scaler]) if isinstance(scaler, int | float) else torch.tensor(scaler)
-        assert not scaler.requires_grad, (
-            f"Scaler tensors must not require gradients. Got requires_grad=True for scaler {name!r}."
-        )
+        assert (
+            not scaler.requires_grad
+        ), f"Scaler tensors must not require gradients. Got requires_grad=True for scaler {name!r}."
 
         if isinstance(dimension, int):
             if len(scaler.shape) == 1:
@@ -354,9 +354,9 @@ class ScaleTensor(nn.Module):
         """
         if not isinstance(scaler, torch.Tensor):
             scaler = torch.tensor([scaler]) if isinstance(scaler, int | float) else torch.tensor(scaler)
-        assert not scaler.requires_grad, (
-            f"Scaler tensors must not require gradients. Got requires_grad=True for scaler {name!r}."
-        )
+        assert (
+            not scaler.requires_grad
+        ), f"Scaler tensors must not require gradients. Got requires_grad=True for scaler {name!r}."
 
         if name not in self._tensors:
             msg = f"scaler {name!r} not found in scalers."

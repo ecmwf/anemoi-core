@@ -23,9 +23,7 @@ OTHER_KEY = "model.model.processor.proc.0.weight"
 def _checkpoint(hidden_nodes_name: object, provider_prefix: str = PROVIDER) -> dict:
     return {
         "hyper_parameters": {
-            "config": OmegaConf.create(
-                {"model": {"model": {"hidden_nodes_name": hidden_nodes_name}}}
-            ),
+            "config": OmegaConf.create({"model": {"model": {"hidden_nodes_name": hidden_nodes_name}}}),
         },
         "state_dict": {
             f"{provider_prefix}.trainable.trainable": torch.ones(3),
@@ -48,10 +46,7 @@ def test_single_hidden_mesh_keys_are_nested_under_hidden_name() -> None:
 
 
 def test_dataset_mapping_checkpoint_is_unchanged() -> None:
-    checkpoint = _checkpoint(
-        {"data": "hidden_a", "other": "hidden_b"},
-        provider_prefix=f"{PROVIDER}.hidden_a",
-    )
+    checkpoint = _checkpoint({"data": "hidden_a", "other": "hidden_b"}, provider_prefix=f"{PROVIDER}.hidden_a")
     keys = set(checkpoint["state_dict"])
 
     migrate(checkpoint)

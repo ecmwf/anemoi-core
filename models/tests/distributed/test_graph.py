@@ -35,20 +35,19 @@ import torch
 import torch.distributed as dist
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.graph import (
-    all_to_all_transpose,
-    ensure_sharded,
-    gather_tensor,
-    halo_exchange,
-    reduce_shard_tensor,
-    reduce_tensor,
-    shard_tensor,
-    sync_tensor,
-)
+from anemoi.models.distributed.graph import all_to_all_transpose
+from anemoi.models.distributed.graph import ensure_sharded
+from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.graph import halo_exchange
+from anemoi.models.distributed.graph import reduce_shard_tensor
+from anemoi.models.distributed.graph import reduce_tensor
+from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.graph import sync_tensor
 from anemoi.models.distributed.halo import HaloInfo
 
 from ._distributed_runner import _run_distributed_test
-from .distributed_test_utils import shard_sizes_from_pattern, torch_version_less_than
+from .distributed_test_utils import shard_sizes_from_pattern
+from .distributed_test_utils import torch_version_less_than
 
 GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12
@@ -115,9 +114,7 @@ def test_ensure_sharded_errors() -> None:
     with pytest.raises(ValueError, match="non-negative"):
         ensure_sharded(x, dim=0, shard_sizes=[4, -1], model_comm_group=group)
     with pytest.raises(ValueError, match=r"must match shard_sizes\[1\]"):
-        ensure_sharded(
-            x, dim=0, shard_sizes=[4, 3], model_comm_group=_TestProcessGroup(rank=1)
-        )
+        ensure_sharded(x, dim=0, shard_sizes=[4, 3], model_comm_group=_TestProcessGroup(rank=1))
 
 
 @pytest.mark.parametrize(
@@ -127,9 +124,7 @@ def test_ensure_sharded_errors() -> None:
         pytest.param(_TestProcessGroup(size=1), id="single_rank_group"),
     ],
 )
-def test_ensure_sharded_computes_sizes_without_communication(
-    mgroup: _TestProcessGroup | None,
-) -> None:
+def test_ensure_sharded_computes_sizes_without_communication(mgroup: _TestProcessGroup | None) -> None:
     """Without communication, compute single-rank sizes and return the tensor unchanged."""
     x = _make_range_tensor((4, 3))
     expected = x.clone()
@@ -182,9 +177,7 @@ def _test_ensure_sharded_rank(
     expected_sizes = get_balanced_partition_sizes(full.size(dim), world_size)
     expected = torch.split(full, expected_sizes, dim=dim)[rank].clone()
 
-    sharded, sizes = ensure_sharded(
-        full, dim=dim, shard_sizes=None, model_comm_group=group
-    )
+    sharded, sizes = ensure_sharded(full, dim=dim, shard_sizes=None, model_comm_group=group)
 
     assert sizes == expected_sizes
     torch.testing.assert_close(sharded, expected, atol=atol, rtol=rtol)
@@ -351,12 +344,8 @@ def _test_shard_tensor_rank(
 
     # each rank's grad_output is its slice of one full grad_output
     grad_output_full = _make_grad_output(shape, device)
-    grad_output_local = torch.split(grad_output_full, shard_sizes, dim=dim)[
-        rank
-    ].contiguous()
-    loss = (
-        sharded * grad_output_local
-    ).sum()  # d(loss)/d(sharded) == grad_output_local
+    grad_output_local = torch.split(grad_output_full, shard_sizes, dim=dim)[rank].contiguous()
+    loss = (sharded * grad_output_local).sum()  # d(loss)/d(sharded) == grad_output_local
     loss.backward()
 
     torch.testing.assert_close(full.grad, grad_output_full, atol=atol, rtol=rtol)
@@ -436,21 +425,15 @@ def _test_shard_tensor_no_backward_gather_rank(
     expected = torch.split(full, shard_sizes, dim=dim)[rank].clone()
     full.requires_grad_(True)
 
-    sharded = shard_tensor(
-        full, dim=dim, sizes=shard_sizes, mgroup=group, gather_in_backward=False
-    )
+    sharded = shard_tensor(full, dim=dim, sizes=shard_sizes, mgroup=group, gather_in_backward=False)
 
     assert sharded.size() == expected.size()
     torch.testing.assert_close(sharded, expected, atol=atol, rtol=rtol)
 
     # each rank's grad_output is its slice of one full grad_output
     grad_output_full = _make_grad_output(shape, device)
-    grad_output_local = torch.split(grad_output_full, shard_sizes, dim=dim)[
-        rank
-    ].contiguous()
-    loss = (
-        sharded * grad_output_local
-    ).sum()  # d(loss)/d(sharded) == grad_output_local
+    grad_output_local = torch.split(grad_output_full, shard_sizes, dim=dim)[rank].contiguous()
+    loss = (sharded * grad_output_local).sum()  # d(loss)/d(sharded) == grad_output_local
 
     # Verify that gather is not called in backward pass
     with patch(
@@ -466,9 +449,7 @@ def _test_shard_tensor_no_backward_gather_rank(
     normalized_dim = dim % full.dim()
     start = sum(shard_sizes[:rank])
     actual_local_slice = full.grad.narrow(normalized_dim, start, shard_sizes[rank])
-    torch.testing.assert_close(
-        actual_local_slice, grad_output_local, atol=atol, rtol=rtol
-    )
+    torch.testing.assert_close(actual_local_slice, grad_output_local, atol=atol, rtol=rtol)
 
 
 @pytest.mark.distributed
@@ -598,12 +579,7 @@ def _test_gather_tensor_rank(
     full = _make_range_tensor(shape, device)
     if shard_sizes is None:
         shard_sizes = get_balanced_partition_sizes(full.size(dim), world_size)
-    local = (
-        torch.split(full, shard_sizes, dim=dim)[rank]
-        .contiguous()
-        .clone()
-        .requires_grad_(True)
-    )
+    local = torch.split(full, shard_sizes, dim=dim)[rank].contiguous().clone().requires_grad_(True)
 
     gathered = gather_tensor(local, dim=dim, sizes=shard_sizes, mgroup=group)
 
@@ -683,9 +659,7 @@ def test_gather_tensor_splits_gradients_with_explicit_shard_sizes(
         pytest.param(_TestProcessGroup(size=1), id="single_rank_group"),
     ],
 )
-def test_reduce_tensor_identity_without_communication(
-    mgroup: _TestProcessGroup | None,
-) -> None:
+def test_reduce_tensor_identity_without_communication(mgroup: _TestProcessGroup | None) -> None:
     """Without communication, values and gradients pass through unchanged.
 
     Covers the local fallback of ``_ReduceParallelSection``.
@@ -802,9 +776,7 @@ def test_sync_tensor_identity_without_communication(
     x.requires_grad_(True)
     unused_dim = x.ndim  # Out of range; ignored without communication.
 
-    synced = sync_tensor(
-        x, dim=unused_dim, sizes=[-1], mgroup=mgroup, gather_in_fwd=gather_in_fwd
-    )
+    synced = sync_tensor(x, dim=unused_dim, sizes=[-1], mgroup=mgroup, gather_in_fwd=gather_in_fwd)
 
     assert synced.size() == expected.size()
     assert synced.dtype == expected.dtype
@@ -846,9 +818,7 @@ def _test_sync_tensor_rank(
     loss.backward()
 
     # the backward all-reduce sums the rank scales: sum_q (q+1) = ws(ws+1)/2
-    grad_output_sum = _make_grad_output(
-        shape, device, scale=world_size * (world_size + 1) / 2
-    )
+    grad_output_sum = _make_grad_output(shape, device, scale=world_size * (world_size + 1) / 2)
     expected_grad = torch.split(grad_output_sum, shard_sizes, dim=dim)[rank].clone()
     torch.testing.assert_close(local.grad, expected_grad, atol=atol, rtol=rtol)
 
@@ -928,9 +898,7 @@ def _test_sync_tensor_no_gather_rank(
     local.requires_grad_(True)
 
     sizes = get_balanced_partition_sizes(shape[0], world_size) if with_sizes else None
-    synced = sync_tensor(
-        local, dim=0, sizes=sizes, mgroup=group, gather_in_fwd=gather_in_fwd
-    )
+    synced = sync_tensor(local, dim=0, sizes=sizes, mgroup=group, gather_in_fwd=gather_in_fwd)
 
     assert synced.size() == expected.size()
     assert synced.dtype == expected.dtype
@@ -942,9 +910,7 @@ def _test_sync_tensor_no_gather_rank(
     loss.backward()
 
     # the backward all-reduce sums the rank scales: sum_q (q+1) = ws(ws+1)/2
-    expected_grad = _make_grad_output(
-        shape, device, scale=world_size * (world_size + 1) / 2
-    )
+    expected_grad = _make_grad_output(shape, device, scale=world_size * (world_size + 1) / 2)
     torch.testing.assert_close(local.grad, expected_grad, atol=atol, rtol=rtol)
 
 
@@ -1006,9 +972,7 @@ def test_reduce_shard_tensor_errors() -> None:
         pytest.param(_TestProcessGroup(size=1), id="single_rank_group"),
     ],
 )
-def test_reduce_shard_tensor_identity_without_communication(
-    mgroup: _TestProcessGroup | None,
-) -> None:
+def test_reduce_shard_tensor_identity_without_communication(mgroup: _TestProcessGroup | None) -> None:
     """Without communication, values and gradients pass through and unused metadata is ignored."""
     x = _make_range_tensor((4, 3))
     expected = x.clone()
@@ -1058,12 +1022,8 @@ def _test_reduce_shard_tensor_rank(
 
     # each rank's grad_output is its slice of one full grad_output
     grad_output_full = _make_grad_output(shape, device)
-    grad_output_local = torch.split(grad_output_full, shard_sizes, dim=dim)[
-        rank
-    ].contiguous()
-    loss = (
-        shard_sum * grad_output_local
-    ).sum()  # d(loss)/d(shard_sum) == grad_output_local
+    grad_output_local = torch.split(grad_output_full, shard_sizes, dim=dim)[rank].contiguous()
+    loss = (shard_sum * grad_output_local).sum()  # d(loss)/d(shard_sum) == grad_output_local
     loss.backward()
 
     torch.testing.assert_close(local.grad, grad_output_full, atol=atol, rtol=rtol)
@@ -1134,19 +1094,13 @@ def test_all_to_all_transpose_errors() -> None:
         all_to_all_transpose(x, -3, [2, 2], 1, [3, 0], group)
     with pytest.raises(IndexError, match=r"Dimension out of range.*got 2"):
         all_to_all_transpose(x, 0, [2, 2], 2, [3, 0], group)
-    with pytest.raises(
-        ValueError, match="dim_split and dim_concat can not be the same, got 1 and 1"
-    ):
+    with pytest.raises(ValueError, match="dim_split and dim_concat can not be the same, got 1 and 1"):
         all_to_all_transpose(x, 1, [1, 2], 1, [3, 0], group)
-    with pytest.raises(
-        ValueError, match="dim_split and dim_concat can not be the same, got 1 and -1"
-    ):
+    with pytest.raises(ValueError, match="dim_split and dim_concat can not be the same, got 1 and -1"):
         all_to_all_transpose(x, 1, [1, 2], -1, [2, 2], group)
     with pytest.raises(TypeError, match="list or tuple of integers"):
         all_to_all_transpose(x, 0, None, 1, [3, 0], group)
-    with pytest.raises(
-        ValueError, match="Shard sizes must contain one entry per process"
-    ):
+    with pytest.raises(ValueError, match="Shard sizes must contain one entry per process"):
         all_to_all_transpose(x, 0, [4], 1, [3, 0], group)
     with pytest.raises(TypeError, match="Shard sizes must contain only integers"):
         all_to_all_transpose(x, 0, [2, 2.0], 1, [3, 0], group)
@@ -1156,9 +1110,7 @@ def test_all_to_all_transpose_errors() -> None:
         all_to_all_transpose(x, 0, [1, 2], 1, [3, 0], group)
     with pytest.raises(TypeError, match="list or tuple of integers"):
         all_to_all_transpose(x, 0, [2, 2], 1, None, group)
-    with pytest.raises(
-        ValueError, match="Shard sizes must contain one entry per process"
-    ):
+    with pytest.raises(ValueError, match="Shard sizes must contain one entry per process"):
         all_to_all_transpose(x, 0, [2, 2], 1, [3], group)
     with pytest.raises(TypeError, match="Shard sizes must contain only integers"):
         all_to_all_transpose(x, 0, [2, 2], 1, [3, True], group)
@@ -1177,9 +1129,7 @@ def test_all_to_all_transpose_errors() -> None:
         pytest.param(_TestProcessGroup(size=1), id="single_rank_group"),
     ],
 )
-def test_all_to_all_transpose_identity_without_communication(
-    mgroup: _TestProcessGroup | None,
-) -> None:
+def test_all_to_all_transpose_identity_without_communication(mgroup: _TestProcessGroup | None) -> None:
     """Without communication, values and gradients pass through and unused metadata is ignored."""
     x = _make_range_tensor((4, 3))
     expected = x.clone()
@@ -1222,18 +1172,12 @@ def _test_all_to_all_transpose_rank(
 ) -> None:
     full = _make_range_tensor(shape, device)
     if split_shard_sizes is None:
-        split_shard_sizes = get_balanced_partition_sizes(
-            full.size(dim_split), world_size
-        )
+        split_shard_sizes = get_balanced_partition_sizes(full.size(dim_split), world_size)
     if concat_shard_sizes is None:
-        concat_shard_sizes = get_balanced_partition_sizes(
-            full.size(dim_concat), world_size
-        )
+        concat_shard_sizes = get_balanced_partition_sizes(full.size(dim_concat), world_size)
     expected = torch.split(full, split_shard_sizes, dim=dim_split)[rank].clone()
 
-    local = (
-        torch.split(full, concat_shard_sizes, dim=dim_concat)[rank].contiguous().clone()
-    )
+    local = torch.split(full, concat_shard_sizes, dim=dim_concat)[rank].contiguous().clone()
     local.requires_grad_(True)
 
     transposed = all_to_all_transpose(
@@ -1252,16 +1196,12 @@ def _test_all_to_all_transpose_rank(
 
     # each rank's grad_output is its split-layout slice of one full grad_output
     grad_output_full = _make_grad_output(shape, device)
-    grad_output = torch.split(grad_output_full, split_shard_sizes, dim=dim_split)[
-        rank
-    ].contiguous()
+    grad_output = torch.split(grad_output_full, split_shard_sizes, dim=dim_split)[rank].contiguous()
     loss = (transposed * grad_output).sum()  # d(loss)/d(transposed) == grad_output
     loss.backward()
 
     # the reverse transpose delivers the rank's concat-layout slice
-    expected_grad = torch.split(grad_output_full, concat_shard_sizes, dim=dim_concat)[
-        rank
-    ].clone()
+    expected_grad = torch.split(grad_output_full, concat_shard_sizes, dim=dim_concat)[rank].clone()
     torch.testing.assert_close(local.grad, expected_grad, atol=atol, rtol=rtol)
 
 
@@ -1322,12 +1262,8 @@ def test_all_to_all_transpose_inverts_gradients_with_explicit_shard_sizes(
     """Invert all-to-all gradients with explicit sizes, including empty shards."""
     if distributed_backend == "gloo" and torch_version_less_than(2, 6):
         pytest.skip("Gloo all_to_all_transpose requires torch >= 2.6.")
-    split_shard_sizes = shard_sizes_from_pattern(
-        split_shard_size_pattern, distributed_world_size
-    )
-    concat_shard_sizes = shard_sizes_from_pattern(
-        concat_shard_size_pattern, distributed_world_size
-    )
+    split_shard_sizes = shard_sizes_from_pattern(split_shard_size_pattern, distributed_world_size)
+    concat_shard_sizes = shard_sizes_from_pattern(concat_shard_size_pattern, distributed_world_size)
     _run_distributed_test(
         _test_all_to_all_transpose_rank,
         backend=distributed_backend,
@@ -1369,9 +1305,7 @@ def test_all_to_all_transpose_inverts_gradients_with_explicit_shard_sizes(
         ),
     ],
 )
-def test_halo_exchange_peer_count_errors(
-    field: str, num_entries: int, expected_message: str
-) -> None:
+def test_halo_exchange_peer_count_errors(field: str, num_entries: int, expected_message: str) -> None:
     empty_indices = torch.empty(0, dtype=torch.long)
     send_indices = (empty_indices,) * (num_entries if field == "send_indices" else 2)
     recv_counts = (0,) * (num_entries if field == "recv_counts" else 2)
@@ -1384,14 +1318,12 @@ def test_halo_exchange_peer_count_errors(
         edge_index_local=torch.empty((2, 0), dtype=torch.long),
     )
 
-    with (
-        patch(
-            "anemoi.models.distributed.graph._HaloExchangeParallelSection.apply",
-            side_effect=AssertionError("invalid metadata reached autograd dispatch"),
-        ),
-        pytest.raises(ValueError, match=expected_message),
+    with patch(
+        "anemoi.models.distributed.graph._HaloExchangeParallelSection.apply",
+        side_effect=AssertionError("invalid metadata reached autograd dispatch"),
     ):
-        halo_exchange(torch.empty((2, 3)), halo_info, _TestProcessGroup(size=2))
+        with pytest.raises(ValueError, match=expected_message):
+            halo_exchange(torch.empty((2, 3)), halo_info, _TestProcessGroup(size=2))
 
 
 @pytest.mark.parametrize(
@@ -1401,9 +1333,7 @@ def test_halo_exchange_peer_count_errors(
         pytest.param(_TestProcessGroup(size=1), id="single_rank_group"),
     ],
 )
-def test_halo_exchange_identity_without_communication(
-    mgroup: _TestProcessGroup | None,
-) -> None:
+def test_halo_exchange_identity_without_communication(mgroup: _TestProcessGroup | None) -> None:
     """Without communication, local values and gradients pass through unchanged."""
     halo_info = HaloInfo(
         num_local_src_nodes=4,
@@ -1443,18 +1373,13 @@ def _test_halo_exchange_rank(
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
     send_indices = tuple(
-        torch.tensor(
-            send_rows.get((rank, dst_rank), ()), dtype=torch.long, device=device
-        )
+        torch.tensor(send_rows.get((rank, dst_rank), ()), dtype=torch.long, device=device)
         for dst_rank in range(world_size)
     )
     # recv_counts_by_rank[dst_rank][src_rank]:
     # number of rows dst_rank receives from src_rank.
     recv_counts_by_rank = [
-        tuple(
-            len(send_rows.get((src_rank, dst_rank), ()))
-            for src_rank in range(world_size)
-        )
+        tuple(len(send_rows.get((src_rank, dst_rank), ())) for src_rank in range(world_size))
         for dst_rank in range(world_size)
     ]
     recv_counts = recv_counts_by_rank[rank]
@@ -1482,9 +1407,7 @@ def _test_halo_exchange_rank(
     assert exchanged.device == expected.device
     torch.testing.assert_close(exchanged, expected, atol=atol, rtol=rtol)
 
-    output_sizes = [
-        size + sum(counts) for size, counts in zip(shard_sizes, recv_counts_by_rank)
-    ]
+    output_sizes = [size + sum(counts) for size, counts in zip(shard_sizes, recv_counts_by_rank)]
     grad_output_full = _make_grad_output((sum(output_sizes), 3), device)
     grad_outputs_by_rank = torch.split(grad_output_full, output_sizes, dim=0)
     grad_output = grad_outputs_by_rank[rank]
@@ -1496,9 +1419,7 @@ def _test_halo_exchange_rank(
     expected_grad = grad_outputs_by_rank[rank][: shard_sizes[rank]].clone()
     for dst_rank in range(world_size):
         dst_halo_grads = grad_outputs_by_rank[dst_rank][shard_sizes[dst_rank] :]
-        grad_from_dst = torch.split(
-            dst_halo_grads, recv_counts_by_rank[dst_rank], dim=0
-        )[rank]
+        grad_from_dst = torch.split(dst_halo_grads, recv_counts_by_rank[dst_rank], dim=0)[rank]
         expected_grad.index_add_(0, send_indices[dst_rank], grad_from_dst)
 
     assert local.grad is not None
@@ -1516,13 +1437,7 @@ def _test_halo_exchange_rank(
         # Rank 0 sends different, equal-sized rows to ranks 1 and 2; row 2 goes to both.
         pytest.param(
             (4, 3, 5),
-            {
-                (0, 1): (0, 2),
-                (0, 2): (1, 2),
-                (1, 0): (2,),
-                (2, 0): (4, 0, 3),
-                (2, 1): (1,),
-            },
+            {(0, 1): (0, 2), (0, 2): (1, 2), (1, 0): (2,), (2, 0): (4, 0, 3), (2, 1): (1,)},
             id="three-rank-irregular",
         ),
         pytest.param((3, 0, 2), {(0, 2): (0, 1), (2, 0): (1,)}, id="empty-shard"),

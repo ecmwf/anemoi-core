@@ -83,9 +83,9 @@ def fake_data(
 
 
 @pytest.fixture
-def fake_data_no_param() -> tuple[
-    DictConfig, IndexCollection, dict[str, list[float]], dict[str, dict[str, list[float]] | list[str]]
-]:
+def fake_data_no_param() -> (
+    tuple[DictConfig, IndexCollection, dict[str, list[float]], dict[str, dict[str, list[float]] | list[str]]]
+):
     config = DictConfig(
         {
             "data": {
@@ -690,7 +690,7 @@ def test_uniform_spectral_scaler(n_spectral_modes: int, spectral_dims: int) -> N
     assert torch.allclose(values, values[0].expand_as(values)), f"Values are not uniform: {values}"
     assert values[0].item() == pytest.approx(
         1.0 / n_spectral_modes,
-    ), f"Expected values to be {1.0 / n_spectral_modes}, got {values[0]}"
+    ), f"Expected values to be {1.0/n_spectral_modes}, got {values[0]}"
 
 
 @pytest.mark.parametrize(

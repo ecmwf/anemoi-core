@@ -58,10 +58,7 @@ def test_noise_conditioning_graph_projection_shape() -> None:
     )
 
     assert noise is not None
-    assert noise.shape == (
-        batch_size * ensemble_size * hidden_nodes,
-        injector.noise_channels,
-    )
+    assert noise.shape == (batch_size * ensemble_size * hidden_nodes, injector.noise_channels)
 
 
 def test_noise_conditioning_rejects_mixed_sources() -> None:

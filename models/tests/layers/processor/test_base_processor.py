@@ -7,13 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
+from dataclasses import dataclass
+from dataclasses import field
 
 import pytest
-from anemoi.utils.config import DotDict
 
 from anemoi.models.layers.processor import BaseProcessor
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.utils.config import DotDict
 
 
 @dataclass
@@ -43,19 +45,14 @@ def base_processor(processor_init):
 def test_base_processor_init(processor_init, base_processor):
 
     assert isinstance(base_processor.num_chunks, int), "num_layers should be an integer"
-    assert isinstance(base_processor.num_channels, int), (
-        "num_channels should be an integer"
-    )
+    assert isinstance(base_processor.num_channels, int), "num_channels should be an integer"
 
-    assert base_processor.num_chunks == processor_init.num_chunks, (
-        f"num_chunks ({base_processor.num_chunks}) should be equal to the input num_chunks ({processor_init.num_chunks})"
-    )
-    assert base_processor.num_channels == processor_init.num_channels, (
-        f"num_channels ({base_processor.num_channels}) should be equal to the input num_channels ({processor_init.num_channels})"
-    )
     assert (
-        base_processor.chunk_size
-        == processor_init.num_layers // processor_init.num_chunks
-    ), (
-        f"chunk_size ({base_processor.chunk_size}) should be equal to num_layers // num_chunks ({processor_init.num_layers // processor_init.num_chunks})"
-    )
+        base_processor.num_chunks == processor_init.num_chunks
+    ), f"num_chunks ({base_processor.num_chunks}) should be equal to the input num_chunks ({processor_init.num_chunks})"
+    assert (
+        base_processor.num_channels == processor_init.num_channels
+    ), f"num_channels ({base_processor.num_channels}) should be equal to the input num_channels ({processor_init.num_channels})"
+    assert (
+        base_processor.chunk_size == processor_init.num_layers // processor_init.num_chunks
+    ), f"chunk_size ({base_processor.chunk_size}) should be equal to num_layers // num_chunks ({processor_init.num_layers // processor_init.num_chunks})"

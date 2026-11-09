@@ -7,16 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
+from dataclasses import dataclass
+from dataclasses import field
 
 import pytest
 import torch
-from anemoi.utils.config import DotDict
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.mapper import BaseMapper
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.utils.config import DotDict
 
 
 class ConcreteBaseMapper(BaseMapper):
@@ -34,9 +36,7 @@ class ConcreteBaseMapper(BaseMapper):
     def post_process(self, x_dst, **kwargs):
         return x_dst
 
-    def forward(
-        self, x, batch_size, shard_info, graph_provider, model_comm_group=None, **kwargs
-    ):
+    def forward(self, x, batch_size, shard_info, graph_provider, model_comm_group=None, **kwargs):
         """Simple forward implementation for testing."""
         x_src, x_dst = self.pre_process(x)
         # Simple identity operation

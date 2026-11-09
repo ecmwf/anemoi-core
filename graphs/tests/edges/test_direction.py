@@ -18,13 +18,8 @@ tol = 1e-7
 def test_compute_directions_unit_vectors():
     """Test that compute_directions always returns unit vectors."""
     # Test with various lat/lon pairs
-    source = torch.tensor(
-        [[0.0, 0.0], [0.5, 0.5], [-0.3, 0.8], [np.pi / 4, 0.0]], dtype=torch.float32
-    )
-    target = torch.tensor(
-        [[0.5, 0.5], [-0.3, 0.8], [0.0, 0.0], [np.pi / 3, np.pi / 6]],
-        dtype=torch.float32,
-    )
+    source = torch.tensor([[0.0, 0.0], [0.5, 0.5], [-0.3, 0.8], [np.pi / 4, 0.0]], dtype=torch.float32)
+    target = torch.tensor([[0.5, 0.5], [-0.3, 0.8], [0.0, 0.0], [np.pi / 3, np.pi / 6]], dtype=torch.float32)
 
     directions = compute_directions(source, target)
 
@@ -38,9 +33,7 @@ def test_compute_directions_unit_vectors():
 
 def test_compute_directions_equator_to_pole():
     """Test direction from equator to north pole."""
-    source = torch.tensor(
-        [[0.0, 0.0]], dtype=torch.float32
-    )  # Equator at prime meridian
+    source = torch.tensor([[0.0, 0.0]], dtype=torch.float32)  # Equator at prime meridian
     target = torch.tensor([[np.pi / 2, 0.0]], dtype=torch.float32)  # North pole
 
     directions = compute_directions(source, target)
@@ -70,12 +63,8 @@ def test_compute_directions_equator_eastward():
 
 def test_compute_directions_same_meridian():
     """Test direction along same meridian (longitude) moving north."""
-    source = torch.tensor(
-        [[np.pi / 6, 0.0], [np.pi / 6, np.pi / 4]], dtype=torch.float32
-    )  # 30°N at 0° and 45°E
-    target = torch.tensor(
-        [[np.pi / 3, 0.0], [np.pi / 3, np.pi / 4]], dtype=torch.float32
-    )  # 60°N at 0° and 45°E
+    source = torch.tensor([[np.pi / 6, 0.0], [np.pi / 6, np.pi / 4]], dtype=torch.float32)  # 30°N at 0° and 45°E
+    target = torch.tensor([[np.pi / 3, 0.0], [np.pi / 3, np.pi / 4]], dtype=torch.float32)  # 60°N at 0° and 45°E
 
     directions = compute_directions(source, target)
 
@@ -166,9 +155,7 @@ def test_compute_directions_known_values():
     directions = compute_directions(source, target)
     expected = torch.tensor([[1.0, 0.0]], dtype=torch.float32)
 
-    assert torch.allclose(directions, expected, atol=1e-4), (
-        f"Expected {expected}, got {directions}"
-    )
+    assert torch.allclose(directions, expected, atol=1e-4), f"Expected {expected}, got {directions}"
 
     # Case 2: source=equator (1,0,0), target=30°N on prime meridian
     # Target at (cos30°, 0, sin30°) = (0.866, 0, 0.5)
@@ -180,9 +167,7 @@ def test_compute_directions_known_values():
     directions = compute_directions(source, target)
     expected = torch.tensor([[1.0, 0.0]], dtype=torch.float32)
 
-    assert torch.allclose(directions, expected, atol=1e-4), (
-        f"Expected {expected}, got {directions}"
-    )
+    assert torch.allclose(directions, expected, atol=1e-4), f"Expected {expected}, got {directions}"
 
     # Case 3: source=north pole (0,0,1), target=equator (1,0,0)
     # Rotation around y-axis by 90° to move target to north pole
@@ -193,9 +178,7 @@ def test_compute_directions_known_values():
     directions = compute_directions(source, target)
     expected = torch.tensor([[-1.0, 0.0]], dtype=torch.float32)
 
-    assert torch.allclose(directions, expected, atol=1e-4), (
-        f"Expected {expected}, got {directions}"
-    )
+    assert torch.allclose(directions, expected, atol=1e-4), f"Expected {expected}, got {directions}"
 
 
 def test_compute_directions_equator_90_degrees():
@@ -206,12 +189,8 @@ def test_compute_directions_equator_90_degrees():
     by the rotation.
     """
     # Two points on equator, 90° apart in longitude
-    source = torch.tensor(
-        [[0.0, 0.0]], dtype=torch.float32
-    )  # (0°, 0°) -> (1, 0, 0) in 3D
-    target = torch.tensor(
-        [[0.0, np.pi / 2]], dtype=torch.float32
-    )  # (0°, 90°E) -> (0, 1, 0) in 3D
+    source = torch.tensor([[0.0, 0.0]], dtype=torch.float32)  # (0°, 0°) -> (1, 0, 0) in 3D
+    target = torch.tensor([[0.0, np.pi / 2]], dtype=torch.float32)  # (0°, 90°E) -> (0, 1, 0) in 3D
 
     directions = compute_directions(source, target)
 
@@ -220,9 +199,7 @@ def test_compute_directions_equator_90_degrees():
     # (x, y) = (1, 0)
     expected = torch.tensor([[1.0, 0.0]], dtype=torch.float32)
 
-    assert torch.allclose(directions, expected, atol=1e-4), (
-        f"Expected {expected}, got {directions}"
-    )
+    assert torch.allclose(directions, expected, atol=1e-4), f"Expected {expected}, got {directions}"
 
 
 def test_compute_directions_small_latitude_steps():
@@ -246,9 +223,9 @@ def test_compute_directions_small_latitude_steps():
         # Expected direction is approximately (1, 0)
         expected = torch.tensor([[1.0, 0.0]], dtype=torch.float32)
 
-        assert torch.allclose(directions, expected, atol=0.05), (
-            f"Step {i} to {i + 1}: Expected ~{expected}, got {directions}"
-        )
+        assert torch.allclose(
+            directions, expected, atol=0.05
+        ), f"Step {i} to {i+1}: Expected ~{expected}, got {directions}"
 
 
 def test_compute_directions_symmetry():
@@ -290,33 +267,21 @@ def test_compute_directions_pole_cases():
     assert torch.all(torch.isfinite(directions))
 
     # Case 2: Target at south pole (should use south pole case)
-    source_south = torch.tensor(
-        [[0.0, 0.0], [np.pi / 4, np.pi / 2]], dtype=torch.float32
-    )
-    target_south = torch.tensor(
-        [[-np.pi / 2, 0.0], [-np.pi / 2, 0.0]], dtype=torch.float32
-    )
+    source_south = torch.tensor([[0.0, 0.0], [np.pi / 4, np.pi / 2]], dtype=torch.float32)
+    target_south = torch.tensor([[-np.pi / 2, 0.0], [-np.pi / 2, 0.0]], dtype=torch.float32)
 
     directions_south = compute_directions(source_south, target_south)
 
     # Should produce valid unit vectors
-    assert torch.allclose(
-        torch.norm(directions_south, dim=-1), torch.ones(2), atol=1e-5
-    )
+    assert torch.allclose(torch.norm(directions_south, dim=-1), torch.ones(2), atol=1e-5)
     assert torch.all(torch.isfinite(directions_south))
 
     # Case 3: Mixed batch (north pole, south pole, and normal)
-    source_mixed = torch.tensor(
-        [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]], dtype=torch.float32
-    )
-    target_mixed = torch.tensor(
-        [[np.pi / 2, 0.0], [-np.pi / 2, 0.0], [np.pi / 4, 0.0]], dtype=torch.float32
-    )
+    source_mixed = torch.tensor([[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]], dtype=torch.float32)
+    target_mixed = torch.tensor([[np.pi / 2, 0.0], [-np.pi / 2, 0.0], [np.pi / 4, 0.0]], dtype=torch.float32)
 
     directions_mixed = compute_directions(source_mixed, target_mixed)
 
     # All should produce valid unit vectors
-    assert torch.allclose(
-        torch.norm(directions_mixed, dim=-1), torch.ones(3), atol=1e-5
-    )
+    assert torch.allclose(torch.norm(directions_mixed, dim=-1), torch.ones(3), atol=1e-5)
     assert torch.all(torch.isfinite(directions_mixed))

@@ -12,15 +12,13 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.edges.attributes import (
-    AttributeFromSourceNode,
-    AttributeFromTargetNode,
-    DirectionalHarmonics,
-    EdgeDirection,
-    EdgeLength,
-    GaussianDistanceWeights,
-    RadialBasisFeatures,
-)
+from anemoi.graphs.edges.attributes import AttributeFromSourceNode
+from anemoi.graphs.edges.attributes import AttributeFromTargetNode
+from anemoi.graphs.edges.attributes import DirectionalHarmonics
+from anemoi.graphs.edges.attributes import EdgeDirection
+from anemoi.graphs.edges.attributes import EdgeLength
+from anemoi.graphs.edges.attributes import GaussianDistanceWeights
+from anemoi.graphs.edges.attributes import RadialBasisFeatures
 
 TEST_EDGES = ("test_nodes", "to", "test_nodes")
 
@@ -48,12 +46,8 @@ def test_edge_lengths(edge_attr_cls, graph_nodes_and_edges, norm):
     assert isinstance(edge_attr, torch.Tensor)
 
 
-@pytest.mark.parametrize(
-    "attribute_builder_cls", [AttributeFromSourceNode, AttributeFromTargetNode]
-)
-def test_edge_attribute_from_node(
-    attribute_builder_cls, graph_nodes_and_edges: HeteroData
-):
+@pytest.mark.parametrize("attribute_builder_cls", [AttributeFromSourceNode, AttributeFromTargetNode])
+def test_edge_attribute_from_node(attribute_builder_cls, graph_nodes_and_edges: HeteroData):
     """Test edge attribute builder fails with unknown nodes."""
     edge_attr_builder = attribute_builder_cls(node_attr_name="mask")
     edge_index = graph_nodes_and_edges[TEST_EDGES].edge_index
@@ -92,9 +86,7 @@ def test_radial_basis_features_default(graph_nodes_and_edges):
         for target_node in target_indices.unique():
             mask = target_indices == target_node
             center_sum = edge_attr[mask, center_idx].sum()
-            assert torch.isclose(
-                center_sum, torch.tensor(1.0, dtype=edge_attr.dtype), atol=1e-6
-            )
+            assert torch.isclose(center_sum, torch.tensor(1.0, dtype=edge_attr.dtype), atol=1e-6)
 
 
 def test_radial_basis_features_global_scale(graph_nodes_and_edges):
@@ -114,9 +106,7 @@ def test_radial_basis_features_global_scale(graph_nodes_and_edges):
         for target_node in target_indices.unique():
             mask = target_indices == target_node
             center_sum = edge_attr[mask, center_idx].sum()
-            assert torch.isclose(
-                center_sum, torch.tensor(1.0, dtype=edge_attr.dtype), atol=1e-6
-            )
+            assert torch.isclose(center_sum, torch.tensor(1.0, dtype=edge_attr.dtype), atol=1e-6)
 
 
 def test_radial_basis_features_custom_centers(graph_nodes_and_edges):
@@ -137,9 +127,7 @@ def test_radial_basis_features_custom_centers(graph_nodes_and_edges):
         for target_node in target_indices.unique():
             mask = target_indices == target_node
             center_sum = edge_attr[mask, center_idx].sum()
-            assert torch.isclose(
-                center_sum, torch.tensor(1.0, dtype=edge_attr.dtype), atol=1e-6
-            )
+            assert torch.isclose(center_sum, torch.tensor(1.0, dtype=edge_attr.dtype), atol=1e-6)
 
 
 def test_radial_basis_features_epsilon(graph_nodes_and_edges):
