@@ -219,25 +219,36 @@ class DTCWT2DLoss(BaseLoss):
         self._score_pyramid = torch.compile(self._score_pyramid, **options)
 
     @staticmethod
-    def _validate_scaler_dimensions(dimension: int | tuple[int, ...], scaler: torch.Tensor) -> None:
+    def _validate_scaler_dimensions(
+        dimension: int | tuple[int, ...],
+        scaler: torch.Tensor,
+        *,
+        name: str | None = None,
+    ) -> None:
         """Reject GRID scalers because the wavelet score has no spatial axis to weight.
 
         The base loss scaling implementation expects a score at every grid point. Wavelet
         scoring collapses the grid into subband scores, so only non-spatial
         scalers can be applied meaningfully.
         """
+        scaler_label = f"Scaler {name!r}" if name is not None else "Scaler"
         scaler_dimensions = (
             tuple(range(dimension, dimension + scaler.ndim)) if isinstance(dimension, int) else dimension
         )
         if any(dim < -5 or dim >= 5 for dim in scaler_dimensions):
-            msg = "Wavelet scaler dimensions must index the five-dimensional input layout"
+            msg = f"{scaler_label} dimensions must index the five-dimensional input layout"
             raise ValueError(msg)
         scaler_dimensions = tuple(dim % 5 for dim in scaler_dimensions)
         if TensorDim.GRID in scaler_dimensions:
-            msg = "DTCWT2DLoss does not support area weights or GRID-bearing scalers"
+            removal_hint = (
+                f"Remove {name!r} from this loss's configured scalers list."
+                if name is not None
+                else "Remove this scaler from the loss configuration."
+            )
+            msg = f"{scaler_label}: DTCWT2DLoss does not support area weights or GRID-bearing scalers. {removal_hint}"
             raise ValueError(msg)
         if len(scaler_dimensions) != scaler.ndim or len(set(scaler_dimensions)) != len(scaler_dimensions):
-            msg = f"Scaler dimensions {scaler_dimensions} are incompatible with scaler shape {scaler.shape}"
+            msg = f"{scaler_label} dimensions {scaler_dimensions} are incompatible with scaler shape {scaler.shape}"
             raise ValueError(msg)
 
     def add_scaler(
@@ -252,7 +263,7 @@ class DTCWT2DLoss(BaseLoss):
         This override gives config-driven scaler registration an immediate,
         actionable error for unsupported GRID weights.
         """
-        self._validate_scaler_dimensions(dimension, scaler)
+        self._validate_scaler_dimensions(dimension, scaler, name=name)
         super().add_scaler(dimension=dimension, scaler=scaler, name=name)
 
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
@@ -262,7 +273,7 @@ class DTCWT2DLoss(BaseLoss):
         be enforced when the base class updates a previously registered scaler.
         """
         scaler_dimensions = self.scaler.specified_dimensions[name]
-        self._validate_scaler_dimensions(scaler_dimensions, scaler)
+        self._validate_scaler_dimensions(scaler_dimensions, scaler, name=name)
         super().update_scaler(name=name, scaler=scaler, override=override)
 
     def _prepare_inputs(
@@ -321,8 +332,8 @@ class DTCWT2DLoss(BaseLoss):
         shards so variable scalers remain globally aligned.
         """
         scaler_specs = self.scaler.tensors
-        for scaler_dimensions, scaler in scaler_specs.values():
-            self._validate_scaler_dimensions(scaler_dimensions, scaler)
+        for name, (scaler_dimensions, scaler) in scaler_specs.items():
+            self._validate_scaler_dimensions(scaler_dimensions, scaler, name=name)
         if not scaler_specs:
             return scores
 
@@ -564,9 +575,11 @@ class DTCWT2DLoss(BaseLoss):
                     combined_pyramid.lowpass[:n_chunk_fields],
                     tuple(highpass[:n_chunk_fields] for highpass in combined_pyramid.highpasses),
                 )
+                # Detach tensors to avoid tracking gradients through the target-side scoring
+                # computation and reduce memory usage
                 target_pyramid = WaveletPyramid(
-                    combined_pyramid.lowpass[n_chunk_fields:],
-                    tuple(highpass[n_chunk_fields:] for highpass in combined_pyramid.highpasses),
+                    combined_pyramid.lowpass[n_chunk_fields:].detach(),
+                    tuple(highpass[n_chunk_fields:].detach() for highpass in combined_pyramid.highpasses),
                 )
             coefficient_validity = None
             if valid_grid is not None:
@@ -628,6 +641,13 @@ class DTCWT2DLoss(BaseLoss):
             # Projection columns must match this selected source domain; full-grid matrices are not sliced here.
             selected_pred = pred[:, :, :, self.subgrid]
             selected_target = target[:, :, :, self.subgrid]
+            if projection_matrix is None and selected_pred.shape[3] != self.n_gridpoints:
+                msg = (
+                    f"Selected input grid size ({selected_pred.shape[3]}) must equal "
+                    f"grid_shape[0] * grid_shape[1] ({self.n_gridpoints}) for grid_shape={self.grid_shape} "
+                    "when no projection is configured"
+                )
+                raise ValueError(msg)
             if projection_matrix is not None and projection_matrix.shape[1] != selected_pred.shape[3]:
                 msg = (
                     f"Projection source point count ({projection_matrix.shape[1]}) must match "

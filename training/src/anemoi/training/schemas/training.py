@@ -7,6 +7,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import math
 from enum import StrEnum
 from functools import partial
 from typing import Annotated
@@ -651,6 +652,7 @@ class DTCWT2DLossSchema(BaseLossSchema):
     scalers: list[str] = Field(default_factory=list)
     grid_shape: tuple[Annotated[int, Field(ge=2)], Annotated[int, Field(ge=2)]]
     J: PositiveInt | None = None
+    "Number of wavelet decomposition levels; at most ceil(log2(min(grid_shape)))."
     transform: WaveletTransformSchema = Field(default_factory=WaveletTransformSchema)
     scale_weights: list[Annotated[float, Field(ge=0, allow_inf_nan=False)]] | None = None
     eps: float = Field(default=1e-8, gt=0, allow_inf_nan=False)
@@ -661,6 +663,20 @@ class DTCWT2DLossSchema(BaseLossSchema):
     transform_prediction_and_target_separately: bool | None = None
     separate_transform_gridpoint_threshold: PositiveInt = 1_000_000
     transform_field_chunk_size: PositiveInt | None = None
+
+    @model_validator(mode="after")
+    def check_decomposition_depth(self) -> Self:
+        """Reject decompositions beyond the shorter grid dimension's natural depth."""
+        max_levels = (min(self.grid_shape) - 1).bit_length()
+        if self.J is not None and max_levels < self.J:
+            recommended_levels = max(1, int(math.log2(min(self.grid_shape))) - 3)
+            msg = (
+                f"J must not exceed {max_levels} for grid_shape={self.grid_shape}; got J={self.J}. "
+                f"The recommended default is J={recommended_levels} for grid_shape={self.grid_shape}, "
+                "which preserves more spatial resolution at the coarsest level."
+            )
+            raise ValueError(msg)
+        return self
 
     @model_validator(mode="after")
     def check_projection_options(self) -> Self:

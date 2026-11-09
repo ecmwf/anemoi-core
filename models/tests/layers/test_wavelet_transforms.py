@@ -130,6 +130,17 @@ def test_object_backend_contract_and_validation():
         transform(torch.ones(1, 2, 4, 4))
 
 
+def test_filter_buffers_do_not_affect_strict_checkpoint_loading():
+    pytest.importorskip("pytorch_wavelets")
+    transform = DTCWT2D(J=2)
+    assert dict(transform.named_buffers())
+    assert not transform.state_dict()
+    model = torch.nn.ModuleDict({"weights": torch.nn.Linear(2, 2)})
+    model_with_wavelets = torch.nn.ModuleDict({"weights": torch.nn.Linear(2, 2), "wavelet": transform})
+    model_with_wavelets.load_state_dict(model.state_dict(), strict=True)
+    model.load_state_dict(model_with_wavelets.state_dict(), strict=True)
+
+
 def test_prepare_moves_reference_filters():
     pytest.importorskip("pytorch_wavelets")
     transform = DTCWT2D(J=2)

@@ -185,6 +185,18 @@ def test_subgrid_matches_explicitly_sliced_input() -> None:
     torch.testing.assert_close(actual, expected)
 
 
+@pytest.mark.parametrize("subgrid", [None, (5, 84), (5, 86)])
+def test_selected_grid_size_must_match_grid_shape_without_projection(
+    subgrid: tuple[int, int | None] | None,
+) -> None:
+    pred, target = _data((9, 10))
+    loss = DTCWT2DLoss([8, 10], J=2, subgrid=subgrid)
+    with pytest.raises(ValueError, match="Selected input grid size") as error:
+        loss(pred, target)
+    assert f"({pred[:, :, :, loss.subgrid].shape[3]})" in str(error.value)
+    assert "(80) for grid_shape=(8, 10)" in str(error.value)
+
+
 @pytest.mark.parametrize("value", [0.0, 1.0, 1e-5])
 def test_identical_and_zero_fields_have_stable_gradients(value: float) -> None:
     pred = torch.full((1, 1, 1, 80, 1), value, requires_grad=True)
@@ -234,6 +246,22 @@ def test_invalid_configuration_is_rejected_by_schema(options: dict[str, Any]) ->
         TypeAdapter(LossSchemas).validate_python(config)
 
 
+@pytest.mark.parametrize(
+    ("grid_shape", "max_levels", "recommended_levels"),
+    [((8, 10), 3, 1), ((9, 11), 4, 1), ((192, 256), 8, 4)],
+)
+def test_schema_limits_wavelet_levels_to_grid_shape(
+    grid_shape: tuple[int, int],
+    max_levels: int,
+    recommended_levels: int,
+) -> None:
+    config = {"_target_": "anemoi.training.losses.DTCWT2DLoss", "grid_shape": grid_shape, "J": max_levels}
+    assert max_levels == TypeAdapter(LossSchemas).validate_python(config).J
+    with pytest.raises(ValidationError, match=f"J must not exceed {max_levels}") as error:
+        TypeAdapter(LossSchemas).validate_python({**config, "J": max_levels + 1})
+    assert f"The recommended default is J={recommended_levels}" in str(error.value)
+
+
 def test_scale_weight_count_matches_wavelet_levels() -> None:
     with pytest.raises(ValueError, match="one weight per wavelet level"):
         DTCWT2DLoss([8, 10], J=2, scale_weights=[1])
@@ -242,10 +270,10 @@ def test_scale_weight_count_matches_wavelet_levels() -> None:
 @pytest.mark.parametrize("dimension", [3, (1, 3), (0, 2, 3, 4)])
 def test_area_scalers_are_rejected_on_add_and_update(dimension: int | tuple[int, ...]) -> None:
     loss = DTCWT2DLoss([8, 10], J=2)
-    with pytest.raises(ValueError, match="does not support area weights"):
+    with pytest.raises(ValueError, match=r"Scaler 'area'.*does not support area weights"):
         loss.add_scaler(dimension, torch.ones(80), name="area")
 
-    with pytest.raises(ValueError, match="does not support area weights"):
+    with pytest.raises(ValueError, match=r"Scaler 'area'.*does not support area weights"):
         get_loss_function(
             OmegaConf.create(
                 {
@@ -259,9 +287,9 @@ def test_area_scalers_are_rejected_on_add_and_update(dimension: int | tuple[int,
         )
 
     loss.scaler.add_scaler(dimension=3, scaler=torch.ones(80), name="legacy_area")
-    with pytest.raises(ValueError, match="does not support area weights"):
+    with pytest.raises(ValueError, match=r"Scaler 'legacy_area'.*does not support area weights"):
         loss.update_scaler("legacy_area", torch.ones(80))
-    with pytest.raises(ValueError, match="does not support area weights"):
+    with pytest.raises(ValueError, match=r"Scaler 'legacy_area'.*does not support area weights"):
         loss(*_data(), without_scalers=["legacy_area"])
 
     with pytest.raises(TypeError, match="target_grid_weights"):
@@ -274,6 +302,27 @@ def test_area_scalers_are_rejected_on_add_and_update(dimension: int | tuple[int,
                 "target_grid_weights": [1.0] * 80,
             },
         )
+
+
+@pytest.mark.parametrize(
+    ("name", "hint"),
+    [
+        ("spatial_weights", "Remove 'spatial_weights' from this loss's configured scalers list."),
+        (None, "Remove this scaler from the loss configuration."),
+    ],
+)
+def test_grid_scaler_errors_include_removal_guidance(name: str | None, hint: str) -> None:
+    loss = DTCWT2DLoss([8, 10], J=2)
+    with pytest.raises(ValueError, match="does not support area weights") as error:
+        loss.add_scaler(3, torch.ones(80), name=name)
+    assert hint in str(error.value)
+
+
+@pytest.mark.parametrize(("dimension", "message"), [(5, "five-dimensional"), ((1, 4), "incompatible")])
+def test_invalid_scaler_dimensions_include_name(dimension: int | tuple[int, ...], message: str) -> None:
+    loss = DTCWT2DLoss([8, 10], J=2)
+    with pytest.raises(ValueError, match=rf"Scaler 'invalid'.*{message}"):
+        loss.add_scaler(dimension, torch.ones(2), name="invalid")
 
 
 def _projection_matrix() -> torch.Tensor:
