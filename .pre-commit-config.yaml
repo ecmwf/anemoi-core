@@ -87,7 +87,7 @@ repos:
     - --check-class      # Check class docstrings
     - --disable=SIG101,SIG102,SIG305     # Disable empty docstrings
 - repo: https://github.com/ecmwf/ci-infrastructure
-  rev: cc8151ca9315b95862d0c2db7b5dc7f7063877c2
+  rev: 82d9bb0981ec1b76b3800f3770a3698a96e81db6
   hooks:
   - id: check-ci-approval
   - id: check-ci-result
