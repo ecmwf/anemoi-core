@@ -822,12 +822,6 @@ def partial_metadata_schema() -> dict[str, Any]:
                     "prognostic": None,
                     "diagnostic": None,
                 },
-                "shapes": {
-                    "variables": None,
-                    "input_timesteps": None,
-                    "ensemble": None,
-                    "grid": None,
-                },
             },
         },
     }

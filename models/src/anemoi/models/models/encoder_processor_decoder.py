@@ -999,12 +999,4 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         return Batch(x_out_dict)
 
     def fill_metadata(self, md_dict) -> None:
-        for dataset in self.input_dim.keys():
-            dataset_md = md_dict["metadata_inference"][dataset]
-            shapes = {
-                "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input[dataset],
-                "ensemble": 1,
-                "grid": dataset_md.get("grid_size"),  # None for tabular data
-            }
-            dataset_md["shapes"] = shapes
+        pass

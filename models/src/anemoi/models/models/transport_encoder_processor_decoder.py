@@ -879,14 +879,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         )
 
     def fill_metadata(self, md_dict) -> None:
-        for dataset in self.input_dim.keys():
-            shapes = {
-                "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input[dataset],
-                "ensemble": 1,
-                "grid": None,  # grid size is dynamic
-            }
-            md_dict["metadata_inference"][dataset]["shapes"] = shapes
+        pass
 
 
 class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
