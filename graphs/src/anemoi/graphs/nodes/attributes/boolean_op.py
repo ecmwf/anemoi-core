@@ -50,9 +50,9 @@ class BooleanOperation(BooleanBaseNodeAttribute, ABC):
         if isinstance(mask, str):
             assert mask in nodes, f"Nodes have no attribute named {mask}."
             attributes = nodes[mask]
-            assert (
-                attributes.dtype == torch.bool
-            ), f"The mask attribute '{mask}' must be a boolean but is {attributes.dtype}."
+            assert attributes.dtype == torch.bool, (
+                f"The mask attribute '{mask}' must be a boolean but is {attributes.dtype}."
+            )
             return attributes
 
         return mask._get_raw_values(nodes, **kwargs)

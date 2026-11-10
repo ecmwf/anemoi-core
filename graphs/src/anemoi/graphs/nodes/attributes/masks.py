@@ -135,9 +135,9 @@ class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
     def _get_grid_sizes(self, nodes):
         from anemoi.datasets import open_dataset
 
-        assert "_dataset" in nodes and isinstance(
-            nodes["_dataset"], (dict, str)
-        ), "The '_dataset' attribute must be a dictionary or string."
+        assert "_dataset" in nodes and isinstance(nodes["_dataset"], (dict, str)), (
+            "The '_dataset' attribute must be a dictionary or string."
+        )
 
         return open_dataset(nodes["_dataset"]).grids
 
@@ -223,8 +223,8 @@ class LimitedAreaMask(BooleanBaseNodeAttribute):
         super().__init__(name=name)
 
     def _get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
-        assert nodes["node_type"] in [
-            "StretchedTriNodes"
-        ], f"{self.__class__.__name__} can only be used with StretchedIcosahedronNodes."
+        assert nodes["node_type"] in ["StretchedTriNodes"], (
+            f"{self.__class__.__name__} can only be used with StretchedIcosahedronNodes."
+        )
         lam_mask = nodes["_area_mask_builder"].get_mask(nodes.x)
         return lam_mask

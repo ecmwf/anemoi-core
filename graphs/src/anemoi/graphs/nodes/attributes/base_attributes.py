@@ -128,9 +128,9 @@ class BaseNodeAttribute(ABC, NormaliserMixin):
         torch.Tensor (num_nodes, num_node_features)
             The computed node attributes.
         """
-        assert (
-            nodes_name in graph.node_types
-        ), f"{nodes_name} is not a valid nodes name. The current graph has the following nodes: {graph.node_types}"
+        assert nodes_name in graph.node_types, (
+            f"{nodes_name} is not a valid nodes name. The current graph has the following nodes: {graph.node_types}"
+        )
         nodes = graph[nodes_name].to(self.device)
         attributes = self._get_raw_values(nodes, **kwargs).to(dtype=self.dtype, device=self.device)
         return self._post_process(attributes)

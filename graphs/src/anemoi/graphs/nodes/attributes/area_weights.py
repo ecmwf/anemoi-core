@@ -212,9 +212,9 @@ class PlanarAreaWeights(BaseAreaWeights):
         lengths, flat = PlanarAreaWeights._flatten_regions(v, point_indices)
 
         # Regions must be bounded polygons (>= 3 vertices); trusted cells all are.
-        assert (
-            n_points == 0 or lengths.min() >= 3
-        ), "Voronoi regions must be bounded polygons with >= 3 vertices (were untrusted cells passed?)."
+        assert n_points == 0 or lengths.min() >= 3, (
+            "Voronoi regions must be bounded polygons with >= 3 vertices (were untrusted cells passed?)."
+        )
 
         # Per-region offsets and a wrap-around "next vertex" index.
         starts = np.zeros(n_points, dtype=np.intp)
@@ -333,9 +333,9 @@ class MaskedPlanarAreaWeights(PlanarAreaWeights):
         dtype: str = "float32",
     ) -> None:
         super().__init__(name=name, norm=norm, dtype=dtype)
-        assert isinstance(
-            mask_node_attr_name, str
-        ), f"{self.__class__.__name__} requires a string for 'mask_node_attr_name' variable."
+        assert isinstance(mask_node_attr_name, str), (
+            f"{self.__class__.__name__} requires a string for 'mask_node_attr_name' variable."
+        )
         self.mask_node_attr_name = mask_node_attr_name
 
     def _get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
@@ -388,12 +388,12 @@ class SphericalAreaWeights(BaseAreaWeights):
         fill_value: float = 0.0,
         dtype: str = "float32",
     ) -> None:
-        assert isinstance(fill_value, float) or isinstance(
-            fill_value, int
-        ), f"fill_value must be float or nan but it is {type(fill_value)}"
-        assert (
-            isinstance(radius, float) or isinstance(radius, int)
-        ) and radius > 0, f"radius must be a positive value, but radius={radius}"
+        assert isinstance(fill_value, float) or isinstance(fill_value, int), (
+            f"fill_value must be float or nan but it is {type(fill_value)}"
+        )
+        assert (isinstance(radius, float) or isinstance(radius, int)) and radius > 0, (
+            f"radius must be a positive value, but radius={radius}"
+        )
         super().__init__(name=name, norm=norm, dtype=dtype)
         self.radius = radius
         self.centre = centre

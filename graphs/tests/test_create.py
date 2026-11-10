@@ -41,7 +41,6 @@ class AddProcessedFlag:
 
 
 class TestGraphCreatorFromFile:
-
     @pytest.mark.parametrize("name", ["graph.pt", None])
     def test_generate_graph(self, config_file: tuple[Path, str], mock_grids_path: tuple[str, int], name: str):
         """Test GraphCreator.initialize_from_config workflow."""
