@@ -229,7 +229,6 @@ class ConditionalNaNPostprocessorSchema(BaseModel):
 
 
 class RemapperSchema(BaseModel):
-
     model_config = ConfigDict(extra="allow")
 
     default: str = "none"
