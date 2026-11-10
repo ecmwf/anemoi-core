@@ -177,7 +177,8 @@ def _check_transport_conditioning(*, rank, world_size, device, group) -> None:
 
     model = AnemoiTransportModelEncProcDec.__new__(AnemoiTransportModelEncProcDec)
     torch.nn.Module.__init__(model)
-    model._graph_name_hidden = "hidden"
+    model.hidden_names = ["hidden"]
+    model.dataset2hidden = {"data": "hidden"}
     model.static_graph_geometry = stub_graph_geometry(hidden=hidden_nodes)
     model.dynamic_node_attributes = {}
     model.noise_embedder = torch.nn.Identity()
