@@ -7,16 +7,96 @@
 # nor does it submit to any jurisdiction.
 #
 
+from typing import Annotated
+from typing import Any
 from typing import Literal
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
+from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
+from pydantic import Tag
+from pydantic import field_validator
 
 from anemoi.utils.schemas import BaseModel
+
+
+class NeighbourhoodSchema(BaseModel):
+    grid: str = Field(example="octahedral")
+    "Grid family of the nodes: 'octahedral' or 'healpix'."
+    kernel_size: tuple[PositiveInt, PositiveInt] = Field(example=(7, 13))
+    "Latitude rows and points per row each query attends to; both odd."
+    backend: Literal["triton", "sdpa"] = Field(default="triton")
+    "Kernels to use: 'triton' (GPU) or 'sdpa' (dense mask; CPUs and small grids). Default to 'triton'."
+    num_bands: PositiveInt = Field(default=1)
+    "Number of bands of query rows processed one at a time (per GPU), to save memory on large grids. Does not change the result. Default to 1."
+
+    @field_validator("grid")
+    @classmethod
+    def check_grid(cls, grid: str) -> str:
+        from anemoi.models.layers.neighbourhood_attention import GRID_FAMILIES
+
+        reduced = [name for name, family in GRID_FAMILIES.items() if family.is_member is not None]
+        if grid not in reduced:
+            raise ValueError(
+                f"No neighbourhood attention kernels with a kernel_size for grid '{grid}'. Known grids: {reduced}; "
+                "the processor can also use grid 'icosahedral' with a radius."
+            )
+        return grid
+
+    @field_validator("kernel_size")
+    @classmethod
+    def check_kernel_size(cls, kernel_size: tuple[int, int]) -> tuple[int, int]:
+        if any(k % 2 == 0 for k in kernel_size):
+            raise ValueError(f"kernel_size entries must be odd, got {kernel_size}.")
+        return kernel_size
+
+
+class IcosahedralNeighbourhoodSchema(BaseModel):
+    grid: Literal["icosahedral"] = Field(example="icosahedral")
+    "The refined icosahedron, nodes built with anemoi-graphs TriNodes and 'ordering: diamonds'."
+    radius: PositiveInt = Field(example=5)
+    "Each node attends to the nodes within this many hops."
+    backend: Literal["triton", "sdpa"] = Field(default="triton")
+    "Kernels to use: 'triton' (GPU) or 'sdpa' (dense mask, small meshes). Default to 'triton'."
+
+
+def _neighbourhood_kind(value: Any) -> str:
+    grid = value.get("grid") if isinstance(value, dict) else getattr(value, "grid", None)
+    return "icosahedral" if grid == "icosahedral" else "reduced"
+
+
+ProcessorNeighbourhoodSchema = Annotated[
+    Union[
+        Annotated[NeighbourhoodSchema, Tag("reduced")],
+        Annotated[IcosahedralNeighbourhoodSchema, Tag("icosahedral")],
+    ],
+    Discriminator(_neighbourhood_kind),
+]
+"Neighbourhood of a processor: a reduced grid of GRID_FAMILIES or the refined icosahedron."
+
+
+class RotaryEmbeddingsSchema(BaseModel):
+    max_frequency: float = Field(ge=1.0, example=10000.0)
+    "Highest frequency in radians per Earth radius; it repeats every 40,000 km / max_frequency. The lowest is 1."
+    backend: Literal["triton", "torch"] = Field(default="triton")
+    "Rotate with a Triton kernel ('triton', GPU) or with PyTorch ('torch', any device). Default to 'triton'."
+
+
+def check_neighbourhood_attention(component: Any) -> Any:
+    """Check that the neighbourhood settings and the attention implementation of a component agree."""
+    if component.attention_implementation != "neighbourhood":
+        if component.neighbourhood is not None:
+            raise ValueError("'neighbourhood' is only used with attention_implementation 'neighbourhood'.")
+        return component
+    if component.neighbourhood is None:
+        raise ValueError("attention_implementation 'neighbourhood' needs a 'neighbourhood' section.")
+    if component.window_size is not None:
+        raise ValueError("Neighbourhood attention sets its own mask; window_size must be null.")
+    return component
 
 
 class TransformerModelComponent(PydanticBaseModel):

@@ -10,11 +10,10 @@
 
 # These tests for a triton fused attention algorithm are adapted from
 # the fused attention example from the Triton-lang github repo (MIT license) (Credits: OpenAI kernel team)
-# The tests have been extended to support sliding window and to test real-world problem sizes against flash attention if its available
+# The tests have been extended to support sliding window and to compare training runs against PyTorch's attention
 
 import math
 
-import einops
 import pytest
 import torch
 
@@ -29,13 +28,6 @@ if is_triton_available():
     from anemoi.models.triton.attention import _attn_fwd
     from anemoi.models.triton.attention import _host_descriptor_pre_hook
     from anemoi.models.triton.attention import is_hip
-
-try:
-    from flash_attn import flash_attn_func
-
-    HAS_FLASH = True
-except BaseException:
-    HAS_FLASH = False
 
 pytestmark = pytest.mark.skipif(not is_triton_available(), reason="CUDA and Triton needed")
 
@@ -255,6 +247,47 @@ def test_triton_attention_block_sizes(block_sizes, n_ctx, window):
         assert error < 1e-2, f"{name}: relative error {error:.3g}"
 
 
+CROSS_LENGTHS = [(97, 1025), (1025, 97), (256, 128), (128, 300), (1, 300), (300, 1)]
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("block_sizes", BLOCK_SIZES, indirect=True, ids=[f"{f}x{i}" for f, i in BLOCK_SIZES])
+@pytest.mark.parametrize(("n_q", "n_kv"), CROSS_LENGTHS)
+def test_triton_cross_attention_block_sizes(block_sizes, n_q, n_kv):
+    """Cross attention between sequences of different lengths matches float64 attention for each block size pair.
+
+    The lengths include ones that are not a multiple of any block size, more queries than keys and
+    fewer, and a single point on either side.
+    """
+    generator = torch.Generator(device="cuda").manual_seed(0)
+    q, grad_out = (torch.randn(2, 3, n_q, 64, device="cuda", generator=generator).to(torch.bfloat16) for _ in range(2))
+    k, v = (torch.randn(2, 3, n_kv, 64, device="cuda", generator=generator).to(torch.bfloat16) for _ in range(2))
+    sm_scale = 64**-0.5
+
+    q_run, k_run, v_run = (t.detach().clone().requires_grad_() for t in (q, k, v))
+    out = TritonAttention.apply(q_run, k_run, v_run, False, None, sm_scale)
+    results = (out, *torch.autograd.grad(out, (q_run, k_run, v_run), grad_out))
+
+    reference_out = torch.nn.functional.scaled_dot_product_attention(q.double(), k.double(), v.double(), scale=sm_scale)
+    references = (reference_out, *_attention_fp64_grads(q, k, v, grad_out, sm_scale, False, -1))
+
+    for name, result, reference in zip(("out", "dq", "dk", "dv"), results, references):
+        assert result.shape == reference.shape
+        # With a single key every query puts all its weight on it, so dq and dk are exactly zero;
+        # the error is then measured against 1 rather than against a zero norm.
+        error = ((result.double() - reference).norm() / reference.norm().clamp_min(1.0)).item()
+        assert error < 1e-2, f"{name}: relative error {error:.3g}"
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize(("causal", "window"), [(True, None), (False, 16)])
+def test_triton_attention_refuses_masks_between_sequences_of_different_lengths(causal, window):
+    q = torch.randn(1, 2, 64, 32, device="cuda", dtype=torch.bfloat16)
+    k = torch.randn(1, 2, 128, 32, device="cuda", dtype=torch.bfloat16)
+    with pytest.raises(AssertionError, match="need queries and keys of the same length"):
+        TritonAttention.apply(q, k, k, causal, window, 32**-0.5)
+
+
 @pytest.mark.gpu
 def test_triton_attention_deterministic():
     """Computes the same test case 50 times in a row and checks that the output matches to ensure that the implementation is deterministic."""
@@ -336,17 +369,8 @@ def test_triton_attention_deterministic():
 @pytest.mark.parametrize("mode", ["fwd", "bwd"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
-    """Compares Triton flash attention against a naive torch implementation, and optionally flash attention
-
-    Since flash attention is more memory efficient, installing it allows larger problem sizes
-    to be tested (in this case, an o96 processor setup).
-    """
+    """Compares Triton flash attention against a naive torch implementation."""
     attention = TritonAttention.apply
-
-    if N_CTX > 2048 and not HAS_FLASH:
-        pytest.skip(
-            "N_CTX > 2048 will cause OOM for naive pytorch reference implementation, so we skip these tests when flash attention is not available."
-        )
 
     if window and causal:
         pytest.skip("Causal and sliding window together not supported")
@@ -368,39 +392,14 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
         window_size = int(torch.randint(0, N_CTX, (1,))[0])
 
     # Compute reference values
-    if not HAS_FLASH:
-        ref_out = attention_ref(q, k, v, sm_scale, causal=causal, window_size=window_size).to(dtype)
+    ref_out = attention_ref(q, k, v, sm_scale, causal=causal, window_size=window_size).to(dtype)
 
-        if mode == "bwd":
-            dout = torch.randn_like(q)
-            ref_out.backward(dout)
-            ref_dq, q.grad = q.grad.clone(), None
-            ref_dv, v.grad = v.grad.clone(), None
-            ref_dk, k.grad = k.grad.clone(), None
-    else:
-        # Flash attention references
-        q_flash, k_flash, v_flash = (einops.rearrange(t, "b h s d -> b s h d") for t in (q, k, v))
-        q_flash.retain_grad()
-        k_flash.retain_grad()
-        v_flash.retain_grad()
-        flash_window = (-1, -1) if not window else (window_size, window_size)
-        ref_out = flash_attn_func(
-            q_flash, k_flash, v_flash, causal=causal, window_size=flash_window, softmax_scale=sm_scale
-        )
-
-        if mode == "bwd":
-            dout = torch.randn_like(q)
-            dout_flash = einops.rearrange(dout, "b s h d -> b h s d")
-            ref_out.backward(dout_flash)
-            ref_dq, q.grad = q_flash.grad.clone(), None
-            ref_dv, v.grad = v_flash.grad.clone(), None
-            ref_dk, k.grad = k_flash.grad.clone(), None
-
-            # rearrange for later comparison w triton version
-            ref_dq = einops.rearrange(ref_dq, "b s h d -> b h s d")
-            ref_dv = einops.rearrange(ref_dv, "b s h d -> b h s d")
-            ref_dk = einops.rearrange(ref_dk, "b s h d -> b h s d")
-        ref_out = einops.rearrange(ref_out, "b s h d -> b h s d")
+    if mode == "bwd":
+        dout = torch.randn_like(q)
+        ref_out.backward(dout)
+        ref_dq, q.grad = q.grad.clone(), None
+        ref_dv, v.grad = v.grad.clone(), None
+        ref_dk, k.grad = k.grad.clone(), None
 
     # Compute triton values
     tri_out = attention(q, k, v, causal, window_size, sm_scale).to(dtype)
@@ -513,17 +512,14 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
 @pytest.mark.parametrize("causal", [False])
 @pytest.mark.parametrize("window", [True, False])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-def test_triton_attention_cumulative_loss_vs_flash(Z, H, N_CTX, HEAD_DIM, causal, window, dtype, seed):
-    """Runs 50 cumulative forward+backward steps (simulating a training loop) and
-    compares the final loss trajectory between Triton attention and Flash Attention 2.
+def test_triton_attention_cumulative_loss_vs_sdpa(Z, H, N_CTX, HEAD_DIM, causal, window, dtype, seed):
+    """Runs 100 cumulative forward+backward steps (simulating a training loop) and
+    compares the final loss between Triton attention and PyTorch's scaled_dot_product_attention.
 
     Both implementations start from identical parameters and use the same learning
     rate / loss function.  The test asserts that the final losses are close,
-    demonstrating that the two kernels are numerically interchangeable for training.
+    demonstrating that the two are numerically interchangeable for training.
     """
-
-    if not HAS_FLASH:
-        pytest.skip("Flash Attention 2 is required for this comparison test")
 
     if window and causal:
         pytest.skip("Causal and sliding window together not supported")
@@ -539,7 +535,9 @@ def test_triton_attention_cumulative_loss_vs_flash(Z, H, N_CTX, HEAD_DIM, causal
     if window:
         window_size = max(1, N_CTX // 4)
 
-    flash_window = (-1, -1) if not window else (window_size, window_size)
+    # PyTorch's attention takes the sliding window as a mask of the keys each query sees.
+    positions = torch.arange(N_CTX, device=DEVICE)
+    sdpa_mask = (positions[:, None] - positions[None, :]).abs() <= window_size if window else None
 
     # --------------- shared initial weights ---------------
     # Generate in fp32 — these serve as master weights for mixed-precision SGD.
@@ -579,34 +577,34 @@ def test_triton_attention_cumulative_loss_vs_flash(Z, H, N_CTX, HEAD_DIM, causal
             k_tri -= lr * k_t.grad.float()
             v_tri -= lr * v_t.grad.float()
 
-    # --------------- Flash Attention training loop (fp32 master weights) ---------------
-    # flash_attn_func expects layout (b, s, h, d)
-    q_fa = einops.rearrange(q_init.clone(), "b h s d -> b s h d")
-    k_fa = einops.rearrange(k_init.clone(), "b h s d -> b s h d")
-    v_fa = einops.rearrange(v_init.clone(), "b h s d -> b s h d")
-    target_fa = einops.rearrange(target, "b h s d -> b s h d")
+    # --------------- PyTorch attention training loop (fp32 master weights) ---------------
+    q_sd = q_init.clone()
+    k_sd = k_init.clone()
+    v_sd = v_init.clone()
 
-    flash_losses = []
+    sdpa_losses = []
 
     for _ in range(num_steps):
-        q_f = q_fa.to(dtype).detach().requires_grad_()
-        k_f = k_fa.to(dtype).detach().requires_grad_()
-        v_f = v_fa.to(dtype).detach().requires_grad_()
+        q_s = q_sd.to(dtype).detach().requires_grad_()
+        k_s = k_sd.to(dtype).detach().requires_grad_()
+        v_s = v_sd.to(dtype).detach().requires_grad_()
 
-        out_fa = flash_attn_func(q_f, k_f, v_f, causal=causal, window_size=flash_window, softmax_scale=sm_scale)
-        loss_fa = ((out_fa.float() - target_fa) ** 2).mean()
-        loss_fa.backward()
+        out_sd = torch.nn.functional.scaled_dot_product_attention(
+            q_s, k_s, v_s, attn_mask=sdpa_mask, is_causal=causal, scale=sm_scale
+        )
+        loss_sd = ((out_sd.float() - target) ** 2).mean()
+        loss_sd.backward()
 
-        flash_losses.append(loss_fa.item())
+        sdpa_losses.append(loss_sd.item())
 
         with torch.no_grad():
-            q_fa -= lr * q_f.grad.float()
-            k_fa -= lr * k_f.grad.float()
-            v_fa -= lr * v_f.grad.float()
+            q_sd -= lr * q_s.grad.float()
+            k_sd -= lr * k_s.grad.float()
+            v_sd -= lr * v_s.grad.float()
 
     # --------------- compare loss trajectories ---------------
     triton_final = triton_losses[-1]
-    flash_final = flash_losses[-1]
+    sdpa_final = sdpa_losses[-1]
 
     # Allow slightly larger tolerance for accumulated numerical drift over 50 steps
     if dtype == torch.bfloat16:
@@ -616,36 +614,36 @@ def test_triton_attention_cumulative_loss_vs_flash(Z, H, N_CTX, HEAD_DIM, causal
         loss_atol = 1e-3
         loss_rtol = 1e-2
 
-    rel_diff = abs(triton_final - flash_final) / (abs(flash_final) + 1e-12)
+    rel_diff = abs(triton_final - sdpa_final) / (abs(sdpa_final) + 1e-12)
 
     print(f"\n[cumulative-loss] dtype={dtype}, N_CTX={N_CTX}, window={window_size}")
     print(f"  Triton final loss : {triton_final:.6f}")
-    print(f"  Flash  final loss : {flash_final:.6f}")
+    print(f"  SDPA   final loss : {sdpa_final:.6f}")
     print(f"  Relative diff     : {rel_diff:.6e}")
     print(f"  Triton loss curve : {triton_losses[0]:.4f} -> {triton_losses[24]:.4f} -> {triton_final:.4f}")
-    print(f"  Flash  loss curve : {flash_losses[0]:.4f} -> {flash_losses[24]:.4f} -> {flash_final:.4f}")
+    print(f"  SDPA   loss curve : {sdpa_losses[0]:.4f} -> {sdpa_losses[24]:.4f} -> {sdpa_final:.4f}")
 
     # Both should be decreasing (sanity check that training is working)
     # assert triton_losses[-1] < triton_losses[0], (
     #    f"Triton loss did not decrease — training loop broken "
     #    f"(first={triton_losses[0]:.6f}, last={triton_losses[-1]:.6f})"
     # )
-    # assert flash_losses[-1] < flash_losses[0], (
-    #    f"Flash loss did not decrease — training loop broken "
-    #    f"(first={flash_losses[0]:.6f}, last={flash_losses[-1]:.6f})"
+    # assert sdpa_losses[-1] < sdpa_losses[0], (
+    #    f"SDPA loss did not decrease — training loop broken "
+    #    f"(first={sdpa_losses[0]:.6f}, last={sdpa_losses[-1]:.6f})"
     # )
 
-    if not (triton_losses[-1] < triton_losses[0]) and not (flash_losses[-1] < flash_losses[0]):
+    if not (triton_losses[-1] < triton_losses[0]) and not (sdpa_losses[-1] < sdpa_losses[0]):
         pytest.skip("Warning: Neither loss decreased, so final loss comparison may be meaningless. Skipping test")
 
     # Final losses should be close
     torch.testing.assert_close(
         torch.tensor(triton_final),
-        torch.tensor(flash_final),
+        torch.tensor(sdpa_final),
         atol=loss_atol,
         rtol=loss_rtol,
         msg=lambda s: (
-            f"Final loss mismatch after {num_steps} steps between Triton and FA2.\n"
-            f"Triton={triton_final:.6f}  Flash={flash_final:.6f}  relDiff={rel_diff:.4e}\n{s}"
+            f"Final loss mismatch after {num_steps} steps between Triton and SDPA.\n"
+            f"Triton={triton_final:.6f}  SDPA={sdpa_final:.6f}  relDiff={rel_diff:.4e}\n{s}"
         ),
     )

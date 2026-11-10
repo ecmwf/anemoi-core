@@ -129,7 +129,6 @@ def test_forward_output(
         dropout_p=dropout_p,
         layer_kernels=layer_kernels,
         attention_implementation="scaled_dot_product_attention",
-        softcap=None,
     )
 
     x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)
@@ -155,7 +154,6 @@ def test_forward_output_with_conditioning():
         dropout_p=0.0,
         layer_kernels=_conditional_layer_kernels(condition_shape),
         attention_implementation="scaled_dot_product_attention",
-        softcap=None,
         qk_norm=False,
     )
 

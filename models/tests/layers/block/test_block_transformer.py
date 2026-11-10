@@ -113,7 +113,6 @@ class TestTransformerProcessorBlock:
             layer_kernels=layer_kernels,
             attention_implementation="scaled_dot_product_attention",
             mlp_implementation=mlp_implementation,
-            softcap=None,
             qk_norm=qk_norm,
         )
 
@@ -137,7 +136,6 @@ class TestTransformerProcessorBlock:
             dropout_p=0.0,
             layer_kernels=load_layer_kernels(),
             attention_implementation="scaled_dot_product_attention",
-            softcap=None,
             qk_norm=False,
         )
 
@@ -160,7 +158,6 @@ class TestTransformerProcessorBlock:
             dropout_p=0.0,
             layer_kernels=_conditional_layer_kernels(condition_shape),
             attention_implementation="scaled_dot_product_attention",
-            softcap=None,
             qk_norm=False,
         )
 
@@ -181,7 +178,6 @@ class TestTransformerProcessorBlock:
                 dropout_p=0.0,
                 layer_kernels=load_layer_kernels(),
                 attention_implementation="scaled_dot_product_attention",
-                softcap=None,
                 qk_norm=False,
             )
 
