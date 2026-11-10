@@ -1,0 +1,14 @@
+defaults:
+- data: multi
+- dataloader: multi
+- diagnostics: evaluation_multi
+- system: example
+- graph: multi
+- model: graphtransformer_multi_transport_fm
+- task: forecaster
+- training: multi_flow_matching
+- _self_
+
+
+# set to true to switch on config validation
+config_validation: True

@@ -265,12 +265,12 @@ def test_training_cycle_imerg_target(
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_multidatasets_edm_transport(
-    multidatasets_edm_transport_config: tuple[DictConfig, list[str]],
+def test_training_cycle_multidatasets_transport(
+    multidatasets_transport_config: tuple[DictConfig, list[str]],
     get_test_archive: callable,
     partial_metadata_schema: dict[str, Any],
 ) -> None:
-    cfg, urls = multidatasets_edm_transport_config
+    cfg, urls = multidatasets_transport_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)

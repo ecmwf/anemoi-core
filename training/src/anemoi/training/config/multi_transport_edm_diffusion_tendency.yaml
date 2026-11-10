@@ -1,12 +1,12 @@
 defaults:
-- data: zarr
-- dataloader: native_grid
-- diagnostics: evaluation
+- data: multi
+- dataloader: multi
+- diagnostics: evaluation_multi
 - system: example
-- graph: multi_scale
+- graph: multi
 - model: graphtransformer_multi_transport_tendency_edm
 - task: forecaster
-- training: edm_diffusion
+- training: multi_edm_diffusion
 - _self_
 
 

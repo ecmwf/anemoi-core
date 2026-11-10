@@ -149,6 +149,13 @@ def test_config_validation_flow_matching(flow_matching_config: tuple[DictConfig,
     BaseSchema(**cfg)
 
 
+def test_config_validation_multidatasets_transport(
+    multidatasets_transport_config: tuple[DictConfig, list[str]],
+) -> None:
+    cfg, _ = multidatasets_transport_config
+    BaseSchema(**cfg)
+
+
 def test_config_validation_temporal_downscaler_ensemble(
     temporal_downscaler_ensemble_config: tuple[DictConfig, str],
 ) -> None:

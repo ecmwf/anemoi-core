@@ -302,8 +302,16 @@ The transport entry points are:
 -  ``transport_flow_matching.yaml``
 -  ``transport_flow_matching_tendency.yaml``
 
+and, for two datasets (``era5`` and ``cerra``) trained together:
+
+-  ``multi_transport_edm_diffusion.yaml``
+-  ``multi_transport_edm_diffusion_tendency.yaml``
+-  ``multi_transport_flow_matching.yaml``
+-  ``multi_transport_flow_matching_tendency.yaml``
+
 These configs select ``training: edm_diffusion`` or
-``training: flow_matching``, which set the corresponding
+``training: flow_matching`` (``multi_edm_diffusion`` or
+``multi_flow_matching`` for two datasets), which set the corresponding
 ``training.transport.objective``. Tendency variants additionally select
 ``training.transport.prediction_mode: tendency`` and a tendency model
 config.
