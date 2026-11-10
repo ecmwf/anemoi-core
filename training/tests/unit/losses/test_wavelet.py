@@ -73,6 +73,36 @@ def test_public_dtcwt_2d_name_and_factory_target() -> None:
     assert loss.name == "dtcwt_2d"
 
 
+def test_combined_transform_detaches_target_without_changing_prediction_gradients(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pred, target = _data(variables=1)
+    combined_pred = pred.clone().requires_grad_()
+    separate_pred = pred.clone().requires_grad_()
+    combined_loss = DTCWT2DLoss([8, 10], J=2, transform_prediction_and_target_separately=False)
+    separate_loss = DTCWT2DLoss([8, 10], J=2, transform_prediction_and_target_separately=True)
+    original_score_pyramid = combined_loss._score_pyramid
+
+    def check_detached_target(
+        pred_pyramid: Any,
+        target_pyramid: Any,
+        coefficient_validity: Any,
+        valid_grid: torch.Tensor | None,
+    ) -> torch.Tensor:
+        assert not target_pyramid.lowpass.requires_grad
+        assert all(not level.requires_grad for level in target_pyramid.highpasses)
+        return original_score_pyramid(pred_pyramid, target_pyramid, coefficient_validity, valid_grid)
+
+    monkeypatch.setattr(combined_loss, "_score_pyramid", check_detached_target)
+    combined_score = combined_loss(combined_pred, target, squash=False)
+    separate_score = separate_loss(separate_pred, target, squash=False)
+    combined_gradient = torch.autograd.grad(combined_score.sum(), combined_pred)[0]
+    separate_gradient = torch.autograd.grad(separate_score.sum(), separate_pred)[0]
+
+    torch.testing.assert_close(combined_score, separate_score)
+    torch.testing.assert_close(combined_gradient, separate_gradient)
+
+
 def test_variable_selection_precedes_transform_and_preserves_weighted_gradients() -> None:
     pred, target = _data(batch=2, time=2, ensemble=2, variables=4)
     pred.requires_grad_()
