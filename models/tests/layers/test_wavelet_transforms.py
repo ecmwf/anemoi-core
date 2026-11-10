@@ -122,10 +122,10 @@ class _ObjectBackend(torch.nn.Module):
 def test_object_backend_contract_and_validation():
     pytest.importorskip("pytorch_wavelets")
     transform = DTCWT2D(J=1)
-    transform.impl = _ObjectBackend()
+    transform.backend_transform = _ObjectBackend()
     result = transform(torch.ones(1, 2, 4, 4))
     assert result.highpasses[0].shape == (1, 2, 6, 2, 2, 2)
-    transform.impl = _ObjectBackend(invalid=True)
+    transform.backend_transform = _ObjectBackend(invalid=True)
     with pytest.raises(ValueError, match="high-pass"):
         transform(torch.ones(1, 2, 4, 4))
 

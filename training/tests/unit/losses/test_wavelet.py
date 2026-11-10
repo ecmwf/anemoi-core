@@ -87,7 +87,7 @@ def test_variable_selection_precedes_transform_and_preserves_weighted_gradients(
     def record_transform(_module: torch.nn.Module, inputs: tuple[torch.Tensor, ...]) -> None:
         transformed_fields.append(inputs[0].shape[0])
 
-    with loss.transform.register_forward_pre_hook(record_transform):
+    with loss.wavelet_transform.register_forward_pre_hook(record_transform):
         actual = loss(pred, target, scaler_indices=(..., selected_variables))
 
     torch.testing.assert_close(actual, expected)
@@ -188,7 +188,7 @@ def test_pooled_nan_handling_uses_fractional_support_and_preserves_gradients() -
     assert valid_grid[0, 0, 0, 0]
     assert not valid_grid[0, 0, 3, 5]
 
-    pyramid = loss.transform(pred_chunk)
+    pyramid = loss.wavelet_transform(pred_chunk)
     support = loss._pooled_coefficient_support(valid_grid, pyramid)
     assert any(torch.any((level > 0) & (level < 1)) for level in (*support.highpasses, support.lowpass))
 
@@ -697,7 +697,7 @@ def _distributed_projection_worker(
             def record_transform(_module: torch.nn.Module, inputs: tuple[torch.Tensor, ...]) -> None:
                 transformed_fields.append(inputs[0].shape[0])
 
-            with loss.transform.register_forward_pre_hook(record_transform):
+            with loss.wavelet_transform.register_forward_pre_hook(record_transform):
                 actual = loss(local_pred, local_target, **kwargs)
 
             field_count = torch.tensor(sum(transformed_fields))

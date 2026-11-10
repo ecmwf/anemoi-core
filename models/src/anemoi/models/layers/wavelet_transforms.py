@@ -66,10 +66,10 @@ class DTCWT2D(nn.Module):
             from pytorch_wavelets import DTCWTForward
         except ImportError as exc:
             raise ImportError("Install anemoi-models[wavelet] to use the pytorch_wavelets backend") from exc
-        self.transform = DTCWTForward(J=J, biort=biort, qshift=qshift, mode="symmetric")
+        self.backend_transform = DTCWTForward(J=J, biort=biort, qshift=qshift, mode="symmetric")
         # Register transform filters as buffers so they follow device/dtype moves but are excluded
         # from checkpoints
-        for module in self.transform.modules():
+        for module in self.backend_transform.modules():
             for name, buffer in module.named_buffers(recurse=False):
                 module.register_buffer(name, buffer, persistent=False)
 
@@ -91,8 +91,8 @@ class DTCWT2D(nn.Module):
         if data.dtype not in (torch.float32, torch.float64):
             raise TypeError("DTCWT2D inputs must be float32 or float64")
         # This boundary stays eager because wavelet filters may be initialized lazily.
-        self.transform.to(device=data.device, dtype=data.dtype)
-        output = self.transform(data)
+        self.backend_transform.to(device=data.device, dtype=data.dtype)
+        output = self.backend_transform(data)
         if isinstance(output, tuple) and len(output) == 2:
             lowpass, highpasses = output
         elif isinstance(output, _BackendResult):

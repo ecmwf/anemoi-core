@@ -162,7 +162,7 @@ class DTCWT2DLoss(BaseLoss):
         self.projection_provider = self._build_projection(projection_config, graph_data, data_node_name)
         if self.projection_provider is not None:
             self.projector = SparseProjector()
-        self.transform = DTCWT2D(J=self.J, **dict(transform or {}))
+        self.wavelet_transform = DTCWT2D(J=self.J, **dict(transform or {}))
 
     def _build_projection(
         self,
@@ -516,7 +516,7 @@ class DTCWT2DLoss(BaseLoss):
         mask_input = torch.zeros_like(valid_grid, dtype=torch.float32)
         mask_input = mask_input.masked_fill(~valid_grid, float("nan"))
         with torch.no_grad():
-            mask_pyramid = self.transform(mask_input)
+            mask_pyramid = self.wavelet_transform(mask_input)
         return WaveletCoefficientValidity(
             lowpass=torch.isfinite(mask_pyramid.lowpass),
             highpasses=tuple(torch.isfinite(level).all(dim=-1) for level in mask_pyramid.highpasses),
@@ -572,12 +572,12 @@ class DTCWT2DLoss(BaseLoss):
                 target_chunk = self._chunk_inputs(target, field_indices, projection_matrix)
             if self.transform_prediction_and_target_separately:
                 # Separate calls reduce peak transform-batch memory for large fields.
-                pred_pyramid = self.transform(pred_chunk)
+                pred_pyramid = self.wavelet_transform(pred_chunk)
                 with torch.no_grad():
-                    target_pyramid = self.transform(target_chunk)
+                    target_pyramid = self.wavelet_transform(target_chunk)
             else:
                 # One combined call is cheaper when the doubled field batch fits in memory.
-                combined_pyramid = self.transform(torch.cat((pred_chunk, target_chunk), dim=0))
+                combined_pyramid = self.wavelet_transform(torch.cat((pred_chunk, target_chunk), dim=0))
                 n_chunk_fields = pred_chunk.shape[0]
                 pred_pyramid = WaveletPyramid(
                     combined_pyramid.lowpass[:n_chunk_fields],
