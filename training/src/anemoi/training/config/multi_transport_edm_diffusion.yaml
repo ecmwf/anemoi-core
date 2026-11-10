@@ -1,14 +1,6 @@
+# The two-dataset setup of multi.yaml, with a transport model and objective.
 defaults:
-- data: multi
-- dataloader: multi
-- diagnostics: evaluation_multi
-- system: example
-- graph: multi
-- model: graphtransformer_multi_transport_edm
-- task: forecaster
-- training: multi_edm_diffusion
+- multi
+- override model: graphtransformer_multi_transport_edm
+- override training: multi_edm_diffusion
 - _self_
-
-
-# set to true to switch on config validation
-config_validation: True
