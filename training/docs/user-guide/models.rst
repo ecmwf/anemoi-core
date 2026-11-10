@@ -31,7 +31,7 @@ For detailed instructions on creating models, see the
 
 The processor is the part of the model that performs the computation on
 the latent space. The processor can be chosen to be a GNN,
-GraphTransformer, Transformer with Flash attention or Point-wise MLP.
+GraphTransformer, Transformer or Point-wise MLP.
 
 GNN
 ===
@@ -71,11 +71,9 @@ coarser than the resolution of the base data.
 Transformer
 ===========
 
-The Transformer uses a multi-head self attention on the processor. Note
-that this requires an optimised attention implementation to be installed.
-Anemoi offers a triton attention implementation, which is supported on GPUs.
-Another option is to install the `flash-attention
-<https://github.com/Dao-AILab/flash-attention>`__ library.
+The Transformer uses a multi-head self attention on the processor. On
+GPUs it runs Anemoi's Triton attention implementation; PyTorch's scaled
+dot product attention runs it anywhere, including on CPUs.
 
 The attention windows are chosen in such a way that a complete grid
 neighbourhood is always included (see Figure below). Like with the

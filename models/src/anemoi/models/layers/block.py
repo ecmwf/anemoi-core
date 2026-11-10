@@ -42,6 +42,9 @@ from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.mlp import build_feedforward_layer
+from anemoi.models.layers.neighbourhood_attention import Neighbourhood
+from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBand
+from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
@@ -132,9 +135,8 @@ class TransformerProcessorBlock(BaseBlock):
         qk_norm: bool = False,
         attention_implementation: str = "triton_attention",
         mlp_implementation: MLPImplementation = "mlp",
-        softcap: Optional[float] = None,
-        use_alibi_slopes: bool = False,
-        use_rotary_embeddings: bool = False,
+        neighbourhood: Optional[Neighbourhood] = None,
+        rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
         super().__init__()
 
@@ -152,9 +154,8 @@ class TransformerProcessorBlock(BaseBlock):
             dropout_p=dropout_p,
             layer_kernels=layer_kernels,
             attention_implementation=attention_implementation,
-            softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
-            use_rotary_embeddings=use_rotary_embeddings,
+            neighbourhood=neighbourhood,
+            rotary=rotary,
         )
 
         self.mlp = MLP(
@@ -191,6 +192,30 @@ class TransformerProcessorBlock(BaseBlock):
         )
         return (x,)
 
+    def forward_band(self, x: Tensor, band: NeighbourhoodBand, cond: Optional[Tensor] = None) -> Tensor:
+        """:meth:`forward` for one band of points.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input of the band's key points (which include its queries), ``(batch, band key points, num_channels)``.
+        band : NeighbourhoodBand
+            The band.
+        cond : Tensor, optional
+            Conditioning of the band's key points, like ``x``.
+
+        Returns
+        -------
+        Tensor
+            ``(batch, band query points, num_channels)``.
+        """
+        queries = band.queries_in_keys
+        cond_kwargs = {"cond": cond} if cond is not None else {}
+        cond_query_kwargs = {"cond": cond[:, queries]} if cond is not None else {}
+
+        x_query = x[:, queries] + self.attention.forward_band(self.layer_norm_attention(x, **cond_kwargs), band)
+        return x_query + self.mlp(self.layer_norm_mlp(x_query, **cond_query_kwargs))
+
 
 class TransformerMapperBlock(BaseBlock):
     """Transformer mapper block with MultiHeadCrossAttention and MLPs."""
@@ -208,9 +233,8 @@ class TransformerMapperBlock(BaseBlock):
         qk_norm: bool = False,
         attention_implementation: str = "scaled_dot_product_attention",
         mlp_implementation: MLPImplementation = "mlp",
-        softcap: Optional[float] = None,
-        use_alibi_slopes: bool = False,
-        use_rotary_embeddings: bool = False,
+        neighbourhood: Optional[Neighbourhood] = None,
+        rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
         super().__init__()
 
@@ -231,9 +255,8 @@ class TransformerMapperBlock(BaseBlock):
             dropout_p=dropout_p,
             layer_kernels=layer_kernels,
             attention_implementation=attention_implementation,
-            softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
-            use_rotary_embeddings=use_rotary_embeddings,
+            neighbourhood=neighbourhood,
+            rotary=rotary,
         )
 
         self.mlp = MLP(
@@ -262,6 +285,36 @@ class TransformerMapperBlock(BaseBlock):
         x_dst = x_dst + self.attention((x_src, x_dst), shard_info, batch_size, model_comm_group=model_comm_group)
         x_dst = x_dst + self.mlp(self.layer_norm_mlp(x_dst, **cond_dst_kwargs))
         return (x_src, x_dst), None  # logic expects return of edge_attr
+
+    def forward_band(
+        self,
+        x: OptPairTensor,
+        band: NeighbourhoodBand,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
+    ) -> Tensor:
+        """:meth:`forward` for one band of destination points.
+
+        Parameters
+        ----------
+        x : OptPairTensor
+            Source input of the band's key points and destination input of its query points.
+        band : NeighbourhoodBand
+            The band.
+        cond : tuple[Tensor, Tensor], optional
+            Conditioning of the band's source and destination points, like ``x``.
+
+        Returns
+        -------
+        Tensor
+            ``(batch, band query points, num_channels)``.
+        """
+        cond_src_kwargs = {"cond": cond[0]} if cond is not None else {}
+        cond_dst_kwargs = {"cond": cond[1]} if cond is not None else {}
+
+        x_src = self.layer_norm_attention_src(x[0], **cond_src_kwargs)
+        x_dst = self.layer_norm_attention_dst(x[1], **cond_dst_kwargs)
+        x_dst = x_dst + self.attention.forward_band((x_src, x_dst), band)
+        return x_dst + self.mlp(self.layer_norm_mlp(x_dst, **cond_dst_kwargs))
 
 
 class GraphConvBaseBlock(BaseBlock):
