@@ -18,6 +18,7 @@ from pydantic import NonNegativeInt
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
+from .common_components import NeighbourhoodSchema
 from .common_components import PointWiseMapperComponent
 from .common_components import RotaryEmbeddingsSchema
 from .common_components import TransformerModelComponent
@@ -81,8 +82,8 @@ class TransformerDecoderSchema(TransformerModelComponent):
     "Dropout probability used for multi-head self attention, default 0.0"
     attention_implementation: str = Field(example="scaled_dot_product_attention")
     "Attention implementation to use. Default to 'scaled_dot_product_attention'."
-    neighbourhood: Optional[dict[str, Any]] = Field(default=None)
-    "Settings of attention_implementation 'neighbourhood': the grid family in 'grid' and the family's own settings, checked when the model is built. Default to None."
+    neighbourhood: Optional[NeighbourhoodSchema] = Field(default=None)
+    "Grid and neighbourhood size for attention_implementation 'neighbourhood'. Default to None."
     rotary_embeddings: Optional[RotaryEmbeddingsSchema] = Field(default=None)
     "Rotary position embeddings from the positions of the nodes on the sphere; off when None. Default to None."
 

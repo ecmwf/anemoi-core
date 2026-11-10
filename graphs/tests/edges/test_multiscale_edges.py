@@ -113,6 +113,17 @@ class TestMultiScaleEdgesTransform:
         assert len(graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index) > 0
         assert graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index.dim() == 2
 
+    def test_diamond_ordering_gives_the_same_edges(self):
+        """The edges join the same pairs of points whether the nodes are in latlon or diamond order."""
+        pairs = []
+        for ordering in ("latlon", "diamonds"):
+            graph = TriNodes(2, "nodes", ordering=ordering).update_graph(HeteroData(), {})
+            graph = MultiScaleEdges("nodes", "nodes", 1, None).update_graph(graph)
+            coords = graph["nodes"].x
+            edge_index = graph[("nodes", "to", "nodes")].edge_index
+            pairs.append({(tuple(coords[a].tolist()), tuple(coords[b].tolist())) for a, b in edge_index.T.tolist()})
+        assert pairs[0] == pairs[1]
+
     def test_transform_fail_nodes(self, tri_ico_graph: HeteroData):
         """Test MultiScaleEdges update method with wrong node type."""
         edges = MultiScaleEdges("fail_nodes", "fail_nodes", 1, None)

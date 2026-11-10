@@ -37,6 +37,24 @@ The class `TriNodes` allows us to define the nodes over the entire globe
 where `resolution` is the number of refinements to be applied to the
 icosahedron.
 
+By default the nodes are sorted by latitude and longitude. With
+``ordering: diamonds`` they are stored diamond by diamond instead: the
+twenty faces of the icosahedron pair up into ten diamonds, each refined
+into a regular ``2**resolution`` by ``2**resolution`` lattice, stored
+row by row, with the two vertices left over first and last. This is the
+order the icosahedral neighbourhood attention kernels of anemoi-models
+work in. It needs the whole globe, so it is only available for
+`TriNodes`.
+
+.. code:: yaml
+
+   nodes:
+     hidden:
+       node_builder:
+         _target_: anemoi.graphs.nodes.TriNodes
+         resolution: 6
+         ordering: diamonds
+
 *********************
  Limited Area graphs
 *********************

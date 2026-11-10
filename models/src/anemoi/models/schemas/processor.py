@@ -20,6 +20,7 @@ from pydantic import model_validator
 
 from .common_components import GNNModelComponent
 from .common_components import PointWiseModelComponent
+from .common_components import ProcessorNeighbourhoodSchema
 from .common_components import RotaryEmbeddingsSchema
 from .common_components import TransformerModelComponent
 from .common_components import check_neighbourhood_attention
@@ -95,8 +96,8 @@ class TransformerProcessorSchema(TransformerModelComponent):
     "Attention implementation to use. Default to 'triton_attention'."
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
-    neighbourhood: Optional[dict[str, Any]] = Field(default=None)
-    "Settings of attention_implementation 'neighbourhood': the grid family in 'grid' and the family's own settings, checked when the model is built. Default to None."
+    neighbourhood: Optional[ProcessorNeighbourhoodSchema] = Field(default=None)
+    "Grid and neighbourhood size for attention_implementation 'neighbourhood'. Default to None."
     rotary_embeddings: Optional[RotaryEmbeddingsSchema] = Field(default=None)
     "Rotary position embeddings from the positions of the nodes on the sphere; off when None. Default to None."
 

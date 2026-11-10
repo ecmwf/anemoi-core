@@ -214,13 +214,34 @@ def test_sdpa_cross_attention_refuses_a_window_between_sequences_of_different_le
 
 
 @requires_triton
-def test_triton_attention_refuses_sequences_of_different_lengths(layer_kernels):
+def test_triton_cross_attention_between_sequences_of_different_lengths_matches_sdpa(layer_kernels):
+    torch.manual_seed(0)
+    layers = [
+        MultiHeadCrossAttention(
+            num_heads=4, embed_dim=128, layer_kernels=layer_kernels, attention_implementation=implementation
+        ).cuda()
+        for implementation in ("scaled_dot_product_attention", "triton_attention")
+    ]
+    layers[1].load_state_dict(layers[0].state_dict())
+    keys, queries = torch.randn(2 * 500, 128, device="cuda"), torch.randn(2 * 130, 128, device="cuda")
+    shard_info = BipartiteGraphShardInfo(src_nodes=[2 * 500], dst_nodes=[2 * 130])
+    expected, got = (layer((keys, queries), shard_info, batch_size=2) for layer in layers)
+    assert got.shape == (2 * 130, 128)
+    torch.testing.assert_close(got, expected, rtol=1e-4, atol=1e-5)
+
+
+@requires_triton
+def test_triton_cross_attention_refuses_a_window_between_sequences_of_different_lengths(layer_kernels):
     attention = MultiHeadCrossAttention(
-        num_heads=2, embed_dim=32, layer_kernels=layer_kernels, attention_implementation="triton_attention"
+        num_heads=2,
+        embed_dim=32,
+        layer_kernels=layer_kernels,
+        window_size=4,
+        attention_implementation="triton_attention",
     ).cuda()
     keys, queries = torch.randn(12, 32, device="cuda"), torch.randn(6, 32, device="cuda")
     shard_info = BipartiteGraphShardInfo(src_nodes=[12], dst_nodes=[6])
-    with pytest.raises(NotImplementedError, match="needs queries and keys of the same length"):
+    with pytest.raises(ValueError, match="needs queries and keys of the same length"):
         attention((keys, queries), shard_info, batch_size=1)
 
 
