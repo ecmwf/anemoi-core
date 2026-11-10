@@ -103,9 +103,7 @@ def boxcox_converter(x, lambd=0.5, clip_negative=False):
         if clip_negative:
             x = torch.clamp_(x, min=0.0)
         else:
-            assert x.ge(
-                0.0
-            ).all(), (
+            assert x.ge(0.0).all(), (
                 "input x must me greater or equal to 0, or use with clip_negative=True to clip negative values to 0"
             )
 
@@ -143,9 +141,7 @@ def power_transform(x, lambd=0.33, clip_negative=False, tangent_linear_above_one
     if clip_negative:
         x = torch.clamp_(x, min=0.0)
     else:
-        assert x.ge(
-            0.0
-        ).all(), (
+        assert x.ge(0.0).all(), (
             "Power transform input x must satisfy x >= 0, or use with clip_negative=True to clip negative values to 0."
         )
     if tangent_linear_above_one:

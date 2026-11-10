@@ -85,7 +85,6 @@ class BaseImputer(BasePreprocessor, ABC):
 
         # Create indices for imputation
         for name in name_to_index_training_input:
-
             method = self.methods.get(name, self.default)
             if method == "none":
                 LOGGER.debug(f"Imputer: skipping {name} as no imputation method is specified")
@@ -268,9 +267,9 @@ class BaseImputer(BasePreprocessor, ABC):
             msg = "Cannot inverse-transform before the corresponding input has been transformed."
             raise RuntimeError(msg)
 
-        assert (
-            x.shape[0] == self.nan_locations.shape[0]
-        ), f"Batch dimension of input tensor ({x.shape[0]}) does not match the batch dimension of nan locations ({self.nan_locations.shape[0]}). Are you using the postprocessors without running the preprocessor first?"
+        assert x.shape[0] == self.nan_locations.shape[0], (
+            f"Batch dimension of input tensor ({x.shape[0]}) does not match the batch dimension of nan locations ({self.nan_locations.shape[0]}). Are you using the postprocessors without running the preprocessor first?"
+        )
 
         # Replace values
         for idx_src, idx_dst in zip(self.index_inference_input, index):

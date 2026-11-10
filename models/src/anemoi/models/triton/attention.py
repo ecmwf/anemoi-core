@@ -243,7 +243,6 @@ def _host_descriptor_pre_hook(nargs):
         nargs["desc_k"].block_shape = [BLOCK_ITER, HEAD_DIM]
         nargs["desc_o"].block_shape = [BLOCK_FIXED, HEAD_DIM]
     else:  # BWD pass
-
         # Must determine if this is for bwd_dkdv or _bwd_dq to
         # determine which tensors have fixed and iterating blocks
 
@@ -1389,7 +1388,6 @@ def _system_specific_settings(q, k, v, o, warp_specialize):
 
     # If host descriptor isnt supported, the descriptors will be created on device at the start of the kernels
     if supports_host_descriptor():
-
         dummy_block = [
             1,
             1,
@@ -1447,7 +1445,6 @@ def _dot_input_precision() -> str:
 
 
 class TritonAttention(torch.autograd.Function):
-
     @staticmethod
     def forward(ctx, q, k, v, causal, window, sm_scale):
         """This function implements a tiled version of the attention algorithm.
@@ -1479,9 +1476,9 @@ class TritonAttention(torch.autograd.Function):
             window = -1  # If window is not specified, set to -1 to indicate no window masking
         assert not (causal and window >= 0), "causal and window not supported in combination"
         assert q.ndim == k.ndim == v.ndim == 4, "TritonAttention expects [batch, head, sequence, dim] tensors"
-        assert (
-            q.shape[:3] == k.shape[:3] == v.shape[:3]
-        ), "TritonAttention requires q, k and v to share batch, head, and sequence dimensions"
+        assert q.shape[:3] == k.shape[:3] == v.shape[:3], (
+            "TritonAttention requires q, k and v to share batch, head, and sequence dimensions"
+        )
         assert q.dtype == k.dtype == v.dtype, "TritonAttention requires q, k and v to use the same dtype"
         assert q.device == k.device == v.device, "TritonAttention requires q, k and v to be on the same device"
 
