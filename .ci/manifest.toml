@@ -2,6 +2,8 @@
 name = "anemoi-core"
 repo = "ecmwf/anemoi-core"
 visibility = "public"
+# Approved fork pull requests run ci.yml through the generated ci-fork.yml.
+fork-pull-requests = true
 compiler-inputs = []
 # An umbrella: `package = "anemoi-core"` stands for the three packages below.
 # Consumers may instead name the ones they use.
