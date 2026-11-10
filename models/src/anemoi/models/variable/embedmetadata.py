@@ -95,7 +95,6 @@ class EmbedMetadata(nn.Module):
         device = self.emb_param.weight.device
         # forcing
         is_forcing = current_vocabular.is_forcing.to(device=device)
-        is_physical = ~is_forcing
 
         # categorical
         param_ids = current_vocabular.param_ids.to(device=device)

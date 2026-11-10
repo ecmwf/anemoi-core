@@ -106,11 +106,15 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         )
 
         if self.condition_on_residual:
-            x_skip_cond = x_skip[:, 0] if x_skip.ndim == 5 else x_skip
+            x_skip_cond = x_skip[:, 0]
+            x_skip_cond = x_skip_cond[..., self._internal_input_idx[dataset_name]]
             x_data_latent = torch.cat(
                 (
                     x_data_latent,
-                    einops.rearrange(x_skip_cond, "bse grid vars -> (bse grid) vars"),
+                    einops.rearrange(
+                        x_skip_cond,
+                        "batch ensemble grid vars -> (batch ensemble grid) vars",
+                    ),
                 ),
                 dim=-1,
             )
@@ -199,12 +203,13 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         fcstep = min(1, fcstep)
         # Process each dataset through its corresponding encoder
+        hidden_name = self._get_active_hidden_name(dataset_names)
         dataset_latents = {}
         x_skip_dict = {}
         x_data_latent_dict = {}
         shard_sizes_data_dict = {}
 
-        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
+        x_hidden_latent = self.node_attributes(hidden_name, batch_size=batch_ens_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
         for dataset_name in x.keys():
@@ -258,7 +263,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x=x_latent,
             batch_size=batch_size,
             ensemble_size=ensemble_size,
-            grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            grid_size=self.node_attributes.num_nodes[hidden_name],
             grid_shard_sizes=shard_sizes_hidden,
             model_comm_group=model_comm_group,
         )
@@ -267,7 +272,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             processor_edge_attr,
             processor_edge_index,
             proc_edge_shard_sizes,
-        ) = self.processor_graph_provider.get_edges(
+        ) = self.processor_graph_provider[hidden_name].get_edges(
             batch_size=batch_ens_size,
             model_comm_group=model_comm_group,
         )
@@ -288,7 +293,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_latent_proc = x_latent_proc + x_latent
 
         x_out_dict = {}
-        for dataset_name in self.target_datasets:
+        for dataset_name in dataset_names:
+            if dataset_name not in self.target_datasets:
+                continue
             x_target_latent, shard_sizes_target = self._assemble_targets(
                 x[dataset_name],
                 x_data_latent_dict.get(dataset_name, None),
