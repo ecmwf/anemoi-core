@@ -473,9 +473,7 @@ def test_alltoall_transpose_redistributes_between_sharded_layouts(
         pytest.param(
             (256, 0, 256, 256),
             (0, 256, 256, 256),
-            id=(
-                "split-dim=0,empty-split-shard-sizes=[256,0,256,256]," "concat-dim=1,concat-shard-sizes=[0,256,256,256]"
-            ),
+            id=("split-dim=0,empty-split-shard-sizes=[256,0,256,256],concat-dim=1,concat-shard-sizes=[0,256,256,256]"),
         ),
     ],
 )

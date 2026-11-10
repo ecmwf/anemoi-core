@@ -157,15 +157,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         batch_size, _, ensemble_size = condition_ref.shape[:3]
         for dataset_name in dataset_names:
             condition_shape = condition[dataset_name].shape
-            assert (
-                len(condition_shape) == 5
-            ), f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
-            assert (
-                condition_shape[1] == condition_shape[3] == condition_shape[4] == 1
-            ), f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
-            assert (
-                condition_shape[0] == batch_size and condition_shape[2] == ensemble_size
-            ), "Batch or ensemble dimension mismatch across datasets for conditioned inputs."
+            assert len(condition_shape) == 5, (
+                f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
+            )
+            assert condition_shape[1] == condition_shape[3] == condition_shape[4] == 1, (
+                f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
+            )
+            assert condition_shape[0] == batch_size and condition_shape[2] == ensemble_size, (
+                "Batch or ensemble dimension mismatch across datasets for conditioned inputs."
+            )
         return batch_size, ensemble_size
 
     def _generate_noise_conditioning(
@@ -593,12 +593,11 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Sampled output (after post-processing).
         """
         with torch.no_grad():
-
             assert isinstance(batch, dict), "Input batch must be a dictionary!"
             for dataset_name, dataset_tensor in batch.items():
-                assert (
-                    len(dataset_tensor.shape) == 4
-                ), f'The input tensor "{dataset_name}" has an incorrect shape: expected a 4-dimensional tensor, got {dataset_tensor.shape}!'
+                assert len(dataset_tensor.shape) == 4, (
+                    f'The input tensor "{dataset_name}" has an incorrect shape: expected a 4-dimensional tensor, got {dataset_tensor.shape}!'
+                )
 
             # Before sampling hook
             before_sampling_data, grid_shard_sizes = self._before_sampling(
@@ -873,22 +872,22 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 skip_imputation=skip_imputation,
             )
 
-            state_outp[dataset_name][
-                ..., self.data_indices[dataset_name].model.output.diagnostic
-            ] = post_processors_state[dataset_name](
-                tendency[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic],
-                in_place=False,
-                data_index=self.data_indices[dataset_name].data.output.diagnostic,
-                skip_imputation=skip_imputation,
+            state_outp[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic] = (
+                post_processors_state[dataset_name](
+                    tendency[dataset_name][..., self.data_indices[dataset_name].model.output.diagnostic],
+                    in_place=False,
+                    data_index=self.data_indices[dataset_name].data.output.diagnostic,
+                    skip_imputation=skip_imputation,
+                )
             )
 
-            state_outp[dataset_name][
-                ..., self.data_indices[dataset_name].model.output.prognostic
-            ] += post_processors_state[dataset_name](
-                state_inp[dataset_name],
-                in_place=False,
-                data_index=self.data_indices[dataset_name].data.input.prognostic,
-                skip_imputation=skip_imputation,
+            state_outp[dataset_name][..., self.data_indices[dataset_name].model.output.prognostic] += (
+                post_processors_state[dataset_name](
+                    state_inp[dataset_name],
+                    in_place=False,
+                    data_index=self.data_indices[dataset_name].data.input.prognostic,
+                    skip_imputation=skip_imputation,
+                )
             )
 
             output_pre_proc = output_pre_processor[dataset_name] if output_pre_processor is not None else None
@@ -1012,13 +1011,13 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 # Single-output tendency models may still provide one flat
                 # Processors object. Treat it as the only output-step processor.
                 # Multi-output models need an explicit processor for each lead time.
-                assert (
-                    self.n_step_output == 1
-                ), "Per-step tendency processors must be provided for multiple output steps."
+                assert self.n_step_output == 1, (
+                    "Per-step tendency processors must be provided for multiple output steps."
+                )
                 post_tend = [post_tend]
-            assert (
-                len(post_tend) == out_dataset.shape[1]
-            ), "Per-step tendency processors must match the number of output steps."
+            assert len(post_tend) == out_dataset.shape[1], (
+                "Per-step tendency processors must match the number of output steps."
+            )
 
             states = []
             for step, post_proc in enumerate(post_tend):

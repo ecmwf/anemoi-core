@@ -34,9 +34,9 @@ class HEALPixMultiScaleEdges(BaseEdgeBuilder):
             assert scale_resolutions > 0, "The scale_resolutions argument only supports positive integers."
             scale_resolutions = list(range(1, scale_resolutions + 1))
         assert not isinstance(scale_resolutions, str), "The scale_resolutions argument is not valid."
-        assert (
-            scale_resolutions is None or min(scale_resolutions) > 0
-        ), "The scale_resolutions argument only supports positive integers."
+        assert scale_resolutions is None or min(scale_resolutions) > 0, (
+            "The scale_resolutions argument only supports positive integers."
+        )
         self.scale_resolutions = scale_resolutions
 
     def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:

@@ -102,8 +102,7 @@ def shard_tensor(
         total_size = sum(sizes)
         if total_size != input_size:
             raise ValueError(
-                f"sizes must sum exactly to {input_size} "
-                f"(input tensor's size at dimension {dim}), but got {total_size}"
+                f"sizes must sum exactly to {input_size} (input tensor's size at dimension {dim}), but got {total_size}"
             )
     return _ShardParallelSection.apply(input_, dim, sizes, gather_in_backward, mgroup)
 
@@ -137,8 +136,7 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
         input_size = input_.size(dim)
         if input_size != sizes[rank]:
             raise ValueError(
-                f"input tensor's size at dimension {dim} must match sizes[{rank}] "
-                f"({sizes[rank]}), but got {input_size}"
+                f"input tensor's size at dimension {dim} must match sizes[{rank}] ({sizes[rank]}), but got {input_size}"
             )
     return _GatherParallelSection.apply(input_, dim, sizes, mgroup)
 
@@ -203,8 +201,7 @@ def sync_tensor(
         input_size = input_.size(dim)
         if input_size != sizes[rank]:
             raise ValueError(
-                f"input tensor's size at dimension {dim} must match sizes[{rank}] "
-                f"({sizes[rank]}), but got {input_size}"
+                f"input tensor's size at dimension {dim} must match sizes[{rank}] ({sizes[rank]}), but got {input_size}"
             )
     return _SyncParallelSection.apply(input_, dim, sizes, mgroup, gather_in_fwd)
 
@@ -238,8 +235,7 @@ def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: Pro
         total_size = sum(sizes)
         if total_size != input_size:
             raise ValueError(
-                f"sizes must sum exactly to {input_size} "
-                f"(input tensor's size at dimension {dim}), but got {total_size}"
+                f"sizes must sum exactly to {input_size} (input tensor's size at dimension {dim}), but got {total_size}"
             )
     return _ReduceShardParallelSection.apply(input_, dim, sizes, mgroup)
 
