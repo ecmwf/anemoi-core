@@ -139,7 +139,6 @@ class AnemoiCheckpoint(ModelCheckpoint):
                 }
 
         if self._tracker_name == "mlflow":
-
             run_id = trainer.logger.run_id
             run = trainer.logger._mlflow_client.get_run(run_id)
 

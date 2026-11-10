@@ -136,7 +136,6 @@ class NormalizedReluPostprocessorSchema(RootModel[dict[Any, Any]]):
     def validate_entries(cls, values: dict[Union[int, float, str], Union[str, list[str]]]) -> dict[Any, Any]:
 
         for k, v in values.items():
-
             if k == "normalizer":
                 if not isinstance(v, str):  #
                     msg = f'"normalizer" must map to a string, got {v}'

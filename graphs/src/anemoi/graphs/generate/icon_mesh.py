@@ -132,7 +132,6 @@ class ICONMultiMesh:
     def _read_vertices_data(self):
         LOGGER.debug(f"{type(self).__name__}: read vertices data from ICON grid file '{self.grid_filename}'")
         with netCDF4.Dataset(self.grid_filename, "r") as ncfile:
-
             edge_vertices_fine = np.asarray(ncfile.variables["edge_vertices"][:] - 1, dtype=np.int64).transpose()
             assert ncfile.variables["edge_vertices"].dimensions == ("nc", "edge")
 
@@ -178,7 +177,7 @@ class ICONMultiMesh:
 
         # coarsen edge-vertex list from level `ilevel -> ilevel - 1`:
         for ilevel in reversed(range(1, self.reflvl_vertex.max() + 1)):
-            LOGGER.debug(f"  edges[{ilevel}] = {edge_vertices[0].shape[0] : >9}")
+            LOGGER.debug(f"  edges[{ilevel}] = {edge_vertices[0].shape[0]: >9}")
 
             # define edge selection matrix (selecting only edges of which have
             # exactly one coarse vertex):

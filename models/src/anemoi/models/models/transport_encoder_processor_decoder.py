@@ -316,15 +316,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         batch_size, _, ensemble_size = condition_ref.shape[:3]
         for dataset_name in dataset_names:
             condition_shape = condition[dataset_name].shape
-            assert (
-                len(condition_shape) == 5
-            ), f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
-            assert (
-                condition_shape[1] == condition_shape[3] == condition_shape[4] == 1
-            ), f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
-            assert (
-                condition_shape[0] == batch_size and condition_shape[2] == ensemble_size
-            ), "Batch or ensemble dimension mismatch across datasets for conditioned inputs."
+            assert len(condition_shape) == 5, (
+                f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
+            )
+            assert condition_shape[1] == condition_shape[3] == condition_shape[4] == 1, (
+                f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
+            )
+            assert condition_shape[0] == batch_size and condition_shape[2] == ensemble_size, (
+                "Batch or ensemble dimension mismatch across datasets for conditioned inputs."
+            )
         return batch_size, ensemble_size
 
     def _noise_emb_over_view(

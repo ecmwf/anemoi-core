@@ -397,9 +397,9 @@ class SpectralAMSELoss(SpectralLoss):
             self.transform.cross_spectral_density,
         ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a cross-spectrum method"
         # Patch-wise FFT2D yields a per-patch (ky, kx) plane that breaks the per-L contract.
-        assert (
-            getattr(self.transform, "patch_size", None) is None
-        ), "SpectralAMSELoss does not support patch-wise FFT2D; set patch_size=None"
+        assert getattr(self.transform, "patch_size", None) is None, (
+            "SpectralAMSELoss does not support patch-wise FFT2D; set patch_size=None"
+        )
         # AMSE uses the Cartesian PSD/CSD path, which needs the radial-band index.
         if isinstance(self.transform, Cartesian2DTransform):
             self.transform.register_radial_bands()
@@ -508,9 +508,9 @@ class PowerSpectrumLoss(SpectralLoss):
             self.transform.power_spectral_density,
         ), "spectral transform used in PowerSpectrumLoss must contain a power_spectral_density method"
         # Patch-wise FFT2D yields a per-patch (ky, kx) plane that breaks the per-L contract.
-        assert (
-            getattr(self.transform, "patch_size", None) is None
-        ), "PowerSpectrumLoss does not support patch-wise FFT2D; set patch_size=None"
+        assert getattr(self.transform, "patch_size", None) is None, (
+            "PowerSpectrumLoss does not support patch-wise FFT2D; set patch_size=None"
+        )
         # The Cartesian PSD sums |coeff|^2 per radial band, which needs the band index.
         if isinstance(self.transform, Cartesian2DTransform):
             self.transform.register_radial_bands()

@@ -189,8 +189,8 @@ class CopyImputer(BaseImputer):
             if idx_dst is not None and idx_src is not None:
                 nan_mask = torch.isnan(data[..., idx_dst])
                 source_vals = data[..., idx_src]
-                assert not torch.isnan(
-                    source_vals[nan_mask]
-                ).any(), "NaNs found in source variable at locations where target variable needs imputation."
+                assert not torch.isnan(source_vals[nan_mask]).any(), (
+                    "NaNs found in source variable at locations where target variable needs imputation."
+                )
                 data[..., idx_dst] = torch.where(nan_mask, source_vals, data[..., idx_dst])
         return data

@@ -19,7 +19,6 @@ from anemoi.graphs.utils import load_graph_from_file
 
 
 class TestGraphCreator:
-
     @pytest.mark.parametrize("name", ["graph.pt", None])
     def test_generate_graph(self, config_file: tuple[Path, str], mock_grids_path: tuple[str, int], name: str):
         """Test GraphCreator workflow."""

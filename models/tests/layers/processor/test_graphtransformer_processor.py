@@ -148,9 +148,9 @@ class TestGraphTransformerProcessor:
         # Check gradients of processor
         for param in graphtransformer_processor.parameters():
             assert param.grad is not None, f"param.grad is None for {param}"
-            assert (
-                param.grad.shape == param.shape
-            ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            assert param.grad.shape == param.shape, (
+                f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            )
 
     def test_processor_shares_one_halo_info_across_layers(
         self, graphtransformer_processor, graphtransformer_init, graph_provider, monkeypatch

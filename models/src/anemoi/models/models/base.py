@@ -242,9 +242,9 @@ class BaseGraphModel(nn.Module):
             missing_datasets = set(self.dataset_names) - set(self.dataset2hidden)
             unknown_datasets = set(self.dataset2hidden) - set(self.dataset_names)
             assert not missing_datasets, f"Hidden node names are missing for datasets {sorted(missing_datasets)}."
-            assert (
-                not unknown_datasets
-            ), f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
+            assert not unknown_datasets, (
+                f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
+            )
             self.hidden_names = list(dict.fromkeys(self.dataset2hidden.values()))
         elif isinstance(hidden_nodes_name, (list, ListConfig)):
             # Hierarchical levels: every dataset is encoded into the first level.
@@ -342,14 +342,14 @@ class BaseGraphModel(nn.Module):
     def _assert_model_routing(self) -> None:
         """Asserts that the model routing is valid."""
         not_input_datasets = set(self.dataset2encoder) - set(self.input_dim)
-        assert (
-            not not_input_datasets
-        ), f"Datasets {not_input_datasets} are referenced by encoders but missing from data_indices provided to the model. "
+        assert not not_input_datasets, (
+            f"Datasets {not_input_datasets} are referenced by encoders but missing from data_indices provided to the model. "
+        )
 
         not_target_datasets = set(self.dataset2decoder) - set(self.output_dim)
-        assert (
-            not not_target_datasets
-        ), f"Datasets {not_target_datasets} are referenced by decoders but missing from data_indices provided to the model. "
+        assert not not_target_datasets, (
+            f"Datasets {not_target_datasets} are referenced by decoders but missing from data_indices provided to the model. "
+        )
 
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():
@@ -402,9 +402,9 @@ class BaseGraphModel(nn.Module):
     def _assert_hidden_nodes_name(self) -> None:
         node_types = list(self.graph_geometry.num_nodes)
         for hidden_name in self.hidden_names:
-            assert (
-                hidden_name in node_types
-            ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {node_types}"
+            assert hidden_name in node_types, (
+                f"Hidden nodes name '{hidden_name}' not found in graph data node types {node_types}"
+            )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         return (
@@ -423,9 +423,9 @@ class BaseGraphModel(nn.Module):
             hidden_name: COORDS_DIM + self.node_attributes.num_trainable_parameters.get(hidden_name, 0)
             for hidden_name in dict.fromkeys(self.dataset2hidden.values())
         }
-        assert (
-            len(set(hidden_dims.values())) == 1
-        ), f"All hidden meshes must have the same node attribute dimension, got {hidden_dims}."
+        assert len(set(hidden_dims.values())) == 1, (
+            f"All hidden meshes must have the same node attribute dimension, got {hidden_dims}."
+        )
         return next(iter(hidden_dims.values()))
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
@@ -469,7 +469,9 @@ class BaseGraphModel(nn.Module):
             )
             assert len(dataset_internal_input_idx) == len(
                 dataset_internal_output_idx,
-            ), f"Dataset '{dataset_name}': Model indices must match {dataset_internal_input_idx} != {dataset_internal_output_idx}"
+            ), (
+                f"Dataset '{dataset_name}': Model indices must match {dataset_internal_input_idx} != {dataset_internal_output_idx}"
+            )
 
     def _assert_valid_sharding(
         self,
@@ -478,18 +480,18 @@ class BaseGraphModel(nn.Module):
         in_out_sharded: bool,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> None:
-        assert not (
-            in_out_sharded and model_comm_group is None
-        ), "If input is sharded, model_comm_group must be provided."
+        assert not (in_out_sharded and model_comm_group is None), (
+            "If input is sharded, model_comm_group must be provided."
+        )
 
         if model_comm_group is not None:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded across GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                "Only batch size of 1 is supported when model is sharded across GPUs"
+            )
 
-            assert (
-                model_comm_group.size() == 1 or ensemble_size == 1
-            ), "Ensemble size per device must be 1 when model is sharded across GPUs"
+            assert model_comm_group.size() == 1 or ensemble_size == 1, (
+                "Ensemble size per device must be 1 when model is sharded across GPUs"
+            )
 
     def _resolve_in_out_sharded(self, batch: Batch) -> dict[str, bool]:
         """Per-dataset flag indicating whether the dataset is grid-sharded.

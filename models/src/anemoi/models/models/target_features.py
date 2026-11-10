@@ -119,9 +119,9 @@ class DecodingTargetFeature(ABC):
         dataset_name: str | None = None,
     ) -> Tensor:
         """Return the feature tensor, sharding it iff the feature is defined on full-size nodes."""
-        assert (
-            dataset_name is not None
-        ), f"dataset_name must be provided to {self.__class__.__name__}.tensor() for sharding and validation."
+        assert dataset_name is not None, (
+            f"dataset_name must be provided to {self.__class__.__name__}.tensor() for sharding and validation."
+        )
 
         out = self._compute(
             x_input_data, x_encoded_data, x_target, target_spec, batch_size=batch_size, dataset_name=dataset_name
@@ -226,7 +226,7 @@ class TargetForcingsFeature(DecodingTargetFeature):
     ) -> Tensor:
         x_target_forcing = x_target.flatten()
         assert x_target_forcing.data.shape[-1] == self.dim, (
-            f"Expected flattened target forcing width {self.dim}, " f"but got {x_target_forcing.data.shape[-1]}."
+            f"Expected flattened target forcing width {self.dim}, but got {x_target_forcing.data.shape[-1]}."
         )
         return x_target_forcing.data
 
@@ -367,9 +367,9 @@ class CompositeTargetFeature(DecodingTargetFeature):
     """
 
     def __init__(self, model: BaseGraphModel, datasets_names: list[str], feature_names: list[str]) -> None:
-        assert (
-            feature_names
-        ), f"Decoder for datasets {', '.join(datasets_names)} must declare at least one target feature."
+        assert feature_names, (
+            f"Decoder for datasets {', '.join(datasets_names)} must declare at least one target feature."
+        )
         self.features = [TARGET_FEATURE_REGISTRY[name](model, datasets_names) for name in feature_names]
 
     def validate(self) -> None:
@@ -435,7 +435,7 @@ def create_decoding_target_features(
     """Create a dict of :class:`DecodingTargetFeature` instances from a list of registry keys."""
     invalid = set(features) - VALID_TARGET_FEATURES
     assert not invalid, (
-        f"Decoder has invalid target_node_features: {invalid}. " f"Valid options: {sorted(VALID_TARGET_FEATURES)}"
+        f"Decoder has invalid target_node_features: {invalid}. Valid options: {sorted(VALID_TARGET_FEATURES)}"
     )
 
     return CompositeTargetFeature(model, datasets_names=decoder_datasets_names, feature_names=features)
