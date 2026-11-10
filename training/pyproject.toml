@@ -53,7 +53,6 @@ dependencies = [
   "torchinfo>=1.8",
   "torchvision>=0.18",
   "tqdm>=4.65",
-  "zarr>=2.14.2",
 ]
 # Optional extras: pip install anemoi-training[azure,tests], etc.
 optional-dependencies.all = []
@@ -95,6 +94,7 @@ optional-dependencies.tests = [
   "pytest>=8",
   "pytest-mock>=3",
   "pytest-skip-slow>=0.0.5",
+  "pytest-xdist>=3",
   "sshfs",
 ]
 optional-dependencies.wandb = [
