@@ -4,7 +4,7 @@
 
 **Description:** The interface between `anemoi-models` and `anemoi-inference`, as implemented on `feat/richer-batch`.
 
-**Version:** 8 November 2026
+**Version:** 10 November 2026
 
 ## What changed
 
@@ -68,11 +68,20 @@ Per input dataset (every dataset the model encodes):
 
 - gridded: `("time", "ensemble", "grid", "variables")`. All four axes are **required**: a gridded payload
   without an `ensemble` axis fails inside the model (an `EinopsError`). Use an ensemble axis of size 1 for a
-  single member. The axis order is free.
+  single member.
 - tabular: `("grid", "variables")`, or `("ensemble", "grid", "variables")`. There is no `time` axis: the time
   slots are stacked along the grid axis and described by `boundaries`.
 - No layout may contain a `batch` axis: the interface adds it (gridded) or holds the batch as a list
   (tabular). A `batch` axis fails at collation with a dimension-count `ValueError`.
+- The axis order is free, for inputs, forcings and templates alike. `create_batched_struct` permutes `data`
+  to the canonical order above (`TensorLayout.AXES`: `time`, `ensemble`, `grid`, `variables`), so the model
+  only ever sees that order. The output always comes back in the canonical order, whatever order the
+  template named, and its `layout` says so.
+- The layout names the axes; nothing checks their **lengths** against the checkpoint. In particular the
+  `time` axis must hold exactly `n_step_input` steps, i.e.
+  `len(metadata_inference[<dataset>]["timesteps"]["input_relative_date_indices"])` (what `anemoi-inference`
+  reads as `multi_step_input`). A tensor with the right rank but mislabelled axes passes validation and fails deep
+  in the model (see "What to expect when it goes wrong").
 
 ### Variable order
 
@@ -115,7 +124,7 @@ One payload per decoded dataset (the keys of `target_template` that are decoder 
 |---|---|---|---|
 | `data` | `torch.Tensor` | physical | Post-processed. No batch axis. |
 | `variables` | `list[str]` | — | Output names, in tensor column order. |
-| `layout` | `tuple[str, ...]` | — | Axis names, no `batch`. |
+| `layout` | `tuple[str, ...]` | — | Axis names, no `batch`, always in canonical order: `("time", "ensemble", "grid", "variables")` for gridded, `("grid", "variables")` or `("ensemble", "grid", "variables")` for tabular. |
 | `latitudes`, `longitudes` | `torch.Tensor` | **degrees** | Converted back from radians. Always present. |
 | `timedeltas` | `torch.Tensor` | seconds | Tabular only. |
 | `boundaries` | `list[(int, int)]` | — | Tabular only. Back as int pairs. |
@@ -131,7 +140,7 @@ unwrapped (asserted).
 ```python
 model.predict_step(
     x=Batch, target_template=dict[str, BaseTemplate], target_forcing=Batch,
-    pre_processors=..., post_processors=..., n_step_input=dict[str, int],
+    pre_processors=..., post_processors=...,
     model_comm_group=..., gather_out=...,
     statistics_tendencies=...,       # only when the checkpoint has tendency statistics
     spatial_pre_processors=...,      # only when a dataset has a spatial processor
@@ -239,10 +248,11 @@ then again at collation:
 | tabular layout with `time` or `batch` | `ValueError("TabularSample requires a layout without time and batch axes ...")` |
 | gridded layout with `batch` | `ValueError` at collation: the layout describes fewer axes than the data |
 | gridded layout without `ensemble` | `EinopsError` inside the model |
+| `time` axis length ≠ `n_step_input` (e.g. `(1, T, grid, vars)` labelled `("time", "ensemble", "grid", "variables")`) | `RuntimeError` inside the model, e.g. `mat1 and mat2 shapes cannot be multiplied`; not checked at the boundary |
 | `encoded_data` target feature on a dataset whose input and target nodes differ | `AssertionError("Decoder x_dst rows ... != target node count ...")` |
 
-Not caught: a wrong variable order (see "Variable order"), and a decoded dataset missing from
-`target_template`.
+Not caught: a wrong variable order (see "Variable order"), a decoded dataset missing from
+`target_template`, and axis lengths that do not match the checkpoint.
 
 ## Checkpoint metadata
 
@@ -251,11 +261,15 @@ Under `metadata_inference`: `dataset_names` and `task`, and per dataset:
 | Key | Content |
 |---|---|
 | `data_type` | `"gridded"` or `"tabular"` (replaces the old `is_static_grid` / `is_tabular`) |
-| `grid_size` | gridded only |
+| `grid_size` | always present: the full grid size for gridded datasets, `None` for tabular |
 | `data_indices` | `{"input": name → model-input index, "output": name → model-output index}` |
 | `variable_types` | `forcing`, `target`, `prognostic`, `diagnostic` name lists |
-| `shapes` | `variables`, `input_timesteps`, `ensemble`, `grid` (`None` for tabular and transport models) |
-| `timesteps` | relative date indices, `timestep`, and for forecasters `input_offsets`, `output_offsets`, `rollout_shift`, `advance_map` |
+| `timesteps` | `input_relative_date_indices`, `output_relative_date_indices`, `relative_date_indices_training`, `timestep`, and for forecasters `input_offsets`, `output_offsets`, `rollout_shift`, `advance_map` |
+
+There is no `shapes` entry any more: the number of input and output steps is the length of
+`timesteps["input_relative_date_indices"]` / `["output_relative_date_indices"]`, the number of variables the
+length of `data_indices["input"]` / `["output"]`, and the grid size is `grid_size`. The model's own
+`fill_metadata` writes nothing; every entry comes from the data module and the task.
 
 ## Open questions for the team
 
@@ -278,6 +292,6 @@ Under `metadata_inference`: `dataset_names` and `task`, and per dataset:
 | Model-side `predict_step` (deterministic, ensemble) | `models/src/anemoi/models/models/base.py` |
 | Transport `predict_step`, tendency `_sampled_to_physical` | `models/src/anemoi/models/models/transport_encoder_processor_decoder.py` |
 | Output assembly / target node assert | `models/src/anemoi/models/models/encoder_processor_decoder.py` |
-| Checkpoint metadata | `training/src/anemoi/training/data/datamodule.py` (`fill_metadata`), model and task `fill_metadata` |
+| Checkpoint metadata | `training/src/anemoi/training/data/datamodule.py` (`fill_metadata`) and the task's `fill_metadata` (`training/src/anemoi/training/tasks/`) |
 | End-to-end tests of the boundary | `models/tests/interface/test_predict_step.py` |
 | Inference-side caller | `anemoi-inference`: `src/anemoi/inference/runners/richer_batch.py` |

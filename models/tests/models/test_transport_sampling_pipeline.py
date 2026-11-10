@@ -817,7 +817,6 @@ def test_predict_step_samples_onto_the_target_and_postprocesses() -> None:
         target_forcing=target_forcing,
         pre_processors=torch.nn.ModuleDict({"ds_a": AddOneProcessor()}),
         post_processors=torch.nn.ModuleDict({"ds_a": AddOneProcessor()}),
-        n_step_input={"ds_a": 2},
         model_comm_group=None,
         gather_out=True,
         sampler_params={"sampler": "heun"},
@@ -857,7 +856,6 @@ def test_predict_step_passes_pre_processors_to_sampled_to_physical() -> None:
         target_template=target_template,
         pre_processors=pre_processors,
         post_processors=torch.nn.ModuleDict({"ds_a": AddOneProcessor()}),
-        n_step_input={"ds_a": 2},
         model_comm_group=None,
         gather_out=False,
     )
@@ -883,7 +881,6 @@ def test_predict_step_runs_without_target_forcings() -> None:
         target_template=_target_template(model, {"ds_a": torch.zeros(1, 2, 1, 4, 2)}),
         pre_processors=torch.nn.ModuleDict({"ds_a": AddOneProcessor()}),
         post_processors=torch.nn.ModuleDict({"ds_a": AddOneProcessor()}),
-        n_step_input={"ds_a": 2},
     )
 
     assert list(captured["target_forcing"].keys()) == []
@@ -915,7 +912,6 @@ def test_predict_step_accepts_the_interface_arguments() -> None:
         "target_forcing",
         "pre_processors",
         "post_processors",
-        "n_step_input",
         "model_comm_group",
         "gather_out",
         "statistics_tendencies",

@@ -773,7 +773,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         target_template: dict[str, "BaseTemplate"],
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
-        n_step_input: dict[str, int],
         target_forcing: Optional[Batch] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
@@ -795,8 +794,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Pre-processing module.
         post_processors : nn.ModuleDict
             Post-processing module.
-        n_step_input : dict[str, int]
-            Number of input time steps for each dataset; ``x`` already holds exactly these.
         target_forcing : Optional[Batch]
             Decoder conditioning (before pre-processing): the forcing variables at the output valid times.
         model_comm_group : Optional[ProcessGroup]
@@ -821,7 +818,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         Batch
             Sampled prediction (after post-processing), on the nodes of ``target_template``.
         """
-        del n_step_input
         with torch.no_grad():
             target_template = self._shard_target_template(target_template, model_comm_group)
             x, target_forcing = self._prepare_prediction_inputs(

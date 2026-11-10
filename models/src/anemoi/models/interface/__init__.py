@@ -352,7 +352,6 @@ class AnemoiModelInterface(torch.nn.Module):
             "target_forcing": target_forcing,
             "pre_processors": self.pre_processors,
             "post_processors": self.post_processors,
-            "n_step_input": self.n_step_input,
             "model_comm_group": model_comm_group,
             "gather_out": gather_out,
         }

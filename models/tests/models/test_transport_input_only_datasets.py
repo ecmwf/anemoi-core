@@ -346,7 +346,6 @@ def test_tendency_model_samples_grid_states_with_input_only_observations() -> No
         target_template={"grid": batches["noisy_target"]["grid"].template()},
         pre_processors=pre_processors,
         post_processors=post_processors,
-        n_step_input=model.n_step_input,
         target_forcing=batches["target_forcing"],
         statistics_tendencies=TENDENCY_STATISTICS,
     )

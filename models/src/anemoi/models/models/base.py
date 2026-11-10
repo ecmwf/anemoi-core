@@ -633,7 +633,6 @@ class BaseGraphModel(nn.Module):
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
         target_forcing: Optional[Batch] = None,
-        n_step_input: Optional[dict[str, int]] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         spatial_pre_processors: Optional[nn.ModuleDict] = None,
@@ -658,8 +657,6 @@ class BaseGraphModel(nn.Module):
         target_forcing : Optional[Batch]
             Decoder conditioning (before pre-processing): the forcing variables at the output valid times.
             ``None`` means there are no forcings.
-        n_step_input : Optional[dict[str, int]]
-            Number of input time steps for each dataset; ``x`` already holds exactly these. Unused.
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training.
         gather_out : bool
@@ -675,7 +672,6 @@ class BaseGraphModel(nn.Module):
         Batch
             Model output (after post-processing), built from the target information.
         """
-        del n_step_input  # x already holds the input steps; not a pre-processor or forward argument
         with torch.no_grad():
             target_template = self._shard_target_template(target_template, model_comm_group)
             processed_batch, processed_target = self._prepare_prediction_inputs(
