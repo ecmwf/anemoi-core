@@ -14,7 +14,6 @@ from .hierarchical import AnemoiModelEncProcDecHierarchical
 
 from .transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec  # isort: skip
 from .disentangled_encprocdec import AnemoiModelDisentangledEncProcDec  # isort: skip
-from .disentangled_hierarchical_encprocdec import AnemoiModelDisentangledHierarchicalEncProcDec  # isort: skip
 from .transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec  # isort: skip
 
 __all__ = [
@@ -25,6 +24,5 @@ __all__ = [
     "AnemoiTransportTendModelEncProcDec",
     "AnemoiModelEncProcDecHierarchical",
     "AnemoiModelDisentangledEncProcDec",
-    "AnemoiModelDisentangledHierarchicalEncProcDec",
     "AnemoiEnsModelEncProcDec",
 ]

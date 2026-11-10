@@ -29,28 +29,41 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
-class DisentangledMixin:
-    """Shared pieces of the disentangled (per-timestep encoding) forecasters.
+class AnemoiModelDisentangledEncProcDec(AnemoiModelEncProcDec):
+    """Disentangled encoder-processor-decoder with optional latent rollout.
 
-    A disentangled forecaster re-uses the encoder/decoder of an autoencoder
-    trained with ``multistep_input = 1`` (the ``Autoencoder`` task). Each input
-    timestep is encoded independently through that encoder, the per-timestep
-    latents are fused by a trainable ``latent_blender`` and advanced in time by
-    the processor.
+    Re-uses the encoder/decoder of an autoencoder trained with
+    ``multistep_input = 1`` (the ``Autoencoder`` task); submodule names match
+    ``AnemoiModelEncProcDec``, so its weights load by name and can be frozen.
+    Each input timestep of each dataset is encoded independently and the
+    datasets of one timestep are combined by the ``latent_aggregator``. The
+    ``n_step_input`` latents are fused by a trainable ``latent_blender`` and the
+    processor predicts the next latent state, which is decoded per dataset.
 
     With ``model.latent_rollout: True`` the model keeps a buffer of latents
     between calls: on ``rollout_step == 0`` it encodes all input timesteps, on
     later steps it shifts the buffer and appends the previous processor output
     instead of re-encoding from data space. This needs ``rollout_step`` passed to
     ``forward`` (see ``anemoi.training.train.methods.LatentRolloutTraining``).
-    Without it every call re-encodes, which is always correct.
+    Without it every call re-encodes.
     """
 
-    def _init_latent_rollout(self, model_config: DotDict) -> None:
+    def __init__(self, *, model_config: DotDict, **kwargs) -> None:
+        super().__init__(model_config=model_config, **kwargs)
         self.latent_rollout = bool(model_config.model.get("latent_rollout", False))
         self._latent_buffer: Optional[Tensor] = None
         self._last_latent: Optional[Tensor] = None
         self._cached_encoder_outputs: dict = {}
+
+    def _build_networks(self, model_config: DotDict) -> None:
+        super()._build_networks(model_config)
+        assert len(self.hidden_names) == 1, "The disentangled model supports a single hidden mesh."
+        self._build_latent_blender(
+            model_config,
+            num_channels=self.latent_aggregator.hidden_dim,
+            hidden_name=self.hidden_names[0],
+            edge_dim=self.processor_graph_provider[self.hidden_names[0]].edge_dim,
+        )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         # One timestep per encoder call: no n_step_input multiplier. This matches an
@@ -145,30 +158,6 @@ class DisentangledMixin:
             keep_x_dst_sharded=True,
         )
         return blended
-
-
-class AnemoiModelDisentangledEncProcDec(DisentangledMixin, AnemoiModelEncProcDec):
-    """Disentangled encoder-processor-decoder with optional latent rollout.
-
-    Each input timestep of each dataset is encoded independently; the datasets of
-    one timestep are combined by the ``latent_aggregator``. The resulting
-    ``n_step_input`` latents are fused by ``latent_blender`` and the processor
-    predicts the next latent state, which is decoded per dataset.
-    """
-
-    def __init__(self, *, model_config: DotDict, **kwargs) -> None:
-        super().__init__(model_config=model_config, **kwargs)
-        self._init_latent_rollout(model_config)
-
-    def _build_networks(self, model_config: DotDict) -> None:
-        super()._build_networks(model_config)
-        assert len(self.hidden_names) == 1, "The disentangled model supports a single hidden mesh."
-        self._build_latent_blender(
-            model_config,
-            num_channels=self.latent_aggregator.hidden_dim,
-            hidden_name=self.hidden_names[0],
-            edge_dim=self.processor_graph_provider[self.hidden_names[0]].edge_dim,
-        )
 
     def forward(
         self,

@@ -136,11 +136,11 @@ nodes and the first hidden level:
    :no-undoc-members:
    :show-inheritance:
 
-**********************
- Disentangled Models
-**********************
+*********************************************
+ Disentangled Encoder-Processor-Decoder Model
+*********************************************
 
-Forecasters built on top of an autoencoder trained with the ``Autoencoder``
+A forecaster built on top of an autoencoder trained with the ``Autoencoder``
 task and ``multistep_input: 1``. Each input timestep is encoded
 independently with the (optionally frozen) encoder, a trainable
 ``latent_blender`` fuses the per-timestep latents, and the processor predicts
@@ -159,15 +159,6 @@ Key features:
    config of the first encoder is used.
 
 .. autoclass:: anemoi.models.models.disentangled_encprocdec.AnemoiModelDisentangledEncProcDec
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
-
-The hierarchical variant takes each input timestep down the hierarchy to the
-deepest level, blends and processes there, and goes back up re-using the
-skip connections of the most recent input timestep.
-
-.. autoclass:: anemoi.models.models.disentangled_hierarchical_encprocdec.AnemoiModelDisentangledHierarchicalEncProcDec
    :members:
    :no-undoc-members:
    :show-inheritance:
