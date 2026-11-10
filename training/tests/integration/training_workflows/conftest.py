@@ -578,10 +578,10 @@ def edm_transport_config(
 
 
 @pytest.fixture(
-    params=["transport_stochastic_interpolant", "transport_stochastic_interpolant_tendency"],
-    ids=["transport_stochastic_interpolant", "transport_stochastic_interpolant_tendency"],
+    params=["transport_flow_matching", "transport_flow_matching_tendency"],
+    ids=["transport_flow_matching", "transport_flow_matching_tendency"],
 )
-def stochastic_interpolant_config(
+def flow_matching_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_path: GetTmpPath,
@@ -589,7 +589,7 @@ def stochastic_interpolant_config(
     with initialize_config_module(
         version_base=None,
         config_module="anemoi.training.config",
-        job_name="test_stochastic_interpolant",
+        job_name="test_flow_matching",
     ):
         template = compose(config_name=request.param)
 

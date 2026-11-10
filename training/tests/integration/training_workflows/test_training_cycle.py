@@ -205,6 +205,20 @@ def test_training_cycle_edm_transport(
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_flow_matching(
+    flow_matching_config: tuple[DictConfig, str],
+    get_test_archive: callable,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
+    cfg, url = flow_matching_config
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
+
+
+@skip_if_offline
+@pytest.mark.slow
 @pytest.mark.mlflow
 def test_training_cycle_mlflow_dry_run(
     mlflow_dry_run_config: tuple[DictConfig, str],

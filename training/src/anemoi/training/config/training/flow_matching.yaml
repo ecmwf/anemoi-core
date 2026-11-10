@@ -4,4 +4,4 @@ defaults:
   - _self_
 
 transport:
-  objective: stochastic_interpolant
+  objective: flow_matching

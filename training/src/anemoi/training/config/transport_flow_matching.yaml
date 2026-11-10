@@ -4,9 +4,9 @@ defaults:
 - diagnostics: evaluation
 - system: example
 - graph: multi_scale
-- model: graphtransformer_transport_si
+- model: graphtransformer_transport_fm
 - task: forecaster
-- training: stochastic_interpolant
+- training: flow_matching
 - _self_
 
 

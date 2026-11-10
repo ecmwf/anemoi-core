@@ -144,8 +144,8 @@ def test_config_validation_edm_transport(edm_transport_config: tuple[DictConfig,
     BaseSchema(**cfg)
 
 
-def test_config_validation_stochastic_interpolant(stochastic_interpolant_config: tuple[DictConfig, str]) -> None:
-    cfg, _ = stochastic_interpolant_config
+def test_config_validation_flow_matching(flow_matching_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = flow_matching_config
     BaseSchema(**cfg)
 
 

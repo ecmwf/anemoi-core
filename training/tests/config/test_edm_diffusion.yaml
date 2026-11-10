@@ -450,7 +450,7 @@ model:
           num_steps: 50
         sampler:
           sampler: heun
-  # The noise level (EDM) or bridge time (SI) conditions every layer norm: encoders, processor, decoders.
+  # The noise level (EDM) or time (flow matching) conditions every layer norm: encoders, processor, decoders.
   layer_kernels:
     LayerNorm:
       _target_: anemoi.models.layers.normalization.ConditionalLayerNorm

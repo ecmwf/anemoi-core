@@ -21,7 +21,6 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
-from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
@@ -86,36 +85,20 @@ class SparseProjectorSchema(BaseModel):
     "Number of chunks to use for sparse projection matmuls."
 
 
-class TransportSourceConfig(BaseModel):
-    """Configuration of the starting/source field for transport objectives.
-
-    The defaults map 1:1 to :class:`TransportSourceSettings` in
-    ``anemoi.models.transport.settings`` and are restated here so that importing
-    the schemas does not pull in the model code.
-    """
-
-    kind: Literal["default", "zero", "gaussian", "reference_state"] = "default"
-    "Starting field used before the transport objective moves toward the target."
-    scale: NonNegativeFloat = Field(default=1.0, examples=[1.0])
-    "Multiplier applied to the starting/source field."
-    noise_scale: NonNegativeFloat = Field(default=0.0, examples=[0.1])
-    "Additional additive Gaussian noise applied to the starting/source field."
-
-
 class TransportConfig(BaseModel):
     """Configuration of the transport objective, path, conditioning and inference.
 
-    The defaults map 1:1 to :class:`EdmSettings`, :class:`NoiseConditioningSettings`
-    and :class:`StochasticInterpolantSettings` in ``anemoi.models.transport.settings``
-    and are restated here so that importing the schemas does not pull in the model code.
+    The defaults map 1:1 to :class:`EdmSettings` and :class:`NoiseConditioningSettings`
+    in ``anemoi.models.transport.settings`` and are restated here so that importing the
+    schemas does not pull in the model code.
     """
 
-    objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
+    objective: Literal["edm_diffusion", "flow_matching"] = "edm_diffusion"
     "Training and sampling objective used by the transport model."
     sigma_data: PositiveFloat = Field(default=1.0, examples=[1.0])
     "Typical data scale used by EDM diffusion."
     noise_channels: PositiveInt = Field(default=32, examples=[32])
-    "Number of channels in the noise or bridge-time embedding."
+    "Number of channels in the noise-level or time embedding."
     noise_cond_dim: PositiveInt = Field(default=16, examples=[16])
     "Size of the conditioning vector passed to conditional layers."
     sigma_max: PositiveFloat = Field(default=100.0, examples=[100.0])
@@ -124,20 +107,10 @@ class TransportConfig(BaseModel):
     "Minimum EDM diffusion noise level used during training."
     rho: PositiveFloat = Field(default=7.0, examples=[7.0])
     "Shape parameter for the Karras EDM noise schedule."
-    si_alpha_schedule: Literal["linear"] = "linear"
-    "Schedule for how strongly the SI bridge keeps the source field."
-    si_beta_schedule: Literal["linear", "quadratic"] = "linear"
-    "Schedule for how strongly the SI bridge moves toward the target field."
-    si_sigma_schedule: Literal["brownian_bridge", "quadratic_bridge"] = "brownian_bridge"
-    "Schedule for the SI bridge-noise amplitude."
-    source: TransportSourceConfig = Field(default_factory=TransportSourceConfig)
-    "Configuration for the starting/source field."
-    si_noise_scale: NonNegativeFloat = Field(default=1.0, examples=[1.0])
-    "Overall scale of the stochastic-interpolant bridge noise."
     training_condition: dict = Field(default_factory=dict)
-    "Distribution used to sample one training noise level or bridge time per sample."
+    "Distribution used to sample one training noise level or time per sample."
     noise_embedder: dict = Field(default_factory=dict)
-    "Hydra configuration for embedding the current noise level or bridge time."
+    "Hydra configuration for embedding the current noise level or time."
     inference_defaults: dict = Field(default_factory=dict)
     "Default sampler parameters used during inference."
 

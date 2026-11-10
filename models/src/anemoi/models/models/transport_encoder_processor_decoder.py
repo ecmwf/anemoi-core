@@ -37,11 +37,8 @@ from anemoi.models.models.encoder_processor_decoder import gathered_batch_sizes
 from anemoi.models.models.encoder_processor_decoder import latlons_to_sincos
 from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import NoiseConditioningSettings
-from anemoi.models.transport import StochasticInterpolantSettings
-from anemoi.models.transport import TransportSourceBuilder
-from anemoi.models.transport import TransportSourceRequest
+from anemoi.models.transport import gaussian_source
 from anemoi.models.transport import get_transport_model_objective
-from anemoi.models.transport import reference_state_sampling_source
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
@@ -83,7 +80,7 @@ def _second_blocks(joined: torch.Tensor, first_sizes: Sequence[int], second_size
 
 
 class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
-    """Encoder-processor-decoder model conditioned on diffusion noise level or bridge time."""
+    """Encoder-processor-decoder model conditioned on diffusion noise level or flow-matching time."""
 
     def __init__(
         self,
@@ -102,8 +99,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         transport_params = model_config.model.transport
         self.noise_conditioning = NoiseConditioningSettings.from_config(transport_params)
         self.edm = EdmSettings.from_config(transport_params)
-        self.stochastic_interpolant = StochasticInterpolantSettings.from_config(transport_params)
-        self.transport_source = TransportSourceBuilder.from_config(transport_params)
         self.training_condition = dict(transport_params.get("training_condition", {}))
         self.noise_channels = self.noise_conditioning.channels
         self.noise_cond_dim = self.noise_conditioning.cond_dim
@@ -128,8 +123,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     def _assert_no_boundings(self) -> None:
         """Reject configured output bounds.
 
-        The network outputs EDM's pre-combination field or the interpolant's drift, not the predicted
-        state, so bounds on its output would constrain the wrong quantity.
+        The network outputs EDM's pre-combination field or the flow-matching velocity. Bounds belong on
+        the predicted state, which is built from that output afterwards.
         """
         bounded = [name for name, bounding in self.boundings.items() if len(bounding) > 0]
         if bounded:
@@ -290,7 +285,20 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         return out
 
     def _embed_noise_conditioning(self, sigma: torch.Tensor) -> torch.Tensor:
-        return self.noise_cond_mlp(self.noise_embedder(sigma))
+        """Embed the noise level or time, and pass it through the conditioning MLP.
+
+        Both run in float32 also under mixed precision: bfloat16 keeps a noise level or time only
+        to about 0.4 %, too coarse for the higher embedding frequencies. The result is handed on
+        in the autocast dtype, the dtype the layers reading it compute in. Assumes the embedder
+        and the MLP keep float32 weights, as they do under mixed precision.
+        """
+        device_type = sigma.device.type
+        with torch.autocast(device_type=device_type, enabled=False):
+            sigma = sigma.to(torch.promote_types(sigma.dtype, torch.float32))
+            embedding = self.noise_cond_mlp(self.noise_embedder(sigma))
+        if torch.is_autocast_enabled(device_type):
+            embedding = embedding.to(torch.get_autocast_dtype(device_type))
+        return embedding
 
     def _make_noise_emb_for_view(self, noise_emb: torch.Tensor, view: "Source") -> torch.Tensor:
         """Repeat noise embeddings over the actual flattened nodes in a source view."""
@@ -379,7 +387,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self._assert_condition_shapes(condition)
         dataset_names = list(conditioned_target.keys())
 
-        # Transport assumes one noise level or bridge time per sample and
+        # Transport assumes one noise level or time per sample and
         # ensemble member, shared across datasets. The training objectives build
         # the condition that way, so we can read it from the first dataset,
         # embed it once, and repeat it over each dataset's graph nodes below.
@@ -493,7 +501,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         for dataset_name in dataset_names:
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
-        # Embed the current noise level or bridge time and pass it to the conditional layers.
+        # Embed the current noise level or time and pass it to the conditional layers.
         fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = self._build_conditioning_kwargs(
             batch, conditioned_target, condition, model_comm_group=model_comm_group
         )
@@ -737,35 +745,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             sources[name] = template.unflatten(payload)
         return Batch(sources)
 
-    #: Named in the error raised for an invalid transport source kind.
-    _sampling_source_context = "state prediction"
-
     def build_sampling_source(
         self,
         x: Batch,
         *,
         target_template: dict[str, "BaseTemplate"],
         model_comm_group: Optional[ProcessGroup] = None,
-        default_kind: str = "gaussian",
     ) -> Batch:
-        """Build the starting/source field used by transport sampling, in model-output space.
-
-        Gaussian noise or zeros, or the latest input state projected to the predicted variables.
-        """
-        request = TransportSourceRequest(
-            templates=self._sampling_template(target_template, x),
-            default_kind=default_kind,
-            custom_source_factories={
-                "reference_state": lambda: reference_state_sampling_source(
-                    {name: source.data for name, source in x.items() if name in self.target_datasets},
-                    data_indices=self.data_indices,
-                    n_step_output=self.n_step_output,
-                ),
-            },
-            model_comm_group=model_comm_group,
-            error_context=self._sampling_source_context,
-        )
-        return self.transport_source.build(request)
+        """Build the starting/source field used by transport sampling, in model-output space."""
+        return gaussian_source(self._sampling_template(target_template, x), model_comm_group)
 
     def predict_step(
         self,
@@ -880,8 +868,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
 class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     """Transport model that predicts tendencies and converts them back to state fields."""
-
-    _sampling_source_context = "tendency prediction"
 
     def __init__(
         self,

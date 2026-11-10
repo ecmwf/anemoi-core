@@ -36,9 +36,6 @@ from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.imputer import InputImputer
 from anemoi.models.preprocessing.normalizer import InputNormalizer
 from anemoi.models.transport import EdmSettings
-from anemoi.models.transport import StochasticInterpolantSettings
-from anemoi.models.transport import TransportSourceBuilder
-from anemoi.models.transport import TransportSourceSettings
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
@@ -50,14 +47,13 @@ from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
 from anemoi.training.train.methods.ensemble import EnsembleTraining
+from anemoi.training.train.methods.flow_matching import FlowMatchingTransportObjective
 from anemoi.training.train.methods.single import SingleTraining
-from anemoi.training.train.methods.stochastic_interpolant import StochasticInterpolantTransportObjective
 from anemoi.training.train.methods.transport import StatePredictionMode
 from anemoi.training.train.methods.transport import TendencyPredictionMode
 from anemoi.training.train.methods.transport import TransportTraining
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import PreparedTransportObjective
-from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
@@ -144,7 +140,6 @@ class DummyModel:
         self.pre_processors = {"data": Processors([])}
         self.post_processors = {"data": Processors([], inverse=True)}
         self.metrics: dict = {}
-        self.transport_source = TransportSourceBuilder()
 
     def __call__(
         self,
@@ -171,7 +166,6 @@ class DummyTransportModel(DummyModel):
             "sigma_min": self.edm.sigma_min,
             "rho": self.edm.rho,
         }
-        self.stochastic_interpolant = StochasticInterpolantSettings(noise_scale=0.0)
         self.target_datasets = ["data"]
 
     def __call__(
@@ -185,7 +179,7 @@ class DummyTransportModel(DummyModel):
         del model_comm_group, kwargs
         assert isinstance(x, Batch), f"the model takes a Batch, got {type(x).__name__}"
         for dataset_name, target in conditioned_target.items():
-            # One noise level or bridge time per sample and member, as the transport objectives build it.
+            # One noise level or time per sample and member, as the transport objectives build it.
             assert condition[dataset_name].shape == (target.batch_size, 1, target.ensemble_size, 1, 1)
         return conditioned_target.map_data(lambda data: data + 0.1 * torch.randn_like(data))
 
@@ -553,7 +547,7 @@ def test_spatial_processor_target_grid_skips_without_processors() -> None:
 
 # Shared minimal configs
 _CFG_EMPTY = DictConfig(
-    {"training": {"transport": {"prediction_mode": "state", "objective": "stochastic_interpolant"}}},
+    {"training": {"transport": {"prediction_mode": "state", "objective": "flow_matching"}}},
 )
 _CFG_DIFFUSION = DictConfig(
     {
@@ -820,25 +814,7 @@ def test_edm_transport_compute_loss_forwards_sharding_metadata_when_requested() 
     }
 
 
-# ── StochasticInterpolantTransportObjective: prepare ─────────────────────────
-
-
-def _transport_objective_with_source(
-    kind: str,
-    scale: float = 1.0,
-    noise_scale: float = 0.0,
-) -> TransportObjective:
-    module = SimpleNamespace(
-        model=SimpleNamespace(
-            model=SimpleNamespace(
-                transport_source=TransportSourceBuilder(
-                    TransportSourceSettings(kind=kind, scale=scale, noise_scale=noise_scale),
-                ),
-            ),
-        ),
-        _grid_shard_sizes=lambda _source: {"data": None},
-    )
-    return TransportObjective(module)
+# ── FlowMatchingTransportObjective: prepare ─────────────────────────
 
 
 def _value_batch(data: dict[str, torch.Tensor | list[torch.Tensor]]) -> Batch:
@@ -867,108 +843,20 @@ def _value_batch(data: dict[str, torch.Tensor | list[torch.Tensor]]) -> Batch:
     )
 
 
-def _prepared_target_with_reference_source() -> PreparedPredictionTarget:
-    clean = {"data": torch.full((1, 1, 1, 2, 1), 3.0)}
-    reference = {"data": torch.full_like(clean["data"], 2.0)}
-    clean_batch = _value_batch(clean)
-    return PreparedPredictionTarget(
-        model_target=clean_batch,
-        loss_target=clean_batch,
-        loss_target_layout=IndexSpace.MODEL_OUTPUT,
-        metric_target=clean_batch,
-        aux={"transport_reference_source": lambda: reference},
-    )
-
-
-def test_transport_source_default_is_gaussian(monkeypatch: pytest.MonkeyPatch) -> None:
-    objective = _transport_objective_with_source("default")
-    prepared = _prepared_target_with_reference_source()
-
-    monkeypatch.setattr(
-        torch,
-        "randn",
-        lambda shape, device=None, dtype=None: torch.full(shape, 7.0, device=device, dtype=dtype),
-    )
-
-    source = objective.build_transport_source(prepared)
-
-    torch.testing.assert_close(source["data"].data, torch.full_like(prepared.model_target["data"].data, 7.0))
-
-
-def test_state_reference_source_is_lazy_and_handles_diagnostic_variables() -> None:
-    """The reference-state source is built lazily from the full batch.
-
-    Diagnostic (output-only) variables are not part of the model input, so the
-    projection must draw from the full batch rather than the model inputs, and
-    it must only be materialised when a reference_state source is requested.
-    """
-    name_to_index = {"A": 0, "B": 1, "D": 2}
-    data_indices = {"data": _make_minimal_index_collection(name_to_index, diagnostic=["D"])}
-    task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
-
-    forecaster = TransportTraining.__new__(TransportTraining)
-    pl.LightningModule.__init__(forecaster)
-    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, n_step_input=2, task=task)
-    forecaster.model = SimpleNamespace(
-        model=SimpleNamespace(target_datasets=["data"]),
-        pre_processors={"data": Processors([])},
-        post_processors={"data": Processors([], inverse=True)},
-    )
-    mode = StatePredictionMode(forecaster)
-
-    batch = _make_gridded_batch(torch.randn(1, 3, 1, 4, len(name_to_index)), variables=list(name_to_index))
-    prepared = mode.prepare_target(batch, x=None)
-
-    reference_factory = prepared.aux["transport_reference_source"]
-    assert callable(reference_factory), "gaussian/zero sources must not pay for the reference projection"
-
-    reference = reference_factory()
-    assert reference["data"].shape[-1] == len(data_indices["data"].model.output)
-    # The reference is the last input step of the full batch in model-output space.
-    torch.testing.assert_close(
-        reference["data"][:, 0],
-        batch["data"].data[:, 1][..., data_indices["data"].data.output.full],
-    )
-
-
-def test_transport_source_rejects_missing_reference_state_source() -> None:
-    objective = _transport_objective_with_source("reference_state")
-    clean = _value_batch({"data": torch.zeros(1, 1, 1, 2, 1)})
-    prepared = PreparedPredictionTarget(
-        model_target=clean,
-        loss_target=clean,
-        loss_target_layout=IndexSpace.MODEL_OUTPUT,
-        metric_target=clean,
-        aux={},
-    )
-
-    with pytest.raises(ValueError, match="requires a reference source"):
-        objective.build_transport_source(prepared, default_kind="gaussian")
-
-
-def test_stochastic_interpolant_prepare_builds_bridge_and_drift(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Stochastic interpolants train drift in MODEL_OUTPUT space."""
-    module = SimpleNamespace(
+def _flow_matching_module() -> SimpleNamespace:
+    return SimpleNamespace(
         model=SimpleNamespace(
             model=SimpleNamespace(
-                stochastic_interpolant=StochasticInterpolantSettings(
-                    alpha_schedule="linear",
-                    beta_schedule="quadratic",
-                    sigma_schedule="quadratic_bridge",
-                    noise_scale=1.0,
-                ),
                 training_condition={"distribution": "uniform_time"},
-                transport_source=TransportSourceBuilder(
-                    TransportSourceSettings(kind="reference_state", noise_scale=0.25),
-                ),
             ),
         ),
-        _grid_shard_sizes=lambda _source: {"data": None},
     )
 
-    anchor = {"data": torch.full((1, 1, 1, 2, 1), 3.0)}
+
+def test_flow_matching_prepare_builds_state_and_velocity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flow matching trains the velocity in MODEL_OUTPUT space, starting from Gaussian noise."""
     clean = {"data": torch.full((1, 1, 1, 2, 1), 5.0)}
     clean_batch = _value_batch(clean)
     prepared = PreparedPredictionTarget(
@@ -976,9 +864,7 @@ def test_stochastic_interpolant_prepare_builds_bridge_and_drift(
         loss_target=clean_batch,
         loss_target_layout=IndexSpace.MODEL_OUTPUT,
         metric_target=clean_batch,
-        aux={
-            "transport_reference_source": lambda: anchor,
-        },
+        aux={},
     )
 
     monkeypatch.setattr(
@@ -989,54 +875,30 @@ def test_stochastic_interpolant_prepare_builds_bridge_and_drift(
     monkeypatch.setattr(
         torch,
         "randn",
-        lambda shape, device=None, dtype=None: torch.ones(shape, device=device, dtype=dtype),
+        lambda shape, device=None, dtype=None: torch.full(shape, 3.0, device=device, dtype=dtype),
     )
 
-    objective = StochasticInterpolantTransportObjective(module).prepare(prepared)
+    module = _flow_matching_module()
+    objective = FlowMatchingTransportObjective(module).prepare(prepared)
 
-    time_level = torch.full((1, 1, 1, 1, 1), 0.25)
-    expected_anchor = anchor["data"] + 0.25
-    expected_interpolant = 0.75 * expected_anchor + 0.25**2 * clean["data"] + 0.25 * 0.75
-    expected_drift = -expected_anchor + 0.5 * clean["data"] + 0.5
-
-    torch.testing.assert_close(objective.condition["data"], time_level)
-    torch.testing.assert_close(objective.conditioned_target["data"].data, expected_interpolant)
-    torch.testing.assert_close(objective.loss_target["data"].data, expected_drift)
-    torch.testing.assert_close(objective.aux["source"]["data"].data, expected_anchor)
+    torch.testing.assert_close(objective.condition["data"], torch.full((1, 1, 1, 1, 1), 0.25))
+    torch.testing.assert_close(objective.conditioned_target["data"].data, 0.75 * 3.0 + 0.25 * clean["data"])
+    torch.testing.assert_close(objective.loss_target["data"].data, clean["data"] - 3.0)
     assert objective.loss_target_layout == IndexSpace.MODEL_OUTPUT
     assert objective.pred_layout == IndexSpace.MODEL_OUTPUT
     assert objective.weights is None
 
-    reconstructed = StochasticInterpolantTransportObjective(module).reconstruct_endpoint(
-        objective.loss_target,
-        objective,
-    )
+    reconstructed = FlowMatchingTransportObjective(module).reconstruct_endpoint(objective.loss_target, objective)
     torch.testing.assert_close(reconstructed["data"].data, clean["data"])
 
 
 @pytest.mark.parametrize("sparse", [False, True])
-def test_stochastic_interpolant_prepare_remasks_missing_observations(
+def test_flow_matching_prepare_remasks_missing_observations(
     monkeypatch: pytest.MonkeyPatch,
     sparse: bool,
 ) -> None:
-    """Drift loss targets carry NaNs at missing observations while the network input stays clean."""
-    module = SimpleNamespace(
-        model=SimpleNamespace(
-            model=SimpleNamespace(
-                stochastic_interpolant=StochasticInterpolantSettings(
-                    alpha_schedule="linear",
-                    beta_schedule="quadratic",
-                    sigma_schedule="quadratic_bridge",
-                    noise_scale=1.0,
-                ),
-                training_condition={"distribution": "uniform_time"},
-                transport_source=TransportSourceBuilder(
-                    TransportSourceSettings(kind="gaussian", scale=1.0, noise_scale=0.0),
-                ),
-            ),
-        ),
-        _grid_shard_sizes=lambda _source: None,
-    )
+    """Velocity loss targets carry NaNs at missing observations while the network input stays clean."""
+    module = _flow_matching_module()
 
     clean = {"data": torch.full((1, 1, 1, 2, 1), 5.0)}  # imputed, NaN-free
     missing = {"data": clean["data"].clone()}
@@ -1063,19 +925,17 @@ def test_stochastic_interpolant_prepare_remasks_missing_observations(
         lambda shape, device=None, dtype=None: torch.ones(shape, device=device, dtype=dtype),
     )
 
-    monkeypatch.setattr(torch, "randn_like", torch.ones_like)
-
-    objective = StochasticInterpolantTransportObjective(module).prepare(prepared)
+    objective = FlowMatchingTransportObjective(module).prepare(prepared)
 
     loss_data = objective.loss_target["data"].data
     target = loss_data[0] if sparse else loss_data
     network_input = objective.conditioned_target["data"].data
     network_input = network_input[0] if sparse else network_input
-    torch.testing.assert_close(target.flatten(), torch.tensor([2.0, float("nan")]), equal_nan=True)
+    torch.testing.assert_close(target.flatten(), torch.tensor([4.0, float("nan")]), equal_nan=True)
     assert torch.isfinite(network_input).all()
 
     target_view = _value_batch({"data": loss_data})["data"]
-    prediction = torch.full_like(target, 3.0, requires_grad=True)
+    prediction = torch.full_like(target, 5.0, requires_grad=True)
     prediction_view = target_view.clone(data=[prediction] if sparse else prediction)
     loss = MSELoss(ignore_nans=True)(prediction_view, target_view)
     # Dense reduction sums grid nodes; sparse reduction averages over the observations that exist.
@@ -2594,10 +2454,10 @@ def test_transport_training_target_reduction_fast_paths() -> None:
     )
 
 
-def test_stochastic_interpolant_training_uses_model_output_target_layout(
+def test_flow_matching_training_uses_model_output_target_layout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """TransportTraining SI _step must pass target_layout=MODEL_OUTPUT for the drift target."""
+    """TransportTraining flow matching _step must pass target_layout=MODEL_OUTPUT for the velocity target."""
 
     class _DummyTransportWrapper:
         def __init__(self, inner: DummyTransportModel) -> None:
@@ -2616,7 +2476,7 @@ def test_stochastic_interpolant_training_uses_model_output_target_layout(
     transport_model.training_condition = {"distribution": "uniform_time"}
     forecaster.model = _DummyTransportWrapper(transport_model)
     forecaster._prediction_mode = StatePredictionMode(forecaster)
-    forecaster._transport_objective = StochasticInterpolantTransportObjective(forecaster)
+    forecaster._transport_objective = FlowMatchingTransportObjective(forecaster)
     forecaster.is_first_step = False
     forecaster.updating_scalars = {}
     forecaster.target_dataset_names = forecaster.dataset_names
@@ -2757,10 +2617,10 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
     assert auxiliary_output["data"].data.requires_grad is False
 
 
-def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_target(
+def test_flow_matching_tendency_training_step_uses_model_output_velocity_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """TransportTraining SI can train drift in MODEL_OUTPUT tendency space."""
+    """TransportTraining flow matching can train the velocity in MODEL_OUTPUT tendency space."""
 
     class _DummyTransportWrapper:
         def __init__(self, inner: DummyTransportModel) -> None:
@@ -2777,7 +2637,7 @@ def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_t
     transport_model = DummyTransportModel()
     transport_model.training_condition = {"distribution": "uniform_time"}
     forecaster.model = _DummyTransportWrapper(transport_model)
-    forecaster._transport_objective = StochasticInterpolantTransportObjective(forecaster)
+    forecaster._transport_objective = FlowMatchingTransportObjective(forecaster)
     forecaster.is_first_step = False
     forecaster.updating_scalars = {}
     forecaster.target_dataset_names = forecaster.dataset_names
@@ -3162,10 +3022,10 @@ def test_tendency_prediction_mode_requires_tendency_model() -> None:
         mode._resolve_tendency_statistics()
 
 
-def test_stochastic_interpolant_training_compute_dataset_loss_metrics_uses_data_full_state(
+def test_flow_matching_training_compute_dataset_loss_metrics_uses_data_full_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """TransportTraining SI metrics must score validation metrics in DATA_FULL space."""
+    """TransportTraining flow matching must score validation metrics in DATA_FULL space."""
     name_to_index = {"A": 0, "B": 1, "obs_A": 2}
     data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
 

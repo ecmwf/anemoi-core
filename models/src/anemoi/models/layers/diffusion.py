@@ -26,12 +26,18 @@ class RandomFourierEmbeddings(torch.nn.Module):
 
 
 class SinusoidalEmbeddings(torch.nn.Module):
-    """Fourier embeddings for noise levels."""
+    """Fourier embeddings for noise levels.
 
-    def __init__(self, num_channels: int = 32, max_period: int = 10000):
+    The frequencies run from ``scale`` down to about ``scale / max_period``, in radians per unit of
+    the input. ``scale`` sets how finely the embedding tells inputs apart: a log noise level that
+    spans a few units is resolved with 1, a time in [0, 1] needs a large scale such as 1000.
+    """
+
+    def __init__(self, num_channels: int = 32, max_period: int = 10000, scale: float = 1.0):
         super().__init__()
         zdim = num_channels // 2
-        self.register_buffer("frequencies", torch.exp(-math.log(max_period) * torch.arange(0, zdim) / zdim))
+        frequencies = scale * torch.exp(-math.log(max_period) * torch.arange(0, zdim) / zdim)
+        self.register_buffer("frequencies", frequencies)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = x[:] * self.frequencies
