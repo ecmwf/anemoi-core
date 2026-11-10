@@ -10,6 +10,7 @@
 
 import logging
 from abc import abstractmethod
+from typing import Optional
 
 import torch
 from hydra.utils import instantiate
@@ -26,6 +27,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.input_transform import BaseInputTransform
 from anemoi.models.layers.target_features import DecodingTargetFeature
 from anemoi.models.layers.target_features import create_decoding_target_features
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -37,9 +39,6 @@ LOGGER = logging.getLogger(__name__)
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
-    supports_shared_encoder_decoder = False
-    supports_variable_io = False
-
     def __init__(
         self,
         *,
@@ -49,7 +48,7 @@ class BaseGraphModel(nn.Module):
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
-        variable_metadata: dict | None = None,
+        variable_metadata: Optional[dict] = None,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -63,12 +62,8 @@ class BaseGraphModel(nn.Module):
             Data statistics
         graph_data : HeteroData
             Graph definition
-        n_step_input : int
-            Number of input timesteps
-        n_step_output : int
-            Number of output timesteps
         variable_metadata : Optional[dict]
-            Variable metadata dictionary
+            Per-variable metadata of the dataset (``variables_metadata``), handed to the input transform
         """
         super().__init__()
         self._graph_data = graph_data
@@ -77,21 +72,20 @@ class BaseGraphModel(nn.Module):
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
         self.variable_metadata = variable_metadata
+
         self.dataset_names = list(data_indices.keys())
         self._build_hidden_node_routing(model_config.model.hidden_nodes_name)
 
         self.latent_skip = model_config.model.latent_skip
 
         self.node_attributes = NamedNodesAttributes(
-            model_config.node_trainable_parameters,
-            self._build_named_node_attributes_graph(),
+            model_config.node_trainable_parameters, self._build_named_node_attributes_graph()
         )
 
         self._build_encoder_routing(model_config.encoders)
         self._build_decoder_routing(model_config.decoders)
 
-        self._build_variable_io(model_config=model_config)
-
+        self._build_input_transform(model_config)
         self._calculate_shapes_and_indices(data_indices)
 
         self._assert_model_routing()
@@ -170,12 +164,12 @@ class BaseGraphModel(nn.Module):
         """Asserts that the model routing is valid."""
         not_input_datasets = set(self.input_datasets) - set(self.input_dim.keys())
         assert all(
-            d in self.input_datasets for d in self.dataset2encoder
+            d in self.input_datasets for d in self.dataset2encoder.keys()
         ), f"Datasets {not_input_datasets} are in input_datasets but not in data_indices provided to the model. "
 
         not_target_datasets = set(self.target_datasets) - set(self.output_dim.keys())
         assert all(
-            d in self.target_datasets for d in self.dataset2decoder
+            d in self.target_datasets for d in self.dataset2decoder.keys()
         ), f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
 
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
@@ -236,11 +230,32 @@ class BaseGraphModel(nn.Module):
                 hidden_name in self._graph_data.node_types
             ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
 
+    def _build_input_transform(self, model_config: DotDict) -> None:
+        """Build the transform that turns raw input variables into encoder features.
+
+        Built before the input dimensions are computed, because a transform can change the
+        per-timestep feature width the encoder sees.
+        """
+        # The Pydantic schema round-trip leaves this key present but None when unset,
+        # so ``.get`` with a default would not fall back.
+        input_transform_config = model_config.get("input_transform") or {
+            "_target_": "anemoi.models.layers.input_transform.FlattenInputTransform"
+        }
+        self.input_transform = instantiate(
+            input_transform_config,
+            variable_metadata=self.variable_metadata,
+            _recursive_=False,
+        )
+        assert isinstance(
+            self.input_transform, BaseInputTransform
+        ), f"input_transform must be a BaseInputTransform, got {type(self.input_transform).__name__}."
+
     def _calculate_input_dim(self, dataset_name: str) -> int:
         """Calculate the encoder input dimension for a given dataset."""
-        if getattr(self, "variable_tokenizer", None) is not None:
-            return self.n_step_input * self.variable_tokenizer.out_dim + self.node_attributes.attr_ndims[dataset_name]
-        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
+        per_step = self.input_transform.output_dim
+        if per_step is None:
+            per_step = self.num_input_channels[dataset_name]
+        return self.n_step_input * per_step + self.node_attributes.attr_ndims[dataset_name]
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
@@ -282,9 +297,9 @@ class BaseGraphModel(nn.Module):
             assert len(dataset_internal_output_idx) == len(dataset_indices.model.output.full) - len(
                 dataset_indices.model.output.diagnostic
             ), (
-                f"Dataset '{dataset_name}': Mismatch between the internal data indices "
-                f"({len(dataset_internal_output_idx)}) and the output indices excluding diagnostic variables "
-                f"({len(dataset_indices.model.output.full) - len(dataset_indices.model.output.diagnostic)})"
+                f"Dataset '{dataset_name}': Mismatch between the internal data indices ({len(dataset_internal_output_idx)}) and "
+                f"the output indices excluding diagnostic variables "
+                f"({len(dataset_indices.model.output.full) - len(dataset_indices.model.output.diagnostic)})",
             )
             assert len(dataset_internal_input_idx) == len(
                 dataset_internal_output_idx,
@@ -295,7 +310,7 @@ class BaseGraphModel(nn.Module):
         batch_size: int,
         ensemble_size: int,
         in_out_sharded: bool,
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> None:
         assert not (
             in_out_sharded and model_comm_group is None
@@ -331,27 +346,6 @@ class BaseGraphModel(nn.Module):
 
         return dim_sizes[0]
 
-    def _build_variable_io(self, model_config: DotDict) -> None:
-        """Validate variable I/O support."""
-
-        self.variable_vocabulary = None
-        self.variable_tokenizer = None
-        self.variable_detokenizer = None
-        self.variable_dropout = None
-
-        requested = any(
-            getattr(model_config, name, None)
-            for name in (
-                "variable_tokenizer",
-                "variable_detokenizer",
-                "variable_dropout",
-            )
-        )
-
-        assert (
-            self.supports_variable_io or not requested
-        ), f"{self.__class__.__name__} does not support variable-agnostic I/O."
-
     def _get_active_hidden_name(self, dataset_names: list[str]) -> str:
         """Return the single hidden mesh used by the datasets in the batch."""
         active_hidden_names = list(dict.fromkeys(self.dataset2hidden[dataset_name] for dataset_name in dataset_names))
@@ -362,6 +356,7 @@ class BaseGraphModel(nn.Module):
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the networks for the model."""
+        pass
 
     @abstractmethod
     def _assemble_input(
@@ -410,7 +405,7 @@ class BaseGraphModel(nn.Module):
         self,
         x: dict[str, Tensor],
         *,
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:
@@ -434,13 +429,14 @@ class BaseGraphModel(nn.Module):
             Output of the model, with the same shape as the input (sharded if
             the corresponding input dataset is sharded).
         """
+        pass
 
     @staticmethod
     def _apply_spatial_preprocessor(
         tensors: tuple[Tensor, ...],
         dataset_name: str,
-        spatial_pre_processors: nn.ModuleDict | None,
-        model_comm_group: ProcessGroup | None,
+        spatial_pre_processors: Optional[nn.ModuleDict],
+        model_comm_group: Optional[ProcessGroup],
         grid_shard_sizes: DatasetShardSizes | None,
     ) -> tuple[tuple[Tensor, ...], DatasetShardSizes | None]:
         """Apply one dataset's spatial preprocessor to tensors sharing a source grid."""
@@ -474,9 +470,9 @@ class BaseGraphModel(nn.Module):
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
         n_step_input: int,
-        model_comm_group: ProcessGroup | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
-        spatial_pre_processors: nn.ModuleDict | None = None,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Prediction step for the model.
@@ -533,10 +529,7 @@ class BaseGraphModel(nn.Module):
                         x[dataset_name], -2, model_comm_group=model_comm_group
                     )
                     x[dataset_name] = shard_tensor(
-                        x[dataset_name],
-                        -2,
-                        grid_shard_sizes[dataset_name],
-                        model_comm_group,
+                        x[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
                     )
 
             # Spatial preprocessing: applied after grid sharding, before normalisation.
@@ -568,10 +561,7 @@ class BaseGraphModel(nn.Module):
                 assert grid_shard_sizes is not None
                 for dataset_name in y_hat:
                     y_hat[dataset_name] = gather_tensor(
-                        y_hat[dataset_name],
-                        -2,
-                        grid_shard_sizes[dataset_name],
-                        model_comm_group,
+                        y_hat[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
                     )
 
         return y_hat
@@ -579,3 +569,4 @@ class BaseGraphModel(nn.Module):
     @abstractmethod
     def fill_metadata(self, md_dict) -> None:
         """To be implemented in subclasses to fill model-specific metadata."""
+        pass

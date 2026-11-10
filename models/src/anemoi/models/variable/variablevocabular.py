@@ -364,12 +364,11 @@ class VariableVocabulary:
     @classmethod
     def from_foundation(
         cls,
-        data_indices: Any,
         metadata: dict[str, dict[str, Any]],
     ) -> "VariableVocabulary":
         """Construct the variable vocabulary for foundation training.
 
-        Builds the vocabulary from the union of model input and output variables.
+        Builds the vocabulary from every variable described in ``metadata``.
         Categorical metadata values are assigned stable foundation indices that
         define the embedding tables used by the model.
 
@@ -380,8 +379,6 @@ class VariableVocabulary:
 
         Parameters
         ----------
-        data_indices : Any
-            Anemoi data indices describing the model input and output variables.
         metadata : dict[str, dict[str, Any]]
             Dataset metadata indexed by variable name.
 
@@ -390,22 +387,8 @@ class VariableVocabulary:
         VariableVocabulary
             Foundation variable vocabulary.
         """
-        names: set[str] = set()
-
-        # Foundation vocabulary is the union of model input/output fields.
-        for io in ["input", "output"]:
-            current_data_indices = getattr(
-                data_indices.model,
-                io,
-            )
-
-            names.update(current_data_indices.name_to_index.keys())
-
         specifications: dict[str, VariableSpecification] = {}
-        for name in sorted(names):
-            if name not in metadata:
-                raise KeyError(f"Missing metadata for variable {name}")
-
+        for name in sorted(metadata):
             spec = cls.make_specification(
                 name=name,
                 metadata=metadata,
@@ -419,17 +402,12 @@ class VariableVocabulary:
     @classmethod
     def from_datasets(
         cls,
-        data_indices: dict[str, Any],
-        metadata: dict[str, dict[str, dict[str, Any]]] | None,
+        metadata: dict[str, dict[str, dict[str, Any]]],
     ) -> "VariableVocabulary":
         """Build one stable vocabulary from the union of all domain fields."""
-        if metadata is None:
-            raise ValueError("variable metadata is required when variable_tokenizer is configured")
-
         specifications: dict[str, VariableSpecification] = {}
-        for dataset_name, indices in data_indices.items():
-            dataset_metadata = metadata.get(dataset_name, {})
-            domain_vocabulary = cls.from_foundation(indices, dataset_metadata)
+        for dataset_name, dataset_metadata in metadata.items():
+            domain_vocabulary = cls.from_foundation(dataset_metadata)
             for name, specification in domain_vocabulary.specification_by_name.items():
                 previous = specifications.get(name)
                 if previous is not None and previous != specification:

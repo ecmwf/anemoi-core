@@ -7,9 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from types import SimpleNamespace
+
 import torch
 from torch import nn
 
+from anemoi.models.layers.input_transform import FlattenInputTransform
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 
@@ -19,6 +22,7 @@ class _NodeAttributes(nn.Module):
         super().__init__()
         self.num_nodes = num_nodes
         self.num_features = num_features
+        self.attr_ndims = {"data": num_features}
 
     def forward(self, node_name: str, batch_size: int) -> torch.Tensor:
         return torch.zeros(batch_size * self.num_nodes, self.num_features)
@@ -32,9 +36,16 @@ def test_assemble_input_conditions_on_prognostic_residual_variables() -> None:
     model = AnemoiEnsModelEncProcDec.__new__(AnemoiEnsModelEncProcDec)
     nn.Module.__init__(model)
     model.condition_on_residual = True
-    model.variable_dropout = None
-    model.variable_tokenizer = None
+    model.input_transform = FlattenInputTransform()
+    model.data_indices = {
+        "data": SimpleNamespace(
+            model=SimpleNamespace(input=SimpleNamespace(name_to_index={str(i): i for i in range(num_variables)}))
+        )
+    }
+    model.n_step_input = input_steps
     model.n_step_output = 2
+    model.num_input_channels = {"data": num_variables}
+    model.num_input_channels_prognostic = {"data": len(prognostic_indices)}
     model._internal_input_idx = {"data": prognostic_indices}
     model.node_attributes = _NodeAttributes(num_nodes, node_features)
     model.residual = nn.ModuleDict({"data": SkipConnection()})
@@ -52,6 +63,7 @@ def test_assemble_input_conditions_on_prognostic_residual_variables() -> None:
     )
 
     expected_num_features = input_steps * num_variables + node_features + 1 + len(prognostic_indices)
+    assert model._calculate_input_dim("data") == expected_num_features
     assert x_data_latent.shape == (batch_size * ensemble_size * num_nodes, expected_num_features)
     assert x_skip.shape == (batch_size, model.n_step_output, ensemble_size, num_nodes, num_variables)
     assert grid_shard_sizes is None

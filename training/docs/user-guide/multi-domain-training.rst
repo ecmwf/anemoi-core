@@ -20,7 +20,7 @@ Domains may cover different geographical regions and do not need to overlap spat
 
 .. note::
 
-   Positional encoders and shared decoders still require compatible ordered variables. Heterogeneous input variables require a variable tokenizer. If output variables differ, configure dataset-specific decoder groups; each dataset's loss then includes only the variables produced for that dataset.
+   Positional encoders and shared decoders still require compatible ordered variables. Heterogeneous input variables require a variable-aware ``model.input_transform``. If output variables differ, configure dataset-specific decoder groups; each dataset's loss then includes only the variables produced for that dataset.
 
 Training Procedure
 ******************
@@ -57,7 +57,7 @@ Multi-domain training is enabled by selecting the multi-domain loading policy, w
        loading_policy:
            _target_: anemoi.training.data.loading.MultiDomainLoadingPolicy
 
-By default the policy verifies identical variable ordering. A variable-aware model can allow different domain subsets explicitly:
+By default the policy verifies identical variable ordering. Select a variable-aware input transform with ``+model/input_transform=mha_embedder`` and allow different domain subsets explicitly:
 
 .. code-block:: yaml
 
@@ -72,7 +72,7 @@ The following constraints apply:
 
 - Hierarchical models do not support per-dataset hidden meshes.
 - Datasets sharing a positional encoder or decoder must have the same variables in the same order.
-- Heterogeneous input sets require ``allow_heterogeneous_variables: true`` and a variable tokenizer. Heterogeneous output sets require dataset-specific decoder groups.
+- Heterogeneous input sets require ``allow_heterogeneous_variables: true`` and a variable-aware ``model.input_transform``. Heterogeneous output sets require dataset-specific decoder groups.
 - Hidden node and edge feature dimensions must match across the hidden meshes, because the weights are shared.
 - Trainable node and edge parameters must be set to 0, because the active graph-specific parameters would change between batches.
 
