@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -24,6 +24,7 @@ Key components:
 
 from .base import CheckpointContext
 from .base import PipelineStage
+from .builder import build_checkpoint_pipeline
 from .catalog import ComponentCatalog
 from .exceptions import CheckpointConfigError
 from .exceptions import CheckpointError
@@ -42,13 +43,6 @@ from .utils import format_size
 from .utils import get_checkpoint_metadata
 from .utils import validate_checkpoint
 
-# Import validation utilities with graceful fallback
-try:
-    from .validation import validate_pipeline_health
-except ImportError:
-    # Validation module not available
-    validate_pipeline_health = None
-
 __all__ = [
     # Exceptions
     "CheckpointConfigError",
@@ -65,6 +59,7 @@ __all__ = [
     "ComponentCatalog",
     "PipelineStage",
     # Utilities
+    "build_checkpoint_pipeline",
     "calculate_checksum",
     "compare_state_dicts",
     "download_with_retry",
@@ -72,7 +67,4 @@ __all__ = [
     "format_size",
     "get_checkpoint_metadata",
     "validate_checkpoint",
-    "validate_pipeline_health",
 ]
-
-__version__ = "0.1.0"

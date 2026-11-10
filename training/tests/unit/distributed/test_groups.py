@@ -93,25 +93,31 @@ def test_create_model_and_reader_process_groups(monkeypatch: pytest.MonkeyPatch)
         global_rank=5,
     )
 
-    created_groups: list[tuple[int, ...]] = []
+    created_groups: list[tuple[tuple[int, ...], bool]] = []
 
-    def _fake_new_group(ranks: np.ndarray) -> str:
-        created_groups.append(_to_rank_tuple(ranks))
+    def _fake_new_group(ranks: np.ndarray, *, use_local_synchronization: bool) -> str:
+        created_groups.append((_to_rank_tuple(ranks), use_local_synchronization))
         return f"group-{len(created_groups) - 1}"
 
     monkeypatch.setattr(torch.distributed, "new_group", _fake_new_group)
 
-    model_comm_groups = create_model_process_groups(model_layout.model_comm_group_ranks)
-    reader_groups = create_reader_process_groups(reader_layout.reader_group_ranks)
+    model_comm_groups = create_model_process_groups(
+        model_layout.model_comm_group_ranks,
+        use_local_synchronization=True,
+    )
+    reader_groups = create_reader_process_groups(
+        reader_layout.reader_group_ranks,
+        use_local_synchronization=True,
+    )
     model_reader_groups = reader_groups[model_layout.model_comm_group_id]
 
     assert created_groups == [
-        (0, 1, 2, 3),
-        (4, 5, 6, 7),
-        (0, 1),
-        (2, 3),
-        (4, 5),
-        (6, 7),
+        ((0, 1, 2, 3), True),
+        ((4, 5, 6, 7), True),
+        ((0, 1), True),
+        ((2, 3), True),
+        ((4, 5), True),
+        ((6, 7), True),
     ]
     assert model_comm_groups[model_layout.model_comm_group_id] == "group-1"
     assert model_reader_groups == ["group-4", "group-5"]
@@ -181,27 +187,27 @@ def test_create_ensemble_process_groups(monkeypatch: pytest.MonkeyPatch) -> None
         model_comm_group_rank=2,
     )
 
-    created_groups: list[tuple[int, ...]] = []
+    created_groups: list[tuple[tuple[int, ...], bool]] = []
 
-    def _fake_new_group(ranks: np.ndarray) -> str:
-        created_groups.append(_to_rank_tuple(ranks))
+    def _fake_new_group(ranks: np.ndarray, *, use_local_synchronization: bool) -> str:
+        created_groups.append((_to_rank_tuple(ranks), use_local_synchronization))
         return f"group-{len(created_groups) - 1}"
 
     monkeypatch.setattr(torch.distributed, "new_group", _fake_new_group)
 
-    process_groups = create_ensemble_process_groups(layout)
+    process_groups = create_ensemble_process_groups(layout, use_local_synchronization=True)
 
     assert created_groups == [
-        (0, 1, 2, 3, 4, 5, 6, 7),
-        (8, 9, 10, 11, 12, 13, 14, 15),
-        (0, 4),
-        (1, 5),
-        (2, 6),
-        (3, 7),
-        (8, 12),
-        (9, 13),
-        (10, 14),
-        (11, 15),
+        ((0, 1, 2, 3, 4, 5, 6, 7), True),
+        ((8, 9, 10, 11, 12, 13, 14, 15), True),
+        ((0, 4), True),
+        ((1, 5), True),
+        ((2, 6), True),
+        ((3, 7), True),
+        ((8, 12), True),
+        ((9, 13), True),
+        ((10, 14), True),
+        ((11, 15), True),
     ]
     assert process_groups.ens_comm_group == "group-1"
     assert process_groups.ens_comm_subgroup == "group-8"

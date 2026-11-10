@@ -1,4 +1,4 @@
-# (C) Copyright 2024- ECMWF.
+# (C) Copyright 2026- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -22,6 +22,7 @@ from pydantic import model_validator
 from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
 from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
 from anemoi.models.schemas.models import ModelSchema
@@ -35,6 +36,7 @@ from .data import DataSchema
 from .dataloader import DataLoaderSchema
 from .diagnostics import DiagnosticsSchema
 from .system import SystemSchema
+from .tasks import TaskSchema
 from .training import TrainingSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -69,8 +71,107 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[System
 
 
 _DEPRECATED_TARGETS: dict[str, str] = {
+    "anemoi.training.losses.kcrps.KernelCRPS": (
+        "This loss has been deprecated and removed. Use 'anemoi.training.losses.CRPS' instead "
+        "with 'backend: stable' (default). The 'alpha' parameter controls the fair/standard CRPS blend "
+        "(alpha=1.0 gives fully fair CRPS)."
+    ),
+    "anemoi.training.losses.kcrps.AlmostFairKernelCRPS": (
+        "This loss has been deprecated and removed. Use 'anemoi.training.losses.CRPS' instead "
+        "with 'backend: stable' and set 'alpha' to control the fair/standard CRPS blend "
+        "(0 < alpha < 1 gives the almost fair formulation, alpha=1.0 gives fully fair CRPS)."
+    ),
     "anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots": (
         "This callback has been deprecated and removed, update your config to remove any references to it. "
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.LossCurvePlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotSample": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotLoss": (
+        "This callback has been renamed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.LossCurvePlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot": (
+        "This callback has been renamed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotSample": (
+        "This callback has been removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotHistogram": (
+        "This callback has been removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotSpectrum": (
+        "This callback has been removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotEnsSample": (
+        "This callback has been removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot": (
+        "This callback has been renamed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.models.layers.activations.GLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: glu' "
+        "in your model component config instead."
+    ),
+    "anemoi.models.layers.activations.SwiGLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: swiglu' "
+        "in your model component config instead."
+    ),
+    "anemoi.models.layers.activations.GEGLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: geglu' "
+        "in your model component config instead."
+    ),
+    "anemoi.models.layers.activations.ReGLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: reglu' "
+        "in your model component config instead."
     ),
 }
 
@@ -95,6 +196,62 @@ def _find_deprecated_target(data: Any, deprecated: dict[str, str]) -> tuple[str,
     return None
 
 
+# Removed config KEYS (by dotted path). Unlike _DEPRECATED_TARGETS (which keys on
+# _target_ values), these fire on the PRESENCE of the key — even when set to null —
+# because the field is gone from the schema and a leftover entry is a migration signal.
+_DEPRECATED_KEYS: dict[str, str] = {
+    "training.run_id": (
+        "training.run_id has been removed. To resume a run, set training.checkpoint.source to "
+        "{_target_: anemoi.training.checkpoint.sources.run.RunIdSource, run_id: <id>, fork: false} "
+        "(config group: training/checkpoint/source=run +training.checkpoint.source.run_id=<id>)."
+    ),
+    "training.fork_run_id": (
+        "training.fork_run_id has been removed. To fork a new run from an existing run, set "
+        "training.checkpoint.source to {_target_: anemoi.training.checkpoint.sources.run.RunIdSource, "
+        "run_id: <id>, fork: true}."
+    ),
+    "system.input.warm_start": (
+        "system.input.warm_start has been removed. To load an explicit checkpoint file, set "
+        "training.checkpoint.source to {_target_: anemoi.training.checkpoint.sources.local.LocalSource, "
+        "path: <path>}."
+    ),
+    "training.load_weights_only": (
+        "training.load_weights_only has been removed. Set training.checkpoint.source to the run or file to "
+        "load ({_target_: anemoi.training.checkpoint.sources.run.RunIdSource, run_id: <id>} or "
+        "{_target_: anemoi.training.checkpoint.sources.local.LocalSource, path: <path>}) and "
+        "training.checkpoint.loading to "
+        "{_target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader}."
+    ),
+    "training.transfer_learning": (
+        "training.transfer_learning has been removed. Set training.checkpoint.source to the checkpoint to "
+        "load and training.checkpoint.loading to "
+        "{_target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader, skip_mismatched: true}."
+    ),
+    "training.submodules_to_freeze": (
+        "training.submodules_to_freeze has been removed. Set training.checkpoint.modifiers to a list of "
+        "modifier stages, e.g. [{_target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage, "
+        "submodules_to_freeze: [model.model.<submodule>, ...]}]. Paths start at the LightningModule, so "
+        "prefix the old names with model.model. to reach the same modules the removed key addressed: the "
+        "graph model that owns encoder/processor/decoder, two attribute hops below the LightningModule."
+    ),
+}
+
+
+def _find_deprecated_key(data: Any, deprecated: dict[str, str]) -> tuple[str, str] | None:
+    """Find a removed config key by dotted path; fires on key PRESENCE (any value)."""
+    for path, hint in deprecated.items():
+        node = data
+        for part in path.split("."):
+            if hasattr(node, "keys") and part in node:
+                node = node[part]
+            else:
+                node = None
+                break
+        else:
+            return path, hint
+    return None
+
+
 class SchemaCommonMixin:
     """Shared logic for schema objects."""
 
@@ -111,6 +268,16 @@ class SchemaCommonMixin:
             target, hint = result
             msg = f"'{target}' is deprecated and has been removed. {hint}"
             raise ValueError(msg)
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
+    def _check_deprecated_keys(cls, values: Any) -> Any:
+        """Raise before validation if a removed config key is present (any value)."""
+        result = _find_deprecated_key(values, _DEPRECATED_KEYS)
+        if result:
+            _, hint = result
+            raise ValueError(hint)
         return values
 
     def model_post_init(self, _: Any) -> None:
@@ -137,10 +304,37 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     """Graph configuration."""
     model: ModelSchema
     """Model configuration."""
+    task: TaskSchema
+    """Task configuration."""
     training: TrainingSchema
     """Training configuration."""
     config_validation: bool = True
     """Flag to disable validation of the configuration"""
+
+    @model_validator(mode="after")
+    def check_frequency_null_for_trajectory_datasets(self) -> Self:
+        """Assert data.frequency is null when any trajectory (forecast) dataset is configured."""
+        from anemoi.training.schemas.dataloader import TrajectoryDatasetSchema
+
+        all_splits = [
+            self.dataloader.training,
+            self.dataloader.validation,
+            self.dataloader.test,
+        ]
+        uses_trajectory = any(
+            isinstance(dataset, TrajectoryDatasetSchema) and dataset.trajectory is not None
+            for split in all_splits
+            for dataset in split.values()
+        )
+        if uses_trajectory and self.data.frequency is not None:
+            msg = (
+                "data.frequency must be null when using trajectory (forecast) datasets. "
+                "The step frequency is read directly from the dataset. "
+                f"Got data.frequency={self.data.frequency!r}."
+            )
+            error = "trajectory_frequency_conflict"
+            raise PydanticCustomError(error, msg)
+        return self
 
     @model_validator(mode="after")
     def set_read_group_size_if_not_provided(self) -> Self:
@@ -151,20 +345,24 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     @model_validator(mode="after")
     def check_bounding_not_used_with_data_extractor_zero(self) -> Self:
         """Check that bounding is not used with zero data extractor."""
-        if (
-            isinstance(self.model.decoder, GraphTransformerDecoderSchema)
-            and self.model.decoder.initialise_data_extractor_zero
-            and self.model.bounding
-        ):
-            error = "bounding_conflict_with_data_extractor_zero"
-            msg = (
-                "Boundings cannot be used with zero initialized weights in decoder. "
-                "Set initalise_data_extractor_zero to False."
-            )
-            raise PydanticCustomError(
-                error,
-                msg,
-            )
+        bounding = self.model.bounding
+        # A plain list of boundings belongs to the default dataset, as in the model.
+        if isinstance(bounding, dict) and "datasets" in bounding:
+            boundings = bounding["datasets"]
+        else:
+            boundings = {DEFAULT_DATASET_NAME: bounding}
+        for decoder_name, decoder in self.model.decoders.items():
+            mapper = decoder.mapper
+            dataset_names = decoder.target_datasets
+            if isinstance(mapper, GraphTransformerDecoderSchema) and mapper.initialise_data_extractor_zero:
+                for dataset_name in dataset_names:
+                    if boundings.get(dataset_name):
+                        error = "bounding_conflict_with_data_extractor_zero"
+                        msg = (
+                            f"Boundings for dataset '{dataset_name}' cannot be used with zero initialized weights"
+                            f" in decoder `'{decoder_name}`'. Set initalise_data_extractor_zero to False."
+                        )
+                        raise PydanticCustomError(error, msg)
         return self
 
 
@@ -181,13 +379,15 @@ class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     """Graph configuration."""
     model: Any
     """Model configuration."""
+    task: Any
+    """Task configuration."""
     training: Any
     """Training configuration."""
     config_validation: bool = False
     """Flag to disable validation of the configuration"""
 
 
-def convert_to_omegaconf(config: BaseSchema) -> dict:
+def convert_to_omegaconf(config: BaseSchema) -> DictConfig:
     config = config.model_dump(by_alias=True)
     return OmegaConf.create(config)
 

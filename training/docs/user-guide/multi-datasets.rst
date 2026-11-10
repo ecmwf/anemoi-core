@@ -19,7 +19,7 @@ When multiple datasets are configured:
 #. A single shared processor operates on the combined latent representation.
 
 .. warning::
-    All datasets must share the same time resolution and forecast horizon or interpolation target times.
+    All datasets must share the same time resolution and forecast horizon or target times.
 
 
 Dataset-Specific Configuration
@@ -75,6 +75,8 @@ now becomes:
 
 Each dataset is identified by a unique name, and all configuration that applies specifically to that dataset is defined within its block.
 
+
+.. _multi-dataset-reader-configuration:
 
 *********************************************
  Dataloader Dataset Reader Configuration

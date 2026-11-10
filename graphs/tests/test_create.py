@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -15,6 +15,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
+from anemoi.graphs.utils import load_graph_from_file
 
 
 class TestGraphCreator:
@@ -51,6 +52,6 @@ class TestGraphCreator:
 
         if graph_path is not None:
             assert graph_path.exists()
-            graph_saved = torch.load(graph_path, weights_only=False)
+            graph_saved = load_graph_from_file(graph_path)
             assert graph.node_types == graph_saved.node_types
             assert graph.edge_types == graph_saved.edge_types

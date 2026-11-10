@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -15,6 +15,8 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 
+from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
+from anemoi.models.layers.spectral_helpers import LatitudeGrid
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 
 LOGGER = logging.getLogger(__name__)
@@ -36,6 +38,8 @@ class SpectralTransform(torch.nn.Module):
         data : torch.Tensor
             Input data in the spatial domain of expected shape
             `[batch, ensemble, points, variables]`.
+        kwargs : dict
+            Additional keyword arguments for the transform.
 
         Returns
         -------
@@ -45,15 +49,85 @@ class SpectralTransform(torch.nn.Module):
         """
 
 
-class FFT2D(SpectralTransform):
+class Cartesian2DTransform(SpectralTransform):
+    """Base class for the 2D Cartesian spectral transforms (:class:`FFT2D`, :class:`DCT2D`).
+
+    Defines the per-radial-band power and cross spectra the 2D transforms share, binning
+    their ``(ky, kx)`` spectral plane into integer radial-wavenumber bands.
+    """
+
+    # Set by each subclass. "fft": signed FFT wavenumbers (|k| in 0..N//2); "index": cosine indices 0..N-1.
+    _radial_wavenumber_kind: str
+
+    def register_radial_bands(self) -> None:
+        """Register the radial-band index buffer used by PSD/CSD.
+
+        Opt-in (not called from ``__init__``) to avoid the cost when unused; loss functions
+        that call :meth:`power_spectral_density` or :meth:`cross_spectral_density` (e.g.
+        ``SpectralAMSELoss``, ``PowerSpectrumLoss``) must call this once at construction.
+        Idempotent.
+        """
+        if hasattr(self, "_radial_band_index"):
+            return
+        kind = getattr(self, "_radial_wavenumber_kind", None)
+        if kind == "fft":
+            ky = (torch.fft.fftfreq(self.y_dim) * self.y_dim).abs()
+            kx = (torch.fft.fftfreq(self.x_dim) * self.x_dim).abs()
+        elif kind == "index":
+            ky = torch.arange(self.y_dim, dtype=torch.float32)
+            kx = torch.arange(self.x_dim, dtype=torch.float32)
+        else:
+            raise ValueError(f"Unknown radial wavenumber kind: {kind}")
+        ky_grid, kx_grid = torch.meshgrid(ky, kx, indexing="ij")
+        band = torch.sqrt(ky_grid**2 + kx_grid**2).round().long().reshape(-1)
+        self.register_buffer("_radial_band_index", band, persistent=False)
+        self.n_radial_bands = int(band.max().item()) + 1
+
+    @property
+    def radial_band_index(self) -> torch.Tensor:
+        """Flattened ``(ky*kx,)`` radial-band id for each spectral coefficient."""
+        if not hasattr(self, "_radial_band_index"):
+            raise RuntimeError(
+                f"{type(self).__name__}.radial_band_index accessed before register_radial_bands(); "
+                "call it once on the transform (loss functions using PSD/CSD are expected to do this)."
+            )
+        return self._radial_band_index
+
+    def power_spectral_density(self, spectral_coeffs: torch.Tensor) -> torch.Tensor:
+        """Return per-band power spectral density: sum of ``|coeff|^2`` within each band.
+
+        Requires :meth:`register_radial_bands` to have been called on the transform.
+        """
+        # torch.real(c * conj(c)) == |c|^2 for complex (FFT) and c^2 for real (DCT) coeffs.
+        return self._sum_over_radial_bands(torch.real(spectral_coeffs * torch.conj(spectral_coeffs)))
+
+    def cross_spectral_density(self, spectral_coeffs_a: torch.Tensor, spectral_coeffs_b: torch.Tensor) -> torch.Tensor:
+        """Return per-band cross-spectral density: sum of ``Re[a conj(b)]`` within each band.
+
+        Requires :meth:`register_radial_bands` to have been called on the transform.
+        """
+        return self._sum_over_radial_bands(torch.real(spectral_coeffs_a * torch.conj(spectral_coeffs_b)))
+
+    def _sum_over_radial_bands(self, per_mode: torch.Tensor) -> torch.Tensor:
+        """Collapse the two spectral dims ``[..., ky, kx, v] -> [..., L, v]``."""
+        *lead, ky, kx, v = per_mode.shape
+        index = self.radial_band_index  # raises the informative RuntimeError if bands are not registered
+        flat = per_mode.reshape(*lead, ky * kx, v)
+        out = per_mode.new_zeros(*lead, self.n_radial_bands, v)
+        out.index_add_(-2, index, flat)
+        return out
+
+
+class FFT2D(Cartesian2DTransform):
     """2D Fast Fourier Transform (FFT) implementation."""
+
+    _radial_wavenumber_kind = "fft"
 
     def __init__(
         self,
         x_dim: int,
         y_dim: int,
-        apply_filter: bool = True,
-        nodes_slice: tuple[int, int | None] | None = None,
+        apply_filter: bool = False,
         patch_size: tuple[int, int] | None = None,
         patch_stride: tuple[int, int] | None = None,
         patch_padding: bool = False,
@@ -88,9 +162,6 @@ class FFT2D(SpectralTransform):
         self.patch_padding = patch_padding
         self.patch_pad_y = 0
         self.patch_pad_x = 0
-        nodes_slice = nodes_slice or (0, None)  # we don't want einops to silently fail
-        # by slicing random parts of the input
-        self.nodes_slice = slice(*nodes_slice)
         self.apply_filter = apply_filter
 
         if self.patch_size is not None:
@@ -126,6 +197,17 @@ class FFT2D(SpectralTransform):
                 patch_y, patch_x = self.patch_size
                 self.filter = self.lowpass_filter(patch_x, patch_y)
 
+    def prepare_for_fft(self, data: torch.Tensor) -> torch.Tensor:
+        """Reshape data from flat ``(nodes, vars)`` to ``(y, x, vars)``."""
+        var = data.shape[-1]
+        try:
+            return einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
+        except Exception as e:
+            raise einops.EinopsError(
+                f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
+                f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
+            ) from e
+
     @staticmethod
     def lowpass_filter(x_dim: int, y_dim: int) -> torch.Tensor:
         fx = torch.fft.fftfreq(x_dim)
@@ -141,16 +223,8 @@ class FFT2D(SpectralTransform):
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
-        data = torch.index_select(data, -2, torch.arange(*self.nodes_slice.indices(data.size(-2)), device=data.device))
 
-        var = data.shape[-1]
-        try:
-            data = einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
-        except Exception as e:
-            raise einops.EinopsError(
-                f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
-                f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
-            ) from e
+        data = self.prepare_for_fft(data)
 
         if self.patch_size is None:
             fft = torch.fft.fft2(data, dim=(-2, -3))
@@ -183,8 +257,11 @@ class FFT2D(SpectralTransform):
         return fft
 
 
-class DCT2D(SpectralTransform):
+class DCT2D(Cartesian2DTransform):
     """2D Discrete Cosine Transform."""
+
+    # DCT coefficients are real and indexed by non-negative cosine frequencies 0..N-1.
+    _radial_wavenumber_kind = "index"
 
     def __init__(self, x_dim: int, y_dim: int, **kwargs) -> None:
         super().__init__()
@@ -209,13 +286,29 @@ class DCT2D(SpectralTransform):
         return einops.rearrange(x, "(b t e v) y x -> b t e y x v", b=b, e=e, v=v, t=t)
 
 
-class RegularSHT(SpectralTransform):
-    """SHT on a regular lon-lat grid."""
+class SHT(SpectralTransform):
+    """Spherical Harmonic Transform (SHT) baseclass."""
+
+    def power_spectral_density(self, spectral_coeffs: torch.Tensor) -> torch.Tensor:
+        """Return per-L power spectral density: sum over M of |coeff|^2."""
+        return (spectral_coeffs.real**2 + spectral_coeffs.imag**2).sum(dim=-2)
+
+    def cross_spectral_density(self, spectral_coeffs_a: torch.Tensor, spectral_coeffs_b: torch.Tensor) -> torch.Tensor:
+        """Return per-L cross-spectral density."""
+        return (spectral_coeffs_a.real * spectral_coeffs_b.real + spectral_coeffs_a.imag * spectral_coeffs_b.imag).sum(
+            dim=-2
+        )
+
+
+class RegularSHT(SHT):
+    """SHT on Gaussian or equally spaced latitude rings and uniform longitudes."""
 
     def __init__(
         self,
         nlat: int,
         truncation: int | None = None,
+        nlon: int | None = None,
+        latitude_grid: LatitudeGrid = "legendre-gauss",
         **kwargs,
     ) -> None:
         """SHT on a regular lon-lat grid.
@@ -226,13 +319,25 @@ class RegularSHT(SpectralTransform):
             Number of latitudes in the regular grid.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        nlon : int | None
+            Number of equally spaced longitudes in [0, 360), starting at zero. Defaults to 2 * nlat.
+        latitude_grid : {"legendre-gauss", "equiangular-poles"}
+            Latitude sampling, north to south. Equiangular rows include both poles:
+            latitude[j] = 90 - j * 180 / (nlat - 1).
+            Equiangular truncation must satisfy 2 * truncation < nlat.
         """
         super().__init__()
         self.nlat = nlat
-        self.nlon = 2 * self.nlat
+        self.nlon = 2 * nlat if nlon is None else nlon
+        if nlat < 2 or self.nlon < 2:
+            raise ValueError("nlat and nlon must both be at least 2")
+        if truncation is None:
+            truncation = min(nlat // 2 - 1, (self.nlon - 1) // 2)
+        if 2 * truncation >= self.nlon:
+            raise ValueError("Require 2 * truncation < nlon to resolve all zonal modes")
         self.lons_per_lat = [self.nlon] * self.nlat
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat, truncation=truncation, latitude_grid=latitude_grid
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -242,16 +347,17 @@ class RegularSHT(SpectralTransform):
         coeffs = self._sht(x)
 
         # -> [b,t,e,L,M,v] == [b,t,e,y_freq,x_freq,v]
-        return einops.rearrange(coeffs, "(b t e v) yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
+        return einops.rearrange(coeffs, "b t e v yF xF -> b t e yF xF v")
 
 
-class ReducedSHT(SpectralTransform):
+class ReducedSHT(SHT):
     """SHT on a reduced Gaussian grid."""
 
     def __init__(
         self,
         grid: str,
         truncation: int | None = None,
+        use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
         """SHT on a reduced Gaussian grid.
@@ -262,6 +368,9 @@ class ReducedSHT(SpectralTransform):
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_graphed_rfft : bool
+            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have
+            higher memory usage and may not be supported by all devices.
         """
         super().__init__()
 
@@ -290,7 +399,9 @@ class ReducedSHT(SpectralTransform):
         self.lons_per_lat = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
 
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_rfft=use_graphed_rfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -303,13 +414,14 @@ class ReducedSHT(SpectralTransform):
         return einops.rearrange(coeffs, "b t e v yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
 
 
-class OctahedralSHT(SpectralTransform):
+class OctahedralSHT(SHT):
     """SHT on an octahedral reduced grid."""
 
     def __init__(
         self,
         nlat: int,
         truncation: int | None = None,
+        use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
         """SHT on an octahedral reduced grid.
@@ -317,16 +429,21 @@ class OctahedralSHT(SpectralTransform):
         Parameters
         ----------
         nlat : int
-            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based on the octahedral grid structure.
+            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based
+            on the octahedral grid structure.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_graphed_rfft : bool
+            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices.
         """
         super().__init__()
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
         self.lons_per_lat += list(reversed(self.lons_per_lat))
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_rfft=use_graphed_rfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -339,3 +456,156 @@ class OctahedralSHT(SpectralTransform):
         x = einops.rearrange(data, "b t e p v -> (b t e v) p")
         coeffs = self._sht(x)  # complex: (b*t*e*v, L, M)
         return einops.rearrange(coeffs, "(b t e v) yF xF -> b t e yF xF v", b=b, t=t, e=e, v=v)
+
+
+class InverseSpectralTransform(torch.nn.Module):
+    """Abstract base class for inverse spectral transforms.
+
+    Input: complex tensor [..., l, m] (spectral coefficients).
+    Output: real tensor [..., points] (spatial domain).
+    """
+
+    @abc.abstractmethod
+    def forward(self, data: torch.Tensor) -> torch.Tensor: ...
+
+
+class InverseRegularSHT(InverseSpectralTransform):
+    """Inverse SHT on Gaussian or equally spaced latitude rings and uniform longitudes."""
+
+    def __init__(
+        self,
+        nlat: int,
+        truncation: int | None = None,
+        nlon: int | None = None,
+        latitude_grid: LatitudeGrid = "legendre-gauss",
+        **kwargs,
+    ) -> None:
+        """Initialize InverseRegularSHT.
+
+        Parameters
+        ----------
+        nlat : int
+            Number of latitudes.
+        truncation : int | None
+            Spectral truncation. Defaults to ``nlat // 2 - 1``.
+        nlon : int | None
+            Number of equally spaced longitudes in [0, 360), starting at zero. Defaults to 2 * nlat.
+        latitude_grid : {"legendre-gauss", "equiangular-poles"}
+            Latitude sampling, north to south. Equiangular rows include both poles:
+            latitude[j] = 90 - j * 180 / (nlat - 1).
+            Equiangular truncation must satisfy 2 * truncation < nlat.
+        **kwargs : dict
+            Additional keyword arguments (ignored).
+        """
+        super().__init__()
+        self.nlat = nlat
+        self.nlon = 2 * nlat if nlon is None else nlon
+        if nlat < 2 or self.nlon < 2:
+            raise ValueError("nlat and nlon must both be at least 2")
+        if truncation is None:
+            truncation = min(nlat // 2 - 1, (self.nlon - 1) // 2)
+        if 2 * truncation >= self.nlon:
+            raise ValueError("Require 2 * truncation < nlon to resolve all zonal modes")
+        self.lons_per_lat = [self.nlon] * self.nlat
+        self._isht = InverseSphericalHarmonicTransform(
+            lons_per_lat=self.lons_per_lat, truncation=truncation, latitude_grid=latitude_grid
+        )
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        return self._isht(data)
+
+
+class InverseReducedSHT(InverseSpectralTransform):
+    """Inverse SHT on a reduced Gaussian grid."""
+
+    def __init__(
+        self,
+        grid: str,
+        truncation: int | None = None,
+        use_graphed_irfft: bool = False,
+        **kwargs,
+    ) -> None:
+        """Inverse SHT on a reduced Gaussian grid.
+
+        Parameters
+        ----------
+        grid : str
+            Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
+        truncation : int | None
+            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_graphed_irfft : bool
+            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
+            higher memory usage and may not be supported by all devices.
+        """
+        super().__init__()
+
+        if grid not in ["n320", "N320"]:
+            raise ValueError("Only the N320 reduced Gaussian grid SHT is supported.")
+        else:
+            self.nlat = 2 * int(grid[1:])  # N320 has 640 latitudes from pole to pole
+
+        # Fetch regular grid data
+        try:
+            from anemoi.transform.grids.named import lookup
+        except ImportError:
+            raise ImportError(
+                "anemoi.transform is required for InverseReducedSHT transform. Install optional dependencies: pip install anemoi-models[spectra]"
+            )
+
+        # To generate a grid
+        # anemoi-transform get-grid --source mars grid=n320,levtype=sfc,param=2t grid-n320.npz
+
+        lats = lookup(grid)["latitudes"]
+
+        # Get latitudes of this grid
+        unique_lats = sorted(set(lats))
+
+        # Calculate longitudes per latitude
+        self.lons_per_lat = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
+
+        self._isht = InverseSphericalHarmonicTransform(
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_irfft=use_graphed_irfft,
+        )
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        return self._isht(data)
+
+
+class InverseOctahedralSHT(InverseSpectralTransform):
+    """Inverse SHT on an octahedral reduced grid."""
+
+    def __init__(
+        self,
+        nlat: int,
+        truncation: int | None = None,
+        use_graphed_irfft: bool = False,
+        **kwargs,
+    ) -> None:
+        """Inverse SHT on an octahedral reduced grid.
+
+        Parameters
+        ----------
+        nlat : int
+            Number of latitudes.
+        truncation : int | None
+            Spectral truncation. Defaults to nlat // 2 - 1.
+        use_graphed_irfft : bool
+            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
+            higher memory usage and may not be supported by all devices.
+        **kwargs : dict
+            Additional keyword arguments (ignored).
+        """
+        super().__init__()
+        self.nlat = nlat
+        self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
+        self.lons_per_lat += list(reversed(self.lons_per_lat))
+        self._isht = InverseSphericalHarmonicTransform(
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_irfft=use_graphed_irfft,
+        )
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        return self._isht(data)

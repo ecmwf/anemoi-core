@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -13,6 +13,7 @@ from pathlib import Path
 
 import torch
 
+from anemoi.graphs.utils import load_graph_from_file
 from anemoi.utils.humanize import bytes
 from anemoi.utils.text import table
 
@@ -22,7 +23,7 @@ class GraphDescriptor:
 
     def __init__(self, path: str | Path, **kwargs):
         self.path = path
-        self.graph = torch.load(self.path, weights_only=False, map_location="cpu")
+        self.graph = load_graph_from_file(self.path)
 
     @property
     def total_size(self):

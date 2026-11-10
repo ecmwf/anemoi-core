@@ -1,0 +1,53 @@
+# Minimal Hydra override file for `anemoi-training evaluate`.
+#
+# A checkpoint MUST be specified via training.checkpoint.source (Pattern A or B
+# below) — evaluating a randomly-initialised model is almost certainly an error.
+#
+# Usage:
+#   anemoi-training evaluate --config-path /path/to/overrides --config-name config_evaluate
+#
+# Or pass individual keys as CLI overrides:
+#   anemoi-training evaluate training/checkpoint/source=run +training.checkpoint.source.run_id=<run_id>
+
+# ── Checkpoint (REQUIRED — choose one pattern) ───────────────────────────────
+
+# Pattern A: last.ckpt of a known run_id (most common)
+training:
+  checkpoint:
+    source:
+      _target_: anemoi.training.checkpoint.sources.run.RunIdSource
+      run_id: ???             # run_id of the completed training run
+    loading:
+      # weights-only load: skips a redundant second load by Lightning and
+      # avoids restoring optimiser state — recommended for evaluation.
+      _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+
+# Pattern B: point directly at a checkpoint file
+# training:
+#   checkpoint:
+#     source:
+#       _target_: anemoi.training.checkpoint.sources.local.LocalSource
+#       path: /path/to/epoch=10-step=5000.ckpt
+#     loading:
+#       _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+
+# ── Diagnostics ───────────────────────────────────────────────────────────────
+diagnostics:
+  # Checkpointing and weight averaging are automatically disabled by the
+  # evaluator — evaluation is a read-only operation on a trained model.
+  enable_checkpointing: False  # listed here for clarity; always overridden
+  enable_progress_bar: True
+  print_memory_summary: False
+
+  plot:
+    enabled: True            # generate diagnostic plots during validation
+    asynchronous: True       # plot in a background thread
+
+  log:
+    mlflow:
+      enabled: True          # log metrics and plots to an existing MLflow experiment
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+dataloader:
+  limit_batches:
+    validation: null         # set to an integer to cap the number of batches

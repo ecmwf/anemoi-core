@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -11,6 +11,8 @@
 import datetime
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -20,7 +22,10 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.demos.boring_classes import BoringModel
 from torch import nn
 
+from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.preprocessing.imputer import ConstantImputer
 from anemoi.training.diagnostics.callbacks import AnemoiCheckpoint
+from anemoi.training.utils.checkpoint import save_inference_checkpoint
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.utils.checkpoints import load_metadata
 from anemoi.utils.config import DotDict
@@ -35,6 +40,10 @@ class DummyModel(torch.nn.Module):
         self.config = config
         self.metadata = metadata
         self.supporting_arrays = {}
+        # Mirror AnemoiModelInterface's graph_data/model._graph_data shape so
+        # AnemoiCheckpoint._save_checkpoint's graph_data null-out has something to act on.
+        self.graph_data = {"dummy": "graph"}
+        self.model = SimpleNamespace(_graph_data={"dummy": "graph"})
         self.fc1 = nn.Linear(32, 5)
         self.fc2 = nn.Linear(5, 1)
         self.relu = nn.ReLU()
@@ -96,6 +105,84 @@ def callback(tmp_path: str, checkpoint_settings: dict) -> AnemoiCheckpoint:
     return callback
 
 
+def test_on_train_start_initializes_timer(tmp_path: Path) -> None:
+    """Regression test for #952: on_train_start must initialize _last_time_checked via super().
+
+    Without the super() call, _last_time_checked stays None and every time-based checkpoint
+    is silently skipped because on_train_batch_end short-circuits on `prev_time_check is None`.
+    """
+    import time
+
+    dirpath = str(tmp_path) + "/test_timer_init"
+    callback = AnemoiCheckpoint(
+        filename="{step}",
+        save_last=True,
+        train_time_interval=datetime.timedelta(seconds=60),
+        save_top_k=1,
+        monitor="step",
+        mode="max",
+        dirpath=dirpath,
+    )
+
+    # Before on_train_start fires, the timer must be uninitialised
+    assert callback._last_time_checked is None, "_last_time_checked should be None before on_train_start"
+
+    trainer = MagicMock()
+    trainer.is_global_zero = False
+    pl_module = MagicMock()
+    before = time.monotonic()
+    callback.on_train_start(trainer, pl_module)
+    after = time.monotonic()
+
+    assert (
+        callback._last_time_checked is not None
+    ), "_last_time_checked is still None after on_train_start — super().on_train_start() is probably missing"
+    assert (
+        before <= callback._last_time_checked <= after
+    ), "_last_time_checked value is outside the expected time window"
+
+
+def test_time_based_checkpoint_skip_logic_after_interval(tmp_path: Path) -> None:
+    """Verify that after on_train_start + elapsed interval, skip_time evaluates to False.
+
+    This directly simulates the check inside ModelCheckpoint.on_train_batch_end and
+    confirms that the timer initialised by on_train_start works correctly.
+    """
+    import time
+
+    interval = datetime.timedelta(seconds=0.05)  # 50 ms
+    dirpath = str(tmp_path) + "/checkpoint_test"
+    callback = AnemoiCheckpoint(
+        filename="{step}",
+        save_last=True,
+        train_time_interval=interval,
+        save_top_k=1,
+        monitor="step",
+        mode="max",
+        dirpath=dirpath,
+    )
+    trainer = MagicMock()
+    trainer.is_global_zero = False
+    pl_module = MagicMock()
+    callback.on_train_start(trainer, pl_module)
+    # Simulate the skip_time check from on_train_batch_end BEFORE the interval passes
+    now = time.monotonic()
+    prev = callback._last_time_checked
+    skip_time_before = prev is None or (now - prev) < interval.total_seconds()
+    assert skip_time_before is True, "Checkpoint should be skipped immediately after start"
+
+    # Wait longer than the interval
+    time.sleep(0.1)  # 100 ms > 50 ms
+
+    # Simulate the skip_time check AFTER the interval has passed
+    now = time.monotonic()
+    skip_time_after = prev is None or (now - prev) < interval.total_seconds()
+    assert skip_time_after is False, (
+        "Checkpoint should NOT be skipped after the interval has elapsed — "
+        "if this fails, _last_time_checked was never set (super() missing)"
+    )
+
+
 @pytest.fixture
 def metadata(config: DictConfig) -> dict:
     return map_config_to_primitives(
@@ -115,8 +202,8 @@ def model(metadata: dict, config: DictConfig) -> DummyModule:
 
 
 @pytest.mark.data_dependent
-def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule) -> None:
-    """Test if the inference checkpoints and lightning checkpoints store same uuid.
+def test_training_checkpoint_has_its_own_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule) -> None:
+    """Test that a training checkpoint stores a different uuid from its inference checkpoint.
 
     Args:
         tmp_path (str): path to checkpoint dir
@@ -126,15 +213,40 @@ def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule
     trainer = Trainer(default_root_dir=tmp_path, accelerator="cpu", callbacks=[callback], max_epochs=2, logger=False)
     trainer.fit(model)
 
-    for ckpt_path in Path(tmp_path).iterdir():
-        if str(ckpt_path.name).startswith("inference"):
-            pl_ckpt_name = (ckpt_path.name).replace("inference-", "")
+    for inference_ckpt_path in Path(tmp_path).iterdir():
+        if str(inference_ckpt_path.name).startswith("inference"):
+            training_ckpt_name = inference_ckpt_path.name.replace("inference-", "")
 
-            if Path(tmp_path + "/" + pl_ckpt_name).exists():
-                uuid = load_metadata(ckpt_path)["uuid"]
+            if Path(tmp_path + "/" + training_ckpt_name).exists():
+                inference_uuid = load_metadata(inference_ckpt_path)["uuid"]
+                training_ckpt_path = tmp_path + "/" + training_ckpt_name
+                training_uuid = load_metadata(training_ckpt_path)["uuid"]
 
-                pl_model = DummyModule.load_from_checkpoint(tmp_path + "/" + pl_ckpt_name, weights_only=False)
+                training_model = DummyModule.load_from_checkpoint(training_ckpt_path, weights_only=False)
 
-                assert uuid == pl_model.hparams["metadata"]["uuid"]
+                assert training_uuid == training_model.hparams["metadata"]["uuid"]
+                assert training_uuid != inference_uuid
 
     shutil.rmtree(tmp_path)
+
+
+def test_inference_checkpoint_excludes_imputer_runtime_state(tmp_path: str, config: DictConfig) -> None:
+    """Inference checkpoints must not capture a rank's current batch mask."""
+    model = DummyModel(config=config, metadata={})
+    data_indices = IndexCollection(
+        DictConfig({"forcing": [], "diagnostic": []}),
+        {"imputed": 0, "valid": 1},
+    )
+    model.imputer = ConstantImputer(
+        DictConfig({"default": "none", 0: ["imputed"]}),
+        data_indices=data_indices,
+    )
+    batch = torch.tensor([[[[torch.nan, 1.0], [1.0, 1.0]]]])
+    model.imputer.transform(batch, in_place=False)
+    inference_path = save_inference_checkpoint(model, {}, Path(tmp_path) / "model.ckpt")
+    saved_model = torch.load(inference_path, weights_only=False)
+
+    assert saved_model.imputer.nan_locations is None
+    assert saved_model.imputer.loss_mask_training is None
+    assert model.imputer.nan_locations is None
+    assert model.imputer.loss_mask_training is None

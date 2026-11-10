@@ -1,5 +1,11 @@
 prefetch_factor: 2
 pin_memory: True
+# keep dataloader workers alive between epochs instead of starting new ones every epoch
+persistent_workers: False
+fake_dataloading: False
+
+loading_policy:
+  _target_: anemoi.training.data.loading.SynchronizedLoadingPolicy
 
 # ============
 # read_group_size:
@@ -59,8 +65,6 @@ training:
       start: 1985
       end: 2020
       trajectory: null
-
-validation_rollout: 1 # number of rollouts to use for validation
 
 # Multi-dataset validation with same datasets, different time period
 validation:

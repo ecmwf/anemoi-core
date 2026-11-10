@@ -183,6 +183,13 @@ nor does it submit to any jurisdiction. #}
                     <input id="scaleFactor" type="number" min="0.5" max="3.0" step="0.1" value="1.0" />
                 </div>
             </div>
+
+            <div class="control-row">
+                <span>Scale nodes by degree</span>
+                <div class="control-right">
+                    <input id="scaleByDegree" type="checkbox" checked />
+                </div>
+            </div>
         </div>
 
         <div class="controls">
@@ -397,8 +404,9 @@ nor does it submit to any jurisdiction. #}
         let totalNodeCount = 0;
 
         const BASE_SCALE = 1.0;
+        const scaleByDegreeCheckbox = document.getElementById('scaleByDegree');
         function computeNodeScale(d) {
-            if (maxDegree === minDegree) return 1.0 * BASE_SCALE;
+            if (!scaleByDegreeCheckbox.checked || maxDegree === minDegree) return 1.0 * BASE_SCALE;
             const n = (d - minDegree) / ((maxDegree / 4) - minDegree);
             return (1 + n * 4) * BASE_SCALE;
         }
@@ -698,8 +706,9 @@ nor does it submit to any jurisdiction. #}
                 selectedNode = nodeName;
                 connectedNodes = new Set();
 
-                // Compute adjacency on the fly
-                EDGE_SETS.forEach(es => {
+                // Compute adjacency on the fly, only for visible edge sets
+                EDGE_SETS.forEach((es, i) => {
+                    if (!edgeSetMeshes[i].visible) return;
                     es.edges.forEach(([a, b]) => {
                         if (a === nodeName) connectedNodes.add(b);
                         else if (b === nodeName) connectedNodes.add(a);
@@ -900,6 +909,8 @@ nor does it submit to any jurisdiction. #}
             baseScaleFactorRef.value = Number(e.target.value);
             updateNodeScales();
         };
+
+        scaleByDegreeCheckbox.onchange = () => { updateNodeScales(); };
 
         // Resize
         window.addEventListener('resize', () => {

@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -16,86 +16,76 @@ import torch
 from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
-from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.utils.config import DotDict
-
-from .autoencoder import AnemoiModelAutoEncoder
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
-    """Disentangled graph network with multi-dataset support.
+class DisentangledMixin:
+    """Shared pieces of the disentangled (per-timestep encoding) forecasters.
 
-    Encodes each input timestep independently for each dataset, accumulates all
-    latent representations, blends them with a learned latent_blender, then runs
-    a processor in latent space. On rollout step > 0, performs latent rollout by
-    shifting the latent buffer instead of re-encoding from data space.
+    A disentangled forecaster re-uses the encoder/decoder of an autoencoder
+    trained with ``multistep_input = 1`` (the ``Autoencoder`` task). Each input
+    timestep is encoded independently through that encoder, the per-timestep
+    latents are fused by a trainable ``latent_blender`` and advanced in time by
+    the processor.
+
+    With ``model.latent_rollout: True`` the model keeps a buffer of latents
+    between calls: on ``rollout_step == 0`` it encodes all input timesteps, on
+    later steps it shifts the buffer and appends the previous processor output
+    instead of re-encoding from data space. This needs ``rollout_step`` passed to
+    ``forward`` (see ``anemoi.training.train.methods.LatentRolloutTraining``).
+    Without it every call re-encodes, which is always correct.
     """
 
-    def __init__(
-        self,
-        *,
-        model_config: DotDict,
-        data_indices: dict,
-        statistics: dict,
-        graph_data: HeteroData,
-    ) -> None:
-        model_config = DotDict(model_config)
-        super().__init__(
-            model_config=model_config,
-            data_indices=data_indices,
-            statistics=statistics,
-            graph_data=graph_data,
-        )
-        self.latent_rollout = model_config.model.model.latent_rollout
+    def _init_latent_rollout(self, model_config: DotDict) -> None:
+        self.latent_rollout = bool(model_config.model.get("latent_rollout", False))
+        self._latent_buffer: Optional[Tensor] = None
+        self._last_latent: Optional[Tensor] = None
+        self._cached_encoder_outputs: dict = {}
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        # Encode one timestep at a time — no n_step_input multiplier
+        # One timestep per encoder call: no n_step_input multiplier. This matches an
+        # encoder trained with multistep_input=1, so its weights load by name.
         return self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
 
-    def _calculate_target_dim(self, dataset_name: str) -> int:
-        return (
-            self.n_step_output * self.num_input_channels_decoding_forcings[dataset_name]
-            + self.node_attributes.attr_ndims[dataset_name]
-        )
+    def _build_latent_blender(self, model_config: DotDict, num_channels: int, hidden_name: str, edge_dim: int) -> None:
+        """Mapper hidden -> hidden fusing ``n_step_input`` latents into one state.
 
-    def _build_networks(self, model_config: DotDict) -> None:
-        # Build encoder, processor, decoder (and their graph providers) via parent
-        super()._build_networks(model_config)
-
-        # Latent blender: maps accumulated latents from all datasets
-        # (n_datasets * n_step_input * num_channels) -> hidden
-        # Uses the same hidden->hidden edges as the processor graph provider
+        Uses ``model.latent_blender`` if given, otherwise the mapper config of the
+        first encoder. It runs over the processor's hidden -> hidden edges.
+        """
+        blender_config = model_config.get("latent_blender") or next(iter(model_config.encoders.values())).mapper
         self.latent_blender = instantiate(
-            model_config.model.encoder,
+            blender_config,
             _recursive_=False,
-            in_channels_src=self.num_channels * self.n_step_input * len(self.dataset_names),
-            in_channels_dst=self.node_attributes.attr_ndims[self._graph_name_hidden],
-            hidden_dim=self.num_channels,
-            edge_dim=self.processor_graph_provider.edge_dim,
+            in_channels_src=num_channels * self.n_step_input,
+            in_channels_dst=self.node_attributes.attr_ndims[hidden_name],
+            num_channels=num_channels,
+            edge_dim=edge_dim,
         )
 
-    def _assemble_single_input(
+    def _assemble_step_input(
         self,
         x_t: Tensor,
         batch_size: int,
-        grid_shard_shapes: dict | None,
-        model_comm_group,
+        grid_shard_sizes: DatasetShardSizes | None,
+        model_comm_group: Optional[ProcessGroup],
         dataset_name: str,
-    ) -> tuple[Tensor, list]:
-        """Assemble input for a single timestep (no n_step_input slicing)."""
+    ) -> tuple[Tensor, ShardSizes]:
+        """Encoder source features for one timestep ``x_t`` of shape (batch, 1, ensemble, grid, vars)."""
         node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
-        ds_grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
-        if ds_grid_shard_shapes is not None:
-            shard_shapes_nodes = get_or_apply_shard_shapes(
-                node_attributes_data, 0, shard_shapes_dim=ds_grid_shard_shapes, model_comm_group=model_comm_group
-            )
-            node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
+        ds_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+        if ds_shard_sizes is not None:
+            node_attributes_data = shard_tensor(node_attributes_data, 0, ds_shard_sizes, model_comm_group)
 
         x_data_latent = torch.cat(
             (
@@ -104,18 +94,89 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
             ),
             dim=-1,
         )
-        shard_shapes_data = get_or_apply_shard_shapes(
-            x_data_latent, 0, shard_shapes_dim=ds_grid_shard_shapes, model_comm_group=model_comm_group
+        return x_data_latent, ds_shard_sizes
+
+    def _residual(
+        self,
+        x: Tensor,
+        grid_shard_sizes: DatasetShardSizes | None,
+        model_comm_group: Optional[ProcessGroup],
+        dataset_name: str,
+    ) -> Tensor:
+        """Residual skip computed from the full (current) input window."""
+        return self.residual[dataset_name](
+            x,
+            grid_shard_sizes=grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None,
+            model_comm_group=model_comm_group,
+            n_step_output=self.n_step_output,
         )
-        return x_data_latent, shard_shapes_data
+
+    def _use_latent_buffer(self, rollout_step: int) -> bool:
+        return self.latent_rollout and rollout_step > 0 and self._latent_buffer is not None
+
+    def _advance_latent_buffer(self) -> Tensor:
+        """Shift the latent buffer by one step, appending the previous processor output."""
+        self._latent_buffer = torch.cat((self._latent_buffer[:, 1:], self._last_latent.unsqueeze(1)), dim=1)
+        return self._last_latent
+
+    def _blend(
+        self,
+        latents: Tensor,
+        x_hidden_latent: Tensor,
+        shard_sizes_hidden: ShardSizes,
+        edge_attr: Tensor,
+        edge_index: Tensor,
+        edge_shard_sizes,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup],
+    ) -> Tensor:
+        """Fuse (nodes, n_step_input, channels) latents into a single (nodes, channels) state."""
+        _, blended = self.latent_blender(
+            (einops.rearrange(latents, "nodes time channels -> nodes (time channels)"), x_hidden_latent),
+            batch_size=batch_size,
+            shard_info=BipartiteGraphShardInfo(
+                src_nodes=shard_sizes_hidden,
+                dst_nodes=shard_sizes_hidden,
+                edges=edge_shard_sizes,
+            ),
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            model_comm_group=model_comm_group,
+            keep_x_dst_sharded=True,
+        )
+        return blended
+
+
+class AnemoiModelDisentangledEncProcDec(DisentangledMixin, AnemoiModelEncProcDec):
+    """Disentangled encoder-processor-decoder with optional latent rollout.
+
+    Each input timestep of each dataset is encoded independently; the datasets of
+    one timestep are combined by the ``latent_aggregator``. The resulting
+    ``n_step_input`` latents are fused by ``latent_blender`` and the processor
+    predicts the next latent state, which is decoded per dataset.
+    """
+
+    def __init__(self, *, model_config: DotDict, **kwargs) -> None:
+        super().__init__(model_config=model_config, **kwargs)
+        self._init_latent_rollout(model_config)
+
+    def _build_networks(self, model_config: DotDict) -> None:
+        super()._build_networks(model_config)
+        assert len(self.hidden_names) == 1, "The disentangled model supports a single hidden mesh."
+        self._build_latent_blender(
+            model_config,
+            num_channels=self.latent_aggregator.hidden_dim,
+            hidden_name=self.hidden_names[0],
+            edge_dim=self.processor_graph_provider[self.hidden_names[0]].edge_dim,
+        )
 
     def forward(
         self,
         x: dict[str, Tensor],
-        rollout_step: Optional[int] = 0,
+        rollout_step: int = 0,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[dict] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:
         """Forward pass.
@@ -123,128 +184,130 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelAutoEncoder):
         Parameters
         ----------
         x : dict[str, Tensor]
-            Input data keyed by dataset name.
+            Input per dataset, shaped (batch, time, ensemble, grid, vars).
         rollout_step : int, optional
-            Current rollout step. On 0, encode all input timesteps for all datasets.
-            On > 0, do latent rollout.
+            Rollout step. With ``latent_rollout`` enabled, steps > 0 advance the
+            latent buffer instead of re-encoding ``x``.
         model_comm_group : ProcessGroup, optional
-        grid_shard_shapes : dict, optional
+        grid_shard_sizes : DatasetShardSizes, optional
         """
-        batch_size = x[self.dataset_names[0]].shape[0]
-        ensemble_size = x[self.dataset_names[0]].shape[2]
+        dataset_names = list(x.keys())
+        batch_size = self._get_consistent_dim(x, 0)
+        ensemble_size = self._get_consistent_dim(x, 2)
 
-        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
-        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
+        in_out_sharded = self._resolve_in_out_sharded(dataset_names=dataset_names, grid_shard_sizes=grid_shard_sizes)
+        for dataset_name in dataset_names:
+            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
-        proc_edge_attr, proc_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+        hidden_name = self._get_active_hidden_name(dataset_names)
+        x_hidden_latent = self.node_attributes(hidden_name, batch_size=batch_size)
+        shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
+        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
+
+        proc_edge_attr, proc_edge_index, proc_edge_shard_sizes = self.processor_graph_provider[hidden_name].get_edges(
             batch_size=batch_size, model_comm_group=model_comm_group
         )
 
-        if rollout_step == 0:
-            # Encode each timestep of each dataset independently and accumulate latents
-            latents = []
-            for dataset_name in self.dataset_names:
-                x_ds = x[dataset_name]
-                in_out_sharded = grid_shard_shapes is not None and dataset_name in grid_shard_shapes
-                self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
-
-                enc_edge_attr, enc_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
-                    dataset_name
-                ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
-
-                for i in range(self.n_step_input):
-                    x_t = x_ds[:, i : i + 1, ...]  # [B, 1, E, G, D]
-                    x_data_latent, shard_shapes_data = self._assemble_single_input(
-                        x_t, batch_size, grid_shard_shapes, model_comm_group, dataset_name
+        if self._use_latent_buffer(rollout_step):
+            x_latent_skip = self._advance_latent_buffer()
+        else:
+            step_latents = []
+            encoded_data = {}
+            for t in range(self.n_step_input):
+                dataset_latents = {}
+                for dataset_name in dataset_names:
+                    if dataset_name not in self.input_datasets:
+                        continue
+                    x_data_latent, shard_sizes_data = self._assemble_step_input(
+                        x[dataset_name][:, t : t + 1],
+                        batch_size,
+                        grid_shard_sizes,
+                        model_comm_group,
+                        dataset_name,
                     )
-                    _, x_latent = self.encoder[dataset_name](
+                    enc_edge_attr, enc_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
+                        dataset_name
+                    ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
+                    x_data_latent, dataset_latents[dataset_name] = self.encoder[self.dataset2encoder[dataset_name]](
                         (x_data_latent, x_hidden_latent),
                         batch_size=batch_size,
-                        shard_shapes=(shard_shapes_data, shard_shapes_hidden),
+                        shard_info=BipartiteGraphShardInfo(
+                            src_nodes=shard_sizes_data,
+                            dst_nodes=shard_sizes_hidden,
+                            edges=enc_edge_shard_sizes,
+                        ),
                         edge_attr=enc_edge_attr,
                         edge_index=enc_edge_index,
                         model_comm_group=model_comm_group,
-                        x_src_is_sharded=in_out_sharded,
-                        x_dst_is_sharded=False,
                         keep_x_dst_sharded=True,
-                        edge_shard_shapes=enc_edge_shard_shapes,
                     )
-                    latents.append(x_latent)
+                    if t == self.n_step_input - 1:
+                        encoded_data[dataset_name] = x_data_latent
+                step_latents.append(self.latent_aggregator(x_hidden_latent, dataset_latents))
 
-            # Stack: [B*E*G_hidden, n_datasets * n_step_input, num_channels]
-            self.x_accum = torch.stack(latents, dim=1)
-            x_skip = latents[-1]  # last latent (last timestep of last dataset) for residual
+            # Data-node encoder outputs of the most recent input step, used as decoder
+            # targets when target_node_features includes ``encoded_data``.
+            self._cached_encoder_outputs = encoded_data
+            self._latent_buffer = torch.stack(step_latents, dim=1)
+            x_latent_skip = step_latents[-1]
 
-        else:
-            # Latent rollout: shift buffer and replace last slot with previous processor output
-            self.x_accum = self.x_accum.roll(-1, dims=1)
-            self.x_accum[:, -1, ...] = self.x_latent_proc
-            x_skip = self.x_latent_proc
-
-        # Flatten accumulated latents for blender input:
-        # [B*E*G, n_datasets * n_step_input * num_channels]
-        x_accum_flat = einops.rearrange(self.x_accum, "bg n c -> bg (n c)")
-
-        # Latent blending: blend accumulated latents into a single hidden representation
-        # Uses same hidden->hidden edges as the processor
-        _, blended_x = self.latent_blender(
-            (x_accum_flat, x_hidden_latent),
-            batch_size=batch_size,
-            shard_shapes=(shard_shapes_hidden, shard_shapes_hidden),
-            edge_attr=proc_edge_attr,
-            edge_index=proc_edge_index,
-            model_comm_group=model_comm_group,
-            x_src_is_sharded=False,
-            x_dst_is_sharded=False,
-            keep_x_dst_sharded=True,
-            edge_shard_shapes=proc_edge_shard_shapes,
+        x_latent = self._blend(
+            self._latent_buffer,
+            x_hidden_latent,
+            shard_sizes_hidden,
+            proc_edge_attr,
+            proc_edge_index,
+            proc_edge_shard_sizes,
+            batch_size,
+            model_comm_group,
         )
-
-        # Processor: hidden -> hidden
         x_latent_proc = self.processor(
-            x=blended_x,
+            x=x_latent,
             batch_size=batch_size,
-            shard_shapes=shard_shapes_hidden,
+            shard_info=GraphShardInfo(nodes=shard_sizes_hidden, edges=proc_edge_shard_sizes),
             edge_attr=proc_edge_attr,
             edge_index=proc_edge_index,
             model_comm_group=model_comm_group,
-            edge_shard_shapes=proc_edge_shard_shapes,
         )
-
-        # Latent skip connection
         if self.latent_skip:
-            x_latent_proc = x_latent_proc + x_skip
-        self.x_latent_proc = x_latent_proc
+            x_latent_proc = x_latent_proc + x_latent_skip
+        self._last_latent = x_latent_proc
 
-        # Decode each dataset independently
-        outputs = {}
-        for dataset_name in self.dataset_names:
-            x_ds = x[dataset_name]
-            in_out_sharded = grid_shard_shapes is not None and dataset_name in grid_shard_shapes
-
-            dec_edge_attr, dec_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[dataset_name].get_edges(
+        x_out_dict = {}
+        for dataset_name in dataset_names:
+            if dataset_name not in self.target_datasets:
+                continue
+            x_target_latent, shard_sizes_target = self._assemble_targets(
+                x[dataset_name],
+                self._cached_encoder_outputs.get(dataset_name),
+                batch_size,
+                grid_shard_sizes,
+                model_comm_group,
+                dataset_name,
+            )
+            dec_edge_attr, dec_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size, model_comm_group=model_comm_group
             )
-
-            x_target_latent, shard_shapes_target = self._assemble_forcings(
-                x_ds, batch_size, grid_shard_shapes, model_comm_group, dataset_name=dataset_name
-            )
-
-            x_out = self.decoder[dataset_name](
+            x_out = self.decoder[self.dataset2decoder[dataset_name]](
                 (x_latent_proc, x_target_latent),
                 batch_size=batch_size,
-                shard_shapes=(shard_shapes_hidden, shard_shapes_target),
+                shard_info=BipartiteGraphShardInfo(
+                    src_nodes=shard_sizes_hidden,
+                    dst_nodes=shard_sizes_target,
+                    edges=dec_edge_shard_sizes,
+                ),
                 edge_attr=dec_edge_attr,
                 edge_index=dec_edge_index,
                 model_comm_group=model_comm_group,
-                x_src_is_sharded=True,
-                x_dst_is_sharded=in_out_sharded,
-                keep_x_dst_sharded=in_out_sharded,
-                edge_shard_shapes=dec_edge_shard_shapes,
+                keep_x_dst_sharded=in_out_sharded[dataset_name],
+            )
+            x_out_dict[dataset_name] = self._assemble_output(
+                x_out,
+                self._residual(x[dataset_name], grid_shard_sizes, model_comm_group, dataset_name),
+                batch_size=batch_size,
+                ensemble_size=ensemble_size,
+                dtype=x[dataset_name].dtype,
+                dataset_name=dataset_name,
             )
 
-            outputs[dataset_name] = self._assemble_output(
-                x_out, batch_size, ensemble_size, x_ds.dtype, dataset_name=dataset_name
-            )
-
-        return outputs
+        return x_out_dict

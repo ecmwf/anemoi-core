@@ -17,6 +17,7 @@ from typing import Self
 import torch
 from torch import nn
 
+from anemoi.training.utils.compile import subset_tensor
 from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
@@ -124,6 +125,7 @@ class ScaleTensor(nn.Module):
         super().__init__()
 
         self._tensors = {}
+        self._runtime_scalers: dict[str, torch.Tensor] = {}
 
         named_tensors.update(scalers or {})
         self.add(named_tensors)
@@ -136,9 +138,30 @@ class ScaleTensor(nn.Module):
         """Get the scalers as a dictionary of name to (dimension, tensor) pairs."""
         tensors = {}
         for name, (dimension, _) in self._tensors.items():
-            tensors[name] = (dimension, self._buffers[name])
-
+            tensors[name] = (dimension, self.get_scaler_tensor(name))
         return tensors
+
+    def get_scaler_tensor(self, name: str) -> torch.Tensor:
+        """Return a scaler from either explicit runtime state or registered buffers."""
+        if name in self._runtime_scalers:
+            return self._runtime_scalers[name]
+        if name in self._buffers:
+            return self.get_buffer(name)
+
+        msg = f"Scaler {name!r} has no associated tensor."
+        raise KeyError(msg)
+
+    def _apply(self, fn: Callable, recurse: bool = True) -> Self:
+        """Apply device and dtype conversions to registered and runtime scalers.
+
+        ``nn.Module._apply`` handles parameters and registered buffers. Runtime
+        scalers deliberately are neither, so apply the same conversion to the
+        tensors stored in the explicit runtime dictionary.
+        """
+        super()._apply(fn, recurse=recurse)
+        for name, scaler in self._runtime_scalers.items():
+            self._runtime_scalers[name] = fn(scaler)
+        return self
 
     @property
     def specified_dimensions(self) -> dict[str, tuple[int]]:
@@ -166,6 +189,10 @@ class ScaleTensor(nn.Module):
             raise IndexError(error_msg)
 
         return Shape(get_dim_shape)
+
+    def has_scaler_for_dim(self, dim: TensorDim) -> bool:
+        """Check if there is a scaler for the given dimension."""
+        return len(self.subset_by_dim(dim.value).tensors) > 0
 
     def validate_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor) -> None:
         """Check if the scaler is compatible with the given dimension.
@@ -225,6 +252,9 @@ class ScaleTensor(nn.Module):
         """
         if not isinstance(scaler, torch.Tensor):
             scaler = torch.tensor([scaler]) if isinstance(scaler, int | float) else torch.tensor(scaler)
+        assert (
+            not scaler.requires_grad
+        ), f"Scaler tensors must not require gradients. Got requires_grad=True for scaler {name!r}."
 
         if isinstance(dimension, int):
             if len(scaler.shape) == 1:
@@ -272,7 +302,10 @@ class ScaleTensor(nn.Module):
         """
         for scaler_to_pop in self.subset(scaler_to_remove).tensors:
             self._tensors.pop(scaler_to_pop)
-            self._buffers.pop(scaler_to_pop, None)
+            if scaler_to_pop in self._runtime_scalers:
+                self._runtime_scalers.pop(scaler_to_pop)
+            else:
+                delattr(self, scaler_to_pop)
         return self
 
     def freeze_state(self) -> "FrozenStateRecord":  # noqa: F821
@@ -321,6 +354,9 @@ class ScaleTensor(nn.Module):
         """
         if not isinstance(scaler, torch.Tensor):
             scaler = torch.tensor([scaler]) if isinstance(scaler, int | float) else torch.tensor(scaler)
+        assert (
+            not scaler.requires_grad
+        ), f"Scaler tensors must not require gradients. Got requires_grad=True for scaler {name!r}."
 
         if name not in self._tensors:
             msg = f"scaler {name!r} not found in scalers."
@@ -328,18 +364,18 @@ class ScaleTensor(nn.Module):
 
         dimension = self._tensors[name][0]
 
-        original_scaler = self._tensors.pop(name)
-        original_scaler_buffer = self._buffers.pop(name, None)
-
         if not override:
-            self.validate_scaler(dimension, scaler)
+            # Multiple updating scalers sharing a dynamic dimension are not supported;
+            # other updating scalers would still expose their previous shape here.
+            excluded_scaler = self._tensors.pop(name)
+            try:
+                self.validate_scaler(dimension, scaler)
+            finally:
+                self._tensors[name] = excluded_scaler
 
-        try:
-            self.add_scaler(dimension, scaler, name=name)
-        except ValueError:
-            self._tensors[name] = original_scaler
-            self.register_buffer(name, original_scaler_buffer, persistent=False)
-            raise
+        if name in self._buffers:
+            delattr(self, name)
+        self._runtime_scalers[name] = scaler
 
     def add(self, new_scalers: dict[str, TENSOR_SPEC] | list[TENSOR_SPEC] | None = None, **kwargs) -> None:
         """Add multiple scalers to the existing scalers.
@@ -526,9 +562,12 @@ class ScaleTensor(nn.Module):
         resolved_scalers: dict[str, TENSOR_SPEC] = {}
 
         for name, (dims, scaler) in self.tensors.items():
-            if any(d < 0 for d in dims):
-                dims = [d if d >= 0 else ndim + d for d in dims]
-            resolved_scalers[name] = (dims, scaler)
+            # Cast to plain int: dims may hold TensorDim (IntEnum) members, and
+            # torch.compile/Dynamo does not support the < / >= operators on enums.
+            int_dims = [int(d) for d in dims]
+            if any(d < 0 for d in int_dims):
+                int_dims = [d if d >= 0 else ndim + d for d in int_dims]
+            resolved_scalers[name] = (int_dims, scaler)
 
         return ScaleTensor(**resolved_scalers)
 
@@ -538,7 +577,7 @@ class ScaleTensor(nn.Module):
         subset_indices: tuple[int, ...] | None = None,
         *,
         grid_shard_slice: slice | None = None,
-    ) -> None:
+    ) -> torch.Tensor:
         """Apply the scalers iteratively to the input tensor.
 
         Parameters
@@ -549,11 +588,17 @@ class ScaleTensor(nn.Module):
             Indices to subset the input tensor, by default None
         grid_shard_slice : slice | None, optional
             Slice to apply to the grid dimension, by default None
+
+        Returns
+        -------
+        torch.Tensor
+            Scaled tensor.
         """
         if subset_indices is not None and not isinstance(subset_indices, tuple):
             msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
             raise TypeError(msg)
-        x_subset = x[subset_indices] if subset_indices is not None else x
+        x_subset, subset_index, subset_dim = subset_tensor(x, subset_indices)
+
         out = x_subset.clone()
         ndim = x.ndim
         tensors = self.resolve(ndim).tensors
@@ -575,8 +620,8 @@ class ScaleTensor(nn.Module):
 
             reshaped_scaler = reshaped_scaler.expand_as(x)
 
-            if subset_indices is not None:
-                reshaped_scaler = reshaped_scaler[subset_indices]
+            if subset_index is not None:
+                reshaped_scaler = torch.index_select(reshaped_scaler, dim=subset_dim, index=subset_index)
 
             out = out * reshaped_scaler
 
@@ -588,13 +633,17 @@ class ScaleTensor(nn.Module):
         subset_indices: tuple[int, ...] | None = None,
         *,
         grid_shard_slice: slice | None = None,
-    ) -> None:
+    ) -> torch.Tensor:
         """Scale a given tensor by the scalers.
 
         Parameters
         ----------
-        tensor : torch.Tensor
+        x : torch.Tensor
             Input tensor to scale
+        subset_indices : tuple[int, ...] | None, optional
+            Indices to select along one tensor dimension.
+        grid_shard_slice : slice | None, optional
+            Grid slice to select from a full-grid scaler.
 
         Returns
         -------
@@ -604,12 +653,16 @@ class ScaleTensor(nn.Module):
         if subset_indices is not None and not isinstance(subset_indices, tuple):
             msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
             raise TypeError(msg)
-        x_subset = x[subset_indices] if subset_indices is not None else x
-        scaler = self.get_scaler(x_subset.ndim)
+        x_subset, subset_index, subset_dim = subset_tensor(x, subset_indices)
+        scaler = self.get_scaler(x.ndim)
         if grid_shard_slice is not None and scaler.shape[TensorDim.GRID] > 1:
-            slices = [slice(None)] * x_subset.ndim
+            slices = [slice(None)] * x.ndim
             slices[TensorDim.GRID] = grid_shard_slice
             scaler = scaler[tuple(slices)]
+
+        if subset_index is not None:
+            scaler = scaler.expand_as(x)
+            scaler = torch.index_select(scaler, dim=subset_dim, index=subset_index)
 
         return x_subset * scaler
 

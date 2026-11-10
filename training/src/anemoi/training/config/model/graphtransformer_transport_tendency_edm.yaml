@@ -1,0 +1,21 @@
+defaults:
+- graphtransformer_transport_tendency
+- _self_
+
+model:
+  transport:
+    objective: edm_diffusion
+    training_condition:
+      distribution: "karras"
+      sigma_max: ${model.model.transport.sigma_max}
+      sigma_min: ${model.model.transport.sigma_min}
+      rho: ${model.model.transport.rho}
+    inference_defaults:
+      sampling_schedule:
+        schedule_type: "karras"
+        sigma_max: 100.0
+        sigma_min: 0.02
+        rho: 7.0
+        num_steps: 50
+      sampler:
+        sampler: "heun"

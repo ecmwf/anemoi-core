@@ -237,6 +237,17 @@ cannot load input data fast enough to keep up with your GPU. This
 results in your GPU stalling at the start of an iteration while it waits
 for the CPU to provide the next input batch.
 
+To determine whether a configuration is dataloader-bound, run the same
+configuration with ``dataloader.fake_dataloading=True``. This loads the
+first real sample and reuses it for subsequent batches, preserving valid
+shapes and numerical values while removing repeated dataset reads.
+A significant increase in throughput indicates that dataloading is the
+bottleneck. Possible fixes are to increase the number of workers when
+sufficient CPU memory is available, move the dataset to a faster or
+less congested filesystem, or rechunk the dataset along the grid
+dimension to better match the access pattern (if gpus_per_model is
+greater than 1).
+
 By default, each GPU will spawn 8 workers. Each worker will load data in
 parallel. You should try to increase this number until you run out of
 CPU memory. A CPU out of memory error looks like:
@@ -277,10 +288,8 @@ their recommended settings
 
 .. note::
 
-   Longer rollout increases the CPU memory required by the dataloaders.
-   It can be beneficial to break rollout runs into multiple runs (e.g.
-   rollout 1->6 and rollout 7->12) and tune the number of workers for
-   both runs accordingly.
+   Dataloader CPU memory can increase as the active rollout length
+   grows. Longer rollouts might require reducing the number of workers.
 
 Change attention backend
 ========================
@@ -304,6 +313,18 @@ for further speedups.
 
 Flash attention is not the default as it must be compiled from source.
 
+The Transformer processor also supports a Triton backend. Its speed is
+close to flash-attention 2. It is supported on Nvidia and AMD GPUs. It is
+enabled by default for the processor. The Triton backend does not support
+cross attention, so the encoder and decoder of the transformer mappers
+use PyTorch's scaled dot product attention by default. It can be selected
+in the config like so:
+
+.. code::
+
+   model.processor.attention_implementation: 'triton_attention'
+
+
 For the GraphTransformer processor, the 'triton' backend is the fastest.
 To use the 'triton' backend set the following config option:
 
@@ -315,6 +336,26 @@ Triton is the default backend when using the GraphTransformer processor.
 However it requires the 'triton' library to be installed. On AMD systems
 the library is called 'pytorch-triton-rocm'. Triton is not officially
 supported on CPUs.
+
+.. note::
+
+   The attention backend for both the Transformer and GraphTransformer
+   processors can be overridden at runtime using environment variables,
+   without modifying the model config. This is useful when switching
+   backends at inference time.
+
+   .. code:: bash
+
+      # Override the Transformer attention backend
+      export ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND='scaled_dot_product_attention'
+
+      # Override the GraphTransformer attention backend
+      export ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND='pyg'
+
+   The override is applied once on the first forward pass. Valid values
+   are the same as the corresponding config options (e.g.
+   ``flash_attention``, ``scaled_dot_product_attention`` for the
+   Transformer; ``triton``, ``pyg`` for the GraphTransformer).
 
 Compiling
 =========
@@ -367,6 +408,28 @@ be difficult to debug.
    such as chunking are exhausted.
 
 .. _compilation documentation: https://anemoi.readthedocs.io/projects/training/en/latest/user-guide/models.html#compilation
+
+Disable reproducible gradient synchronisation
+=============================================
+
+By default, ``training.strategy.static_graph`` is ``false`` and
+``training.strategy.find_unused_parameters`` is ``true``. With these
+settings, the gradients of all GPUs are summed in the same order in
+every step, so a resumed run continues bitwise identically. For large
+models, telling DDP that the same parameters are trained in every step
+can make training faster, at the cost of this exact reproducibility. In a
+benchmark of a 1B parameter model, this gave a 6% speedup, while smaller
+models showed no difference.
+
+.. code:: yaml
+
+   training:
+     strategy:
+       static_graph: True
+       find_unused_parameters: False
+
+``static_graph`` must stay ``false`` when
+``training.accum_grad_batches`` is larger than 1.
 
 Performance Profiling
 =====================

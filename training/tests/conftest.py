@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,13 +7,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import os
+
 # Use non-GUI backend before any test (or plot) code imports matplotlib.
 # Avoids slow backend probing (Tk/Qt) in headless/CI and speeds up plotting tests.
 import matplotlib as mpl
 
 mpl.use("Agg")
 
-from pathlib import Path
+# Newer mlflow releases put the filesystem tracking backend ("./mlruns") in maintenance
+# mode and raise unless this opt-out is set; the offline logger tests depend on the
+# file store. Set before any test code imports mlflow.
+os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
+
 from typing import Any
 
 import numpy as np
@@ -21,27 +27,6 @@ import pytest
 from _pytest.fixtures import SubRequest
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
-
-
-def _get_config_path() -> str:
-    """Get the config path relative to the project root, working from any directory."""
-    # Find the config directory by looking for src/anemoi/training/config
-    # This works whether running from training/ or training/tests/
-    current = Path.cwd()
-
-    # Try from current directory first (running from training/)
-    config_path = current / "src" / "anemoi" / "training" / "config"
-    if config_path.exists():
-        return str(config_path)
-
-    # Try from parent directory (running from training/tests/)
-    config_path = current.parent / "src" / "anemoi" / "training" / "config"
-    if config_path.exists():
-        return str(config_path)
-
-    # Fallback: use relative path from tests/ directory
-    return "../src/anemoi/training/config"
-
 
 pytest_plugins = "anemoi.utils.testing"
 
@@ -54,11 +39,10 @@ PYTEST_MARKED_TESTS = [
 @pytest.fixture
 def config(request: SubRequest) -> DictConfig:
     from hydra import compose
-    from hydra import initialize
+    from hydra import initialize_config_module
 
     overrides = request.param
-    config_path = _get_config_path()
-    with initialize(version_base=None, config_path=config_path):
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config"):
         # config is relative to a module
         return compose(config_name="debug", overrides=overrides)
 
@@ -67,12 +51,11 @@ def config(request: SubRequest) -> DictConfig:
 def datamodule():  # noqa: ANN201
     """Lazy-load AnemoiDatasetsDataModule to avoid expensive import at test collection time."""
     from hydra import compose
-    from hydra import initialize
+    from hydra import initialize_config_module
 
     from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
-    config_path = _get_config_path()
-    with initialize(version_base=None, config_path=config_path):
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config"):
         # config is relative to a module
         cfg = compose(config_name="config")
     return AnemoiDatasetsDataModule(cfg)
@@ -115,15 +98,33 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="MLFlow server for tests requiring MLFlow (only if --mlflow is set)",
     )
+    parser.addoption(
+        "--accuracy-reference-id",
+        dest="accuracy_reference_id",
+        default="",
+        help="MLflow run ID to compare the accuracy test against (empty: use the hard-coded reference)",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    # Fail at startup rather than hours into the run: an unset MLFLOW_TEST_URL in CI
+    # expands to an empty --mlflow-server, which only surfaces as an opaque
+    # "URL must be provided if authentication is enabled." once an MLFlow test is reached.
+    if config.getoption("mlflow") and not config.getoption("mlflow_server"):
+        msg = "MLFlow server must be provided via --mlflow-server when using --mlflow"
+        raise pytest.UsageError(msg)
+
+
+def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
+    # The multi-GPU tests run under srun with one process per GPU: no xdist workers with -n logical (pytest.ini).
+    if config.getoption("--multigpu"):
+        return 0
+    return None
 
 
 @pytest.fixture
 def mlflow_server(pytestconfig: Any) -> str:
-    mlflow_server = pytestconfig.getoption("mlflow_server")
-    if pytestconfig.getoption("mlflow") and mlflow_server is None:
-        e = ValueError("MLFlow server must be provided via --mlflow-server when using --mlflow")
-        raise e
-    return mlflow_server
+    return pytestconfig.getoption("mlflow_server")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

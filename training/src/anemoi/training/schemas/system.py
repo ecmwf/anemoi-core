@@ -1,4 +1,4 @@
-# (C) Copyright 2024-2025 ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -25,7 +25,7 @@ class HardwareSchema(BaseModel):
     accelerator: Annotated[
         str,
         AfterValidator(partial(allowed_values, values=["cpu", "gpu", "auto", "cuda", "tpu"])),
-    ] = "auto"
+    ] = "cuda"
     "Accelerator to use for training."
     num_gpus_per_node: NonNegativeInt = 1
     "Number of GPUs per node."
@@ -48,8 +48,6 @@ class InputSchema(PydanticBaseModel):
     "Path to the inverse truncation matrix file."
     loss_matrices_path: Path | None = None
     "Path to the directory containing smoothing matrices for the multiscale loss"
-    warm_start: Path | None = None
-    "Path of the checkpoint file to use for warm starting the training"
 
 
 class CheckpointsSchema(BaseModel):

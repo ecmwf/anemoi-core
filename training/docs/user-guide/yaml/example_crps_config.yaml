@@ -5,6 +5,7 @@ defaults:
   - system: example
   - graph: encoder_decoder_only
   - model: transformer_ens
+  - task: forecaster
   - training: default
   - _self_
 
@@ -13,8 +14,9 @@ config_validation: True
 # Changes in system
 system:
   input:
-    truncation: ${data.resolution}-O32-linear.mat.npz
-    truncation_inv: O32-${data.resolution}-linear.mat.npz
+    # Optional: uncomment when using a file-based TruncatedConnection.
+    # truncation: ${data.resolution}-O32-linear.mat.npz
+    # truncation_inv: O32-${data.resolution}-linear.mat.npz
   hardware:
     num_gpus_per_ensemble: 1
     num_gpus_per_node: 1
@@ -26,7 +28,8 @@ data:
 
 # Changes in training
 training:
-  model_task: anemoi.training.train.tasks.GraphEnsForecaster
+  method:
+    _target_: anemoi.training.train.methods.EnsembleTraining
   ensemble_size_per_device: 4
   max_epochs: 20
 
@@ -40,20 +43,17 @@ training:
   training_loss:
     datasets:
       your_dataset_name:
-        _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-        scalars: ["variable"]
+        _target_: anemoi.training.losses.CRPS
+        scalers: ["variable"]
         ignore_nans: False
-        alpha: 1.0
+        alpha: 0.95
 
   # Changes in validation metrics
   validation_metrics:
     datasets:
       your_dataset_name:
         kcrps:
-          _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-          scalars: []
+          _target_: anemoi.training.losses.CRPS
+          scalers: []
           ignore_nans: False
           alpha: 1.0
-diagnostics:
-  plot:
-    callbacks: []

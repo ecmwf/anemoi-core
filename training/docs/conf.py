@@ -138,6 +138,12 @@ html_css_files = ["style.css"]
 todo_include_todos = not read_the_docs_build
 
 autodoc_member_order = "bysource"  # Keep file order
+# Do not merge legacy type comments into runtime annotations because doing so
+# corrupts Pydantic's internal annotations during autodoc imports.
+autodoc_use_type_comments = False
+# Prefix generated section labels with the document name so repeated headings
+# such as "Overview" do not collide across documentation pages.
+autosectionlabel_prefix_document = True
 
 
 # https://autodoc-pydantic.readthedocs.io/en/stable/users/configuration.html

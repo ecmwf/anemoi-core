@@ -5,6 +5,7 @@ defaults:
 - system: example
 - graph: stretched_grid
 - model: graphtransformer
+- task: forecaster
 - training: stretched
 - _self_
 

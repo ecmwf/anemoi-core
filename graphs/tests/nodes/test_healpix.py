@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -44,6 +44,27 @@ def test_register_nodes(resolution: int):
     assert isinstance(graph["test_nodes"].x, torch.Tensor)
     assert graph["test_nodes"].x.shape[1] == 2
     assert graph["test_nodes"].node_type == "HEALPixNodes"
+
+
+@pytest.mark.parametrize("resolution", [2, 5])
+def test_nest_ordering(resolution: int):
+    """nest_ordering selects NEST vs RING pixel ordering; defaults to NEST."""
+    nest = HEALPixNodes(resolution, "test_nodes", nest_ordering=True).get_coordinates()
+    ring = HEALPixNodes(resolution, "test_nodes", nest_ordering=False).get_coordinates()
+    default = HEALPixNodes(resolution, "test_nodes").get_coordinates()
+
+    # default is NEST, backward-compatible with the previously hardcoded nest=True
+    assert torch.equal(default, nest)
+
+    # same set of pixel centres, different row order
+    assert not torch.equal(nest, ring)
+    nest_sorted = nest[nest[:, 0].argsort(stable=True)].sort(dim=0).values
+    ring_sorted = ring[ring[:, 0].argsort(stable=True)].sort(dim=0).values
+    assert torch.allclose(nest_sorted, ring_sorted)
+
+    # RING ordering is isolatitude, sorted north -> south
+    assert torch.all(torch.diff(ring[:, 0]) <= 1e-9)
+    assert not torch.all(torch.diff(nest[:, 0]) <= 1e-9)
 
 
 @pytest.mark.parametrize("attr_class", [UniformWeights, SphericalAreaWeights])

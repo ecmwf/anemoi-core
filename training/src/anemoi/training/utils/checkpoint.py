@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-import importlib
 import io
 import logging
 import pickle
@@ -16,35 +15,77 @@ from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn as nn
 from pytorch_lightning import Callback
 from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
+from anemoi.graphs.utils import load_graph_from_file
+from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.migrations import Migrator
-from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.models.preprocessing.imputer import BaseImputer
 from anemoi.utils.checkpoints import save_metadata
-
-chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
 
 LOGGER = logging.getLogger(__name__)
 
 
-def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Module, dict]:
+def clear_imputer_runtime_state(model: torch.nn.Module) -> None:
+    """Clear imputer state before serialising a model."""
+    for module in model.modules():
+        if isinstance(module, BaseImputer):
+            module.nan_locations = None
+            module.loss_mask_training = None
+
+
+def load_and_prepare_model(
+    lightning_checkpoint_path: str,
+    graph_path: Path | str | None = None,
+) -> tuple[torch.nn.Module, dict]:
     """Load the lightning checkpoint and extract the pytorch model and its metadata.
 
     Parameters
     ----------
     lightning_checkpoint_path : str
-        path to lightning checkpoint
+        path to lightning checkpoint.
+    graph_path : Path | str | None, optional
+        path to a graph file. If given, it is used instead of the ``graph_data`` stored in the
+        checkpoint (which is then not required). The graph is not checked against the checkpoint
+        beyond the presence of the required dataset nodes.
 
     Returns
     -------
     tuple[torch.nn.Module, dict]
-        pytorch model, metadata
+        pytorch model, metadata.
 
     """
-    module = BaseGraphModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
+    from hydra.utils import get_class
+
+    # memory-mapped: only the hyperparameters are needed here, not the weights
+    hyper_parameters = torch.load(
+        lightning_checkpoint_path,
+        map_location="cpu",
+        mmap=True,
+        weights_only=False,
+    )["hyper_parameters"]
+
+    overrides = {}
+    if graph_path is not None:
+        dataset_names = list(hyper_parameters["data_indices"])
+        graph = load_graph_from_file(graph_path)
+        fused = uses_fused_dataset_graph(graph, dataset_names)
+        validate_loaded_graph(graph, dataset_names if fused else [DEFAULT_DATASET_NAME])
+        overrides["graph_data"] = graph
+    elif "graph_data" not in hyper_parameters:
+        msg = (
+            f"The checkpoint {lightning_checkpoint_path} does not contain the hyperparameter 'graph_data'. "
+            "Supply a graph with --graph."
+        )
+        raise ValueError(msg)
+
+    training_method_cls = get_class(hyper_parameters["config"].training.method._target_)
+
+    module = training_method_cls.load_from_checkpoint(lightning_checkpoint_path, weights_only=False, **overrides)
     model = module.model
 
     metadata = dict(**model.metadata)
@@ -54,98 +95,36 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
     return model, metadata
 
 
-def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path: Path | str) -> Path:
+def save_inference_checkpoint(
+    model: torch.nn.Module,
+    metadata: dict,
+    save_path: Path | str,
+    supporting_arrays: dict | None = None,
+) -> Path:
     """Save a pytorch checkpoint for inference with the model metadata.
 
     Parameters
     ----------
     model : torch.nn.Module
-        Pytorch model
+        Pytorch model.
     metadata : dict
-        Anemoi Metadata to inject into checkpoint
+        Anemoi Metadata to inject into checkpoint.
     save_path : Path | str
-        Directory to save anemoi checkpoint
+        File path of the anemoi inference checkpoint to write.
+    supporting_arrays : dict | None, optional
+        Supporting arrays to inject into checkpoint.
 
     Returns
     -------
     Path
-        Path to saved checkpoint
+        Path to saved checkpoint.
     """
-    save_path = Path(save_path)
-    inference_filepath = save_path.parent / f"inference-{save_path.name}"
+    inference_filepath = Path(save_path)
 
+    clear_imputer_runtime_state(model)
     torch.save(model, inference_filepath)
-    save_metadata(inference_filepath, metadata)
+    save_metadata(inference_filepath, metadata, supporting_arrays=supporting_arrays)
     return inference_filepath
-
-
-def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
-    # Load the checkpoint
-    LOGGER.debug("Loading checkpoint to device: %s", model.device)
-    checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
-
-    # apply chunking migration (fails silently otherwise leading to hard to debug issues)
-    # this is due to loading with strict=False, planning to make this more robust in the future
-    checkpoint = chunking_fix_migration(checkpoint)
-
-    # Refresh processor stats from the current dataset if configured.
-    model._update_checkpoint_state_dict_for_load(checkpoint)
-
-    # Filter out layers with size mismatch
-    state_dict = checkpoint["state_dict"]
-
-    model_state_dict = model.state_dict()
-
-    for key in state_dict.copy():
-        if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
-            LOGGER.info("Skipping loading parameter: %s", key)
-            LOGGER.info("Checkpoint shape: %s", str(state_dict[key].shape))
-            LOGGER.info("Model shape: %s", str(model_state_dict[key].shape))
-
-            del state_dict[key]  # Remove the mismatched key
-
-    # Load the filtered st-ate_dict into the model
-    model.load_state_dict(state_dict, strict=False)
-
-    ## Needed for data indices check
-    data_indices = checkpoint["hyper_parameters"]["data_indices"]
-
-    if isinstance(data_indices, dict):
-        # New format: data_indices is always a dict in new code (even for single-dataset)
-        LOGGER.info("Loading checkpoint with datasets: %s", list(data_indices.keys()))
-        model._ckpt_model_name_to_index = {
-            dataset_name: indices.name_to_index for dataset_name, indices in data_indices.items()
-        }
-    else:
-        # Old format: data_indices is a single IndexCollection object (not dict)
-        msg = (
-            f"Checkpoint at '{ckpt_path}' was created with an older version of anemoi-core "
-            "that does not support multi-dataset training. This checkpoint is incompatible "
-            "with transfer learning in the current version."
-        )
-        raise TypeError(msg)
-
-    return model
-
-
-def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
-    """Recursively freezes the parameters of a submodule with the specified name.
-
-    Parameters
-    ----------
-    module : torch.nn.Module
-        Pytorch model
-    target_name : str
-        The name of the submodule to freeze.
-    """
-    for name, child in module.named_children():
-        # If this is the target submodule, freeze its parameters
-        if name == target_name:
-            for param in child.parameters():
-                param.requires_grad = False
-        else:
-            # Recursively search within children
-            freeze_submodule_by_name(child, target_name)
 
 
 class LoggingUnpickler(pickle.Unpickler):

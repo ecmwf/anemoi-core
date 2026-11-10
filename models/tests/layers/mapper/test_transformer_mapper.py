@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -15,6 +15,7 @@ from typing import Optional
 import pytest
 import torch
 
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.layers.mapper import TransformerBackwardMapper
 from anemoi.models.layers.mapper import TransformerBaseMapper
 from anemoi.models.layers.mapper import TransformerForwardMapper
@@ -38,7 +39,7 @@ def _conditional_layer_kernel_config(condition_shape: int):
 class MapperConfig:
     in_channels_src: int = 3
     in_channels_dst: int = 4
-    hidden_dim: int = 128
+    num_channels: int = 128
     num_chunks: int = 2
     num_heads: int = 8
     mlp_hidden_ratio: int = 4
@@ -60,10 +61,9 @@ class MapperConfig:
 class ConcreteTransformerBaseMapper(TransformerBaseMapper):
     """Concrete implementation of TransformerBaseMapper for testing."""
 
-    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
-        shapes_src, shapes_dst = shard_shapes
+    def pre_process(self, x):
         x_src, x_dst = x
-        return x_src, x_dst, shapes_src, shapes_dst
+        return x_src, x_dst
 
     def post_process(self, x_dst, **kwargs):
         return x_dst
@@ -96,23 +96,24 @@ class TestTransformerBaseMapper:
         assert isinstance(mapper, TransformerBaseMapper)
         assert mapper.in_channels_src == mapper_init.in_channels_src
         assert mapper.in_channels_dst == mapper_init.in_channels_dst
-        assert mapper.hidden_dim == mapper_init.hidden_dim
+        assert mapper.hidden_dim == mapper_init.num_channels
         assert mapper.out_channels_dst == self.OUT_CHANNELS_DST
 
     def test_pre_process(self, mapper, pair_tensor):
-        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
-
-        x_src, x_dst, shapes_src, shapes_dst = mapper.pre_process(pair_tensor, shard_shapes)
-        assert x_src.shape == torch.Size(pair_tensor[0].shape)
-        assert x_dst.shape == torch.Size(pair_tensor[1].shape)
-        assert shapes_src == [list(pair_tensor[0].shape)]
-        assert shapes_dst == [list(pair_tensor[1].shape)]
+        # Should be a no-op in the base class
+        x = pair_tensor
+        x_src, x_dst = mapper.pre_process(x)
+        assert x_src.shape == torch.Size(
+            x[0].shape
+        ), f"x_src.shape ({x_src.shape}) != torch.Size(x[0].shape) ({torch.Size(x[0].shape)})"
+        assert x_dst.shape == torch.Size(
+            x[1].shape
+        ), f"x_dst.shape ({x_dst.shape}) != torch.Size(x[1].shape) ({x[1].shape})"
 
     def test_post_process(self, mapper, pair_tensor):
         x_dst = pair_tensor[1]
-        shapes_dst = [list(x_dst.shape)]
 
-        result = mapper.post_process(x_dst, shapes_dst=shapes_dst)
+        result = mapper.post_process(x_dst)
         assert torch.equal(result, x_dst)
 
 
@@ -143,22 +144,22 @@ class TestTransformerForwardMapper:
 
         assert mapper.proc.attention.attn_channels == 96
         assert mapper.proc.attention.projection.in_features == 96
-        assert mapper.proc.attention.projection.out_features == mapper_init.hidden_dim
+        assert mapper.proc.attention.projection.out_features == mapper_init.num_channels
 
         batch_size = 1
-        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
-        _, x_dst = mapper.forward(pair_tensor, batch_size, shard_shapes)
-        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
+        shard_info = BipartiteGraphShardInfo(src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES])
+        _, x_dst = mapper.forward(pair_tensor, batch_size, shard_info)
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.num_channels])
 
     def test_forward_backward(self, mapper_init, mapper, pair_tensor):
         batch_size = 1
-        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
+        shard_info = BipartiteGraphShardInfo(src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES])
 
-        x_src, x_dst = mapper.forward(pair_tensor, batch_size, shard_shapes)
+        x_src, x_dst = mapper.forward(pair_tensor, batch_size, shard_info)
         assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.in_channels_src])
-        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.num_channels])
 
-        target = torch.rand(self.NUM_DST_NODES, mapper_init.hidden_dim, device=x_dst.device)
+        target = torch.rand(self.NUM_DST_NODES, mapper_init.num_channels, device=x_dst.device)
         loss = torch.nn.MSELoss()(x_dst, target)
         loss.backward()
 
@@ -177,16 +178,16 @@ class TestTransformerForwardMapper:
         mapper.gradient_checkpointing = False
 
         batch_size = 1
-        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
+        shard_info = BipartiteGraphShardInfo(src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES])
         cond = (
             torch.randn(self.NUM_SRC_NODES, condition_shape, device=device),
             torch.randn(self.NUM_DST_NODES, condition_shape, device=device),
         )
 
-        x_src, x_dst = mapper.forward(pair_tensor, batch_size, shard_shapes, cond=cond)
+        x_src, x_dst = mapper.forward(pair_tensor, batch_size, shard_info, cond=cond)
 
         assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.in_channels_src])
-        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.num_channels])
 
 
 class TestTransformerBackwardMapper:
@@ -216,19 +217,17 @@ class TestTransformerBackwardMapper:
 
         assert mapper.proc.attention.attn_channels == 96
         assert mapper.proc.attention.projection.in_features == 96
-        assert mapper.proc.attention.projection.out_features == mapper_init.hidden_dim
+        assert mapper.proc.attention.projection.out_features == mapper_init.num_channels
 
     def test_forward_backward(self, mapper_init, mapper, device):
         batch_size = 1
         x = (
-            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim, device=device),
+            torch.rand(self.NUM_SRC_NODES, mapper_init.num_channels, device=device),
             torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_dst, device=device),
         )
-        shard_shapes = [[self.NUM_SRC_NODES, mapper_init.in_channels_src]], [
-            [self.NUM_DST_NODES, mapper_init.in_channels_dst]
-        ]
+        shard_info = BipartiteGraphShardInfo(src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES])
 
-        out = mapper.forward(x, batch_size, shard_shapes)
+        out = mapper.forward(x, batch_size, shard_info)
         assert out.shape == torch.Size([self.NUM_DST_NODES, self.OUT_CHANNELS_DST])
 
         target = torch.rand(self.NUM_DST_NODES, self.OUT_CHANNELS_DST, device=out.device)
@@ -254,17 +253,15 @@ class TestTransformerBackwardMapper:
 
         batch_size = 1
         x = (
-            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim, device=device),
+            torch.rand(self.NUM_SRC_NODES, mapper_init.num_channels, device=device),
             torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_dst, device=device),
         )
-        shard_shapes = [[self.NUM_SRC_NODES, mapper_init.in_channels_src]], [
-            [self.NUM_DST_NODES, mapper_init.in_channels_dst]
-        ]
+        shard_info = BipartiteGraphShardInfo(src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES])
         cond = (
             torch.randn(self.NUM_SRC_NODES, condition_shape, device=device),
             torch.randn(self.NUM_DST_NODES, condition_shape, device=device),
         )
 
-        out = mapper.forward(x, batch_size, shard_shapes, cond=cond)
+        out = mapper.forward(x, batch_size, shard_info, cond=cond)
 
         assert out.shape == torch.Size([self.NUM_DST_NODES, self.OUT_CHANNELS_DST])

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,44 +7,58 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# ruff: noqa: ANN001
 
-
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
 
 import pytorch_lightning as pl
 import torch
+from packaging import version
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 from pytorch_lightning.utilities.types import STEP_OUTPUT
+from torch.utils.checkpoint import set_checkpoint_early_stop
 
 LOGGER = logging.getLogger(__name__)
+
+# With torch 2.11, memory history recording causes a failure in the checkpoint early stop.
+# To prevent the failure, disable early stop while the recording is on.
+# Once the recording ends, checkpoint early stopping is resumed
+_DISABLE_CHECKPOINT_EARLY_STOP = version.parse(torch.__version__).release[:2] == (2, 11)
 
 
 class MemorySnapshotRecorder(Callback):
     """Record memory snapshot using torch.cuda._record_memory_history()."""
 
-    def __init__(self, config):
+    def __init__(self, dirpath: str, steps: int, warmup: int = 0):
+        """Initialise MemorySnapshotRecorder.
+
+        Parameters
+        ----------
+        dirpath : str
+            Directory to save the memory snapshot pickle file.
+        steps : int
+            Number of training steps to record after warmup.
+        warmup : int, optional
+            Number of warmup steps before recording starts, by default 0.
+        """
         super().__init__()
-        self.config = config
-        self.dirpath = Path(self.config.system.output.profiler)
-
-        self.warmup = self.config.diagnostics.benchmark_profiler.snapshot.warmup
-        if not self.warmup:
-            self.warmup = 0
-        self.num_steps = (
-            self.config.diagnostics.benchmark_profiler.snapshot.steps + self.warmup
-        )  # be consistent with profiler scheduler
+        self.dirpath = Path(dirpath)
+        self.warmup = warmup or 0
+        self.num_steps = steps + self.warmup
         self.status = False
+        self._early_stop_ctx = contextlib.ExitStack()
 
-        assert (
-            self.num_steps % self.config.dataloader.batch_size.training == 0
-        ), "Snapshot steps is not a multiple of batch size"
-        assert (
-            self.warmup % self.config.dataloader.batch_size.training == 0
-        ), "Snapshot Warmup steps is not a multiple of batch size"
+    def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        del pl_module
+        train_dataloader = trainer.train_dataloader
+        if isinstance(train_dataloader, list):
+            train_dataloader = train_dataloader[0]
+        batch_size = train_dataloader.batch_sampler.batch_size
+        assert self.num_steps % batch_size == 0, "Snapshot steps is not a multiple of batch size"
+        assert self.warmup % batch_size == 0, "Snapshot warmup steps is not a multiple of batch size"
 
     @rank_zero_only
     def _start_snapshot_recording(self) -> None:
@@ -75,6 +89,8 @@ class MemorySnapshotRecorder(Callback):
     ) -> None:
         del pl_module, batch, batch_idx
         if trainer.global_step == self.warmup:
+            if _DISABLE_CHECKPOINT_EARLY_STOP:  # on all ranks, so recomputation stays in sync
+                self._early_stop_ctx.enter_context(set_checkpoint_early_stop(False))
             self._start_snapshot_recording()
 
     def on_train_batch_end(
@@ -92,3 +108,4 @@ class MemorySnapshotRecorder(Callback):
                 self.stop_record_memory_history()
             else:
                 LOGGER.info("Snapshot recording was not started so no snapshot was saved")
+            self._early_stop_ctx.close()

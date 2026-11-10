@@ -1,0 +1,13 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- system: example
+- graph: multi_scale
+- model: graphtransformer_transport_si
+- task: forecaster
+- training: stochastic_interpolant
+- _self_
+
+
+config_validation: True

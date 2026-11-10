@@ -1,0 +1,14 @@
+defaults:
+  - optimizer: adamw
+  - lr_scheduler: cosine_scheduler
+  - _self_
+
+lr: 0.625e-4 # local_lr — scaled by hardware config at runtime
+
+# Lightning scheduler integration: controls how Lightning calls the scheduler
+# during training (step vs epoch, metric to monitor for ReduceLROnPlateau, etc.).
+# See https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.core.LightningModule.html#lightning.pytorch.core.LightningModule.configure_optimizers
+# for all available options.
+# Set to null to use Lightning defaults (interval: epoch).
+pl_lr_scheduler:
+  interval: step

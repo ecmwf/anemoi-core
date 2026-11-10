@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -8,11 +8,16 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
+from collections import defaultdict
+
 import einops
 import torch
 from torch import Tensor
 from torch import nn
 from torch_geometric.data import HeteroData
+
+LOGGER = logging.getLogger(__name__)
 
 
 class TrainableTensor(nn.Module):
@@ -65,6 +70,7 @@ class NamedNodesAttributes(nn.Module):
     """
 
     num_nodes: dict[str, int]
+    num_trainable_parameters: dict[str, int]
     attr_ndims: dict[str, int]
     trainable_tensors: dict[str, TrainableTensor]
 
@@ -72,26 +78,29 @@ class NamedNodesAttributes(nn.Module):
         """Initialize NamedNodesAttributes."""
         super().__init__()
 
-        for nodes_name in graph_data.node_types:
-            assert (
-                nodes_name in trainable_parameters
-            ), f"Number of trainable parameters for nodes group '{nodes_name}' not provided in config.model.trainable_parameters."
-
-        self.define_fixed_attributes(graph_data, trainable_parameters)
+        self.num_trainable_parameters = defaultdict(int, trainable_parameters)
+        self.define_fixed_attributes(graph_data, self.num_trainable_parameters)
 
         self.trainable_tensors = nn.ModuleDict()
         for nodes_name, nodes in graph_data.node_items():
             self.register_coordinates(nodes_name, nodes.x)
-            self.register_tensor(nodes_name, trainable_parameters[nodes_name])
+            self.register_tensor(nodes_name, self.num_trainable_parameters[nodes_name])
 
     def define_fixed_attributes(self, graph_data: HeteroData, trainable_parameters: dict[str, int]) -> None:
         """Define fixed attributes."""
         nodes_names = list(graph_data.node_types)
-        self.num_nodes = {nodes_name: graph_data[nodes_name].num_nodes for nodes_name in nodes_names}
-        self.attr_ndims = {
-            nodes_name: 2 * graph_data[nodes_name].x.shape[1] + trainable_parameters[nodes_name]
-            for nodes_name in nodes_names
-        }
+
+        self.num_nodes = {}
+        self.attr_ndims = {}
+        for nodes_name in nodes_names:
+            if nodes_name not in trainable_parameters:
+                LOGGER.warning(f"Nodes `{nodes_name}` not found in trainable parameters. Setting to 0.")
+
+            self.num_nodes[nodes_name] = graph_data[nodes_name].num_nodes
+            self.attr_ndims[nodes_name] = 2 * graph_data[nodes_name].x.shape[1] + trainable_parameters[nodes_name]
+            LOGGER.info(
+                f"{self.__class__.__name__} | Nodes `{nodes_name}` will have {trainable_parameters[nodes_name]} trainable parameters."
+            )
 
     def register_coordinates(self, name: str, node_coords: Tensor) -> None:
         """Register coordinates."""

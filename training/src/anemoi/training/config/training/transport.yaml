@@ -1,0 +1,81 @@
+---
+defaults:
+  - scalers: global
+  - training_loss: single
+  - optimization: default
+  - weight_averaging: null
+  # Opt-in checkpoint pipeline (training.checkpoint). Default null = fresh run.
+  # Set training.checkpoint.source to resume/fork a run or load weights from a file.
+  - optional checkpoint/source: null
+  - optional checkpoint/loading: null
+  - optional checkpoint/modifiers: null
+
+# base seed of all random number generators. null takes the seed of the checkpoint the run
+# continues from, or draws a new one for a new run
+seed: null
+
+update_ds_stats_on_ckpt_load:
+  states: False
+  tendencies: True
+
+deterministic: False
+precision: bf16-mixed
+accum_grad_batches: 1
+num_sanity_val_steps: 6
+
+gradient_clip:
+  val: 1.
+  algorithm: norm
+
+optimization:
+  optimizer:
+    _target_: torch.optim.AdamW
+    weight_decay: 0.1
+    betas: [0.9, 0.95]
+    eps: 1e-7
+
+method:
+  _target_: anemoi.training.train.methods.TransportTraining
+transport:
+  prediction_mode: state
+  objective: edm_diffusion
+
+strategy:
+  _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+  num_gpus_per_model: ${system.hardware.num_gpus_per_model}
+  read_group_size: ${dataloader.read_group_size}
+  use_local_synchronization: True
+  broadcast_buffers: False
+  # False with find_unused_parameters: True makes resumed runs bitwise reproducible.
+  # static_graph: True with find_unused_parameters: False can be faster for large models,
+  # but static_graph must be False when accum_grad_batches > 1
+  static_graph: False
+  find_unused_parameters: True
+
+loss_gradient_scaling: False
+
+validation_metrics:
+  datasets:
+    data:
+      mse:
+        _target_: anemoi.training.losses.MSELoss
+        scalers: ["node_weights", "time_steps"]
+        ignore_nans: True
+
+variable_groups:
+  datasets:
+    data:
+      default: sfc
+      pl:
+        param: [q, t, u, v, w, z]
+
+metrics:
+  datasets:
+    data:
+      - z_500
+      - t_850
+      - u_850
+      - v_850
+
+max_epochs: null
+max_steps: 1000000

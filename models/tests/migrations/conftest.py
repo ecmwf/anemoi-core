@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -24,7 +24,7 @@ def migrator() -> Migrator:
     -------
     A Migrator instance
     """
-    return Migrator.from_path(Path(__file__).parent / "migrations", "migrations")
+    return Migrator.from_path(Path(__file__).parent / "migrations", "tests.migrations.migrations")
 
 
 @pytest.fixture(scope="module")

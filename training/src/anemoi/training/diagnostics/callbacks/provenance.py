@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -8,36 +8,26 @@
 # nor does it submit to any jurisdiction.
 
 
-import logging
-
 import pytorch_lightning as pl
-import torch
-from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 
-LOGGER = logging.getLogger(__name__)
+from anemoi.training.checkpoint.lineage import record_checkpoint_lineage
 
 
 class ParentUUIDCallback(Callback):
-    """A callback that retrieves the parent UUID for a model, if it is a child model."""
+    """A callback that appends a warm-start checkpoint's parent uuid to the module metadata.
 
-    def __init__(self, config: OmegaConf) -> None:
-        """Initialise the ParentUUIDCallback callback.
+    Recorded when Lightning loads the checkpoint.
+    """
 
-        Parameters
-        ----------
-        config : OmegaConf
-            Config object
-
-        """
+    def __init__(self) -> None:
         super().__init__()
-        self.config = config
 
     def on_load_checkpoint(
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        checkpoint: torch.nn.Module,
+        checkpoint: dict,
     ) -> None:
         del trainer  # unused
-        pl_module.hparams["metadata"]["parent_uuid"] = checkpoint["hyper_parameters"]["metadata"]["uuid"]
+        record_checkpoint_lineage(pl_module, checkpoint, "warm_start")

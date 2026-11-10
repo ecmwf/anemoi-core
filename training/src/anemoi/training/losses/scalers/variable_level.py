@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -73,7 +73,7 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
         ...
 
     def get_scaling_values(self, **_kwargs) -> torch.Tensor:
-        variable_level_scaling = torch.ones((len(self.data_indices.data.output.full),), dtype=torch.float32)
+        variable_level_scaling = torch.ones((len(self.data_indices.model.output.full),), dtype=torch.float32)
 
         LOGGER.info(
             "Variable Level Scaling: Applying %s scaling to %s variables (%s)",

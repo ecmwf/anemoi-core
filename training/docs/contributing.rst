@@ -13,6 +13,16 @@ collaboration on GitHub, writing documentation, testing, and code style.
 The following sections provide additional information for contributing
 to Anemoi Training.
 
+*******************
+ Weekly PR Bulletin
+*******************
+
+A weekly bulletin summarising PR activity across ``anemoi-training``,
+``anemoi-models``, and ``anemoi-graphs`` -- including any breaking or
+config-schema changes -- is automatically posted to `issue #1262
+<https://github.com/ecmwf/anemoi-core/issues/1262>`_. You can receive
+notifications for this issue by clicking the "Subscribe" button on GitHub.
+
 ##########################
  Configuration guidelines
 ##########################
@@ -239,12 +249,29 @@ Anemoi testing guidelines <anemoi-docs:testing-guidelines>`.
  Running tests
 ***************
 
+The integration tests of anemoi-training are split into three
+subfolders of `training/tests/integration/`, one per job of the
+``nightly-integration-tests-hpc-gpu`` workflow. Each subfolder contains
+its own tests, fixtures (``conftest.py``) and configuration files
+(``config/``). Fixtures shared by all three live in
+`training/tests/integration/conftest.py`.
+
+-  `training_workflows/`: training cycles and config validation for the
+   different model types and use cases (smoke tests), including the
+   AICON use case in `training_workflows/aicon/`.
+-  `accuracy/`: the accuracy test, see :ref:`accuracy-testing` below.
+-  `benchmark/`: performance benchmarks, see the benchmarking section of
+   the user guide.
+
 To run integration tests in anemoi-training, ensure that you have GPU
-available, then from the top-level directory of anemoi-core run:
+available, then from the top-level directory of anemoi-core run, e.g.:
 
 .. code:: bash
 
-   pytest training/tests/integration --slow
+   pytest training/tests/integration/training_workflows --slow
+
+The accuracy test additionally requires ``--mlflow
+--mlflow-server=<url>`` and the benchmarks require ``--multigpu``.
 
 *********************************************
  Configuration handling in integration tests
@@ -281,19 +308,21 @@ remain reliable and maintainable. Our approach includes:
  Example of configuration handling
 ***********************************
 
-For an example, see `training/tests/integration/test_training_cycle.py`.
+For an example, see
+`training/tests/integration/training_workflows/test_training_cycle.py`.
 The test uses a configuration based on the template
 `training/src/anemoi/training/config/config.yaml`, i.e. the basic global
 model. It applies testing-specific modifications to reduce batch_size
 etc. as detailed in
-`training/tests/integration/config/testing_modifications.yaml`. It
-furthermore applies use-case-specific modifications as detailed in
-`training/tests/integration/test_config.yaml` to provide the location of
-our testing dataset compatible with the global model.
+`training/tests/integration/training_workflows/config/testing_modifications.yaml`.
+It furthermore applies use-case-specific modifications as detailed in
+`training/tests/integration/training_workflows/config/test_global.yaml`
+to provide the location of our testing dataset compatible with the
+global model.
 
-Note that we also parametrize the fixture `architecture_config` to
-override the default model configuration in order to test different
-model architectures.
+Note that we also parametrize the fixture `global_config` to override
+the default model configuration in order to test different model
+architectures.
 
 ************************
  Adding a use case test
@@ -312,10 +341,79 @@ To add a new use case, follow these steps:
    S3 before adding the test. Please get in touch about access.
 
 #. Subfolder Organization: Place your test and config files in a new
-   subfolder within `training/tests/integration/` for clarity and ease
-   of maintenance.
+   subfolder within `training/tests/integration/training_workflows/` for
+   clarity and ease of maintenance.
 
 #. Handling Test Failures: Complex use cases will likely require more
    test-time modifications. Check if these have overwritten expected
    configurations or are out-of-date with configuration changes in the
    templates.
+
+
+
+.. _accuracy-testing:
+
+****************
+Accuracy testing
+****************
+
+The accuracy test (`training/tests/integration/accuracy/test_accuracy.py`) trains a
+small global model for a fixed number of steps and compares its training
+loss curve against a reference run stored in MLflow. It runs nightly as
+part of the integration test matrix. Its configuration lives in
+`training/tests/integration/accuracy/config/test_global.yaml`.
+
+When the test fails the loss curve no longer matches the reference. There
+are two cases:
+
+#. Unintended regression: a code or config change altered the loss curve by
+   accident. Investigate and fix the change (see the config-consistency
+   checks above).
+
+#. Genuine algorithm improvement: the loss curve changed for a legitimate
+   reason. Take the run ID logged by the test (``Run ID from trainer: ...``)
+   as the candidate reference. Check it first by dispatching the
+   ``nightly-integration-tests-hpc-gpu`` workflow with ``tests`` set to
+   ``test_accuracy`` and ``accuracy_reference_id`` set to the candidate run
+   ID (locally: ``pytest --accuracy-reference-id=<run ID> ...``). If it
+   passes, promote it by copying the run ID into the ``reference_id``
+   constant in `test_accuracy.py`. Update the changelog
+   ``training/tests/integration/CHANGELOG.md`` with a short note
+   explaining the rationale behind your change.
+
+In addition to the MLflow-based comparison, the accuracy test pushes a scalar
+summary of each run (currently the final training loss, under the metric name
+``accuracyFinalLoss``) to the anemoi integration-test data server -- the same
+server used by the performance benchmarks in ``benchmark/test_benchmark.py``. The push
+happens only when the test is run from the ``main`` branch and is guarded by
+``track_accuracy_final_loss`` (a ``track_accuracy_result`` helper) in
+``src/anemoi/training/diagnostics/benchmark_server.py``.
+
+Accuracy results are written under a separate ``accuracy`` tree on the
+server, so they do not mix with the performance benchmarks. The remote
+location is resolved by ``get_benchmark_store(kind)`` which reads
+``~/.config/anemoi/anemoi-benchmark.yaml``:
+
+.. code:: yaml
+
+   user: ...
+   hostname: ...
+   path: /home/data/public/anemoi-integration-tests/training   # base directory
+
+By default, results for a given kind land under ``<path>/<kind>/<test_case>/``
+-- so the current global accuracy test writes to
+``.../training/accuracy/global/`` while the performance benchmarks write to
+``.../training/benchmarks/<test_case>/``. If you need to override the location
+for a specific kind, add a ``paths`` mapping which takes precedence:
+
+.. code:: yaml
+
+   paths:
+     benchmarks: /home/data/public/anemoi-integration-tests/training/benchmarks
+     accuracy:   /home/data/public/anemoi-integration-tests/training/accuracy
+
+Additional accuracy test cases (for example a limited-area variant) should
+reuse the same helper and pass their own ``test_case`` string so their
+results land in a sibling directory (e.g. ``.../training/accuracy/lam/``).
+See the "Local Benchmarking" section of the benchmarking user guide for
+more details on the config file layout.
