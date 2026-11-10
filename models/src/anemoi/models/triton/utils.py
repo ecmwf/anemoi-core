@@ -37,13 +37,14 @@ def edge_index_to_csc(
         edges_are_dst_sorted (bool): If True, assume the edge indices are already sorted by dst nodes.
 
     Returns:
-        (row, colptr), perm[, (rowptr, edge_id_per_src, edge_dst)]:
+        (row, colptr), perm[, (rowptr, edge_id_per_src, edge_dst_csr, csr_pos)]:
             row: source node for each edge (CSC order)
             colptr: column pointers for CSC (dst)
             perm: original → CSC edge permutation
             rowptr: CSR-style prefix sum over src
             edge_id_per_src: indices mapping CSR order → CSC order
-            edge_dst: destination node per edge (CSC order)
+            edge_dst_csr: destination node per edge, in CSR order
+            csr_pos: CSC edge id → its slot in CSR order (inverse of edge_id_per_src)
     """
     perm = None
     if not edges_are_dst_sorted:
@@ -65,7 +66,14 @@ def edge_index_to_csc(
         rowptr = index2ptr(row_sorted, num_nodes[0])
         edge_id_per_src = torch.argsort(row, stable=True)
         edge_dst = col
-        return (row, colptr), perm, (rowptr, edge_id_per_src, edge_dst)
+        # csr_pos is the inverse permutation of edge_id_per_src. The backward dst pass
+        # scatters its per-edge (alpha, dS) through it into CSR slots, so that the src
+        # pass can then read them back as a contiguous stream.
+        csr_pos = torch.empty_like(edge_id_per_src)
+        csr_pos[edge_id_per_src] = torch.arange(edge_id_per_src.numel(), device=edge_id_per_src.device)
+        # dst node per CSR slot, so the src pass needs no edge_id_per_src indirection
+        edge_dst_csr = edge_dst[edge_id_per_src]
+        return (row, colptr), perm, (rowptr, edge_id_per_src, edge_dst_csr, csr_pos)
 
     return (row, colptr), perm
 
