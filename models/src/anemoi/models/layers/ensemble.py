@@ -26,6 +26,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.layers.projection_backend import ProjectionBackend
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
@@ -121,6 +122,7 @@ class NoiseConditioning(BaseNoiseInjector):
         row_normalize_noise_matrix: bool = False,
         autocast: bool = False,
         sparse_projector_num_chunks: int = 1,
+        sparse_projector_backend: ProjectionBackend = "triton",
         num_channels: Optional[int] = None,
         graph_data: Optional[HeteroData] = None,
     ) -> None:
@@ -159,17 +161,19 @@ class NoiseConditioning(BaseNoiseInjector):
                 edges_name=tuple(noise_edges_name),
                 edge_weight_attribute=edge_weight_attribute,
                 row_normalize=row_normalize_noise_matrix,
+                backend=sparse_projector_backend,
             )
             self._sparse_projector = SparseProjector(autocast=autocast, num_chunks=sparse_projector_num_chunks)
-            LOGGER.info("Noise projector matrix shape = %s", self.noise_graph_provider.projection_matrix.shape)
+            LOGGER.info("Noise projector matrix shape = %s", self.noise_graph_provider.shape)
 
         if noise_matrix is not None:
             self.noise_graph_provider = ProjectionGraphProvider(
                 file_path=noise_matrix,
                 row_normalize=row_normalize_noise_matrix,
+                backend=sparse_projector_backend,
             )
             self._sparse_projector = SparseProjector(autocast=autocast, num_chunks=sparse_projector_num_chunks)
-            LOGGER.info("Noise projector matrix shape = %s", self.noise_graph_provider.projection_matrix.shape)
+            LOGGER.info("Noise projector matrix shape = %s", self.noise_graph_provider.shape)
 
         LOGGER.info("processor noise channels = %d", self.noise_channels)
 
@@ -187,7 +191,7 @@ class NoiseConditioning(BaseNoiseInjector):
         noise_shape = (
             batch_size,
             ensemble_size,
-            grid_size if self.noise_graph_provider is None else self.noise_graph_provider.projection_matrix.shape[1],
+            grid_size if self.noise_graph_provider is None else self.noise_graph_provider.shape[1],
             self.noise_channels,
         )
 
@@ -202,8 +206,7 @@ class NoiseConditioning(BaseNoiseInjector):
                 noise, "batch ensemble grid vars -> (batch ensemble) grid vars"
             )  # batch and ensemble always 1 when sharded
 
-            projection_matrix = self.noise_graph_provider.get_edges(device=noise.device)
-            noise = self._sparse_projector(noise, projection_matrix)  # to shape of hidden grid
+            noise = self._sparse_projector(noise, self.noise_graph_provider)  # to shape of hidden grid
 
             noise = einops.rearrange(noise, "bse grid vars -> (bse grid) vars")  # shape of x
             noise = all_to_all_transpose(
@@ -237,6 +240,8 @@ class NoiseInjector(BaseNoiseInjector):
         num_channels: int,
         layer_kernels: DotDict,
         noise_matrix: Optional[str] = None,
+        sparse_projector_num_chunks: int = 1,
+        sparse_projector_backend: ProjectionBackend = "triton",
         graph_data: Optional[HeteroData] = None,
     ) -> None:
         """Initialize NoiseInjector.
@@ -255,6 +260,10 @@ class NoiseInjector(BaseNoiseInjector):
             Layer kernel configurations
         noise_matrix : str, optional
             Optional path to noise truncation matrix
+        sparse_projector_num_chunks : int, optional
+            Number of chunks for the noise projection.
+        sparse_projector_backend : str, optional
+            ``"triton"`` (default) or ``"torch"``.
         graph_data : Optional[HeteroData], optional
             Graph data for noise conditioning.
         """
@@ -266,6 +275,8 @@ class NoiseInjector(BaseNoiseInjector):
             noise_mlp_hidden_dim=noise_mlp_hidden_dim,
             layer_kernels=layer_kernels,
             noise_matrix=noise_matrix,
+            sparse_projector_num_chunks=sparse_projector_num_chunks,
+            sparse_projector_backend=sparse_projector_backend,
             graph_data=graph_data,
         )
         self.noise_channels = noise_channels_dim

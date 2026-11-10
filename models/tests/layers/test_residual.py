@@ -104,6 +104,7 @@ def test_forward(graph_data):
         truncation_down_edges_name=("data", "to", "hidden"),
         truncation_up_edges_name=("hidden", "to", "data"),
         edge_weight_attribute="edge_length",
+        sparse_projector_backend="torch",
     )
     x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
     x_truncated = mapper.forward(x)
@@ -115,6 +116,7 @@ def test_forward_no_weight(graph_data):
         graph_data,
         truncation_down_edges_name=("data", "to", "hidden"),
         truncation_up_edges_name=("hidden", "to", "data"),
+        sparse_projector_backend="torch",
     )
     x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
     x_truncated = mapper.forward(x)
@@ -127,6 +129,7 @@ def test_forward_with_src_node_weight(graph_data):
         truncation_down_edges_name=("data", "to", "hidden"),
         truncation_up_edges_name=("hidden", "to", "data"),
         src_node_weight_attribute="weight",
+        sparse_projector_backend="torch",
     )
     x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
     x_truncated = mapper.forward(x)
@@ -139,6 +142,7 @@ def test_forward_with_edges_name(graph_data):
         truncation_down_edges_name=("data", "to", "hidden"),
         truncation_up_edges_name=("hidden", "to", "data"),
         edge_weight_attribute="edge_length",
+        sparse_projector_backend="torch",
     )
     x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
     x_truncated = mapper.forward(x)
@@ -151,6 +155,7 @@ def test_truncated_connection_shard_sizes_calls_all_to_all(graph_data, monkeypat
         truncation_down_edges_name=("data", "to", "hidden"),
         truncation_up_edges_name=("hidden", "to", "data"),
         edge_weight_attribute="edge_length",
+        sparse_projector_backend="torch",
     )
     calls = []
 
@@ -296,3 +301,17 @@ def test_spectral_ornstein_truncation_has_filter():
     assert hasattr(conn, "filter")
     assert hasattr(conn, "x_fsht")
     assert hasattr(conn, "x_isht")
+
+
+@pytest.mark.parametrize("backend", ["triton", "torch"])
+def test_truncated_connection_passes_its_backend_to_the_projections(graph_data, backend):
+    mapper = TruncatedConnection(
+        graph_data,
+        truncation_down_edges_name=("data", "to", "hidden"),
+        truncation_up_edges_name=("hidden", "to", "data"),
+        edge_weight_attribute="edge_length",
+        sparse_projector_backend=backend,
+    )
+
+    assert mapper.provider_down.backend == backend
+    assert mapper.provider_up.backend == backend

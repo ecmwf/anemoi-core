@@ -27,7 +27,7 @@ def edge_index_to_csc(
     num_nodes: Optional[Tuple[int, int]] = None,
     reverse: bool = True,
     edges_are_dst_sorted: bool = False,
-):
+) -> tuple:
     """Convert edge indices to CSC format, optionally also building reverse (CSR-like) metadata.
 
     Args:
@@ -83,6 +83,8 @@ def torch_dtype_to_triton(dtype):
         return tl.bfloat16
     elif dtype == torch.float32:
         return tl.float32
+    elif dtype == torch.float64:
+        return tl.float64
     else:
         raise ValueError(f"Unsupported dtype: {dtype}")
 

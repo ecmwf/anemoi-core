@@ -156,6 +156,7 @@ class GraphScoreGraph(nn.Module):
             src_node_weight_attribute=src_node_weight_attribute,
             edge_mask=edge_mask,
             row_normalize=row_normalize,
+            backend="torch",
         )
         LOGGER.info(
             "%s: edges=%s nodes=%s",

@@ -14,6 +14,8 @@ from scipy.sparse import save_npz
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.graph_provider import use_torch_projections
+from anemoi.models.layers.sparse_projector import SparseProjector
 
 
 def test_projection_graph_provider_preserves_row_normalized_weights() -> None:
@@ -32,6 +34,7 @@ def test_projection_graph_provider_preserves_row_normalized_weights() -> None:
         edges_name=("src", "to", "dst"),
         edge_weight_attribute="gauss_weight",
         row_normalize=False,
+        backend="torch",
     )
 
     edges = provider.get_edges()
@@ -61,6 +64,7 @@ def test_projection_graph_provider_accepts_int32_edge_index() -> None:
         edges_name=("src", "to", "dst"),
         edge_weight_attribute="gauss_weight",
         row_normalize=False,
+        backend="torch",
     )
 
     edges = provider.get_edges()
@@ -130,12 +134,16 @@ def test_from_config_file_mode(mocker) -> None:
         return_value=csr_matrix(np.array([[2.0, 2.0], [1.0, 3.0]])),
     )
 
-    normalized = ProjectionGraphProvider.from_config({"matrix_path": "/fake/path.npz", "row_normalize": True})
+    normalized = ProjectionGraphProvider.from_config(
+        {"matrix_path": "/fake/path.npz", "row_normalize": True}, backend="torch"
+    )
     assert isinstance(normalized, ProjectionGraphProvider)
     row_sums = normalized.get_edges().to_dense().sum(dim=1)
     assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-6)
 
-    unnormalized = ProjectionGraphProvider.from_config({"matrix_path": "/fake/path.npz", "row_normalize": False})
+    unnormalized = ProjectionGraphProvider.from_config(
+        {"matrix_path": "/fake/path.npz", "row_normalize": False}, backend="torch"
+    )
     row_sums = unnormalized.get_edges().to_dense().sum(dim=1)
     assert torch.allclose(row_sums, torch.tensor([4.0, 4.0]), atol=1e-6)
 
@@ -148,6 +156,7 @@ def test_from_config_edges_mode() -> None:
             "edge_weight_attribute": "gauss_weight",
         },
         graph_data=graph,
+        backend="torch",
     )
     assert isinstance(provider, ProjectionGraphProvider)
     matrix = provider.get_edges().to_dense()
@@ -184,6 +193,7 @@ def test_projection_graph_provider_row_normalizes_csr_matrix() -> None:
         edges_name=("src", "to", "dst"),
         edge_weight_attribute="gauss_weight",
         row_normalize=True,
+        backend="torch",
     )
 
     edges = provider.get_edges()
@@ -202,6 +212,7 @@ def test_projection_graph_provider_retains_requested_dtype() -> None:
     provider = ProjectionGraphProvider(
         graph=graph,
         edges_name=("src", "to", "dst"),
+        backend="torch",
     )
 
     float64_matrix = provider.get_edges(dtype=torch.float64)
@@ -218,8 +229,129 @@ def test_projection_graph_provider_loads_npz_as_csr(tmp_path) -> None:
     provider = ProjectionGraphProvider(
         file_path=file_path,
         row_normalize=False,
+        backend="torch",
     )
 
     edges = provider.get_edges()
     assert edges.layout == torch.sparse_csr
     assert torch.allclose(edges.to_dense(), expected)
+
+
+def _uneven_provider(backend: str = "triton") -> ProjectionGraphProvider:
+    """Four target nodes reading 2, 0, 3 and 1 of five source nodes."""
+    graph = HeteroData()
+    graph["src"].num_nodes = 5
+    graph["dst"].num_nodes = 4
+    graph[("src", "to", "dst")].edge_index = torch.tensor([[4, 1, 0, 2, 3, 2], [0, 0, 2, 2, 2, 3]])
+    graph[("src", "to", "dst")].weight = torch.tensor([0.5, 0.25, 0.1, 0.2, 0.3, 1.0])
+    return ProjectionGraphProvider(
+        graph=graph, edges_name=("src", "to", "dst"), edge_weight_attribute="weight", backend=backend
+    )
+
+
+def _dense_from_table(neighbours: torch.Tensor, weights: torch.Tensor, num_sources: int) -> torch.Tensor:
+    dense = torch.zeros(neighbours.shape[0], num_sources)
+    dense.scatter_add_(1, neighbours.long(), weights)
+    return dense
+
+
+def test_projection_table_holds_the_matrix() -> None:
+    neighbours, weights, row_lengths = _uneven_provider("triton").get_table()
+
+    assert neighbours.dtype == row_lengths.dtype == torch.int32
+    assert weights.dtype == torch.float32
+    assert neighbours.shape == weights.shape == (4, 3)
+    assert row_lengths.tolist() == [2, 0, 3, 1]
+    expected = _uneven_provider("torch").get_edges().to_dense()
+    torch.testing.assert_close(_dense_from_table(neighbours, weights, 5), expected)
+    # The empty row has zero weights.
+    assert (weights[1] == 0).all()
+
+
+def test_each_backend_keeps_only_its_form_of_the_matrix() -> None:
+    table_provider = _uneven_provider("triton")
+    matrix_provider = _uneven_provider("torch")
+
+    assert table_provider.shape == matrix_provider.shape == (4, 5)
+    assert table_provider.projection_matrix is None
+    assert matrix_provider.projection_table is None
+    with pytest.raises(ValueError, match="get_table"):
+        table_provider.get_edges()
+    with pytest.raises(ValueError, match="get_edges"):
+        matrix_provider.get_table()
+
+
+def test_projection_table_built_in_bands_is_the_same(monkeypatch) -> None:
+    from anemoi.models.layers import graph_provider
+
+    expected = _uneven_provider().get_table()
+    monkeypatch.setattr(graph_provider, "_TABLE_BAND_ENTRIES", 3)
+    banded = _uneven_provider().get_table()
+
+    for table, expected_table in zip(banded, expected):
+        torch.testing.assert_close(table, expected_table)
+
+
+def test_projection_table_refuses_tables_that_are_too_large(monkeypatch) -> None:
+    from anemoi.models.layers import graph_provider
+
+    # Four rows padded to the longest row of 3 make a table of 12 entries.
+    monkeypatch.setattr(graph_provider, "_MAX_TABLE_ENTRIES", 12)
+    _uneven_provider("triton")
+    monkeypatch.setattr(graph_provider, "_MAX_TABLE_ENTRIES", 11)
+    with pytest.raises(ValueError, match="too large"):
+        _uneven_provider("triton")
+
+
+def test_projection_table_is_shared_by_copies() -> None:
+    import copy
+
+    provider = _uneven_provider()
+    table = provider.get_table()
+
+    assert provider.get_table() is table
+    copied = copy.deepcopy(provider)
+    assert all(copied_table is shared for copied_table, shared in zip(copied.get_table(), table, strict=True))
+
+
+def test_switching_to_the_torch_backend_gives_the_matrix_back() -> None:
+    provider = _uneven_provider("triton")
+    expected = _uneven_provider("torch")
+
+    provider.use_torch_backend()
+
+    assert provider.backend == "torch"
+    assert provider.projection_table is None
+    torch.testing.assert_close(provider.get_edges().to_dense(), expected.get_edges().to_dense())
+    # Rows of 2, 0, 3 and 1 entries project as with the torch matrix.
+    x = torch.randn(2, 5, 3)
+    torch.testing.assert_close(SparseProjector()(x, provider), SparseProjector()(x, expected))
+
+
+def test_use_torch_projections_switches_every_projection_in_a_model() -> None:
+    model = torch.nn.ModuleDict(
+        {
+            "residual": _uneven_provider("triton"),
+            "nested": torch.nn.Sequential(torch.nn.Linear(2, 2), _uneven_provider("triton")),
+            "already_torch": _uneven_provider("torch"),
+        }
+    )
+
+    use_torch_projections(model)
+
+    providers = [module for module in model.modules() if isinstance(module, ProjectionGraphProvider)]
+    assert len(providers) == 3
+    assert all(provider.backend == "torch" and provider.projection_table is None for provider in providers)
+
+
+def test_matrix_first_cast_in_inference_mode_can_be_used_in_training() -> None:
+    # Lightning runs validation, the first use of the loss, under torch.inference_mode.
+    provider = _uneven_provider("torch")
+    x = torch.randn(2, 5, 3, dtype=torch.float64)
+    with torch.inference_mode():
+        SparseProjector()(x, provider, matrix_dtype=torch.float64)
+
+    x = x.clone().requires_grad_(True)
+    SparseProjector()(x, provider, matrix_dtype=torch.float64).sum().backward()
+
+    assert x.grad is not None
