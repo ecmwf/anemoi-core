@@ -1236,6 +1236,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         )
         seed_random_generators(seed)
         LOGGER.debug("Epoch %d, batch %d: random number generators seeded with %d", self.current_epoch, batch_idx, seed)
+        # Per-batch task state (e.g. the sampled rollout length) must match on every rank,
+        # so its seed does not depend on the model communication group.
+        task = getattr(self, "task", None)
+        if task is not None:
+            task.on_train_batch_start(
+                derive_seed(get_base_seed(), SeedContext.TASK_BATCH, self.current_epoch, batch_idx),
+            )
+
+    def on_validation_epoch_start(self) -> None:
+        self.task.on_validation_epoch_start()
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         del batch_idx

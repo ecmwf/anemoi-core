@@ -217,6 +217,12 @@ class BaseTask(ABC):
     def on_train_epoch_end(self, current_epoch: int) -> None:  # noqa: B027
         """Hook to update task state at the end of each training epoch (e.g. for curriculum learning)."""
 
+    def on_train_batch_start(self, seed: int) -> None:  # noqa: B027
+        """Hook called before each training batch with a seed shared by all ranks (e.g. to sample the rollout)."""
+
+    def on_validation_epoch_start(self) -> None:  # noqa: B027
+        """Hook called before each validation epoch."""
+
     def fill_metadata(self, md_dict: dict) -> None:
         """Fill the metadata dictionary with task-specific information."""
         md_dict["metadata_inference"]["task"] = self.name

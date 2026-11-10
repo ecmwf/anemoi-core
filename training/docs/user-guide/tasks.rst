@@ -46,6 +46,22 @@ The four built-in tasks are:
           epoch_increment: 1
           maximum: 12
 
+   With ``rollout.sampling: random`` every training batch unrolls a
+   random number of steps, drawn uniformly from ``[rollout.minimum,
+   current rollout]`` with a seed shared by all ranks. The dataloader
+   always provides the longest window and validation unrolls the full
+   rollout. Combined with ``epoch_increment`` the sampled range widens
+   during training; with ``start == maximum`` it is fixed:
+
+   .. code:: yaml
+
+      rollout:
+        start: 6
+        epoch_increment: 0
+        maximum: 6
+        sampling: random  # each batch unrolls 1..6 steps
+        minimum: 1
+
 ``OffsetForecaster``
    An experimental generalization of ``Forecaster`` where inputs and
    outputs are specified directly as time offsets relative to the start

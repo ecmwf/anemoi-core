@@ -94,6 +94,10 @@ the progressive rollout schedule:
 - ``epoch_increment`` — increase the rollout window by one every this
   many epochs (``0`` disables progression).
 - ``maximum`` — the rollout window is never increased beyond this value.
+- ``sampling`` — ``fixed`` (default) unrolls the current rollout every
+  batch; ``random`` samples the number of unrolled steps per training
+  batch uniformly from ``[minimum, rollout.step]``.
+- ``minimum`` — shortest sampled rollout when ``sampling`` is ``random``.
 
 The current step count is stored in ``rollout.step`` and is increased
 by calling ``rollout.increase()``, which is triggered by the trainer at

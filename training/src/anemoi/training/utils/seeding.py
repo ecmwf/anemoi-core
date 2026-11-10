@@ -26,6 +26,7 @@ class SeedContext(IntEnum):
     MODEL = 1
     DATALOADER = 2
     TRAINING_BATCH = 3
+    TASK_BATCH = 4
 
 
 # Base seed of the current run; see set_base_seed().

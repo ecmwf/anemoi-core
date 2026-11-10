@@ -10,6 +10,10 @@ rollout:
   epoch_increment: 0
   # maximum rollout to use
   maximum: 1
+  # 'fixed': unroll the current rollout every batch
+  # 'random': unroll a random number of steps in [minimum, current rollout] per training batch
+  sampling: fixed
+  minimum: 1
 
 # set validation rollout length if more rollout is required in validation than
 # training, or set to null to follow the training rollout. Values below the

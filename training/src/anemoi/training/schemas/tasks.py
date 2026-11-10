@@ -27,6 +27,10 @@ class RolloutSchema(BaseModel):
     "Number of epochs to increment the rollout."
     maximum: NonNegativeInt = Field(example=1)
     "Maximum number of rollouts."
+    sampling: Literal["fixed", "random"] = Field(default="fixed")
+    "'fixed' unrolls the curriculum rollout every batch; 'random' samples it uniformly from [minimum, current maximum]."
+    minimum: PositiveInt = Field(default=1, example=1)
+    "Shortest rollout sampled when sampling is 'random'."
 
 
 class ForecasterSchema(BaseModel):

@@ -693,3 +693,66 @@ def test_offset_convert_and_validate_returns_sorted_timedeltas(
     assert converted_inputs == expected_inputs
     assert converted_outputs == expected_outputs
     assert all(isinstance(offset, datetime.timedelta) for offset in converted_inputs + converted_outputs)
+
+
+def _random_rollout_task(**rollout) -> Forecaster:
+    return Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 6, "maximum": 6, "sampling": "random", "minimum": 1, **rollout},
+    )
+
+
+def test_random_rollout_samples_within_range_and_covers_it() -> None:
+    task = _random_rollout_task()
+    lengths = set()
+    for seed in range(200):
+        task.on_train_batch_start(seed)
+        lengths.add(len(task.steps("training")))
+    assert lengths == {1, 2, 3, 4, 5, 6}
+
+
+def test_random_rollout_is_deterministic_per_seed() -> None:
+    a, b = _random_rollout_task(), _random_rollout_task()
+    for seed in range(20):
+        a.on_train_batch_start(seed)
+        b.on_train_batch_start(seed)
+        assert a.rollout.current == b.rollout.current
+
+
+def test_random_rollout_loads_window_for_longest_rollout() -> None:
+    task = _random_rollout_task()
+    task.on_train_batch_start(0)
+    task.rollout.current = 1
+    assert len(task.get_offsets(mode="training")) == len(task._compute_rollout_offsets(6))
+
+
+def test_random_rollout_validation_uses_full_rollout() -> None:
+    task = _random_rollout_task()
+    task.rollout.current = 2
+    task.on_validation_epoch_start()
+    assert len(task.steps("validation")) == 6
+    assert task.num_steps == 6
+
+
+def test_random_rollout_range_follows_curriculum() -> None:
+    task = _random_rollout_task(start=2, epoch_increment=1, minimum=1)
+    for seed in range(50):
+        task.on_train_batch_start(seed)
+        assert 1 <= task.rollout.current <= 2
+    task.on_train_epoch_end(current_epoch=0)
+    assert {task.rollout.sample(seed) for seed in range(100)} == {1, 2, 3}
+
+
+def test_fixed_rollout_ignores_sampling_seed() -> None:
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 3, "maximum": 3})
+    for seed in range(10):
+        task.on_train_batch_start(seed)
+        assert len(task.steps("training")) == 3
+
+
+@pytest.mark.parametrize("rollout", [{"sampling": "uniform"}, {"sampling": "random", "minimum": 7, "maximum": 6}])
+def test_rollout_config_rejects_invalid_sampling(rollout: dict) -> None:
+    with pytest.raises(ValueError):
+        Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 1, "maximum": 6, **rollout})

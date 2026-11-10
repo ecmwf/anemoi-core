@@ -9,6 +9,7 @@
 
 import datetime
 import logging
+import random
 from collections.abc import Callable
 
 import torch
@@ -23,14 +24,43 @@ LOGGER = logging.getLogger(__name__)
 
 
 class RolloutConfig:
-    """Rollout configuration for autoregressive training."""
+    """Rollout configuration for autoregressive training.
 
-    def __init__(self, start: int = 1, epoch_increment: int = 0, maximum: int = 1) -> None:
+    ``step`` follows the curriculum (``start``, grown by one every
+    ``epoch_increment`` epochs up to ``maximum``) and sets how many time steps
+    the dataloader provides. ``current`` is the rollout length unrolled in the
+    current training batch:
+
+    - ``sampling="fixed"`` (default): ``current == step``.
+    - ``sampling="random"``: ``current`` is drawn uniformly from
+      ``[minimum, step]`` for every training batch, e.g. 3, 5, 1, 6 for
+      ``minimum=1, maximum=6``. Combine with ``epoch_increment`` to widen the
+      range over training, or set ``start == maximum`` for a fixed range.
+      Validation always unrolls ``step`` steps.
+    """
+
+    def __init__(
+        self,
+        start: int = 1,
+        epoch_increment: int = 0,
+        maximum: int = 1,
+        sampling: str = "fixed",
+        minimum: int = 1,
+    ) -> None:
         """Initialize rollout configuration."""
+        if sampling not in ("fixed", "random"):
+            msg = f"rollout.sampling must be 'fixed' or 'random', got {sampling!r}."
+            raise ValueError(msg)
+        if sampling == "random" and not 1 <= minimum <= maximum:
+            msg = f"rollout.minimum must be in [1, maximum={maximum}], got {minimum}."
+            raise ValueError(msg)
         self.start = start
         self.epoch_increment = epoch_increment
         self.maximum = maximum
+        self.sampling = sampling
+        self.minimum = minimum
         self.step = self.start
+        self.current = self.step
         # Remember which epoch last increased the rollout so that running the
         # hook again for the same epoch does not increase it twice.
         self._last_increased_epoch: int = -1
@@ -48,8 +78,25 @@ class RolloutConfig:
         """Increase the rollout window by one step."""
         if self.step < self.maximum:
             self.step += 1
+            self.current = self.step
             self._last_increased_epoch = current_epoch
             LOGGER.info("Rollout window length has been increased to %d.", self.step)
+
+    def sample(self, seed: int) -> int:
+        """Set the rollout length of the next training batch.
+
+        ``seed`` must be the same on every rank so that all ranks unroll the same
+        number of steps.
+        """
+        if self.sampling == "random":
+            self.current = random.Random(seed).randint(min(self.minimum, self.step), self.step)
+        else:
+            self.current = self.step
+        return self.current
+
+    def reset(self) -> None:
+        """Use the full curriculum rollout, e.g. for validation."""
+        self.current = self.step
 
     def state_dict(self) -> dict:
         """Return serialisable state."""
@@ -58,6 +105,7 @@ class RolloutConfig:
     def load_state_dict(self, state: dict) -> None:
         """Restore state from a dict produced by :meth:`state_dict`."""
         self.step = state["step"]
+        self.current = self.step
         self._last_increased_epoch = state["last_increased_epoch"]
 
 
@@ -96,10 +144,15 @@ class BaseForecaster(BaseTask):
         self._plot_adapter = ForecasterPlotAdapter(self)
 
     def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
-        """Return the current steps configuration based on the rollout step."""
-        max_rollout = self.rollout.step
-        if mode == "validation" and self.validation_rollout is not None:
-            max_rollout = max(max_rollout, self.validation_rollout)
+        """Return the steps to unroll.
+
+        Training unrolls ``rollout.current`` steps (the sampled length with random
+        rollout sampling); validation unrolls the full curriculum rollout.
+        """
+        if mode == "validation":
+            max_rollout = max(self.rollout.step, self.validation_rollout or 0)
+        else:
+            max_rollout = self.rollout.current
         return tuple({"rollout_step": i} for i in range(max_rollout))
 
     def get_metric_name(self, rollout_step: int = 0, **_kwargs) -> str:
@@ -116,7 +169,10 @@ class BaseForecaster(BaseTask):
         return sorted(all_offsets)
 
     def get_offsets(self, mode: str | None = None) -> list[datetime.timedelta]:
-        if mode in ("training", "validation"):
+        if mode == "training":
+            # Load the window for the longest rollout a batch may sample.
+            rollout_step = self.rollout.step
+        elif mode == "validation":
             rollout_step = len(self.steps(mode))
         else:
             LOGGER.debug(
@@ -188,6 +244,16 @@ class BaseForecaster(BaseTask):
             rank_zero_only=True,
             sync_dist=False,
         )
+        if self.rollout.sampling == "random":
+            logger(
+                "rollout_sampled",
+                float(self.rollout.current),
+                on_step=True,
+                on_epoch=False,
+                logger=logger_enabled,
+                rank_zero_only=True,
+                sync_dist=False,
+            )
 
     def log_training_state(self) -> None:
         """Log the effective rollout state at the start of training."""
@@ -216,6 +282,12 @@ class BaseForecaster(BaseTask):
     def on_train_epoch_end(self, current_epoch: int) -> None:
         if self.rollout.should_increase(current_epoch):
             self.rollout.increase(current_epoch)
+
+    def on_train_batch_start(self, seed: int) -> None:
+        self.rollout.sample(seed)
+
+    def on_validation_epoch_start(self) -> None:
+        self.rollout.reset()
 
     def _get_timestep_for_metadata(self) -> str:
         """Get the timestep string for metadata."""
