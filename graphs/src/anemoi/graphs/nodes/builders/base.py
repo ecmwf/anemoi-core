@@ -80,6 +80,12 @@ class BaseNodeBuilder(ABC):
         attributes = attributes or []
 
         for attr_obj in attributes:
+            if attr_obj.name is None:
+                error_msg = (
+                    f"Node attribute builder {attr_obj.__class__.__name__} must define 'name' either as a class attribute "
+                    "or in __init__ when registered on a graph."
+                )
+                raise ValueError(error_msg)
             graph[self.name][attr_obj.name] = attr_obj.compute(graph, self.name)
 
     @abstractmethod

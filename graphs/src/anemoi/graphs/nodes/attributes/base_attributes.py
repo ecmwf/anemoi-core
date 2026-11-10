@@ -70,10 +70,6 @@ class BaseNodeAttribute(ABC, NormaliserMixin):
         if name is not None:
             self.name = name
 
-        if self.name is None:
-            error_msg = f"Node attribute builder {self.__class__.__name__} must define 'name' either as a class attribute or in __init__"
-            raise ValueError(error_msg)
-
         self.norm = norm
         self.dtype = getattr(torch, dtype)
         self.device = get_distributed_device()

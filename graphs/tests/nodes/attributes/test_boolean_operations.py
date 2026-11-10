@@ -9,11 +9,28 @@
 
 import pytest
 import torch
+from hydra.utils import instantiate
+from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.nodes.attributes import BooleanAndMask
 from anemoi.graphs.nodes.attributes import BooleanNot
 from anemoi.graphs.nodes.attributes import BooleanOrMask
+
+
+def test_boolean_operation_can_instantiate_anonymous_mask_builder():
+    """A nested mask builder is not registered and therefore needs no name."""
+    config = OmegaConf.create(
+        {
+            "_target_": "anemoi.graphs.nodes.attributes.BooleanNot",
+            "masks": {"_target_": "anemoi.graphs.nodes.attributes.CutOutMask"},
+        }
+    )
+
+    node_attr_builder = instantiate(config, name="not_cutout")
+
+    assert node_attr_builder.name == "not_cutout"
+    assert node_attr_builder.masks[0].name is None
 
 
 def test_boolean_not(graph_with_nodes: HeteroData):
