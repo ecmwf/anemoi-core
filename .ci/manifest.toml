@@ -2,6 +2,7 @@
 name = "anemoi-core"
 repo = "ecmwf/anemoi-core"
 visibility = "public"
+fork-pull-requests = true
 compiler-inputs = []
 # An umbrella: `package = "anemoi-core"` stands for the three packages below.
 # Consumers may instead name the ones they use.

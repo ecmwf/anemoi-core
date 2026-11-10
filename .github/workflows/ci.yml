@@ -8,6 +8,7 @@ on:
   schedule:
     - cron: "9 2 * * 0" # at 9:02 on sunday
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
   # PRs cancel their superseded runs; every push to main runs to the end (as in ecmwf/eccodes).
@@ -27,6 +28,8 @@ permissions:
 
 jobs:
   ci-approval:
+    # A fork's own pull_request run does nothing; ci-fork.yml runs this workflow instead.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -50,6 +53,8 @@ jobs:
           private-key: ${{ secrets.CI_PERMISSIONS_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
       - uses: ecmwf/ci-infrastructure/actions/checkout-under-test@main
+        with:
+          allow-unsafe-pr-checkout: ${{ github.event_name == 'pull_request_target' }}
       - id: r
         uses: ecmwf/ci-infrastructure/actions/resolve-deps@main
         with:
@@ -74,6 +79,7 @@ jobs:
           owner: ${{ github.repository_owner }}
       - uses: ecmwf/ci-infrastructure/actions/checkout-under-test@main
         with:
+          allow-unsafe-pr-checkout: ${{ github.event_name == 'pull_request_target' }}
           # The version comes from the git tags (setuptools-scm).
           fetch-depth: 0
 

@@ -33,7 +33,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 class MultiscaleLossWrapper(BaseLossWrapper):
-
     name: str = "MultiscaleLossWrapper"
     needs_graph_data: bool = True
     needs_data_node_name: bool = True
@@ -120,9 +119,9 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             data_node_name,
         )
         self.num_scales = len(self.smoothing_matrices)
-        assert (
-            len(weights) == self.num_scales
-        ), f"Number of weights ({len(weights)}) must match number of scales ({self.num_scales})"
+        assert len(weights) == self.num_scales, (
+            f"Number of weights ({len(weights)}) must match number of scales ({self.num_scales})"
+        )
         self.weights = weights
         self.supports_sharding = True
         self.mloss = None

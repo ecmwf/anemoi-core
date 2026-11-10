@@ -425,7 +425,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if batch_idx % self.every_n_batches == 0:
-
             batch = self._prepare_batch(pl_module, batch)
             # Lightning hands us the batch returned by `on_after_batch_transfer`, so it sits on the
             # projected grid like the predictions do — `grid_shard_sizes`, not the reader `shard_sizes`.
@@ -435,7 +434,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             }
             preds = output.predictions
             if not isinstance(preds, list):
-
                 raise TypeError(preds)
             gathered_predictions = [
                 {
@@ -511,7 +509,6 @@ class BasePerEpochPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if trainer.current_epoch % self.every_n_epochs == 0:
-
             self.plot(
                 trainer,
                 pl_module,
