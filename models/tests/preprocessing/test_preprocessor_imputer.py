@@ -289,9 +289,9 @@ def test_transform_with_nan_inference(imputer_fixture, data_fixture, request):
     # inverse transform on inference data
     imputer.transform(x_small_in, in_place=False)
     restored = imputer.inverse_transform(expected_small_out, in_place=False)
-    assert torch.allclose(
-        restored, x_small_out, equal_nan=True
-    ), "Inverse transform does not restore NaNs correctly in inference."
+    assert torch.allclose(restored, x_small_out, equal_nan=True), (
+        "Inverse transform does not restore NaNs correctly in inference."
+    )
 
 
 def test_transform_with_subset_data_index_is_noop(non_default_input_imputer, non_default_input_data) -> None:
@@ -306,9 +306,9 @@ def test_transform_with_subset_data_index_is_noop(non_default_input_imputer, non
     x_subset = x[..., prog_index]
     transformed = imputer.transform(x_subset, in_place=False, data_index=prog_index, skip_imputation=True)
 
-    assert torch.allclose(
-        transformed, x_subset, equal_nan=True
-    ), "Subset transform should not modify the input when data_index is provided."
+    assert torch.allclose(transformed, x_subset, equal_nan=True), (
+        "Subset transform should not modify the input when data_index is provided."
+    )
     assert torch.equal(imputer.nan_locations, saved_mask), "Subset transform should not update the saved NaN mask."
 
 
@@ -322,9 +322,9 @@ def test_inverse_transform_skip_imputation_is_noop(non_default_input_imputer, no
     expected_prog = expected[..., data_index]
 
     restored = imputer.inverse_transform(expected_prog, in_place=False, skip_imputation=True, data_index=data_index)
-    assert torch.allclose(
-        restored, expected_prog, equal_nan=True
-    ), "Inverse transform should not modify the input when skip_imputation is set."
+    assert torch.allclose(restored, expected_prog, equal_nan=True), (
+        "Inverse transform should not modify the input when skip_imputation is set."
+    )
 
 
 @pytest.mark.parametrize(
@@ -351,9 +351,9 @@ def test_inverse_transform(imputer_fixture, data_fixture, request):
     transformed = imputer.transform(x, in_place=False)
     assert torch.allclose(transformed, expected, equal_nan=True), "Transform does not handle NaNs correctly."
     restored = imputer.inverse_transform(transformed, in_place=False)
-    assert torch.allclose(
-        restored, expected_restored, equal_nan=True
-    ), "Inverse transform does not restore NaNs correctly."
+    assert torch.allclose(restored, expected_restored, equal_nan=True), (
+        "Inverse transform does not restore NaNs correctly."
+    )
 
 
 @pytest.mark.parametrize(
@@ -383,9 +383,9 @@ def test_loss_nan_mask(imputer_fixture, data_fixture, request):
     )  # only prognostic and diagnostic variables
     imputer = request.getfixturevalue(imputer_fixture)
     imputer.transform(x)
-    assert torch.allclose(
-        imputer.loss_mask_training, expected
-    ), "Transform does not calculate NaN-mask for loss function scaling correctly."
+    assert torch.allclose(imputer.loss_mask_training, expected), (
+        "Transform does not calculate NaN-mask for loss function scaling correctly."
+    )
 
 
 @pytest.mark.parametrize(
@@ -404,9 +404,9 @@ def test_reuse_imputer(imputer_fixture, data_fixture, request):
     x2 = x**2.0
     _ = imputer.transform(x2, in_place=False)
     transformed2 = imputer.transform(x, in_place=False)
-    assert torch.allclose(
-        transformed2, expected, equal_nan=True
-    ), "Imputer does not reuse mask correctly on subsequent runs."
+    assert torch.allclose(transformed2, expected, equal_nan=True), (
+        "Imputer does not reuse mask correctly on subsequent runs."
+    )
 
 
 @pytest.mark.parametrize(
@@ -423,9 +423,9 @@ def test_changing_nan_locations(imputer_fixture, data_fixture, request):
     transformed = imputer.transform(x, in_place=False)
     assert torch.allclose(transformed, expected, equal_nan=True), "Transform does not handle NaNs correctly."
     restored = imputer.inverse_transform(transformed, in_place=False)
-    assert torch.allclose(
-        restored, expected_restored, equal_nan=True
-    ), "Inverse transform does not restore NaNs correctly."
+    assert torch.allclose(restored, expected_restored, equal_nan=True), (
+        "Inverse transform does not restore NaNs correctly."
+    )
     assert torch.equal(imputer.nan_locations, expected_mask), "Mask not saved correctly after first run."
 
     # change nan locations by rolling the tensor
@@ -435,11 +435,11 @@ def test_changing_nan_locations(imputer_fixture, data_fixture, request):
     # reduce time dimension
     expected_mask = torch.isnan(x)[:, 0][..., imputer.data_indices.data.input.full]
     imputer.transform(x, in_place=False)
-    assert torch.allclose(
-        imputer.transform(x, in_place=False), expected, equal_nan=True
-    ), "Transform does not handle changed NaNs correctly."
+    assert torch.allclose(imputer.transform(x, in_place=False), expected, equal_nan=True), (
+        "Transform does not handle changed NaNs correctly."
+    )
     restored = imputer.inverse_transform(imputer.transform(x, in_place=False), in_place=False)
-    assert torch.allclose(
-        restored, expected_restored, equal_nan=True
-    ), "Inverse transform does not restore changed NaNs correctly."
+    assert torch.allclose(restored, expected_restored, equal_nan=True), (
+        "Inverse transform does not restore changed NaNs correctly."
+    )
     assert torch.equal(imputer.nan_locations, expected_mask), "Mask not saved correctly after changing nan locations."
