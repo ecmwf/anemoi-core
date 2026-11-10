@@ -17,6 +17,8 @@ from anemoi.graphs.edges.attributes import AttributeFromTargetNode
 from anemoi.graphs.edges.attributes import DirectionalHarmonics
 from anemoi.graphs.edges.attributes import EdgeDirection
 from anemoi.graphs.edges.attributes import EdgeLength
+from anemoi.graphs.edges.attributes import FloatAttributeFromSourceNode
+from anemoi.graphs.edges.attributes import FloatAttributeFromTargetNode
 from anemoi.graphs.edges.attributes import GaussianDistanceWeights
 from anemoi.graphs.edges.attributes import RadialBasisFeatures
 
@@ -55,6 +57,23 @@ def test_edge_attribute_from_node(attribute_builder_cls, graph_nodes_and_edges: 
     target_nodes = graph_nodes_and_edges[TEST_EDGES[2]]
     edge_attr = edge_attr_builder(x=(source_nodes, target_nodes), edge_index=edge_index)
     assert isinstance(edge_attr, torch.Tensor)
+
+
+@pytest.mark.parametrize(
+    "attribute_builder_cls, node_axis", [(FloatAttributeFromSourceNode, 0), (FloatAttributeFromTargetNode, 1)]
+)
+def test_float_edge_attribute_from_node(attribute_builder_cls, node_axis, graph_nodes_and_edges: HeteroData):
+    """Float node attributes are copied unchanged from the source/target node of each edge."""
+    nodes = graph_nodes_and_edges[TEST_EDGES[0]]
+    nodes["elevation"] = torch.arange(nodes.num_nodes, dtype=torch.float32).unsqueeze(-1) * 100.0
+    edge_index = graph_nodes_and_edges[TEST_EDGES].edge_index
+
+    edge_attr = attribute_builder_cls(node_attr_name="elevation")(x=(nodes, nodes), edge_index=edge_index)
+    assert edge_attr.dtype == torch.float32
+    torch.testing.assert_close(edge_attr, nodes["elevation"][edge_index[node_axis]])
+
+    normed = attribute_builder_cls(node_attr_name="elevation", norm="unit-max")(x=(nodes, nodes), edge_index=edge_index)
+    torch.testing.assert_close(normed, edge_attr / edge_attr.max())
 
 
 @pytest.mark.parametrize("attribute_builder", [EdgeDirection(), EdgeLength()])

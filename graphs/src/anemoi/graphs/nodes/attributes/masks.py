@@ -177,8 +177,10 @@ class LimitedAreaMask(BooleanBaseNodeAttribute):
     """
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
-        assert nodes["node_type"] in ["StretchedTriNodes"], (
-            f"{self.__class__.__name__} can only be used with StretchedIcosahedronNodes."
+        assert "_area_mask_builder" in nodes, (
+            f"{self.__class__.__name__} requires an '_area_mask_builder' attribute. "
+            "Use only with node builders that define a LAM boundary "
+            "(e.g. StretchedTriNodes, AdaptiveStretchedTriNodes)."
         )
         lam_mask = nodes["_area_mask_builder"].get_mask(nodes.x)
         return lam_mask
