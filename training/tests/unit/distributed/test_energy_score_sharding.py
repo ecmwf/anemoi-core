@@ -9,6 +9,8 @@
 
 """Compare grid-sharded energy scores and their gradients with the unsharded ones on CPU."""
 
+import faulthandler
+import time
 from datetime import timedelta
 from itertools import combinations
 from pathlib import Path
@@ -24,9 +26,14 @@ from anemoi.training.utils.enums import EnergyScoreDimension
 from anemoi.training.utils.enums import TensorDim
 
 GRID_SHARD_SIZES = [3, 2]
+RANK_STACK_DUMP_SECONDS = 60
+TEST_TIMEOUT_SECONDS = 120
 
 
 def _check_sharded_energy_scores(rank: int, init_file: str) -> None:
+    # The ranks hang rarely with torch 2.6 in CI. pytest's faulthandler_timeout only
+    # dumps the stacks of the pytest worker, so the ranks dump their own.
+    faulthandler.dump_traceback_later(RANK_STACK_DUMP_SECONDS, exit=False)
     torch.set_num_threads(1)
     world_size = len(GRID_SHARD_SIZES)
     dist.init_process_group(
@@ -94,9 +101,17 @@ def _check_sharded_energy_scores(rank: int, init_file: str) -> None:
 def test_sharded_energy_score_and_gradients_match_unsharded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OMP_NUM_THREADS", "1")
     monkeypatch.setenv("OPENBLAS_NUM_THREADS", "1")
-    mp.spawn(
+    context = mp.spawn(
         _check_sharded_energy_scores,
         args=(str(tmp_path / "rendezvous"),),
         nprocs=len(GRID_SHARD_SIZES),
-        join=True,
+        join=False,
     )
+    # mp.spawn has no timeout and its ranks are not daemons, so a hung rank would
+    # block the worker until the CI job limit. Kill the ranks instead.
+    deadline = time.monotonic() + TEST_TIMEOUT_SECONDS
+    while not context.join(timeout=1):
+        if time.monotonic() > deadline:
+            for process in context.processes:
+                process.kill()
+            pytest.fail(f"Ranks did not finish within {TEST_TIMEOUT_SECONDS} s")
