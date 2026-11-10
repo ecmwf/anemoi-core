@@ -13,7 +13,6 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from torch_geometric.data import HeteroData
 
 import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
 from anemoi.graphs.nodes.attributes import Timedeltas
@@ -35,6 +34,7 @@ from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport import TransportSourceSettings
 from anemoi.models.transport import schedules
 from tests.batch_builders import build_batch
+from tests.graph_stubs import stub_graph_geometry
 
 
 class IdentityProcessor(torch.nn.Module):
@@ -109,7 +109,8 @@ def _configure_sampling_model(
     model.statistics = {}
     model.is_dataset_static = {}
     model.target_datasets = list(specs)
-    model._graph_data = HeteroData()
+    # Grid coordinates of the synthetic batches (the model itself does not keep the graph).
+    model.test_coordinates = {}
     for dataset_name, (num_inputs, num_outputs, grid_size) in specs.items():
         input_names = tuple(f"in_{idx}" for idx in range(num_inputs))
         output_names = tuple(f"out_{idx}" for idx in range(num_outputs))
@@ -119,7 +120,7 @@ def _configure_sampling_model(
             "stdev": torch.ones(num_inputs + num_outputs),
         }
         model.is_dataset_static[dataset_name] = True
-        model._graph_data[dataset_name].x = torch.zeros(grid_size, 2)
+        model.test_coordinates[dataset_name] = torch.zeros(grid_size, 2)
 
 
 GRIDDED_LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
@@ -142,7 +143,7 @@ def _model_batch(
             layout=GRIDDED_LAYOUT,
             statistics={key: values[positions] for key, values in model.statistics[name].items()},
             data=tensor,
-            coordinates=model._graph_data[name].x,
+            coordinates=model.test_coordinates[name],
         )
     return Batch(sources)
 
@@ -209,7 +210,7 @@ def _sparse_target_template(
 def test_transport_conditioning_embedding_uses_compact_condition_width() -> None:
     model = _transport_model_stub()
     model.dataset2hidden = {"data": "hidden"}
-    model._graph_data = {"data": SimpleNamespace(num_nodes=4), "hidden": SimpleNamespace(num_nodes=5)}
+    model.static_graph_geometry = stub_graph_geometry(data=4, hidden=5)
     cond_dim = 8
     model._embed_noise_conditioning = lambda sigma: torch.ones(
         (*sigma.shape[:-1], cond_dim),
@@ -250,7 +251,7 @@ def test_transport_conditioning_is_split_like_the_nodes_it_conditions(
     """Both mappers receive conditioning in the same layout as their input node features."""
     model = _transport_model_stub()
     model._graph_name_hidden = "hidden"
-    model._graph_data = {"data": SimpleNamespace(num_nodes=4), "hidden": SimpleNamespace(num_nodes=6)}
+    model.static_graph_geometry = stub_graph_geometry(data=4, hidden=6)
     model._embed_noise_conditioning = lambda sigma: torch.ones((*sigma.shape[:-1], 2), dtype=sigma.dtype)
     # A model group of two ranks, seen from rank 0: every sharded tensor keeps its first shard.
     sharded_row_counts = []
@@ -312,7 +313,7 @@ def test_transport_conditioning_covers_history_and_target_nodes_of_sparse_data()
     """The encoder is conditioned on each sample's history and target nodes; the decoder on the target nodes."""
     model = _transport_model_stub()
     model._graph_name_hidden = "hidden"
-    model._graph_data = {"hidden": SimpleNamespace(num_nodes=5)}
+    model.static_graph_geometry = stub_graph_geometry(hidden=5)
     cond_dim = 6
     model._embed_noise_conditioning = (
         lambda sigma: torch.arange(sigma.shape[0], dtype=sigma.dtype).view(-1, 1, 1).expand(*sigma.shape[:-1], cond_dim)

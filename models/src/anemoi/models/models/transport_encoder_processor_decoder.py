@@ -347,20 +347,20 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         hidden_name = self.dataset2hidden[dataset_name]
 
         c_data = self._noise_emb_over_view(noise_cond, data_view, data_shard_sizes)
-        c_hidden = self._make_noise_emb(noise_cond, repeat=self._graph_data[hidden_name].num_nodes)
+        c_hidden = self._make_noise_emb(noise_cond, repeat=self.graph_geometry.num_nodes[hidden_name])
 
         if edge_conditioning:  # currently unused, but available if graph edges need conditioning later
             c_data_to_hidden = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(dataset_name, "to", hidden_name)]["edge_length"].shape[0],
+                repeat=self.graph_geometry.num_edges[(dataset_name, "to", hidden_name)],
             )
             c_hidden_to_data = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(hidden_name, "to", dataset_name)]["edge_length"].shape[0],
+                repeat=self.graph_geometry.num_edges[(hidden_name, "to", dataset_name)],
             )
             c_hidden_to_hidden = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(hidden_name, "to", hidden_name)]["edge_length"].shape[0],
+                repeat=self.graph_geometry.num_edges[(hidden_name, "to", hidden_name)],
             )
         else:
             c_data_to_hidden = None

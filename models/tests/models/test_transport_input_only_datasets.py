@@ -220,7 +220,7 @@ def _build_model(kind: str) -> AnemoiTransportModelEncProcDec:
         is_dataset_static={"grid": True, "obs": False},
         hidden_nodes_name="hidden",
     )
-    return MODEL_CLASSES[kind](
+    model = MODEL_CLASSES[kind](
         model_config=_model_config(),
         static_graph_data=static_graph_data,
         dynamic_graph_config=dynamic_graph_config,
@@ -229,6 +229,9 @@ def _build_model(kind: str) -> AnemoiTransportModelEncProcDec:
         n_step_input={"grid": 2, "obs": 2},
         n_step_output={"grid": 1, "obs": 1},
     )
+    # The model does not keep the graph; the synthetic batches need its grid coordinates.
+    model.test_grid_coordinates = static_graph_data["grid"].x
+    return model
 
 
 def _gridded(variables: list[str], data: torch.Tensor, coordinates: torch.Tensor) -> GriddedSource:
@@ -262,7 +265,7 @@ def _tabular(variables: list[str], windows: list[torch.Tensor], coordinates: lis
 def _synthetic_batches(model: AnemoiTransportModelEncProcDec) -> dict[str, Batch]:
     """Inputs of both datasets, and the target forcings and a noisy target of the grid, for one sample."""
     generator = torch.Generator().manual_seed(2)
-    grid_coordinates = model._graph_data["grid"].x.float()  # radians, as the graph stores them
+    grid_coordinates = model.test_grid_coordinates.float()  # radians, as the graph stores them
     indices = _data_indices()
 
     def obs_coordinates(num_rows):

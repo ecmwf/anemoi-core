@@ -1130,7 +1130,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
 
             if auxiliary_tensor is not None:
                 latlons, data, output_tensor, auxiliary_tensor = self.focus_mask.apply(
-                    pl_module.model.model._graph_data,
+                    pl_module.model.graph_data,
                     data_latlons,
                     data,
                     output_tensor,
@@ -1138,7 +1138,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                 )
             else:
                 latlons, data, output_tensor = self.focus_mask.apply(
-                    pl_module.model.model._graph_data,
+                    pl_module.model.graph_data,
                     data_latlons,
                     data,
                     output_tensor,

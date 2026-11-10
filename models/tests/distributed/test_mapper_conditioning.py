@@ -11,7 +11,6 @@
 
 from copy import deepcopy
 from itertools import product
-from types import SimpleNamespace
 
 import pytest
 import torch
@@ -31,6 +30,7 @@ from anemoi.models.layers.mapper import GraphTransformerForwardMapper
 from anemoi.models.layers.mapper import TransformerForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
+from tests.graph_stubs import stub_graph_geometry
 
 from ._distributed_runner import _run_distributed_test
 
@@ -178,7 +178,7 @@ def _check_transport_conditioning(*, rank, world_size, device, group) -> None:
     model = AnemoiTransportModelEncProcDec.__new__(AnemoiTransportModelEncProcDec)
     torch.nn.Module.__init__(model)
     model._graph_name_hidden = "hidden"
-    model._graph_data = {"hidden": SimpleNamespace(num_nodes=hidden_nodes)}
+    model.static_graph_geometry = stub_graph_geometry(hidden=hidden_nodes)
     model.dynamic_node_attributes = {}
     model.noise_embedder = torch.nn.Identity()
     model.noise_cond_mlp = torch.nn.Linear(1, 2, bias=False).to(device)

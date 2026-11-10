@@ -178,7 +178,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
 
     assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
     assert model.hidden_names == ["hidden_1", "hidden_2", "hidden_3"]
-    assert model._graph_data["hidden_3"].num_nodes == 1
+    assert model.graph_geometry.num_nodes["hidden_3"] == 1
 
 
 # ---------------------------------------------------------------------------

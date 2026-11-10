@@ -27,7 +27,7 @@ class _GraphModel(torch.nn.Module):
 
     def __init__(self, *, static_graph_data, dynamic_graph_config, **kwargs) -> None:
         super().__init__()
-        self._graph_data = static_graph_data
+        self.received_graph = static_graph_data
 
 
 def test_interface_passes_complete_graph_to_spatial_preprocessor(tmp_path) -> None:
@@ -64,7 +64,7 @@ def test_interface_passes_complete_graph_to_spatial_preprocessor(tmp_path) -> No
     model_interface._build_model()
 
     # The interface loads the graph and hands the same object to the model.
-    assert model_interface.graph_data is model_interface.model._graph_data
+    assert model_interface.graph_data is model_interface.model.received_graph
     projector = model_interface.spatial_pre_processors["projected"]
     projected, grid_shard_sizes = projector(torch.tensor([[[[[1.0], [3.0]]]]]))
 

@@ -31,6 +31,7 @@ from anemoi.models.data.sources import TabularSource
 from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.layers.graph import StaticGraphGeometry
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.imputer import InputImputer
 from anemoi.models.preprocessing.normalizer import InputNormalizer
@@ -331,11 +332,11 @@ def _projection_graph() -> HeteroData:
 
 
 class _ProjectionGraphModel(torch.nn.Module):
-    """Stand-in model that receives the static graph from the interface."""
+    """Stand-in model that receives the static graph from the interface, and keeps its geometry like the real ones."""
 
     def __init__(self, *, static_graph_data: HeteroData, **_kwargs: Any) -> None:
         super().__init__()
-        self._graph_data = static_graph_data
+        self.graph_geometry = StaticGraphGeometry(static_graph_data, coordinate_node_names=["projected"])
 
 
 def _projecting_interface() -> AnemoiModelInterface:

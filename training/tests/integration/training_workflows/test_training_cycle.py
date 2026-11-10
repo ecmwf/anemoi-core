@@ -98,8 +98,9 @@ def test_training_cycle_multidomain(
         "data": "hidden",
         "data_2": "hidden_2",
     }
-    assert model._graph_data["data"].num_nodes != model._graph_data["data_2"].num_nodes
-    assert model._graph_data["hidden"].num_nodes != model._graph_data["hidden_2"].num_nodes
+    num_nodes = model.graph_geometry.num_nodes
+    assert num_nodes["data"] != num_nodes["data_2"]
+    assert num_nodes["hidden"] != num_nodes["hidden_2"]
     assert trainer.model.trainer.global_step == 4
 
     assert_keys_exist(trainer.metadata, partial_metadata_schema)

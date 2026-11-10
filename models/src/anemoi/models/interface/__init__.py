@@ -199,7 +199,7 @@ class AnemoiModelInterface(torch.nn.Module):
             if dataset_name in batch:
                 projected = projector.project_source(
                     batch[dataset_name],
-                    self.graph_data[dataset_name].x,
+                    self.model.graph_geometry.coordinates(dataset_name),
                     model_comm_group=model_comm_group,
                 )
                 batch = batch.replace(dataset_name, projected)

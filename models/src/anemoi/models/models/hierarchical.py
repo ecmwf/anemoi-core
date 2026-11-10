@@ -211,9 +211,13 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
             )
 
+    def _hidden_node_sets(self) -> list[str]:
+        """Every hidden level, not only the first: the forward pass starts each from its coordinates."""
+        return list(self._hidden_names)
+
     def _hidden_coordinates(self, hidden_name: str | None = None) -> Tensor:
         """Coordinates of a hidden level, by default the first one (the one the datasets connect to)."""
-        return self._graph_data[hidden_name or self._hidden_names[0]].x
+        return self.graph_geometry.coordinates(hidden_name or self._hidden_names[0])
 
     def _hidden_edges(
         self,

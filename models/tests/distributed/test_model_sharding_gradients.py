@@ -362,6 +362,8 @@ def _build_model(
         n_step_input={name: 2 for name in datasets},
         n_step_output={name: 1 for name in datasets},
     )
+    # The model does not keep the graph; the synthetic batches need its grid coordinates.
+    model.test_grid_coordinates = static_graph_data["grid"].x if with_grid else None
     if isinstance(model, AnemoiEnsModelEncProcDec):
         # The ensemble model draws its noise in the injector's default float32.
         model.noise_injector.forward = partial(model.noise_injector.forward, noise_dtype=DTYPE)
@@ -449,9 +451,9 @@ def _synthetic_batches(
     The target forcings and the noisy target cover the predicted datasets only.
     """
     generator = torch.Generator().manual_seed(2)
-    with_grid = "grid" in model._graph_data.node_types
+    with_grid = model.test_grid_coordinates is not None
     # radians, as the graph stores them; a model without the grid gets a batch without it
-    grid_coordinates = model._graph_data["grid"].x.float() if with_grid else torch.zeros(NUM_GRID_POINTS, 2)
+    grid_coordinates = model.test_grid_coordinates.float() if with_grid else torch.zeros(NUM_GRID_POINTS, 2)
     indices = _data_indices()
 
     def randn(*shape):

@@ -249,6 +249,7 @@ then again at collation:
 | gridded layout with `batch` | `ValueError` at collation: the layout describes fewer axes than the data |
 | gridded layout without `ensemble` | `EinopsError` inside the model |
 | `time` axis length ≠ `n_step_input` (e.g. `(1, T, grid, vars)` labelled `("time", "ensemble", "grid", "variables")`) | `RuntimeError` inside the model, e.g. `mat1 and mat2 shapes cannot be multiplied`; not checked at the boundary |
+| inference checkpoint saved without the graph, before the model kept its graph geometry | `RuntimeError` naming `restore_graph_geometry(graph)`; see "The model in the checkpoint" |
 | `encoded_data` target feature on a dataset whose input and target nodes differ | `AssertionError("Decoder x_dst rows ... != target node count ...")` |
 
 Not caught: a wrong variable order (see "Variable order"), a decoded dataset missing from
@@ -270,6 +271,26 @@ There is no `shapes` entry any more: the number of input and output steps is the
 `timesteps["input_relative_date_indices"]` / `["output_relative_date_indices"]`, the number of variables the
 length of `data_indices["input"]` / `["output"]`, and the grid size is `grid_size`. The model's own
 `fill_metadata` writes nothing; every entry comes from the data module and the task.
+
+## The model in the checkpoint
+
+The inference checkpoint pickles the whole `AnemoiModelInterface`, without the static graph: its
+`graph_data` is `None`, and the model itself does not keep the graph. It does not need it, and the caller
+passes none: the graph providers hold the edges, and `model.model.graph_geometry` holds the node and edge
+counts and the coordinates of the hidden nodes and of the gridded datasets' grids (what spatial
+pre-processors project onto; the pre-processors themselves stay stateless).
+
+Inference checkpoints written between the checkpoint trim (#1456, merged into `feat/richer-batch` on
+22 October 2026) and the graph geometry have neither the graph nor the geometry. `predict_step` on them
+raises a `RuntimeError`. Give the model the training graph once, after loading, and they run:
+
+```python
+model = torch.load(path, map_location="cpu", weights_only=False)
+model.model.restore_graph_geometry(graph)  # the training graph file, or rebuilt with anemoi-graphs from
+                                           # the checkpoint's metadata["config"]["graph"]
+```
+
+Older checkpoints, which still carry the graph, build the geometry from it on load.
 
 ## Open questions for the team
 
@@ -293,5 +314,6 @@ length of `data_indices["input"]` / `["output"]`, and the grid size is `grid_siz
 | Transport `predict_step`, tendency `_sampled_to_physical` | `models/src/anemoi/models/models/transport_encoder_processor_decoder.py` |
 | Output assembly / target node assert | `models/src/anemoi/models/models/encoder_processor_decoder.py` |
 | Checkpoint metadata | `training/src/anemoi/training/data/datamodule.py` (`fill_metadata`) and the task's `fill_metadata` (`training/src/anemoi/training/tasks/`) |
+| What the model keeps of the graph (`StaticGraphGeometry`) | `models/src/anemoi/models/layers/graph.py`; `BaseGraphModel.graph_geometry` / `restore_graph_geometry` in `models/base.py` |
 | End-to-end tests of the boundary | `models/tests/interface/test_predict_step.py` |
 | Inference-side caller | `anemoi-inference`: `src/anemoi/inference/runners/richer_batch.py` |
