@@ -1,4 +1,5 @@
 defaults:
+- migration_state
 - data: multi
 - dataloader: multi
 - diagnostics: evaluation_multi
