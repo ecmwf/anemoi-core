@@ -146,9 +146,9 @@ class InputNormalizer(BasePreprocessor):
         # Check for typos in method config
         assert isinstance(self.methods, dict)
         for name, method in self.methods.items():
-            assert (
-                method in NORMALIZATION_STATISTICS
-            ), f"{method} is not a valid normalisation method for variable {name}."
+            assert method in NORMALIZATION_STATISTICS, (
+                f"{method} is not a valid normalisation method for variable {name}."
+            )
 
     def transform(
         self,

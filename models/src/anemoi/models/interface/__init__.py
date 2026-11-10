@@ -274,8 +274,7 @@ class AnemoiModelInterface(torch.nn.Module):
                 batch_axis = sample.layout.axis("batch", ndim=data.ndim) if sample.layout.batch is not None else None
                 if batch_axis is not None:
                     assert data.shape[batch_axis] == 1, (
-                        f"Dataset {dataset_name!r}: expected a single sample to unwrap, got "
-                        f"{data.shape[batch_axis]}."
+                        f"Dataset {dataset_name!r}: expected a single sample to unwrap, got {data.shape[batch_axis]}."
                     )
                     data = data.squeeze(batch_axis)
                 layout = layout.without_batch_dim()

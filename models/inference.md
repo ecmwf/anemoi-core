@@ -139,12 +139,16 @@ unwrapped (asserted).
 
 ```python
 model.predict_step(
-    x=Batch, target_template=dict[str, BaseTemplate], target_forcing=Batch,
-    pre_processors=..., post_processors=...,
-    model_comm_group=..., gather_out=...,
-    statistics_tendencies=...,       # only when the checkpoint has tendency statistics
-    spatial_pre_processors=...,      # only when a dataset has a spatial processor
-    **kwargs,                        # from the caller
+    x=Batch,
+    target_template=dict[str, BaseTemplate],
+    target_forcing=Batch,
+    pre_processors=...,
+    post_processors=...,
+    model_comm_group=...,
+    gather_out=...,
+    statistics_tendencies=...,  # only when the checkpoint has tendency statistics
+    spatial_pre_processors=...,  # only when a dataset has a spatial processor
+    **kwargs,  # from the caller
 )
 ```
 
@@ -162,26 +166,26 @@ All return a `Batch` on the template's nodes, post-processed and, with `gather_o
 ### Gridded, one dataset, 2 input steps → 1 output step
 
 ```python
-names_in = list(md["era5"]["data_indices"]["input"])       # model-input order
-names_out = list(md["era5"]["data_indices"]["output"])     # model-output order
+names_in = list(md["era5"]["data_indices"]["input"])  # model-input order
+names_out = list(md["era5"]["data_indices"]["output"])  # model-output order
 forcings = [n for n in names_in if n in md["era5"]["variable_types"]["forcing"]]
 geometry = {
     "data_type": "gridded",
-    "latitudes": lats,                                     # (N,) degrees
-    "longitudes": lons,                                    # (N,) degrees
+    "latitudes": lats,  # (N,) degrees
+    "longitudes": lons,  # (N,) degrees
     "layout": ("time", "ensemble", "grid", "variables"),
 }
 
 result = model.predict_step(
-    {"era5": {**geometry, "data": x, "variables": names_in}},              # x: (2, 1, N, V_in)
+    {"era5": {**geometry, "data": x, "variables": names_in}},  # x: (2, 1, N, V_in)
     target_template={"era5": {**geometry, "variables": names_out}},
     target_forcing={"era5": {**geometry, "data": f, "variables": forcings}},  # f: (1, 1, N, V_forcing), OUTPUT time
 )
 
 out = result["era5"]
-out["data"]       # (1, 1, N, V_out)
+out["data"]  # (1, 1, N, V_out)
 out["variables"]  # == names_out
-out["layout"]     # ("time", "ensemble", "grid", "variables")
+out["layout"]  # ("time", "ensemble", "grid", "variables")
 out["latitudes"]  # (N,) degrees
 ```
 
@@ -192,17 +196,17 @@ model.predict_step(
     {
         "obs": {
             "data_type": "tabular",
-            "data": y,                       # (M, V_in)  grid, vars; time folded into grid
+            "data": y,  # (M, V_in)  grid, vars; time folded into grid
             "variables": obs_names_in,
-            "latitudes": obs_lats,           # (M,) degrees
-            "longitudes": obs_lons,          # (M,) degrees
-            "timedeltas": offsets,           # (M,) seconds
+            "latitudes": obs_lats,  # (M,) degrees
+            "longitudes": obs_lons,  # (M,) degrees
+            "timedeltas": offsets,  # (M,) seconds
             "boundaries": [(0, k), (k, M)],  # one (start, stop) per input time slot
             "layout": ("grid", "variables"),
         }
     },
-    target_template={"obs": {...}},          # the output points and window(s), no data
-    target_forcing={"obs": {...}},           # forcings at the output points and times
+    target_template={"obs": {...}},  # the output points and window(s), no data
+    target_forcing={"obs": {...}},  # forcings at the output points and times
 )
 # out["obs"]["data"]: (M_out, V_out), layout ("grid", "variables"), with timedeltas and boundaries
 ```
@@ -211,8 +215,8 @@ model.predict_step(
 
 ```python
 model.predict_step(
-    {"era5": {...}, "obs": {...}},   # every dataset the model encodes
-    target_template={"era5": {...}}, # the datasets to decode
+    {"era5": {...}, "obs": {...}},  # every dataset the model encodes
+    target_template={"era5": {...}},  # the datasets to decode
     target_forcing={"era5": {...}},
 )
 # result.keys() == {"era5"}
@@ -222,7 +226,9 @@ model.predict_step(
 
 ```python
 model.predict_step(
-    x, target_template=templates, target_forcing=forcings,
+    x,
+    target_template=templates,
+    target_forcing=forcings,
     schedule_params={"num_steps": 20},
     sampler_params={"sampler": "heun"},
 )
@@ -287,7 +293,7 @@ raises a `RuntimeError`. Give the model the training graph once, after loading, 
 ```python
 model = torch.load(path, map_location="cpu", weights_only=False)
 model.model.restore_graph_geometry(graph)  # the training graph file, or rebuilt with anemoi-graphs from
-                                           # the checkpoint's metadata["config"]["graph"]
+# the checkpoint's metadata["config"]["graph"]
 ```
 
 Older checkpoints, which still carry the graph, build the geometry from it on load.
