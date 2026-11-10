@@ -192,6 +192,7 @@ def test_edm_loss_passes_sparse_weights_and_preserves_gradients() -> None:
         loss={"obs": WeightedMSELoss()},
         model_comm_group=None,
         _evaluate_loss=BaseTrainingModule._evaluate_loss,
+        _check_nan_targets=lambda *_args: None,
     )
     weights = {"obs": [torch.full((2, 1), 2.0), torch.full((3, 1), 3.0)]}
     result = EDMDiffusionTransportObjective(module).compute_loss(pred, target, dataset_name="obs", weights=weights)

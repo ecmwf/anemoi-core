@@ -450,6 +450,26 @@ class TransportTraining(BaseTransportTraining):
             **kwargs,
         )
 
+    def _check_nan_network_target(self, model_target: Batch) -> None:
+        """Fail loudly when the target passed through the network still contains NaNs.
+
+        The corrupted target goes through the network together with the inputs, diagnostics
+        included, so it is imputed like the inputs. A variable the imputer does not cover keeps
+        its NaNs, and one NaN spreads through the graph and makes the whole prediction NaN.
+        """
+        nan_targets = self._nan_variables_per_dataset(
+            model_target,
+            {name: self.data_indices[name].model.output.name_to_index for name, _ in model_target.items()},
+        )
+        if not nan_targets:
+            return
+        msg = (
+            f"The target passed through the transport network contains NaNs after imputation: {nan_targets}. "
+            "One NaN makes the whole prediction NaN. Add an imputer "
+            "(e.g. anemoi.models.preprocessing.imputer.InputImputer) for these variables to the dataset's processors."
+        )
+        raise ValueError(msg)
+
     def _step(
         self,
         batch: Batch,
@@ -458,6 +478,7 @@ class TransportTraining(BaseTransportTraining):
         """Run one training or validation step for the selected transport objective."""
         x = self.preprocess_inputs(self.task.get_inputs(batch, data_indices=self.data_indices))
         prepared_target = self.prediction_mode.prepare_target(batch, x)
+        self._check_nan_network_target(prepared_target.model_target)
         prepared_objective = self.transport_objective.prepare(prepared_target)
 
         prediction = self(

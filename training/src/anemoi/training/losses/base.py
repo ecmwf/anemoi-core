@@ -97,6 +97,9 @@ class BaseLoss(nn.Module, ABC):
     scaler: ScaleTensor
     needs_graph_data: bool = False
     needs_data_node_name: bool = False
+    # Whether the loss multiplies its elementwise errors by the ``weights`` passed to it.
+    # The other losses accept ``weights`` and leave them unused.
+    applies_weights: bool = False
 
     def __init__(
         self,

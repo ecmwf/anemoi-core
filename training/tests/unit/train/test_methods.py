@@ -38,6 +38,7 @@ from anemoi.models.preprocessing.normalizer import InputNormalizer
 from anemoi.models.transport import EdmSettings
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
+from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
@@ -746,6 +747,7 @@ def test_edm_transport_compute_loss_forwards_standard_loss_kwargs() -> None:
     """EDMDiffusionTransportObjective.compute_loss passes noise weights to the loss function."""
     module = MagicMock(spec=TransportTraining)
     loss = CaptureLoss()
+    loss.applies_weights = True
     group = object()
     shard_sizes = [1, 1]
     weights = {"data": torch.tensor([0.25])}
@@ -775,12 +777,29 @@ def test_edm_transport_compute_loss_forwards_standard_loss_kwargs() -> None:
         "grid_shard_slice": grid_shard_slice,
         "group": group,
     }
+    module._check_nan_targets.assert_called_once_with(y, "data", {"training_loss": loss})
+
+
+def test_edm_transport_compute_loss_rejects_a_loss_that_leaves_the_weights_unused() -> None:
+    """MSELoss accepts the EDM noise weights and drops them, so EDM refuses it."""
+    module = MagicMock(spec=TransportTraining)
+    module.loss = {"data": MSELoss()}
+    y = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
+
+    with pytest.raises(ValueError, match="leaves the weights unused"):
+        EDMDiffusionTransportObjective(module).compute_loss(
+            y_pred=y,
+            y=y,
+            dataset_name="data",
+            weights={"data": torch.tensor([0.25])},
+        )
 
 
 def test_edm_transport_compute_loss_forwards_sharding_metadata_when_requested() -> None:
     """EDMDiffusionTransportObjective.compute_loss adds shard layout when loss.needs_shard_layout_info."""
     module = MagicMock(spec=TransportTraining)
     loss = ShardingAwareCaptureLoss()
+    loss.applies_weights = True
     group = object()
     shard_sizes = [1, 1]
     weights = {"data": torch.tensor([0.25])}
@@ -1861,7 +1880,7 @@ def test_edm_transport_training_step_with_forecaster() -> None:
     forecaster.is_first_step = False
     forecaster.updating_scalars = {}
     forecaster.target_dataset_names = forecaster.dataset_names
-    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss = {"data": WeightedMSELoss()}
     forecaster.loss_supports_sharding = False
     forecaster.metrics_support_sharding = True
 

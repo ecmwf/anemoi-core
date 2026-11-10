@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""``BaseTrainingModule._check_nan_targets`` and ``_check_nan_inputs``: when NaNs must stop training."""
+"""NaN checks on targets, model inputs and the transport network target: when NaNs must stop training."""
 
 from types import SimpleNamespace
 
@@ -22,6 +22,7 @@ from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.methods.transport import TransportTraining
 from tests.batch_builders import build_batch
 
 VARIABLES = ["a", "b", "diag"]
@@ -37,6 +38,7 @@ def _module() -> SimpleNamespace:
         data_indices={"data": data_indices},
         _nan_flags_per_variable=BaseTrainingModule._nan_flags_per_variable,
         _variables_with_nans=BaseTrainingModule._variables_with_nans,
+        _nan_variables_per_dataset=BaseTrainingModule._nan_variables_per_dataset,
     )
 
 
@@ -127,3 +129,14 @@ def test_preprocess_inputs_runs_the_check() -> None:
     module._check_nan_inputs = lambda batch: BaseTrainingModule._check_nan_inputs(module, batch)
     with pytest.raises(ValueError, match="Model inputs contain NaNs"):
         BaseTrainingModule.preprocess_inputs(module, _batch_with_nan_in("a"))
+
+
+def test_transport_network_target_with_a_nan_diagnostic_is_rejected() -> None:
+    """The input check leaves diagnostics out, but they go through a transport network too."""
+    BaseTrainingModule._check_nan_inputs(_module(), _batch_with_nan_in("diag"))
+    with pytest.raises(ValueError, match="transport network contains NaNs"):
+        TransportTraining._check_nan_network_target(_module(), _batch_with_nan_in("diag"))
+
+
+def test_transport_network_target_without_nans_passes() -> None:
+    TransportTraining._check_nan_network_target(_module(), _batch_with_nan_in(None))

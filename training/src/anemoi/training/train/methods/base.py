@@ -672,9 +672,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         shard_sizes = source.grid_shard_sizes
         if not shard_sizes:
             return None
-        assert isinstance(shard_sizes, list) and all(
-            isinstance(s, int) for s in shard_sizes
-        ), "shard_sizes must be a list of integers"
+        assert isinstance(shard_sizes, list) and all(isinstance(s, int) for s in shard_sizes), (
+            "shard_sizes must be a list of integers"
+        )
         start, end = get_partition_range(shard_sizes, self.model_comm_group_rank)
         return slice(start, end)
 
@@ -747,12 +747,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     ) -> torch.Tensor:
         """Check training precision before promoting inputs and evaluating the loss."""
         full_precision = (torch.float32, torch.float64)
-        assert (
-            pred.dtype in full_precision
-        ), f"Prediction for {pred.name!r} must be float32 or float64, got {pred.dtype}."
-        assert (
-            target.dtype in full_precision
-        ), f"Target for {target.name!r} must be float32 or float64, got {target.dtype}."
+        assert pred.dtype in full_precision, (
+            f"Prediction for {pred.name!r} must be float32 or float64, got {pred.dtype}."
+        )
+        assert target.dtype in full_precision, (
+            f"Target for {target.name!r} must be float32 or float64, got {target.dtype}."
+        )
         dtype = torch.promote_types(torch.promote_types(pred.dtype, target.dtype), torch.float32)
         pred = pred.map_data(lambda data: data.to(dtype))
         target = target.map_data(lambda data: data.to(dtype))
@@ -782,6 +782,26 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """Return the names of the flagged variables."""
         return [source.variables[i] for i, has_nan in zip(indices, nan_per_variable.tolist(), strict=True) if has_nan]
 
+    @staticmethod
+    def _nan_variables_per_dataset(batch: Batch, variables: Mapping[str, Mapping[str, Any]]) -> dict[str, list[str]]:
+        """Return, for each dataset of ``batch``, which of its ``variables`` contain NaNs.
+
+        All datasets are checked with a single sync. Datasets without NaNs are left out.
+        """
+        flags = {
+            name: BaseTrainingModule._nan_flags_per_variable(source, variables[name])
+            for name, source in batch.items()
+            if name in variables
+        }
+        flags = {name: flag for name, flag in flags.items() if flag is not None}
+        if not flags or not bool(torch.cat([nan_per_variable for _, nan_per_variable in flags.values()]).any()):
+            return {}
+        return {
+            name: nan_variables
+            for name, flag in flags.items()
+            if (nan_variables := BaseTrainingModule._variables_with_nans(batch[name], *flag))
+        }
+
     def _check_nan_inputs(self, batch: Batch) -> None:
         """Fail loudly when model inputs still contain NaNs after preprocessing.
 
@@ -795,20 +815,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         batch : Batch
             Preprocessed model inputs.
         """
-        flags = {
-            name: self._nan_flags_per_variable(source, self.data_indices[name].model.input.name_to_index)
-            for name, source in batch.items()
-            if name in self.data_indices
-        }
-        flags = {name: flag for name, flag in flags.items() if flag is not None}
-        if not flags or not bool(torch.cat([nan_per_variable for _, nan_per_variable in flags.values()]).any()):
+        nan_inputs = self._nan_variables_per_dataset(
+            batch,
+            {name: indices.model.input.name_to_index for name, indices in self.data_indices.items()},
+        )
+        if not nan_inputs:
             return
-
-        nan_inputs = {
-            name: nan_variables
-            for name, flag in flags.items()
-            if (nan_variables := self._variables_with_nans(batch[name], *flag))
-        }
         msg = (
             f"Model inputs contain NaNs after preprocessing: {nan_inputs}. The model cannot handle NaN inputs: "
             "the whole prediction becomes NaN, and losses with ignore_nans=True then report 0. Add an imputer "
@@ -865,6 +877,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
+        extra_loss_kwargs: dict[str, Any] | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the loss function.
@@ -883,6 +896,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Variable layout of the predictions.
         target_layout : IndexSpace | str | None
             Variable layout of the targets.
+        extra_loss_kwargs : dict[str, Any] | None
+            Further arguments for the loss, such as per-sample weights.
         **_kwargs
             Additional arguments.
 
@@ -901,6 +916,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             loss_kwargs["pred_layout"] = pred_layout
         if target_layout is not None:
             loss_kwargs["target_layout"] = target_layout
+        loss_kwargs.update(extra_loss_kwargs or {})
 
         if getattr(loss, "needs_shard_layout_info", False):
             # grid_shard_sizes must stay consistent with grid_shard_slice: if the tensors were
