@@ -209,3 +209,89 @@ indices based on the target nodes:
 Both processors maintain the consistency of all edge attributes while
 sorting, ensuring that the relationship between edge indices and their
 corresponding attributes remains intact.
+
+**************************************
+ RemoveEdgesCrossingArea
+**************************************
+
+The ``RemoveEdgesCrossingArea`` post-processor removes the edges that
+cross a given area. The area is defined by a boolean attribute of a
+reference set of nodes, where ``True`` marks the points inside the
+restricted area.
+
+This is useful for domains that are physically disconnected, such as the
+ocean, where an edge builder with no knowledge of the land/sea boundary
+connects nodes that should not exchange information. A typical example
+is ``SphericalDelaunayEdges`` applied to an ocean mesh, which connects basins
+across narrow land barriers.
+
+.. code:: yaml
+
+   nodes:
+     data:
+       node_builder: ...
+       attributes:
+         land_mask:
+           _target_: anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable
+           variable: lsm
+   edges: ...
+
+   post_processors:
+   - _target_: anemoi.graphs.processors.RemoveEdgesCrossingArea
+     source_name: hidden
+     target_name: hidden
+     reference_nodes_name: data        # nodes holding the mask
+     reference_attribute_name: land_mask  # True inside the restricted area
+     num_middle_points: 1              # optional
+
+Each edge is checked by sampling ``num_middle_points`` points evenly
+spaced along it, projecting them back onto the sphere, and looking up
+the closest node of the reference set. If any of those points is closest
+to a node inside the restricted area, the edge is removed. The default,
+``num_middle_points: 1``, tests only the midpoint of the edge; a larger
+value makes the test stricter at the cost of a slower post-processing
+step.
+
+.. note::
+
+   The test is based on the nearest reference node, so its resolution is
+   limited by the resolution of the reference grid. Narrow barriers may
+   be missed if the reference nodes are too coarse to resolve them.
+
+This post-processor also supports the ``source_mask_attr_name`` and
+``target_mask_attr_name`` arguments, which restrict the check to the
+edges whose source and/or target node is ``True`` under the given
+boolean attribute. The remaining edges are preserved regardless of
+whether they cross the area.
+
+*************************
+ RemoveEdgesOutsideArea
+*************************
+
+The ``RemoveEdgesOutsideArea`` post-processor is the complement of
+``RemoveEdgesCrossingArea``: it removes the edges that leave the area
+defined by the reference attribute, i.e. the edges that are sampled at a
+point whose closest reference node is ``False`` under the attribute.
+
+It takes the same arguments, and is a convenience for the case where the
+available mask describes the area of interest rather than the area to
+avoid. The two configurations below are equivalent, assuming
+``sea_mask`` and ``land_mask`` are complementary:
+
+.. code:: yaml
+
+   post_processors:
+   - _target_: anemoi.graphs.processors.RemoveEdgesOutsideArea
+     source_name: hidden
+     target_name: hidden
+     reference_nodes_name: data
+     reference_attribute_name: sea_mask
+
+.. code:: yaml
+
+   post_processors:
+   - _target_: anemoi.graphs.processors.RemoveEdgesCrossingArea
+     source_name: hidden
+     target_name: hidden
+     reference_nodes_name: data
+     reference_attribute_name: land_mask

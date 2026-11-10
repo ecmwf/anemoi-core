@@ -27,7 +27,8 @@ def cartesian_to_latlon_rad(xyz: np.ndarray) -> np.ndarray:
     np.ndarray
         A 2D array of the coordinates of shape (N, 2) in radians.
     """
-    lat = np.arcsin(xyz[..., 2] / (xyz**2).sum(axis=1))
+    radius = np.linalg.norm(xyz, axis=1)
+    lat = np.arcsin(np.clip(xyz[..., 2] / radius, -1.0, 1.0))
     lon = np.arctan2(xyz[..., 1], xyz[..., 0])
     return np.array((lat, lon), dtype=np.float32).transpose()
 

@@ -151,6 +151,21 @@ class StretchedIcosahdralNodeSchema(BaseModel):
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
 
 
+class KMeansClusteredNodeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.KMeansClusteredNodes"] = Field(..., alias="_target_")
+    "Class implementation for nodes at the centroids of a K-means clustering from anemoi.graphs.nodes."
+    reference_node_name: str
+    "Name of the nodes in the graph to cluster."
+    ratio: float = Field(gt=1, example=20.0)
+    "Number of reference nodes per cluster, num_nodes = round(num_reference_nodes / ratio). Must be > 1."
+    mask_attr_name: Optional[str] = Field(default=None, example=None)
+    "Boolean attribute of the reference nodes defining the area of interest. Defaults to consider all reference nodes."
+    node_weight_attribute_name: Optional[str] = Field(default=None, example=None)
+    "Attribute of the reference nodes to use as clustering weights. Defaults to uniform weighting."
+    kmeans_kwargs: Optional[dict] = Field(default=None, examples=[{"random_state": 0}])
+    "Additional arguments passed to sklearn.cluster.MiniBatchKMeans. Defaults to None."
+
+
 NodeBuilderSchemas = Annotated[
     AnemoiDatasetNodeSchema
     | NPZnodeSchema
@@ -161,6 +176,7 @@ NodeBuilderSchemas = Annotated[
     | IcosahedralandHealPixNodeSchema
     | HealPixNodeSchema
     | LimitedAreaIcosahedralandHealPixNodeSchema
-    | StretchedIcosahdralNodeSchema,
+    | StretchedIcosahdralNodeSchema
+    | KMeansClusteredNodeSchema,
     Field(discriminator="target_"),
 ]
