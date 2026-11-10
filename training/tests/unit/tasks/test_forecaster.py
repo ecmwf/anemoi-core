@@ -752,7 +752,13 @@ def test_fixed_rollout_ignores_sampling_seed() -> None:
         assert len(task.steps("training")) == 3
 
 
-@pytest.mark.parametrize("rollout", [{"sampling": "uniform"}, {"sampling": "random", "minimum": 7, "maximum": 6}])
-def test_rollout_config_rejects_invalid_sampling(rollout: dict) -> None:
-    with pytest.raises(ValueError):
+@pytest.mark.parametrize(
+    ("rollout", "match"),
+    [
+        ({"sampling": "uniform"}, "rollout.sampling must be"),
+        ({"sampling": "random", "minimum": 7, "maximum": 6}, "rollout.minimum must be"),
+    ],
+)
+def test_rollout_config_rejects_invalid_sampling(rollout: dict, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
         Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 1, "maximum": 6, **rollout})

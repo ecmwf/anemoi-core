@@ -8,13 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 from .base import BaseGraphModel
+from .disentangled_encprocdec import AnemoiModelDisentangledEncProcDec
 from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
-
-from .transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec  # isort: skip
-from .disentangled_encprocdec import AnemoiModelDisentangledEncProcDec  # isort: skip
-from .transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec  # isort: skip
+from .transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
+from .transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 
 __all__ = [
     "BaseGraphModel",

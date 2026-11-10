@@ -74,9 +74,9 @@ urls.Documentation = "https://anemoi-models.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-models/"
 urls.Issues = "https://github.com/ecmwf/anemoi-models/issues"
 urls.Repository = "https://github.com/ecmwf/anemoi-models/"
-# Changelog = "https://github.com/ecmwf/anemoi-models/CHANGELOG.md"
 # Add subcommand in the `commands` directory
 scripts.anemoi-models = "anemoi.models.__main__:main"
+# Changelog = "https://github.com/ecmwf/anemoi-models/CHANGELOG.md"
 
 [tool.setuptools]
 package-data."anemoi.models" = [ "py.typed" ]
@@ -91,5 +91,8 @@ fallback_version = "0.0.0"
 git_describe_command = "git describe --dirty --tags --long --match 'models-*[0-9]*'"
 
 [tool.ruff]
-lint.extend-select = [ "TID251" ]  # banned API usage
+line-length = 120
+lint.select = [ "E4", "E7", "E9", "F", "I", "TID251" ]  # TID251: banned API usage
 lint.flake8-tidy-imports.banned-api."anemoi.training".msg = "Do not import from anemoi-training in anemoi-models."
+lint.isort.force-single-line = true
+lint.isort.known-first-party = [ "anemoi" ]

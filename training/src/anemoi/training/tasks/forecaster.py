@@ -89,7 +89,8 @@ class RolloutConfig:
         number of steps.
         """
         if self.sampling == "random":
-            self.current = random.Random(seed).randint(min(self.minimum, self.step), self.step)
+            rng = random.Random(seed)  # noqa: S311 - sampling a rollout length, not cryptography
+            self.current = rng.randint(min(self.minimum, self.step), self.step)
         else:
             self.current = self.step
         return self.current

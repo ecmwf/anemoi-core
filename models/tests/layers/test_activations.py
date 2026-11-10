@@ -34,7 +34,6 @@ def tensor_strategy(draw, min_dims=3, max_dims=5, min_size=1, max_size=10):
 
 
 class TestSine:
-
     @given(w=st.floats(0.1, 10.0), phi=st.floats(-np.pi, np.pi), x=tensor_strategy(min_dims=1, max_dims=4))
     def test_sine_properties(self, w, phi, x):
         sine = Sine(w=w, phi=phi)
