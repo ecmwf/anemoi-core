@@ -67,7 +67,8 @@ optional-dependencies.tests = [
   "hypothesis>=6.11",
   "pytest>=8",
   "pytest-mock>=3",
-  "pytest-skip-slow>=0.0.5"
+  "pytest-skip-slow>=0.0.5",
+  "pytest-xdist>=3",
 ]
 optional-dependencies.wavelet = [ "pytorch-wavelets>=1.3", "pywavelets", "setuptools<81" ]
 urls.Documentation = "https://anemoi-models.readthedocs.io/"

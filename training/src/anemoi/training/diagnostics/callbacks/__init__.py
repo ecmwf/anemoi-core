@@ -309,7 +309,9 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
     # Progress bar callback
     trainer_callbacks.extend(_get_progress_bar_callback(diagnostics_cfg))
 
-    # Parent UUID callback
+    # ParentUUIDCallback only fires when Lightning loads the checkpoint (a warm start via
+    # ckpt_path since that's the only case where Lightning loads the file).
+    # For other scenarios, the checkpoint pipeline records lineage for its own loads in `runner.py`.
     # Check variable order callback
     # Register Migrations callback
     trainer_callbacks.extend(
