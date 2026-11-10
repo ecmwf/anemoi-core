@@ -33,13 +33,10 @@ processor:
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: 512
   dropout_p: 0.0 # GraphTransformer
-  attention_implementation: triton_attention # Possible values:  flash_attention, triton_attention, scaled_dot_product_attention
-  softcap: 0.0 # Transformer only
-  use_alibi_slopes: False # Transformer only
+  attention_implementation: triton_attention # Possible values: triton_attention, flash_attention, scaled_dot_product_attention
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   qk_norm: False
-  use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
 
 encoders:
@@ -57,10 +54,7 @@ encoders:
       window_size: null
       dropout_p: 0.0
       attention_implementation: scaled_dot_product_attention  # Possible values: scaled_dot_product_attention, flash_attention
-      softcap: 0.0 # Transformer only
-      use_alibi_slopes: False # Transformer only
       qk_norm: False
-      use_rotary_embeddings: False
       layer_kernels: ${model.layer_kernels}
       shard_strategy: "edges"
 
@@ -84,10 +78,7 @@ decoders:
       window_size: null
       dropout_p: 0.0
       attention_implementation: scaled_dot_product_attention  # Possible values: scaled_dot_product_attention, flash_attention
-      softcap: 0.0 # Transformer only
-      use_alibi_slopes: False # Transformer only
       qk_norm: False
-      use_rotary_embeddings: False
       layer_kernels: ${model.layer_kernels}
       shard_strategy: "edges"
 

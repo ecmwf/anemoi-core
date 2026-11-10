@@ -7,6 +7,7 @@
 # nor does it submit to any jurisdiction.
 #
 
+from typing import Any
 from typing import Literal
 from typing import Union
 
@@ -17,6 +18,26 @@ from pydantic import PositiveFloat
 from pydantic import PositiveInt
 
 from anemoi.utils.schemas import BaseModel
+
+
+class RotaryEmbeddingsSchema(BaseModel):
+    max_frequency: float = Field(ge=1.0, example=10000.0)
+    "Highest frequency in radians per Earth radius; it repeats every 40,000 km / max_frequency. The lowest is 1."
+    backend: Literal["torch"] = Field(default="torch")
+    "Rotate with PyTorch ('torch', any device). Default to 'torch'."
+
+
+def check_neighbourhood_attention(component: Any) -> Any:
+    """Check that the neighbourhood settings and the attention implementation of a component agree."""
+    if component.attention_implementation != "neighbourhood":
+        if component.neighbourhood is not None:
+            raise ValueError("'neighbourhood' is only used with attention_implementation 'neighbourhood'.")
+        return component
+    if component.neighbourhood is None:
+        raise ValueError("attention_implementation 'neighbourhood' needs a 'neighbourhood' section.")
+    if component.window_size is not None:
+        raise ValueError("Neighbourhood attention sets its own mask; window_size must be null.")
+    return component
 
 
 class TransformerModelComponent(PydanticBaseModel):
