@@ -38,6 +38,8 @@ from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.spectral_transforms import DCT2D
 from anemoi.models.layers.spectral_transforms import FFT2D
+from anemoi.models.layers.spectral_transforms import SHT
+from anemoi.models.layers.spectral_transforms import Cartesian2DTransform
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import ReducedSHT
 from anemoi.models.layers.spectral_transforms import RegularSHT
@@ -334,13 +336,6 @@ class SpectralAMSELoss(SpectralLoss):
         }.
 
     The sum over :math:`M` is performed before the nonlinear AMSE computation.
-    Only :math:`M \ge 0` is stored. For a real field the :math:`M < 0` terms equal
-    those at :math:`M > 0`, so the latter are counted twice.
-
-    As in the paper, :math:`c_{L,M}` are normalised so that :math:`\sum_L S_L` is the
-    area-weighted mean square of the field, which makes them the transform's coefficients
-    divided by :math:`4\pi`. ``eps`` acts on the transform's own values, before this
-    normalisation.
 
     The physical interpretation of :math:`L` and :math:`M` depends on the
     spectral transform:
@@ -348,9 +343,18 @@ class SpectralAMSELoss(SpectralLoss):
     - ``regular_sht`` / ``octahedral_sht`` / ``reduced_sht``: :math:`L` is the total wavenumber
       and :math:`M` is the zonal wavenumber, consistent with the original paper.
       The sum over :math:`M` gives per-total-wavenumber power spectra.
-    - ``fft2d`` / ``dct2d``: currently not supported. These transforms require
-      implementations of ``power_spectral_density()`` and
-      ``cross_spectral_density()`` compatible with the AMSE formulation.
+      Only :math:`M \ge 0` is stored. For a real field the :math:`M < 0` terms equal
+      those at :math:`M > 0`, so the latter are counted twice.
+      As in the paper, :math:`c_{L,M}` are normalised so that :math:`\sum_L S_L` is the
+      area-weighted mean square of the field, which makes them the transform's coefficients
+      divided by :math:`4\pi`. ``eps`` acts on the transform's own values, before this
+      normalisation.
+    - ``fft2d`` / ``dct2d``: the ``(ky, kx)`` spectral plane is binned into integer
+      radial-wavenumber bands :math:`L = \mathrm{round}(\sqrt{k_y^2 + k_x^2})`, and the
+      sum is taken over each band. :math:`L` is then the radial wavenumber; the per-band
+      terms have a slightly different physical meaning than under the SHT but the
+      formulation is unchanged. The transform's coefficients are used as they are, with
+      no further normalisation. Patch-wise FFT2D (``patch_size`` set) is not supported.
     """
 
     def __init__(self, *args, eps: float = 1e-8, **kwargs) -> None:
@@ -362,6 +366,13 @@ class SpectralAMSELoss(SpectralLoss):
         assert hasattr(self.transform, "cross_spectral_density") and callable(
             self.transform.cross_spectral_density,
         ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a cross-spectrum method"
+        # Patch-wise FFT2D yields a per-patch (ky, kx) plane that breaks the per-L contract.
+        assert (
+            getattr(self.transform, "patch_size", None) is None
+        ), "SpectralAMSELoss does not support patch-wise FFT2D; set patch_size=None"
+        # AMSE uses the Cartesian PSD/CSD path, which needs the radial-band index.
+        if isinstance(self.transform, Cartesian2DTransform):
+            self.transform.register_radial_bands()
         self.eps = eps
 
     def forward(
@@ -410,9 +421,10 @@ class SpectralAMSELoss(SpectralLoss):
 
             # per-L AMSE: [B, T, E, L, vars]
             amse_per_l = (amp_pred - amp_target) ** 2 + 2 * torch.maximum(psd_pred, psd_target) * (1 - coherence)
-            # The transform's power sums to (4 pi)^2 times the area-weighted mean square of the field. Subich et al.
-            # (arXiv:2501.19374, eqs. 3-4) normalise it to sum to the mean square itself.
-            amse_per_l = amse_per_l / (4 * math.pi) ** 2
+            if isinstance(self.transform, SHT):
+                # The SHT power sums to (4 pi)^2 times the area-weighted mean square of the field. Subich et al.
+                # (arXiv:2501.19374, eqs. 3-4) normalise it to sum to the mean square itself.
+                amse_per_l = amse_per_l / (4 * math.pi) ** 2
 
         amse_per_l, spectral_shard_slice, global_spectral_size = self._reshard_spectral_loss(
             amse_per_l,
@@ -456,6 +468,11 @@ class PowerSpectrumLoss(SpectralLoss):
     .. math::
         \mathcal{L} = \sum_l \bigl( \sum_{m=-l}^{l} |\hat{F}_{lm}|^2
                                    - \sum_{m=-l}^{l} |F_{lm}|^2 \bigr)^2 .
+
+    With the 2D Cartesian transforms (``fft2d``, ``dct2d``), the ``(ky, kx)`` plane is
+    binned into radial-wavenumber bands :math:`l = \mathrm{round}(\sqrt{k_y^2 + k_x^2})`
+    and the power is summed per band. Patch-wise FFT2D (``patch_size`` set) is not
+    supported.
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -463,6 +480,13 @@ class PowerSpectrumLoss(SpectralLoss):
         assert hasattr(self.transform, "power_spectral_density") and callable(
             self.transform.power_spectral_density,
         ), "spectral transform used in PowerSpectrumLoss must contain a power_spectral_density method"
+        # Patch-wise FFT2D yields a per-patch (ky, kx) plane that breaks the per-L contract.
+        assert (
+            getattr(self.transform, "patch_size", None) is None
+        ), "PowerSpectrumLoss does not support patch-wise FFT2D; set patch_size=None"
+        # The Cartesian PSD sums |coeff|^2 per radial band, which needs the band index.
+        if isinstance(self.transform, Cartesian2DTransform):
+            self.transform.register_radial_bands()
 
     def forward(
         self,
