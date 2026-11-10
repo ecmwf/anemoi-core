@@ -19,7 +19,7 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from omegaconf import open_dict
 
-from anemoi.models.migrations import Migrator
+from anemoi.models.migrations import CkptMigrator
 from anemoi.training.testing import GetTmpPath
 from anemoi.utils.testing import GetTestData
 from tests.integration.helpers import handle_truncation_matrices
@@ -447,13 +447,13 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
 
 
 @pytest.fixture(scope="session")
-def migrator() -> Migrator:
-    return Migrator()
+def migrator() -> CkptMigrator:
+    return CkptMigrator()
 
 
 @pytest.fixture
 def global_config_with_checkpoint(
-    migrator: Migrator,
+    migrator: CkptMigrator,
     global_config: tuple[DictConfig, str, str],
     get_test_data: GetTestData,
 ) -> tuple[OmegaConf, str]:
