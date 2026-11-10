@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+import torch.distributed as dist
 from torch import Tensor
 
 from anemoi.models.layers.target_features import TARGET_FEATURE_REGISTRY
@@ -23,6 +24,7 @@ from anemoi.models.layers.target_features import CompositeTargetFeature
 from anemoi.models.layers.target_features import DecodingTargetFeature
 from anemoi.models.layers.target_features import create_decoding_target_features
 from anemoi.models.layers.target_features import register_target_feature
+from tests.distributed._distributed_runner import _run_distributed_test
 
 
 @dataclass
@@ -284,3 +286,44 @@ class TestTargetFeatureRegistry(TargetFeatureTestCase):
         """Test that creating decoding target features with unknown names raises an AssertionError."""
         with pytest.raises(AssertionError, match="invalid target_node_features: {'not_a_feature'}"):
             create_decoding_target_features(["coordinates", "not_a_feature"], [self.DATASET], model)
+
+
+def _test_composite_target_layout_rank(
+    *, rank: int, world_size: int, device: torch.device, group: dist.ProcessGroup, input_is_sharded: bool
+) -> None:
+    """Encoded, fixed-node and input-derived features share the external row layout."""
+    splits = [3] + [2] * (world_size - 1)
+    num_nodes = sum(splits)
+    start, stop = sum(splits[:rank]), sum(splits[: rank + 1])
+    coordinates = torch.arange(num_nodes * 4, dtype=torch.float32, device=device).reshape(num_nodes, 4)
+    encoded = torch.arange(num_nodes * 8, dtype=torch.float32, device=device).reshape(num_nodes, 8) / 7
+    inputs = torch.arange(num_nodes * 2, dtype=torch.float32, device=device).reshape(1, 1, 1, num_nodes, 2)
+    model = SimpleNamespace(
+        node_attributes=SimpleNamespace(latlons_data=coordinates),
+        _internal_input_idx={"data": [0, 1]},
+    )
+    feature = create_decoding_target_features(["encoded_data", "coordinates", "prognostics"], ["data"], model)
+    actual = feature.tensor(
+        inputs[..., start:stop, :] if input_is_sharded else inputs,
+        encoded[start:stop] if input_is_sharded else encoded,
+        batch_size=1,
+        grid_shard_sizes=splits if input_is_sharded else None,
+        model_comm_group=group,
+        dataset_name="data",
+    )
+    expected = torch.cat([encoded, coordinates, inputs.reshape(num_nodes, 2)], dim=1)
+    torch.testing.assert_close(actual, expected[start:stop] if input_is_sharded else expected)
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize("input_is_sharded", [True, False], ids=["sharded-features", "replicated-features"])
+def test_composite_target_features_preserve_layout(
+    distributed_backend: str, distributed_world_size: int, input_is_sharded: bool
+) -> None:
+    """Composite target features concatenate matching rows in both external layouts."""
+    _run_distributed_test(
+        _test_composite_target_layout_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        input_is_sharded=input_is_sharded,
+    )
