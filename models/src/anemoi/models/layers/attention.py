@@ -55,7 +55,7 @@ class MultiHeadSelfAttention(nn.Module):
         PyTorch attention, on CPUs and GPUs. A sliding window becomes a dense mask.
 
     "triton_attention"
-        Flash attention in Triton, for GPUs. Queries and keys of the same length, sliding windows, no dropout.
+        Flash attention in Triton, for GPUs. Self and cross attention, sliding windows, no dropout.
 
     "flash_attention"
         The flash-attn package, for GPUs and 16-bit inputs. Self and cross attention, sliding windows,
@@ -64,8 +64,8 @@ class MultiHeadSelfAttention(nn.Module):
     For all three, a sliding window needs queries and keys of the same length.
 
     "neighbourhood"
-        Each query attends to the keys around it on a grid, set by ``neighbourhood``; the grid
-        families are listed in :data:`anemoi.models.layers.neighbourhood_attention.GRID_FAMILIES`. Not affected by ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND, since
+        Each query attends to the keys around it on a grid (octahedral, HEALPix, icosahedral), set
+        by ``neighbourhood``. Not affected by ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND, since
         the other implementations attend to different keys.
     """
 
@@ -408,7 +408,7 @@ class SDPAAttentionWrapper(AttentionWrapper):
 
 
 class TritonAttentionWrapper(AttentionWrapper):
-    """Flash attention in Triton, for queries and keys of the same length."""
+    """Flash attention in Triton. Queries and keys may differ in number, as in the mappers."""
 
     unsupported = frozenset({"dropout_p"})
 
@@ -442,11 +442,7 @@ class TritonAttentionWrapper(AttentionWrapper):
         window_size: int = None,
         dropout_p: float = 0.0,
     ):
-        if query.shape[-2] != key.shape[-2]:
-            raise NotImplementedError(
-                f"{self.describe()} needs queries and keys of the same length, got {query.shape[-2]} queries "
-                f"and {key.shape[-2]} keys. Use scaled_dot_product_attention or flash_attention for the mappers."
-            )
+        check_window_lengths(query, key, window_size)
         softmax_scale = 1 / math.sqrt(query.size(-1))
 
         out = self.attention.apply(query, key, value, causal, window_size, softmax_scale).to(query.dtype)

@@ -15,6 +15,7 @@ it in a model component with::
 
     rotary_embeddings:
       max_frequency: 10000
+      backend: triton
 
 Works with every attention implementation, in self and cross attention.
 """
@@ -28,7 +29,7 @@ import torch
 from torch import Tensor
 from torch import nn
 
-ROTARY_BACKENDS = ("torch",)
+ROTARY_BACKENDS = ("triton", "torch")
 
 
 def rotary_angles(coords: Tensor, head_dim: int, max_frequency: float) -> Tensor:
@@ -85,8 +86,8 @@ class SphericalRotaryEmbedding(nn.Module):
     """Rotates queries and keys by the rotary angles of their points (see :func:`rotary_angles`).
 
     Holds cos and sin per query and key point, in node order, as non-persistent buffers. One module is
-    shared by all attention layers of a component. ``backend`` is ``"torch"`` (:func:`apply_rotary`,
-    any device, can be compiled).
+    shared by all attention layers of a component. ``backend`` is ``"triton"`` (GPU kernel) or
+    ``"torch"`` (:func:`apply_rotary`, any device, can be compiled).
     """
 
     def __init__(
@@ -95,7 +96,7 @@ class SphericalRotaryEmbedding(nn.Module):
         key_coords: Optional[Tensor],
         head_dim: int,
         max_frequency: float,
-        backend: str = "torch",
+        backend: str = "triton",
     ) -> None:
         """Build the tables of one model component.
 
@@ -110,7 +111,7 @@ class SphericalRotaryEmbedding(nn.Module):
         max_frequency : float
             Highest frequency in radians per Earth radius, see :func:`rotary_angles`.
         backend : str
-            ``"torch"``.
+            ``"triton"`` or ``"torch"``.
         """
         super().__init__()
         if backend not in ROTARY_BACKENDS:
@@ -134,7 +135,11 @@ class SphericalRotaryEmbedding(nn.Module):
                 f"Rotary embeddings are set up for {cos.shape[0]} {name} points of {self.head_dim} channels, "
                 f"got shape {tuple(x.shape)}."
             )
-        return apply_rotary(x, cos, sin).to(x.dtype)
+        if self.backend == "torch":
+            return apply_rotary(x, cos, sin).to(x.dtype)
+        from anemoi.models.triton.spherical_rotary import spherical_rotary
+
+        return spherical_rotary(x, cos, sin)
 
     def forward(self, query: Tensor, key: Tensor) -> tuple[Tensor, Tensor]:
         """Rotate queries and keys, ``(..., points, head_dim)`` in node order."""
@@ -162,7 +167,7 @@ def build_spherical_rotary(
     Parameters
     ----------
     config : dict, optional
-        ``max_frequency`` and optional ``backend`` (``"torch"``, the default).
+        ``max_frequency`` and optional ``backend`` (``"triton"``, default, or ``"torch"``).
     head_dim : int
         Number of channels per attention head.
     query_coords : Tensor, optional
@@ -185,5 +190,5 @@ def build_spherical_rotary(
     if query_coords is None:
         raise ValueError("Rotary embeddings need the coordinates of the graph nodes.")
     return SphericalRotaryEmbedding(
-        query_coords, key_coords, head_dim, float(config["max_frequency"]), config.get("backend", "torch")
+        query_coords, key_coords, head_dim, float(config["max_frequency"]), config.get("backend", "triton")
     )
