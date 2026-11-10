@@ -218,9 +218,7 @@ class AnemoiModelInterface(torch.nn.Module):
         }
         if self.config.model.get("input_transform"):
             VariableVocabulary.from_datasets(dataset_metadata)
-        variable_metadata = {
-            name: entry for metadata in dataset_metadata.values() for name, entry in metadata.items()
-        }
+        variable_metadata = {name: entry for metadata in dataset_metadata.values() for name, entry in metadata.items()}
         self.model = instantiate(
             model_instantiate_config,
             model_config=self.config.model,
