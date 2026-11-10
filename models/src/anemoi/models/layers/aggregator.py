@@ -125,11 +125,15 @@ class BaseLatentAggregator(nn.Module, ABC):
         source_latents: Sequence[Tensor],
         dropped_sources: frozenset[str],
     ) -> tuple[Tensor, ...]:
-        """Zero the latents of dropped sources (multiplication keeps them in the graph)."""
+        """Zero the latents of dropped sources (multiplication keeps them in the graph).
+
+        ``nan_to_num`` first: a dropped source can carry NaN input (e.g. its own NaN
+        prediction fed back in an inference rollout), and NaN * 0 is NaN.
+        """
         if not dropped_sources:
             return tuple(source_latents)
         return tuple(
-            latent * 0.0 if name in dropped_sources else latent
+            latent.nan_to_num(0.0) * 0.0 if name in dropped_sources else latent
             for name, latent in zip(source_names, source_latents, strict=True)
         )
 
@@ -270,6 +274,10 @@ class GatedLatentFusion(nn.Module):
         Tensor
             Updated latent of shape [N, D].
         """
+        if drop:
+            # A dropped source can carry NaN input (e.g. its own NaN prediction fed back in an
+            # inference rollout); NaN would survive gate * 0.0 (NaN * 0 is NaN) and reach the latent.
+            encoder_output = encoder_output.nan_to_num(0.0)
         ln = self.norm_latent(latent)
         en = self.norm_input(encoder_output)
         combined = torch.cat([ln, en], dim=-1)  # [N, 2D]
