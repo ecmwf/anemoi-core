@@ -242,7 +242,7 @@ class FloatAttributeFromSourceNode(BaseEdgeAttributeBuilder):
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         # x_j = source node feature (PyG MessagePassing convention)
         assert x_j is not None, (
-            f"FloatAttributeFromSourceNode: attribute '{self.node_attr_name}' " "not found on source nodes."
+            f"FloatAttributeFromSourceNode: attribute '{self.node_attr_name}' not found on source nodes."
         )
         return x_j
 
@@ -275,7 +275,7 @@ class FloatAttributeFromTargetNode(BaseEdgeAttributeBuilder):
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         # x_i = target node feature (PyG MessagePassing convention)
         assert x_i is not None, (
-            f"FloatAttributeFromTargetNode: attribute '{self.node_attr_name}' " "not found on target nodes."
+            f"FloatAttributeFromTargetNode: attribute '{self.node_attr_name}' not found on target nodes."
         )
         return x_i
 

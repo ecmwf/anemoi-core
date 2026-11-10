@@ -149,7 +149,6 @@ def test_poisson_disk_sample_keeps_min_distance(monkeypatch):
 
 
 class TestProbabilisticStretchedTriNodes:
-
     def _build(self, graph, attr_name="z"):
         builder = ProbabilisticStretchedTriNodes(
             GLOBAL_RESOLUTION, LAM_RESOLUTION, "data", attr_name, "hidden", extra_nodes_percent=50
@@ -174,7 +173,6 @@ class TestProbabilisticStretchedTriNodes:
 
 
 class TestProbabilisticNodes:
-
     def _build(self, graph, attr_name="z", compression_lam=0.1, seed=42):
         builder = ProbabilisticNodes(
             "hidden",
