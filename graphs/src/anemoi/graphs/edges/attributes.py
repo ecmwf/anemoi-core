@@ -195,9 +195,9 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         node_attr = (x_j, x_i)[self.nodes_axis.value]
-        assert (
-            node_attr is not None
-        ), f"The node attribute specified for {self.node_attr_name} cannot be found in the nodes."
+        assert node_attr is not None, (
+            f"The node attribute specified for {self.node_attr_name} cannot be found in the nodes."
+        )
         return node_attr
 
 
@@ -366,9 +366,9 @@ class RadialBasisFeatures(EdgeLength):
             self.centers = [c / self.r_scale for c in self.centers]
 
         # Check that centers are in the range [0, 1]
-        assert all(
-            0.0 <= c <= 1.0 for c in self.centers
-        ), f"RBF centers must be in range [0, 1] (or [0, r_scale] if r_scale is set). Got centers: {centers}, r_scale: {r_scale}"
+        assert all(0.0 <= c <= 1.0 for c in self.centers), (
+            f"RBF centers must be in range [0, 1] (or [0, r_scale] if r_scale is set). Got centers: {centers}, r_scale: {r_scale}"
+        )
 
         self.sigma = sigma
         super().__init__(norm=norm, dtype=dtype)

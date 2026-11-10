@@ -68,9 +68,9 @@ class MultiScaleEdges(BaseEdgeBuilder):
             assert scale_resolutions >= 0, "The scale_resolutions argument only supports non-negative integers."
             scale_resolutions = list(range(1, scale_resolutions + 1))
         assert not isinstance(scale_resolutions, str), "The scale_resolutions argument is not valid."
-        assert (
-            scale_resolutions is None or min(scale_resolutions) >= 0
-        ), "The scale_resolutions argument only supports non-negative integers."
+        assert scale_resolutions is None or min(scale_resolutions) >= 0, (
+            "The scale_resolutions argument only supports non-negative integers."
+        )
         self.scale_resolutions = scale_resolutions
 
     @staticmethod

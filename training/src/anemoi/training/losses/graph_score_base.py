@@ -165,8 +165,7 @@ class BaseGraphScoreLoss(BaseLoss):
             raise ValueError(msg)
         if y_pred_ens.shape[:2] != y_target.shape[:2] or y_pred_ens.shape[3:] != y_target.shape[3:]:
             msg = (
-                f"Prediction and target shapes are incompatible: "
-                f"{tuple(y_pred_ens.shape)} and {tuple(y_target.shape)}."
+                f"Prediction and target shapes are incompatible: {tuple(y_pred_ens.shape)} and {tuple(y_target.shape)}."
             )
             raise ValueError(msg)
 

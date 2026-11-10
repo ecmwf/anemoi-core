@@ -76,7 +76,6 @@ class Postprocessor(BasePreprocessor):
 
         # Create indices for postprocessing
         for name in self.data_indices.data.output.name_to_index:
-
             method = self.methods.get(name, self.default)
             if method == "none":
                 LOGGER.debug(f"Postprocessor: skipping {name} as no postprocessing method is specified")
