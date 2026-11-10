@@ -20,6 +20,9 @@ from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import check_loss_variable_units_compatibility
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from collections.abc import Sequence
+
     import numpy as np
 
     from anemoi.models.data_indices.collection import IndexCollection
@@ -87,6 +90,93 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
     LOGGER.debug(log_text)
 
     return scaling_values
+
+
+def check_loss_tree_ignores_nans(loss: BaseLoss, allow_nans: Sequence[str], description: str) -> None:
+    """Check that a loss ignores NaNs for all variables that are allowed to contain NaNs.
+
+    Walks the loss tree and raises if a loss that computes on one of the ``allow_nans`` variables
+    does not have ``ignore_nans`` set. Losses that cannot ignore NaNs (e.g. spectral losses) always fail.
+    A ``LossVariableMapper`` restricts the check to the variables it computes on (its target variables).
+
+    Parameters
+    ----------
+    loss : BaseLoss
+        The loss (or composite loss) to inspect.
+    allow_nans : Sequence[str]
+        Names of the variables that are allowed to contain NaNs.
+    description : str
+        Description of the loss used in the error message, e.g. "training loss of dataset 'data'".
+
+    Raises
+    ------
+    ValueError
+        If a loss that sees any of the variables does not ignore NaNs.
+    """
+    if not allow_nans:
+        return
+
+    if isinstance(loss, LossVariableMapper):
+        # Without data indices the mapper has no variable selection, so it sees all variables.
+        seen = allow_nans if loss.target_variables is None else [v for v in allow_nans if v in loss.target_variables]
+        if seen:
+            check_loss_tree_ignores_nans(loss.loss, seen, description)
+        return
+
+    leaves = list(loss.iter_leaf_losses())
+    if not (len(leaves) == 1 and leaves[0] is loss):
+        # Composite loss (e.g. CombinedLoss) or transparent wrapper (e.g. TimeAggregateLossWrapper): descend into the
+        # children so that variable selections of nested LossVariableMappers are respected.
+        children = getattr(loss, "losses", None)
+        if children is None:
+            children = [loss.loss] if isinstance(loss, BaseLossWrapper) else leaves
+        for child in children:
+            check_loss_tree_ignores_nans(child, allow_nans, description)
+        return
+
+    if not loss.ignore_nans:
+        msg = (
+            f"The {description} ({type(loss).__name__}) does not ignore NaNs, but the variables "
+            f"{allow_nans} are listed under `allow_nans` in the data config and can contain NaNs. "
+            "Set `ignore_nans: True` for this loss, restrict it to other variables with `predicted_variables`/"
+            "`target_variables`, or remove the variables from `allow_nans`. "
+            "Losses that cannot ignore NaNs (e.g. spectral losses) cannot be used with these variables."
+        )
+        raise ValueError(msg)
+
+
+def check_loss_and_metrics_ignore_nans(
+    loss: BaseLoss,
+    metrics: Mapping[str, BaseLoss],
+    allow_nans: Sequence[str],
+    dataset_name: str,
+) -> None:
+    """Check that the training loss and all validation metrics of a dataset ignore NaNs where required.
+
+    Parameters
+    ----------
+    loss : BaseLoss
+        Training loss of the dataset.
+    metrics : Mapping[str, BaseLoss]
+        Validation metrics of the dataset, by name.
+    allow_nans : Sequence[str]
+        Names of the variables that are allowed to contain NaNs.
+    dataset_name : str
+        Name of the dataset, used in the error messages.
+
+    Raises
+    ------
+    ValueError
+        If the training loss or a validation metric that sees any of the variables does not ignore NaNs.
+    """
+    allow_nans = list(allow_nans)
+    check_loss_tree_ignores_nans(loss, allow_nans, f"training loss of dataset {dataset_name!r}")
+    for metric_name, metric in metrics.items():
+        check_loss_tree_ignores_nans(
+            metric,
+            allow_nans,
+            f"validation metric {metric_name!r} of dataset {dataset_name!r}",
+        )
 
 
 def check_loss_tree_variable_units(

@@ -48,6 +48,33 @@ config entry:
        - "tp"
        - "cp"
 
+Missing values (NaNs) in the data are not allowed by default: on the
+first batch, all variables are checked and training stops if any NaN is
+found. Diagnostic variables that are legitimately undefined in some
+places (e.g. tropical cyclone fields that are only defined near a
+cyclone) can be listed explicitly under ``allow_nans``:
+
+.. code:: yaml
+
+   data:
+     diagnostic:
+       - "tc_msl"
+       - "tc_ws"
+     allow_nans:
+       - "tc_msl"
+       - "tc_ws"
+
+Only the listed variables are excluded from the check, all other
+variables (including other diagnostic variables) are still checked.
+Every variable in ``allow_nans`` must exist in the dataset and must be a
+diagnostic variable, otherwise a ``ValueError`` is raised when the data
+indices are created. As NaN targets must not reach the loss, anemoi-training
+additionally raises a ``ValueError`` at startup if the training loss or a
+validation metric that uses one of these variables does not have
+``ignore_nans: True`` (losses that cannot ignore NaNs, e.g. spectral
+losses, cannot be used with these variables). Variables with NaNs should
+not be given an imputation method in the data processors.
+
 .. figure:: ../_static/data_indices.png
    :alt: Schematic of IndexCollection with Data Indexing on Data and Model levels.
    :align: center

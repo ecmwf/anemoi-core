@@ -42,6 +42,7 @@ from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
+from anemoi.training.losses.utils import check_loss_and_metrics_ignore_nans
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
@@ -295,6 +296,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_indices=data_indices[dataset_name],
                 graph_data=graph_data,
                 data_node_name=data_node_name,
+            )
+
+            # Variables with `allow_nans` can be NaN in the targets, the loss and metrics must ignore them
+            check_loss_and_metrics_ignore_nans(
+                self.loss[dataset_name],
+                self.metrics[dataset_name],
+                data_indices[dataset_name].allow_nans,
+                dataset_name,
             )
             self._initialise_updating_scalers(
                 scalers=dataset_scalers,

@@ -23,6 +23,13 @@ class DatasetDataSchema(PydanticBaseModel):
     "Features that are not part of the forecast state but are used as forcing to generate the forecast state."
     diagnostic: list[str] = Field(default_factory=list)
     "Features that are only part of the forecast state and are not used as an input to the model."
+    allow_nans: list[str] = Field(default_factory=list)
+    (
+        "Diagnostic features that are allowed to contain NaNs in the data, e.g. fields that are only "
+        "defined in some places. All other features are checked for NaNs on the first batch. "
+        "Every feature listed here must also be listed under `diagnostic`, and the training loss and "
+        "validation metrics that use it must have `ignore_nans: True`."
+    )
     target: list[str] | None = None
     (
         "Features used to compute the loss against forecasted variables. "

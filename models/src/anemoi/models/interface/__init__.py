@@ -134,7 +134,10 @@ class AnemoiModelInterface(torch.nn.Module):
             [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
             for name, processor in processors_configs.items()
         ]
-        return Processors(processors), Processors(processors, inverse=True)
+        return (
+            Processors(processors, data_indices=data_indices),
+            Processors(processors, inverse=True, data_indices=data_indices),
+        )
 
     def _build_tendency_processors(
         self,

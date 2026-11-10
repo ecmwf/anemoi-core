@@ -150,17 +150,30 @@ class BasePreprocessor(nn.Module):
 class Processors(nn.Module):
     """A collection of processors."""
 
-    def __init__(self, processors: list, inverse: bool = False) -> None:
+    data_indices: IndexCollection | None = None
+
+    def __init__(
+        self,
+        processors: list,
+        inverse: bool = False,
+        data_indices: IndexCollection | None = None,
+    ) -> None:
         """Initialize the processors.
 
         Parameters
         ----------
         processors : list
             List of processors
+        inverse : bool
+            Whether to apply the processors in inverse (reversed) order
+        data_indices : IndexCollection, optional
+            Data indices, used to exclude the variables listed in ``allow_nans`` from the NaN check
+            on the first forward call. If None, all variables are checked.
         """
         super().__init__()
 
         self.inverse = inverse
+        self.data_indices = data_indices
         self.first_run = True
 
         if inverse:
@@ -202,9 +215,14 @@ class Processors(nn.Module):
         """Run checks on the processed tensor."""
         if not self.inverse:
             # Forward transformation checks:
-            assert not torch.isnan(
-                x
-            ).any(), f"NaNs ({torch.isnan(x).sum()}) found in processed tensor after {self.__class__.__name__}."
+            nans = torch.isnan(x)
+            if self.data_indices is not None and x.shape[-1] == len(self.data_indices.name_to_index):
+                # Full data tensor (e.g. training batch): variables explicitly listed under `allow_nans` are
+                # diagnostic variables that may be NaN in the targets (handled by the loss).
+                # Model-input tensors do not contain diagnostic variables.
+                allow_nans_idx = [self.data_indices.name_to_index[name] for name in self.data_indices.allow_nans]
+                nans[..., allow_nans_idx] = False
+            assert not nans.any(), f"NaNs ({nans.sum()}) found in processed tensor after {self.__class__.__name__}."
 
 
 class StepwiseProcessors(nn.Module):

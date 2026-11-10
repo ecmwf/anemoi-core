@@ -10,6 +10,7 @@
 
 import logging
 import operator
+from collections.abc import Sequence
 
 import yaml
 from omegaconf import OmegaConf
@@ -26,6 +27,8 @@ LOGGER = logging.getLogger(__name__)
 
 class IndexCollection:
     """Collection of data and model indices."""
+
+    allow_nans: Sequence[str] = ()  # Empty by default
 
     @staticmethod
     def _contiguous_span(indices: list[int]) -> tuple[bool, int, int]:
@@ -54,8 +57,31 @@ class IndexCollection:
         self.target = (
             [] if data_config.get("target", None) is None else OmegaConf.to_container(data_config.target, resolve=True)
         )
+        # Variables that may contain NaNs in the data (e.g. diagnostic targets which are only defined in some places).
+        # The training loss and metrics must ignore NaNs for these variables, this is checked by anemoi-training.
+        self.allow_nans = (
+            []
+            if data_config.get("allow_nans", None) is None
+            else OmegaConf.to_container(data_config.allow_nans, resolve=True)
+        )
         defined_variables = set.union(set(self.forcing), set(self.diagnostic), set(self.target))
         self.prognostic = [v for v in self.name_to_index.keys() if v not in defined_variables]
+
+        unknown_nan_variables = [v for v in self.allow_nans if v not in self.name_to_index]
+        if unknown_nan_variables:
+            msg = (
+                f"`allow_nans` variables {unknown_nan_variables} are not in the dataset. "
+                f"Available variables: {list(self.name_to_index)}."
+            )
+            raise ValueError(msg)
+        non_diagnostic_nan_variables = [v for v in self.allow_nans if v not in self.diagnostic]
+        if non_diagnostic_nan_variables:
+            msg = (
+                f"`allow_nans` variables {non_diagnostic_nan_variables} are not diagnostic variables. "
+                "NaNs are only allowed in variables that are not model inputs, "
+                "list them under `diagnostic` or remove them from `allow_nans`."
+            )
+            raise ValueError(msg)
 
         assert set(self.diagnostic).isdisjoint(self.forcing), (
             f"Diagnostic and forcing variables overlap: {set(self.diagnostic).intersection(self.forcing)}. ",
@@ -136,6 +162,8 @@ class IndexCollection:
 
         Parameters
         ----------
+        ckpt_name_to_index : dict[str, int]
+            The dictionary mapping variable names to their indices in the model from the checkpoint.
         data_name_to_index : dict[str, int]
             The dictionary mapping variable names to their indices in the data.
 
