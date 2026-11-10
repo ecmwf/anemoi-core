@@ -9,8 +9,7 @@
 
 
 import logging
-from typing import Callable
-from typing import Optional
+from typing import Callable, Optional
 
 import einops
 import torch
@@ -20,23 +19,26 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.graph import gather_tensor, shard_tensor
+from anemoi.models.distributed.shapes import (
+    BipartiteGraphShardInfo,
+    DatasetShardSizes,
+    GraphShardInfo,
+    ShardSizes,
+    get_shard_sizes,
+)
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.preprocessing import StepwiseProcessors
-from anemoi.models.transport import EdmSettings
-from anemoi.models.transport import NoiseConditioningSettings
-from anemoi.models.transport import StochasticInterpolantSettings
-from anemoi.models.transport import TransportSourceBuilder
-from anemoi.models.transport import TransportSourceRequest
-from anemoi.models.transport import get_transport_model_objective
-from anemoi.models.transport import reference_state_sampling_source
-from anemoi.models.transport import sampling_source_specs
+from anemoi.models.transport import (
+    EdmSettings,
+    NoiseConditioningSettings,
+    StochasticInterpolantSettings,
+    TransportSourceBuilder,
+    TransportSourceRequest,
+    get_transport_model_objective,
+    reference_state_sampling_source,
+    sampling_source_specs,
+)
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)

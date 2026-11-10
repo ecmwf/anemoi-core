@@ -13,14 +13,9 @@ from unittest.mock import PropertyMock
 import pytest
 from pytest_mock import MockFixture
 
-from anemoi.training.distributed.strategy import BaseDDPStrategy
-from anemoi.training.distributed.strategy import DDPEnsGroupStrategy
-from anemoi.training.distributed.strategy import DDPGroupStrategy
-from anemoi.training.distributed.strategy import seed_rnd
+from anemoi.training.distributed.strategy import BaseDDPStrategy, DDPEnsGroupStrategy, DDPGroupStrategy, seed_rnd
 from anemoi.training.utils import seeding
-from anemoi.training.utils.seeding import SeedContext
-from anemoi.training.utils.seeding import derive_seed
-from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.seeding import SeedContext, derive_seed, get_base_seed
 
 
 def test_seed_rnd_uses_bounded_model_seed(mocker: MockFixture) -> None:

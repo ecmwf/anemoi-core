@@ -16,12 +16,13 @@ import psutil
 import pytest
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-from torch.cuda import empty_cache
-from torch.cuda import reset_peak_memory_stats
+from torch.cuda import empty_cache, reset_peak_memory_stats
 
-from anemoi.training.diagnostics.benchmark_server import benchmark
-from anemoi.training.diagnostics.benchmark_server import get_benchmark_store
-from anemoi.training.diagnostics.benchmark_server import track_dataloader_benchmark_results
+from anemoi.training.diagnostics.benchmark_server import (
+    benchmark,
+    get_benchmark_store,
+    track_dataloader_benchmark_results,
+)
 from anemoi.training.train.profiler import AnemoiProfiler
 from anemoi.training.utils import seeding
 from anemoi.training.utils.seeding import choose_base_seed

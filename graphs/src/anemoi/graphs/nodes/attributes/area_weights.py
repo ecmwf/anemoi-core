@@ -9,16 +9,11 @@
 
 
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
-from scipy.spatial import ConvexHull
-from scipy.spatial import QhullError
-from scipy.spatial import SphericalVoronoi
-from scipy.spatial import Voronoi
-from scipy.spatial import cKDTree
+from scipy.spatial import ConvexHull, QhullError, SphericalVoronoi, Voronoi, cKDTree
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.datasets import open_dataset

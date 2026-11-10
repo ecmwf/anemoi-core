@@ -19,11 +19,8 @@ from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
-from hydra import compose
-from hydra import initialize
-from hydra import initialize_config_dir
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from hydra import compose, initialize, initialize_config_dir
+from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel
 
 from anemoi.training.commands import Command

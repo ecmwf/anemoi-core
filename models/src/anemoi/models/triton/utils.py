@@ -8,16 +8,14 @@
 # nor does it submit to any jurisdiction.
 
 import os
-from typing import Optional
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 from torch_geometric.typing import Adj
 from torch_geometric.utils import index_sort
 from torch_geometric.utils.sparse import index2ptr
 
-from anemoi.models.distributed.khop_edges import is_edge_index_dst_sorted
-from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
+from anemoi.models.distributed.khop_edges import is_edge_index_dst_sorted, sort_edge_index_by_dst
 
 ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
 

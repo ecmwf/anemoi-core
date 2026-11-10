@@ -18,8 +18,7 @@ from __future__ import annotations
 import logging
 import pickle
 from pathlib import Path
-from typing import Any
-from typing import Literal
+from typing import Any, Literal
 
 import torch
 

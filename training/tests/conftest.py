@@ -38,8 +38,7 @@ PYTEST_MARKED_TESTS = [
 
 @pytest.fixture
 def config(request: SubRequest) -> DictConfig:
-    from hydra import compose
-    from hydra import initialize_config_module
+    from hydra import compose, initialize_config_module
 
     overrides = request.param
     with initialize_config_module(version_base=None, config_module="anemoi.training.config"):
@@ -50,8 +49,7 @@ def config(request: SubRequest) -> DictConfig:
 @pytest.fixture
 def datamodule():  # noqa: ANN201
     """Lazy-load AnemoiDatasetsDataModule to avoid expensive import at test collection time."""
-    from hydra import compose
-    from hydra import initialize_config_module
+    from hydra import compose, initialize_config_module
 
     from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 

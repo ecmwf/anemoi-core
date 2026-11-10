@@ -14,12 +14,8 @@ import operator
 import yaml
 from omegaconf import OmegaConf
 
-from anemoi.models.data_indices.index import BaseIndex
-from anemoi.models.data_indices.index import DataIndex
-from anemoi.models.data_indices.index import ModelIndex
-from anemoi.models.data_indices.tensor import BaseTensorIndex
-from anemoi.models.data_indices.tensor import InputTensorIndex
-from anemoi.models.data_indices.tensor import OutputTensorIndex
+from anemoi.models.data_indices.index import BaseIndex, DataIndex, ModelIndex
+from anemoi.models.data_indices.tensor import BaseTensorIndex, InputTensorIndex, OutputTensorIndex
 
 LOGGER = logging.getLogger(__name__)
 

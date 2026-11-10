@@ -15,17 +15,14 @@ from typing import Any
 import pytest
 import pytorch_lightning as pl
 import torch
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
-from omegaconf import open_dict
+from omegaconf import DictConfig, OmegaConf, open_dict
 
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.train.evaluate import AnemoiEvaluator
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.time_indices import normalize_time_indices
-from anemoi.utils.testing import GetTestArchive
-from anemoi.utils.testing import skip_if_offline
+from anemoi.utils.testing import GetTestArchive, skip_if_offline
 from tests.integration.helpers import assert_keys_exist
 
 

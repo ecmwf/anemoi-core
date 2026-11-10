@@ -10,8 +10,7 @@
 
 import logging
 import uuid
-from collections.abc import Callable
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Self
 
 import torch

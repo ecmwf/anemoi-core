@@ -37,8 +37,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pytorch_lightning.utilities import rank_zero_only
 
@@ -222,8 +221,7 @@ class RunIdSource(CheckpointSource):
             self.fork_run_server2server,
         )
 
-        from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-        from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
+        from anemoi.training.checkpoint.exceptions import CheckpointLoadError, CheckpointNotFoundError
 
         # LocalSource.resolve owns the missing and unreadable checks. Only rank 0
         # raises; other ranks defer, so a distributed run fails cleanly on rank 0

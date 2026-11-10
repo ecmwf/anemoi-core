@@ -20,8 +20,7 @@ from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapt
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
 from anemoi.training.train.methods.stochastic_interpolant import StochasticInterpolantTransportObjective
-from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
-from anemoi.training.train.methods.transport_base import TransportObjective
+from anemoi.training.train.methods.transport_base import PreparedPredictionTarget, TransportObjective
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 

@@ -9,20 +9,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from dataclasses import field
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 
 import pytest
 import torch
 from torch import Tensor
 
-from anemoi.models.layers.target_features import TARGET_FEATURE_REGISTRY
-from anemoi.models.layers.target_features import CompositeTargetFeature
-from anemoi.models.layers.target_features import DecodingTargetFeature
-from anemoi.models.layers.target_features import create_decoding_target_features
-from anemoi.models.layers.target_features import register_target_feature
+from anemoi.models.layers.target_features import (
+    TARGET_FEATURE_REGISTRY,
+    CompositeTargetFeature,
+    DecodingTargetFeature,
+    create_decoding_target_features,
+    register_target_feature,
+)
 
 
 @dataclass

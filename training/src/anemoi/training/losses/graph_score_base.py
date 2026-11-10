@@ -16,11 +16,9 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.shapes import ShardSizes, get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
-from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.base import Squash_mode
+from anemoi.training.losses.base import BaseLoss, Squash_mode
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 from anemoi.training.utils.enums import TensorDim
 

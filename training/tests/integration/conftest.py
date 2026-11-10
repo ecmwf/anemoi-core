@@ -14,8 +14,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from anemoi.training.testing import GetTmpPath
 from anemoi.utils.testing import TemporaryDirectoryForTestData

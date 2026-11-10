@@ -11,13 +11,15 @@ import numpy as np
 import pytest
 import torch
 
-from anemoi.training.distributed.groups import build_ensemble_layout
-from anemoi.training.distributed.groups import build_model_layout
-from anemoi.training.distributed.groups import build_reader_layout
-from anemoi.training.distributed.groups import create_ensemble_process_groups
-from anemoi.training.distributed.groups import create_model_process_groups
-from anemoi.training.distributed.groups import create_reader_process_groups
-from anemoi.training.distributed.groups import get_my_ensemble_comm_group
+from anemoi.training.distributed.groups import (
+    build_ensemble_layout,
+    build_model_layout,
+    build_reader_layout,
+    create_ensemble_process_groups,
+    create_model_process_groups,
+    create_reader_process_groups,
+    get_my_ensemble_comm_group,
+)
 
 
 def _to_rank_tuple(ranks: np.ndarray) -> tuple[int, ...]:

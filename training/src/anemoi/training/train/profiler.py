@@ -11,8 +11,7 @@
 import logging
 import os
 import warnings
-from datetime import UTC
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import cached_property
 from pathlib import Path
 
@@ -24,8 +23,7 @@ from omegaconf import DictConfig
 from pytorch_lightning.utilities import rank_zero_only
 from rich.console import Console
 
-from anemoi.training.diagnostics.profilers import BenchmarkProfiler
-from anemoi.training.diagnostics.profilers import ProfilerProgressBar
+from anemoi.training.diagnostics.profilers import BenchmarkProfiler, ProfilerProgressBar
 from anemoi.training.train.train import AnemoiTrainer
 
 LOGGER = logging.getLogger(__name__)

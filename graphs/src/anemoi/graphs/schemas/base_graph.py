@@ -11,8 +11,7 @@
 import logging
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Field
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from typing_extensions import Self
 
 from anemoi.utils.schemas import BaseModel

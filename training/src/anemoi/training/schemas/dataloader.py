@@ -13,12 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import ConfigDict
-from pydantic import Field
-from pydantic import NonNegativeInt
-from pydantic import PositiveInt
-from pydantic import RootModel
-from pydantic import computed_field
+from pydantic import ConfigDict, Field, NonNegativeInt, PositiveInt, RootModel, computed_field
 
 from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.training.schemas.training import GenericSchema

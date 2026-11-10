@@ -22,15 +22,16 @@ os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 import pandas as pd
 import pytest
 import torch
-from hydra import compose
-from hydra import initialize_config_module
+from hydra import compose, initialize_config_module
 from omegaconf import OmegaConf
 from torch.testing import assert_close
 
-from anemoi.training.diagnostics.benchmark_server import _is_repo_on_branch
-from anemoi.training.diagnostics.benchmark_server import mark_mlflow_run_used
-from anemoi.training.diagnostics.benchmark_server import prune_mlflow_runs
-from anemoi.training.diagnostics.benchmark_server import track_accuracy_final_loss
+from anemoi.training.diagnostics.benchmark_server import (
+    _is_repo_on_branch,
+    mark_mlflow_run_used,
+    prune_mlflow_runs,
+    track_accuracy_final_loss,
+)
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.mlflow.client import AnemoiMlflowClient
 

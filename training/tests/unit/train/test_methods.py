@@ -11,8 +11,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import einops
@@ -24,29 +23,28 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
-from anemoi.models.transport import EdmSettings
-from anemoi.models.transport import StochasticInterpolantSettings
-from anemoi.models.transport import TransportSourceBuilder
-from anemoi.models.transport import TransportSourceSettings
-from anemoi.training.losses import CombinedLoss
-from anemoi.training.losses import MSELoss
+from anemoi.models.transport import (
+    EdmSettings,
+    StochasticInterpolantSettings,
+    TransportSourceBuilder,
+    TransportSourceSettings,
+)
+from anemoi.training.losses import CombinedLoss, MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.scalers import NaNMaskScaler
-from anemoi.training.tasks import Autoencoder
-from anemoi.training.tasks import Forecaster
-from anemoi.training.tasks import TemporalDownscaler
+from anemoi.training.tasks import Autoencoder, Forecaster, TemporalDownscaler
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
 from anemoi.training.train.methods.ensemble import EnsembleTraining
 from anemoi.training.train.methods.single import SingleTraining
 from anemoi.training.train.methods.stochastic_interpolant import StochasticInterpolantTransportObjective
-from anemoi.training.train.methods.transport import StatePredictionMode
-from anemoi.training.train.methods.transport import TendencyPredictionMode
-from anemoi.training.train.methods.transport import TransportTraining
-from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
-from anemoi.training.train.methods.transport_base import PreparedTransportObjective
-from anemoi.training.train.methods.transport_base import TransportObjective
+from anemoi.training.train.methods.transport import StatePredictionMode, TendencyPredictionMode, TransportTraining
+from anemoi.training.train.methods.transport_base import (
+    PreparedPredictionTarget,
+    PreparedTransportObjective,
+    TransportObjective,
+)
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
 

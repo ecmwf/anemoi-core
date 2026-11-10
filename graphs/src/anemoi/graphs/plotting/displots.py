@@ -15,12 +15,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch_geometric.data import HeteroData
-from torch_geometric.data.storage import EdgeStorage
-from torch_geometric.data.storage import NodeStorage
+from torch_geometric.data.storage import EdgeStorage, NodeStorage
 
-from anemoi.graphs.plotting.prepare import compute_node_adjacencies
-from anemoi.graphs.plotting.prepare import get_edge_attribute_dims
-from anemoi.graphs.plotting.prepare import get_node_attribute_dims
+from anemoi.graphs.plotting.prepare import compute_node_adjacencies, get_edge_attribute_dims, get_node_attribute_dims
 
 LOGGER = logging.getLogger(__name__)
 

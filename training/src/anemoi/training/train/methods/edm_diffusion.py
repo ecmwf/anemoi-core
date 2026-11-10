@@ -13,9 +13,11 @@ from typing import TYPE_CHECKING
 
 from anemoi.models.transport.paths import edm_loss_weight
 from anemoi.models.transport.schedules import SIGMA_TRAINING_DISTRIBUTIONS
-from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
-from anemoi.training.train.methods.transport_base import PreparedTransportObjective
-from anemoi.training.train.methods.transport_base import TransportObjective
+from anemoi.training.train.methods.transport_base import (
+    PreparedPredictionTarget,
+    PreparedTransportObjective,
+    TransportObjective,
+)
 from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:

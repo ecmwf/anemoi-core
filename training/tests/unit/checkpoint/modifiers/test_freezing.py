@@ -11,8 +11,7 @@ import pytest
 import torch.nn as nn
 from omegaconf import OmegaConf
 
-from anemoi.training.checkpoint.base import CheckpointContext
-from anemoi.training.checkpoint.base import PipelineStage
+from anemoi.training.checkpoint.base import CheckpointContext, PipelineStage
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.modifiers.freezing import FreezingModifierStage
 from anemoi.training.checkpoint.pipeline import CheckpointPipeline

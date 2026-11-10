@@ -10,15 +10,17 @@
 import pytest
 from pydantic import ValidationError
 
-from anemoi.training.schemas.training import BaseDDPStrategySchema
-from anemoi.training.schemas.training import BaseTrainingSchema
-from anemoi.training.schemas.training import CheckpointPipelineSchema
-from anemoi.training.schemas.training import CombinedLossSchema
-from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
-from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
-from anemoi.training.schemas.training import MultiScaleLossSchema
-from anemoi.training.schemas.training import OptimizerSchema
-from anemoi.training.schemas.training import TimeAggregateLossWrapperSchema
+from anemoi.training.schemas.training import (
+    BaseDDPStrategySchema,
+    BaseTrainingSchema,
+    CheckpointPipelineSchema,
+    CombinedLossSchema,
+    MultiscaleConfigDiskSchema,
+    MultiscaleConfigOnTheFlySchema,
+    MultiScaleLossSchema,
+    OptimizerSchema,
+    TimeAggregateLossWrapperSchema,
+)
 
 _TIME_AGG_CFG = {
     "_target_": "anemoi.training.losses.aggregate.TimeAggregateLossWrapper",

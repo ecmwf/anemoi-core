@@ -26,14 +26,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from hydra import compose
-from hydra import initialize_config_module
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from hydra import compose, initialize_config_module
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
-from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.schemas.base_schema import BaseSchema, UnvalidatedBaseSchema
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.jsonify import map_config_to_primitives
 

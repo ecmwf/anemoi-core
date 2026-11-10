@@ -24,8 +24,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import nullcontext
-from typing import TYPE_CHECKING
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import einops
 import torch
@@ -35,17 +34,17 @@ from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
-from anemoi.models.layers.spectral_transforms import DCT2D
-from anemoi.models.layers.spectral_transforms import FFT2D
-from anemoi.models.layers.spectral_transforms import Cartesian2DTransform
-from anemoi.models.layers.spectral_transforms import OctahedralSHT
-from anemoi.models.layers.spectral_transforms import ReducedSHT
-from anemoi.models.layers.spectral_transforms import RegularSHT
-from anemoi.models.layers.spectral_transforms import SpectralTransform
-from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.base import Squash_mode
-from anemoi.training.losses.kcrps import CRPS
-from anemoi.training.losses.kcrps import CRPSBackend
+from anemoi.models.layers.spectral_transforms import (
+    DCT2D,
+    FFT2D,
+    Cartesian2DTransform,
+    OctahedralSHT,
+    ReducedSHT,
+    RegularSHT,
+    SpectralTransform,
+)
+from anemoi.training.losses.base import BaseLoss, Squash_mode
+from anemoi.training.losses.kcrps import CRPS, CRPSBackend
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:

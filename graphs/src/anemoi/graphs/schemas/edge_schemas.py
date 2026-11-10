@@ -8,13 +8,9 @@
 #
 
 
-from typing import Annotated
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field
-from pydantic import PositiveFloat
-from pydantic import PositiveInt
-from pydantic import model_validator
+from pydantic import Field, PositiveFloat, PositiveInt, model_validator
 
 from anemoi.utils.schemas import BaseModel
 

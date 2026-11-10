@@ -11,8 +11,7 @@ from .base import BaseGraphModel
 from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
-from .transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
-from .transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
+from .transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec, AnemoiTransportTendModelEncProcDec
 
 __all__ = [
     "BaseGraphModel",

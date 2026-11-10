@@ -133,8 +133,7 @@ class S3Source(CheckpointSource):
 
         Maps obstore/anemoi-utils errors to checkpoint exception types.
         """
-        from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
-        from anemoi.training.checkpoint.exceptions import CheckpointSourceError
+        from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError, CheckpointSourceError
 
         try:
             from anemoi.utils.remote.s3 import download_file

@@ -23,9 +23,7 @@ from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.scalers.spectral import SpectralDimensionScaler
-from anemoi.training.losses.scalers.variable_tendency import BaseTendencyScaler
-from anemoi.training.losses.scalers.variable_tendency import StdevTendencyScaler
-from anemoi.training.losses.scalers.variable_tendency import VarTendencyScaler
+from anemoi.training.losses.scalers.variable_tendency import BaseTendencyScaler, StdevTendencyScaler, VarTendencyScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask

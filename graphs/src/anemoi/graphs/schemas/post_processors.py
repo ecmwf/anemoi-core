@@ -9,9 +9,7 @@
 
 
 import logging
-from typing import Annotated
-from typing import Iterable
-from typing import Literal
+from typing import Annotated, Iterable, Literal
 
 from pydantic import Field
 

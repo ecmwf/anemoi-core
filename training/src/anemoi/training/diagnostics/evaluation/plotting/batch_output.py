@@ -50,8 +50,7 @@ under ``diagnostics.plot.settings`` in the YAML, not inside ``plot_fn``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 

@@ -14,14 +14,12 @@ import os
 import re
 import sys
 import time
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from argparse import Namespace
 from collections.abc import Mapping
 from pathlib import Path
 from threading import Thread
-from typing import Any
-from typing import Literal
+from typing import Any, Literal
 from weakref import WeakValueDictionary
 
 import mlflow
@@ -29,20 +27,18 @@ from mlflow.exceptions import RestException
 from mlflow.tracking import MlflowClient
 from omegaconf import DictConfig
 from pytorch_lightning.callbacks import Checkpoint
-from pytorch_lightning.loggers.mlflow import MLFlowLogger
-from pytorch_lightning.loggers.mlflow import _convert_params
-from pytorch_lightning.loggers.mlflow import _flatten_dict
+from pytorch_lightning.loggers.mlflow import MLFlowLogger, _convert_params, _flatten_dict
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from typing_extensions import override
 
-from anemoi.training.diagnostics.mlflow import LOG_MODEL
-from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
-from anemoi.training.diagnostics.mlflow.utils import FixedLengthSet
-from anemoi.training.diagnostics.mlflow.utils import check_params_length
-from anemoi.training.diagnostics.mlflow.utils import clean_config_params
-from anemoi.training.diagnostics.mlflow.utils import expand_iterables
-from anemoi.utils.mlflow.auth import AuthBase
-from anemoi.utils.mlflow.auth import TokenAuth
+from anemoi.training.diagnostics.mlflow import LOG_MODEL, MAX_PARAMS_LENGTH
+from anemoi.training.diagnostics.mlflow.utils import (
+    FixedLengthSet,
+    check_params_length,
+    clean_config_params,
+    expand_iterables,
+)
+from anemoi.utils.mlflow.auth import AuthBase, TokenAuth
 from anemoi.utils.mlflow.utils import health_check
 
 LOGGER = logging.getLogger(__name__)
@@ -536,8 +532,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         from mlflow.system_metrics.system_metrics_monitor import SystemMetricsMonitor
 
         from anemoi.training.diagnostics.mlflow.system_metrics.cpu_monitor import CPUMonitor
-        from anemoi.training.diagnostics.mlflow.system_metrics.gpu_monitor import GreenGPUMonitor
-        from anemoi.training.diagnostics.mlflow.system_metrics.gpu_monitor import RedGPUMonitor
+        from anemoi.training.diagnostics.mlflow.system_metrics.gpu_monitor import GreenGPUMonitor, RedGPUMonitor
 
         class CustomSystemMetricsMonitor(SystemMetricsMonitor):
             def __init__(self, run_id: str, resume_logging: bool = False):

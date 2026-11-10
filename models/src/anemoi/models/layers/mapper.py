@@ -10,36 +10,33 @@
 
 import logging
 import os
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import Optional
 
 import torch
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.typing import Adj
-from torch_geometric.typing import PairTensor
+from torch_geometric.typing import Adj, PairTensor
 
-from anemoi.models.distributed.graph import ensure_sharded
-from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.khop_edges import GraphPartition
-from anemoi.models.distributed.khop_edges import build_graph_partition
-from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
-from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
-from anemoi.models.distributed.khop_edges import shard_edges_1hop
-from anemoi.models.distributed.khop_edges import shard_graph_to_local
+from anemoi.models.distributed.graph import ensure_sharded, gather_tensor
+from anemoi.models.distributed.khop_edges import (
+    GraphPartition,
+    build_graph_partition,
+    build_graph_partition_from_shard_info,
+    ensure_edges_are_dst_sorted,
+    shard_edges_1hop,
+    shard_graph_to_local,
+)
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.layers.block import GraphConvMapperBlock
-from anemoi.models.layers.block import GraphTransformerMapperBlock
-from anemoi.models.layers.block import TransformerMapperBlock
-from anemoi.models.layers.mlp import MLP
-from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.models.layers.utils import compute_mlp_hidden_dim
-from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.models.layers.utils import maybe_checkpoint
-from anemoi.models.layers.utils import refuse_dropout_when_sharded
+from anemoi.models.layers.block import GraphConvMapperBlock, GraphTransformerMapperBlock, TransformerMapperBlock
+from anemoi.models.layers.mlp import MLP, MLPImplementation
+from anemoi.models.layers.utils import (
+    compute_mlp_hidden_dim,
+    load_layer_kernels,
+    maybe_checkpoint,
+    refuse_dropout_when_sharded,
+)
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)

@@ -23,13 +23,11 @@ Callbacks call these functions and splat the returned dict into ``plot_fn``::
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_trainable_modules
-from anemoi.training.diagnostics.evaluation.plotting.graph import get_node_trainable_tensors
+from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_trainable_modules, get_node_trainable_tensors
 
 if TYPE_CHECKING:
     import pytorch_lightning as pl

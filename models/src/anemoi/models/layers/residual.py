@@ -8,8 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import Optional
 
 import einops
@@ -24,10 +23,8 @@ from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
-from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
-from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
-from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
-from anemoi.models.layers.spectral_transforms import InverseRegularSHT
+from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform, SphericalHarmonicTransform
+from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT, InverseRegularSHT
 
 
 class BaseResidualConnection(nn.Module, ABC):

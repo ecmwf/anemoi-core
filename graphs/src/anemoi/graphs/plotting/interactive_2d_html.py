@@ -9,8 +9,7 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
-from typing import Union
+from typing import Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,12 +18,14 @@ import torch
 from matplotlib.colors import rgb2hex
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.plotting.prepare import compute_isolated_nodes
-from anemoi.graphs.plotting.prepare import compute_node_adjacencies
-from anemoi.graphs.plotting.prepare import coordinates_to_lat_lon
-from anemoi.graphs.plotting.prepare import edge_list
-from anemoi.graphs.plotting.prepare import edge_list_from_coordinates
-from anemoi.graphs.plotting.prepare import node_list
+from anemoi.graphs.plotting.prepare import (
+    compute_isolated_nodes,
+    compute_node_adjacencies,
+    coordinates_to_lat_lon,
+    edge_list,
+    edge_list_from_coordinates,
+    node_list,
+)
 
 annotations_style = {"text": "", "showarrow": False, "xref": "paper", "yref": "paper", "x": 0.005, "y": -0.002}
 plotly_axis_config = {"showgrid": False, "zeroline": False, "showticklabels": False}
