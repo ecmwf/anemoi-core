@@ -270,7 +270,6 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
 
     # cant call dist.get_backend(group) in torch.compile() so we check is_compiling first
     if (not torch.compiler.is_compiling()) and dist.get_backend(group) == "gloo":
-
         # Need to check torch version here bc the syntax for dist.send/recv changed in torch v2.6
         torch_version = torch.__version__.split(".")
         torch_major_version = int(torch_version[0])

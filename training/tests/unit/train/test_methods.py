@@ -1936,9 +1936,9 @@ def test_ensemble_training_uses_data_full_target_layout(
     forecaster._step(batch=batch, validation_mode=False)
 
     assert captured["target_layout"] == IndexSpace.DATA_FULL
-    assert (
-        captured["target_vars"] == full_v
-    ), f"Expected target to have {full_v} (DATA_FULL) vars, got {captured['target_vars']}."
+    assert captured["target_vars"] == full_v, (
+        f"Expected target to have {full_v} (DATA_FULL) vars, got {captured['target_vars']}."
+    )
 
 
 def test_edm_transport_training_uses_data_full_target_layout(
@@ -1995,9 +1995,9 @@ def test_edm_transport_training_uses_data_full_target_layout(
     assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
     assert captured["target_layout"] == IndexSpace.DATA_FULL
     assert captured["pred_vars"] == len(data_indices["data"].model.output.full)
-    assert (
-        captured["target_vars"] == full_v
-    ), f"Expected target to have {full_v} (DATA_FULL) vars, got {captured['target_vars']}."
+    assert captured["target_vars"] == full_v, (
+        f"Expected target to have {full_v} (DATA_FULL) vars, got {captured['target_vars']}."
+    )
 
 
 def test_transport_training_target_reduction_fast_paths() -> None:
