@@ -46,10 +46,12 @@ datasets:
       norm: unit-sum
 
     # Scaler for spectral loss functions (adapt number of spectral modes and possibly spectral dimensions)
+    # For an SHT with truncation T, use T + 1 for PowerSpectrumLoss and SpectralAMSELoss,
+    # and (T + 1)**2 for SpectralCRPSLoss, LogSpectralDistance and FourierCorrelationLoss.
     # spectral_dim_mean:
     #   _target_: anemoi.training.losses.scalers.SpectralDimensionScaler
-    #   n_spectral_modes: 193
-    #   spectral_dims: 193
+    #   n_spectral_modes: 192
+    #   spectral_dims: 192
 
    # Scalers in the time dimension
     time_steps:

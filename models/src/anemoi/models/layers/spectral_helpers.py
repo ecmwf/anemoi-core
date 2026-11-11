@@ -204,6 +204,11 @@ class SphericalHarmonicTransform(Module):
         Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array
     n_grid_points : int
         Total number of grid points in the global grid.
+    mode_weights : torch.Tensor
+        Weight of each ``(l, m)`` entry of the output, shape ``(truncation + 1, truncation + 1)``:
+        1 for m = 0, 2 for 0 < m <= l and 0 for m > l. The output only has m >= 0, and for a real
+        field the coefficient at -m is the complex conjugate of the one at m, so m > 0 counts
+        twice. Entries with m > l are always zero. The weights add up to ``(truncation + 1)**2``.
 
     Methods
     -------
@@ -270,6 +275,11 @@ class SphericalHarmonicTransform(Module):
         self._graphed_rfft_cache = {}
 
         self.register_buffer("weight", weight, persistent=False)
+
+        zonal_wavenumber = torch.arange(self.truncation + 1)
+        total_wavenumber = zonal_wavenumber.unsqueeze(-1)
+        mode_weights = (zonal_wavenumber <= total_wavenumber) * torch.where(zonal_wavenumber > 0, 2.0, 1.0)
+        self.register_buffer("mode_weights", mode_weights, persistent=False)
 
     def rfft_rings_reduced(self, x: Tensor) -> Tensor:
         """Transform equal-length rings together, with an explicit FFT adjoint for backward."""
