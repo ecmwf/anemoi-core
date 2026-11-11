@@ -37,11 +37,8 @@ uv pip install "torch=={{ torch_version }}" ${dep_wheels[@]+"${dep_wheels[@]}"} 
 cd "$CI_SOURCE_DIR"
 # Every package's tests run, even after another failed.
 status=0
-# Only the fast tests of anemoi-training dump the thread stacks of a test that
-# runs for more than 60 s. The dump reads the stacks without the GIL and can
-# cause a segmentation fault when other threads run, as in the slow tests.
 {% for p in ci_packages %}
-python -m pytest {{ p | replace('anemoi-', '') }} {{ '-o faulthandler_timeout=60' if p == 'anemoi-training' else '' }} {{ pytest_args | default("") }} || status=1
+python -m pytest {{ p | replace('anemoi-', '') }} {{ pytest_args | default("") }} || status=1
 {% endfor %}
 exit "$status"
 {% endblock %}

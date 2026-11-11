@@ -109,7 +109,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_benchmark' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: srun python -m pytest -o tmp_path_retention_policy=all -o faulthandler_timeout=0 -v training/tests/integration/benchmark/ --slow --multigpu
+      pytest_cmd: srun python -m pytest -o tmp_path_retention_policy=all -v training/tests/integration/benchmark/ --slow --multigpu
       timeout_minutes: 360
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_benchmark_pytest
@@ -128,7 +128,7 @@ jobs:
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
       # -n 0: pytest.ini's -n logical would start one xdist worker per CPU, all on the job's single GPU.
-      pytest_cmd: python3 -m pytest -n 0 -o faulthandler_timeout=0 -v training/tests/integration/training_workflows/ --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL; python3 -m pytest -n 0 -v models/tests/integration/ --slow; python3 -m pytest -n 0 -v graphs/tests/integration/
+      pytest_cmd: python3 -m pytest -n 0 -v training/tests/integration/training_workflows/ --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL; python3 -m pytest -n 0 -v models/tests/integration/ --slow; python3 -m pytest -n 0 -v graphs/tests/integration/
       timeout_minutes: 120
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_training_cycle
@@ -146,7 +146,7 @@ jobs:
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
       # -n 0: one GPU, see test_training_cycle.
-      pytest_cmd: python3 -m pytest -n 0 -o faulthandler_timeout=0 -v training/tests/integration/accuracy/ --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL --accuracy-reference-id=${{ github.event.inputs.accuracy_reference_id }}
+      pytest_cmd: python3 -m pytest -n 0 -v training/tests/integration/accuracy/ --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL --accuracy-reference-id=${{ github.event.inputs.accuracy_reference_id }}
       timeout_minutes: 120
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_accuracy
