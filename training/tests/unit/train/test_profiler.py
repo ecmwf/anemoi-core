@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 import torch
 from omegaconf import DictConfig
 
@@ -102,3 +103,86 @@ def test_model_summary_enabled_passes_inputs_to_summary_provider(mocker: MockerF
         model=mocker.sentinel.model,
         example_input_array=example_input_array,
     )
+
+
+@pytest.fixture
+def profile_owner(mocker: MockerFixture) -> AnemoiProfiler:
+    """Exercise the real entry point without constructing a training model or loggers."""
+    owner = AnemoiProfiler.__new__(AnemoiProfiler)
+    owner.profiler = mocker.Mock(spec=["teardown"])
+    mocker.patch.object(owner, "train")
+    mocker.patch.object(owner, "report")
+    mocker.patch.object(owner, "export_to_logger")
+    return owner
+
+
+def test_profile_finalizes_before_reporting(profile_owner: AnemoiProfiler, mocker: MockerFixture) -> None:
+    """Success reports cannot precede capture finalization."""
+    order = mocker.Mock()
+    order.attach_mock(profile_owner.train, "train")
+    order.attach_mock(profile_owner.profiler.teardown, "teardown")
+    order.attach_mock(profile_owner.report, "report")
+    order.attach_mock(profile_owner.export_to_logger, "export")
+
+    profile_owner.profile()
+
+    assert order.mock_calls == [
+        mocker.call.train(),
+        mocker.call.teardown(stage="fit"),
+        mocker.call.report(),
+        mocker.call.export(),
+    ]
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
+def test_profile_finalizes_on_training_failure(
+    profile_owner: AnemoiProfiler,
+    error_type: type[BaseException],
+) -> None:
+    """Training failures and interruptions close the owner without reporting success."""
+    failure = error_type("training failed before capture activation")
+    profile_owner.train.side_effect = failure
+
+    with pytest.raises(error_type, match="training failed before capture activation") as raised:
+        profile_owner.profile()
+
+    assert raised.value is failure
+    profile_owner.profiler.teardown.assert_called_once_with(stage="fit")
+    profile_owner.report.assert_not_called()
+    profile_owner.export_to_logger.assert_not_called()
+
+
+def test_profile_propagates_cleanup_only_failure(profile_owner: AnemoiProfiler) -> None:
+    """A failed finalization must not produce a successful report after training returns."""
+    failure = RuntimeError("capture close failed")
+    profile_owner.profiler.teardown.side_effect = failure
+
+    with pytest.raises(RuntimeError, match="capture close failed") as raised:
+        profile_owner.profile()
+
+    assert raised.value is failure
+    profile_owner.train.assert_called_once_with()
+    profile_owner.report.assert_not_called()
+    profile_owner.export_to_logger.assert_not_called()
+
+
+def test_profile_preserves_training_and_cleanup_failures(
+    profile_owner: AnemoiProfiler,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The training error remains primary, with the secondary cleanup diagnostic retained."""
+    training_failure = ValueError("training failed")
+    cleanup_failure = RuntimeError("capture close failed")
+    profile_owner.train.side_effect = training_failure
+    profile_owner.profiler.teardown.side_effect = cleanup_failure
+
+    with pytest.raises(ValueError, match="training failed") as raised:
+        profile_owner.profile()
+
+    assert raised.value is training_failure
+    assert any("capture close failed" in note for note in training_failure.__notes__)
+    assert "Failed to finalize the profiler after a training failure" in caplog.text
+    assert "RuntimeError: capture close failed" in caplog.text
+    profile_owner.profiler.teardown.assert_called_once_with(stage="fit")
+    profile_owner.report.assert_not_called()
+    profile_owner.export_to_logger.assert_not_called()

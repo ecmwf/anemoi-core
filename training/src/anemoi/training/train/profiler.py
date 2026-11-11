@@ -347,7 +347,20 @@ class AnemoiProfiler(AnemoiTrainer):
 
     def profile(self) -> None:
         """Profile the model."""
-        self.train()
+        profiler = self.profiler
+        try:
+            self.train()
+        except BaseException as training_error:
+            # Also close on interruption. A secondary cleanup failure must not replace
+            # the training exception or make a failed run look like a successful report.
+            try:
+                profiler.teardown(stage="fit")
+            except BaseException as cleanup_error:
+                training_error.add_note(f"Profiler cleanup also failed: {cleanup_error!r}")
+                LOGGER.exception("Failed to finalize the profiler after a training failure")
+            raise
+        else:
+            profiler.teardown(stage="fit")
         self.report()
         self.export_to_logger()
 

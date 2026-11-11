@@ -305,6 +305,7 @@ class BenchmarkProfiler(Profiler):
         # actions like configuring callbacks would trigger the profiler
         self.memory_profiler = DummyProfiler  # dummy profiler to be used as placeholder
         self.time_profiler = DummyProfiler  # dummy profiler to be used as placeholder
+        self._memory_capture: profile | None = None
 
     @rank_zero_only
     def create_output_path(self) -> None:
@@ -327,8 +328,36 @@ class BenchmarkProfiler(Profiler):
         self.dirpath.mkdir(parents=True, exist_ok=True)
         self._stage = stage
         self._local_rank = local_rank
+        self._memory_capture = None
         self._create_time_profilers()
         self._create_memory_profilers()
+
+    def teardown(self, stage: str | None) -> None:
+        """Close owned captures on every process, retaining completed events for reporting.
+
+        Lightning may call this on normal exit before the application owner does. Child teardown
+        is idempotent; it must not depend on distributed state or rank-zero report generation.
+        Partially initialized instances can also reach this method through the base destructor.
+        """
+        memory_profiler = getattr(self, "memory_profiler", None)
+        time_profiler = getattr(self, "time_profiler", None)
+        try:
+            if (
+                isinstance(memory_profiler, PyTorchProfiler)
+                and memory_profiler.profiler is not None
+                and self.config.diagnostics.benchmark_profiler.memory.extra_plots
+            ):
+                # Lightning drops its live reference on closure, but these optional plots
+                # still need the completed capture rather than only its numeric event list.
+                self._memory_capture = memory_profiler.profiler
+            if isinstance(memory_profiler, Profiler):
+                memory_profiler.teardown(stage=stage)
+        finally:
+            try:
+                if isinstance(time_profiler, Profiler):
+                    time_profiler.teardown(stage=stage)
+            finally:
+                super().teardown(stage=stage)
 
     def _create_time_profilers(self) -> None:
         """Creates profilers for time and memory measurements."""
@@ -579,13 +608,19 @@ class BenchmarkProfiler(Profiler):
             # !it's available for  torch >= 2.1
             from torch.cuda._memory_viz import profile_plot
 
+            capture = self._memory_capture
+            if capture is None:
+                capture = self.memory_profiler.profiler
+            if capture is None:
+                error_msg = "No completed memory capture is available for extra plots."
+                raise RuntimeError(error_msg)
             self.memory_trace_fname = Path(self.dirpath, "memory_trace.html")
             with self.memory_trace_fname.open("w") as f:
-                f.write(profile_plot(self.memory_profiler.profiler))
+                f.write(profile_plot(capture))
 
             # !it's available for  torch >= 2.1
             self.memory_timeline_fname = str(Path(self.dirpath, "memory_timelines.html"))
-            self.memory_profiler.profiler.export_memory_timeline(self.memory_timeline_fname)
+            capture.export_memory_timeline(self.memory_timeline_fname)
 
     @rank_zero_only
     def get_memory_profiler_df(self) -> pd.DataFrame:
@@ -598,10 +633,10 @@ class BenchmarkProfiler(Profiler):
         pd.DataFrame
             Memory profiler data.
         """
+        # Keep direct report calls compatible, but reporting is no longer the capture owner.
+        self.teardown(stage=self._stage)
         if self.config.diagnostics.benchmark_profiler.memory.extra_plots:
             self._save_extra_plots()
-
-        self.memory_profiler._delete_profilers()
 
         if not self.memory_profiler.function_events:
             return ""
