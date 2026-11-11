@@ -14,6 +14,15 @@ The model defines a network architecture with configurable encoder,
 processor, and decoder components (`Lang et al. (2024a)
 <https://arxiv.org/abs/2406.01465>`_).
 
+Latent rollout: ``encode`` returns the combined hidden latent and
+``step_latent`` processes and decodes one step from it, returning the
+processor output as the next latent state. ``forward`` is one
+``step_latent`` after ``encode``. With
+:class:`~anemoi.training.train.methods.LatentRolloutTraining` the processor
+advances its own output during the rollout instead of re-encoding the
+predictions. Models that replace ``forward`` (hierarchical, ensemble,
+transport) do not support it.
+
 .. autoclass:: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
    :members:
    :no-undoc-members:
@@ -132,6 +141,36 @@ nodes and the first hidden level:
        # ... mapper configuration
 
 .. autoclass:: anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+*********************************************
+ Disentangled Encoder-Processor-Decoder Model
+*********************************************
+
+A forecaster built on top of an autoencoder trained with the ``Autoencoder``
+task and ``multistep_input: 1``. Each input timestep is encoded
+independently with the (optionally frozen) encoder, a trainable
+``latent_blender`` fuses the per-timestep latents, and the processor predicts
+the next latent state, which is decoded with the (optionally frozen) decoder.
+
+Key features:
+
+#. Submodule names match ``AnemoiModelEncProcDec``, so autoencoder weights
+   load by name (``training.checkpoint.loading``) and the encoder and decoder
+   can be frozen with the ``FreezingModifierStage`` checkpoint modifier.
+
+#. ``latent_blender`` takes an optional mapper config; by default the mapper
+   config of the first encoder is used.
+
+#. Latent rollout: ``encode`` returns the latents of the input timesteps and
+   ``step_latent`` predicts one step and returns the next window (oldest
+   latent dropped, predicted latent appended), so the blender always sees one
+   latent per timestep. Used by
+   :class:`~anemoi.training.train.methods.LatentRolloutTraining`.
+
+.. autoclass:: anemoi.models.models.disentangled_encprocdec.AnemoiModelDisentangledEncProcDec
    :members:
    :no-undoc-members:
    :show-inheritance:
