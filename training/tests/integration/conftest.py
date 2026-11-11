@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import faulthandler
 import logging
 import os
 import shutil
@@ -28,6 +29,19 @@ def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
     # suppress logging spam when using torch compile
     logging.getLogger("torch.__trace").setLevel(logging.WARNING)
     logging.getLogger("torch.__trace").propagate = False
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:  # noqa: ARG001
+    """Stop the faulthandler timeout for the integration tests.
+
+    pytest starts the timeout (faulthandler_timeout in pytest.ini) before this hook.
+    When the timeout occurs, faulthandler writes the stacks of all threads
+    without the GIL. The plot threads and the dataloader threads continue to
+    run, so faulthandler can read a frame while it changes. This can cause a
+    segmentation fault. The integration tests are slow, thus the timeout always
+    occurs. This hook stops the timeout. faulthandler stays on for crashes.
+    """
+    faulthandler.cancel_dump_traceback_later()
 
 
 # NOTE: Do not delete
