@@ -39,6 +39,7 @@ from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
 from anemoi.training.train.methods.ensemble import EnsembleTraining
+from anemoi.training.train.methods.latent_rollout import LatentRolloutTraining
 from anemoi.training.train.methods.single import SingleTraining
 from anemoi.training.train.methods.stochastic_interpolant import StochasticInterpolantTransportObjective
 from anemoi.training.train.methods.transport import StatePredictionMode
@@ -2731,3 +2732,55 @@ def test_single_compute_metrics_produces_per_step_key_suffix(
     assert "rmse_metric/data/z500/2" in metrics_step1
     # Keys must be distinct across steps
     assert set(metrics_step0.keys()).isdisjoint(set(metrics_step1.keys()))
+
+
+class _LatentStubModel:
+    """Graph model stub with the latent rollout API; records the calls it receives."""
+
+    supports_latent_rollout = True
+
+    def __init__(self, num_output_variables: int) -> None:
+        self.num_output_variables = num_output_variables
+        self.calls: list[tuple[str, Any]] = []
+
+    def encode(self, _x: dict[str, torch.Tensor], **_kwargs: Any) -> int:
+        self.calls.append(("encode", None))
+        return 0
+
+    def step_latent(self, state: int, x: dict[str, torch.Tensor], **_kwargs: Any) -> tuple[dict, int]:
+        self.calls.append(("step_latent", state))
+        y = {name: torch.randn(*t.shape[:1], 1, *t.shape[2:4], self.num_output_variables) for name, t in x.items()}
+        return y, state + 1
+
+
+def _make_latent_rollout_training(rollout: int) -> tuple[LatentRolloutTraining, _LatentStubModel]:
+    data_indices = _data_indices_single()
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": rollout, "maximum": rollout},
+    )
+    module = _make_training_module(LatentRolloutTraining, task, data_indices)
+    stub = _LatentStubModel(num_output_variables=len(data_indices["data"].model.output))
+    module.model = SimpleNamespace(model=stub)
+    return module, stub
+
+
+def test_latent_rollout_training_encodes_once_and_threads_the_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    module, stub = _make_latent_rollout_training(rollout=3)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(module, "compute_loss_metrics", lambda y_pred, _y, **_kw: (torch.tensor(0.0), {}, y_pred))
+
+    batch = {"data": torch.randn(2, 4, 1, 4, len(_NAME_TO_INDEX))}  # offsets [0h, +6h, +12h, +18h]
+    output = module._step(batch, validation_mode=False)
+
+    _assert_step_return_format(output, expected_len=3)
+    assert stub.calls == [("encode", None), ("step_latent", 0), ("step_latent", 1), ("step_latent", 2)]
+
+
+def test_latent_rollout_training_rejects_model_without_latent_api() -> None:
+    module, _ = _make_latent_rollout_training(rollout=1)
+    module.model = SimpleNamespace(model=DummyModel())
+    with pytest.raises(TypeError, match="needs a model that supports latent rollout"):
+        module._step({"data": torch.randn(2, 2, 1, 4, len(_NAME_TO_INDEX))})

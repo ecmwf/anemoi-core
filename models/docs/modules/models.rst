@@ -14,6 +14,15 @@ The model defines a network architecture with configurable encoder,
 processor, and decoder components (`Lang et al. (2024a)
 <https://arxiv.org/abs/2406.01465>`_).
 
+Latent rollout: ``encode`` returns the combined hidden latent and
+``step_latent`` processes and decodes one step from it, returning the
+processor output as the next latent state. ``forward`` is one
+``step_latent`` after ``encode``. With
+:class:`~anemoi.training.train.methods.LatentRolloutTraining` the processor
+advances its own output during the rollout instead of re-encoding the
+predictions. Models that replace ``forward`` (hierarchical, ensemble,
+transport) do not support it.
+
 .. autoclass:: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
    :members:
    :no-undoc-members:

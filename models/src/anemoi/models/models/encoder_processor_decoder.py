@@ -9,6 +9,7 @@
 
 
 import logging
+from dataclasses import dataclass
 from typing import Optional
 
 import einops
@@ -31,8 +32,46 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
+@dataclass
+class LatentState:
+    """Latent state carried between rollout steps by latent rollout.
+
+    Attributes
+    ----------
+    latent : Tensor
+        Hidden-mesh latent the processor advances, shape (nodes, channels).
+    encoded_data : dict[str, Tensor]
+        Data-node encoder outputs of the encoded input, used as decoder targets
+        when ``target_node_features`` includes ``encoded_data``.
+    residual : dict[str, Tensor] | None
+        Residual skip of the encoded input. Only set by :meth:`encode`, so that the
+        first step reuses it; later steps take the residual from their current input.
+    """
+
+    latent: Tensor
+    encoded_data: dict[str, Tensor]
+    residual: dict[str, Tensor] | None = None
+
+
 class AnemoiModelEncProcDec(BaseGraphModel):
-    """Message passing graph neural network."""
+    """Message passing graph neural network.
+
+    Latent rollout: :meth:`encode` encodes the input into a :class:`LatentState`
+    and :meth:`step_latent` predicts one step from it and returns the next state,
+    whose latent is the processor output. ``forward`` is one ``step_latent`` on a
+    fresh ``encode``. The caller carries the state between steps, the model keeps
+    nothing between calls (see ``anemoi.training.train.methods.LatentRolloutTraining``).
+    """
+
+    @property
+    def supports_latent_rollout(self) -> bool:
+        """Whether :meth:`encode` / :meth:`step_latent` describe this model's forward pass.
+
+        Subclasses that replace ``forward`` must implement ``encode`` and ``step_latent``
+        themselves to support latent rollout.
+        """
+        cls = type(self)
+        return cls.forward is AnemoiModelEncProcDec.forward or cls.encode is not AnemoiModelEncProcDec.encode
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
@@ -191,14 +230,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         """
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
+        x_skip = self._assemble_residual(x, grid_shard_sizes, model_comm_group, dataset_name)
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
-
-        x_skip = self.residual[dataset_name](
-            x,
-            grid_shard_sizes=grid_shard_sizes,
-            model_comm_group=model_comm_group,
-            n_step_output=self.n_step_output,
-        )
 
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
@@ -213,6 +246,21 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         )
 
         return x_data_latent, x_skip, grid_shard_sizes
+
+    def _assemble_residual(
+        self,
+        x: Tensor,
+        grid_shard_sizes: DatasetShardSizes | None,
+        model_comm_group: ProcessGroup | None,
+        dataset_name: str,
+    ) -> Tensor:
+        """Residual skip of one dataset, added to the decoder output."""
+        return self.residual[dataset_name](
+            x,
+            grid_shard_sizes=grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None,
+            model_comm_group=model_comm_group,
+            n_step_output=self.n_step_output,
+        )
 
     def _assemble_targets(
         self,
@@ -326,15 +374,28 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 "Ensemble size per device must be 1 when model is sharded across GPUs"
             )
 
-    def forward(
+    def _check_inputs(
+        self,
+        x: dict[str, Tensor],
+        model_comm_group: Optional[ProcessGroup],
+        grid_shard_sizes: DatasetShardSizes | None,
+    ) -> tuple[int, int, dict[str, bool]]:
+        """Batch size, ensemble size and per-dataset sharding of ``x``; validates the sharding."""
+        batch_size = self._get_consistent_dim(x, 0)
+        ensemble_size = self._get_consistent_dim(x, 2)
+        in_out_sharded = self._resolve_in_out_sharded(dataset_names=list(x.keys()), grid_shard_sizes=grid_shard_sizes)
+        for dataset_name in x:
+            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
+        return batch_size, ensemble_size, in_out_sharded
+
+    def encode(
         self,
         x: dict[str, Tensor],
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
-        **kwargs,
-    ) -> dict[str, Tensor]:
-        """Forward pass of the model.
+    ) -> LatentState:
+        """Encode the input of every dataset and combine the latents.
 
         Parameters
         ----------
@@ -345,51 +406,38 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
-        **kwargs
-            Additional model-specific arguments.
 
         Returns
         -------
-        dict[str, Tensor]
-            Output of the model, with the same shape as the input (sharded if input is sharded).
+        LatentState
+            Combined hidden latent and the data-node encoder outputs.
         """
-        dataset_names = list(x.keys())
+        if not self.supports_latent_rollout:
+            msg = f"{type(self).__name__} replaces forward() and does not implement encode() / step_latent()."
+            raise NotImplementedError(msg)
 
-        # Extract and validate batch & ensemble sizes across datasets
-        batch_size = self._get_consistent_dim(x, 0)
-        ensemble_size = self._get_consistent_dim(x, 2)
-
-        in_out_sharded = self._resolve_in_out_sharded(
-            dataset_names=dataset_names,
-            grid_shard_sizes=grid_shard_sizes,
-        )
-        for dataset_name in dataset_names:
-            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
-
-        # Process each dataset through its corresponding encoder
-        hidden_name = self._get_active_hidden_name(dataset_names)
-        dataset_latents = {}
-        x_skip_dict = {}
-        x_data_latent_dict = {}
-        shard_sizes_data_dict = {}
+        batch_size, _, _ = self._check_inputs(x, model_comm_group, grid_shard_sizes)
+        hidden_name = self._get_active_hidden_name(list(x.keys()))
 
         x_hidden_latent = self.node_attributes(hidden_name, batch_size=batch_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
 
+        # Process each dataset through its corresponding encoder
+        dataset_latents = {}
+        x_data_latent_dict = {}
+        x_skip_dict = {}
         for dataset_name in x.keys():
             if dataset_name not in self.input_datasets:
                 continue
 
-            x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
+            x_data_latent, x_skip_dict[dataset_name], shard_sizes_data = self._assemble_input(
                 x[dataset_name],
                 batch_size=batch_size,
                 grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
             )
-            x_skip_dict[dataset_name] = x_skip
-            shard_sizes_data_dict[dataset_name] = shard_sizes_data
 
             (
                 encoder_edge_attr,
@@ -422,6 +470,46 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Combine all dataset latents
         x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
+        return LatentState(latent=x_latent, encoded_data=x_data_latent_dict, residual=x_skip_dict)
+
+    def step_latent(
+        self,
+        state: LatentState,
+        x: dict[str, Tensor],
+        *,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+    ) -> tuple[dict[str, Tensor], LatentState]:
+        """Process the latent state and decode one step.
+
+        Parameters
+        ----------
+        state : LatentState
+            State from :meth:`encode` or the previous call.
+        x : dict[str, Tensor]
+            Current input data. Not encoded; only used for the decoder targets
+            (e.g. forcings, coordinates) and, after the first step, the residual.
+        model_comm_group : Optional[ProcessGroup], optional
+            Model communication group, by default None.
+        grid_shard_sizes : DatasetShardSizes, optional
+            Per-dataset shard sizes for the grid dimension.
+
+        Returns
+        -------
+        tuple[dict[str, Tensor], LatentState]
+            Output per dataset (sharded if the input is sharded) and the next state,
+            whose latent is the processor output.
+        """
+        if not self.supports_latent_rollout:
+            msg = f"{type(self).__name__} replaces forward() and does not implement encode() / step_latent()."
+            raise NotImplementedError(msg)
+
+        dataset_names = list(x.keys())
+        batch_size, ensemble_size, in_out_sharded = self._check_inputs(x, model_comm_group, grid_shard_sizes)
+        hidden_name = self._get_active_hidden_name(dataset_names)
+        shard_sizes_hidden = get_shard_sizes(
+            self.node_attributes(hidden_name, batch_size=batch_size), 0, model_comm_group
+        )
 
         # Processor
         (
@@ -434,7 +522,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         )
 
         x_latent_proc = self.processor(
-            x=x_latent,
+            x=state.latent,
             batch_size=batch_size,
             shard_info=GraphShardInfo(nodes=shard_sizes_hidden, edges=proc_edge_shard_sizes),
             edge_attr=processor_edge_attr,
@@ -444,7 +532,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Latent skip connection
         if self.latent_skip:
-            x_latent_proc = x_latent_proc + x_latent
+            x_latent_proc = x_latent_proc + state.latent
 
         # Decoder
         x_out_dict = {}
@@ -453,7 +541,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 continue
             x_target_latent, shard_sizes_target = self._assemble_targets(
                 x[dataset_name],
-                x_data_latent_dict.get(dataset_name, None),
+                state.encoded_data.get(dataset_name, None),
                 batch_size,
                 grid_shard_sizes,
                 model_comm_group,
@@ -486,15 +574,54 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
             )
 
+            # Residual of the current input (only datasets with an encoder have one). Right after
+            # encode() it is already in the state; later steps compute it from their own input.
+            if dataset_name not in self.input_datasets:
+                x_skip = None
+            elif state.residual is not None:
+                x_skip = state.residual[dataset_name]
+            else:
+                x_skip = self._assemble_residual(x[dataset_name], grid_shard_sizes, model_comm_group, dataset_name)
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,
-                x_skip_dict.get(dataset_name, None),
+                x_skip,
                 batch_size=batch_size,
                 ensemble_size=ensemble_size,
                 dtype=x[dataset_name].dtype,
                 dataset_name=dataset_name,
             )
 
+        return x_out_dict, LatentState(latent=x_latent_proc, encoded_data=state.encoded_data, residual=None)
+
+    def forward(
+        self,
+        x: dict[str, Tensor],
+        *,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        **kwargs,
+    ) -> dict[str, Tensor]:
+        """Forward pass of the model: :meth:`encode` followed by one :meth:`step_latent`.
+
+        Parameters
+        ----------
+        x : dict[str, Tensor]
+            Input data.
+        model_comm_group : Optional[ProcessGroup], optional
+            Model communication group, by default None.
+        grid_shard_sizes : DatasetShardSizes, optional
+            Per-dataset shard sizes for the grid dimension. ``None`` means the
+            corresponding dataset is replicated, not sharded.
+        **kwargs
+            Additional model-specific arguments.
+
+        Returns
+        -------
+        dict[str, Tensor]
+            Output of the model, with the same shape as the input (sharded if input is sharded).
+        """
+        sharding = {"model_comm_group": model_comm_group, "grid_shard_sizes": grid_shard_sizes}
+        x_out_dict, _ = self.step_latent(self.encode(x, **sharding), x, **sharding)
         return x_out_dict
 
     def fill_metadata(self, md_dict) -> None:
