@@ -95,6 +95,8 @@ The following probabilistic loss functions are available by default:
    inside it. With step weights that sum to one, an error that is the same
    at every step gives the same score as scoring each step separately and
    averaging.
+-  ``WaveletEnergyScoreLoss``: Energy score of the local amount and
+   direction of structure at wavelet scales, see below.
 -  ``WeightedMSELoss``: MSE with noise-level weights for EDM diffusion
    transport models.
 
@@ -115,6 +117,95 @@ deterministic:
 The ensemble examples below use the standard global ensemble scaler set. Adapt
 the list when the selected training scaler configuration defines different
 scalers.
+
+Wavelet energy score
+====================
+
+``WaveletEnergyScoreLoss`` rewards the right amount of structure at each
+scale around each point, lined up the right way, and tolerates small shifts
+in the position of each crest. See ``WaveletEnergyScoreLoss`` and
+``RieszStructureTensor`` for how it is computed.
+
+-  The fields are split into dyadic wavelet scales in total wavenumber:
+   scale ``j`` covers ``2^(j - 1) < l < 2^(j + 1)``.
+-  ``scale_weights`` has one weight per scale, from the largest. Scales with
+   weight 0 are not computed.
+-  The finest scale lies mostly beyond the truncation; give it weight 0.
+-  For best results, train with full float32 matrix products:
+   ``training.float32_matmul_precision: highest``. With the default
+   ``high`` (TF32), the gradient of this loss is about 1 % off on real
+   fields, and 13 % for precipitation (measured at O640).
+
+The transforms need the whole grid, which must be a Gaussian grid
+(``octahedral_sht`` with ``nlat``, ``reduced_sht`` with ``grid: n320``, or
+``regular_sht`` with ``nlat`` and optionally ``nlon``).
+
+-  The fields must have no missing values. Leave variables with missing
+   values out of this loss: a scaler such as ``nan_mask_weights`` cannot
+   help, because a missing value spreads through the transforms first.
+-  The truncation defaults to ``nlat // 2 - 1``.
+-  The grid must hold the products of the finest scale with a weight
+   above 0. With ``L`` its top degree and ``Ls`` its smoothing degree,
+   ``2 (L + 1) + 5 Ls`` must be at most ``2 nlat - 1``, and on a regular
+   grid below ``nlon``. Other settings are rejected.
+
+For example, on O1280 (``nlat: 2560``, 12 scales up to T1279), scales 8 to
+10 cover ``128 < l <= 1279`` and scale 11 only ``1024 < l <= 1279``:
+
+.. code:: yaml
+
+   training_loss:
+      datasets:
+         your_dataset_name:
+            _target_: anemoi.training.losses.WaveletEnergyScoreLoss
+            transform: octahedral_sht
+            nlat: 2560
+            scale_weights: [0, 0, 0, 0, 0, 0, 0, 0, 1.0, 1.0, 1.0, 0]
+            scalers: [pressure_level, general_variable, node_weights, time_steps]
+
+Memory and speed
+----------------
+
+Two settings lower the peak memory by recomputing values during the backward pass, which takes longer:
+
+-  ``checkpoint_scales: true`` keeps the values of one scale at a time.
+-  ``variables_per_checkpoint: 8`` also splits the variables into groups of 8,
+   and keeps the values of one group of one scale at a time. Each group adds a
+   fixed time offset, so very small groups are slow with many variables. The
+   setting includes ``checkpoint_scales``.
+
+Both are off by default, and low-resolution training should not require these settings.
+
+Compiling improves both speed and memory requirements.
+Select it through ``model.compile``:
+
+.. code-block:: yaml
+
+   model:
+     compile:
+       - module: anemoi.training.losses.WaveletEnergyScoreLoss
+
+For example, on N320 (10 scales up to T319), with the grid-point work compiled
+and the checkpoints switched off:
+
+.. code-block:: yaml
+
+   training:
+     training_loss:
+       datasets:
+         your_dataset_name:
+           _target_: anemoi.training.losses.WaveletEnergyScoreLoss
+           transform: reduced_sht
+           grid: n320
+           scale_weights: [0, 0, 0, 0, 0, 0, 1.0, 1.0, 1.0, 0]
+           checkpoint_scales: false
+           variables_per_checkpoint: null
+           scalers: [pressure_level, general_variable, node_weights, time_steps]
+
+   model:
+     compile:
+       # keep the modules your model config already lists
+       - module: anemoi.training.losses.WaveletEnergyScoreLoss
 
 ************************
  Combined Loss Functions
@@ -614,10 +705,8 @@ axis ahead of ``l, m`` when passing the forward wrapper's output to the inverse.
 .. note::
 
    ``ReducedSHT`` and ``OctahedralSHT`` both perform a spherical harmonic transform on a reduced Gaussian grid.
-   By default, longitude rings of equal length are transformed together using batched PyTorch FFTs
-   and explicit backward formulas. Optional CUDA graphs can be enabled by setting
-   ``use_graphed_rfft=True`` in the section of the config file corresponding to your spectral loss. This can provide
-   significant speedups, but may not be supported on all devices and can have higher memory usage.
+   The Fourier transforms along the latitude rings use Bluestein's padding trick: rings of different
+   lengths share a few FFT lengths, so all rings go through a few batched FFTs together.
 
 .. note::
 
