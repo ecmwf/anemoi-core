@@ -7,11 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import inspect
 from collections.abc import Iterable
+from collections.abc import Sequence
 from enum import Enum
 from typing import Any
 from typing import Union
 
+from pydantic import ConfigDict
 from pydantic import Field
 from pydantic import RootModel
 from pydantic import TypeAdapter
@@ -19,6 +22,7 @@ from pydantic import ValidationError
 from pydantic import field_validator
 from pydantic import model_validator
 
+from anemoi.models.preprocessing.remapper import Remapper
 from anemoi.utils.schemas import BaseModel
 
 
@@ -225,10 +229,32 @@ class ConditionalNaNPostprocessorSchema(BaseModel):
 
 
 class RemapperSchema(BaseModel):
-    default: str = Field(literals=["none", "log1p", "sqrt", "boxcox"])
-    "Remapper default method to apply."
-    none: Union[list[str], None] = Field(default_factory=list)
-    "Variables not to be remapped."
+    model_config = ConfigDict(extra="allow")
+
+    default: str = "none"
+    "Method for variables not listed under any method."
+    method_kwargs: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    "Keyword arguments per method, e.g. {power: {lambd: 0.1}}."
+
+    @model_validator(mode="after")
+    def check_methods(self) -> "RemapperSchema":
+        supported = set(Remapper.supported_methods)
+        unknown = {self.default, *self.model_extra, *self.method_kwargs} - supported
+        if unknown:
+            msg = f"Unknown remapper method(s) {sorted(unknown)}. Supported: {sorted(supported)}."
+            raise ValueError(msg)
+        for method, kwargs in self.method_kwargs.items():
+            allowed = set(inspect.signature(Remapper.supported_methods[method][0]).parameters) - {"x"}
+            if set(kwargs) - allowed:
+                msg = f"Unknown argument(s) {sorted(set(kwargs) - allowed)} for {method!r}. Allowed: {sorted(allowed)}."
+                raise ValueError(msg)
+        for method, variables in self.model_extra.items():
+            # Any sequence of names (list, tuple, OmegaConf ListConfig), but not a single string.
+            is_names = isinstance(variables, Sequence) and not isinstance(variables, str)
+            if variables is not None and not (is_names and all(isinstance(v, str) for v in variables)):
+                msg = f"Remapper method {method!r} must map to a list of variable names, got {variables!r}."
+                raise ValueError(msg)
+        return self
 
 
 class PreprocessorTarget(str, Enum):
