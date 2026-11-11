@@ -63,7 +63,9 @@ def _backward_configs() -> list[triton.Config]:
     ]
 
 
-_AUTOTUNE_KEY = ["NUM_ROWS", "NUM_POINTS", "HEAD_DIM", "KERNEL_H", "KERNEL_W", "DOT_PRECISION", "SHIFTED", "WIDE"]
+# Grid sizes are runtime arguments, so one compiled kernel serves grids and bands of every size. Autotuning is keyed
+# by their size class (bit length of the point count), so bands of similar size share one tuning run.
+_AUTOTUNE_KEY = ["SIZE_CLASS", "HEAD_DIM", "KERNEL_H", "KERNEL_W", "DOT_PRECISION", "SHIFTED", "WIDE"]
 
 
 # Room for the tables of many grids at once, as when attention runs over bands of rows.
@@ -139,7 +141,7 @@ def _spread(per_row, TILE_H: tl.constexpr, TILE_W: tl.constexpr):
 
 
 @triton.jit
-def _tile_points(ROW_START, first_row, band, NUM_ROWS: tl.constexpr, TILE_H: tl.constexpr, TILE_W: tl.constexpr):
+def _tile_points(ROW_START, first_row, band, NUM_ROWS, TILE_H: tl.constexpr, TILE_W: tl.constexpr):
     """Points of a tile, and the start, end and length of its segment in each row.
 
     Rows past the grid get empty segments. Points are laid out row by row, ``TILE_W`` per row.
@@ -191,7 +193,7 @@ def _matching_shifted(j, n, other_n, shift, other_shift):
 
 
 @triton.jit
-def _over_the_pole(centre_row, row, NUM_ROWS: tl.constexpr, beyond_north, beyond_south, RADIUS_H: tl.constexpr):
+def _over_the_pole(centre_row, row, NUM_ROWS, beyond_north, beyond_south, RADIUS_H: tl.constexpr):
     """Whether ``row`` is reached from ``centre_row`` over a pole; see :func:`anemoi.models.layers.reduced_grid.over_the_pole`."""
     from_north = 2 * beyond_north + centre_row + row
     from_south = 2 * (beyond_south + NUM_ROWS - 1) - centre_row - row
@@ -240,7 +242,7 @@ def _key_rows(
     shift_h,
     beyond_north,
     beyond_south,
-    NUM_ROWS: tl.constexpr,
+    NUM_ROWS,
     KERNEL_H: tl.constexpr,
     KERNEL_W: tl.constexpr,
     TILE_H: tl.constexpr,
@@ -282,7 +284,7 @@ def _key_rows(
 
 
 @triton.autotune(configs=_configs(), key=_AUTOTUNE_KEY)
-@triton.jit
+@triton.jit(do_not_specialize=["NUM_ROWS", "NUM_POINTS", "SIZE_CLASS"])
 def _rg_fwd(
     Q,
     K,
@@ -310,8 +312,9 @@ def _rg_fwd(
     stride_ob,
     stride_oh,
     stride_on,
-    NUM_ROWS: tl.constexpr,
-    NUM_POINTS: tl.constexpr,
+    NUM_ROWS,
+    NUM_POINTS,
+    SIZE_CLASS,  # bit length of the point count, the autotuning key in place of the exact sizes
     HEAD_DIM: tl.constexpr,
     KERNEL_H: tl.constexpr,
     KERNEL_W: tl.constexpr,
@@ -415,7 +418,7 @@ def _rg_fwd(
 
 
 @triton.autotune(configs=_backward_configs(), key=_AUTOTUNE_KEY)
-@triton.jit
+@triton.jit(do_not_specialize=["NUM_ROWS", "NUM_POINTS", "SIZE_CLASS"])
 def _rg_bwd_dq(
     Q,
     K,
@@ -450,8 +453,9 @@ def _rg_bwd_dq(
     stride_ob,  # strides of OUT and DQ, which have the same layout
     stride_oh,
     stride_on,
-    NUM_ROWS: tl.constexpr,
-    NUM_POINTS: tl.constexpr,
+    NUM_ROWS,
+    NUM_POINTS,
+    SIZE_CLASS,  # bit length of the point count, the autotuning key in place of the exact sizes
     HEAD_DIM: tl.constexpr,
     KERNEL_H: tl.constexpr,
     KERNEL_W: tl.constexpr,
@@ -572,7 +576,7 @@ def _rg_bwd_dq(
 
 
 @triton.autotune(configs=_backward_configs(), key=_AUTOTUNE_KEY)
-@triton.jit
+@triton.jit(do_not_specialize=["NUM_ROWS", "NUM_POINTS", "SIZE_CLASS"])
 def _rg_bwd_dkdv(
     Q,
     K,
@@ -607,8 +611,9 @@ def _rg_bwd_dkdv(
     stride_gb,  # strides of DK and DV, which have the same layout
     stride_gh,
     stride_gn,
-    NUM_ROWS: tl.constexpr,
-    NUM_POINTS: tl.constexpr,
+    NUM_ROWS,
+    NUM_POINTS,
+    SIZE_CLASS,  # bit length of the point count, the autotuning key in place of the exact sizes
     HEAD_DIM: tl.constexpr,
     KERNEL_H: tl.constexpr,
     KERNEL_W: tl.constexpr,
@@ -799,6 +804,7 @@ class ReducedGridAttentionTriton(torch.autograd.Function):
         sizes = dict(
             NUM_ROWS=len(row_lengths),
             NUM_POINTS=num_points,
+            SIZE_CLASS=num_points.bit_length(),
             HEAD_DIM=head_dim,
             KERNEL_H=kernel_size[0],
             KERNEL_W=kernel_size[1],
