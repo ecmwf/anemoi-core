@@ -85,6 +85,12 @@ All methods inherit from
    :class:`~anemoi.training.tasks.temporal_downscaler.TemporalDownscaler`,
    and :class:`~anemoi.training.tasks.timeless.Autoencoder`.
 
+:class:`~anemoi.training.train.methods.latent_rollout.LatentRolloutTraining`
+   ``SingleTraining`` with the rollout done in latent space: the inputs are
+   encoded once and every rollout step advances the latent state instead of
+   re-encoding the model's predictions. Needs a model that supports latent
+   rollout, e.g. ``AnemoiModelEncProcDec``.
+
 :class:`~anemoi.training.train.methods.ensemble.EnsembleTraining`
    Ensemble (multi-member) training. Generates multiple perturbed
    members per device and uses ``DDPEnsGroupStrategy`` for distributed
