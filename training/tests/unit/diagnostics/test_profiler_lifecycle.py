@@ -40,7 +40,7 @@ def benchmark_profiler(tmp_path: Path) -> BenchmarkProfiler:
                         "memory": {
                             "enabled": True,
                             "warmup": 0,
-                            "steps": 2,
+                            "steps": 3,
                             "extra_plots": False,
                             "trace_rank0_only": False,
                         },
@@ -187,7 +187,12 @@ def test_application_owner_closes_real_capture_and_retains_events(
     failure = RuntimeError("injected training failure")
 
     def train() -> None:
+        # Lightning's ScheduleWrapper remains inactive until the first step is stopped.
+        # Prime that boundary without work, then leave the measured window open for owner cleanup.
         with benchmark_profiler.profile("[Strategy]SingleDeviceStrategy.training_step"):
+            pass
+        with benchmark_profiler.profile("[Strategy]SingleDeviceStrategy.training_step"):
+            assert inner.profiler.current_action == torch.profiler.ProfilerAction.RECORD
             with torch.profiler.record_function("prof005_completed"):
                 data = torch.ones((4, 4), device="cuda")
                 result = data @ data
@@ -223,8 +228,7 @@ def test_application_owner_closes_real_capture_and_retains_events(
         trace_events = json.loads(traces[0].read_text())["traceEvents"]
         assert any(event.get("cat") == "kernel" for event in trace_events)
         assert any(
-            event.get("cat") == "user_annotation" and event.get("name") == "prof005_completed"
-            for event in trace_events
+            event.get("cat") == "user_annotation" and event.get("name") == "prof005_completed" for event in trace_events
         )
 
         memory_report = benchmark_profiler.get_memory_profiler_df()
