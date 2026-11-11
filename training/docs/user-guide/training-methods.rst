@@ -15,12 +15,24 @@ All methods inherit from
 provides distributed training, loss scaling, normalization, and
 validation metric hooks.
 
-The three built-in methods are:
+The built-in methods are:
 
 ``SingleTraining`` (``anemoi.training.train.methods.single``)
    Deterministic single-member training. Suitable for ``Forecaster``,
    ``TemporalDownscaler``, and ``Autoencoder`` tasks. Uses
    ``DDPGroupStrategy`` for distributed execution.
+
+``LatentRolloutTraining`` (``anemoi.training.train.methods.latent_rollout``)
+   ``SingleTraining`` with the rollout in latent space: the inputs are encoded
+   once and the processor advances its own output at every rollout step.
+   Works with ``AnemoiModelEncProcDec``; models that replace its forward pass
+   (hierarchical, ensemble, transport) are not supported.
+
+   .. code:: yaml
+
+      training:
+        method:
+          _target_: anemoi.training.train.methods.LatentRolloutTraining
 
 ``EnsembleTraining`` (``anemoi.training.train.methods.ensemble``)
    Ensemble (multi-member) training. Generates ``ensemble_size_per_device``
