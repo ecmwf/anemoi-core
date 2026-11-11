@@ -53,11 +53,9 @@ from anemoi.models.triton.reduced_grid_attention import _wrap
 # Larger than any row index, for taking minima and maxima over rows.
 _FAR = tl.constexpr(1 << 30)
 
+# Keyed by the size class of the query and key grids instead of their exact sizes (see reduced_grid_attention).
 _AUTOTUNE_KEY = [
-    "Q_ROWS",
-    "Q_POINTS",
-    "K_ROWS",
-    "K_POINTS",
+    "SIZE_CLASS",
     "HEAD_DIM",
     "KERNEL_H",
     "KERNEL_W",
@@ -143,8 +141,8 @@ def _query_tile_keys(
     beyond_north,
     beyond_south,
     SHIFTED: tl.constexpr,
-    Q_ROWS: tl.constexpr,
-    K_ROWS: tl.constexpr,
+    Q_ROWS,
+    K_ROWS,
     KERNEL_H: tl.constexpr,
     KERNEL_W: tl.constexpr,
     TILE_H: tl.constexpr,
@@ -186,7 +184,7 @@ def _query_tile_keys(
 
 
 @triton.autotune(configs=_configs(), key=_AUTOTUNE_KEY)
-@triton.jit
+@triton.jit(do_not_specialize=["Q_ROWS", "Q_POINTS", "K_ROWS", "K_POINTS", "SIZE_CLASS"])
 def _xg_fwd(
     Q,
     K,
@@ -221,10 +219,11 @@ def _xg_fwd(
     stride_ob,
     stride_oh,
     stride_on,
-    Q_ROWS: tl.constexpr,
-    Q_POINTS: tl.constexpr,
-    K_ROWS: tl.constexpr,
-    K_POINTS: tl.constexpr,
+    Q_ROWS,
+    Q_POINTS,
+    K_ROWS,
+    K_POINTS,
+    SIZE_CLASS,  # bit lengths of the point counts, the autotuning key in place of the exact sizes
     HEAD_DIM: tl.constexpr,
     KERNEL_H: tl.constexpr,
     KERNEL_W: tl.constexpr,
@@ -327,7 +326,7 @@ def _xg_fwd(
 
 
 @triton.autotune(configs=_backward_configs(), key=_AUTOTUNE_KEY)
-@triton.jit
+@triton.jit(do_not_specialize=["Q_ROWS", "Q_POINTS", "K_ROWS", "K_POINTS", "SIZE_CLASS"])
 def _xg_bwd_dq(
     Q,
     K,
@@ -369,10 +368,11 @@ def _xg_bwd_dq(
     stride_ob,  # strides of OUT and DQ, which have the same layout
     stride_oh,
     stride_on,
-    Q_ROWS: tl.constexpr,
-    Q_POINTS: tl.constexpr,
-    K_ROWS: tl.constexpr,
-    K_POINTS: tl.constexpr,
+    Q_ROWS,
+    Q_POINTS,
+    K_ROWS,
+    K_POINTS,
+    SIZE_CLASS,  # bit lengths of the point counts, the autotuning key in place of the exact sizes
     HEAD_DIM: tl.constexpr,
     KERNEL_H: tl.constexpr,
     KERNEL_W: tl.constexpr,
@@ -492,7 +492,7 @@ def _xg_bwd_dq(
 
 
 @triton.autotune(configs=_backward_configs(), key=_AUTOTUNE_KEY)
-@triton.jit
+@triton.jit(do_not_specialize=["Q_ROWS", "Q_POINTS", "K_ROWS", "K_POINTS", "SIZE_CLASS"])
 def _xg_bwd_dkdv(
     Q,
     K,
@@ -534,10 +534,11 @@ def _xg_bwd_dkdv(
     stride_gb,  # strides of DK and DV, which have the same layout
     stride_gh,
     stride_gn,
-    Q_ROWS: tl.constexpr,
-    Q_POINTS: tl.constexpr,
-    K_ROWS: tl.constexpr,
-    K_POINTS: tl.constexpr,
+    Q_ROWS,
+    Q_POINTS,
+    K_ROWS,
+    K_POINTS,
+    SIZE_CLASS,  # bit lengths of the point counts, the autotuning key in place of the exact sizes
     HEAD_DIM: tl.constexpr,
     KERNEL_H: tl.constexpr,
     KERNEL_W: tl.constexpr,
@@ -705,6 +706,7 @@ class ReducedGridCrossAttentionTriton(torch.autograd.Function):
             Q_POINTS=q_points,
             K_ROWS=key_grid.num_rows,
             K_POINTS=key_grid.num_points,
+            SIZE_CLASS=(q_points.bit_length() << 8) | key_grid.num_points.bit_length(),
             HEAD_DIM=head_dim,
             KERNEL_H=kernel_size[0],
             KERNEL_W=kernel_size[1],
