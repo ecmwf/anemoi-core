@@ -155,8 +155,8 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @cached_property
     def model_summary(self) -> str:
-        example_input_array = self.get_example_input_array()
         if self.config.diagnostics.benchmark_profiler.model_summary.enabled:
+            example_input_array = self.get_example_input_array()
             model = self.model
             return self.profiler.get_model_summary(model=model, example_input_array=example_input_array)
         return None
