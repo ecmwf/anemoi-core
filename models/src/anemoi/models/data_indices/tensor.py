@@ -45,7 +45,9 @@ class BaseTensorIndex:
         self.includes = sorted(includes)
         assert set(includes).issubset(
             self.name_to_index.keys(),
-        ), f"Data indexing has invalid entries {[var for var in includes if var not in self.name_to_index]}, not in dataset."
+        ), (
+            f"Data indexing has invalid entries {[var for var in includes if var not in self.name_to_index]}, not in dataset."
+        )
         self.prognostic = self._build_idx_from_list(prognostic)
         self.diagnostic = self._build_idx_from_list(diagnostic)
         self.forcing = self._build_idx_from_list(forcing)

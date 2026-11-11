@@ -47,7 +47,6 @@ class TestMultiScaleEdgesInit:
 
 
 class TestMultiScaleEdgesTransform:
-
     @pytest.fixture()
     def tri_ico_graph(self) -> HeteroData:
         """Return a HeteroData object with MultiScaleEdges."""
@@ -121,7 +120,6 @@ class TestMultiScaleEdgesTransform:
 
 
 class TestMultiScaleEdgesStretched:
-
     @pytest.fixture()
     def tri_graph(self, mocker) -> HeteroData:
         """Return a HeteroData object with stretched Tri nodes."""

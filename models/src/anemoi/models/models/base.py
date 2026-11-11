@@ -124,9 +124,9 @@ class BaseGraphModel(nn.Module):
         missing_datasets = set(self.dataset_names) - set(self.dataset2hidden)
         unknown_datasets = set(self.dataset2hidden) - set(self.dataset_names)
         assert not missing_datasets, f"Hidden node names are missing for datasets {sorted(missing_datasets)}."
-        assert (
-            not unknown_datasets
-        ), f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
+        assert not unknown_datasets, (
+            f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
+        )
         self.hidden_names = list(dict.fromkeys(self.dataset2hidden.values()))
 
     def _build_encoder_routing(self, encoders_config: DotDict) -> None:
@@ -163,14 +163,14 @@ class BaseGraphModel(nn.Module):
     def _assert_model_routing(self) -> None:
         """Asserts that the model routing is valid."""
         not_input_datasets = set(self.input_datasets) - set(self.input_dim.keys())
-        assert all(
-            d in self.input_datasets for d in self.dataset2encoder.keys()
-        ), f"Datasets {not_input_datasets} are in input_datasets but not in data_indices provided to the model. "
+        assert all(d in self.input_datasets for d in self.dataset2encoder.keys()), (
+            f"Datasets {not_input_datasets} are in input_datasets but not in data_indices provided to the model. "
+        )
 
         not_target_datasets = set(self.target_datasets) - set(self.output_dim.keys())
-        assert all(
-            d in self.target_datasets for d in self.dataset2decoder.keys()
-        ), f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
+        assert all(d in self.target_datasets for d in self.dataset2decoder.keys()), (
+            f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
+        )
 
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
             if fusing_strategy not in ("not_supported"):
@@ -226,9 +226,9 @@ class BaseGraphModel(nn.Module):
 
     def _assert_hidden_nodes_name(self) -> None:
         for hidden_name in self.hidden_names:
-            assert (
-                hidden_name in self._graph_data.node_types
-            ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
+            assert hidden_name in self._graph_data.node_types, (
+                f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
+            )
 
     def _build_input_transform(self, model_config: DotDict) -> None:
         """Build the transform that turns raw input variables into encoder features.
@@ -263,9 +263,9 @@ class BaseGraphModel(nn.Module):
             hidden_name: self.node_attributes.attr_ndims[hidden_name]
             for hidden_name in dict.fromkeys(self.dataset2hidden.values())
         }
-        assert (
-            len(set(hidden_dims.values())) == 1
-        ), f"All hidden meshes must have the same node attribute dimension, got {hidden_dims}."
+        assert len(set(hidden_dims.values())) == 1, (
+            f"All hidden meshes must have the same node attribute dimension, got {hidden_dims}."
+        )
         return next(iter(hidden_dims.values()))
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
@@ -303,7 +303,9 @@ class BaseGraphModel(nn.Module):
             )
             assert len(dataset_internal_input_idx) == len(
                 dataset_internal_output_idx,
-            ), f"Dataset '{dataset_name}': Model indices must match {dataset_internal_input_idx} != {dataset_internal_output_idx}"
+            ), (
+                f"Dataset '{dataset_name}': Model indices must match {dataset_internal_input_idx} != {dataset_internal_output_idx}"
+            )
 
     def _assert_valid_sharding(
         self,
@@ -312,18 +314,18 @@ class BaseGraphModel(nn.Module):
         in_out_sharded: bool,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> None:
-        assert not (
-            in_out_sharded and model_comm_group is None
-        ), "If input is sharded, model_comm_group must be provided."
+        assert not (in_out_sharded and model_comm_group is None), (
+            "If input is sharded, model_comm_group must be provided."
+        )
 
         if model_comm_group is not None:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded across GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                "Only batch size of 1 is supported when model is sharded across GPUs"
+            )
 
-            assert (
-                model_comm_group.size() == 1 or ensemble_size == 1
-            ), "Ensemble size per device must be 1 when model is sharded across GPUs"
+            assert model_comm_group.size() == 1 or ensemble_size == 1, (
+                "Ensemble size per device must be 1 when model is sharded across GPUs"
+            )
 
     def _resolve_in_out_sharded(
         self,
@@ -509,9 +511,9 @@ class BaseGraphModel(nn.Module):
             dataset_names = list(batch.keys())
 
             for dataset_name in dataset_names:
-                assert (
-                    len(batch[dataset_name].shape) == 4
-                ), f"The {dataset_name} input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch[dataset_name].shape}!"
+                assert len(batch[dataset_name].shape) == 4, (
+                    f"The {dataset_name} input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch[dataset_name].shape}!"
+                )
                 # Dimensions are: batch, timesteps, grid, variables
 
             x = {}
