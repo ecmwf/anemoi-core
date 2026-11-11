@@ -135,3 +135,27 @@ nodes and the first hidden level:
    :members:
    :no-undoc-members:
    :show-inheritance:
+
+*********************************************
+ Disentangled Encoder-Processor-Decoder Model
+*********************************************
+
+A forecaster built on top of an autoencoder trained with the ``Autoencoder``
+task and ``multistep_input: 1``. Each input timestep is encoded
+independently with the (optionally frozen) encoder, a trainable
+``latent_blender`` fuses the per-timestep latents, and the processor predicts
+the next latent state, which is decoded with the (optionally frozen) decoder.
+
+Key features:
+
+#. Submodule names match ``AnemoiModelEncProcDec``, so autoencoder weights
+   load by name (``training.checkpoint.loading``) and the encoder and decoder
+   can be frozen with the ``FreezingModifierStage`` checkpoint modifier.
+
+#. ``latent_blender`` takes an optional mapper config; by default the mapper
+   config of the first encoder is used.
+
+.. autoclass:: anemoi.models.models.disentangled_encprocdec.AnemoiModelDisentangledEncProcDec
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
