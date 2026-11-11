@@ -67,7 +67,7 @@ jobs:
         uses: pavelzw/pytest-action@v2
         with:
           report-title: "Test report Anemoi Training (python ${{ matrix.python-version }}, torch ${{ matrix.torch-version }} on ${{ matrix.platform }})"
-          custom-pytest: pytest ./training
+          custom-pytest: pytest -o faulthandler_timeout=60 ./training
 
       - name: Run pytest for graphs package
         uses: pavelzw/pytest-action@v2
