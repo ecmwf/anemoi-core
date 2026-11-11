@@ -33,9 +33,9 @@ class BaseVariableTokenizer(BaseInputTransform):
         assert isinstance(emb_dim, int), f"expecting emb_dim to be int, got {type(emb_dim)}"
         assert isinstance(out_dim, int), f"expecting out_dim to be int, got {type(out_dim)}"
 
-        assert isinstance(
-            vocabulary, VariableVocabulary
-        ), f"vocabulary must be an object created for VariableVocabulary class, got {type(vocabulary)}"
+        assert isinstance(vocabulary, VariableVocabulary), (
+            f"vocabulary must be an object created for VariableVocabulary class, got {type(vocabulary)}"
+        )
         self.emb_dim = emb_dim
         self.out_dim = out_dim
         self.output_dim = out_dim
@@ -75,9 +75,9 @@ class MultiHeadAttentionTransform(BaseVariableTokenizer):
         assert isinstance(self.num_heads, int), f"num_heads has to be of type int, got {type(self.num_heads)}"
         assert isinstance(self.chunk_size, int), f"chunk_size has to be of type int, got {type(self.chunk_size)}"
 
-        assert (
-            emb_dim % num_heads == 0
-        ), f"emb_dim and num_heads needs to be divisble, got emb_dim: {emb_dim} and num_heads: {num_heads}"
+        assert emb_dim % num_heads == 0, (
+            f"emb_dim and num_heads needs to be divisble, got emb_dim: {emb_dim} and num_heads: {num_heads}"
+        )
 
         self.mha = nn.MultiheadAttention(embed_dim=emb_dim, num_heads=self.num_heads, batch_first=True, **kwargs)
 
@@ -92,7 +92,7 @@ class MultiHeadAttentionTransform(BaseVariableTokenizer):
         # Each grid point becomes an independent attention batch
         x_chunk = einops.rearrange(
             x_chunk,
-            "... grid variable embedding_dim " "-> (... grid) variable embedding_dim",
+            "... grid variable embedding_dim -> (... grid) variable embedding_dim",
         )
 
         q = self.query.expand(

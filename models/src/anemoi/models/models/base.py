@@ -246,9 +246,9 @@ class BaseGraphModel(nn.Module):
             variable_metadata=self.variable_metadata,
             _recursive_=False,
         )
-        assert isinstance(
-            self.input_transform, BaseInputTransform
-        ), f"input_transform must be a BaseInputTransform, got {type(self.input_transform).__name__}."
+        assert isinstance(self.input_transform, BaseInputTransform), (
+            f"input_transform must be a BaseInputTransform, got {type(self.input_transform).__name__}."
+        )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         """Calculate the encoder input dimension for a given dataset."""
