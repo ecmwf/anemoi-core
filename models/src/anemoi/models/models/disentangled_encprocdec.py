@@ -45,6 +45,24 @@ class _ForwardContext:
     proc_edge_shard_sizes: object
 
 
+@dataclass
+class DisentangledLatentState:
+    """Latent state carried between rollout steps by latent rollout.
+
+    Attributes
+    ----------
+    latents : Tensor
+        Latents of the last ``n_step_input`` steps, shape (nodes, n_step_input, channels),
+        oldest first.
+    encoded_data : dict[str, Tensor]
+        Data-node encoder outputs of the last encoded input step, used as decoder targets
+        when ``target_node_features`` includes ``encoded_data``.
+    """
+
+    latents: Tensor
+    encoded_data: dict[str, Tensor]
+
+
 class AnemoiModelDisentangledEncProcDec(AnemoiModelEncProcDec):
     """Disentangled encoder-processor-decoder.
 
@@ -56,6 +74,12 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelEncProcDec):
     datasets of one timestep are combined by the ``latent_aggregator``. The
     ``n_step_input`` latents are fused by a trainable ``latent_blender`` and the
     processor predicts the next latent state, which is decoded per dataset.
+
+    Latent rollout: :meth:`encode` returns a :class:`DisentangledLatentState` and
+    :meth:`step_latent` predicts one step from it and returns the next state, in
+    which the oldest latent is dropped and the predicted latent appended. The
+    caller carries the state between steps, so the model itself keeps no state
+    between calls (see ``anemoi.training.train.methods.LatentRolloutTraining``).
     """
 
     def _build_networks(self, model_config: DotDict) -> None:
@@ -273,6 +297,54 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelEncProcDec):
                 dataset_name=dataset_name,
             )
         return x_out_dict
+
+    def encode(
+        self,
+        x: dict[str, Tensor],
+        *,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+    ) -> DisentangledLatentState:
+        """Encode every input timestep of ``x`` into the initial latent state."""
+        ctx = self._forward_context(x, model_comm_group, grid_shard_sizes)
+        latents, encoded_data = self._encode(x, ctx, model_comm_group, grid_shard_sizes)
+        return DisentangledLatentState(latents=latents, encoded_data=encoded_data)
+
+    def step_latent(
+        self,
+        state: DisentangledLatentState,
+        x: dict[str, Tensor],
+        *,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+    ) -> tuple[dict[str, Tensor], DisentangledLatentState]:
+        """Predict one step from ``state`` without re-encoding.
+
+        Parameters
+        ----------
+        state : DisentangledLatentState
+            Latent state from :meth:`encode` or the previous call.
+        x : dict[str, Tensor]
+            Current input per dataset. Not encoded; only used for the decoder targets
+            (e.g. forcings, coordinates) and the residual connection.
+        model_comm_group : ProcessGroup, optional
+            Model communication group.
+        grid_shard_sizes : DatasetShardSizes, optional
+            Per-dataset shard sizes of the grid dimension.
+
+        Returns
+        -------
+        tuple[dict[str, Tensor], DisentangledLatentState]
+            Prediction per dataset and the latent state for the next step.
+        """
+        ctx = self._forward_context(x, model_comm_group, grid_shard_sizes)
+        x_latent = self._process(state.latents, ctx, model_comm_group)
+        y = self._decode(x_latent, x, state.encoded_data, ctx, model_comm_group, grid_shard_sizes)
+        next_state = DisentangledLatentState(
+            latents=torch.cat((state.latents[:, 1:], x_latent.unsqueeze(1)), dim=1),
+            encoded_data=state.encoded_data,
+        )
+        return y, next_state
 
     def forward(
         self,

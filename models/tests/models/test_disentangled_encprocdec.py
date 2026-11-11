@@ -159,3 +159,46 @@ def test_autoencoder_weights_load_by_name(model: AnemoiModelDisentangledEncProcD
     missing, unexpected = model.load_state_dict(autoencoder.state_dict(), strict=False)
     assert not unexpected
     assert {key.split(".")[0] for key in missing} == {"latent_blender"}
+
+
+def test_supports_latent_rollout(model: AnemoiModelDisentangledEncProcDec) -> None:
+    assert model.supports_latent_rollout
+
+
+def test_forward_equals_one_latent_step(model: AnemoiModelDisentangledEncProcDec) -> None:
+    x = _inputs()
+    y_latent, _ = model.step_latent(model.encode(x), x)
+    assert torch.allclose(model(x)["data"], y_latent["data"])
+
+
+def test_step_latent_shifts_the_state(model: AnemoiModelDisentangledEncProcDec) -> None:
+    x = _inputs()
+    state = model.encode(x)
+    _, next_state = model.step_latent(state, x)
+    assert next_state.latents.shape == state.latents.shape
+    assert torch.equal(next_state.latents[:, :-1], state.latents[:, 1:])
+
+
+def test_latent_step_differs_from_reencoding(model: AnemoiModelDisentangledEncProcDec) -> None:
+    x, x_next = _inputs(), _inputs()
+    _, state = model.step_latent(model.encode(x), x)
+    y_latent, _ = model.step_latent(state, x_next)
+    assert not torch.allclose(y_latent["data"], model(x_next)["data"])
+
+
+def test_step_latent_keeps_no_hidden_state(model: AnemoiModelDisentangledEncProcDec) -> None:
+    x = _inputs()
+    state = model.encode(x)
+    y_first, _ = model.step_latent(state, x)
+    model(_inputs())  # unrelated call in between
+    y_again, _ = model.step_latent(state, x)
+    assert torch.equal(y_first["data"], y_again["data"])
+
+
+def test_gradients_flow_through_the_latent_state(model: AnemoiModelDisentangledEncProcDec) -> None:
+    x = _inputs()
+    _, state = model.step_latent(model.encode(x), x)
+    y_second, _ = model.step_latent(state, x)
+    y_second["data"].pow(2).mean().backward()
+    assert any(p.grad is not None for p in model.encoder.parameters())
+    assert all(p.grad is not None for p in model.latent_blender.parameters() if p.requires_grad)

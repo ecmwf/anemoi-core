@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Training cycles for the disentangled forecaster."""
+"""Training cycles for the disentangled forecaster, with and without latent rollout."""
 
 import copy
 from pathlib import Path
@@ -40,6 +40,21 @@ def test_training_cycle_disentangled(
     cfg, url, _ = global_config
     get_test_archive(url)
     AnemoiTrainer(_as_disentangled_forecaster(cfg)).train()
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_disentangled_latent_rollout(
+    global_config: tuple[DictConfig, str, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url, _ = global_config
+    get_test_archive(url)
+    cfg = _as_disentangled_forecaster(cfg)
+    with open_dict(cfg):
+        cfg.training.method = OmegaConf.create({"_target_": "anemoi.training.train.methods.LatentRolloutTraining"})
+        cfg.task.rollout = OmegaConf.create({"start": 3, "epoch_increment": 0, "maximum": 3})
+    AnemoiTrainer(cfg).train()
 
 
 @skip_if_offline

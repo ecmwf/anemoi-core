@@ -164,6 +164,12 @@ Key features:
 #. ``latent_blender`` takes an optional mapper config; by default the mapper
    config of the first encoder is used.
 
+#. Latent rollout: ``encode`` returns the latents of the input timesteps and
+   ``step_latent`` predicts one step and returns the next window (oldest
+   latent dropped, predicted latent appended), so the blender always sees one
+   latent per timestep. Used by
+   :class:`~anemoi.training.train.methods.LatentRolloutTraining`.
+
 .. autoclass:: anemoi.models.models.disentangled_encprocdec.AnemoiModelDisentangledEncProcDec
    :members:
    :no-undoc-members:
