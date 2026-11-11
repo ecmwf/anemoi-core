@@ -1058,6 +1058,18 @@ modes rather than grid points. Anemoi-training checks that every
 grid-dimension scaler attached to a spectral loss is sized to the
 spectral dimension.
 
+Spectral losses sum over the spectral dimension and use these scalers
+for normalisation, just as grid-point losses use node weights to
+normalise over grid points.
+
+The scale of the loss depends on the transform's coefficients. For
+spherical harmonic transforms, the total power across all wavenumbers is
+``(4 * pi)**2`` times the area-weighted mean square of the field. This
+means that, at perfect coherence, ``SpectralAMSELoss`` is
+``(4 * pi)**2`` times the area-weighted MSE. When combining a spectral
+loss with other losses, use the scalers or loss weights to account for
+this factor.
+
 ``n_spectral_modes`` is the number of spectral modes considered by the
 loss. It depends on the shape of the loss tensor:
 

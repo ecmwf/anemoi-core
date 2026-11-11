@@ -23,7 +23,6 @@ Notes
 from __future__ import annotations
 
 import logging
-import math
 from contextlib import nullcontext
 from typing import TYPE_CHECKING
 from typing import Literal
@@ -38,7 +37,6 @@ from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.spectral_transforms import DCT2D
 from anemoi.models.layers.spectral_transforms import FFT2D
-from anemoi.models.layers.spectral_transforms import SHT
 from anemoi.models.layers.spectral_transforms import Cartesian2DTransform
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import ReducedSHT
@@ -345,16 +343,17 @@ class SpectralAMSELoss(SpectralLoss):
       The sum over :math:`M` gives per-total-wavenumber power spectra.
       Only :math:`M \ge 0` is stored. For a real field the :math:`M < 0` terms equal
       those at :math:`M > 0`, so the latter are counted twice.
-      As in the paper, :math:`c_{L,M}` are normalised so that :math:`\sum_L S_L` is the
-      area-weighted mean square of the field, which makes them the transform's coefficients
-      divided by :math:`4\pi`. ``eps`` acts on the transform's own values, before this
-      normalisation.
+      With the transform's coefficients, :math:`\sum_L S_L` is :math:`(4\pi)^2` times the
+      area-weighted mean square of the field.
     - ``fft2d`` / ``dct2d``: the ``(ky, kx)`` spectral plane is binned into integer
       radial-wavenumber bands :math:`L = \mathrm{round}(\sqrt{k_y^2 + k_x^2})`, and the
       sum is taken over each band. :math:`L` is then the radial wavenumber; the per-band
       terms have a slightly different physical meaning than under the SHT but the
-      formulation is unchanged. The transform's coefficients are used as they are, with
-      no further normalisation. Patch-wise FFT2D (``patch_size`` set) is not supported.
+      formulation is unchanged. Patch-wise FFT2D (``patch_size`` set) is not supported.
+
+    The loss uses the transform's coefficients as they are and sums over :math:`L`. Like
+    the other spectral losses, it leaves the normalisation over the spectral dimension to
+    the spectral scalers (see ``SpectralDimensionScaler``).
     """
 
     def __init__(self, *args, eps: float = 1e-8, **kwargs) -> None:
@@ -421,10 +420,6 @@ class SpectralAMSELoss(SpectralLoss):
 
             # per-L AMSE: [B, T, E, L, vars]
             amse_per_l = (amp_pred - amp_target) ** 2 + 2 * torch.maximum(psd_pred, psd_target) * (1 - coherence)
-            if isinstance(self.transform, SHT):
-                # The SHT power sums to (4 pi)^2 times the area-weighted mean square of the field. Subich et al.
-                # (arXiv:2501.19374, eqs. 3-4) normalise it to sum to the mean square itself.
-                amse_per_l = amse_per_l / (4 * math.pi) ** 2
 
         amse_per_l, spectral_shard_slice, global_spectral_size = self._reshard_spectral_loss(
             amse_per_l,

@@ -886,7 +886,7 @@ def _expected_two_sided_amse(loss: BaseLoss, pred_coeffs: torch.Tensor, target_c
     amp_target = torch.sqrt(psd_target + loss.eps)
     coherence = cross / (amp_pred * amp_target + loss.eps)
     amse = (amp_pred - amp_target) ** 2 + 2 * torch.maximum(psd_pred, psd_target) * (1 - coherence)
-    return amse.sum(dim=-2)[0, 0, 0] / (4 * math.pi) ** 2
+    return amse.sum(dim=-2)[0, 0, 0]
 
 
 def _per_total_wavenumber_sum(two_sided: torch.Tensor) -> torch.Tensor:
@@ -939,8 +939,8 @@ def test_sht_losses_score_the_two_sided_spectrum(
     torch.testing.assert_close(actual, expected)
 
 
-def test_sht_amse_equals_mse_for_a_scaled_prediction() -> None:
-    """With coherence 1, AMSE is the area-weighted MSE of the fields (Subich et al., eqs. 3-4)."""
+def test_sht_amse_is_proportional_to_mse_for_a_scaled_prediction() -> None:
+    """With coherence 1, SHT AMSE is (4 pi)^2 times the area-weighted MSE of the fields."""
     torch.manual_seed(0)
     nlat, truncation = 8, 3
     loss = SpectralAMSELoss(transform="octahedral_sht", nlat=nlat, truncation=truncation)
@@ -959,7 +959,7 @@ def test_sht_amse_equals_mse_for_a_scaled_prediction() -> None:
             for weight, n_lon in zip(latitude_weights, loss.transform.lons_per_lat, strict=True)
         ],
     ) / (4 * math.pi)
-    expected = (area_weights[:, None] * (pred - target)[0, 0, 0] ** 2).sum(dim=0)
+    expected = (4 * math.pi) ** 2 * (area_weights[:, None] * (pred - target)[0, 0, 0] ** 2).sum(dim=0)
 
     torch.testing.assert_close(loss(pred, target, squash=False), expected, rtol=1e-6, atol=0)
 
