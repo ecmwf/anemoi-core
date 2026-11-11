@@ -530,7 +530,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             model_comm_group=model_comm_group,
         )
 
-        # Latent skip connection
+        # The next state is the processor output *before* the latent skip. The processor is
+        # residual (output ~ input + update), so carrying the skip-added latent would double
+        # the state at every rollout step (~2^n growth, fp16 overflow after ~13 steps).
+        next_latent = x_latent_proc
+
+        # Latent skip connection (decoder input only)
         if self.latent_skip:
             x_latent_proc = x_latent_proc + state.latent
 
@@ -591,7 +596,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dataset_name=dataset_name,
             )
 
-        return x_out_dict, LatentState(latent=x_latent_proc, encoded_data=state.encoded_data, residual=None)
+        return x_out_dict, LatentState(latent=next_latent, encoded_data=state.encoded_data, residual=None)
 
     def forward(
         self,
