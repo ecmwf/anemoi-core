@@ -370,7 +370,9 @@ class RegularSHT(SHT):
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, t, e, p, v = data.shape
-        assert p == self._sht.n_grid_points, f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
+        assert p == self._sht.n_grid_points, (
+            f"Input points={p} does not match expected nlat*nlon={self.nlat * self.nlon}"
+        )
         x = einops.rearrange(data, "b t e p v -> b t e v p")
         coeffs = self._sht(x)
 
@@ -434,7 +436,9 @@ class ReducedSHT(SHT):
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, t, e, p, v = data.shape
-        assert p == self._sht.n_grid_points, f"Input points={p} does not match expected nlat*nlon={self.nlat*self.nlon}"
+        assert p == self._sht.n_grid_points, (
+            f"Input points={p} does not match expected nlat*nlon={self.nlat * self.nlon}"
+        )
         x = einops.rearrange(data, "b t e p v -> b t e v p")
         coeffs = self._sht(x)
 
@@ -476,9 +480,9 @@ class OctahedralSHT(SHT):
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, t, e, p, v = data.shape
-        assert (
-            p == self._sht.n_grid_points
-        ), f"Input points={p} does not match expected octahedral flattened rings={self._sht.n_grid_points}"
+        assert p == self._sht.n_grid_points, (
+            f"Input points={p} does not match expected octahedral flattened rings={self._sht.n_grid_points}"
+        )
 
         # expects [..., points] where points is flattened spatial dim
         x = einops.rearrange(data, "b t e p v -> (b t e v) p")

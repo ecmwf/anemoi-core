@@ -103,12 +103,12 @@ class TestTransformerBaseMapper:
         # Should be a no-op in the base class
         x = pair_tensor
         x_src, x_dst = mapper.pre_process(x)
-        assert x_src.shape == torch.Size(
-            x[0].shape
-        ), f"x_src.shape ({x_src.shape}) != torch.Size(x[0].shape) ({torch.Size(x[0].shape)})"
-        assert x_dst.shape == torch.Size(
-            x[1].shape
-        ), f"x_dst.shape ({x_dst.shape}) != torch.Size(x[1].shape) ({x[1].shape})"
+        assert x_src.shape == torch.Size(x[0].shape), (
+            f"x_src.shape ({x_src.shape}) != torch.Size(x[0].shape) ({torch.Size(x[0].shape)})"
+        )
+        assert x_dst.shape == torch.Size(x[1].shape), (
+            f"x_dst.shape ({x_dst.shape}) != torch.Size(x[1].shape) ({x[1].shape})"
+        )
 
     def test_post_process(self, mapper, pair_tensor):
         x_dst = pair_tensor[1]
