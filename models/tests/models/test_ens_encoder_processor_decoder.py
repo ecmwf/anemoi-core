@@ -7,9 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from types import SimpleNamespace
+
 import torch
 from torch import nn
 
+from anemoi.models.layers.input_transform import FlattenInputTransform
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 
@@ -33,6 +36,12 @@ def test_assemble_input_conditions_on_prognostic_residual_variables() -> None:
     model = AnemoiEnsModelEncProcDec.__new__(AnemoiEnsModelEncProcDec)
     nn.Module.__init__(model)
     model.condition_on_residual = True
+    model.input_transform = FlattenInputTransform()
+    model.data_indices = {
+        "data": SimpleNamespace(
+            model=SimpleNamespace(input=SimpleNamespace(name_to_index={str(i): i for i in range(num_variables)}))
+        )
+    }
     model.n_step_input = input_steps
     model.n_step_output = 2
     model.num_input_channels = {"data": num_variables}

@@ -1,0 +1,4 @@
+_target_: anemoi.models.layers.embedder.PMAEmbedder
+emb_dim: 16
+out_dim: 64
+num_heads: 4

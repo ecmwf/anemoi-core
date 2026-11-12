@@ -43,6 +43,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         graph_data: HeteroData,
         n_step_input: int,
         n_step_output: int,
+        variable_metadata: Optional[dict] = None,
     ) -> None:
         self.condition_on_residual = DotDict(model_config).condition_on_residual
         super().__init__(
@@ -52,6 +53,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             graph_data=graph_data,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
+            variable_metadata=variable_metadata,
         )
 
     def _build_networks(self, model_config: DotDict) -> None:
@@ -94,11 +96,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
-        # add data positional info (lat/lon)
+        variables = list(self.data_indices[dataset_name].model.input.name_to_index)
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
+                self.input_transform(x, node_attributes_data, variables=variables),
                 torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1) * fcstep,
             ),
             dim=-1,  # feature dimension

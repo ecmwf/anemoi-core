@@ -167,8 +167,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     ) -> tuple[torch.Tensor, torch.Tensor, ShardSizes]:
         """Assemble the encoder source features and the residual skip for a single dataset.
 
-        Flattens the raw input over ``(batch, ensemble, grid)`` and ``(time, vars)``, concatenates
-        the per-node attributes on the feature dimension, and computes the residual skip tensor.
+        Turns the raw input and the per-node attributes into encoder features with the input
+        transform, and computes the residual skip tensor.
 
         Parameters
         ----------
@@ -203,14 +203,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
-        # normalize and add data positional info (lat/lon)
-        x_data_latent = torch.cat(
-            (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
-            ),
-            dim=-1,  # feature dimension
-        )
+        variables = list(self.data_indices[dataset_name].model.input.name_to_index)
+        x_data_latent = self.input_transform(x, node_attributes_data, variables=variables)
 
         return x_data_latent, x_skip, grid_shard_sizes
 
