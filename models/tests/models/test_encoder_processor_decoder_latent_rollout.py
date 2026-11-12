@@ -20,6 +20,7 @@ from anemoi.models.models import AnemoiEnsModelEncProcDec
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.models.models import AnemoiModelEncProcDecHierarchical
 from anemoi.models.models import AnemoiTransportModelEncProcDec
+from anemoi.models.models.encoder_processor_decoder import LatentState
 
 VARIABLES = ["a", "b", "c", "f"]
 N_DATA, N_HIDDEN = 40, 20
@@ -185,3 +186,46 @@ def test_gradients_flow_through_the_latent_state(model: AnemoiModelEncProcDec) -
     y_second, _ = model.step_latent(state, x)
     y_second["data"].pow(2).mean().backward()
     assert any(p.grad is not None for p in model.encoder.parameters())
+
+
+def test_next_state_is_the_processor_output_before_the_latent_skip(model: AnemoiModelEncProcDec) -> None:
+    """The latent skip feeds the decoder only: carrying processor(x) + x doubles the latent every step."""
+    assert model.latent_skip
+    outputs = []
+    handle = model.processor.register_forward_hook(lambda _m, _a, _k, out: outputs.append(out), with_kwargs=True)
+    x = _inputs()
+    _, next_state = model.step_latent(model.encode(x), x)
+    handle.remove()
+    assert len(outputs) == 1
+    assert torch.equal(next_state.latent, outputs[0])
+
+
+def test_later_steps_decode_with_the_current_input(model: AnemoiModelEncProcDec) -> None:
+    """After the first step the decoder must see the current input, not the one that was encoded.
+
+    A later step whose latent is ``encode(x_next).latent`` must then reproduce ``forward(x_next)``,
+    whatever input the state was first encoded from.
+    """
+    x, x_next = _inputs(), _inputs()
+    _, state = model.step_latent(model.encode(x), x)  # later-step state, encoded from x
+    state = LatentState(latent=model.encode(x_next).latent, encoded_data=state.encoded_data, residual=None)
+    y, _ = model.step_latent(state, x_next)
+    assert torch.equal(y["data"], model(x_next)["data"])
+
+
+def test_encoder_that_changes_its_source_is_run_for_the_decoder_inputs(model: AnemoiModelEncProcDec) -> None:
+    """An encoder that changes its source (e.g. GNN) is run on the current input at later steps.
+
+    The decoder then still gets the current ``encoded_data``: a later step whose latent is
+    ``encode(x_next).latent`` reproduces ``forward(x_next)``.
+    """
+    model.encoder["0"].passes_source_through = False
+    calls = []
+    x, x_next = _inputs(), _inputs()
+    _, state = model.step_latent(model.encode(x), x)  # later-step state, encoded from x
+    state = LatentState(latent=model.encode(x_next).latent, encoded_data=state.encoded_data, residual=None)
+    handle = model.encoder["0"].register_forward_hook(lambda *_: calls.append(1))
+    y, _ = model.step_latent(state, x_next)
+    handle.remove()
+    assert len(calls) == 1
+    assert torch.equal(y["data"], model(x_next)["data"])
