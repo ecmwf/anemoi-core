@@ -78,6 +78,33 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
+def _missing_module(error: BaseException) -> str | None:
+    """Return the top-level package a ``ModuleNotFoundError`` in the chain of ``error`` names.
+
+    Hydra wraps an import failure of a ``_target_`` in its own exceptions, so the
+    ``ModuleNotFoundError`` sits further down the ``__cause__``/``__context__`` chain.
+
+    Parameters
+    ----------
+    error : BaseException
+        The exception raised while instantiating a stage.
+
+    Returns
+    -------
+    str or None
+        The missing top-level package, such as ``"peft"``, or ``None`` if no
+        ``ModuleNotFoundError`` with a module name is in the chain.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ModuleNotFoundError) and current.name:
+            return current.name.split(".")[0]
+        current = current.__cause__ or current.__context__
+    return None
+
+
 class CheckpointPipeline:
     """Orchestrates checkpoint processing through stages.
 
@@ -177,6 +204,14 @@ class CheckpointPipeline:
                 except Exception as e:
                     from .exceptions import CheckpointConfigError
 
+                    if _missing_module(e) == "peft":
+                        # Hydra imports a peft_config target (peft.LoraConfig, ...) before the
+                        # stage exists, so the stage's own install hint never runs.
+                        from .modifiers.peft import MISSING_PEFT_MESSAGE
+
+                        LOGGER.exception("Failed to instantiate stage %d from config", i)
+                        raise CheckpointConfigError(MISSING_PEFT_MESSAGE, config_path=f"stages[{i}]") from e
+
                     stage_config_preview = str(stage)[:200] + "..." if len(str(stage)) > 200 else str(stage)
                     error_msg = (
                         f"Failed to instantiate pipeline stage {i} from configuration.\n"
@@ -228,19 +263,13 @@ class CheckpointPipeline:
         placed. The builder always emits stages in the canonical order, so only
         hand-built pipelines are bitten.
 
-        Among the modifiers, a ``FreezingModifierStage`` must not follow a
-        ``PeftModifierStage``: the PEFT stage sets the trainable parameters, and
-        freezing after it could freeze the adapters.
-
         Raises
         ------
         CheckpointConfigError
             If a source follows a loader or a modifier, a modifier precedes a
-            loader, there is more than one loading strategy, or freezing follows PEFT.
+            loader, or there is more than one loading strategy.
         """
         from .exceptions import CheckpointConfigError
-        from .modifiers.freezing import FreezingModifierStage
-        from .modifiers.peft import PeftModifierStage
 
         names = [type(stage).__name__ for stage in self.stages]
         rank = {"source": 0, "loader": 1, "modifier": 2}
@@ -248,15 +277,6 @@ class CheckpointPipeline:
         if ranks != sorted(ranks) or ranks.count(rank["loader"]) > 1:
             msg = f"Invalid checkpoint pipeline {names}: use the order source -> one loader -> modifiers."
             raise CheckpointConfigError(msg, config_path="training.checkpoint")
-
-        peft_at = [i for i, stage in enumerate(self.stages) if isinstance(stage, PeftModifierStage)]
-        freezing_at = [i for i, stage in enumerate(self.stages) if isinstance(stage, FreezingModifierStage)]
-        if peft_at and freezing_at and max(freezing_at) > min(peft_at):
-            msg = (
-                f"Invalid checkpoint pipeline {names}: FreezingModifierStage after PeftModifierStage could "
-                "freeze the adapters. List freezing first, or use the PEFT stage's trainable_modules."
-            )
-            raise CheckpointConfigError(msg, config_path="training.checkpoint.modifiers")
 
     def execute(self, initial_context: CheckpointContext) -> CheckpointContext:
         """Execute the pipeline stages in sequence.

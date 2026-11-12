@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""LoRA adapters through real training runs: fine-tune, resume, reload, continue, stack."""
+"""PEFT adapters through real training runs: fine-tune, resume, reload, continue, stack."""
 
 import os
 from copy import deepcopy
@@ -32,8 +32,14 @@ RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
 WEIGHTS_ONLY = "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"
 
 
-def peft_stage(target_modules: str = r"model\.model\.processor\..*") -> dict:
-    return {"_target_": PEFT_STAGE, "peft_config": {"r": 4, "lora_alpha": 8, "target_modules": target_modules}}
+# Every linear layer of the graph model, then all but the processor's excluded: the same
+# target names for both architectures. PEFT matches each pattern against the whole name.
+PROCESSOR_ONLY = {"target_modules": "all-linear", "exclude_modules": r"(?!processor\.).*"}
+
+
+def peft_stage(method: str = "peft.LoraConfig", **options: object) -> dict:
+    options = options or {"r": 4, "lora_alpha": 8, **PROCESSOR_ONLY}
+    return {"_target_": PEFT_STAGE, "peft_config": {"_target_": method, **options}}
 
 
 class _Record(pl.Callback):
@@ -89,11 +95,11 @@ def _prepare(cfg: DictConfig) -> tuple[DictConfig, Path, dict]:
 
 
 def _base_changes(state_dict: dict, pretrained: dict) -> list[str]:
-    """Graph-model weights that differ from the pretrained checkpoint (adapters aside)."""
+    """Graph-model weights that differ from the pretrained checkpoint (adapter weights have no original)."""
     changed = []
     for key, value in state_dict.items():
         original = key.replace(".base_layer.", ".")
-        in_base = key.startswith("model.model.") and ".lora_" not in key and original in pretrained
+        in_base = key.startswith("model.model.") and original in pretrained
         if in_base and not torch.equal(value, pretrained[original]):
             changed.append(key)
     return changed
@@ -122,7 +128,9 @@ def test_lora_fine_tune_resume_reload_continue_and_stack(
     l_ckpt = _load(run_dir / "last.ckpt")
     record = l_ckpt["hyper_parameters"]["metadata"]["peft"]
     lora_keys = [key for key in l_ckpt["state_dict"] if ".lora_" in key]
-    assert record["modules"] and lora_keys
+    assert record["adapters"]["default"]["peft_type"] == "LORA"
+    assert lora_keys
+    assert all(key.startswith("model.model.processor.") for key in lora_keys)
     assert _base_changes(l_ckpt["state_dict"], pretrained) == []
     assert any(l_ckpt["state_dict"][key].abs().sum() > 0 for key in lora_keys if ".lora_B." in key)
 
@@ -148,7 +156,7 @@ def test_lora_fine_tune_resume_reload_continue_and_stack(
         {"source": {"_target_": LOCAL_SOURCE, "path": str(l_path)}, "loading": {"_target_": WEIGHTS_ONLY}},
     )
     continued_ckpt = _load(_run_dir(cfg, continued) / "last.ckpt")
-    assert continued_ckpt["hyper_parameters"]["metadata"]["peft"]["modules"] == record["modules"]
+    assert continued_ckpt["hyper_parameters"]["metadata"]["peft"]["adapters"] == record["adapters"]
 
     # And stacks new adapters on top: L's are merged, one adapter level remains.
     stacked, _ = _train(
@@ -156,11 +164,45 @@ def test_lora_fine_tune_resume_reload_continue_and_stack(
         {
             "source": {"_target_": LOCAL_SOURCE, "path": str(l_path)},
             "loading": {"_target_": WEIGHTS_ONLY},
-            "modifiers": [peft_stage(target_modules="all-linear")],
+            "modifiers": [peft_stage(r=4, lora_alpha=8, target_modules="all-linear")],
         },
     )
-    stacked_record = _load(_run_dir(cfg, stacked) / "last.ckpt")["hyper_parameters"]["metadata"]["peft"]
-    assert [entry["modules"] for entry in stacked_record["lineage"]] == [record["modules"]]
+    stacked_ckpt = _load(_run_dir(cfg, stacked) / "last.ckpt")
+    assert stacked_ckpt["hyper_parameters"]["metadata"]["peft"]["lineage"] == [record["adapters"]]
+    assert not any(".base_layer.base_layer." in key for key in stacked_ckpt["state_dict"])
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_miss_fine_tune_trains_only_the_adapters(
+    global_config_with_checkpoint: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """A method other than LoRA, chosen by its config class, on the integration model.
+
+    PEFT sets the trainable parameters of the graph model only. Nothing outside it may
+    train either, or the fine-tune would update weights no adapter config names.
+    """
+    cfg, url = global_config_with_checkpoint
+    get_test_archive(url)
+    cfg, pretrained_path, pretrained = _prepare(cfg)
+
+    trainer, record = _train(
+        cfg,
+        {
+            "source": {"_target_": LOCAL_SOURCE, "path": str(pretrained_path)},
+            "loading": {"_target_": WEIGHTS_ONLY},
+            "modifiers": [peft_stage("peft.MissConfig", r=4, **PROCESSOR_ONLY)],
+        },
+    )
+
+    trainable = [name for name, p in trainer.model.named_parameters() if p.requires_grad]
+    assert trainable
+    assert all(name.startswith("model.model.processor.") and ".miss_block." in name for name in trainable)
+    assert all(torch.isfinite(torch.tensor(record.losses)))
+    ckpt = _load(_run_dir(cfg, trainer) / "last.ckpt")
+    assert ckpt["hyper_parameters"]["metadata"]["peft"]["adapters"]["default"]["peft_type"] == "MISS"
+    assert _base_changes(ckpt["state_dict"], pretrained) == []
 
 
 @skip_if_offline

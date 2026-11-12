@@ -1,20 +1,22 @@
 # Modifier stages — a list applied in order after a loading strategy, composed
-# under training.checkpoint.modifiers. This one adds LoRA adapters with PEFT:
-# the loaded weights stay as they are and only the adapters (plus any
-# trainable_modules) train. Needs the optional extra: anemoi-training[peft].
+# under training.checkpoint.modifiers. This one adds PEFT adapters to the graph
+# model; PEFT freezes the rest of it, so only the adapters (plus any
+# modules_to_save) train. Needs the optional extra: anemoi-training[peft].
 #
-# Paths are full paths from the LightningModule, as for freezing.yaml:
-# `model.model` is the graph model that owns encoder / processor / decoder.
-# target_modules is "all-linear", a list of exact paths, or a regex matched in
-# full against full paths (it selects the Linear layers among its matches).
+# peft_config is a PEFT config built from its _target_; any PEFT method that is
+# not prompt learning works (peft.LoraConfig, peft.MissConfig, peft.LoHaConfig,
+# ...). Its options mean what the PEFT documentation says. Module names are
+# relative to the graph model at `model.model` and matched by PEFT, unlike the
+# full paths of freezing.yaml.
 #
 # Checkpoints record the adapters, so any later load or resume rebuilds them
 # without this config. Inference checkpoints hold merged weights and load
 # without peft.
 - _target_: anemoi.training.checkpoint.modifiers.peft.PeftModifierStage
   peft_config:
+    _target_: peft.LoraConfig
     r: 8
     lora_alpha: 16
-    lora_dropout: 0.0             # must stay 0 when system.hardware.num_gpus_per_model > 1
-    target_modules: all-linear    # e.g. 'model\.model\.processor\..*' or ["model.model.processor.proc.0.lin_query"]
-  trainable_modules: []           # e.g. ["model.model.decoder.0"] to keep training next to the adapters
+    lora_dropout: 0.0             # adapter dropout must stay 0 when system.hardware.num_gpus_per_model > 1
+    target_modules: all-linear    # or e.g. ["lin_query", "lin_value"], or a regex such as 'processor\..*\.lin_.*'
+    modules_to_save: []           # modules trained in full, e.g. ["decoder"]

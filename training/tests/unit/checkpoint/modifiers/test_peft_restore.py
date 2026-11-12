@@ -11,7 +11,7 @@
 
 import copy
 import json
-import logging
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,29 +37,29 @@ from anemoi.training.checkpoint.sources.local import LocalSource
 from anemoi.training.diagnostics.callbacks import AnemoiCheckpoint
 from anemoi.training.train.methods.base import BaseTrainingModule
 
-from .peft_lora_checkpoint_fixture import RECORD
-from .peft_lora_checkpoint_fixture import STATE_DICT_SHAPES
+from .peft_checkpoint_fixture import CHECKPOINTS
+from .test_peft import METHODS
+from .test_peft import PROCESSOR_REGEX
 from .test_peft import Interface
 from .test_peft import TrainingModule
-from .test_peft import adapted_paths
+from .test_peft import adapted
 from .test_peft import lora
+from .test_peft import trainable
 
 pytest.importorskip("peft")
 
 NO_CONFIG = SimpleNamespace()
 
 
-def with_lora(model: nn.Module | None = None, **options: object) -> nn.Module:
-    """A training module with LoRA applied and non-zero adapter weights."""
+def with_adapters(model: nn.Module | None = None, method: str = "lora", **options: object) -> nn.Module:
+    """A training module with adapters injected and non-zero adapter weights."""
     model = model if model is not None else TrainingModule()
-    trainable_modules = options.pop("trainable", None)
-    options.setdefault("target_modules", r"model\.model\.processor\..*")
-    stage = PeftModifierStage(peft_config=lora(**options), trainable_modules=trainable_modules)
-    stage.process(CheckpointContext(model=model))
+    options.setdefault("target_modules", PROCESSOR_REGEX)
+    PeftModifierStage(peft_config=METHODS[method](**options)).process(CheckpointContext(model=model))
     generator = torch.Generator().manual_seed(3)
     with torch.no_grad():
         for name, param in model.named_parameters():
-            if ".lora_B." in name:
+            if ".default" in name:  # adapter weights and modules_to_save copies
                 param.copy_(torch.randn(param.shape, generator=generator))
     return model
 
@@ -73,8 +73,9 @@ def save(model: nn.Module, **metadata: object) -> dict:
     }
 
 
-def trainable(model: nn.Module) -> set[str]:
-    return {name for name, p in model.named_parameters() if p.requires_grad}
+def stored_config(checkpoint: dict) -> dict:
+    (config,) = checkpoint["hyper_parameters"]["metadata"]["peft"]["adapters"].values()
+    return config
 
 
 def assert_same_weights(a: nn.Module, b: nn.Module) -> None:
@@ -95,49 +96,59 @@ def test_model_without_graph_model_has_no_record() -> None:
     assert adapter_record(nn.Linear(2, 2)) is None
 
 
-def test_record_describes_the_live_adapters() -> None:
-    model = with_lora()
+@pytest.mark.parametrize("method", sorted(METHODS))
+def test_record_is_the_peft_config_as_plain_data(method: str) -> None:
+    model = with_adapters(method=method, modules_to_save=["decoder.data"])
     record = adapter_record(model)
     json.dumps(record)  # stored in checkpoint metadata, which is JSON
     assert record["version"] == 1
     assert record["merged"] is False
-    assert record["modules"] == adapted_paths(model)
-    assert record["trainable"] == []
-    (adapter,) = record["adapters"].values()
-    assert adapter["type"] == "lora"
-    assert (adapter["config"]["r"], adapter["config"]["lora_alpha"]) == (4, 8)
-
-
-def test_record_lists_trainable_parameters_outside_the_adapters() -> None:
-    model = with_lora(trainable=["model.model.decoder"])
-    assert adapter_record(model)["trainable"] == ["model.model.decoder.data.bias", "model.model.decoder.data.weight"]
+    assert record["lineage"] == []
+    (config,) = record["adapters"].values()
+    assert config["peft_type"] == method.upper()
+    assert config["target_modules"] == PROCESSOR_REGEX
+    assert config["modules_to_save"] == ["decoder.data"]
 
 
 # --- restore -----------------------------------------------------------------------------
 
 
-def test_restore_then_strict_load() -> None:
-    source = with_lora(trainable=["model.model.decoder"])
+@pytest.mark.parametrize("method", sorted(METHODS))
+def test_restore_then_strict_load(method: str) -> None:
+    source = with_adapters(method=method, modules_to_save=["decoder.data"])
     checkpoint = save(source)
     target = TrainingModule()
 
     checkpoint = apply_checkpoint_corrections(checkpoint, target, NO_CONFIG)
     target.load_state_dict(checkpoint["state_dict"], strict=True)
 
-    assert adapted_paths(target) == adapted_paths(source)
+    assert adapted(target) == adapted(source)
     assert trainable(target) == trainable(source)
     assert_same_weights(target, source)
 
 
+def test_restore_that_matches_other_modules_fails_the_strict_load() -> None:
+    # As if a peft upgrade matched target_modules differently: the restored adapters no
+    # longer line up with the checkpoint's keys, and the strict load says which.
+    checkpoint = save(with_adapters(method="miss", target_modules=["lin_query", "lin_value"]))
+    stored_config(checkpoint)["target_modules"] = ["lin_query"]
+    target = TrainingModule()
+
+    checkpoint = apply_checkpoint_corrections(checkpoint, target, NO_CONFIG)
+
+    with pytest.raises(RuntimeError, match=r"lin_value\.miss_block\.default"):
+        target.load_state_dict(checkpoint["state_dict"], strict=True)
+
+
 def test_restore_through_the_pipeline_loader(tmp_path: Path) -> None:
-    source = with_lora()
-    path = tmp_path / "lora.ckpt"
+    source = with_adapters(method="miss")
+    path = tmp_path / "adapters.ckpt"
     torch.save(save(source), path)
 
     pipeline = CheckpointPipeline(stages=[LocalSource(path=str(path)), WeightsOnlyLoader()])
     result = pipeline.execute(CheckpointContext(model=TrainingModule()))
 
-    assert adapted_paths(result.model) == adapted_paths(source)
+    assert adapted(result.model) == adapted(source)
     assert_same_weights(result.model, source)
 
 
@@ -147,7 +158,7 @@ class HookModule(BaseTrainingModule):
     def __init__(self) -> None:
         pass
 
-    def _step(self, batch, validation_mode: bool = False) -> Never:  # noqa: ANN001
+    def _step(self, batch: object, validation_mode: bool = False) -> Never:
         raise NotImplementedError
 
 
@@ -165,7 +176,7 @@ def hook_module() -> HookModule:
 
 
 def test_restore_via_on_load_checkpoint_before_the_strict_load() -> None:
-    source = with_lora()
+    source = with_adapters()
     checkpoint = save(source)
     module = hook_module()
 
@@ -173,13 +184,13 @@ def test_restore_via_on_load_checkpoint_before_the_strict_load() -> None:
 
     # What Lightning does next on a resume: a strict load of the same dict.
     module.load_state_dict(checkpoint["state_dict"], strict=True)
-    assert adapted_paths(module) == adapted_paths(source)
+    assert adapted(module) == adapted(source)
     assert_same_weights(module, source)
 
 
 def test_matching_adapters_already_present_are_left_alone() -> None:
-    checkpoint = save(with_lora())
-    target = with_lora()  # the run's own PEFT stage ran first, as on a resume
+    checkpoint = save(with_adapters())
+    target = with_adapters()  # the run's own PEFT stage ran first, as on a resume
     before = {name: id(m) for name, m in target.named_modules()}
 
     apply_checkpoint_corrections(checkpoint, target, NO_CONFIG)
@@ -188,15 +199,42 @@ def test_matching_adapters_already_present_are_left_alone() -> None:
     target.load_state_dict(checkpoint["state_dict"], strict=True)
 
 
-def test_different_adapters_already_present_raise() -> None:
-    checkpoint = save(with_lora())
-    with pytest.raises(CheckpointIncompatibleError, match="differ"):
-        apply_checkpoint_corrections(checkpoint, with_lora(r=8), NO_CONFIG)
+def test_provenance_fields_do_not_count_as_a_difference() -> None:
+    checkpoint = save(with_adapters())
+    stored_config(checkpoint)["peft_version"] = "0.0.1"
+    apply_checkpoint_corrections(checkpoint, with_adapters(), NO_CONFIG)
 
 
-def test_adapter_keys_without_a_record_raise() -> None:
-    checkpoint = save(with_lora())
-    del checkpoint["hyper_parameters"]["metadata"]["peft"]
+@pytest.mark.parametrize(
+    ("options", "differing"),
+    [
+        ({"r": 8}, "default.r"),
+        ({"lora_alpha": 1}, "default.lora_alpha"),  # same keys and shapes: strict loading would not notice
+        ({"target_modules": ["lin_query"]}, "default.target_modules"),
+    ],
+)
+def test_different_adapters_already_present_raise(options: dict, differing: str) -> None:
+    checkpoint = save(with_adapters())
+    with pytest.raises(CheckpointIncompatibleError, match=re.escape(f"'{differing}'")):
+        apply_checkpoint_corrections(checkpoint, with_adapters(**options), NO_CONFIG)
+
+
+def test_a_different_method_already_present_raises() -> None:
+    checkpoint = save(with_adapters(method="lora"))
+    with pytest.raises(CheckpointIncompatibleError, match="peft_type"):
+        apply_checkpoint_corrections(checkpoint, with_adapters(method="miss"), NO_CONFIG)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "model.model.processor.0.lin_query.base_layer.weight",
+        "model.model.decoder.data.modules_to_save.default.weight",
+        "model.model.decoder.data.original_module.weight",
+    ],
+)
+def test_adapter_keys_without_a_record_raise(key: str) -> None:
+    checkpoint = {"state_dict": {key: torch.zeros(1)}, "hyper_parameters": {"metadata": {}}}
     with pytest.raises(CheckpointIncompatibleError, match="no adapter record"):
         apply_checkpoint_corrections(checkpoint, TrainingModule(), NO_CONFIG)
 
@@ -205,24 +243,22 @@ def test_plain_checkpoint_into_plain_model_is_untouched() -> None:
     checkpoint = save(TrainingModule())
     target = TrainingModule()
     apply_checkpoint_corrections(checkpoint, target, NO_CONFIG)
-    assert adapted_paths(target) == []
+    assert adapted(target) == []
 
 
-def test_unknown_stored_option_is_dropped_with_a_warning(caplog: pytest.LogCaptureFixture) -> None:
-    checkpoint = save(with_lora())
-    (adapter,) = checkpoint["hyper_parameters"]["metadata"]["peft"]["adapters"].values()
-    adapter["config"]["option_from_a_newer_peft"] = 1
+def test_unknown_stored_option_is_dropped_with_a_warning() -> None:
+    checkpoint = save(with_adapters())
+    stored_config(checkpoint)["option_from_a_newer_peft"] = 1
     target = TrainingModule()
 
-    with caplog.at_level(logging.WARNING):
+    with pytest.warns(UserWarning, match="option_from_a_newer_peft"):
         apply_checkpoint_corrections(checkpoint, target, NO_CONFIG)
 
-    assert "option_from_a_newer_peft" in caplog.text
     target.load_state_dict(checkpoint["state_dict"], strict=True)
 
 
 def test_restoring_without_peft_raises_with_install_hint() -> None:
-    checkpoint = save(with_lora())
+    checkpoint = save(with_adapters())
     with (
         patch.dict(sys.modules, {"peft": None}),
         pytest.raises(CheckpointConfigError, match=r"anemoi-training\[peft\]"),
@@ -233,7 +269,7 @@ def test_restoring_without_peft_raises_with_install_hint() -> None:
 def test_transfer_learning_drops_a_mismatched_adapted_layer_whole(tmp_path: Path) -> None:
     # A narrower decoder (e.g. fewer output variables): base_layer and lora_B change shape,
     # lora_A does not. Loading lora_A alone would leave a stale half-adapter on a fresh layer.
-    source = with_lora(target_modules=["model.model.decoder.data"])
+    source = with_adapters(target_modules=["decoder.data"])
     path = tmp_path / "lora.ckpt"
     torch.save(save(source), path)
     target = TrainingModule()
@@ -252,7 +288,7 @@ def test_transfer_learning_drops_a_mismatched_adapted_layer_whole(tmp_path: Path
 
 def test_continuing_adapters_without_a_peft_stage_survives_reload_and_resume() -> None:
     # Someone hands over L and keeps training its adapters without declaring a PEFT stage.
-    checkpoint_l = save(with_lora())
+    checkpoint_l = save(with_adapters())
     run = TrainingModule()
     run.load_state_dict(apply_checkpoint_corrections(checkpoint_l, run, NO_CONFIG)["state_dict"], strict=True)
     with torch.no_grad():
@@ -262,7 +298,9 @@ def test_continuing_adapters_without_a_peft_stage_survives_reload_and_resume() -
 
     # Their run's own checkpoint: the record comes from the live model, not from a config.
     checkpoint_run = save(run)
-    assert checkpoint_run["hyper_parameters"]["metadata"]["peft"]["modules"] == adapted_paths(run)
+    assert (
+        checkpoint_run["hyper_parameters"]["metadata"]["peft"] == checkpoint_l["hyper_parameters"]["metadata"]["peft"]
+    )
 
     reloaded = TrainingModule()
     reloaded.load_state_dict(
@@ -299,19 +337,27 @@ class CallbackModule(BoringModel):
         BaseTrainingModule.on_save_checkpoint(self, checkpoint)
 
 
+def callback_module() -> CallbackModule:
+    # BoringModel trains its own ``layer``, outside the graph model, so PEFT leaves it trainable.
+    module = CallbackModule({})
+    PeftModifierStage(peft_config=lora(target_modules=["decoder.data"])).process(CheckpointContext(model=module))
+    assert {"layer.weight", "layer.bias"} <= trainable(module)
+    return module
+
+
 def test_on_save_checkpoint_writes_the_record_without_touching_the_live_metadata() -> None:
-    module = with_lora(hook_module())
+    module = with_adapters(hook_module())
     checkpoint = {"hyper_parameters": module.hparams}  # Lightning hands over the live hparams
 
     BaseTrainingModule.on_save_checkpoint(module, checkpoint)
 
-    assert checkpoint["hyper_parameters"]["metadata"]["peft"]["modules"] == adapted_paths(module)
+    assert checkpoint["hyper_parameters"]["metadata"]["peft"] == adapter_record(module)
     assert "peft" not in module.hparams["metadata"]
 
 
 def test_on_save_checkpoint_drops_a_stale_record_from_a_plain_model() -> None:
     module = hook_module()
-    checkpoint = {"hyper_parameters": {"metadata": {"peft": {"modules": ["model.model.gone"]}}}}
+    checkpoint = {"hyper_parameters": {"metadata": {"peft": {"adapters": {}}}}}
 
     BaseTrainingModule.on_save_checkpoint(module, checkpoint)
 
@@ -319,13 +365,7 @@ def test_on_save_checkpoint_drops_a_stale_record_from_a_plain_model() -> None:
 
 
 def test_a_save_outside_the_checkpoint_callback_still_carries_the_record(tmp_path: Path) -> None:
-    module = CallbackModule({})
-    PeftModifierStage(
-        peft_config=lora(target_modules=["model.model.decoder.data"]),
-        trainable_modules=["layer"],
-    ).process(
-        CheckpointContext(model=module),
-    )
+    module = callback_module()
     trainer = Trainer(
         default_root_dir=tmp_path,
         accelerator="cpu",
@@ -337,46 +377,39 @@ def test_a_save_outside_the_checkpoint_callback_still_carries_the_record(tmp_pat
     trainer.save_checkpoint(tmp_path / "direct.ckpt")
 
     saved = torch.load(tmp_path / "direct.ckpt", map_location="cpu", weights_only=False)
-    assert saved["hyper_parameters"]["metadata"]["peft"]["modules"] == ["model.model.decoder.data"]
+    assert saved["hyper_parameters"]["metadata"]["peft"] == adapter_record(module)
 
 
 def test_checkpoint_callback_writes_the_record(tmp_path: Path) -> None:
-    metadata = {}
-    module = CallbackModule(metadata)
-    # BoringModel trains its own ``layer``; the PEFT stage would freeze it otherwise.
-    PeftModifierStage(
-        peft_config=lora(target_modules=["model.model.decoder.data"]),
-        trainable_modules=["layer"],
-    ).process(
-        CheckpointContext(model=module),
-    )
+    module = callback_module()
     callback = AnemoiCheckpoint(dirpath=str(tmp_path), filename="{step}", save_last=True, monitor="step", mode="max")
     trainer = Trainer(default_root_dir=tmp_path, accelerator="cpu", callbacks=[callback], max_epochs=1, logger=False)
     trainer.fit(module)
 
     saved = torch.load(tmp_path / "last.ckpt", map_location="cpu", weights_only=False)
     record = saved["hyper_parameters"]["metadata"]["peft"]
-    assert record["modules"] == ["model.model.decoder.data"]
-    assert record["trainable"] == ["layer.bias", "layer.weight"]
     assert record == adapter_record(module)
+    assert stored_config(saved)["target_modules"] == ["decoder.data"]
 
 
 # --- compatibility fixture -----------------------------------------------------------------
 
 
-def test_fixture_checkpoint_still_loads() -> None:
+@pytest.mark.parametrize("method", sorted(CHECKPOINTS))
+def test_fixture_checkpoint_still_loads(method: str) -> None:
     """A checkpoint written once with peft 0.18.1 keeps loading with the installed peft."""
+    fixture = CHECKPOINTS[method]
     generator = torch.Generator().manual_seed(0)
     checkpoint = {
-        "state_dict": {key: torch.randn(shape, generator=generator) for key, shape in STATE_DICT_SHAPES.items()},
-        "hyper_parameters": {"metadata": {"peft": copy.deepcopy(RECORD)}},
+        "state_dict": {
+            key: torch.randn(shape, generator=generator) for key, shape in fixture["state_dict_shapes"].items()
+        },
+        "hyper_parameters": {"metadata": {"peft": copy.deepcopy(fixture["record"])}},
     }
     target = TrainingModule()
 
     checkpoint = apply_checkpoint_corrections(checkpoint, target, NO_CONFIG)
     target.load_state_dict(checkpoint["state_dict"], strict=True)
 
-    assert adapted_paths(target) == RECORD["modules"]
-    assert {name for name, p in target.named_parameters() if p.requires_grad and ".lora_" not in name} == set(
-        RECORD["trainable"],
-    )
+    assert set(target.state_dict()) == set(fixture["state_dict_shapes"])
+    assert adapted(target)

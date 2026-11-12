@@ -7,18 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Pipeline stage that adds PEFT adapters (LoRA) to the graph model."""
+"""Pipeline stage that adds PEFT adapters (LoRA, MISS, LoHa, ...) to the graph model."""
 
 from __future__ import annotations
 
 import copy
-import dataclasses
 import enum
 import itertools
 import logging
-import re
-from collections.abc import Callable
 from collections.abc import Mapping
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import NoReturn
@@ -28,7 +26,7 @@ from torch import nn
 from anemoi.training.checkpoint.modifiers.base import ModelModifier
 
 if TYPE_CHECKING:
-    from peft import LoraConfig
+    from peft import PeftConfig
 
     from anemoi.training.checkpoint.base import CheckpointContext
 
@@ -36,89 +34,75 @@ LOGGER = logging.getLogger(__name__)
 
 _CONFIG_PATH = "training.checkpoint.modifiers"
 _GRAPH_MODEL = "model.model"
-_ALL_LINEAR = "all-linear"
 _INSTALL_HINT = "pip install anemoi-training[peft]"
+# Raised when the stage is built without peft, here or by the pipeline from a config.
+MISSING_PEFT_MESSAGE = f"PeftModifierStage needs the peft package. Install it with: {_INSTALL_HINT}"
 
 # Where a checkpoint records the adapters it holds: hyper_parameters["metadata"][_RECORD_KEY].
 _RECORD_KEY = "peft"
 _RECORD_VERSION = 1
-
-# LoraConfig options the stage refuses. Each one either breaks a guarantee the stage
-# gives (only the adapted layers' keys change, the base weights stay as loaded, the
-# adapters plus ``trainable_modules`` are all that trains) or is untested with anemoi
-# models. The predicate says which values are allowed.
-_REJECTED_OPTIONS: tuple[tuple[str, Callable[[Any], bool], str], ...] = (
-    ("modules_to_save", lambda v: not v, "it wraps whole modules and changes their keys; use trainable_modules"),
-    (
-        "init_lora_weights",
-        lambda v: v is True or v == "gaussian",
-        "only True or 'gaussian' leave the base weights as loaded",
-    ),
-    ("bias", lambda v: v == "none", "it trains base-layer biases outside the adapters"),
-    ("lora_bias", lambda v: not v, "it adds trainable biases outside the adapters"),
-    ("use_dora", lambda v: not v, "DoRA is not supported yet"),
-    ("layers_to_transform", lambda v: v is None, "target_modules selects the layers"),
-    ("layers_pattern", lambda v: not v, "target_modules selects the layers"),
-    ("rank_pattern", lambda v: not v, "per-module ranks are not supported yet"),
-    ("alpha_pattern", lambda v: not v, "per-module alphas are not supported yet"),
-    ("exclude_modules", lambda v: not v, "target_modules selects the layers"),
-    ("target_parameters", lambda v: not v, "only Linear modules can be adapted"),
-)
+# The configs of adapters merged into the base weights by earlier PEFT stages, oldest first.
+_LINEAGE_ATTR = "_anemoi_peft_lineage"
+# Config fields that describe where a config came from, not the adapters it builds.
+_PROVENANCE_FIELDS = frozenset({"peft_version", "revision", "base_model_name_or_path", "inference_mode"})
+# State-dict key parts that only exist while adapters are injected and unmerged.
+_ADAPTER_KEY_PARTS = (".base_layer.", ".original_module.", ".modules_to_save.")
 
 
 class PeftModifierStage(ModelModifier):
-    """Add LoRA adapters to the graph model.
+    """Add PEFT adapters to the graph model.
 
-    Adapters are injected with PEFT's low-level ``inject_adapter_in_model`` into the
-    graph model at ``model.model`` (not wrapped in a ``PeftModel``), so the module
-    tree stays anemoi's and only the adapted layers' state-dict keys change. After
-    injection only the adapters and ``trainable_modules`` train; every other
-    parameter of ``context.model`` is frozen.
+    ``peft_config`` is any non-prompt-learning PEFT config (``peft.LoraConfig``,
+    ``peft.MissConfig``, ``peft.LoHaConfig``, ...), built by Hydra from its
+    ``_target_``. The stage hands it to ``peft.inject_adapter_in_model`` with the
+    graph model at ``model.model``, so every option means what the PEFT
+    documentation says: ``target_modules`` and ``modules_to_save`` name modules of
+    the graph model, matched by PEFT (suffix names, a regex, or ``"all-linear"``),
+    and PEFT sets which parameters of the graph model train. Parameters outside the
+    graph model keep their ``requires_grad``.
 
-    Paths are full paths from ``context.model``, as in
-    :class:`~anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage`.
-    ``target_modules`` in ``peft_config`` is one of:
+    The model is not wrapped in a ``PeftModel``, whose wrapper would prefix every
+    state-dict key with ``base_model.model.`` and replace anemoi's model interface.
 
-    - ``"all-linear"``: every ``nn.Linear`` in the graph model;
-    - a list of exact full paths (``model.model.processor.0.lin_query``); a bare
-      name such as ``lin_query`` is not a path and does not match;
-    - a regular expression, matched in full against full paths; it selects the
-      ``nn.Linear`` modules among its matches.
+    A model that already holds adapters (a loaded PEFT checkpoint) has them merged
+    into its base weights first; their configs are kept as lineage in the adapter
+    record.
 
     Parameters
     ----------
-    peft_config : Mapping or peft.LoraConfig
-        LoRA options as a plain mapping (``r``, ``lora_alpha``, ``target_modules``,
-        ...), or a ``LoraConfig``. Only LoRA is supported, and options that would
-        change other modules' keys or the base weights are refused (see
-        ``_REJECTED_OPTIONS``).
-    trainable_modules : list[str], optional
-        Full paths of modules to keep trainable next to the adapters.
+    peft_config : peft.PeftConfig
+        The adapter method and its options.
 
     Raises
     ------
     CheckpointConfigError
-        If ``peft`` is not installed, the config is not LoRA, or it uses a refused
-        option.
+        If ``peft`` is not installed, ``peft_config`` is not a PEFT config, or it is
+        a prompt-learning method.
     """
 
-    def __init__(
-        self,
-        peft_config: Mapping[str, Any] | LoraConfig,
-        trainable_modules: list[str] | None = None,
-    ) -> None:
-        self.lora_config = self._build_lora_config(peft_config)
-        self.trainable_modules = list(trainable_modules or [])
+    def __init__(self, peft_config: PeftConfig) -> None:
+        try:
+            from peft import PeftConfig
+        except ImportError as e:
+            self._raise(MISSING_PEFT_MESSAGE, cause=e)
 
-        LOGGER.debug(
-            "Initialized PeftModifierStage (r=%s, target_modules=%s, trainable_modules=%s)",
-            self.lora_config.r,
-            self.lora_config.target_modules,
-            self.trainable_modules,
-        )
+        if not isinstance(peft_config, PeftConfig):
+            self._raise(
+                "peft_config must be a PEFT config built from its _target_ (e.g. peft.LoraConfig), "
+                f"got {type(peft_config).__name__}.",
+            )
+        if peft_config.is_prompt_learning:
+            self._raise(
+                f"{type(peft_config).__name__} is a prompt-learning method: it adds virtual tokens to a language "
+                "model's input and has no meaning for the graph model.",
+            )
+        # Hydra hands nested lists over as ListConfig. Rebuilding from plain data gives
+        # PEFT plain containers, the same way a restore from a checkpoint record does.
+        self.peft_config = PeftConfig.from_peft_type(**_plain(peft_config.to_dict()))
+        self._warn_about_options(self.peft_config)
 
     def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Inject LoRA adapters into ``context.model``'s graph model.
+        """Inject the adapters into ``context.model``'s graph model.
 
         Parameters
         ----------
@@ -128,39 +112,38 @@ class PeftModifierStage(ModelModifier):
         Returns
         -------
         CheckpointContext
-            The context, with adapters injected, the trainable set applied and a
-            record appended to ``metadata["modifiers_applied"]``.
+            The context, with adapters injected and an entry appended to
+            ``metadata["modifiers_applied"]``.
 
         Raises
         ------
         CheckpointConfigError
-            If the model has no graph model at ``model.model``, already carries
-            adapters, a target or trainable path does not resolve, or nothing matches.
+            If the model has no graph model at ``model.model``, or PEFT refuses the
+            config for it (no target matches, a target type it cannot adapt, ...).
         """
         model = context.model
         graph_model = self._graph_model(model)
-        # A model can hold one level of adapters. Adapters it already carries (a loaded
-        # PEFT checkpoint) are merged into the base weights first and kept as lineage.
-        lineage = list(getattr(graph_model, "_anemoi_peft_lineage", []))
+
+        lineage = list(getattr(graph_model, _LINEAGE_ATTR, []))
         previous = adapter_record(model)
         if previous is not None:
             merge_adapters(graph_model)
-            lineage.append({"adapters": previous["adapters"], "modules": previous["modules"]})
-            LOGGER.info("Merged the model's existing LoRA adapters into the base weights before adding new ones")
+            lineage.append(previous["adapters"])
+            LOGGER.info("Merged the model's existing PEFT adapters into the base weights before adding new ones")
 
-        targets = self._resolve_targets(graph_model, self.lora_config.target_modules)
-        adapted = _inject_lora(graph_model, self.lora_config, targets)
-        graph_model._anemoi_peft_lineage = lineage
-        self._apply_trainable_set(model, adapted.values())
+        _inject_adapter(graph_model, self.peft_config)
+        setattr(graph_model, _LINEAGE_ATTR, lineage)
 
-        adapted_paths = [f"{_GRAPH_MODEL}.{name}" for name in targets]
+        adapted = _adapted_module_names(graph_model)
         n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         n_total = sum(p.numel() for p in model.parameters())
+        peft_type = _plain(self.peft_config.peft_type)
         LOGGER.info(
-            "LoRA (r=%d) added to %d layers: %s. Trainable parameters: %d of %d.",
-            self.lora_config.r,
-            len(adapted_paths),
-            adapted_paths,
+            "%s adapters added to %d modules of the graph model at '%s': %s. Trainable parameters: %d of %d.",
+            peft_type,
+            len(adapted),
+            _GRAPH_MODEL,
+            adapted,
             n_trainable,
             n_total,
         )
@@ -168,67 +151,35 @@ class PeftModifierStage(ModelModifier):
         context.metadata.setdefault("modifiers_applied", []).append(
             {
                 "type": "peft",
-                "adapter": "lora",
+                "peft_type": peft_type,
                 "merged_previous_adapters": previous is not None,
-                "adapted_modules": adapted_paths,
-                "trainable_modules": self.trainable_modules,
+                "adapted_modules": adapted,
                 "trainable_params": n_trainable,
                 "total_params": n_total,
             },
         )
         return context
 
-    @classmethod
-    def _build_lora_config(cls, peft_config: Mapping[str, Any] | LoraConfig) -> LoraConfig:
-        """Build and vet the ``LoraConfig``.
-
-        Parameters
-        ----------
-        peft_config : Mapping or peft.LoraConfig
-            The configured LoRA options.
-
-        Returns
-        -------
-        peft.LoraConfig
-            The vetted config.
-
-        Raises
-        ------
-        CheckpointConfigError
-            If ``peft`` is missing, an option is unknown or refused, or the config is
-            not a ``LoraConfig``.
-        """
-        try:
-            from peft import LoraConfig
-        except ImportError as e:
-            cls._raise(f"PeftModifierStage needs the peft package. Install it with: {_INSTALL_HINT}", cause=e)
-
-        if isinstance(peft_config, Mapping):
-            from omegaconf import DictConfig
-            from omegaconf import OmegaConf
-
-            options = (
-                OmegaConf.to_container(peft_config, resolve=True)
-                if isinstance(peft_config, DictConfig)
-                else dict(peft_config)
+    @staticmethod
+    def _warn_about_options(peft_config: PeftConfig) -> None:
+        """Warn about options that train or change more than the adapters."""
+        bias = getattr(peft_config, "bias", "none")
+        if bias != "none":
+            LOGGER.warning("bias=%r: base-layer biases train beside the adapters.", bias)
+        if getattr(peft_config, "lora_bias", False):
+            LOGGER.warning("lora_bias=True: the adapters add trainable biases to the base layers.")
+        if peft_config.modules_to_save:
+            LOGGER.warning(
+                "modules_to_save=%s: these modules train in full; their state-dict keys change until merged.",
+                sorted(peft_config.modules_to_save),
             )
-            try:
-                lora_config = LoraConfig(**options)
-            except (TypeError, ValueError) as e:
-                cls._raise(f"Invalid LoRA option in peft_config: {e}", cause=e)
-        elif type(peft_config) is LoraConfig:
-            lora_config = peft_config
-        else:
-            cls._raise(f"PeftModifierStage supports LoraConfig only, got {type(peft_config).__name__}.")
-
-        refused = [
-            f"{option}={getattr(lora_config, option)!r} ({reason})"
-            for option, allowed, reason in _REJECTED_OPTIONS
-            if not allowed(getattr(lora_config, option, None))
-        ]
-        if refused:
-            cls._raise(f"PeftModifierStage refuses these LoRA options: {'; '.join(refused)}.")
-        return lora_config
+        init = getattr(peft_config, "init_lora_weights", True)
+        if init is not True and init != "gaussian":
+            LOGGER.warning(
+                "init_lora_weights=%r: either the base weights change at injection, or the adapters do not "
+                "start at zero, so the adapted model's output differs from the loaded model's.",
+                init,
+            )
 
     @classmethod
     def _graph_model(cls, model: nn.Module | None) -> nn.Module:
@@ -244,86 +195,6 @@ class PeftModifierStage(ModelModifier):
             )
 
     @staticmethod
-    def _adapted_layers(module: nn.Module) -> dict[str, nn.Module]:
-        """Return the PEFT tuner layers in ``module`` by name."""
-        from peft.tuners.tuners_utils import BaseTunerLayer
-
-        return {name: m for name, m in module.named_modules() if isinstance(m, BaseTunerLayer)}
-
-    @classmethod
-    def _resolve_targets(cls, graph_model: nn.Module, spec: Any) -> list[str]:
-        """Resolve ``target_modules`` to Linear module names relative to the graph model.
-
-        Parameters
-        ----------
-        graph_model : nn.Module
-            The module at ``model.model``.
-        spec : str, set or list
-            ``"all-linear"``, a regex over full paths, or a collection of exact full paths.
-
-        Returns
-        -------
-        list[str]
-            Names relative to ``graph_model``, sorted.
-
-        Raises
-        ------
-        CheckpointConfigError
-            If ``spec`` is missing, matches nothing, names a path outside the graph
-            model or one that does not exist, or selects a module that is not Linear.
-        """
-        prefix = f"{_GRAPH_MODEL}."
-        modules = {name: m for name, m in graph_model.named_modules() if name}
-
-        if not spec:
-            cls._raise("peft_config.target_modules is required: 'all-linear', a regex, or a list of full paths.")
-
-        if spec == _ALL_LINEAR:
-            selected = [name for name, m in modules.items() if isinstance(m, nn.Linear)]
-        elif isinstance(spec, str):
-            # A regex selects the Linear modules among its matches, so a pattern over a
-            # whole subtree (``model\.model\.processor\..*``) adapts its Linear layers.
-            selected = [
-                name for name, m in modules.items() if isinstance(m, nn.Linear) and re.fullmatch(spec, prefix + name)
-            ]
-            if not selected:
-                cls._raise(f"target_modules regex {spec!r} matched no nn.Linear module under '{_GRAPH_MODEL}'.")
-        else:
-            outside = sorted(path for path in spec if not path.startswith(prefix))
-            if outside:
-                cls._raise(f"target_modules must be full paths under '{_GRAPH_MODEL}': {outside}.")
-            missing = sorted(path for path in spec if path[len(prefix) :] not in modules)
-            if missing:
-                cls._raise(f"target_modules paths not found (full paths from the training module): {missing}.")
-            selected = [path[len(prefix) :] for path in spec]
-
-        not_linear = sorted(prefix + name for name in selected if not isinstance(modules[name], nn.Linear))
-        if not_linear:
-            cls._raise(f"target_modules selects modules that are not nn.Linear: {not_linear}.")
-        if not selected:
-            cls._raise(f"target_modules {spec!r} selected no Linear module under '{_GRAPH_MODEL}'.")
-        return sorted(selected)
-
-    def _apply_trainable_set(self, model: nn.Module, adapted_layers: Any) -> None:
-        """Freeze everything, then unfreeze the adapters and ``trainable_modules``."""
-        missing = []
-        keep = []
-        for path in self.trainable_modules:
-            try:
-                keep.append(model.get_submodule(path))
-            except AttributeError:
-                missing.append(path)
-        if missing:
-            self._raise(f"trainable_modules paths not found (full paths from the training module): {missing}.")
-
-        model.requires_grad_(False)
-        for layer in adapted_layers:
-            for adapter_name in layer.adapter_layer_names:
-                getattr(layer, adapter_name).requires_grad_(True)
-        for module in keep:
-            module.requires_grad_(True)
-
-    @staticmethod
     def _raise(msg: str, cause: Exception | None = None) -> NoReturn:
         """Log and raise a ``CheckpointConfigError`` for the modifiers config."""
         from anemoi.training.checkpoint.exceptions import CheckpointConfigError
@@ -332,48 +203,42 @@ class PeftModifierStage(ModelModifier):
         raise CheckpointConfigError(msg, config_path=_CONFIG_PATH) from cause
 
 
-def _inject_lora(graph_model: nn.Module, lora_config: LoraConfig, targets: list[str]) -> dict[str, nn.Module]:
-    """Inject LoRA into exactly ``targets`` (names relative to ``graph_model``).
-
-    PEFT matches a list of names by suffix, which could pick up a deeper module whose
-    path ends the same way, so the targets go to PEFT as one exact regex.
-
-    Parameters
-    ----------
-    graph_model : nn.Module
-        The module at ``model.model``.
-    lora_config : peft.LoraConfig
-        The vetted LoRA config; its ``target_modules`` is replaced by ``targets``.
-    targets : list[str]
-        Names of the Linear modules to adapt, relative to ``graph_model``.
-
-    Returns
-    -------
-    dict[str, nn.Module]
-        The adapted layers by name.
-    """
+def _inject_adapter(graph_model: nn.Module, peft_config: PeftConfig, adapter_name: str = "default") -> None:
+    """Call ``peft.inject_adapter_in_model``, raising its refusals as config errors."""
     from peft import inject_adapter_in_model
 
-    explicit = copy.deepcopy(lora_config)
-    explicit.target_modules = "|".join(re.escape(name) for name in targets)
-    inject_adapter_in_model(explicit, graph_model)
+    try:
+        inject_adapter_in_model(peft_config, graph_model, adapter_name=adapter_name)
+    except ValueError as e:
+        PeftModifierStage._raise(f"PEFT could not add {type(peft_config).__name__} adapters: {e}", cause=e)
 
-    adapted = PeftModifierStage._adapted_layers(graph_model)
-    if sorted(adapted) != sorted(targets):
-        PeftModifierStage._raise(f"PEFT adapted {sorted(adapted)} but the stage resolved {sorted(targets)}.")
-    return adapted
+
+def _adapted_module_names(graph_model: nn.Module) -> list[str]:
+    """Names, relative to the graph model, of the modules PEFT adapted or wrapped."""
+    from peft.tuners.tuners_utils import BaseTunerLayer
+    from peft.utils import ModulesToSaveWrapper
+
+    return sorted(
+        name for name, m in graph_model.named_modules() if isinstance(m, BaseTunerLayer | ModulesToSaveWrapper)
+    )
 
 
 def _plain(value: Any) -> Any:
-    """Turn a PEFT config value into plain JSON-safe data (sets become sorted lists, enums their value)."""
+    """Turn a PEFT config value into plain JSON-safe data.
+
+    Enums become their value, sets sorted lists, and any other sequence or mapping
+    (including OmegaConf's ``ListConfig`` and ``DictConfig``) a list or dict.
+    """
+    if isinstance(value, enum.Enum):
+        return value.value
+    if isinstance(value, str | bytes):
+        return value
     if isinstance(value, Mapping):
         return {str(k): _plain(v) for k, v in value.items()}
     if isinstance(value, set | frozenset):
         return sorted(_plain(v) for v in value)
-    if isinstance(value, list | tuple):
+    if isinstance(value, Sequence):
         return [_plain(v) for v in value]
-    if isinstance(value, enum.Enum):
-        return value.value
     return value
 
 
@@ -404,105 +269,25 @@ def adapter_record(model: nn.Module | None) -> dict[str, Any] | None:
     -------
     dict or None
         ``None`` when the graph model carries no adapters. Otherwise ``version``,
-        ``adapters`` (name -> ``type`` and ``config`` as a plain dict), ``modules``
-        (full paths of the adapted layers), ``trainable`` (full names of trainable
-        parameters outside the adapters), ``lineage`` and ``merged``.
+        ``adapters`` (adapter name -> PEFT config as a plain dict), ``lineage``
+        (the ``adapters`` of earlier, merged levels, oldest first) and ``merged``.
     """
     graph_model = _graph_model_or_none(model)
     if graph_model is None or not getattr(graph_model, "peft_config", None):
         return None
-
-    adapted = PeftModifierStage._adapted_layers(graph_model)
-    adapter_params = {
-        id(p)
-        for layer in adapted.values()
-        for name in layer.adapter_layer_names
-        for p in getattr(layer, name).parameters()
-    }
     return {
         "version": _RECORD_VERSION,
-        "adapters": {
-            name: {"type": "lora", "config": _plain(config.to_dict())}
-            for name, config in graph_model.peft_config.items()
-        },
-        "modules": sorted(f"{_GRAPH_MODEL}.{name}" for name in adapted),
-        "trainable": sorted(
-            name for name, p in model.named_parameters() if p.requires_grad and id(p) not in adapter_params
-        ),
-        "lineage": list(getattr(graph_model, "_anemoi_peft_lineage", [])),
+        "adapters": {name: _plain(config.to_dict()) for name, config in graph_model.peft_config.items()},
+        "lineage": list(getattr(graph_model, _LINEAGE_ATTR, [])),
         "merged": False,
     }
 
 
-def checkpoint_adapter_record(checkpoint: Mapping[str, Any]) -> dict[str, Any] | None:
-    """Return the adapter record stored in a checkpoint's metadata, or ``None``."""
-    hyper_parameters = checkpoint.get("hyper_parameters") or {}
-    metadata = hyper_parameters.get("metadata") or {}
-    return metadata.get(_RECORD_KEY)
-
-
-def _structure(record: Mapping[str, Any]) -> tuple:
-    """What has to match for two adapter sets to share state-dict keys and scaling."""
-    adapters = tuple(
-        (name, adapter["config"].get("r"), adapter["config"].get("lora_alpha"), adapter["config"].get("use_rslora"))
-        for name, adapter in sorted(record["adapters"].items())
-    )
-    return tuple(record["modules"]), adapters
-
-
-def _lora_config_from_record(config: Mapping[str, Any], targets: list[str]) -> LoraConfig:
-    """Rebuild a ``LoraConfig`` from a stored plain dict.
-
-    Fields this ``peft`` does not know are dropped with a warning, so a checkpoint
-    written with another ``peft`` version still loads. The rebuilt config is vetted
-    like a configured one.
-    """
-    try:
-        from peft import LoraConfig
-    except ImportError as e:
-        msg = f"The checkpoint holds PEFT adapters; loading it needs the peft package. Install it with: {_INSTALL_HINT}"
-        PeftModifierStage._raise(msg, cause=e)
-
-    known = {field.name for field in dataclasses.fields(LoraConfig) if field.init}
-    unknown = sorted(set(config) - known)
-    if unknown:
-        LOGGER.warning("Ignoring LoRA options this peft version does not know: %s", unknown)
-    options = {key: value for key, value in config.items() if key in known}
-    options["target_modules"] = "|".join(re.escape(name) for name in targets)
-    return PeftModifierStage._build_lora_config(options)
-
-
-def restore_adapters(model: nn.Module, record: Mapping[str, Any]) -> None:
-    """Rebuild the adapters a checkpoint records, so its state dict loads strictly.
-
-    Injects the recorded adapters into the graph model and applies the recorded
-    trainable set: only the adapters and the recorded parameters train.
-
-    Parameters
-    ----------
-    model : nn.Module
-        The training module.
-    record : Mapping
-        The checkpoint's adapter record (see :func:`adapter_record`).
-    """
-    graph_model = PeftModifierStage._graph_model(model)
-    prefix = f"{_GRAPH_MODEL}."
-    targets = sorted(path[len(prefix) :] for path in record["modules"])
-    adapted = {}
-    for adapter in record["adapters"].values():
-        adapted = _inject_lora(graph_model, _lora_config_from_record(adapter["config"], targets), targets)
-
-    graph_model._anemoi_peft_lineage = list(record.get("lineage", []))
-
-    trainable = set(record.get("trainable", []))
-    model.requires_grad_(False)
-    for layer in adapted.values():
-        for adapter_name in layer.adapter_layer_names:
-            getattr(layer, adapter_name).requires_grad_(True)
-    for name, param in model.named_parameters():
-        if name in trainable:
-            param.requires_grad_(True)
-    LOGGER.info("Restored LoRA adapters recorded in the checkpoint on %d layers", len(adapted))
+def _without_provenance(adapters: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        name: {key: value for key, value in config.items() if key not in _PROVENANCE_FIELDS}
+        for name, config in adapters.items()
+    }
 
 
 def restore_checkpoint_adapters(checkpoint: Mapping[str, Any], model: nn.Module | None) -> None:
@@ -510,24 +295,38 @@ def restore_checkpoint_adapters(checkpoint: Mapping[str, Any], model: nn.Module 
 
     Called from :func:`~anemoi.training.checkpoint.loading.base.apply_checkpoint_corrections`,
     so the pipeline loaders and the Lightning resume hook rebuild adapters the same way.
+    Each recorded config is rebuilt with ``PeftConfig.from_peft_type`` and injected,
+    so PEFT re-matches the targets and re-marks the trainable parameters. If that
+    yields other modules than the checkpoint holds, the strict load that follows
+    fails on the missing and unexpected keys.
+
+    Parameters
+    ----------
+    checkpoint : Mapping
+        The loaded checkpoint dict.
+    model : nn.Module or None
+        The training module the checkpoint loads into.
 
     Raises
     ------
     CheckpointIncompatibleError
         If the checkpoint has adapter keys but no record, or the model already holds
-        adapters that differ from the recorded ones.
+        adapters whose configs differ from the recorded ones.
+    CheckpointConfigError
+        If the checkpoint holds adapters and ``peft`` is not installed.
     """
     from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
 
-    record = checkpoint_adapter_record(checkpoint)
+    metadata = (checkpoint.get("hyper_parameters") or {}).get("metadata") or {}
+    record = metadata.get(_RECORD_KEY)
     if record is None:
         state_dict = checkpoint.get("state_dict") or {}
-        adapter_keys = sorted(key for key in state_dict if ".base_layer." in key)
+        adapter_keys = sorted(key for key in state_dict if any(part in key for part in _ADAPTER_KEY_PARTS))
         if adapter_keys:
             msg = (
                 "The checkpoint holds PEFT adapter weights but no adapter record in its metadata, so the "
                 f"adapters cannot be rebuilt (e.g. {adapter_keys[0]}). Refusing to load it into a plain model, "
-                "where a non-strict load would silently skip the adapted layers."
+                "where a non-strict load would silently skip the adapted modules."
             )
             raise CheckpointIncompatibleError(msg, unexpected_keys=adapter_keys)
         return
@@ -536,24 +335,48 @@ def restore_checkpoint_adapters(checkpoint: Mapping[str, Any], model: nn.Module 
 
     live = adapter_record(model)
     if live is None:
-        restore_adapters(model, record)
+        _restore_adapters(model, record)
         return
-    if _structure(live) != _structure(record):
-        msg = (
-            f"The model already holds PEFT adapters {_structure(live)} that differ from the ones the "
-            f"checkpoint records {_structure(record)}."
+    expected, found = _without_provenance(record["adapters"]), _without_provenance(live["adapters"])
+    if found != expected:
+        differing = sorted(
+            f"{name}.{key}"
+            for name in expected.keys() | found.keys()
+            for key in expected.get(name, {}).keys() | found.get(name, {}).keys()
+            if expected.get(name, {}).get(key) != found.get(name, {}).get(key)
         )
+        msg = f"The model already holds PEFT adapters that differ from the ones the checkpoint records: {differing}."
         raise CheckpointIncompatibleError(msg)
     LOGGER.debug("The model already holds the adapters the checkpoint records; nothing to restore")
+
+
+def _restore_adapters(model: nn.Module, record: Mapping[str, Any]) -> None:
+    """Inject the adapters ``record`` describes into the model's graph model."""
+    try:
+        from peft import PeftConfig
+    except ImportError as e:
+        msg = f"The checkpoint holds PEFT adapters; loading it needs the peft package. Install it with: {_INSTALL_HINT}"
+        PeftModifierStage._raise(msg, cause=e)
+
+    graph_model = PeftModifierStage._graph_model(model)
+    for name, config in record["adapters"].items():
+        # from_peft_type picks the config class from peft_type, and drops (with a
+        # warning) fields this peft version does not know.
+        _inject_adapter(graph_model, PeftConfig.from_peft_type(**config), adapter_name=name)
+    setattr(graph_model, _LINEAGE_ATTR, list(record.get("lineage", [])))
+    LOGGER.info(
+        "Restored the PEFT adapters recorded in the checkpoint on: %s",
+        _adapted_module_names(graph_model),
+    )
 
 
 def merge_adapters(module: nn.Module) -> None:
     """Merge every PEFT adapter in ``module`` into its base layer, in place.
 
-    Each adapted layer is replaced by its base layer carrying the merged weights, so
-    the state-dict keys are the plain model's again, and the ``peft_config`` that
-    ``inject_adapter_in_model`` leaves behind is dropped: nothing in ``module``
-    refers to ``peft`` afterwards.
+    Each adapted layer is replaced by its base layer carrying the merged weights, and
+    each ``modules_to_save`` wrapper by its trained copy, so the state-dict keys are
+    the plain model's again. The ``peft_config`` that ``inject_adapter_in_model``
+    leaves behind is dropped: nothing in ``module`` refers to ``peft`` afterwards.
 
     Parameters
     ----------
@@ -561,12 +384,20 @@ def merge_adapters(module: nn.Module) -> None:
         The module holding the adapters, e.g. the graph model or the model interface.
     """
     from peft.tuners.tuners_utils import BaseTunerLayer
+    from peft.utils import ModulesToSaveWrapper
 
     for name, layer in list(module.named_modules()):
-        if name and isinstance(layer, BaseTunerLayer):
+        if not name:
+            continue
+        if isinstance(layer, BaseTunerLayer):
             layer.merge()
-            parent, _, child = name.rpartition(".")
-            setattr(module.get_submodule(parent) if parent else module, child, layer.get_base_layer())
+            replacement = layer.get_base_layer()
+        elif isinstance(layer, ModulesToSaveWrapper):
+            replacement = layer.modules_to_save[layer.active_adapters[0]]
+        else:
+            continue
+        parent, _, child = name.rpartition(".")
+        setattr(module.get_submodule(parent) if parent else module, child, replacement)
     for submodule in module.modules():
         submodule.__dict__.pop("peft_config", None)
 
@@ -599,7 +430,7 @@ def merged_copy_on_cpu(model: nn.Module) -> nn.Module:
     merged = copy.deepcopy(model, memo)
     merge_adapters(merged)
     for submodule in merged.modules():
-        submodule.__dict__.pop("_anemoi_peft_lineage", None)
+        submodule.__dict__.pop(_LINEAGE_ATTR, None)
     return merged
 
 
