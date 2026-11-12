@@ -168,11 +168,14 @@ training (add a modifier after any loading strategy):
          - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
            submodules_to_freeze: ["model.model.encoder.0"]   # the encoder key from your model config
 
-Fine-tune with LoRA adapters
+Fine-tune with PEFT adapters
 ============================
 
 Load the weights, then train small LoRA adapters on the processor instead of
-the full model (needs the ``peft`` extra, see :ref:`below <cp_peft>`):
+the full model. The adapters come from the
+parameter-efficient fine-tuning (PEFT) library, and this example needs the
+``peft`` extra. :ref:`PEFT adapters <cp_peft>` describes the other PEFT
+methods and all options.
 
 .. code:: yaml
 
@@ -186,9 +189,11 @@ the full model (needs the ``peft`` extra, see :ref:`below <cp_peft>`):
        modifiers:
          - _target_: anemoi.training.checkpoint.modifiers.peft.PeftModifierStage
            peft_config:
+             _target_: peft.LoraConfig
              r: 8
              lora_alpha: 16
-             target_modules: model\.model\.processor\..*
+             target_modules: all-linear
+             exclude_modules: (?!processor\.).*   # keep the adapters in the processor
 
 Load weights from S3 or a URL
 =============================
@@ -686,13 +691,14 @@ fixed during training (it sets ``requires_grad=False``):
 
 .. _cp_peft:
 
-LoRA adapters (PEFT)
-====================
+PEFT adapters
+=============
 
-``PeftModifierStage`` adds LoRA adapters to the graph model with the `PEFT
-<https://huggingface.co/docs/peft>`_ library. The base weights stay as they
-were loaded; only the small adapter matrices (and any ``trainable_modules`` you
-name) train. PEFT is an optional dependency:
+``PeftModifierStage`` adds adapters to the graph model with the
+parameter-efficient fine-tuning (PEFT) library, `Hugging Face PEFT
+<https://huggingface.co/docs/peft>`_. An adapter is a small set of new weights
+next to a layer. Training updates the adapters and leaves the loaded weights as
+they are. PEFT is an optional dependency:
 
 .. code:: bash
 
@@ -705,69 +711,129 @@ name) train. PEFT is an optional dependency:
        modifiers:
          - _target_: anemoi.training.checkpoint.modifiers.peft.PeftModifierStage
            peft_config:
+             _target_: peft.LoraConfig
              r: 8
              lora_alpha: 16
              lora_dropout: 0.0
-             target_modules: model\.model\.processor\..*
-           trainable_modules: ["model.model.decoder.0"]
+             target_modules: all-linear
 
-.. list-table:: ``PeftModifierStage`` parameters
-   :header-rows: 1
-   :widths: 26 14 60
+The stage has one parameter, ``peft_config``. Its ``_target_`` key is the PEFT
+configuration class that Hydra builds, and the class sets the method:
+``peft.LoraConfig`` for LoRA, ``peft.MissConfig`` for MiSS, or
+``peft.LoHaConfig`` for LoHa. Every PEFT method works except the
+prompt-learning methods, such as prompt tuning, because they add tokens to the
+input of a language model. The other keys are the options of that
+configuration class, and each one does what the `PEFT documentation
+<https://huggingface.co/docs/peft>`_ says.
 
-   -  -  Parameter
-      -  Default
-      -  Meaning
+The stage calls ``peft.inject_adapter_in_model`` on the graph model at
+``model.model``. It does not wrap the model in a ``PeftModel``. The state-dict
+keys keep their prefix, and the model keeps the Anemoi model interface.
 
-   -  -  ``peft_config``
-      -  *(required)*
-      -  LoRA options, as for ``peft.LoraConfig`` (``r``, ``lora_alpha``,
-         ``lora_dropout``, ``target_modules``, ...). ``target_modules`` uses
-         **full paths** from the LightningModule, as for freezing, and is one of:
-         ``all-linear`` (every ``Linear`` layer in the graph model); a list of
-         exact paths (``model.model.processor.proc.0.lin_query``); or a regular
-         expression matched in full against full paths, which selects the
-         ``Linear`` layers among its matches. A bare name such as ``lin_query``
-         is not a path and does not match.
+Name the modules
+----------------
 
-   -  -  ``trainable_modules``
-      -  ``[]``
-      -  Full paths of modules that keep training next to the adapters. Every
-         other parameter is frozen.
+Module names in ``peft_config`` are relative to the graph model at
+``model.model``, and PEFT matches them. This differs from
+``FreezingModifierStage``, which takes full paths from the LightningModule.
+PEFT accepts three forms for ``target_modules``, ``exclude_modules`` and
+``modules_to_save``:
 
-Only LoRA is supported. Options that would change other modules' checkpoint
-keys or rewrite the base weights are refused when the pipeline is built:
-``modules_to_save`` (use ``trainable_modules``), ``init_lora_weights`` other
-than ``true`` / ``gaussian``, ``bias``, ``lora_bias``, ``use_dora``,
-``layers_to_transform``, ``rank_pattern`` / ``alpha_pattern``,
-``exclude_modules`` and ``target_parameters``. ``lora_dropout`` must be ``0``
-when the model is sharded (``system.hardware.num_gpus_per_model > 1``).
+-  **A list of names.** An entry matches a module whose name is the entry, or
+   whose name ends with a dot and the entry. ``lin_query`` matches
+   ``processor.proc.0.lin_query`` and every other ``lin_query`` layer.
+-  **One string.** PEFT reads it as a regular expression and matches it
+   against the whole module name. ``processor\..*\.lin_query`` matches the
+   ``lin_query`` layers of the processor only.
+-  **all-linear.** The string ``all-linear`` selects every ``Linear`` layer of
+   the graph model. Combine it with
+   ``exclude_modules`` to leave some out: ``exclude_modules: (?!processor\.).*``
+   keeps the adapters in the processor.
 
-What a checkpoint with adapters carries
----------------------------------------
+Each method adapts only some layer types. LoRA adapts ``Linear``, ``Embedding``,
+convolution and ``MultiheadAttention`` layers. A target of a type the method
+does not support stops the pipeline with an error from PEFT. To list the names,
+print ``dict(model.model.model.named_modules()).keys()``, where the first
+``model`` is the LightningModule. Use the names as printed, without a
+``model.model.`` prefix.
 
-A checkpoint is a checkpoint: you load one with adapters like any other, without
-knowing its adapter config.
+What trains
+-----------
 
--  Every training checkpoint records the adapters the model holds in its
-   metadata (``hyper_parameters["metadata"]["peft"]``). Every loading strategy,
-   and a resume, rebuilds them from that record before the weights are loaded.
-   This works even when the run that wrote the checkpoint inherited its adapters
-   and never listed a PEFT stage itself.
--  Inference checkpoints hold **merged** weights: the adapters are folded into
-   the base layers, so anemoi-inference loads them without PEFT installed.
--  A training checkpoint with adapters needs ``peft`` installed to load.
--  A ``PeftModifierStage`` on a model that already holds adapters (from the
-   checkpoint you loaded) merges those into the base weights first, then adds
-   the new ones. A model holds one level of adapters at a time; the record
-   keeps the merged ones as lineage.
+PEFT freezes every parameter of the graph model except the adapters. The
+following options make more of the model train, and the stage logs a warning
+for each one when it is built:
 
-List a ``FreezingModifierStage`` **before** a ``PeftModifierStage``: the PEFT
-stage decides what trains, and freezing after it could freeze the adapters, so
-that order is refused.
+-  ``modules_to_save``: these modules train in full. PEFT keeps the original
+   next to a trainable copy, so their state-dict keys change until the
+   adapters are merged.
+-  ``bias`` other than ``none``: the biases of the base layers train.
+-  ``lora_bias``: the adapters add trainable biases.
+-  ``init_lora_weights`` other than ``true`` or ``gaussian``: the base weights
+   change when the adapters are added, or the adapters do not start at zero.
+   Either way, the model's output changes before training starts.
 
-Freezing and LoRA are the modifiers shipped today. Adding more (quantisation,
-other adapter types) is exactly the extensibility story in the next section.
+Parameters outside the graph model keep the ``requires_grad`` value they had.
+
+Dropout options must be ``0`` when the model is sharded
+(``system.hardware.num_gpus_per_model > 1``). Each method names its dropout
+differently (``lora_dropout``, ``miss_dropout``, ``rank_dropout``,
+``module_dropout``), so the check looks at each option whose name ends in
+``dropout``. The pipeline raises an error when it is built.
+
+Freeze adapters
+---------------
+
+A ``FreezingModifierStage`` after the ``PeftModifierStage`` can freeze some of
+the adapters, for example the ones in the first processor chunk. It uses full
+paths from the LightningModule, and freezing a layer freezes its adapters too:
+
+.. code:: yaml
+
+   training:
+     checkpoint:
+       modifiers:
+         - _target_: anemoi.training.checkpoint.modifiers.peft.PeftModifierStage
+           peft_config:
+             _target_: peft.LoraConfig
+             r: 8
+             target_modules: all-linear
+         - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
+           submodules_to_freeze: ["model.model.processor.proc.0"]
+
+A freezing stage before the ``PeftModifierStage`` has no effect on the graph
+model, because PEFT freezes everything except the adapters anyway.
+
+Checkpoints with adapters
+-------------------------
+
+You load a checkpoint with adapters like any other checkpoint, without its
+adapter configuration:
+
+-  Each training checkpoint records the adapters of the model in its
+   metadata, at ``hyper_parameters["metadata"]["peft"]``. The record stores the
+   PEFT configuration of each adapter. Every loading strategy, and a resume,
+   adds the recorded adapters to the model before it loads the weights. This
+   works even when the run that wrote the checkpoint inherited its adapters
+   and never listed a PEFT stage.
+-  The weights load strictly. If PEFT now matches different modules from the
+   ones in the checkpoint, for example after a change to the model
+   configuration, loading fails and names the missing and unexpected keys.
+-  If the installed PEFT does not know an option from the record, PEFT drops
+   the option and warns.
+-  Inference checkpoints contain **merged** weights: anemoi-training adds the
+   adapters to the base weights before it saves them. anemoi-inference loads
+   them without PEFT installed.
+-  Loading a training checkpoint with adapters needs ``peft`` installed.
+-  A ``PeftModifierStage`` on a model that already has adapters (from the
+   checkpoint you loaded) first merges those into the base weights, then adds
+   the new ones. A model has one level of adapters at a time. The record keeps
+   the configurations of the merged adapters, oldest first, under
+   ``lineage``.
+
+Freezing and PEFT adapters are the two modifiers in anemoi-training. To add
+another modifier, such as quantization, write your own stage as
+:ref:`Write your own stage <cp_extensibility>` shows.
 
 .. _cp_resume_fork:
 
