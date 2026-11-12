@@ -20,6 +20,7 @@ from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.models.variable.variablevocabular import VariableVocabulary
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -211,7 +212,13 @@ class AnemoiModelInterface(torch.nn.Module):
             "_target_": self.config.model.model._target_,
             "_convert_": getattr(self.config.model.model, "_convert_", "none"),
         }
-        variable_metadata = self.metadata["dataset"]["data"]["variables_metadata"]
+        dataset_metadata = {
+            dataset_name: self.metadata["dataset"].get(dataset_name, {}).get("variables_metadata", {})
+            for dataset_name in self.data_indices
+        }
+        if self.config.model.get("input_transform"):
+            VariableVocabulary.from_datasets(dataset_metadata)
+        variable_metadata = {name: entry for metadata in dataset_metadata.values() for name, entry in metadata.items()}
         self.model = instantiate(
             model_instantiate_config,
             model_config=self.config.model,
