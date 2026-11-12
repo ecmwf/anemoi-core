@@ -18,6 +18,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.models import AnemoiModelDisentangledEncProcDec
 from anemoi.models.models import AnemoiModelEncProcDec
+from anemoi.models.models.disentangled_encprocdec import DisentangledLatentState
 
 VARIABLES = ["a", "b", "c", "f"]
 N_DATA, N_HIDDEN = 40, 20
@@ -202,3 +203,50 @@ def test_gradients_flow_through_the_latent_state(model: AnemoiModelDisentangledE
     y_second["data"].pow(2).mean().backward()
     assert any(p.grad is not None for p in model.encoder.parameters())
     assert all(p.grad is not None for p in model.latent_blender.parameters() if p.requires_grad)
+
+
+def test_next_state_appends_the_processor_output_before_the_latent_skip(
+    model: AnemoiModelDisentangledEncProcDec,
+) -> None:
+    """The latent skip feeds the decoder only: carrying processor(x) + x doubles the latent every step."""
+    assert model.latent_skip
+    outputs = []
+    handle = model.processor.register_forward_hook(lambda _m, _a, _k, out: outputs.append(out), with_kwargs=True)
+    x = _inputs()
+    _, next_state = model.step_latent(model.encode(x), x)
+    handle.remove()
+    assert len(outputs) == 1
+    assert torch.equal(next_state.latents[:, -1], outputs[0])
+
+
+def test_later_steps_decode_with_the_current_input(model: AnemoiModelDisentangledEncProcDec) -> None:
+    """After the first step the decoder must see the current input, not the one that was encoded.
+
+    A later step whose latents are ``encode(x_next).latents`` must then reproduce ``forward(x_next)``,
+    whatever input the state was first encoded from.
+    """
+    x, x_next = _inputs(), _inputs()
+    _, state = model.step_latent(model.encode(x), x)  # later-step state, encoded from x
+    state = DisentangledLatentState(
+        latents=model.encode(x_next).latents, encoded_data=state.encoded_data, from_encode=False
+    )
+    y, _ = model.step_latent(state, x_next)
+    assert torch.allclose(y["data"], model(x_next)["data"])
+
+
+def test_encoder_that_changes_its_source_is_run_for_the_decoder_inputs(
+    model: AnemoiModelDisentangledEncProcDec,
+) -> None:
+    """An encoder that changes its source (e.g. GNN) is run on the current input at later steps."""
+    model.encoder["0"].passes_source_through = False
+    calls = []
+    x, x_next = _inputs(), _inputs()
+    _, state = model.step_latent(model.encode(x), x)  # later-step state, encoded from x
+    state = DisentangledLatentState(
+        latents=model.encode(x_next).latents, encoded_data=state.encoded_data, from_encode=False
+    )
+    handle = model.encoder["0"].register_forward_hook(lambda *_: calls.append(1))
+    y, _ = model.step_latent(state, x_next)
+    handle.remove()
+    assert len(calls) == 1
+    assert torch.allclose(y["data"], model(x_next)["data"])

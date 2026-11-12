@@ -56,11 +56,17 @@ class DisentangledLatentState:
         oldest first.
     encoded_data : dict[str, Tensor]
         Data-node encoder outputs of the last encoded input step, used as decoder targets
-        when ``target_node_features`` includes ``encoded_data``.
+        when ``target_node_features`` includes ``encoded_data``. Only used by the first
+        step: later steps take them from their current input (see
+        :meth:`AnemoiModelDisentangledEncProcDec.step_latent`).
+    from_encode : bool
+        Whether the state comes straight from :meth:`AnemoiModelDisentangledEncProcDec.encode`,
+        so that ``encoded_data`` belongs to the input of the next step.
     """
 
     latents: Tensor
     encoded_data: dict[str, Tensor]
+    from_encode: bool = True
 
 
 class AnemoiModelDisentangledEncProcDec(AnemoiModelEncProcDec):
@@ -162,6 +168,51 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelEncProcDec):
         )
         return x_data_latent, ds_shard_sizes
 
+    def _passes_source_through(self, dataset_name: str) -> bool:
+        """Whether the encoder of ``dataset_name`` returns its source unchanged (False if it does not say)."""
+        return getattr(self.encoder[self.dataset2encoder[dataset_name]], "passes_source_through", False)
+
+    def _encode_step(
+        self,
+        x_t: Tensor,
+        ctx: _ForwardContext,
+        model_comm_group: Optional[ProcessGroup],
+        grid_shard_sizes: DatasetShardSizes | None,
+        dataset_name: str,
+    ) -> tuple[Tensor, Tensor]:
+        """Encode one timestep ``x_t`` of one dataset: returns (data-node output, hidden latent)."""
+        x_data_latent, shard_sizes_data = self._assemble_step_input(
+            x_t,
+            ctx.batch_size,
+            grid_shard_sizes,
+            model_comm_group,
+            dataset_name,
+        )
+        enc_edge_attr, enc_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[dataset_name].get_edges(
+            batch_size=ctx.batch_size, model_comm_group=model_comm_group
+        )
+        x_data_input = x_data_latent
+        x_data_latent, x_latent = self.encoder[self.dataset2encoder[dataset_name]](
+            (x_data_latent, ctx.x_hidden_latent),
+            batch_size=ctx.batch_size,
+            shard_info=BipartiteGraphShardInfo(
+                src_nodes=shard_sizes_data,
+                dst_nodes=ctx.shard_sizes_hidden,
+                edges=enc_edge_shard_sizes,
+            ),
+            edge_attr=enc_edge_attr,
+            edge_index=enc_edge_index,
+            model_comm_group=model_comm_group,
+            keep_x_dst_sharded=True,
+        )
+        if self._passes_source_through(dataset_name):
+            # step_latent rebuilds the decoder inputs on this assumption, so check it (same memory,
+            # not object identity: a compiled encoder may return an alias of its input)
+            assert x_data_latent.data_ptr() == x_data_input.data_ptr() and x_data_latent.shape == x_data_input.shape, (
+                f"{type(self.encoder[self.dataset2encoder[dataset_name]]).__name__} sets passes_source_through but changed its source."
+            )
+        return x_data_latent, x_latent
+
     def _encode(
         self,
         x: dict[str, Tensor],
@@ -182,28 +233,8 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelEncProcDec):
             for dataset_name in ctx.dataset_names:
                 if dataset_name not in self.input_datasets:
                     continue
-                x_data_latent, shard_sizes_data = self._assemble_step_input(
-                    x[dataset_name][:, t : t + 1],
-                    ctx.batch_size,
-                    grid_shard_sizes,
-                    model_comm_group,
-                    dataset_name,
-                )
-                enc_edge_attr, enc_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
-                    dataset_name
-                ].get_edges(batch_size=ctx.batch_size, model_comm_group=model_comm_group)
-                x_data_latent, dataset_latents[dataset_name] = self.encoder[self.dataset2encoder[dataset_name]](
-                    (x_data_latent, ctx.x_hidden_latent),
-                    batch_size=ctx.batch_size,
-                    shard_info=BipartiteGraphShardInfo(
-                        src_nodes=shard_sizes_data,
-                        dst_nodes=ctx.shard_sizes_hidden,
-                        edges=enc_edge_shard_sizes,
-                    ),
-                    edge_attr=enc_edge_attr,
-                    edge_index=enc_edge_index,
-                    model_comm_group=model_comm_group,
-                    keep_x_dst_sharded=True,
+                x_data_latent, dataset_latents[dataset_name] = self._encode_step(
+                    x[dataset_name][:, t : t + 1], ctx, model_comm_group, grid_shard_sizes, dataset_name
                 )
                 if t == self.n_step_input - 1:
                     encoded_data[dataset_name] = x_data_latent
@@ -216,8 +247,12 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelEncProcDec):
         latents: Tensor,
         ctx: _ForwardContext,
         model_comm_group: Optional[ProcessGroup],
-    ) -> Tensor:
-        """Blend the (nodes, n_step_input, channels) latents and predict the next latent state."""
+    ) -> tuple[Tensor, Tensor]:
+        """Blend the (nodes, n_step_input, channels) latents and predict the next latent state.
+
+        Returns the decoder input and the next latent state: the processor output, before
+        the latent skip.
+        """
         _, x_latent = self.latent_blender(
             (einops.rearrange(latents, "nodes time channels -> nodes (time channels)"), ctx.x_hidden_latent),
             batch_size=ctx.batch_size,
@@ -239,10 +274,14 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelEncProcDec):
             edge_index=ctx.proc_edge_index,
             model_comm_group=model_comm_group,
         )
+        # The next state is the processor output *before* the latent skip. The processor is
+        # residual (output ~ input + update), so carrying the skip-added latent would double
+        # the state at every rollout step.
+        x_latent_next = x_latent_proc
         if self.latent_skip:
-            # Skip connection from the most recent latent.
+            # Skip connection from the most recent latent (decoder input only).
             x_latent_proc = x_latent_proc + latents[:, -1]
-        return x_latent_proc
+        return x_latent_proc, x_latent_next
 
     def _decode(
         self,
@@ -298,6 +337,43 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelEncProcDec):
             )
         return x_out_dict
 
+    def _current_encoded_data(
+        self,
+        state: DisentangledLatentState,
+        x: dict[str, Tensor],
+        ctx: _ForwardContext,
+        model_comm_group: Optional[ProcessGroup],
+        grid_shard_sizes: DatasetShardSizes | None,
+    ) -> dict[str, Tensor]:
+        """Encoder-side decoder inputs (``encoded_data``) of the current input ``x``.
+
+        Right after :meth:`encode` the state holds them. At later latent steps ``x`` is a new
+        input that was not encoded: they are rebuilt from its last timestep when the encoder
+        passes its source through unchanged (they are then only the assembled input, no graph
+        pass is needed). An encoder that changes its source (e.g. GNN) is run on that timestep
+        when the decoder uses ``encoded_data``, so that the decoder never gets the encoder output
+        of an old input; latent rollout then saves less compute for that dataset.
+        """
+        if state.from_encode:
+            return state.encoded_data
+        encoded_data = {}
+        for dataset_name in ctx.dataset_names:
+            if dataset_name not in self.input_datasets:
+                continue
+            x_last = x[dataset_name][:, -1:]
+            if self._passes_source_through(dataset_name):
+                encoded_data[dataset_name], _ = self._assemble_step_input(
+                    x_last, ctx.batch_size, grid_shard_sizes, model_comm_group, dataset_name
+                )
+            elif dataset_name in self.target_datasets and any(
+                f.name == "encoded_data"
+                for f in self.decoders_target_input[self.dataset2decoder[dataset_name]].features
+            ):
+                encoded_data[dataset_name], _ = self._encode_step(
+                    x_last, ctx, model_comm_group, grid_shard_sizes, dataset_name
+                )
+        return encoded_data
+
     def encode(
         self,
         x: dict[str, Tensor],
@@ -325,8 +401,10 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelEncProcDec):
         state : DisentangledLatentState
             Latent state from :meth:`encode` or the previous call.
         x : dict[str, Tensor]
-            Current input per dataset. Not encoded; only used for the decoder targets
-            (e.g. forcings, coordinates) and the residual connection.
+            Current input per dataset. Not encoded by the graph; gives the residual and the
+            decoder target features (``encoded_data`` is rebuilt from it after the first step
+            when the encoder passes its source through; an encoder that changes its source is
+            run on its last timestep).
         model_comm_group : ProcessGroup, optional
             Model communication group.
         grid_shard_sizes : DatasetShardSizes, optional
@@ -338,11 +416,13 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelEncProcDec):
             Prediction per dataset and the latent state for the next step.
         """
         ctx = self._forward_context(x, model_comm_group, grid_shard_sizes)
-        x_latent = self._process(state.latents, ctx, model_comm_group)
-        y = self._decode(x_latent, x, state.encoded_data, ctx, model_comm_group, grid_shard_sizes)
+        x_latent, x_latent_next = self._process(state.latents, ctx, model_comm_group)
+        encoded_data = self._current_encoded_data(state, x, ctx, model_comm_group, grid_shard_sizes)
+        y = self._decode(x_latent, x, encoded_data, ctx, model_comm_group, grid_shard_sizes)
         next_state = DisentangledLatentState(
-            latents=torch.cat((state.latents[:, 1:], x_latent.unsqueeze(1)), dim=1),
+            latents=torch.cat((state.latents[:, 1:], x_latent_next.unsqueeze(1)), dim=1),
             encoded_data=state.encoded_data,
+            from_encode=False,
         )
         return y, next_state
 
@@ -374,5 +454,5 @@ class AnemoiModelDisentangledEncProcDec(AnemoiModelEncProcDec):
         """
         ctx = self._forward_context(x, model_comm_group, grid_shard_sizes)
         latents, encoded_data = self._encode(x, ctx, model_comm_group, grid_shard_sizes)
-        x_latent = self._process(latents, ctx, model_comm_group)
+        x_latent, _ = self._process(latents, ctx, model_comm_group)
         return self._decode(x_latent, x, encoded_data, ctx, model_comm_group, grid_shard_sizes)
