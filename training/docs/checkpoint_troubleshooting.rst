@@ -389,6 +389,146 @@ older ``data_indices`` format.
    with ``LocalSource`` (or upload the migrated copy).
 
 *********************************
+ PEFT adapter errors
+*********************************
+
+``peft`` is not installed
+=========================
+
+**Message** (one of):
+
+.. code:: text
+
+   CheckpointConfigError: PeftModifierStage needs the peft package. Install it
+   with: pip install anemoi-training[peft]
+
+   CheckpointConfigError: The checkpoint holds PEFT adapters; loading it needs
+   the peft package. Install it with: pip install anemoi-training[peft]
+
+**What it means:** the pipeline needs the
+parameter-efficient fine-tuning (PEFT) library, and ``peft`` is not
+installed. The first message comes from building a ``PeftModifierStage``,
+from the configuration or in Python. The second comes from loading a
+checkpoint that has PEFT adapters.
+
+**How to fix it:** ``pip install anemoi-training[peft]``. Inference
+checkpoints never need it, because their adapters are merged into the base
+weights.
+
+``peft_config`` is not a PEFT configuration
+===========================================
+
+**Message** (one of):
+
+.. code:: text
+
+   CheckpointConfigError: peft_config must be a PEFT config built from its
+   _target_ (e.g. peft.LoraConfig), got DictConfig.
+   CheckpointConfigError: PromptTuningConfig is a prompt-learning method: it
+   adds virtual tokens to a language model's input and has no meaning for the
+   graph model.
+
+**What it means:** in the first case, ``peft_config`` has no ``_target_``, so
+Hydra passes the options as a plain mapping. In the second case, the
+``_target_`` sets a prompt-learning method, for example prompt tuning. These
+methods add tokens to the input of a language model, and the graph model has
+no such input.
+
+**How to fix it:** add ``_target_`` with the PEFT configuration class of the
+method, for example ``_target_: peft.LoraConfig``. Choose a method that adds
+adapters to layers, such as LoRA, LoHa, or MiSS.
+
+PEFT can't add the adapters
+===========================
+
+**Message** (one of):
+
+.. code:: text
+
+   CheckpointConfigError: PEFT could not add LoraConfig adapters: Target modules
+   {'lin_q'} not found in the base model. Please check the target modules and
+   try again.
+   CheckpointConfigError: PEFT could not add LoraConfig adapters: Target module
+   LayerNorm(...) is not supported. Currently, only the following modules are
+   supported: torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv1d, ...
+
+**What it means:** the PEFT library raised an error while adding the
+adapters, and the rest of the message is that error. In the first case,
+``target_modules`` names modules the graph model doesn't have. Names are
+relative to the graph model at ``model.model``, so a full path such as
+``model.model.processor.proc.0.lin_query`` does not match. In the second
+case, ``target_modules`` matches a layer type that the method cannot adapt.
+
+**How to fix it:** use names as PEFT expects them. A list entry matches a
+name or the end of a name (``lin_query``), one string is a regular
+expression matched against the whole name (``processor\..*\.lin_query``), and
+``all-linear`` selects every ``Linear`` layer. To see the names, print
+``dict(model.model.model.named_modules()).keys()`` and use them as printed,
+without a prefix. :ref:`PEFT adapters <cp_peft>` describes the forms in full.
+
+Adapter dropout with a sharded model
+====================================
+
+**Message** (example):
+
+.. code:: text
+
+   CheckpointConfigError: Adapter dropout {'lora_dropout': 0.1} is not
+   supported when the model is sharded
+   (system.hardware.num_gpus_per_model=2). Set it to 0.
+
+**What it means:** with the model sharded across GPUs, dropout inside the
+adapters would make the ranks draw different masks for the same nodes. The
+check looks at each option of ``peft_config`` whose name ends in ``dropout``,
+such as ``lora_dropout``, ``rank_dropout``, or ``module_dropout``. The
+pipeline raises the error when it is built, before training starts.
+
+**How to fix it:** set the options the message names to ``0.0``, or train on
+one GPU per model.
+
+Adapter weights without an adapter record
+=========================================
+
+**Message** (example):
+
+.. code:: text
+
+   CheckpointIncompatibleError: The checkpoint holds PEFT adapter weights but no
+   adapter record in its metadata, so the adapters cannot be rebuilt (e.g.
+   model.model.processor.proc.0.lin_query.base_layer.weight). Refusing to load
+   it into a plain model, where a non-strict load would silently skip the
+   adapted modules.
+
+**What it means:** the checkpoint has keys that PEFT adapters create
+(``.base_layer.``, ``.original_module.`` or ``.modules_to_save.``), but its
+metadata does not say which adapters made them. This usually means the
+checkpoint was written outside anemoi-training. A load into a plain model
+would skip the adapted layers without an error, so the pipeline refuses it.
+
+**How to fix it:** load the merged inference checkpoint of that run instead.
+It holds plain weights and no adapter keys.
+
+The model already holds different adapters
+==========================================
+
+**Message:**
+
+.. code:: text
+
+   CheckpointIncompatibleError: The model already holds PEFT adapters that
+   differ from the ones the checkpoint records: ['default.r'].
+
+**What it means:** on a resume, the run's own ``PeftModifierStage`` added
+adapters before the checkpoint was loaded. Their configuration differs from
+the one the checkpoint records, for example in the method, the target layers,
+``r``, or ``lora_alpha``. The message lists each option that differs, as
+``<adapter name>.<option>``.
+
+**How to fix it:** resume with the PEFT stage settings the run used, or remove
+the PEFT stage from the configuration. The record in the checkpoint adds the
+adapters without it.
+
+*********************************
  Source and download errors
 *********************************
 

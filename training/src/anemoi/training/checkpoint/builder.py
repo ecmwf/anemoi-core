@@ -362,4 +362,52 @@ def build_checkpoint_pipeline(
 
     # CheckpointPipeline instantiates each ``_target_`` config in order via Hydra
     # and surfaces a CheckpointConfigError with context on failure.
-    return CheckpointPipeline(stages=stage_configs)
+    pipeline = CheckpointPipeline(stages=stage_configs)
+    _reject_adapter_dropout_with_model_sharding(pipeline, cfg)
+    return pipeline
+
+
+def _reject_adapter_dropout_with_model_sharding(pipeline: CheckpointPipeline, cfg: DictConfig) -> None:
+    """Refuse adapter dropout when the model is sharded across GPUs.
+
+    With the model sharded, dropout inside a PEFT adapter would make the ranks draw
+    different masks for the same nodes. The stage cannot see the hardware config,
+    so the builder refuses it here, before training starts. PEFT methods name their
+    dropout options differently (``lora_dropout``, ``miss_dropout``,
+    ``rank_dropout``, ``module_dropout``, ...), so every config field whose name
+    ends in ``dropout`` counts.
+
+    Parameters
+    ----------
+    pipeline : CheckpointPipeline
+        The built pipeline.
+    cfg : DictConfig
+        The training-run configuration.
+
+    Raises
+    ------
+    CheckpointConfigError
+        If a ``PeftModifierStage`` config has a dropout option above 0 and
+        ``system.hardware.num_gpus_per_model > 1``.
+    """
+    num_gpus_per_model = OmegaConf.select(cfg, "system.hardware.num_gpus_per_model", default=1) or 1
+    if num_gpus_per_model <= 1:
+        return
+
+    from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+    from anemoi.training.checkpoint.modifiers.peft import PeftModifierStage
+
+    for stage in pipeline.stages:
+        if not isinstance(stage, PeftModifierStage):
+            continue
+        dropout = {
+            name: value
+            for name, value in stage.peft_config.to_dict().items()
+            if name.endswith("dropout") and isinstance(value, int | float) and not isinstance(value, bool) and value > 0
+        }
+        if dropout:
+            msg = (
+                f"Adapter dropout {dropout} is not supported when the model is sharded "
+                f"(system.hardware.num_gpus_per_model={num_gpus_per_model}). Set it to 0."
+            )
+            raise CheckpointConfigError(msg, config_path=f"{_TRAINING}.{_CHECKPOINT}.{_MODIFIERS}")
