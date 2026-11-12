@@ -376,6 +376,82 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 "Ensemble size per device must be 1 when model is sharded across GPUs"
             )
 
+    def _passes_source_through(self, dataset_name: str) -> bool:
+        """Whether the encoder of ``dataset_name`` returns its source unchanged (False if it does not say)."""
+        return getattr(self.encoder[self.dataset2encoder[dataset_name]], "passes_source_through", False)
+
+    def _hidden_latent(
+        self,
+        dataset_names: list[str],
+        batch_size: int,
+        model_comm_group: ProcessGroup | None,
+    ) -> tuple[Tensor, ShardSizes]:
+        """Hidden-node attributes (the encoder's destination features), sharded, and their shard sizes."""
+        hidden_name = self._get_active_hidden_name(dataset_names)
+        x_hidden_latent = self.node_attributes(hidden_name, batch_size=batch_size)
+        shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
+        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
+        return x_hidden_latent, shard_sizes_hidden
+
+    def _encode_dataset(
+        self,
+        x: Tensor,
+        x_hidden_latent: Tensor,
+        shard_sizes_hidden: ShardSizes,
+        *,
+        batch_size: int,
+        grid_shard_sizes: DatasetShardSizes | None,
+        model_comm_group: ProcessGroup | None,
+        dataset_name: str,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        """Run one dataset through its encoder.
+
+        Returns ``(encoded_data, latent, residual)``: the encoder's data-node output (decoder
+        target feature ``encoded_data``), its hidden-mesh latent and the residual skip.
+        """
+        x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
+            x,
+            batch_size=batch_size,
+            grid_shard_sizes=grid_shard_sizes,
+            model_comm_group=model_comm_group,
+            dataset_name=dataset_name,
+        )
+
+        (
+            encoder_edge_attr,
+            encoder_edge_index,
+            enc_edge_shard_sizes,
+        ) = self.encoder_graph_provider[dataset_name].get_edges(
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
+        )
+
+        enc_shard_info = BipartiteGraphShardInfo(
+            src_nodes=shard_sizes_data,  # None if not sharded (in_out_sharded=False)
+            dst_nodes=shard_sizes_hidden,
+            edges=enc_edge_shard_sizes,
+        )
+
+        # Encoder for this dataset
+        encoder_name = self.dataset2encoder[dataset_name]
+        x_data_input = x_data_latent
+        x_data_latent, x_latent = self.encoder[encoder_name](
+            (x_data_latent, x_hidden_latent),
+            batch_size=batch_size,
+            shard_info=enc_shard_info,
+            edge_attr=encoder_edge_attr,
+            edge_index=encoder_edge_index,
+            model_comm_group=model_comm_group,
+            keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+        )
+        if self._passes_source_through(dataset_name):
+            # step_latent rebuilds the decoder inputs on this assumption, so check it (same memory,
+            # not object identity: a compiled encoder may return an alias of its input)
+            assert x_data_latent.data_ptr() == x_data_input.data_ptr() and x_data_latent.shape == x_data_input.shape, (
+                f"{type(self.encoder[encoder_name]).__name__} sets passes_source_through but changed its source."
+            )
+        return x_data_latent, x_latent, x_skip
+
     def _current_encoded_data_and_residual(
         self,
         state: "LatentState",
@@ -390,14 +466,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         Right after :meth:`encode` the state holds both for ``x``. At later latent steps ``x`` is a
         new input that was not encoded. The residual is computed from it. ``encoded_data`` is rebuilt
         from it when the encoder passes its source through unchanged (it is then only the assembled
-        input: no graph pass is needed). Otherwise it would come from an old input, so a decoder that
-        uses it is refused instead of silently being given stale inputs.
+        input: no graph pass is needed). An encoder that changes its source (e.g. GNN) is run on ``x``
+        when the decoder uses ``encoded_data``, so that the decoder never gets the encoder output of
+        an old input; latent rollout then saves less compute for that dataset.
         """
         if dataset_name not in self.input_datasets:  # no encoder: no encoder output and no residual
             return None, None
         if state.residual is not None:  # state comes straight from encode(x)
             return state.encoded_data[dataset_name], state.residual[dataset_name]
-        if self.encoder[self.dataset2encoder[dataset_name]].passes_source_through:
+        if self._passes_source_through(dataset_name):
             x_encoded, x_skip, _ = self._assemble_input(
                 x[dataset_name],
                 batch_size=batch_size,
@@ -408,14 +485,17 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             return x_encoded, x_skip
         decoder_name = self.dataset2decoder[dataset_name]
         if any(f.name == "encoded_data" for f in self.decoders_target_input[decoder_name].features):
-            msg = (
-                f"Latent rollout cannot give decoder '{decoder_name}' the 'encoded_data' of the current input: "
-                f"encoder '{self.dataset2encoder[dataset_name]}' "
-                f"({type(self.encoder[self.dataset2encoder[dataset_name]]).__name__}) changes its source, so "
-                "it would have to run again. Use other target_node_features (e.g. coordinates, forcings, "
-                "prognostics) for this decoder."
+            x_hidden_latent, shard_sizes_hidden = self._hidden_latent(list(x.keys()), batch_size, model_comm_group)
+            x_encoded, _, x_skip = self._encode_dataset(
+                x[dataset_name],
+                x_hidden_latent,
+                shard_sizes_hidden,
+                batch_size=batch_size,
+                grid_shard_sizes=grid_shard_sizes,
+                model_comm_group=model_comm_group,
+                dataset_name=dataset_name,
             )
-            raise ValueError(msg)
+            return x_encoded, x_skip
         return None, self._assemble_residual(x[dataset_name], grid_shard_sizes, model_comm_group, dataset_name)
 
     def _check_inputs(
@@ -461,11 +541,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             raise NotImplementedError(msg)
 
         batch_size, _, _ = self._check_inputs(x, model_comm_group, grid_shard_sizes)
-        hidden_name = self._get_active_hidden_name(list(x.keys()))
-
-        x_hidden_latent = self.node_attributes(hidden_name, batch_size=batch_size)
-        shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
-        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
+        x_hidden_latent, shard_sizes_hidden = self._hidden_latent(list(x.keys()), batch_size, model_comm_group)
 
         # Process each dataset through its corresponding encoder
         dataset_latents = {}
@@ -474,50 +550,17 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         for dataset_name in x.keys():
             if dataset_name not in self.input_datasets:
                 continue
-
-            x_data_latent, x_skip_dict[dataset_name], shard_sizes_data = self._assemble_input(
-                x[dataset_name],
-                batch_size=batch_size,
-                grid_shard_sizes=grid_shard_sizes,
-                model_comm_group=model_comm_group,
-                dataset_name=dataset_name,
+            x_data_latent_dict[dataset_name], dataset_latents[dataset_name], x_skip_dict[dataset_name] = (
+                self._encode_dataset(
+                    x[dataset_name],
+                    x_hidden_latent,
+                    shard_sizes_hidden,
+                    batch_size=batch_size,
+                    grid_shard_sizes=grid_shard_sizes,
+                    model_comm_group=model_comm_group,
+                    dataset_name=dataset_name,
+                )
             )
-
-            (
-                encoder_edge_attr,
-                encoder_edge_index,
-                enc_edge_shard_sizes,
-            ) = self.encoder_graph_provider[dataset_name].get_edges(
-                batch_size=batch_size,
-                model_comm_group=model_comm_group,
-            )
-
-            enc_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_data,  # None if not sharded (in_out_sharded=False)
-                dst_nodes=shard_sizes_hidden,
-                edges=enc_edge_shard_sizes,
-            )
-
-            # Encoder for this dataset
-            encoder_name = self.dataset2encoder[dataset_name]
-            x_data_input = x_data_latent
-            x_data_latent, x_latent = self.encoder[encoder_name](
-                (x_data_latent, x_hidden_latent),
-                batch_size=batch_size,
-                shard_info=enc_shard_info,
-                edge_attr=encoder_edge_attr,
-                edge_index=encoder_edge_index,
-                model_comm_group=model_comm_group,
-                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-            )
-            if self.encoder[encoder_name].passes_source_through:
-                # step_latent rebuilds the decoder inputs on this assumption, so check it (same memory,
-                # not object identity: a compiled encoder may return an alias of its input)
-                assert (
-                    x_data_latent.data_ptr() == x_data_input.data_ptr() and x_data_latent.shape == x_data_input.shape
-                ), f"{type(self.encoder[encoder_name]).__name__} sets passes_source_through but changed its source."
-            x_data_latent_dict[dataset_name] = x_data_latent
-            dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents
         x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
@@ -540,7 +583,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x : dict[str, Tensor]
             Current input data. Not encoded by the graph; after the first step it gives the
             residual and the decoder target features (``encoded_data`` is rebuilt from it when
-            the encoder passes its source through, and refused otherwise).
+            the encoder passes its source through; an encoder that changes its source is run on it).
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None.
         grid_shard_sizes : DatasetShardSizes, optional
