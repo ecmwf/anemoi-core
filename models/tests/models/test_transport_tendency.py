@@ -20,6 +20,8 @@ from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTrans
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.imputer import InputImputer
 from anemoi.models.preprocessing.normalizer import InputNormalizer
+from anemoi.models.preprocessing.postprocessor import NormalizedReluPostprocessor
+from anemoi.models.preprocessing.remapper import Remapper
 from tests.batch_builders import build_batch
 
 GRIDDED_LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
@@ -79,7 +81,7 @@ def _make_imputer_settings() -> tuple[InputImputer, IndexCollection]:
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4, "prog": 5}
     data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
-    imputer = InputImputer(config=config.data.imputer, data_indices=data_indices, statistics=IMPUTER_STATISTICS)
+    imputer = InputImputer(config=config.data.imputer, data_indices=data_indices)
     return imputer, data_indices
 
 
@@ -373,3 +375,213 @@ def test_sampled_to_physical_requires_tendency_statistics() -> None:
 
     with pytest.raises(ValueError, match="Tendency statistics must be provided"):
         model._sampled_to_physical(sampled, sampled, torch.nn.ModuleDict({"data": IdentityProcessor()}))
+
+
+# One output step; prog0 is bounded below by 0 (physical units) by a NormalizedReluPostprocessor.
+# prog0: state mean 1, stdev 2; 6h tendency mean 0.1, stdev 0.5.
+ONE_STEP_TENDENCY_STATISTICS = {"lead_times": ["6h"], "6h": TENDENCY_STATISTICS["6h"]}
+
+
+def _bounded_processors(model: AnemoiTransportTendModelEncProcDec) -> tuple[Processors, Processors]:
+    normalizer = InputNormalizer(config=DictConfig({"default": "mean-std"}))
+    relu = NormalizedReluPostprocessor(
+        config=DictConfig({"default": "none", 0: ["prog0"], "normalizer": "mean-std"}),
+        data_indices=model.data_indices["data"],
+    )
+    processors = [["normalizer", normalizer], ["relu", relu]]
+    return Processors(processors), Processors(processors, inverse=True)
+
+
+def _bounded_case() -> tuple[GriddedSource, GriddedSource]:
+    """Normalised reference and tendency at two grid points, as (reference, tendency) of prog0.
+
+    Grid point 0: reference 5, tendency -2 -> state 3 (inside the bound, tendency below it).
+    Grid point 1: reference 1, tendency -3 -> state -2 (outside the bound).
+    """
+    reference = torch.zeros(1, 1, 1, 2, 2)
+    reference[..., 0] = torch.tensor([(5.0 - 1.0) / 2.0, (1.0 - 1.0) / 2.0])
+    tendency = torch.zeros(1, 1, 1, 2, 3)
+    tendency[..., 0] = torch.tensor([(-2.0 - 0.1) / 0.5, (-3.0 - 0.1) / 0.5])
+    return _source(reference, ["prog0", "prog1"]), _source(tendency, ["prog0", "prog1", "diag"])
+
+
+def test_processors_skip_output_constraints() -> None:
+    model = _tendency_model(n_step_output=1)
+    _, post_processors = _bounded_processors(model)
+    state = _source(torch.full((1, 1, 1, 1, 3), -3.0), ["prog0", "prog1", "diag"])
+
+    assert post_processors.has_state_only_processors
+    assert not _normalizer_processors()[1].has_state_only_processors
+    clipped = post_processors(state, in_place=False).data[..., 0]
+    unclipped = post_processors(state, in_place=False, skip_output_constraints=True).data[..., 0]
+    torch.testing.assert_close(clipped, torch.zeros_like(clipped))
+    torch.testing.assert_close(unclipped, torch.full_like(unclipped, -3.0 * 2.0 + 1.0))
+
+
+def test_add_tendency_to_state_does_not_constrain_the_tendency() -> None:
+    model = _tendency_model(n_step_output=1)
+    pre_processors, post_processors = _bounded_processors(model)
+    per_step = model.tendency_statistics("data", ONE_STEP_TENDENCY_STATISTICS)
+    reference, tendency = _bounded_case()
+
+    physical = model.add_tendency_to_state("data", reference, tendency, per_step, post_processors)
+    normalised = model.add_tendency_to_state(
+        "data", reference, tendency, per_step, post_processors, pre_processors=pre_processors
+    )
+
+    # Clipping the tendency at 0 would give 5 and 1. The state is rebuilt unconstrained ...
+    torch.testing.assert_close(physical.data[0, 0, 0, :, 0], torch.tensor([3.0, -2.0]))
+    torch.testing.assert_close(normalised.data[0, 0, 0, :, 0], torch.tensor([1.0, -1.5]))
+    # ... and the constraint applies when the state is post-processed, like a state prediction.
+    torch.testing.assert_close(
+        post_processors(normalised, in_place=False).data[0, 0, 0, :, 0], torch.tensor([3.0, 0.0])
+    )
+
+
+def test_compute_tendency_does_not_constrain_target_states() -> None:
+    """A target state outside the bound keeps its value, so the tendency roundtrip is exact."""
+    model = _tendency_model(n_step_output=1)
+    pre_processors, post_processors = _bounded_processors(model)
+    per_step = model.tendency_statistics("data", ONE_STEP_TENDENCY_STATISTICS)
+    reference, _ = _bounded_case()
+    state = torch.zeros(1, 1, 1, 2, 3)
+    state[..., 0] = torch.tensor([(3.0 - 1.0) / 2.0, (-2.0 - 1.0) / 2.0])  # 3 and -2 in physical units
+    state = _source(state, ["prog0", "prog1", "diag"])
+
+    tendency = model.compute_tendency("data", state, reference, per_step, pre_processors, post_processors)
+    rebuilt = model.add_tendency_to_state(
+        "data", reference, tendency, per_step, post_processors, pre_processors=pre_processors
+    )
+
+    torch.testing.assert_close(tendency.data[0, 0, 0, :, 0], torch.tensor([(-2.0 - 0.1) / 0.5, (-3.0 - 0.1) / 0.5]))
+    torch.testing.assert_close(rebuilt.data, state.data)
+
+
+def _bounded_sampling_model() -> tuple[AnemoiTransportTendModelEncProcDec, Batch, Batch]:
+    model = _tendency_model(n_step_output=1)
+    reference, tendency = _bounded_case()
+    model.apply_reference_state_truncation = lambda *_args, **_kwargs: {"data": reference.data}
+    x = Batch({"data": _source(torch.zeros(1, 1, 1, 2, 3), ["prog0", "prog1", "force"])})
+    return model, x, Batch({"data": tendency})
+
+
+def test_sampled_to_physical_constrains_states_not_tendencies() -> None:
+    model, x, sampled = _bounded_sampling_model()
+    pre_processors, post_processors = _bounded_processors(model)
+
+    out = model._sampled_to_physical(
+        sampled,
+        x,
+        torch.nn.ModuleDict({"data": post_processors}),
+        statistics_tendencies={"data": ONE_STEP_TENDENCY_STATISTICS},
+        pre_processors=torch.nn.ModuleDict({"data": pre_processors}),
+    )
+
+    torch.testing.assert_close(out["data"].data[0, 0, 0, :, 0], torch.tensor([3.0, 0.0]))
+
+
+def test_sampled_to_physical_needs_pre_processors_for_output_constraints() -> None:
+    model, x, sampled = _bounded_sampling_model()
+    _, post_processors = _bounded_processors(model)
+
+    with pytest.raises(ValueError, match="needs the pre-processors"):
+        model._sampled_to_physical(
+            sampled,
+            x,
+            torch.nn.ModuleDict({"data": post_processors}),
+            statistics_tendencies={"data": ONE_STEP_TENDENCY_STATISTICS},
+        )
+
+
+def _remapped_processors(model: AnemoiTransportTendModelEncProcDec) -> tuple[Processors, Processors]:
+    """Normaliser followed by a ``sqrt`` remapping of prog1 (prognostic) and diag (diagnostic)."""
+    normalizer = InputNormalizer(config=DictConfig({"default": "mean-std"}))
+    remapper = Remapper(config=DictConfig({"sqrt": ["prog1", "diag"]}), data_indices=model.data_indices["data"])
+    relu = NormalizedReluPostprocessor(
+        config=DictConfig({"default": "none", 0: ["prog0"], "normalizer": "mean-std"}),
+        data_indices=model.data_indices["data"],
+    )
+    processors = [["normalizer", normalizer], ["remapper", remapper], ["relu", relu]]
+    return Processors(processors), Processors(processors, inverse=True)
+
+
+def test_processors_skip_state_only_processors_on_tendencies() -> None:
+    model = _tendency_model(n_step_output=1)
+    pre_processors, post_processors = _remapped_processors(model)
+    tendency = _source(torch.full((1, 1, 1, 1, 3), -3.0), ["prog0", "prog1", "diag"])
+
+    physical = post_processors(tendency, in_place=False, tendency=True).data[0, 0, 0, 0]
+    # Only denormalised: no ReLU on prog0, no squaring of prog1 and diag.
+    torch.testing.assert_close(physical, torch.tensor([-3.0 * 2.0 + 1.0, -3.0 * 4.0 + 2.0, -3.0 * 0.5 + 4.0]))
+    # sqrt would reject the negative values.
+    normalised = pre_processors(tendency.clone(data=physical.reshape(1, 1, 1, 1, 3)), in_place=False, tendency=True)
+    torch.testing.assert_close(normalised.data, tendency.data)
+
+
+def test_tendency_conversion_skips_remapping() -> None:
+    """Tendencies are raw differences normalised with tendency statistics; diagnostics keep their remapping."""
+    torch.manual_seed(0)
+    model = _tendency_model()
+    pre_processors, post_processors = _remapped_processors(model)
+    per_step = model.tendency_statistics("data", TENDENCY_STATISTICS)
+    # Normalised (remapped) states in the domain of the sqrt remapping.
+    state = _source(torch.rand(2, 2, 1, 3, 3) * 2.0, ["prog0", "prog1", "diag"])
+    reference = _source(torch.rand(2, 1, 1, 3, 2) * 2.0, ["prog0", "prog1"])
+
+    tendency = model.compute_tendency("data", state, reference, per_step, pre_processors, post_processors)
+
+    physical_state = post_processors(state, in_place=False, skip_output_constraints=True).data[..., :2]
+    physical_reference = post_processors(reference, in_place=False, skip_output_constraints=True).data
+    difference = physical_state - physical_reference
+    assert (difference[..., 1] < 0).any(), "the test needs negative tendencies of the remapped variable"
+    for step, lead_time in enumerate(["6h", "12h"]):
+        statistics = {
+            key: torch.as_tensor(value[:2], dtype=torch.float32)
+            for key, value in TENDENCY_STATISTICS[lead_time].items()
+        }
+        expected = (difference[:, step] - statistics["mean"]) / statistics["stdev"]
+        torch.testing.assert_close(tendency.data[:, step, ..., :2], expected)
+    # The diagnostic is predicted as a state and keeps its normalised, remapped value.
+    torch.testing.assert_close(tendency.data[..., 2], state.data[..., 2], rtol=0, atol=0)
+
+    normalised = model.add_tendency_to_state(
+        "data", reference, tendency, per_step, post_processors, pre_processors=pre_processors
+    )
+    physical = model.add_tendency_to_state("data", reference, tendency, per_step, post_processors)
+    torch.testing.assert_close(normalised.data, state.data)
+    torch.testing.assert_close(physical.data, post_processors(state, in_place=False, skip_output_constraints=True).data)
+
+
+def test_states_rebuilt_from_tendencies_are_clipped_to_remapping_domains() -> None:
+    """A rebuilt state outside the domain of a remapping is clipped to it when normalised again."""
+    model = _tendency_model(n_step_output=1)
+    pre_processors, post_processors = _remapped_processors(model)
+    per_step = model.tendency_statistics("data", ONE_STEP_TENDENCY_STATISTICS)
+    # prog1 (state mean 2, stdev 4; remapped with sqrt after normalisation): reference 6 -> normalised 1.
+    reference = torch.zeros(1, 1, 1, 2, 2)
+    reference[..., 1] = 1.0
+    reference = _source(reference, ["prog0", "prog1"])
+    # 6h tendency mean 0.2, stdev 0.25: +2 -> state 8 (in the domain), -8 -> state -2 (below the mean).
+    tendency = torch.zeros(1, 1, 1, 2, 3)
+    tendency[..., 1] = torch.tensor([(2.0 - 0.2) / 0.25, (-8.0 - 0.2) / 0.25])
+    tendency = _source(tendency, ["prog0", "prog1", "diag"])
+
+    physical = model.add_tendency_to_state("data", reference, tendency, per_step, post_processors)
+    normalised = model.add_tendency_to_state(
+        "data", reference, tendency, per_step, post_processors, pre_processors=pre_processors
+    )
+
+    torch.testing.assert_close(physical.data[0, 0, 0, :, 1], torch.tensor([8.0, -2.0]))
+    torch.testing.assert_close(normalised.data[0, 0, 0, :, 1], torch.tensor([1.5**0.5, 0.0]))
+
+    # Inference post-processes the clipped state, as a state predicted in remapped space would be.
+    model.apply_reference_state_truncation = lambda *_args, **_kwargs: {"data": reference.data}
+    x = Batch({"data": _source(torch.zeros(1, 1, 1, 2, 3), ["prog0", "prog1", "force"])})
+    out = model._sampled_to_physical(
+        Batch({"data": tendency}),
+        x,
+        torch.nn.ModuleDict({"data": post_processors}),
+        statistics_tendencies={"data": ONE_STEP_TENDENCY_STATISTICS},
+        pre_processors=torch.nn.ModuleDict({"data": pre_processors}),
+    )
+    torch.testing.assert_close(out["data"].data[0, 0, 0, :, 1], torch.tensor([8.0, 2.0]))

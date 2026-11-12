@@ -11,7 +11,6 @@
 import datetime
 import shutil
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -37,8 +36,9 @@ class DummyModel(torch.nn.Module):
         self.config = config
         self.metadata = metadata
         self.supporting_arrays = {}
-        self.graph_data = {"hidden": torch.tensor(1.0)}
-        self.model = SimpleNamespace(_graph_data=self.graph_data)
+        # Mirror AnemoiModelInterface's graph_data so AnemoiCheckpoint._save_checkpoint's
+        # graph_data null-out has something to act on.
+        self.graph_data = {"dummy": "graph"}
         self.fc1 = nn.Linear(32, 5)
         self.fc2 = nn.Linear(5, 1)
         self.relu = nn.ReLU()
@@ -46,7 +46,7 @@ class DummyModel(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.fc1(x)
         x = self.relu(x)
-        return self.fc2(x) + self.model._graph_data["hidden"]
+        return self.fc2(x)
 
 
 class DummyModule(BoringModel):
@@ -129,12 +129,12 @@ def test_on_train_start_initializes_timer(tmp_path: Path) -> None:
     callback.on_train_start(trainer, pl_module)
     after = time.monotonic()
 
-    assert (
-        callback._last_time_checked is not None
-    ), "_last_time_checked is still None after on_train_start — super().on_train_start() is probably missing"
-    assert (
-        before <= callback._last_time_checked <= after
-    ), "_last_time_checked value is outside the expected time window"
+    assert callback._last_time_checked is not None, (
+        "_last_time_checked is still None after on_train_start — super().on_train_start() is probably missing"
+    )
+    assert before <= callback._last_time_checked <= after, (
+        "_last_time_checked value is outside the expected time window"
+    )
 
 
 def test_time_based_checkpoint_skip_logic_after_interval(tmp_path: Path) -> None:
@@ -197,8 +197,8 @@ def model(metadata: dict, config: DictConfig) -> DummyModule:
 
 
 @pytest.mark.data_dependent
-def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule) -> None:
-    """Test if the inference checkpoints and lightning checkpoints store same uuid.
+def test_training_checkpoint_has_its_own_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule) -> None:
+    """Test that a training checkpoint stores a different uuid from its inference checkpoint.
 
     Args:
         tmp_path (str): path to checkpoint dir.
@@ -208,19 +208,18 @@ def test_same_uuid(tmp_path: str, callback: AnemoiCheckpoint, model: DummyModule
     trainer = Trainer(default_root_dir=tmp_path, accelerator="cpu", callbacks=[callback], max_epochs=2, logger=False)
     trainer.fit(model)
 
-    for ckpt_path in Path(tmp_path).iterdir():
-        if str(ckpt_path.name).startswith("inference"):
-            inference_model = torch.load(ckpt_path, weights_only=False)
-            torch.testing.assert_close(inference_model.graph_data["hidden"], torch.tensor(1.0))
-            assert inference_model(torch.zeros(1, 32)).shape == (1, 1)
+    for inference_ckpt_path in Path(tmp_path).iterdir():
+        if str(inference_ckpt_path.name).startswith("inference"):
+            training_ckpt_name = inference_ckpt_path.name.replace("inference-", "")
 
-            pl_ckpt_name = (ckpt_path.name).replace("inference-", "")
+            if Path(tmp_path + "/" + training_ckpt_name).exists():
+                inference_uuid = load_metadata(inference_ckpt_path)["uuid"]
+                training_ckpt_path = tmp_path + "/" + training_ckpt_name
+                training_uuid = load_metadata(training_ckpt_path)["uuid"]
 
-            if Path(tmp_path + "/" + pl_ckpt_name).exists():
-                uuid = load_metadata(ckpt_path)["uuid"]
+                training_model = DummyModule.load_from_checkpoint(training_ckpt_path, weights_only=False)
 
-                pl_model = DummyModule.load_from_checkpoint(tmp_path + "/" + pl_ckpt_name, weights_only=False)
-
-                assert uuid == pl_model.hparams["metadata"]["uuid"]
+                assert training_uuid == training_model.hparams["metadata"]["uuid"]
+                assert training_uuid != inference_uuid
 
     shutil.rmtree(tmp_path)

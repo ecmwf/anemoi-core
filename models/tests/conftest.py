@@ -10,6 +10,18 @@
 import pytest
 import torch
 
+try:
+    from hypothesis import settings as hypothesis_settings
+except ImportError:  # only the property tests need hypothesis; the rest of the suite runs without it
+    hypothesis_settings = None
+else:
+    # The property tests check correctness, not speed. Hypothesis fails an example that takes more
+    # than 200 ms by default, which happens spuriously on a loaded machine, e.g. with many
+    # pytest-xdist workers on a shared node. Loaded here, before the test modules are imported, so
+    # that their @settings(...) inherit it.
+    hypothesis_settings.register_profile("anemoi-models", deadline=None)
+    hypothesis_settings.load_profile("anemoi-models")
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
@@ -30,6 +42,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=2,
         help="world size for distributed tests when --distributed is set",
     )
+
+
+def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
+    # The distributed tests spawn their own ranks: no xdist workers with -n logical (pytest.ini).
+    if config.getoption("--distributed"):
+        return 0
+    return None
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

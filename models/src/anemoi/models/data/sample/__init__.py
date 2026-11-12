@@ -72,7 +72,9 @@ def create_batched_struct(
     variables : Sequence[str]
         Variable names along the layout's ``variables`` axis, in order.
     layout : TensorLayout or Sequence[str]
-        The per-sample layout (no batch axis), or its axis names in order.
+        The per-sample layout (no batch axis), or its axis names in order. Any axis
+        order is accepted: ``data`` is permuted to the canonical order of
+        :attr:`TensorLayout.AXES`, and the sample or template carries the canonical layout.
     latitudes, longitudes : array-like
         ``(N,)`` coordinates in **degrees**; converted to radians here.
     data : torch.Tensor, optional
@@ -114,6 +116,15 @@ def create_batched_struct(
         layout = TensorLayout.from_tuple(*layout)
     variables = list(variables)
 
+    # Callers may order the axes freely; everything downstream sees the canonical order.
+    if data is not None:
+        if data.ndim != layout.ndim:
+            msg = f"data of shape {tuple(data.shape)} does not match the layout {layout!r}."
+            raise ValueError(msg)
+        if not layout.is_canonical:
+            data = data.permute(layout.canonical_permutation).contiguous()
+    layout = layout.canonical()
+
     if data is None:
         return sample_cls.template_from_validated(
             n_points=num_points,
@@ -125,9 +136,6 @@ def create_batched_struct(
             **kwargs,
         )
 
-    if data.ndim != layout.ndim:
-        msg = f"data of shape {tuple(data.shape)} does not match the layout {layout!r}."
-        raise ValueError(msg)
     n_vars = data.shape[layout.axis("variables", ndim=data.ndim)]
     if n_vars != len(variables):
         msg = f"data carries {n_vars} variables but {len(variables)} names were given."

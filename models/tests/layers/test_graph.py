@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+import io
+
 import einops
 import pytest
 import torch
@@ -15,6 +17,7 @@ from torch import nn
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph import NodeTrainableParameters
+from anemoi.models.layers.graph import StaticGraphGeometry
 from anemoi.models.layers.graph import TrainableTensor
 
 
@@ -117,3 +120,52 @@ class TestNodeTrainableParameters:
         no_trainable = NodeTrainableParameters({}, graph_data)
         for nodes_name in self.nodes_names:
             assert no_trainable(nodes_name, batch_size=2) is None
+
+
+def _geometry_graph() -> HeteroData:
+    graph = HeteroData()
+    graph["data"].x = torch.rand(5, 2)
+    graph["hidden"].x = torch.rand(3, 2)
+    graph["data", "to", "hidden"].edge_index = torch.tensor([[0, 1, 2, 3], [0, 0, 1, 2]])
+    graph["hidden", "to", "data"].edge_index = torch.tensor([[0, 1, 2], [0, 1, 2]])
+    return graph
+
+
+def test_static_graph_geometry_keeps_counts_and_the_named_coordinates() -> None:
+    graph = _geometry_graph()
+    geometry = StaticGraphGeometry(graph, coordinate_node_names=["hidden"])
+
+    assert geometry.num_nodes == {"data": 5, "hidden": 3}
+    assert geometry.num_edges == {("data", "to", "hidden"): 4, ("hidden", "to", "data"): 3}
+    torch.testing.assert_close(geometry.coordinates("hidden"), graph["hidden"].x)
+    with pytest.raises(KeyError, match="No coordinates kept for node set 'data'"):
+        geometry.coordinates("data")
+
+
+def test_static_graph_geometry_is_pickled_with_the_model_but_not_in_its_state_dict() -> None:
+    """Carried by a pickled model (inference checkpoints), absent from its state_dict (training checkpoints)."""
+    graph = _geometry_graph()
+    model = nn.Linear(2, 2)
+    model.geometry = StaticGraphGeometry(graph, coordinate_node_names=["hidden"])
+
+    assert set(model.state_dict()) == {"weight", "bias"}
+    buffer = io.BytesIO()
+    torch.save(model, buffer)
+    buffer.seek(0)
+    restored = torch.load(buffer, weights_only=False)
+
+    assert restored.geometry.num_edges == model.geometry.num_edges
+    torch.testing.assert_close(restored.geometry.coordinates("hidden"), graph["hidden"].x)
+    # A copy, not a view of the graph: changing the graph does not change the geometry.
+    graph["hidden"].x.zero_()
+    assert not torch.equal(model.geometry.coordinates("hidden"), graph["hidden"].x)
+
+
+def test_static_graph_geometry_keeps_its_dtype_when_the_model_is_cast() -> None:
+    """Geometry, like the batch coordinates it is combined with: a model cast does not change it."""
+    model = nn.Linear(2, 2)
+    model.geometry = StaticGraphGeometry(_geometry_graph(), coordinate_node_names=["hidden"])
+
+    model.to(torch.float64)
+
+    assert model.geometry.coordinates("hidden").dtype == torch.float32

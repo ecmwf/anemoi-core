@@ -109,7 +109,8 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_benchmark' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: srun python -m pytest -o tmp_path_retention_policy=all -v training/tests/integration/benchmark/ --slow --multigpu
+      # faulthandler_timeout: see test_training_cycle; kept just under the 1 h SLURM limit.
+      pytest_cmd: srun python -m pytest -o tmp_path_retention_policy=all -o faulthandler_timeout=3000 -v training/tests/integration/benchmark/ --slow --multigpu
       timeout_minutes: 360
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_benchmark_pytest
@@ -127,7 +128,10 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_training_cycle' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: python3 -m pytest -v training/tests/integration/training_workflows/ --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL; python3 -m pytest -v models/tests/integration/ --slow; python3 -m pytest -v graphs/tests/integration/
+      # -n 0: pytest.ini's -n logical would start one xdist worker per CPU, all on the job's single GPU.
+      # faulthandler_timeout: pytest.ini's 60 s fires mid-test on these slow workflows (up to ~3 min each), and
+      # dumping the stacks of running threads can segfault the interpreter. Keep the watchdog for real hangs only.
+      pytest_cmd: python3 -m pytest -n 0 -v -o faulthandler_timeout=600 training/tests/integration/training_workflows/ --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL; python3 -m pytest -n 0 -v models/tests/integration/ --slow; python3 -m pytest -n 0 -v graphs/tests/integration/
       timeout_minutes: 120
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_training_cycle
@@ -144,7 +148,9 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_accuracy' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: python3 -m pytest -v training/tests/integration/accuracy/ --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL --accuracy-reference-id=${{ github.event.inputs.accuracy_reference_id }}
+      # -n 0: one GPU, see test_training_cycle.
+      # faulthandler_timeout: see test_training_cycle; kept just under the 30 min SLURM limit.
+      pytest_cmd: python3 -m pytest -n 0 -v -o faulthandler_timeout=1500 training/tests/integration/accuracy/ --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL --accuracy-reference-id=${{ github.event.inputs.accuracy_reference_id }}
       timeout_minutes: 120
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_accuracy

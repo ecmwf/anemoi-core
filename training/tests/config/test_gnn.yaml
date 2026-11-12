@@ -1010,6 +1010,8 @@ model:
     analysis:
       source_datasets: [ "era" ]
       dataset_fusing_strategy: "none"
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper:
         _target_: anemoi.models.layers.mapper.GNNForwardMapper
         num_channels: ${model.num_channels}
@@ -1026,26 +1028,38 @@ model:
     combined_amv:
       source_datasets: [ "combined_amv" ]
       dataset_fusing_strategy: "none"
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper: ${model.obs_encoder}
     combined_gpsro_notrop:
       source_datasets: [ "combined_gpsro_notrop" ]
       dataset_fusing_strategy: "none"
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper: ${model.obs_encoder}
     amsr2:
       source_datasets: [ "amsr2" ]
       dataset_fusing_strategy: "none"
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper: ${model.obs_encoder}
     combined_seviri:
       source_datasets: [ "combined_seviri" ]
       dataset_fusing_strategy: "none"
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper: ${model.obs_encoder}
     combined_mhs:
       source_datasets: [ "combined_mhs" ]
       dataset_fusing_strategy: "none"
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper: ${model.obs_encoder}
     combined_amsua:
       source_datasets: [ "combined_amsua" ]
       dataset_fusing_strategy: "none"
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper: ${model.obs_encoder}
   latent_aggregator:
     _target_: anemoi.models.layers.aggregator.SumAggregator

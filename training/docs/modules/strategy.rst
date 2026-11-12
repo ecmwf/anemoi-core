@@ -25,7 +25,7 @@ deterministic or ensemble-based model tasks.
  Base strategy template
 -------------------------
 
-The :class:`BaseDDPStrategy` contains the common logic shared by all
+The :class:`BaseDDPStrategy` bundles the common logic shared by all
 strategies:
 
 * initializes the different process group layouts (model, reader, ensemble)

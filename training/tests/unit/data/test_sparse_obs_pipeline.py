@@ -19,7 +19,6 @@ Covers:
 
 from __future__ import annotations
 
-import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -32,9 +31,6 @@ from anemoi.models.data import TabularSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
 from anemoi.training.data.readers import TabularDataReader
-from anemoi.training.data.readers import create_reader
-from anemoi.training.schemas.dataloader import DatasetConfigSchema
-from anemoi.training.schemas.dataloader import NativeDatasetSchema
 
 _DATASET_NAME = "npp_atms"
 

@@ -388,7 +388,6 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
 
 
 class GraphConvMapperBlock(GraphConvBaseBlock):
-
     def __ini__(
         self,
         *,
@@ -595,7 +594,9 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         assert self.graph_attention_backend in [
             "triton",
             "pyg",
-        ], f"Backend '{self.graph_attention_backend}' not supported for GraphTransformerBlock, valid options are 'triton' and 'pyg'"
+        ], (
+            f"Backend '{self.graph_attention_backend}' not supported for GraphTransformerBlock, valid options are 'triton' and 'pyg'"
+        )
 
         if not is_triton_available():
             LOGGER.warning(
@@ -690,9 +691,9 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, ShardSizes]:
         """Shards qkv and edges along head dimension using all_to_all_transpose."""
         if model_comm_group is not None:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded across GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                "Only batch size of 1 is supported when model is sharded across GPUs"
+            )
 
         query, key, value, edges = (
             einops.rearrange(

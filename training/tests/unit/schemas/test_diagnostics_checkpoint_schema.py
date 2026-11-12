@@ -20,7 +20,6 @@ from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.hyperparameters import HYPERPARAMETERS_FOR_RESUME
 from anemoi.training.utils.hyperparameters import INIT_HYPERPARAMETERS
 from anemoi.training.utils.hyperparameters import OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION
-from anemoi.training.utils.hyperparameters import RECONSTRUCTED_HYPERPARAMETERS
 from anemoi.training.utils.hyperparameters import REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION
 
 
@@ -38,10 +37,7 @@ def test_hyperparameter_sets_are_known_hyperparameters() -> None:
 def test_inference_conversion_sets_partition_init_hyperparameters() -> None:
     optional = set(OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION)
     assert not optional & REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION
-    assert (
-        optional | REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION | RECONSTRUCTED_HYPERPARAMETERS
-        == INIT_HYPERPARAMETERS
-    )
+    assert optional | REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION == INIT_HYPERPARAMETERS
 
 
 @pytest.mark.parametrize("option", sorted(OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION.values()))

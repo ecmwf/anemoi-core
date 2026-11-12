@@ -1,9 +1,9 @@
-# Anemobs test config for the stochastic-interpolant (SI) transport model
+# Anemobs test config for the flow-matching transport model
 # (AnemoiTransportModelEncProcDec, TransportTraining). Derived from test_anemobs_ens_afcrps.yaml: same data,
 # single hidden mesh and GraphTransformer model. Two datasets, both encoded and decoded: ERA5 (`era`) and
 # conventional surface observations (`combined_surface`, without `reportype`). State prediction with the
-# `stochastic_interpolant` objective; inference samples with Heun, 50 steps.
-#   anemoi-training train --config-name=test_anemobs_transport_stochastic_interpolant
+# `flow_matching` objective; inference samples with Heun, 50 steps.
+#   anemoi-training train --config-name=test_transport_flow_matching
 data:
   format: zarr
   frequency: 12h
@@ -273,7 +273,7 @@ diagnostics:
       project_name: AIFS
       system: false
       terminal: true
-      run_name: 'test-anemobs-transport-si'
+      run_name: 'test-anemobs-transport-fm'
       prefix: ''
       log_hyperparams: true
       on_resume_create_child: true
@@ -316,7 +316,7 @@ diagnostics:
   print_memory_summary: false
 system:
   output:
-    root: ${oc.env:SCRATCH}/anemobs-test/transport_si/
+    root: ${oc.env:SCRATCH}/anemobs-test/transport_fm/
     logs:
       root: logs
       wandb: wandb
@@ -425,7 +425,7 @@ model:
     hidden_nodes_name: hidden
     latent_skip: true
     transport:
-      objective: stochastic_interpolant
+      objective: flow_matching
       sigma_data: 1.0
       noise_channels: 32
       noise_cond_dim: 16
@@ -436,19 +436,16 @@ model:
         _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
         num_channels: ${model.model.transport.noise_channels}
         max_period: 1000
+        scale: 1000
       training_condition:
         distribution: uniform_time
-      # The source kind applies to every dataset; reference_state (the packaged SI default) is not
-      # implemented for observation datasets, so the bridge starts from Gaussian noise.
-      source:
-        kind: gaussian
       inference_defaults:
         sampling_schedule:
           schedule_type: unit_time
           num_steps: 50
         sampler:
           sampler: heun
-  # The noise level (EDM) or bridge time (SI) conditions every layer norm: encoders, processor, decoders.
+  # The noise level (EDM) or time (flow matching) conditions every layer norm: encoders, processor, decoders.
   layer_kernels:
     LayerNorm:
       _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
@@ -500,6 +497,8 @@ model:
     analysis:
       source_datasets: ["era"]
       dataset_fusing_strategy: "none"
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper:
         _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
         num_channels: 768
@@ -519,6 +518,8 @@ model:
     combined_surface:
       source_datasets: [combined_surface]
       dataset_fusing_strategy: none
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper: ${model.obs_encoder}
   latent_aggregator:
     _target_: anemoi.models.layers.aggregator.SumAggregator
@@ -661,7 +662,7 @@ training:
     _target_: anemoi.training.train.methods.TransportTraining
   transport:
     prediction_mode: state
-    objective: stochastic_interpolant
+    objective: flow_matching
   strategy:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
     num_gpus_per_model: ${system.hardware.num_gpus_per_model}

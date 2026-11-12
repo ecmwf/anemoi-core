@@ -450,7 +450,7 @@ model:
           num_steps: 50
         sampler:
           sampler: heun
-  # The noise level (EDM) or bridge time (SI) conditions every layer norm: encoders, processor, decoders.
+  # The noise level (EDM) or time (flow matching) conditions every layer norm: encoders, processor, decoders.
   layer_kernels:
     LayerNorm:
       _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
@@ -502,6 +502,8 @@ model:
     analysis:
       source_datasets: ["era"]
       dataset_fusing_strategy: "none"
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper:
         _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
         num_channels: 768
@@ -521,6 +523,8 @@ model:
     combined_surface:
       source_datasets: [combined_surface]
       dataset_fusing_strategy: none
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
       mapper: ${model.obs_encoder}
   latent_aggregator:
     _target_: anemoi.models.layers.aggregator.SumAggregator

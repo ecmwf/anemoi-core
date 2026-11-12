@@ -24,6 +24,7 @@ from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from tests.batch_builders import build_batch
+from tests.graph_stubs import stub_graph_geometry
 
 
 class _NearestEdges:
@@ -84,7 +85,7 @@ def _model(model_type):
     model.hidden_names = ["hidden"]
     model.dataset2hidden = {"grid": "hidden"}
     model._hidden_coordinates = lambda hidden_name=None: torch.tensor([[0.0, 0.0], [0.2, 0.2]])
-    model._graph_data = {"hidden": SimpleNamespace(num_nodes=2), "grid": SimpleNamespace(x=model._hidden_coordinates())}
+    model.static_graph_geometry = stub_graph_geometry(hidden=2)
     model.condition_on_residual = False
     model.noise_injector = lambda x, **kwargs: (x, None)
     model.input_datasets = model.target_datasets = ["grid"]

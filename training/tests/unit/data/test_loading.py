@@ -12,7 +12,10 @@ import torch
 from torch.utils.data import ConcatDataset
 from torch.utils.data import TensorDataset
 
+from anemoi.training.data.loading import DataLoadingPolicy
 from anemoi.training.data.loading import MultiDomainBatchSampler
+from anemoi.training.data.loading import MultiDomainLoadingPolicy
+from anemoi.training.data.loading import SynchronizedLoadingPolicy
 
 
 def make_sampler(
@@ -116,3 +119,51 @@ def test_multi_domain_sampler_resumes_at_each_batch_boundary_after_first_epoch(n
         resumed.load_state_dict(sampler.state_dict())
 
         assert consumed + list(resumed) == expected
+
+
+DATASETS = ["era5", "cerra", "synop"]
+
+
+def encoders(strategy: str | None, sources: list[str]) -> dict:
+    encoder = {"source_datasets": sources}
+    if strategy is not None:
+        encoder["dataset_fusing_strategy"] = strategy
+    return {"shared": encoder, "obs": {"source_datasets": ["synop"], "dataset_fusing_strategy": "none"}}
+
+
+def test_co_loaded_datasets_per_policy() -> None:
+    assert SynchronizedLoadingPolicy().co_loaded_datasets(DATASETS) == [frozenset(DATASETS)]
+    assert MultiDomainLoadingPolicy().co_loaded_datasets(DATASETS) == [frozenset({name}) for name in DATASETS]
+
+
+@pytest.mark.parametrize("strategy", ["none", None])
+def test_synchronized_policy_rejects_unfused_encoder_with_several_sources(strategy: str | None) -> None:
+    with pytest.raises(ValueError, match=r"Encoder 'shared'.*SynchronizedLoadingPolicy.*\['era5', 'cerra'\]"):
+        SynchronizedLoadingPolicy().check_encoder_fusion(encoders(strategy, ["era5", "cerra"]), DATASETS)
+
+
+def test_multi_domain_policy_accepts_unfused_encoder_with_several_sources() -> None:
+    MultiDomainLoadingPolicy().check_encoder_fusion(encoders("none", ["era5", "cerra"]), DATASETS)
+
+
+def test_encoder_fusion_check_accepts_sequential_and_single_sources() -> None:
+    policy = SynchronizedLoadingPolicy()
+    policy.check_encoder_fusion(encoders("sequential", ["era5", "cerra"]), DATASETS)
+    policy.check_encoder_fusion(encoders("none", ["era5"]), DATASETS)
+
+
+def test_encoder_fusion_check_ignores_sources_that_are_not_loaded() -> None:
+    SynchronizedLoadingPolicy().check_encoder_fusion(encoders("none", ["era5", "unloaded"]), DATASETS)
+
+
+def test_custom_policy_defaults_to_one_batch_for_all_datasets() -> None:
+    class CustomPolicy(DataLoadingPolicy):
+        def build_dataset(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        def build_batch_sampler(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+    assert CustomPolicy().co_loaded_datasets(DATASETS) == [frozenset(DATASETS)]
+    with pytest.raises(ValueError, match="CustomPolicy"):
+        CustomPolicy().check_encoder_fusion(encoders("none", ["era5", "cerra"]), DATASETS)

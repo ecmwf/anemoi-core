@@ -98,8 +98,9 @@ def test_training_cycle_multidomain(
         "data": "hidden",
         "data_2": "hidden_2",
     }
-    assert trainer.graph_data["data"].num_nodes != trainer.graph_data["data_2"].num_nodes
-    assert trainer.graph_data["hidden"].num_nodes != trainer.graph_data["hidden_2"].num_nodes
+    num_nodes = model.graph_geometry.num_nodes
+    assert num_nodes["data"] != num_nodes["data_2"]
+    assert num_nodes["hidden"] != num_nodes["hidden_2"]
     assert trainer.model.trainer.global_step == 4
 
     assert_keys_exist(trainer.metadata, partial_metadata_schema)
@@ -204,6 +205,20 @@ def test_training_cycle_edm_transport(
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_flow_matching(
+    flow_matching_config: tuple[DictConfig, str],
+    get_test_archive: callable,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
+    cfg, url = flow_matching_config
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
+
+
+@skip_if_offline
+@pytest.mark.slow
 @pytest.mark.mlflow
 def test_training_cycle_mlflow_dry_run(
     mlflow_dry_run_config: tuple[DictConfig, str],
@@ -250,12 +265,12 @@ def test_training_cycle_imerg_target(
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_multidatasets_edm_transport(
-    multidatasets_edm_transport_config: tuple[DictConfig, list[str]],
+def test_training_cycle_multidatasets_transport(
+    multidatasets_transport_config: tuple[DictConfig, list[str]],
     get_test_archive: callable,
     partial_metadata_schema: dict[str, Any],
 ) -> None:
-    cfg, urls = multidatasets_edm_transport_config
+    cfg, urls = multidatasets_transport_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)

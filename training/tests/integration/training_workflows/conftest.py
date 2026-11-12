@@ -578,10 +578,10 @@ def edm_transport_config(
 
 
 @pytest.fixture(
-    params=["transport_stochastic_interpolant", "transport_stochastic_interpolant_tendency"],
-    ids=["transport_stochastic_interpolant", "transport_stochastic_interpolant_tendency"],
+    params=["transport_flow_matching", "transport_flow_matching_tendency"],
+    ids=["transport_flow_matching", "transport_flow_matching_tendency"],
 )
-def stochastic_interpolant_config(
+def flow_matching_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_path: GetTmpPath,
@@ -589,7 +589,7 @@ def stochastic_interpolant_config(
     with initialize_config_module(
         version_base=None,
         config_module="anemoi.training.config",
-        job_name="test_stochastic_interpolant",
+        job_name="test_flow_matching",
     ):
         template = compose(config_name=request.param)
 
@@ -604,41 +604,25 @@ def stochastic_interpolant_config(
 
 @pytest.fixture(
     params=[
-        pytest.param(
-            [
-                "model=graphtransformer_multi_transport_edm",
-                "training=multi_transport",
-                "training.transport.prediction_mode=state",
-                "training.transport.objective=edm_diffusion",
-            ],
-            id="edm_diffusion",
-        ),
-        pytest.param(
-            [
-                "model=graphtransformer_multi_transport_tendency_edm",
-                "training=multi_transport",
-                "training.transport.prediction_mode=tendency",
-                "training.transport.objective=edm_diffusion",
-            ],
-            id="edm_diffusion_tendency",
-        ),
+        "multi_transport_edm_diffusion",
+        "multi_transport_edm_diffusion_tendency",
+        "multi_transport_flow_matching",
+        "multi_transport_flow_matching_tendency",
     ],
-    ids=["edm_diffusion", "edm_diffusion_tendency"],
 )
-def multidatasets_edm_transport_config(
+def multidatasets_transport_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, list[str]]:
-    overrides = request.param
-    is_tendency = any("graphtransformer_transport_tendency" in override for override in overrides)
+    is_tendency = request.param.endswith("_tendency")
 
     with initialize_config_module(
         version_base=None,
         config_module="anemoi.training.config",
-        job_name="test_multi_edm_transport",
+        job_name="test_multi_transport",
     ):
-        template = compose(config_name="multi", overrides=overrides)
+        template = compose(config_name=request.param)
 
     use_case_modifications = OmegaConf.load(CONFIG_DIR / "test_multidatasets.yaml")
     assert isinstance(use_case_modifications, DictConfig)
@@ -821,12 +805,6 @@ def partial_metadata_schema() -> dict[str, Any]:
                     "target": None,
                     "prognostic": None,
                     "diagnostic": None,
-                },
-                "shapes": {
-                    "variables": None,
-                    "input_timesteps": None,
-                    "ensemble": None,
-                    "grid": None,
                 },
             },
         },

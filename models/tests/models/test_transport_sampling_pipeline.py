@@ -13,7 +13,6 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from torch_geometric.data import HeteroData
 
 import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
 from anemoi.graphs.nodes.attributes import Timedeltas
@@ -24,17 +23,17 @@ from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data.sources import GriddedTemplate
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.layers.aggregator import SumAggregator
+from anemoi.models.layers.diffusion import SinusoidalEmbeddings
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.samplers import transport_samplers
 from anemoi.models.transport import EDMDiffusionModelObjective
 from anemoi.models.transport import EdmSettings
-from anemoi.models.transport import StochasticInterpolantModelObjective
-from anemoi.models.transport import TransportSourceBuilder
-from anemoi.models.transport import TransportSourceRequest
-from anemoi.models.transport import TransportSourceSettings
+from anemoi.models.transport import FlowMatchingModelObjective
 from anemoi.models.transport import schedules
+from anemoi.models.transport.paths import flow_matching_state
 from tests.batch_builders import build_batch
+from tests.graph_stubs import stub_graph_geometry
 
 
 class IdentityProcessor(torch.nn.Module):
@@ -48,7 +47,6 @@ class IdentityProcessor(torch.nn.Module):
 def _transport_model_stub() -> AnemoiTransportModelEncProcDec:
     model = AnemoiTransportModelEncProcDec.__new__(AnemoiTransportModelEncProcDec)
     torch.nn.Module.__init__(model)
-    model.transport_source = TransportSourceBuilder()
     model.dynamic_node_attributes = {}
     # Single hidden mesh: every dataset routes to "hidden".
     model.hidden_names = ["hidden"]
@@ -109,7 +107,8 @@ def _configure_sampling_model(
     model.statistics = {}
     model.is_dataset_static = {}
     model.target_datasets = list(specs)
-    model._graph_data = HeteroData()
+    # Grid coordinates of the synthetic batches (the model itself does not keep the graph).
+    model.test_coordinates = {}
     for dataset_name, (num_inputs, num_outputs, grid_size) in specs.items():
         input_names = tuple(f"in_{idx}" for idx in range(num_inputs))
         output_names = tuple(f"out_{idx}" for idx in range(num_outputs))
@@ -119,7 +118,7 @@ def _configure_sampling_model(
             "stdev": torch.ones(num_inputs + num_outputs),
         }
         model.is_dataset_static[dataset_name] = True
-        model._graph_data[dataset_name].x = torch.zeros(grid_size, 2)
+        model.test_coordinates[dataset_name] = torch.zeros(grid_size, 2)
 
 
 GRIDDED_LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
@@ -142,7 +141,7 @@ def _model_batch(
             layout=GRIDDED_LAYOUT,
             statistics={key: values[positions] for key, values in model.statistics[name].items()},
             data=tensor,
-            coordinates=model._graph_data[name].x,
+            coordinates=model.test_coordinates[name],
         )
     return Batch(sources)
 
@@ -209,7 +208,7 @@ def _sparse_target_template(
 def test_transport_conditioning_embedding_uses_compact_condition_width() -> None:
     model = _transport_model_stub()
     model.dataset2hidden = {"data": "hidden"}
-    model._graph_data = {"data": SimpleNamespace(num_nodes=4), "hidden": SimpleNamespace(num_nodes=5)}
+    model.static_graph_geometry = stub_graph_geometry(data=4, hidden=5)
     cond_dim = 8
     model._embed_noise_conditioning = lambda sigma: torch.ones(
         (*sigma.shape[:-1], cond_dim),
@@ -250,7 +249,7 @@ def test_transport_conditioning_is_split_like_the_nodes_it_conditions(
     """Both mappers receive conditioning in the same layout as their input node features."""
     model = _transport_model_stub()
     model._graph_name_hidden = "hidden"
-    model._graph_data = {"data": SimpleNamespace(num_nodes=4), "hidden": SimpleNamespace(num_nodes=6)}
+    model.static_graph_geometry = stub_graph_geometry(data=4, hidden=6)
     model._embed_noise_conditioning = lambda sigma: torch.ones((*sigma.shape[:-1], 2), dtype=sigma.dtype)
     # A model group of two ranks, seen from rank 0: every sharded tensor keeps its first shard.
     sharded_row_counts = []
@@ -312,10 +311,10 @@ def test_transport_conditioning_covers_history_and_target_nodes_of_sparse_data()
     """The encoder is conditioned on each sample's history and target nodes; the decoder on the target nodes."""
     model = _transport_model_stub()
     model._graph_name_hidden = "hidden"
-    model._graph_data = {"hidden": SimpleNamespace(num_nodes=5)}
+    model.static_graph_geometry = stub_graph_geometry(hidden=5)
     cond_dim = 6
-    model._embed_noise_conditioning = (
-        lambda sigma: torch.arange(sigma.shape[0], dtype=sigma.dtype).view(-1, 1, 1).expand(*sigma.shape[:-1], cond_dim)
+    model._embed_noise_conditioning = lambda sigma: (
+        torch.arange(sigma.shape[0], dtype=sigma.dtype).view(-1, 1, 1).expand(*sigma.shape[:-1], cond_dim)
     )
     x = Batch({"obs": _obs_source([3, 1], n_variables=1, value=0.0, coordinate_offset=-1.0)})
     target = Batch({"obs": _obs_source([2, 4], n_variables=1, value=0.0, coordinate_offset=1.0)})
@@ -817,7 +816,6 @@ def test_predict_step_samples_onto_the_target_and_postprocesses() -> None:
         target_forcing=target_forcing,
         pre_processors=torch.nn.ModuleDict({"ds_a": AddOneProcessor()}),
         post_processors=torch.nn.ModuleDict({"ds_a": AddOneProcessor()}),
-        n_step_input={"ds_a": 2},
         model_comm_group=None,
         gather_out=True,
         sampler_params={"sampler": "heun"},
@@ -833,6 +831,35 @@ def test_predict_step_samples_onto_the_target_and_postprocesses() -> None:
     assert isinstance(out, Batch)
     torch.testing.assert_close(out["ds_a"].data, torch.full((1, 1, 1, 4, 3), 6.0))
     assert out["ds_a"].variables == list(model.data_indices["ds_a"].model.output.ordered_names)
+
+
+def test_predict_step_passes_pre_processors_to_sampled_to_physical() -> None:
+    """Tendency models need the pre-processors to apply output constraints to the rebuilt states."""
+    model = _transport_model_stub()
+    _configure_sampling_model(model, {"ds_a": (2, 3, 4)})
+    model.n_step_output = {"ds_a": 1}
+    x = _sampling_batch(model, {"ds_a": torch.zeros(1, 2, 1, 4, 2)})
+    target_template = _target_template(model, {"ds_a": torch.zeros(1, 2, 1, 4, 2)})
+    model.sample = lambda _x, **kwargs: Batch({"ds_a": kwargs["target_template"]["ds_a"].unflatten(torch.zeros(4, 3))})
+    captured = {}
+
+    def _sampled_to_physical(sampled, _x, _post_processors, **kwargs):
+        captured.update(kwargs)
+        return sampled
+
+    model._sampled_to_physical = _sampled_to_physical
+    pre_processors = torch.nn.ModuleDict({"ds_a": AddOneProcessor()})
+
+    model.predict_step(
+        x=x,
+        target_template=target_template,
+        pre_processors=pre_processors,
+        post_processors=torch.nn.ModuleDict({"ds_a": AddOneProcessor()}),
+        model_comm_group=None,
+        gather_out=False,
+    )
+
+    assert captured["pre_processors"] is pre_processors
 
 
 def test_predict_step_runs_without_target_forcings() -> None:
@@ -853,7 +880,6 @@ def test_predict_step_runs_without_target_forcings() -> None:
         target_template=_target_template(model, {"ds_a": torch.zeros(1, 2, 1, 4, 2)}),
         pre_processors=torch.nn.ModuleDict({"ds_a": AddOneProcessor()}),
         post_processors=torch.nn.ModuleDict({"ds_a": AddOneProcessor()}),
-        n_step_input={"ds_a": 2},
     )
 
     assert list(captured["target_forcing"].keys()) == []
@@ -885,7 +911,6 @@ def test_predict_step_accepts_the_interface_arguments() -> None:
         "target_forcing",
         "pre_processors",
         "post_processors",
-        "n_step_input",
         "model_comm_group",
         "gather_out",
         "statistics_tendencies",
@@ -1002,7 +1027,7 @@ def test_edm_sparse_sampling_uses_target_template_shapes(monkeypatch: pytest.Mon
     assert [tuple(sample.shape) for sample in out["obs"].data] == [(3, 1), (1, 1)]
 
 
-def test_stochastic_interpolant_sparse_sampling_uses_target_template_shapes(
+def test_flow_matching_sparse_sampling_uses_target_template_shapes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class SpyVectorFieldSampler:
@@ -1025,7 +1050,7 @@ def test_stochastic_interpolant_sparse_sampling_uses_target_template_shapes(
             return y
 
     model = _transport_model_stub()
-    model.transport_model_objective = StochasticInterpolantModelObjective()
+    model.transport_model_objective = FlowMatchingModelObjective()
     model.inference_defaults = {
         "sampling_schedule": {"schedule_type": "unit_time", "num_steps": 2},
         "sampler": {"sampler": "spy_vector"},
@@ -1088,7 +1113,6 @@ def test_tendency_sparse_sampling_rejects_sparse_obs(monkeypatch: pytest.MonkeyP
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     model.hidden_names = ["hidden"]
     model.dataset2hidden = defaultdict(lambda: "hidden")
-    model.transport_source = TransportSourceBuilder()
     model.transport_model_objective = EDMDiffusionModelObjective()
     model.inference_defaults = {
         "sampling_schedule": {"schedule_type": "linear", "sigma_max": 1.0, "sigma_min": 0.1, "num_steps": 2},
@@ -1119,7 +1143,7 @@ def test_tendency_sparse_sampling_rejects_sparse_obs(monkeypatch: pytest.MonkeyP
         model.sample(x, target_template=target_template)
 
 
-def test_sample_dispatches_stochastic_interpolant_to_default_heun_sampler(
+def test_sample_dispatches_flow_matching_to_default_heun_sampler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class DummyVectorFieldSampler:
@@ -1149,7 +1173,7 @@ def test_sample_dispatches_stochastic_interpolant_to_default_heun_sampler(
             )
 
     model = _transport_model_stub()
-    model.transport_model_objective = StochasticInterpolantModelObjective()
+    model.transport_model_objective = FlowMatchingModelObjective()
     model.inference_defaults = {
         "sampling_schedule": {"schedule_type": "unit_time", "num_steps": 3},
         "sampler": {"sampler": "heun"},
@@ -1180,7 +1204,7 @@ def test_sample_dispatches_stochastic_interpolant_to_default_heun_sampler(
     assert out["ds_a"].data.shape == (1, 2, 1, 5, 3)
 
 
-def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interpolant(
+def test_sample_can_use_vector_field_sampler_for_flow_matching(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class DummyVectorFieldSampler:
@@ -1210,7 +1234,7 @@ def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interp
             )
 
     model = _transport_model_stub()
-    model.transport_model_objective = StochasticInterpolantModelObjective()
+    model.transport_model_objective = FlowMatchingModelObjective()
     model.inference_defaults = {
         "sampling_schedule": {"schedule_type": "unit_time", "num_steps": 3},
         "sampler": {"sampler": "heun"},
@@ -1245,103 +1269,9 @@ def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interp
     assert out["ds_a"].data.shape == (1, 2, 1, 5, 3)
 
 
-def _single_dataset_template(data: torch.Tensor) -> Batch:
-    """A one-dataset gridded batch describing the field a source builder should produce."""
-    return build_batch(
-        data={"data": data},
-        coordinates={"data": torch.zeros(data.shape[3], 2)},
-        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
-        variables={"data": [f"v{idx}" for idx in range(data.shape[4])]},
-    )
-
-
-def test_transport_source_builder_does_not_build_unselected_reference(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    builder = TransportSourceBuilder(TransportSourceSettings(kind="gaussian", scale=2.0))
-    target = _single_dataset_template(torch.zeros(1, 1, 1, 2, 1))
-
-    def reference_source_factory() -> dict[str, torch.Tensor]:
-        raise AssertionError("reference source should not be built")
-
-    def fake_randn(shape, device=None, dtype=None):
-        return torch.full(shape, 3.0, device=device, dtype=dtype)
-
-    monkeypatch.setattr(torch, "randn", fake_randn)
-
-    source = builder.build(
-        TransportSourceRequest(
-            templates=target,
-            default_kind="reference_state",
-            custom_source_factories={"reference_state": reference_source_factory},
-        )
-    )
-
-    torch.testing.assert_close(source["data"].data, torch.full_like(target["data"].data, 6.0))
-
-
-def test_transport_source_builder_postprocesses_reference_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    builder = TransportSourceBuilder(TransportSourceSettings(kind="reference_state", scale=0.5, noise_scale=0.25))
-    target = _single_dataset_template(torch.zeros(1, 1, 1, 2, 1, dtype=torch.float64))
-    reference = {"data": torch.full_like(target["data"].data, 4.0)}
-
-    monkeypatch.setattr(
-        torch, "randn", lambda shape, device=None, dtype=None: torch.full(shape, 2.0, device=device, dtype=dtype)
-    )
-
-    source = builder.build(
-        TransportSourceRequest(
-            templates=target,
-            default_kind="gaussian",
-            custom_source_factories={"reference_state": lambda: reference},
-        )
-    )
-
-    assert source["data"].dtype == target["data"].dtype
-    torch.testing.assert_close(source["data"].data, torch.full_like(target["data"].data, 2.5))
-    torch.testing.assert_close(reference["data"], torch.full_like(target["data"].data, 4.0))
-
-
-def test_tendency_sampling_source_can_use_reference_state() -> None:
-    model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
-    model.hidden_names = ["hidden"]
-    model.dataset2hidden = defaultdict(lambda: "hidden")
-    model.transport_source = TransportSourceBuilder(TransportSourceSettings(kind="reference_state"))
-    model.target_datasets = ["ds_a"]
-    model.n_step_output = {"ds_a": 2}
-    model.num_output_channels = {"ds_a": 2}
-    model.statistics = {"ds_a": {}}
-    model.data_indices = {
-        "ds_a": SimpleNamespace(
-            name_to_index={"a": 0, "c": 1, "b": 2, "d": 3},
-            model=SimpleNamespace(
-                output=SimpleNamespace(ordered_names=("a", "b")),
-                input=SimpleNamespace(positions_for_names=lambda names: [0, 2]),
-            ),
-        ),
-    }
-    x_data = torch.arange(1 * 3 * 1 * 5 * 4, dtype=torch.float32).reshape(1, 3, 1, 5, 4)
-    x = build_batch(
-        data={"ds_a": x_data},
-        coordinates={"ds_a": torch.zeros(5, 2)},
-        metadata={"static_coords": frozenset({"ds_a"})},
-        layouts={"ds_a": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
-        variables={"ds_a": ["a", "c", "b", "d"]},
-        statistics={"ds_a": {}},
-    )
-
-    source = model.build_sampling_source(
-        x,
-        target_template=_templates(x.select(time=[1, 2], variables={"ds_a": [0, 2]})),
-    )
-
-    expected = x_data[:, -1:, :, :, :].index_select(-1, torch.tensor([0, 2])).expand(-1, 2, -1, -1, -1)
-    torch.testing.assert_close(source["ds_a"].data, expected)
-
-
-def test_stochastic_interpolant_objective_returns_raw_drift_prediction() -> None:
-    """The stochastic-interpolant model objective leaves drift predictions in model-output space."""
-    interpolant = build_batch(
+def test_flow_matching_objective_returns_raw_velocity_prediction() -> None:
+    """The flow-matching model objective leaves velocity predictions in model-output space."""
+    state = build_batch(
         data={"data": torch.full((1, 1, 1, 2, 1), 2.0)},
         coordinates={"data": torch.zeros(2, 2)},
         metadata={"static_coords": frozenset({"data"})},
@@ -1349,8 +1279,8 @@ def test_stochastic_interpolant_objective_returns_raw_drift_prediction() -> None
         variables={"data": ["x"]},
         statistics={"data": {}},
     )
-    time_level = {"data": torch.full_like(interpolant["data"].data, 0.25)}
-    drift = interpolant.with_data({"data": torch.full_like(interpolant["data"].data, 0.5)})
+    time_level = {"data": torch.full_like(state["data"].data, 0.25)}
+    velocity = state.with_data({"data": torch.full_like(state["data"].data, 0.5)})
     marker = object()
 
     def _forward_transport_network(
@@ -1359,22 +1289,108 @@ def test_stochastic_interpolant_objective_returns_raw_drift_prediction() -> None
         condition: dict[str, torch.Tensor],
         **_kwargs,
     ) -> Batch:
-        assert conditioned_target is interpolant
+        assert conditioned_target is state
         assert condition is time_level
         assert _kwargs["marker"] is marker
-        return drift
+        return velocity
 
     model = SimpleNamespace(_forward_transport_network=_forward_transport_network)
 
-    out = StochasticInterpolantModelObjective().forward(
+    out = FlowMatchingModelObjective().forward(
         model,
-        interpolant.with_data({"data": torch.zeros_like(interpolant["data"].data)}),
-        interpolant,
+        state.with_data({"data": torch.zeros_like(state["data"].data)}),
+        state,
         time_level,
         marker=marker,
     )
 
-    assert out is drift
+    assert out is velocity
+
+
+def test_flow_matching_samples_differ_because_the_source_is_random() -> None:
+    """Every sample starts from new Gaussian noise, so the same input gives different members."""
+    model = _transport_model_stub()
+    model.transport_model_objective = FlowMatchingModelObjective()
+    model.inference_defaults = {
+        "sampling_schedule": {"schedule_type": "unit_time", "num_steps": 3},
+        "sampler": {"sampler": "heun"},
+    }
+    model.n_step_output = {"ds_a": 1}
+    model.num_output_channels = {"ds_a": 3}
+    # A velocity that depends only on the state: all randomness comes from the source.
+    model._forward_transport_network = lambda _x, y, *_args, **_kwargs: y.map_data(torch.zeros_like)
+    _configure_sampling_model(model, {"ds_a": (3, 3, 5)})
+    x = {"ds_a": torch.randn(1, 2, 1, 5, 3, dtype=torch.float32)}
+    batch = _sampling_batch(model, x)
+    template = _target_template(model, x)
+
+    first = model.sample(batch, target_template=template)["ds_a"].data
+    second = model.sample(batch, target_template=template)["ds_a"].data
+
+    assert first.shape == (1, 1, 1, 5, 3)
+    assert not torch.equal(first, second)
+
+
+def test_noise_embedding_is_computed_in_float32_under_bfloat16_autocast() -> None:
+    """The embedding and its MLP run in float32; the result is handed on in the autocast dtype."""
+    model = _transport_model_stub()
+    model.noise_channels = 32
+    model.noise_cond_dim = 16
+    model.noise_embedder = SinusoidalEmbeddings(num_channels=32, max_period=1000, scale=1000.0)
+    model.noise_cond_mlp = model._create_noise_conditioning_mlp()
+    time = torch.rand(2, 3, 1)
+    in_float32 = model.noise_cond_mlp(model.noise_embedder(time))
+
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        under_autocast = model._embed_noise_conditioning(time)
+        all_bfloat16 = model.noise_cond_mlp(model.noise_embedder(time))
+
+    assert under_autocast.dtype == torch.bfloat16
+    assert torch.equal(under_autocast, in_float32.to(torch.bfloat16))
+    assert not torch.equal(all_bfloat16, under_autocast)
+    torch.testing.assert_close(model._embed_noise_conditioning(time), in_float32)
+
+
+@pytest.mark.parametrize("sampler", ["euler", "heun"])
+def test_flow_matching_sampling_retraces_the_training_path(sampler: str) -> None:
+    """With the exact velocity, sampling visits the training states and ends on the target.
+
+    The network is replaced by the velocity that ``flow_matching_clean`` follows from the current
+    state at time ``t`` to the target at time 1. Every state the sampler passes to the network must
+    then be the training state ``flow_matching_state`` between the starting noise and the target,
+    and the last state must be the target. A reversed time grid, or a network given ``1 - t``,
+    leaves that path.
+    """
+    model = _transport_model_stub()
+    model.transport_model_objective = FlowMatchingModelObjective()
+    model.inference_defaults = {
+        "sampling_schedule": {"schedule_type": "unit_time", "num_steps": 4},
+        "sampler": {"sampler": sampler},
+    }
+    model.n_step_output = {"ds_a": 1}
+    model.num_output_channels = {"ds_a": 3}
+    target = torch.randn(1, 1, 1, 5, 3, dtype=torch.float64)
+    visited = []
+
+    def _exact_velocity(_x: Batch, state: Batch, time_level: dict[str, torch.Tensor], *_args, **_kwargs) -> Batch:
+        t = time_level["ds_a"].to(torch.float64)
+        visited.append((t, state["ds_a"].data.to(torch.float64)))
+        return state.map_data(lambda data: ((target - data.to(torch.float64)) / (1.0 - t)).to(data.dtype))
+
+    model._forward_transport_network = _exact_velocity
+    _configure_sampling_model(model, {"ds_a": (3, 3, 5)})
+    x = {"ds_a": torch.randn(1, 2, 1, 5, 3, dtype=torch.float32)}
+    batch = _sampling_batch(model, x)
+    template = _target_template(model, x)
+
+    sampled = model.sample(batch, target_template=template)["ds_a"].data
+
+    first_time, noise = visited[0]
+    assert first_time.flatten()[0].item() == 0.0
+    assert len(visited) == (4 if sampler == "euler" else 7)
+    for t, state in visited:
+        torch.testing.assert_close(state, flow_matching_state(noise, target, t), atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(sampled.to(torch.float64), target, atol=1e-5, rtol=1e-5)
 
 
 @pytest.mark.parametrize(
@@ -1422,7 +1438,9 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
                 1,
                 1,
             )
-            assert condition_data.dtype == target_data.dtype == x[dataset_name].data.dtype
+            # The noise level keeps at least float32, and the noised target follows it.
+            assert condition_data.dtype == torch.promote_types(x[dataset_name].data.dtype, torch.float32)
+            assert target_data.dtype == condition_data.dtype
             out[dataset_name] = 0.8 * target_data + 0.02 * condition_data
         return conditioned_target.with_data(out)
 

@@ -20,7 +20,10 @@ import anemoi.models.preprocessing.spatial as spatial_module
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.models.base import BaseGraphModel
+from anemoi.models.models.base import hidden_node_names
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
+from anemoi.models.utils.config import COORDS_DIM
+from anemoi.models.utils.graphs import split_graph_config
 from tests.batch_builders import build_batch
 
 
@@ -81,7 +84,7 @@ def _make_hierarchical_graph() -> HeteroData:
     return graph
 
 
-def test_base_graph_model_builds_with_omegaconf_config(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_base_graph_model_builds_with_omegaconf_config() -> None:
     model_config = OmegaConf.create(
         {
             "node_trainable_parameters": {
@@ -114,15 +117,14 @@ def test_base_graph_model_builds_with_omegaconf_config(monkeypatch: pytest.Monke
     )
 
     graph = _make_graph()
-    monkeypatch.setattr("anemoi.models.models.base.GraphCreator.create", lambda self: graph)
     model = DummyGraphModel(
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
         n_step_input={"data": 1},
         n_step_output={"data": 1},
-        model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
-        data_types={"data": "gridded"},
+        static_graph_data=graph,
+        dynamic_graph_config={"nodes": {}, "edges": {}},
     )
 
     assert model.seen_hidden_name == "hidden"
@@ -130,7 +132,7 @@ def test_base_graph_model_builds_with_omegaconf_config(monkeypatch: pytest.Monke
     assert model.target_dim["data"] == 4
 
 
-def test_base_graph_model_accepts_omegaconf_hidden_node_lists(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
     model_config = OmegaConf.create(
         {
             "num_channels": 8,
@@ -164,20 +166,154 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists(monkeypatch: pytes
     )
 
     graph = _make_hierarchical_graph()
-    monkeypatch.setattr("anemoi.models.models.base.GraphCreator.create", lambda self: graph)
     model = DummyGraphModel(
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
         n_step_input={"data": 1},
         n_step_output={"data": 1},
-        model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
-        data_types={"data": "gridded"},
+        static_graph_data=graph,
+        dynamic_graph_config={"nodes": {}, "edges": {}},
     )
 
     assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
     assert model.hidden_names == ["hidden_1", "hidden_2", "hidden_3"]
-    assert model._graph_data["hidden_3"].num_nodes == 1
+    assert model.graph_geometry.num_nodes["hidden_3"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Hidden-mesh routing (adapted to the routing reading ``_graph_name_hidden``)
+# ---------------------------------------------------------------------------
+
+
+def _route_hidden_nodes(hidden_nodes_name, dataset_names=("a", "b")) -> SimpleNamespace:
+    """Run the hidden-node routing on a bare namespace, without building a model."""
+    model = SimpleNamespace(dataset_names=list(dataset_names), _graph_name_hidden=hidden_nodes_name)
+    BaseGraphModel._build_hidden_node_routing(model)
+    return model
+
+
+def test_hidden_node_routing_string_applies_to_all_datasets() -> None:
+    model = _route_hidden_nodes("hidden")
+
+    assert model.dataset2hidden == {"a": "hidden", "b": "hidden"}
+    assert model.hidden_names == ["hidden"]
+
+
+@pytest.mark.parametrize("as_omegaconf", [False, True])
+def test_hidden_node_routing_mapping_keeps_order_and_deduplicates(as_omegaconf) -> None:
+    mapping = {"a": "hidden_1", "b": "hidden_2", "c": "hidden_1"}
+    model = _route_hidden_nodes(OmegaConf.create(mapping) if as_omegaconf else mapping, ("a", "b", "c"))
+
+    assert model.dataset2hidden == mapping
+    assert model.hidden_names == ["hidden_1", "hidden_2"]
+
+
+@pytest.mark.parametrize("as_omegaconf", [False, True])
+def test_hierarchical_routing_encodes_every_dataset_into_the_first_level(as_omegaconf) -> None:
+    levels = ["hidden_1", "hidden_2"]
+    model = _route_hidden_nodes(OmegaConf.create(levels) if as_omegaconf else levels)
+
+    assert model.dataset2hidden == {"a": "hidden_1", "b": "hidden_1"}
+    assert model.hidden_names == levels
+
+
+def test_hidden_node_routing_rejects_mapping_missing_a_dataset() -> None:
+    with pytest.raises(AssertionError, match=r"missing for datasets \['b'\]"):
+        _route_hidden_nodes({"a": "hidden"})
+
+
+def test_hidden_node_routing_rejects_mapping_with_unknown_dataset() -> None:
+    with pytest.raises(AssertionError, match=r"unknown datasets \['c'\]"):
+        _route_hidden_nodes({"a": "hidden", "b": "hidden", "c": "hidden"})
+
+
+def test_hidden_node_routing_rejects_unsupported_type() -> None:
+    with pytest.raises(TypeError, match="Hidden nodes name must be"):
+        _route_hidden_nodes(3)
+
+
+def test_active_hidden_name_for_datasets_sharing_a_mesh() -> None:
+    model = _route_hidden_nodes({"a": "hidden_1", "b": "hidden_2", "c": "hidden_1"}, ("a", "b", "c"))
+
+    assert BaseGraphModel._get_active_hidden_name(model, ["a"]) == "hidden_1"
+    assert BaseGraphModel._get_active_hidden_name(model, ["a", "c"]) == "hidden_1"
+    assert BaseGraphModel._get_active_hidden_name(model, ["b"]) == "hidden_2"
+
+
+def test_active_hidden_name_rejects_batch_mixing_meshes() -> None:
+    model = _route_hidden_nodes({"a": "hidden_1", "b": "hidden_2"})
+
+    with pytest.raises(ValueError, match="same hidden mesh"):
+        BaseGraphModel._get_active_hidden_name(model, ["a", "b"])
+
+
+@pytest.mark.parametrize(
+    ("hidden_nodes_name", "expected"),
+    [
+        ("hidden", ["hidden"]),
+        (["hidden_1", "hidden_2"], ["hidden_1", "hidden_2"]),
+        ({"a": "hidden_1", "b": "hidden_2", "c": "hidden_1"}, ["hidden_1", "hidden_2"]),
+    ],
+)
+def test_hidden_node_names(hidden_nodes_name, expected) -> None:
+    assert hidden_node_names(hidden_nodes_name) == expected
+    assert hidden_node_names(OmegaConf.create({"h": hidden_nodes_name}).h) == expected
+
+
+def test_split_graph_config_marks_mapped_hidden_meshes_static() -> None:
+    """A dataset mapping marks its hidden meshes static, not the dataset names."""
+    graph_config = OmegaConf.create(
+        {
+            "nodes": {"a": {}, "b": {}, "hidden_1": {}, "hidden_2": {}},
+            "edges": [
+                {"source_name": "a", "target_name": "hidden_1", "edge_builders": [], "attributes": {}},
+                {"source_name": "hidden_2", "target_name": "hidden_2", "edge_builders": [], "attributes": {}},
+            ],
+        },
+    )
+    is_dataset_static = {"a": True, "b": False}
+
+    static, dynamic = split_graph_config(
+        graph_config, is_dataset_static, OmegaConf.create({"a": "hidden_1", "b": "hidden_2"})
+    )
+
+    assert set(static.nodes) == {"a", "hidden_1", "hidden_2"}
+    assert set(dynamic.nodes) == {"b"}
+    assert len(static.edges) == 2
+
+
+def test_latent_input_dim_uses_the_meshes_datasets_are_encoded_into() -> None:
+    """Hierarchical levels may differ in trainable size: only the first level is encoded into."""
+    model = _route_hidden_nodes(["hidden_1", "hidden_2", "hidden_3"])
+    model.node_attributes = SimpleNamespace(num_trainable_parameters={"hidden_1": 8, "hidden_2": 0})
+
+    assert BaseGraphModel._calculate_input_dim_latent(model) == COORDS_DIM + 8
+
+
+def test_latent_input_dim_rejects_mapped_meshes_of_different_widths() -> None:
+    model = _route_hidden_nodes({"a": "hidden_1", "b": "hidden_2"})
+    model.node_attributes = SimpleNamespace(num_trainable_parameters={"hidden_1": 8, "hidden_2": 0})
+
+    with pytest.raises(AssertionError, match="same node attribute dimension"):
+        BaseGraphModel._calculate_input_dim_latent(model)
+
+
+def test_unpickling_a_model_without_hidden_routing_fills_it_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inference checkpoints pickle the model; ones pickled before per-mesh routing must still run."""
+    model = _make_minimal_model()
+    provider = nn.Linear(1, 1)
+    state = dict(model.__dict__)
+    state["_modules"] = {**state["_modules"], "processor_graph_provider": provider}
+    del state["dataset2hidden"], state["hidden_names"]
+
+    restored = DummyGraphModel.__new__(DummyGraphModel)
+    restored.__setstate__(state)
+
+    assert restored.dataset2hidden == {"data": "hidden"}
+    assert restored.hidden_names == ["hidden"]
+    assert isinstance(restored.processor_graph_provider, nn.ModuleDict)
+    assert restored.processor_graph_provider["hidden"] is provider
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +321,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists(monkeypatch: pytes
 # ---------------------------------------------------------------------------
 
 
-def _make_minimal_model(monkeypatch: pytest.MonkeyPatch) -> DummyGraphModel:
+def _make_minimal_model() -> DummyGraphModel:
     """Return a DummyGraphModel with a working predict_step."""
     model_config = OmegaConf.create(
         {
@@ -213,15 +349,14 @@ def _make_minimal_model(monkeypatch: pytest.MonkeyPatch) -> DummyGraphModel:
         }
     )
     graph = _make_graph()
-    monkeypatch.setattr("anemoi.models.models.base.GraphCreator.create", lambda self: graph)
     return DummyGraphModel(
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
         n_step_input={"data": 1},
         n_step_output={"data": 1},
-        model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
-        data_types={"data": "gridded"},
+        static_graph_data=graph,
+        dynamic_graph_config={"nodes": {}, "edges": {}},
     )
 
 
@@ -264,7 +399,7 @@ def test_predict_step_spatial_preprocessors_called_before_normalization(monkeypa
             call_order.append("pre")
             return x
 
-    model = _make_minimal_model(monkeypatch)
+    model = _make_minimal_model()
 
     # Patch forward so predict_step can complete without a real graph network.
     monkeypatch.setattr(model, "forward", lambda x, **kw: Batch({"data": x["data"]}))
@@ -297,7 +432,7 @@ def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
             assert grid_shard_sizes == source_grid_shard_sizes
             return x[..., :2, :], target_grid_shard_sizes
 
-    model = _make_minimal_model(monkeypatch)
+    model = _make_minimal_model()
     comm_group = SimpleNamespace(size=lambda: 2)
 
     def forward(x, **_kwargs):
@@ -326,7 +461,7 @@ def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
 
 def test_predict_step_skips_input_only_datasets(monkeypatch):
     """Datasets without a decoder (input-only) have no output and must not be post-processed."""
-    model = _make_minimal_model(monkeypatch)
+    model = _make_minimal_model()
 
     # `forcing` feeds an encoder but has no decoder, so forward only returns `data`
     monkeypatch.setattr(model, "forward", lambda x, **kw: Batch({"data": x["data"].clone(data=x["data"].data + 1.0)}))

@@ -16,11 +16,10 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
-from anemoi.models.transport import reference_state_sampling_source
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
-from anemoi.training.train.methods.stochastic_interpolant import StochasticInterpolantTransportObjective
+from anemoi.training.train.methods.flow_matching import FlowMatchingTransportObjective
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.train.step_output import TrainingStepOutput
@@ -62,30 +61,6 @@ class PredictionMode:
 class StatePredictionMode(PredictionMode):
     """Prediction mode where the model learns the future state directly."""
 
-    def _reference_state_target_space(self, batch: Batch) -> Batch:
-        # Use the latest input state as a source field, selecting the same
-        # variables that the model predicts for the future state. The state is
-        # taken from the full batch rather than the model inputs because
-        # diagnostic output variables are not part of the model input, and it
-        # is normalized (with imputation) like the model inputs.
-        batch = self.module.predicted_datasets(batch)
-        latest_input = {name: self.module.n_step_input[name] - 1 for name in batch}
-        reference_state = self.module.preprocess_inputs(batch.select(time=latest_input))
-        reference = reference_state
-        for dataset_name, state_view in reference_state.items():
-            var_idx = self.module.data_indices[dataset_name].data.output.full.tolist()
-            # select() narrows the spec (variables, statistics) along with the data.
-            reference_step = state_view.select(variables=var_idx)
-            if self.module.n_step_output[dataset_name] > 1:
-                if reference_step.is_tabular:
-                    msg = "Multi-step reference-state transport sources are not supported for sparse datasets."
-                    raise NotImplementedError(msg)
-                reference_step = reference_step.clone(
-                    data=reference_step.data.expand(-1, self.module.n_step_output[dataset_name], -1, -1, -1),
-                )
-            reference = reference.replace(dataset_name, reference_step)
-        return self.module.reduce_data_output_target_to_model_output(reference)
-
     def prepare_target(
         self,
         batch: Batch,
@@ -104,8 +79,8 @@ class StatePredictionMode(PredictionMode):
             self.module.get_data_output_target(model_state),
         )
         # NaN-preserving counterpart of model_target, used by objectives that
-        # derive their loss target from model_target (e.g. the SI drift) to
-        # re-mask missing observations.
+        # derive their loss target from model_target (e.g. the flow-matching
+        # velocity) to re-mask missing observations.
         model_target_missing = self.module.reduce_data_output_target_to_model_output(
             self.module.get_data_output_target(target_full),
         )
@@ -115,11 +90,6 @@ class StatePredictionMode(PredictionMode):
             loss_target_layout=IndexSpace.DATA_FULL,
             metric_target=target_full,
             aux={
-                # Build the reference-state source lazily so gaussian and zero
-                # sources never pay for (or crash on) this projection.
-                "transport_reference_source": lambda: {
-                    name: source.data for name, source in self._reference_state_target_space(batch).items()
-                },
                 # Output-time decoding forcings, normalized like the model inputs.
                 "target_forcing": self.module.preprocess_inputs(target_forcing),
                 "model_target_missing": model_target_missing,
@@ -214,8 +184,6 @@ class TendencyPredictionMode(PredictionMode):
             tendencies(self.module.preprocess_inputs(raw_state_target)),
         )
         tendency_target_full = tendencies(state_target_full)
-        # The predicted datasets are dense (checked above), so the reference source works on payload tensors.
-        x_data = {name: source.data for name, source in x.items() if name in reference}
         return PreparedPredictionTarget(
             model_target=tendency_target,
             loss_target=tendency_target_full,
@@ -224,15 +192,8 @@ class TendencyPredictionMode(PredictionMode):
             aux={
                 "reference": reference,
                 # NaN-keeping counterpart of model_target, used by objectives that derive their
-                # loss target from model_target (e.g. the SI drift) to re-mask missing values.
+                # loss target from model_target (e.g. the flow-matching velocity) to re-mask missing values.
                 "model_target_missing": self.module.reduce_data_output_target_to_model_output(tendency_target_full),
-                # Build a reference-state source only if source.kind asks for it;
-                # Gaussian and zero sources do not need this projection.
-                "transport_reference_source": lambda: reference_state_sampling_source(
-                    x_data,
-                    data_indices=self.module.data_indices,
-                    n_step_output=self.module.n_step_output,
-                ),
                 # Output-time decoding forcings, normalized like the model inputs.
                 "target_forcing": self.module.preprocess_inputs(target_forcing),
             },
@@ -267,7 +228,7 @@ PREDICTION_MODE_CLASSES = {
 
 TRANSPORT_OBJECTIVE_CLASSES = {
     "edm_diffusion": EDMDiffusionTransportObjective,
-    "stochastic_interpolant": StochasticInterpolantTransportObjective,
+    "flow_matching": FlowMatchingTransportObjective,
 }
 
 
@@ -427,7 +388,7 @@ class BaseTransportTraining(BaseTrainingModule):
 
 
 class TransportTraining(BaseTransportTraining):
-    """Training module for EDM diffusion and stochastic-interpolant transport models."""
+    """Training module for EDM diffusion and flow-matching transport models."""
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -489,6 +450,26 @@ class TransportTraining(BaseTransportTraining):
             **kwargs,
         )
 
+    def _check_nan_network_target(self, model_target: Batch) -> None:
+        """Fail loudly when the target passed through the network still contains NaNs.
+
+        The corrupted target goes through the network together with the inputs, diagnostics
+        included, so it is imputed like the inputs. A variable the imputer does not cover keeps
+        its NaNs, and one NaN spreads through the graph and makes the whole prediction NaN.
+        """
+        nan_targets = self._nan_variables_per_dataset(
+            model_target,
+            {name: self.data_indices[name].model.output.name_to_index for name, _ in model_target.items()},
+        )
+        if not nan_targets:
+            return
+        msg = (
+            f"The target passed through the transport network contains NaNs after imputation: {nan_targets}. "
+            "One NaN makes the whole prediction NaN. Add an imputer "
+            "(e.g. anemoi.models.preprocessing.imputer.InputImputer) for these variables to the dataset's processors."
+        )
+        raise ValueError(msg)
+
     def _step(
         self,
         batch: Batch,
@@ -497,6 +478,7 @@ class TransportTraining(BaseTransportTraining):
         """Run one training or validation step for the selected transport objective."""
         x = self.preprocess_inputs(self.task.get_inputs(batch, data_indices=self.data_indices))
         prepared_target = self.prediction_mode.prepare_target(batch, x)
+        self._check_nan_network_target(prepared_target.model_target)
         prepared_objective = self.transport_objective.prepare(prepared_target)
 
         prediction = self(

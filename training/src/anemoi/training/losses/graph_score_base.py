@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import math
 from abc import abstractmethod
 from contextlib import nullcontext
 
@@ -38,7 +39,7 @@ def csr_matmul(matrix: torch.Tensor, node_values: torch.Tensor) -> torch.Tensor:
         msg = f"CSR matrix width {matrix.shape[1]} does not match the input node count {input_nodes}."
         raise ValueError(msg)
 
-    dense_batches = node_values.numel() // (input_nodes * channels)
+    dense_batches = math.prod(input_shape[:-2])
     right_hand_side = (
         node_values.reshape(dense_batches, input_nodes, channels)
         .permute(1, 0, 2)
@@ -168,8 +169,7 @@ class BaseGraphScoreLoss(BaseLoss):
             raise ValueError(msg)
         if y_pred_ens.shape[:2] != y_target.shape[:2] or y_pred_ens.shape[3:] != y_target.shape[3:]:
             msg = (
-                f"Prediction and target shapes are incompatible: "
-                f"{tuple(y_pred_ens.shape)} and {tuple(y_target.shape)}."
+                f"Prediction and target shapes are incompatible: {tuple(y_pred_ens.shape)} and {tuple(y_target.shape)}."
             )
             raise ValueError(msg)
 

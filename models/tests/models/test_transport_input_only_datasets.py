@@ -30,6 +30,8 @@ from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTrans
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.normalizer import InputNormalizer
+from anemoi.models.utils.graphs import build_graph
+from anemoi.utils.config import DotDict
 
 NUM_GRID_POINTS = 60
 OBS_ROWS_PER_WINDOW = (17, 21)  # the two input windows of the observation dataset
@@ -213,15 +215,23 @@ def _data_indices() -> dict[str, IndexCollection]:
 def _build_model(kind: str) -> AnemoiTransportModelEncProcDec:
     latitudes, longitudes = _points_on_sphere(NUM_GRID_POINTS, torch.Generator().manual_seed(0))
     torch.manual_seed(1)
-    return MODEL_CLASSES[kind](
+    static_graph_data, dynamic_graph_config = build_graph(
+        DotDict(_graph_config(latitudes, longitudes)),
+        is_dataset_static={"grid": True, "obs": False},
+        hidden_nodes_name="hidden",
+    )
+    model = MODEL_CLASSES[kind](
         model_config=_model_config(),
-        model_graph_config=_graph_config(latitudes, longitudes),
+        static_graph_data=static_graph_data,
+        dynamic_graph_config=dynamic_graph_config,
         data_indices=_data_indices(),
         statistics=STATISTICS,
-        data_types={"grid": "gridded", "obs": "tabular"},
         n_step_input={"grid": 2, "obs": 2},
         n_step_output={"grid": 1, "obs": 1},
     )
+    # The model does not keep the graph; the synthetic batches need its grid coordinates.
+    model.test_grid_coordinates = static_graph_data["grid"].x
+    return model
 
 
 def _gridded(variables: list[str], data: torch.Tensor, coordinates: torch.Tensor) -> GriddedSource:
@@ -255,7 +265,7 @@ def _tabular(variables: list[str], windows: list[torch.Tensor], coordinates: lis
 def _synthetic_batches(model: AnemoiTransportModelEncProcDec) -> dict[str, Batch]:
     """Inputs of both datasets, and the target forcings and a noisy target of the grid, for one sample."""
     generator = torch.Generator().manual_seed(2)
-    grid_coordinates = model._graph_data["grid"].x.float()  # radians, as the graph stores them
+    grid_coordinates = model.test_grid_coordinates.float()  # radians, as the graph stores them
     indices = _data_indices()
 
     def obs_coordinates(num_rows):
@@ -339,7 +349,6 @@ def test_tendency_model_samples_grid_states_with_input_only_observations() -> No
         target_template={"grid": batches["noisy_target"]["grid"].template()},
         pre_processors=pre_processors,
         post_processors=post_processors,
-        n_step_input=model.n_step_input,
         target_forcing=batches["target_forcing"],
         statistics_tendencies=TENDENCY_STATISTICS,
     )

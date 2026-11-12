@@ -22,6 +22,7 @@ from torch_geometric.data.storage import EdgeStorage
 
 from anemoi.graphs.create import HeteroData
 from anemoi.models.data.batch import Batch
+from anemoi.models.distributed.graph import ensure_sharded
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -29,10 +30,13 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.models.layers.node_embedder import NOOP_NODE_EMBEDDER_TARGET
+from anemoi.models.layers.node_embedder import NoOpNodeEmbedder
+from anemoi.models.layers.node_embedder import is_noop_node_embedder_config
 from anemoi.models.layers.processor import NoOpProcessor
 from anemoi.models.models import BaseGraphModel
-from anemoi.models.models.base import PROJECTING_FUSING_STRATEGIES
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
@@ -79,27 +83,41 @@ def gathered_batch_sizes(batch_sizes: tuple[int, ...] | None, shard_sizes: Shard
 
 
 def _format_dims(dims: dict[str, int]) -> str:
-    """Helper function. Prints one dataset per line, widths aligned, widest first so the odd one out stands out."""
+    """Helper function. Prints one dataset per line, counts aligned, largest first so the odd one out stands out."""
     pad = max(len(name) for name in dims)
     ordered = sorted(dims.items(), key=lambda item: (-item[1], item[0]))
-    return "\n".join(f"      {name:<{pad}}  {width}" for name, width in ordered)
+    return "\n".join(f"      {name:<{pad}}  {count}" for name, count in ordered)
 
 
-def _mismatched_input_dims_message(encoder_name: str, in_dims: dict[str, int], strategy: str) -> str:
-    """Explain why an unprojected encoder cannot take source datasets of differing widths."""
+def _mismatched_input_dims_message(encoder_name: str, in_dims: dict[str, int]) -> str:
+    """Explain why a 'none' encoder cannot take source datasets with differing numbers of input channels."""
     return (
-        f"Encoder '{encoder_name}' has dataset_fusing_strategy '{strategy}', which passes every source "
-        f"dataset through the same encoder weights but builds no per-dataset projections, so all "
-        f"{len(in_dims)} of its source datasets must have the same input width. Got:\n"
+        f"Encoder '{encoder_name}' has dataset_fusing_strategy 'none', which feeds each source dataset "
+        f"to the encoder mapper as is (NoOpNodeEmbedder), so all {len(in_dims)} of its source datasets must "
+        f"have the same number of input channels. Got:\n"
         f"{_format_dims(in_dims)}\n"
-        "    These are assembled encoder input widths (variables + coordinates + trainable node "
+        "    These are assembled encoder input channels (variables + coordinates + trainable node "
         "parameters + any timedelta node features), not raw variable counts.\n"
-        "    To share one encoder across datasets of differing widths, set\n"
+        "    To share one encoder across datasets with different input channels, set\n"
         f"        model.encoders.{encoder_name}.dataset_fusing_strategy: 'sequential'\n"
-        f"    which inserts a thin linear projection per dataset onto a common width "
-        f"(default max = {max(in_dims.values())}, override with "
-        f"model.encoders.{encoder_name}.fusion_projection_dim).\n"
+        f"        model.encoders.{encoder_name}.node_embedder:\n"
+        "          _target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder\n"
+        f"          num_channels: {max(in_dims.values())}\n"
+        "    which projects each dataset onto num_channels before the shared mapper.\n"
         "    Alternatively, give these datasets separate encoders if they should not share weights."
+    )
+
+
+def _several_sources_message(encoder_name: str, dataset_names: list[str]) -> str:
+    """Explain why a 'none' encoder cannot encode several source datasets in one batch."""
+    return (
+        f"Encoder '{encoder_name}' has dataset_fusing_strategy 'none' but the batch holds "
+        f"{len(dataset_names)} of its source datasets: {dataset_names}. 'none' does not fuse: it "
+        "encodes one source dataset per batch, so several source_datasets are only valid when each "
+        "batch carries one of them (e.g. multi-domain training with MultiDomainLoadingPolicy).\n"
+        "    To encode several source datasets in the same batch, set\n"
+        f"        model.encoders.{encoder_name}.dataset_fusing_strategy: 'sequential'\n"
+        f"    with a model.encoders.{encoder_name}.node_embedder block, or give them separate encoders."
     )
 
 
@@ -107,9 +125,9 @@ def _mismatched_edge_dims_message(encoder_name: str, edge_dims: dict[str, int]) 
     """Explain a per-source edge-dimension mismatch, which is a graph-config problem."""
     return (
         f"Encoder '{encoder_name}' has source datasets whose encoder graphs supply different edge "
-        f"feature widths, so they cannot share one mapper. Got:\n"
+        f"feature counts, so they cannot share one mapper. Got:\n"
         f"{_format_dims(edge_dims)}\n"
-        "    Edge width comes from the graph, not the model: a static (gridded) source contributes "
+        "    The number of edge features comes from the graph, not the model: a static (gridded) source contributes "
         "the attributes named in the mapper's sub_graph_edge_attributes plus trainable_size, while a "
         "dynamic (observation) source contributes every attribute declared on its edges and no "
         "trainable parameters.\n"
@@ -182,31 +200,64 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         features = [attribute.compute(x_flat.timedeltas) for attribute in attribute_builders.values()]
         return torch.cat(features, dim=-1)
 
-    def _encoder_projects_sources(self, encoder_name: str) -> bool:
-        """Whether this encoder maps its source datasets through per-dataset projections.
+    def _projecting_node_embedder(self, encoder_name: str) -> torch.nn.Module | None:
+        """This encoder's node embedder if it changes its input, or None if the input passes through.
 
-        Only multi-source encoders using a real fusing strategy do; single-source encoders keep
-        feeding the mapper their assembled input directly, so their weights are unchanged.
+        None for a NoOpNodeEmbedder, and for encoders with no entry at all: models pickled before every
+        encoder had a node embedder only hold the projecting ones.
         """
-        return (
-            len(self.encoder2datasets[encoder_name]) > 1
-            and self.encoder_fusing_strategy[encoder_name] in PROJECTING_FUSING_STRATEGIES
-        )
-
-    def _project_source(self, encoder_name: str, dataset_name: str, x_data_latent: Tensor) -> Tensor:
-        """Apply this encoder's thin projection for one source dataset, if it has one."""
         if encoder_name not in self.encoder_src_projection:
+            return None
+        node_embedder = self.encoder_src_projection[encoder_name]
+        return None if isinstance(node_embedder, NoOpNodeEmbedder) else node_embedder
+
+    def _encoder_projects_sources(self, encoder_name: str) -> bool:
+        """Whether this encoder maps its source datasets through a projecting node embedder.
+
+        True for 'sequential' encoders. Once the node embedders are built this is read off the modules,
+        so models pickled before node embedders were explicit (single-source 'sequential' without a
+        projection) keep their behaviour. Before that (decoder target input channels are
+        computed first) it follows the configured strategy.
+        """
+        if "encoder_src_projection" in self._modules:
+            return self._projecting_node_embedder(encoder_name) is not None
+        return self.encoder_fusing_strategy[encoder_name] == "sequential"
+
+    def _project_source(
+        self,
+        encoder_name: str,
+        dataset_name: str,
+        x_data_latent: Tensor,
+        src_shard_sizes: ShardSizes = None,
+        model_comm_group: ProcessGroup | None = None,
+    ) -> Tensor:
+        """Apply this encoder's node embedder to one source dataset, unless it is a pass-through.
+
+        Under model sharding a source that is replicated on every rank (``src_shard_sizes`` is
+        None) is sharded before the node embedder and gathered after it. The node embedder is applied row by row,
+        so its weight gradient on each rank then covers only that rank's rows, as the strategy's
+        gradient scaling expects; applied to all rows it would be counted once per rank. The
+        mapper still receives the replicated input it gets for an unprojected source.
+        """
+        node_embedder = self._projecting_node_embedder(encoder_name)
+        if node_embedder is None:
             return x_data_latent
-        return self.encoder_src_projection[encoder_name][dataset_name](x_data_latent)
+        # Indexed by dataset name rather than called: models pickled before LinearNodeEmbedder hold a plain ModuleDict.
+        projection = node_embedder[dataset_name]
+        if src_shard_sizes is not None or not model_is_distributed(model_comm_group):
+            return projection(x_data_latent)
+        x_shard, shard_sizes = ensure_sharded(x_data_latent, 0, None, model_comm_group)
+        return gather_tensor(projection(x_shard), 0, shard_sizes, model_comm_group)
 
     def _build_encoding_networks(self, encoders_config: DotDict) -> None:
-        """Instantiate one mapper per encoder, plus thin source projections where needed.
+        """Instantiate one node embedder and one mapper per encoder.
 
         Requires self.encoder_graph_provider to be populated, since an encoder's edge
         dimension comes from its source datasets' graph providers.
         """
-        # Per-dataset "thin" projections onto a shared width, for multi-source encoders whose
-        # source datasets differ in input dimension. Keyed [encoder_name][dataset_name].
+        # Node embedders keyed by encoder name: a NoOpNodeEmbedder for 'none' encoders, a projecting one
+        # (per-dataset projections onto the mapper's input channels) for 'sequential' encoders. The
+        # attribute name is part of the state-dict keys of the projecting ones.
         self.encoder_src_projection = torch.nn.ModuleDict()
 
         self.encoder = torch.nn.ModuleDict()
@@ -216,17 +267,22 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             if len(set(edge_dims.values())) > 1:
                 raise ValueError(_mismatched_edge_dims_message(encoder_name, edge_dims))
 
-            projects = self._encoder_projects_sources(encoder_name)
-            if projects:
-                in_channels_src = encoder_config.get("fusion_projection_dim") or max(in_dims.values())
-            else:
+            node_embedder_config = encoder_config.get("node_embedder")
+            if self.encoder_fusing_strategy[encoder_name] == "none":
+                # 'none' never projects: null or another node embedder falls back to the pass-through one.
+                if node_embedder_config is None or not is_noop_node_embedder_config(node_embedder_config):
+                    node_embedder_config = DotDict({"_target_": NOOP_NODE_EMBEDDER_TARGET})
                 if len(set(in_dims.values())) > 1:
-                    raise ValueError(
-                        _mismatched_input_dims_message(
-                            encoder_name, in_dims, self.encoder_fusing_strategy[encoder_name]
-                        )
-                    )
-                in_channels_src = next(iter(in_dims.values()))
+                    raise ValueError(_mismatched_input_dims_message(encoder_name, in_dims))
+            layer_kernels = node_embedder_config.get("layer_kernels") or encoder_config.mapper.get("layer_kernels")
+            node_embedder = instantiate(
+                node_embedder_config,
+                _recursive_=False,  # layer_kernels are instantiated by the node embedder
+                in_channels=in_dims,
+                layer_kernels=layer_kernels,
+            )
+            self.encoder_src_projection[encoder_name] = node_embedder
+            in_channels_src = node_embedder.num_channels
 
             self.encoder[encoder_name] = instantiate(
                 encoder_config.mapper,
@@ -235,12 +291,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 in_channels_dst=self.input_dim_latent,
                 edge_dim=next(iter(edge_dims.values())),
             )
-
-            if projects:
-                Linear = self.encoder[encoder_name].layer_factory.Linear
-                self.encoder_src_projection[encoder_name] = torch.nn.ModuleDict(
-                    {d: Linear(dim, in_channels_src) for d, dim in in_dims.items()}
-                )
 
     def _build_encoding_graphproviders(
         self, encoders_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict
@@ -286,9 +336,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def _build_processing_networks(self, processor_config: DotDict) -> None:
         processor_edge_dims = [provider.edge_dim for provider in self.processor_graph_provider.values()]
-        assert all(
-            dim == processor_edge_dims[0] for dim in processor_edge_dims
-        ), f"All hidden meshes must have the same processor edge dimension, got {processor_edge_dims}."
+        assert all(dim == processor_edge_dims[0] for dim in processor_edge_dims), (
+            f"All hidden meshes must have the same processor edge dimension, got {processor_edge_dims}."
+        )
         processor_edge_dim = processor_edge_dims[0]
 
         self.processor = instantiate(
@@ -526,12 +576,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         pred = template.unflatten(x_out.to(torch.promote_types(dtype, torch.float32)))
 
         if x_skip is not None:
-            assert (
-                x_skip.ndim == 5
-            ), f"Residual must be (batch, time, ensemble, grid, variables), but got shape {x_skip.shape}"
-            assert (
-                x_skip.shape[1] == pred.data.shape[1]
-            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({pred.data.shape[1]})."
+            assert x_skip.ndim == 5, (
+                f"Residual must be (batch, time, ensemble, grid, variables), but got shape {x_skip.shape}"
+            )
+            assert x_skip.shape[1] == pred.data.shape[1], (
+                f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({pred.data.shape[1]})."
+            )
             new_data = pred.data.clone()
             new_data[..., self._internal_output_idx[dataset_name]] += x_skip[
                 ..., self._internal_input_idx[dataset_name]
@@ -549,18 +599,18 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         in_out_sharded: bool,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> None:
-        assert not (
-            in_out_sharded and model_comm_group is None
-        ), "If input is sharded, model_comm_group must be provided."
+        assert not (in_out_sharded and model_comm_group is None), (
+            "If input is sharded, model_comm_group must be provided."
+        )
 
         if model_comm_group is not None:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded across GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                "Only batch size of 1 is supported when model is sharded across GPUs"
+            )
 
-            assert (
-                model_comm_group.size() == 1 or ensemble_size == 1
-            ), "Ensemble size per device must be 1 when model is sharded across GPUs"
+            assert model_comm_group.size() == 1 or ensemble_size == 1, (
+                "Ensemble size per device must be 1 when model is sharded across GPUs"
+            )
 
     def _prepare_encoder_source(
         self,
@@ -736,16 +786,26 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     ) -> dict[str, Tensor]:
         """Encode one encoder's source datasets, returning its latents keyed by dataset name.
 
-        With ``sequential`` (and with ``none``) every source dataset gets its own
-        pass through the shared encoder against the same unmodified hidden latent, and yields its
-        own latent; the latent aggregator combines them. ``mapper_kwargs`` holds extra mapper
-        arguments per dataset (e.g. the noise conditioning of a transport model).
+        With ``sequential`` every source dataset is projected by the encoder's node embedder and gets its
+        own pass through the shared mapper against the same unmodified hidden latent, yielding
+        its own latent; the latent aggregator combines them. With ``none`` the batch may hold only
+        one of the encoder's source datasets, which is encoded unprojected. ``mapper_kwargs`` holds
+        extra mapper arguments per dataset (e.g. the noise conditioning of a transport model).
         """
+        if self.encoder_fusing_strategy[encoder_name] == "none" and len(sources) > 1:
+            raise ValueError(_several_sources_message(encoder_name, [source.dataset_name for source in sources]))
+
         projects = self._encoder_projects_sources(encoder_name)
         latents: dict[str, Tensor] = {}
 
         for source in sources:
-            x_src = self._project_source(encoder_name, source.dataset_name, source.x_data_latent)
+            x_src = self._project_source(
+                encoder_name,
+                source.dataset_name,
+                source.x_data_latent,
+                src_shard_sizes=source.shard_info.src_nodes,
+                model_comm_group=model_comm_group,
+            )
             x_data_latent, x_latent = self.encoder[encoder_name](
                 (x_src, x_hidden_latent),
                 batch_size=batch_size,
@@ -756,7 +816,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 **(mapper_kwargs or {}).get(source.dataset_name, {}),
             )
-            # Decoder target features expect the *assembled* (pre-projection) width, so a
+            # Decoder target features expect the *assembled* (pre-projection) input channels, so a
             # projecting encoder reports its input rather than the mapper's src passthrough.
             x_data_latent_dict[source.dataset_name] = source.x_data_latent if projects else x_data_latent
             latents[source.dataset_name] = x_latent
@@ -939,12 +999,4 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         return Batch(x_out_dict)
 
     def fill_metadata(self, md_dict) -> None:
-        for dataset in self.input_dim.keys():
-            dataset_md = md_dict["metadata_inference"][dataset]
-            shapes = {
-                "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input[dataset],
-                "ensemble": 1,
-                "grid": dataset_md.get("grid_size"),  # None for tabular data
-            }
-            dataset_md["shapes"] = shapes
+        pass

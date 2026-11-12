@@ -63,6 +63,7 @@ class _ConcatenatedTabularDataset:
         self.statistics = datasets[0].statistics
         self.frequency = datasets[0].frequency
         self.window = datasets[0].window
+        self.resolution = datasets[0].resolution
         self.missing = set()
 
     def __len__(self) -> int:

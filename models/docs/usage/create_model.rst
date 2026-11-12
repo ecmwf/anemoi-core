@@ -35,7 +35,9 @@ First, let's take the model configuration ``transformer.yaml``:
    encoders:
      0:                        # user-defined group name (appears in the state-dict)
        source_datasets: [ "data" ]           # datasets encoded by this group
-       dataset_fusing_strategy: "none"
+       dataset_fusing_strategy: "none"     # "none" or "sequential" ("joint" is planned)
+       node_embedder:                      # pass-through for "none"; "sequential" needs e.g. LinearNodeEmbedder
+         _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024

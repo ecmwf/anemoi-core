@@ -100,7 +100,8 @@ def test_user_callback_instantiated_via_hydra_interpolation():
     """
     config = omegaconf.OmegaConf.create(
         yaml.safe_load(
-            default_config + """
+            default_config
+            + """
 task:
   validation_rollout: 3
 """,

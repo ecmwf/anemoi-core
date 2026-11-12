@@ -123,7 +123,7 @@ def _index_list(indices: slice | Sequence[int] | torch.Tensor | int, size: int) 
 class Source(ABC):
     """Per-dataset view returned by :meth:`Batch.view`.
 
-    Combines the per-dataset payload with the metadata that describes it (name,
+    Bundles the per-dataset payload with the metadata that describes it (name,
     variables, layout, statistics) so callers can index logical axes (``time``,
     ``variables``) without hard-coded dimension positions. The same API works for
     gridded and tabular (observation) datasets; the subclass decides how each

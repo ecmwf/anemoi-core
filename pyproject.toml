@@ -1,0 +1,13 @@
+# Settings for files outside the packages, and for docsig, which reads them only from the repository root.
+# Each package has its own pyproject.toml.
+
+[tool.ruff]
+line-length = 120
+
+[tool.docsig]
+check-class = true
+check-dunders = true
+check-overridden = true
+check-protected = true
+ignore-no-params = true
+disable = [ "SIG101", "SIG102", "SIG305", "SIG306", "SIG502", "SIG505" ]

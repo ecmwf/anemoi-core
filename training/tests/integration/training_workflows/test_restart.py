@@ -20,11 +20,13 @@ from omegaconf import OmegaConf
 from omegaconf import open_dict
 
 from anemoi.models.data import Batch
+from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.train.evaluate import AnemoiEvaluator
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.time_indices import normalize_time_indices
+from anemoi.utils.checkpoints import load_metadata
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
 from tests.integration.helpers import assert_keys_exist
@@ -36,9 +38,9 @@ def get_single_checkpoint_dir(cfg: DictConfig) -> Path:
     assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
 
     run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
-    assert (
-        len(run_dirs) == 1
-    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
+    assert len(run_dirs) == 1, (
+        f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
+    )
     return run_dirs[0]
 
 
@@ -167,16 +169,82 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     trainer.train()
 
     assert start.epoch == parent_epoch, f"resumed run started at epoch {start.epoch}, checkpoint has {parent_epoch}"
-    assert (
-        start.global_step == parent_global_step
-    ), f"resumed run started at step {start.global_step}, checkpoint has {parent_global_step}"
+    assert start.global_step == parent_global_step, (
+        f"resumed run started at step {start.global_step}, checkpoint has {parent_global_step}"
+    )
 
     expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
-    assert (
-        trainer.model.trainer.global_step == expected_global_step
-    ), f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+    assert trainer.model.trainer.global_step == expected_global_step, (
+        f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+    )
 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_resumed_run_is_bitwise_identical(
+    gnn_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """A run resumed from a mid-epoch checkpoint has the losses and weights of the uninterrupted run.
+
+    A resumed run must not use state that is not in the checkpoint. The test uses the
+    default DDP strategy settings and deterministic GPU kernels. With one GPU, the test
+    does not examine the order in which DDP sums the gradients of different GPUs.
+    """
+    cfg, url = gnn_config
+    get_test_archive(url)
+    cfg.training.strategy._target_ = "anemoi.training.distributed.strategy.DDPGroupStrategy"
+    cfg.training.deterministic = True
+    cfg.dataloader.limit_batches.validation = 1
+    # Log the training loss of every step to a local MLflow file store.
+    cfg.diagnostics.log.mlflow.enabled = True
+    cfg.diagnostics.log.mlflow.offline = True
+    cfg.diagnostics.log.interval = 1
+    # Two epochs of 3 steps each, with a checkpoint in the middle of the second epoch.
+    total_steps = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    checkpoint_step = 4
+    cfg.diagnostics.checkpoint.every_n_train_steps.save_frequency = checkpoint_step
+    cfg.diagnostics.checkpoint.every_n_train_steps.num_models_saved = -1
+    checkpoints_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+
+    def train(run_cfg: DictConfig) -> tuple[dict[int, float], dict[str, torch.Tensor]]:
+        trainer = AnemoiTrainer(run_cfg)
+        trainer.train()
+        logger = trainer.mlflow_logger
+        history = logger.experiment.get_metric_history(logger.run_id, "train_multi_dataset_loss_step")
+        losses = {metric.step: metric.value for metric in history}
+        weights = {name: param.detach().cpu().clone() for name, param in trainer.model.state_dict().items()}
+        return losses, weights
+
+    uninterrupted_cfg = deepcopy(cfg)
+    uninterrupted_cfg.training.seed = 42
+    uninterrupted_losses, uninterrupted_weights = train(uninterrupted_cfg)
+    assert len(uninterrupted_losses) == total_steps
+    (uninterrupted_dir,) = checkpoints_dir.iterdir()
+    (checkpoint_path,) = uninterrupted_dir.glob(f"anemoi-by_step-*-step_{checkpoint_step:06d}.ckpt")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    assert checkpoint["global_step"] == checkpoint_step
+
+    resumed_cfg = deepcopy(cfg)
+    # A LocalSource without a loading strategy resumes through Lightning's ckpt_path.
+    with open_dict(resumed_cfg):
+        resumed_cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.local.LocalSource",
+                "path": str(checkpoint_path),
+            },
+        }
+    # Without a seed in the config, the resumed run takes the checkpoint's seed.
+    resumed_cfg.training.seed = None
+    resumed_losses, resumed_weights = train(resumed_cfg)
+
+    assert len(resumed_losses) == total_steps - checkpoint_step
+    assert resumed_losses == {step: uninterrupted_losses[step] for step in resumed_losses}
+    assert resumed_weights.keys() == uninterrupted_weights.keys()
+    for name in resumed_weights:
+        assert torch.equal(resumed_weights[name], uninterrupted_weights[name]), f"weights of {name} differ"
 
 
 @skip_if_offline
@@ -225,32 +293,70 @@ def test_restart_training_architectures(
     trainer.train()
 
     expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
-    assert (
-        trainer.model.trainer.global_step == expected_global_step
-    ), f"{config_fixture} resume: expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+    assert trainer.model.trainer.global_step == expected_global_step, (
+        f"{config_fixture} resume: expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+    )
 
 
-@skip_if_offline
-@pytest.mark.slow
-def test_inference_checkpoint_round_trips(
-    gnn_config: tuple[DictConfig, str],
+def _predict_from_inference_checkpoint(path: Path) -> None:
+    """Load an inference checkpoint and run ``predict_step`` on it, as anemoi-inference does.
+
+    The checkpoint pickles the model without its graph; the inputs are built from the
+    checkpoint alone: its metadata (variables, steps) and its supporting arrays (the grid).
+    Inputs are random, in physical units: the model's normaliser takes them from there.
+    """
+    model = torch.load(path, map_location="cpu", weights_only=False).eval()
+    assert model.graph_data is None, "the inference checkpoint is saved without the graph"
+    metadata, supporting_arrays = load_metadata(str(path), supporting_arrays=True)
+    metadata_inference = metadata["metadata_inference"]
+
+    inputs, templates, forcings, expected_shapes = {}, {}, {}, {}
+    for name in metadata_inference["dataset_names"]:
+        md = metadata_inference[name]
+        assert md["data_type"] == "gridded", f"{name}: this test builds gridded inputs only"
+        input_names = sorted(md["data_indices"]["input"], key=md["data_indices"]["input"].get)
+        output_names = sorted(md["data_indices"]["output"], key=md["data_indices"]["output"].get)
+        forcing_names = [variable for variable in input_names if variable in md["variable_types"]["forcing"]]
+        n_input = len(md["timesteps"]["input_relative_date_indices"])
+        n_output = len(md["timesteps"]["output_relative_date_indices"])
+        geometry = {
+            "data_type": "gridded",
+            "latitudes": supporting_arrays[name]["latitudes"],
+            "longitudes": supporting_arrays[name]["longitudes"],
+            "layout": ("time", "ensemble", "grid", "variables"),
+        }
+        grid = geometry["latitudes"].size
+        inputs[name] = {**geometry, "data": torch.randn(n_input, 1, grid, len(input_names)), "variables": input_names}
+        templates[name] = {**geometry, "variables": output_names}
+        forcings[name] = {
+            **geometry,
+            "data": torch.randn(n_output, 1, grid, len(forcing_names)),
+            "variables": forcing_names,
+        }
+        expected_shapes[name] = (n_output, 1, grid, len(output_names))
+
+    # Few sampling steps: the test checks that the model runs, not what it predicts.
+    kwargs = {"schedule_params": {"num_steps": 2}} if isinstance(model.model, AnemoiTransportModelEncProcDec) else {}
+    with torch.no_grad():
+        prediction = model.predict_step(inputs, target_template=templates, target_forcing=forcings, **kwargs)
+
+    for name, shape in expected_shapes.items():
+        assert tuple(prediction[name]["data"].shape) == shape, f"{name}: {tuple(prediction[name]['data'].shape)}"
+        assert torch.isfinite(prediction[name]["data"]).all(), f"{name}: non-finite prediction"
+
+
+def _check_inference_checkpoint(
+    cfg: DictConfig,
+    urls: str | list[str],
     get_test_archive: GetTestArchive,
     partial_metadata_schema: dict[str, Any],
 ) -> None:
-    """A training run's inference checkpoint loads back and carries the inference contract.
-
-    ``AnemoiCheckpoint`` writes an ``inference-*.ckpt`` next to each Lightning checkpoint;
-    it is what anemoi-inference consumes downstream, and the existing UUID test never loads
-    it back. Train, then assert the saved inference checkpoint ``torch.load``s into a model
-    that carries weights and that its metadata satisfies the inference schema — the
-    consumption contract — without taking a dependency on anemoi-inference.
-    """
-    import torch
-
-    from anemoi.utils.checkpoints import load_metadata
-
-    cfg, url = gnn_config
-    get_test_archive(url)
+    """Train, then check the run's inference checkpoint: it loads, carries the contract, and predicts."""
+    for url in urls if isinstance(urls, list) else [urls]:
+        get_test_archive(url)
+    with open_dict(cfg):
+        cfg.diagnostics.plot.callbacks = []
+        cfg.diagnostics.callbacks = []
     AnemoiTrainer(cfg).train()
 
     output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
@@ -266,6 +372,49 @@ def test_inference_checkpoint_round_trips(
     # Carries the metadata anemoi-inference consumes (the consumption contract).
     metadata = load_metadata(inference_ckpt)
     assert_keys_exist(metadata, partial_metadata_schema)
+
+    # And predicts, from the checkpoint alone.
+    _predict_from_inference_checkpoint(inference_ckpt)
+
+
+@skip_if_offline
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "config_fixture",
+    ["gnn_config", "ensemble_config", "hierarchical_config", "offset_forecaster_tendency_transport_config"],
+)
+def test_inference_checkpoint_round_trips(
+    config_fixture: str,
+    request: pytest.FixtureRequest,
+    get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
+    """A training run's inference checkpoint loads back, carries the inference contract, and predicts.
+
+    ``AnemoiCheckpoint`` writes an ``inference-*.ckpt`` next to each Lightning checkpoint;
+    it is what anemoi-inference consumes downstream. Train, then assert the saved inference
+    checkpoint ``torch.load``s into a model that carries weights, that its metadata satisfies
+    the inference schema, and that ``predict_step`` runs on it -- without the graph, which the
+    checkpoint does not carry -- for each kind of model, without a dependency on anemoi-inference.
+    """
+    cfg, urls = request.getfixturevalue(config_fixture)
+    _check_inference_checkpoint(cfg, urls, get_test_archive, partial_metadata_schema)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_transport_inference_checkpoint_round_trips(
+    edm_transport_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
+    """As ``test_inference_checkpoint_round_trips``, for the EDM transport models (state and tendency).
+
+    A separate test because ``edm_transport_config`` is parametrized, which
+    ``request.getfixturevalue`` does not support.
+    """
+    cfg, url = edm_transport_config
+    _check_inference_checkpoint(cfg, url, get_test_archive, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -321,9 +470,9 @@ def test_loading_strategy_loads_real_checkpoint(
 
     # The pipeline applies weights at model-build and marks the model; if the strategy
     # had silently failed to load, this would be unset (or the run would have crashed).
-    assert (
-        getattr(trainer.model, "weights_initialized", False) is True
-    ), f"{loader} did not mark the model weights as initialised"
+    assert getattr(trainer.model, "weights_initialized", False) is True, (
+        f"{loader} did not mark the model weights as initialised"
+    )
 
 
 @skip_if_offline
@@ -433,9 +582,9 @@ def test_restart_training_with_rollout(
     trainer.train()
     assert_keys_exist(trainer.metadata, partial_metadata_schema)
     # The rollout step should be incremented after each epoch, so after 2 epochs it should be 3
-    assert (
-        trainer.task.rollout.step == 3
-    ), f"Expected rollout step after 2 epochs to be 1+2=3, got {trainer.task.rollout.step}"
+    assert trainer.task.rollout.step == 3, (
+        f"Expected rollout step after 2 epochs to be 1+2=3, got {trainer.task.rollout.step}"
+    )
 
     # Resume training from the checkpoint and verify the rollout counter is restored
     # correctly and continues to increment on further epochs.

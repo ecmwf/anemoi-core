@@ -9,7 +9,6 @@
 
 
 import copy
-import importlib
 import io
 import logging
 import pickle
@@ -25,11 +24,6 @@ from pytorch_lightning import Trainer
 from anemoi.models.migrations import Migrator
 from anemoi.models.preprocessing.imputer import BaseImputer
 from anemoi.utils.checkpoints import save_metadata
-
-chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
-trainable_edge_perm_fix_migration = importlib.import_module(
-    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix",
-).migrate
 
 LOGGER = logging.getLogger(__name__)
 

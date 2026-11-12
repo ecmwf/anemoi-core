@@ -22,6 +22,7 @@ from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -488,7 +489,7 @@ def test_multiscale_smooths_in_input_dtype(mocker: MockerFixture) -> None:
     loss = multiscale_loss(_view(pred), _view(target))
 
     assert loss.dtype == torch.float64
-    assert provider.projection_matrix.dtype == torch.float64
+    assert provider.projection_matrix.dtype == torch.float32
     assert torch.isfinite(loss)
 
 
@@ -577,10 +578,9 @@ def test_deepcopy_multiscale_loss_does_not_raise(mocker: MockerFixture) -> None:
 def test_multiscale_masks_predictions_through_the_variable_mapping(mocker: MockerFixture, nan_variable: str) -> None:
     """NaN targets mask the prediction variables they are compared with, also when the layouts differ.
 
-    Built from a config, the per-scale loss is wrapped in a LossVariableMapper: the prediction arrives in
-    the model-output layout and the target in the full data layout, which also holds the forcings. The
-    target's NaN mask therefore cannot be applied to the prediction position by position. A NaN in a
-    target variable that is not compared (the forcing) must not mask any prediction.
+    The prediction arrives in the model-output layout and the target in the full data layout, which also
+    holds the forcings, so the target's NaN mask cannot be applied to the full prediction position by
+    position. A NaN in a target variable that is not compared (the forcing) must not mask any prediction.
     """
     mocker.patch(
         "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
@@ -614,3 +614,63 @@ def test_multiscale_masks_predictions_through_the_variable_mapping(mocker: Mocke
     expected = aligned(_view(pred), _view(target))
     assert torch.isfinite(loss)
     torch.testing.assert_close(loss, expected)
+
+
+def _time_aggregate_config(inner: dict) -> dict:
+    return {
+        "_target_": "anemoi.training.losses.aggregate.TimeAggregateLossWrapper",
+        "time_aggregation_types": ["mean", "diff"],
+        "loss_fn": inner,
+    }
+
+
+def _multiscale_config(inner: dict) -> dict:
+    return {
+        "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
+        "weights": [1.0, 2.0],
+        "multiscale_config": {"loss_matrices": ["ring", None]},
+        "per_scale_loss": inner,
+    }
+
+
+@pytest.mark.parametrize(
+    "nesting",
+    ["multiscale", "time_aggregate", "time_inside_multiscale", "multiscale_inside_time"],
+)
+def test_loss_wrappers_sit_inside_one_variable_mapper(mocker: MockerFixture, nesting: str) -> None:
+    """Loss wrappers built from a config sit inside one variable mapper, however they are nested.
+
+    The prediction comes in model-output order and the target in full-data order, here with a forcing and
+    a diagnostic, so the same variable sits at different positions on the two sides. The mapper selects
+    and lines them up first, so the wrappers only work on the variables that enter the loss.
+    """
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        return_value=[_ring_smoother(), None],
+    )
+    data_indices = IndexCollection(
+        DictConfig({"forcing": ["f"], "diagnostic": ["d"]}),
+        {"a": 0, "f": 1, "d": 2, "b": 3},
+    )
+    crps = {"_target_": "anemoi.training.losses.CRPS", "scalers": []}
+    config = {
+        "multiscale": _multiscale_config(crps),
+        "time_aggregate": _time_aggregate_config(crps),
+        "time_inside_multiscale": _multiscale_config(_time_aggregate_config(crps)),
+        "multiscale_inside_time": _time_aggregate_config(_multiscale_config(crps)),
+    }[nesting]
+    loss = get_loss_function(DictConfig(config), scalers={}, data_indices=data_indices)
+
+    names = list(data_indices.model.output.ordered_names)
+    pred_positions = [data_indices.model.output.name_to_index[name] for name in names]
+    target_positions = [data_indices.name_to_index[name] for name in names]
+    generator = torch.Generator().manual_seed(0)
+    pred = torch.randn((1, 2, 2, 4, len(names)), generator=generator)
+    target = torch.randn((1, 2, 1, 4, len(data_indices.name_to_index)), generator=generator)
+
+    value = loss(_view(pred), _view(target), pred_layout=IndexSpace.MODEL_OUTPUT, target_layout=IndexSpace.DATA_FULL)
+    expected = loss.loss(_view(pred[..., pred_positions]), _view(target[..., target_positions]))
+
+    assert isinstance(loss, LossVariableMapper)
+    assert not any(isinstance(module, LossVariableMapper) for module in loss.loss.modules())
+    torch.testing.assert_close(value, expected)

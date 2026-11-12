@@ -55,6 +55,8 @@ from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
+from anemoi.models.utils.graphs import build_graph
+from anemoi.utils.config import DotDict
 
 from ._distributed_runner import _run_distributed_test
 
@@ -74,6 +76,8 @@ MODELS = {
     "edm_transport": {"model_class": AnemoiTransportModelEncProcDec, "obs_predicted": True},
     "edm_transport_obs_input_only": {"model_class": AnemoiTransportModelEncProcDec, "obs_predicted": False},
     "edm_tendency_obs_input_only": {"model_class": AnemoiTransportTendModelEncProcDec, "obs_predicted": False},
+    # One 'sequential' encoder fuses the grid and the observations, with different input channels, through a node embedder.
+    "fused_sequential": {"model_class": AnemoiModelEncProcDec, "obs_predicted": True, "fused": True},
 }
 # Observation rows per input window and in the target window.
 OBS_ROWS = {
@@ -165,7 +169,7 @@ def _graph_config(
     return config
 
 
-def _model_config(model_class: type, obs_predicted: bool, with_grid: bool = True) -> DictConfig:
+def _model_config(model_class: type, obs_predicted: bool, with_grid: bool = True, fused: bool = False) -> DictConfig:
     transport = issubclass(model_class, AnemoiTransportModelEncProcDec)
     tendency = issubclass(model_class, AnemoiTransportTendModelEncProcDec)
     ensemble = issubclass(model_class, AnemoiEnsModelEncProcDec)
@@ -289,6 +293,18 @@ def _model_config(model_class: type, obs_predicted: bool, with_grid: bool = True
                 "autocast": False,
             },
         }
+    if fused:
+        config["encoders"] = {
+            "fused": {
+                "source_datasets": ["grid", "obs"],
+                "dataset_fusing_strategy": "sequential",
+                "node_embedder": {
+                    "_target_": "anemoi.models.layers.node_embedder.LinearNodeEmbedder",
+                    "num_channels": 10,
+                },
+                "mapper": mapper("GraphTransformerForwardMapper", 0, shard_strategy="edges"),
+            }
+        }
     if not obs_predicted:
         del config["decoders"]["obs"]
         del config["bounding"]["datasets"]["obs"]
@@ -326,21 +342,28 @@ def _statistics() -> dict[str, dict[str, np.ndarray]]:
 
 
 def _build_model(
-    model_class: type, obs_predicted: bool, max_obs_neighbours: int, with_grid: bool = True
+    model_class: type, obs_predicted: bool, max_obs_neighbours: int, with_grid: bool = True, fused: bool = False
 ) -> torch.nn.Module:
     generator = torch.Generator().manual_seed(0)
     latitudes, longitudes = _points_on_sphere(NUM_GRID_POINTS, generator)
     datasets = ["grid", "obs"] if with_grid else ["obs"]
     torch.manual_seed(1)
+    static_graph_data, dynamic_graph_config = build_graph(
+        DotDict(_graph_config(latitudes, longitudes, max_obs_neighbours, with_grid)),
+        is_dataset_static={name: name == "grid" for name in datasets},
+        hidden_nodes_name="hidden",
+    )
     model = model_class(
-        model_config=_model_config(model_class, obs_predicted, with_grid),
-        model_graph_config=_graph_config(latitudes, longitudes, max_obs_neighbours, with_grid),
+        model_config=_model_config(model_class, obs_predicted, with_grid, fused),
+        static_graph_data=static_graph_data,
+        dynamic_graph_config=dynamic_graph_config,
         data_indices={name: index for name, index in _data_indices().items() if name in datasets},
         statistics={name: stats for name, stats in _statistics().items() if name in datasets},
-        data_types={name: kind for name, kind in {"grid": "gridded", "obs": "tabular"}.items() if name in datasets},
         n_step_input={name: 2 for name in datasets},
         n_step_output={name: 1 for name in datasets},
     )
+    # The model does not keep the graph; the synthetic batches need its grid coordinates.
+    model.test_grid_coordinates = static_graph_data["grid"].x if with_grid else None
     if isinstance(model, AnemoiEnsModelEncProcDec):
         # The ensemble model draws its noise in the injector's default float32.
         model.noise_injector.forward = partial(model.noise_injector.forward, noise_dtype=DTYPE)
@@ -428,9 +451,9 @@ def _synthetic_batches(
     The target forcings and the noisy target cover the predicted datasets only.
     """
     generator = torch.Generator().manual_seed(2)
-    with_grid = "grid" in model._graph_data.node_types
+    with_grid = model.test_grid_coordinates is not None
     # radians, as the graph stores them; a model without the grid gets a batch without it
-    grid_coordinates = model._graph_data["grid"].x.float() if with_grid else torch.zeros(NUM_GRID_POINTS, 2)
+    grid_coordinates = model.test_grid_coordinates.float() if with_grid else torch.zeros(NUM_GRID_POINTS, 2)
     indices = _data_indices()
 
     def randn(*shape):
@@ -528,7 +551,11 @@ def _run_whole_model(model: dict, obs_rows: dict, max_obs_neighbours: int) -> tu
     """Forward and backward on the whole batch; returns the outputs and the parameters left without a gradient."""
     transport = issubclass(model["model_class"], AnemoiTransportModelEncProcDec)
     network = _build_model(
-        model["model_class"], model["obs_predicted"], max_obs_neighbours, model.get("with_grid", True)
+        model["model_class"],
+        model["obs_predicted"],
+        max_obs_neighbours,
+        model.get("with_grid", True),
+        model.get("fused", False),
     )
     outputs = _forward(network, _synthetic_batches(network, **obs_rows), transport, group=None)
     generator = torch.Generator().manual_seed(3)
@@ -552,7 +579,11 @@ def _check_sharded_model(
     max_obs_neighbours = neighbour_search["max_obs_neighbours"]
     transport = issubclass(model["model_class"], AnemoiTransportModelEncProcDec)
     reference_model = _build_model(
-        model["model_class"], model["obs_predicted"], max_obs_neighbours, model.get("with_grid", True)
+        model["model_class"],
+        model["obs_predicted"],
+        max_obs_neighbours,
+        model.get("with_grid", True),
+        model.get("fused", False),
     )
     sharded_model = deepcopy(reference_model)
     batches = _synthetic_batches(reference_model, **obs_rows)
@@ -764,6 +795,7 @@ def test_mixed_batch_matches_single_samples(model, batch_rows) -> None:
         spec["obs_predicted"],
         NEIGHBOUR_SEARCH["pyg_all_neighbours"]["max_obs_neighbours"],
         spec.get("with_grid", True),
+        spec.get("fused", False),
     )
 
     def single_sample(obs_rows: dict, shift: float) -> dict[str, Batch]:

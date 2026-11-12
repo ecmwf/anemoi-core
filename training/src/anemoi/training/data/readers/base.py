@@ -257,6 +257,12 @@ class BaseAnemoiReader(ABC):
         tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
         tree.add(f"Dataset: {self.data}")
         tree.add(f"Frequency: {self.frequency}")
-        tree.add(f"Num variables: {len(self.name_to_index)}")
+        tree.add(f"Num. variables: {len(self.name_to_index)}")
         tree.add(f"Resolution: {self.resolution}")
+        tree.add(self._date_range_summary())
+        tree.add(f"Num. missing dates: {len(self.missing)}")
         return tree
+
+    def _date_range_summary(self) -> str:
+        """Return the first and last date of the dataset, for :meth:`tree`."""
+        return f"From: {self.dates[0]} To: {self.dates[-1]}"
