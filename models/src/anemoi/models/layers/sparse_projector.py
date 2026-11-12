@@ -98,9 +98,15 @@ class SparseProjector(torch.nn.Module):
         x_rhs = x_flat.permute(1, 0, 2).reshape(input_nodes, batch_size * channels)
 
         with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
-            # One sparse matmul instead of B sparse matmuls:
-            # [M, N] @ [N, B*C] -> [M, B*C]
-            out = torch.sparse.mm(projection_matrix, x_rhs)
+            if torch.are_deterministic_algorithms_enabled()
+                # torch sparse mm does not have a deterministic option
+                # so fall back to dense mm when determinism is needed
+                # see https://github.com/pytorch/pytorch/issues/202030
+                out = torch.mm(projection_matrix, x_rhs)
+            else:
+                # One sparse matmul instead of B sparse matmuls:
+                # [M, N] @ [N, B*C] -> [M, B*C]
+                out = torch.sparse.mm(projection_matrix, x_rhs)
 
         output_nodes = out.shape[0]
 
