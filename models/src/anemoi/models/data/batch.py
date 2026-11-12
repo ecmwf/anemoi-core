@@ -17,7 +17,6 @@ from collections.abc import Iterator
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
-from typing import Self
 
 import torch
 from rich.console import Console
@@ -45,16 +44,24 @@ class Batch:
     """A batch of per-dataset sources.
 
     A batch is one mapping from dataset name to
-    :class:`~anemoi.models.data.source.Source`. Each source owns its own
+    :class:`~anemoi.models.data.sources.Source`. Each source owns its own
     payload (data, coordinates, timedeltas, shard sizes, boundaries) together with
     the metadata that describes it (name, variables, layout, statistics), so there
     is a single place per dataset where that information lives.
 
-    Per-dataset payload shapes are as the sources define them: gridded datasets hold
-    one stacked tensor of shape ``(batch, time, ensemble, grid, vars)``; sparse
-    observation datasets hold a ``list[torch.Tensor]`` of length ``batch``, one entry
-    per sample. Coordinates are ``(N, 2)`` tensors stacking ``(latitudes, longitudes)``
-    in **radians**, shared by reference for static grids.
+    Per-dataset payload shapes are as the sources define them:
+
+    - gridded datasets (:class:`~anemoi.models.data.sources.GriddedSource`) hold one
+      stacked tensor, e.g. ``(batch, time, ensemble, grid, variables)`` in the order
+      given by the source's layout, and one ``(grid, 2)`` coordinate tensor shared by
+      every sample;
+    - tabular datasets (:class:`~anemoi.models.data.sources.TabularSource`) hold a
+      ``list[torch.Tensor]`` of length ``batch``, one tensor per sample, e.g.
+      ``(ensemble, grid_i, variables)`` in the order given by the source's layout, and
+      one ``(grid_i, 2)`` coordinate tensor per sample; the layout has no time axis,
+      the time windows are given by ``boundaries``.
+
+    Coordinates stack ``(latitude, longitude)`` in **radians**.
 
     Every transformation returns a new batch; the receiver is never mutated.
 
@@ -85,10 +92,12 @@ class Batch:
     def ensemble_size(self) -> int:
         ensemble_sizes = {name: source.ensemble_size for name, source in self.sources.items()}
         if not ensemble_sizes:
-            raise ValueError("Cannot determine ensemble size of an empty batch.")
+            msg = "Cannot determine ensemble size of an empty batch."
+            raise ValueError(msg)
 
         if len(set(ensemble_sizes.values())) != 1:
-            raise ValueError(f"Inconsistent ensemble sizes across datasets: {ensemble_sizes}")
+            msg = f"Inconsistent ensemble sizes across datasets: {ensemble_sizes}"
+            raise ValueError(msg)
 
         return next(iter(ensemble_sizes.values()))
 
@@ -105,7 +114,8 @@ class Batch:
         device after the call to :meth:`to`.
         """
         if not self.sources:
-            raise ValueError("Cannot determine device of an empty batch.")
+            msg = "Cannot determine device of an empty batch."
+            raise ValueError(msg)
         return next(iter(self.sources.values())).device
 
     @property
@@ -304,7 +314,7 @@ class Batch:
         return Batch(sources=new_sources)
 
     @staticmethod
-    def collate(samples: list[dict[str, BaseSample]] | dict[str, BaseSample]) -> Self:
+    def collate(samples: list[dict[str, BaseSample]] | dict[str, BaseSample]) -> "Batch":
         """Collate per-sample :class:`BaseSample` payloads into a :class:`Batch`.
 
         Each sample is a mapping ``{dataset_name: BaseSample}``. The class of each

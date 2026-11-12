@@ -1,0 +1,19 @@
+defaults:
+- transformer_transport_tendency
+- _self_
+
+model:
+  transport:
+    objective: flow_matching
+    noise_embedder:
+      # Frequencies from 1000 down to about 1.5 radians per unit of t, so the embedding varies
+      # over t in [0, 1]. Flux embeds 1000 * t for the same reason.
+      scale: 1000
+    training_condition:
+      distribution: uniform_time
+    inference_defaults:
+      sampling_schedule:
+        schedule_type: unit_time
+        num_steps: 50
+      sampler:
+        sampler: heun

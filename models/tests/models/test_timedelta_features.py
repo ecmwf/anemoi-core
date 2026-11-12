@@ -14,9 +14,9 @@ import torch
 
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources import TabularSource
-from anemoi.models.models.base import split_graph_config
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.target_features import create_decoding_target_features
+from anemoi.models.utils.graphs import split_graph_config
 from anemoi.utils.config import DotDict
 
 

@@ -60,7 +60,7 @@ def test_base_loss_pairwise_checks_gridded_layout_and_coordinates() -> None:
     pred = _grid(torch.ones(1, 1, 1, 3, 2))
     other_layout = _grid(
         torch.zeros(1, 1, 1, 3, 2),
-        layout=TensorLayout(batch=-5, time=-4, ensemble=-3, grid=-2, variables=-1),
+        layout=TensorLayout(batch=0, time=2, ensemble=1, grid=3, variables=4),
     )
     with pytest.raises(ValueError, match="same layout"):
         apply_pairwise(pred, other_layout, lambda p, t, **_: (p - t).sum())
@@ -192,6 +192,7 @@ def test_edm_loss_passes_sparse_weights_and_preserves_gradients() -> None:
         loss={"obs": WeightedMSELoss()},
         model_comm_group=None,
         _evaluate_loss=BaseTrainingModule._evaluate_loss,
+        _check_nan_targets=lambda *_args: None,
     )
     weights = {"obs": [torch.full((2, 1), 2.0), torch.full((3, 1), 3.0)]}
     result = EDMDiffusionTransportObjective(module).compute_loss(pred, target, dataset_name="obs", weights=weights)

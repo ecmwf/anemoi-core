@@ -13,7 +13,7 @@ import importlib
 import torch
 
 migrate = importlib.import_module(
-    "anemoi.models.migrations.scripts.1791980135_drop_stateless_processor_buffers"
+    "anemoi.models.migrations.scripts.1792683307_drop_stateless_processor_buffers"
 ).migrate
 
 NORMALIZER_BUFFERS = ("_norm_mul", "_norm_add", "_input_idx", "_output_idx", "_model_output_idx")

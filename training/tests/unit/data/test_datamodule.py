@@ -35,7 +35,6 @@ class SampleIndexDataset(Dataset):
     def __init__(self, size: int = 1) -> None:
         self.size = size
         self.data_readers: dict = {}
-        self.relative_date_indices_are_native = True
 
     def __len__(self) -> int:
         return self.size
@@ -189,7 +188,6 @@ def test_set_epoch_updates_all_constructed_datasets(mocker: MockFixture) -> None
 
     ds_train = mocker.Mock()
     ds_train.data_readers = {"data": object()}
-    ds_train.relative_date_indices_are_native = True
     ds_valid = mocker.Mock()
     ds_valid.data_readers = {"data": object()}
     ds_test = mocker.Mock()

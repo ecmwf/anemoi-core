@@ -84,6 +84,76 @@ splits the samples of a distributed sampler into batches with torchdata's
 ``BatchSampler``, which remembers its position so that training can resume
 in the middle of an epoch.
 
+Multi-Domain
+------------
+
+``MultiDomainLoadingPolicy`` builds one independently indexed
+``MultiDataset`` per domain. A domain is the spatial structure of a dataset
+(grid, resolution, geographical extent); all domains share the same variables,
+and a typical case is a set of stretched-grid domains that share a global
+dataset and add different regional ones. Its batch sampler visits domains in a
+random (seeded) order and keeps every batch domain-homogeneous, including when
+the configured batch size is greater than one. The readers may use different
+grids and date ranges.
+
+Select it in the dataloader configuration::
+
+   dataloader:
+     loading_policy:
+       _target_: anemoi.training.data.loading.MultiDomainLoadingPolicy
+
+Common variables are checked for metadata compatibility when training starts.
+Flat encoder-processor-decoder models can route each domain through its own
+hidden mesh while sharing the encoder, processor, and decoder weights. Each
+mapped hidden node set must have corresponding domain-to-hidden,
+hidden-to-hidden, and hidden-to-domain edges in the graph. Hidden node and edge
+feature dimensions must match because the model weights remain shared.
+
+The model routing names the hidden mesh for each domain and assigns the same
+encoder and decoder group to both domains::
+
+   model:
+     model:
+       hidden_nodes_name:
+         data: hidden
+         data_2: hidden_2
+     encoders:
+       shared:
+         source_datasets: [data, data_2]
+         dataset_fusing_strategy: none   # one domain per batch, pass-through node embedder
+         node_embedder:
+           _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
+         mapper:
+           _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+           # ... mapper configuration
+     decoders:
+       shared:
+         target_datasets: [data, data_2]
+         target_node_features: [encoded_data]
+         mapper:
+           _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+           # ... mapper configuration
+
+The ``shared`` key is user-defined; datasets listed in the same group use the
+same mapper weights. Because each batch holds a single domain, the encoder uses
+the ``none`` fusing strategy: the domains must have the same number of input channels, and
+they may never share a batch. Before building the model, training asks the
+loading policy which datasets can share a batch
+(``DataLoadingPolicy.co_loaded_datasets``) and raises if a ``none`` encoder could
+receive two of its source datasets together, so the same encoder under
+``SynchronizedLoadingPolicy`` fails at start-up. Domains with different variables need the
+``sequential`` strategy with a projecting ``node_embedder`` such as ``LinearNodeEmbedder`` (see the anemoi-models documentation on
+multi-dataset models). ``hidden`` and ``hidden_2`` must be nodes in the
+graph configuration, with ``data -> hidden -> data`` and
+``data_2 -> hidden_2 -> data_2`` edges. The complete example is the top-level
+``multidomain`` configuration, which builds on the single-domain stretched-grid
+configurations (first domain ``data``) and adds the second domain ``data_2``; its
+graph is defined in the ``graph=multidomain`` group.
+
+With the current distributed strategy, domain-specific trainable node and edge
+features must be disabled because the active domain, and therefore the active
+graph-specific parameters, changes between batches.
+
 API Reference
 =============
 

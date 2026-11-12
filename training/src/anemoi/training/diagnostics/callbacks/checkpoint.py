@@ -139,7 +139,6 @@ class AnemoiCheckpoint(ModelCheckpoint):
                 }
 
         if self._tracker_name == "mlflow":
-
             run_id = trainer.logger.run_id
             run = trainer.logger._mlflow_client.get_run(run_id)
 
@@ -198,12 +197,10 @@ class AnemoiCheckpoint(ModelCheckpoint):
             tmp_supporting_arrays = model.supporting_arrays
             model.supporting_arrays = None
 
-            # Graph providers already store all needed graph information as buffers.
-            # Clear raw graph to avoid redundantly saving it to checkpoint.
+            # The model does not keep the raw graph: the graph providers and its graph geometry
+            # hold what it needs. Clear the interface's copy to avoid saving it to the checkpoint.
             tmp_graph_data = model.graph_data
             model.graph_data = None
-            tmp_inner_graph_data = model.model._graph_data
-            model.model._graph_data = None
 
             # Make sure we don't accidentally modify these
             metadata = tmp_metadata.copy()
@@ -219,9 +216,12 @@ class AnemoiCheckpoint(ModelCheckpoint):
             model.metadata = tmp_metadata
             model.supporting_arrays = tmp_supporting_arrays
             model.graph_data = tmp_graph_data
-            model.model._graph_data = tmp_inner_graph_data
 
             self._last_global_step_saved = trainer.global_step
+
+            # Add a new uuid for the training Lightning checkpoint
+            checkpoint_uuid = str(uuid.uuid4())
+            trainer.lightning_module._hparams["metadata"]["uuid"] = checkpoint_uuid
 
         trainer.strategy.barrier()
 
@@ -238,10 +238,6 @@ class AnemoiCheckpoint(ModelCheckpoint):
             from packaging.version import Version
 
             if Version(version("torch")) >= Version("2.6"):
-                # Add a new uuid
-                checkpoint_uuid = str(uuid.uuid4())
-                trainer.lightning_module._hparams["metadata"]["uuid"] = checkpoint_uuid
-
                 # Extract and save metadata for lightning checkpoint
                 model = self._torch_drop_down(trainer)
                 metadata = model.metadata.copy()

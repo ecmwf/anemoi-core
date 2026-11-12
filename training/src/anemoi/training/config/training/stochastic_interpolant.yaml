@@ -1,7 +1,0 @@
----
-defaults:
-  - transport
-  - _self_
-
-transport:
-  objective: stochastic_interpolant

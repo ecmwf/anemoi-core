@@ -184,10 +184,10 @@ def build_halo_info(
     my_rank = torch.distributed.get_rank(group=model_comm_group)
     num_parts = model_comm_group.size()
 
-    assert (
-        partition.num_parts == num_parts
-    ), f"Partition num_parts ({partition.num_parts}) != comm group size ({num_parts})"
-    assert partition.src_splits is not None, "Halo exchange needs sharded source nodes (partition.src_splits is None)"
+    if partition.num_parts != num_parts:
+        raise ValueError(f"Partition num_parts ({partition.num_parts}) != comm group size ({num_parts})")
+    if partition.src_splits is None:
+        raise ValueError("Halo exchange needs sharded source nodes (partition.src_splits is None)")
 
     if edge_shard_sizes is not None:
         local_edge_index = edge_index
@@ -200,9 +200,9 @@ def build_halo_info(
 
     if debug:
         local_dst = local_edge_index[1]
-        assert (
-            (local_dst >= dst_start) & (local_dst < dst_stop)
-        ).all(), f"Rank {my_rank}: local edges must end on this rank's destination nodes [{dst_start}, {dst_stop})"
+        assert ((local_dst >= dst_start) & (local_dst < dst_stop)).all(), (
+            f"Rank {my_rank}: local edges must end on this rank's destination nodes [{dst_start}, {dst_stop})"
+        )
 
     # Halo nodes are the sources of local edges that another rank owns, grouped by owner.
     local_src = local_edge_index[0]
@@ -214,9 +214,9 @@ def build_halo_info(
     send_nodes_by_rank = _request_send_nodes(recv_nodes_by_rank, model_comm_group)
     if debug:
         for rank, nodes in enumerate(send_nodes_by_rank):
-            assert (
-                (nodes >= src_start) & (nodes < src_stop)
-            ).all(), f"Rank {my_rank}: rank {rank} asked for source nodes this rank does not own"
+            assert ((nodes >= src_start) & (nodes < src_stop)).all(), (
+                f"Rank {my_rank}: rank {rank} asked for source nodes this rank does not own"
+            )
 
     halo_nodes = torch.cat(recv_nodes_by_rank)
     num_halo_nodes = halo_nodes.size(0)

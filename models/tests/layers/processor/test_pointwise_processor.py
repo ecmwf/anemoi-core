@@ -106,6 +106,6 @@ def test_pointwisemlp_processor_forward(pointwisemlp_processor, pointwisemlp_pro
     # Check gradients
     for param in pointwisemlp_processor.parameters():
         assert param.grad is not None, f"param.grad is None for {param}"
-        assert (
-            param.grad.shape == param.shape
-        ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+        assert param.grad.shape == param.shape, (
+            f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+        )

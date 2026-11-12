@@ -24,6 +24,7 @@ from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from tests.batch_builders import build_batch
+from tests.graph_stubs import stub_graph_geometry
 
 
 class _NearestEdges:
@@ -81,8 +82,10 @@ def _model(model_type):
     model = model_type.__new__(model_type)
     nn.Module.__init__(model)
     model._graph_name_hidden = "hidden"
-    model._hidden_coordinates = lambda: torch.tensor([[0.0, 0.0], [0.2, 0.2]])
-    model._graph_data = {"hidden": SimpleNamespace(num_nodes=2), "grid": SimpleNamespace(x=model._hidden_coordinates())}
+    model.hidden_names = ["hidden"]
+    model.dataset2hidden = {"grid": "hidden"}
+    model._hidden_coordinates = lambda hidden_name=None: torch.tensor([[0.0, 0.0], [0.2, 0.2]])
+    model.static_graph_geometry = stub_graph_geometry(hidden=2)
     model.condition_on_residual = False
     model.noise_injector = lambda x, **kwargs: (x, None)
     model.input_datasets = model.target_datasets = ["grid"]
@@ -94,7 +97,7 @@ def _model(model_type):
     model.decoder = nn.ModuleDict({"0": _Decoder()})
     model.encoder_graph_provider = nn.ModuleDict({"grid": _dynamic_graph()})
     model.decoder_graph_provider = nn.ModuleDict({"0": _dynamic_graph(), "grid": _dynamic_graph()})
-    model.processor_graph_provider = _ProcessorGraph()
+    model.processor_graph_provider = {"hidden": _ProcessorGraph()}
     model.processor = _Processor()
     model.latent_aggregator = SumAggregator(input_channels=4, source_channels={"grid": 4})
     model.node_attributes = _NoNodeAttributes()

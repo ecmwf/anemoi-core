@@ -134,9 +134,14 @@ class TrajectoryDataReader(GriddedDataReader):
         x = rearrange(x, "variables ensemble steps gridpoints -> steps ensemble gridpoints variables")
         return torch.from_numpy(x)
 
+    def _date_range_summary(self) -> str:
+        """Return the first and last initialisation date: trajectory datasets have no ``dates``."""
+        base_dates = self.data.base_dates
+        return f"Initialisations from: {base_dates[0]} To: {base_dates[-1]}"
+
     def tree(self, prefix: str = "") -> Tree:
         tree = super().tree(prefix)
-        tree.add(f"Num initialisations: {self.num_sequences}")
+        tree.add(f"Num. initialisations: {self.num_sequences}")
         tree.add(f"Steps per initialisation: {self.sequence_length()}")
         tree.add(f"Sampling: {self.sampling}")
         return tree

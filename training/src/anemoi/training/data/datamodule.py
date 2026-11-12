@@ -23,6 +23,7 @@ from anemoi.models.data import Batch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.loading import DataLoadingPolicy
+from anemoi.training.data.multidataset import MixedFrequencyDataset
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.readers import create_reader
 from anemoi.training.data.relative_time_indices import resolve_task_relative_indices_by_dataset
@@ -184,7 +185,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 self.loading_policy.relative_date_indices(self.task, dataset.data_readers, mode=label),
             )
 
-        if "ds_train" in self.__dict__ and not self.ds_train.relative_date_indices_are_native:
+        if "ds_train" in self.__dict__ and isinstance(self.ds_train, MixedFrequencyDataset):
             metadata = {
                 "metadata_inference": {
                     "dataset_names": self.dataset_names,
@@ -313,9 +314,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 metadata["metadata_inference"][dataset_name]["timesteps"] = timesteps
             reader = self.ds_train.data_readers[dataset_name]
             metadata["metadata_inference"][dataset_name]["data_type"] = reader.data_type
-
-            if reader.data_type == "gridded":
-                metadata["metadata_inference"][dataset_name]["grid_size"] = reader.grid_size
+            metadata["metadata_inference"][dataset_name]["grid_size"] = reader.grid_size
 
             name_to_index = {
                 "input": data_indices[dataset_name].model.input.name_to_index,
@@ -343,7 +342,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         )
 
         def timing(dataset: MultiDataset, label: str) -> dict[str, object]:
-            if dataset.relative_date_indices_are_native:
+            if not isinstance(dataset, MixedFrequencyDataset):
                 return {}
             timestep = datetime.timedelta(seconds=dataset.frequency_seconds)
             inputs, targets, targets_by_step = resolve_task_relative_indices_by_dataset(

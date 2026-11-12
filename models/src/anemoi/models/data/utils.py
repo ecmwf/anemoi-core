@@ -19,5 +19,6 @@ from anemoi.models.data.sources import Source
 def apply_pairwise(pred: Source, target: Source, func: Callable, *args: Any, **kwargs) -> torch.Tensor:
     """Apply a tensor-level function to two aligned source views (see :meth:`Source.pairwise`)."""
     if not isinstance(pred, Source):
-        raise TypeError(f"Pairwise losses do not support source type {type(pred).__name__}.")
+        msg = f"Pairwise losses do not support source type {type(pred).__name__}."
+        raise TypeError(msg)
     return pred.pairwise(target, func, *args, **kwargs)

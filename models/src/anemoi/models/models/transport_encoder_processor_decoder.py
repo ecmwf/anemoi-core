@@ -22,6 +22,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric.data import HeteroData
 
 from anemoi.models.data import Batch
 from anemoi.models.data.flat import FlatSource
@@ -36,11 +37,8 @@ from anemoi.models.models.encoder_processor_decoder import gathered_batch_sizes
 from anemoi.models.models.encoder_processor_decoder import latlons_to_sincos
 from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import NoiseConditioningSettings
-from anemoi.models.transport import StochasticInterpolantSettings
-from anemoi.models.transport import TransportSourceBuilder
-from anemoi.models.transport import TransportSourceRequest
+from anemoi.models.transport import gaussian_source
 from anemoi.models.transport import get_transport_model_objective
-from anemoi.models.transport import reference_state_sampling_source
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
@@ -82,16 +80,16 @@ def _second_blocks(joined: torch.Tensor, first_sizes: Sequence[int], second_size
 
 
 class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
-    """Encoder-processor-decoder model conditioned on diffusion noise level or bridge time."""
+    """Encoder-processor-decoder model conditioned on diffusion noise level or flow-matching time."""
 
     def __init__(
         self,
         *,
         model_config: DictConfig,
-        model_graph_config: DictConfig,
+        static_graph_data: HeteroData,
+        dynamic_graph_config: DotDict,
         data_indices: dict,
         statistics: dict,
-        data_types: dict[str, str],
         n_step_input: dict[str, int],
         n_step_output: dict[str, int],
     ) -> None:
@@ -101,8 +99,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         transport_params = model_config.model.transport
         self.noise_conditioning = NoiseConditioningSettings.from_config(transport_params)
         self.edm = EdmSettings.from_config(transport_params)
-        self.stochastic_interpolant = StochasticInterpolantSettings.from_config(transport_params)
-        self.transport_source = TransportSourceBuilder.from_config(transport_params)
         self.training_condition = dict(transport_params.get("training_condition", {}))
         self.noise_channels = self.noise_conditioning.channels
         self.noise_cond_dim = self.noise_conditioning.cond_dim
@@ -111,10 +107,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         super().__init__(
             model_config=model_config,
-            model_graph_config=model_graph_config,
+            static_graph_data=static_graph_data,
+            dynamic_graph_config=dynamic_graph_config,
             data_indices=data_indices,
             statistics=statistics,
-            data_types=data_types,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )
@@ -127,8 +123,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     def _assert_no_boundings(self) -> None:
         """Reject configured output bounds.
 
-        The network outputs EDM's pre-combination field or the interpolant's drift, not the predicted
-        state, so bounds on its output would constrain the wrong quantity.
+        The network outputs EDM's pre-combination field or the flow-matching velocity. Bounds belong on
+        the predicted state, which is built from that output afterwards.
         """
         bounded = [name for name, bounding in self.boundings.items() if len(bounding) > 0]
         if bounded:
@@ -289,7 +285,20 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         return out
 
     def _embed_noise_conditioning(self, sigma: torch.Tensor) -> torch.Tensor:
-        return self.noise_cond_mlp(self.noise_embedder(sigma))
+        """Embed the noise level or time, and pass it through the conditioning MLP.
+
+        Both run in float32 also under mixed precision: bfloat16 keeps a noise level or time only
+        to about 0.4 %, too coarse for the higher embedding frequencies. The result is handed on
+        in the autocast dtype, the dtype the layers reading it compute in. Assumes the embedder
+        and the MLP keep float32 weights, as they do under mixed precision.
+        """
+        device_type = sigma.device.type
+        with torch.autocast(device_type=device_type, enabled=False):
+            sigma = sigma.to(torch.promote_types(sigma.dtype, torch.float32))
+            embedding = self.noise_cond_mlp(self.noise_embedder(sigma))
+        if torch.is_autocast_enabled(device_type):
+            embedding = embedding.to(torch.get_autocast_dtype(device_type))
+        return embedding
 
     def _make_noise_emb_for_view(self, noise_emb: torch.Tensor, view: "Source") -> torch.Tensor:
         """Repeat noise embeddings over the actual flattened nodes in a source view."""
@@ -315,15 +324,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         batch_size, _, ensemble_size = condition_ref.shape[:3]
         for dataset_name in dataset_names:
             condition_shape = condition[dataset_name].shape
-            assert (
-                len(condition_shape) == 5
-            ), f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
-            assert (
-                condition_shape[1] == condition_shape[3] == condition_shape[4] == 1
-            ), f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
-            assert (
-                condition_shape[0] == batch_size and condition_shape[2] == ensemble_size
-            ), "Batch or ensemble dimension mismatch across datasets for conditioned inputs."
+            assert len(condition_shape) == 5, (
+                f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
+            )
+            assert condition_shape[1] == condition_shape[3] == condition_shape[4] == 1, (
+                f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
+            )
+            assert condition_shape[0] == batch_size and condition_shape[2] == ensemble_size, (
+                "Batch or ensemble dimension mismatch across datasets for conditioned inputs."
+            )
         return batch_size, ensemble_size
 
     def _noise_emb_over_view(
@@ -343,24 +352,23 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         data_shard_sizes: ShardSizes = None,
         edge_conditioning: bool = False,
     ) -> tuple[torch.Tensor, ...]:
+        hidden_name = self.dataset2hidden[dataset_name]
 
         c_data = self._noise_emb_over_view(noise_cond, data_view, data_shard_sizes)
-        c_hidden = self._make_noise_emb(noise_cond, repeat=self._graph_data[self._graph_name_hidden].num_nodes)
+        c_hidden = self._make_noise_emb(noise_cond, repeat=self.graph_geometry.num_nodes[hidden_name])
 
         if edge_conditioning:  # currently unused, but available if graph edges need conditioning later
             c_data_to_hidden = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(dataset_name, "to", self._graph_name_hidden)]["edge_length"].shape[0],
+                repeat=self.graph_geometry.num_edges[(dataset_name, "to", hidden_name)],
             )
             c_hidden_to_data = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(self._graph_name_hidden, "to", dataset_name)]["edge_length"].shape[0],
+                repeat=self.graph_geometry.num_edges[(hidden_name, "to", dataset_name)],
             )
             c_hidden_to_hidden = self._make_noise_emb(
                 noise_cond,
-                repeat=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)]["edge_length"].shape[
-                    0
-                ],
+                repeat=self.graph_geometry.num_edges[(hidden_name, "to", hidden_name)],
             )
         else:
             c_data_to_hidden = None
@@ -379,7 +387,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self._assert_condition_shapes(condition)
         dataset_names = list(conditioned_target.keys())
 
-        # Transport assumes one noise level or bridge time per sample and
+        # Transport assumes one noise level or time per sample and
         # ensemble member, shared across datasets. The training objectives build
         # the condition that way, so we can read it from the first dataset,
         # embed it once, and repeat it over each dataset's graph nodes below.
@@ -493,22 +501,23 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         for dataset_name in dataset_names:
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
-        # Embed the current noise level or bridge time and pass it to the conditional layers.
+        # Embed the current noise level or time and pass it to the conditional layers.
         fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = self._build_conditioning_kwargs(
             batch, conditioned_target, condition, model_comm_group=model_comm_group
         )
 
         # Process each dataset through its corresponding encoder
+        hidden_name = self._get_active_hidden_name(dataset_names)
         dataset_latents = {}
         x_skip_dict: dict[str, torch.Tensor | None] = {}
         x_data_latent_dict = {}
 
-        hidden_coordinates = self._hidden_coordinates().to(batch.device)
+        hidden_coordinates = self._hidden_coordinates(hidden_name).to(batch.device)
         hidden_coordinates_batched = einops.repeat(hidden_coordinates, "n f -> (repeat n) f", repeat=bse)
         hidden_batch_sizes = (hidden_coordinates.shape[0],) * bse
         x_hidden_latent = latlons_to_sincos(hidden_coordinates)
         x_hidden_latent = einops.repeat(x_hidden_latent, "n f -> (repeat n) f", repeat=bse)
-        hidden_trainable_parameters = self.node_attributes(self._graph_name_hidden, batch_size=bse)
+        hidden_trainable_parameters = self.node_attributes(hidden_name, batch_size=bse)
         if hidden_trainable_parameters is not None:
             x_hidden_latent = torch.cat([x_hidden_latent, hidden_trainable_parameters], dim=-1)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group=model_comm_group)
@@ -583,7 +592,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             processor_edge_attr,
             processor_edge_index,
             proc_edge_shard_sizes,
-        ) = self.processor_graph_provider.get_edges(
+        ) = self.processor_graph_provider[hidden_name].get_edges(
             src_coords=hidden_coordinates,
             dst_coords=hidden_coordinates,
             batch_size=bse,
@@ -736,35 +745,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             sources[name] = template.unflatten(payload)
         return Batch(sources)
 
-    #: Named in the error raised for an invalid transport source kind.
-    _sampling_source_context = "state prediction"
-
     def build_sampling_source(
         self,
         x: Batch,
         *,
         target_template: dict[str, "BaseTemplate"],
         model_comm_group: Optional[ProcessGroup] = None,
-        default_kind: str = "gaussian",
     ) -> Batch:
-        """Build the starting/source field used by transport sampling, in model-output space.
-
-        Gaussian noise or zeros, or the latest input state projected to the predicted variables.
-        """
-        request = TransportSourceRequest(
-            templates=self._sampling_template(target_template, x),
-            default_kind=default_kind,
-            custom_source_factories={
-                "reference_state": lambda: reference_state_sampling_source(
-                    {name: source.data for name, source in x.items() if name in self.target_datasets},
-                    data_indices=self.data_indices,
-                    n_step_output=self.n_step_output,
-                ),
-            },
-            model_comm_group=model_comm_group,
-            error_context=self._sampling_source_context,
-        )
-        return self.transport_source.build(request)
+        """Build the starting/source field used by transport sampling, in model-output space."""
+        return gaussian_source(self._sampling_template(target_template, x), model_comm_group)
 
     def predict_step(
         self,
@@ -772,7 +761,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         target_template: dict[str, "BaseTemplate"],
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
-        n_step_input: dict[str, int],
         target_forcing: Optional[Batch] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
@@ -794,8 +782,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Pre-processing module.
         post_processors : nn.ModuleDict
             Post-processing module.
-        n_step_input : dict[str, int]
-            Number of input time steps for each dataset; ``x`` already holds exactly these.
         target_forcing : Optional[Batch]
             Decoder conditioning (before pre-processing): the forcing variables at the output valid times.
         model_comm_group : Optional[ProcessGroup]
@@ -820,7 +806,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         Batch
             Sampled prediction (after post-processing), on the nodes of ``target_template``.
         """
-        del n_step_input
         with torch.no_grad():
             target_template = self._shard_target_template(target_template, model_comm_group)
             x, target_forcing = self._prepare_prediction_inputs(
@@ -846,6 +831,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 post_processors,
                 model_comm_group=model_comm_group,
                 statistics_tendencies=statistics_tendencies,
+                pre_processors=pre_processors,
             )
 
             if gather_out:
@@ -877,29 +863,20 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         )
 
     def fill_metadata(self, md_dict) -> None:
-        for dataset in self.input_dim.keys():
-            shapes = {
-                "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input[dataset],
-                "ensemble": 1,
-                "grid": None,  # grid size is dynamic
-            }
-            md_dict["metadata_inference"][dataset]["shapes"] = shapes
+        pass
 
 
 class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     """Transport model that predicts tendencies and converts them back to state fields."""
 
-    _sampling_source_context = "tendency prediction"
-
     def __init__(
         self,
         *,
         model_config: DictConfig,
-        model_graph_config: DictConfig,
+        static_graph_data: HeteroData,
+        dynamic_graph_config: DotDict,
         data_indices: dict,
         statistics: dict,
-        data_types: dict[str, str],
         n_step_input: dict[str, int],
         n_step_output: dict[str, int],
     ) -> None:
@@ -908,10 +885,10 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         self.condition_on_residual = model_config.condition_on_residual
         super().__init__(
             model_config=model_config,
-            model_graph_config=model_graph_config,
+            static_graph_data=static_graph_data,
+            dynamic_graph_config=dynamic_graph_config,
             data_indices=data_indices,
             statistics=statistics,
-            data_types=data_types,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )
@@ -1064,10 +1041,13 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     ) -> "Source":
         """Turn normalised output states into normalised tendencies.
 
-        Each output step is un-normalised, the reference is subtracted from its prognostic variables,
+        The prognostic variables of each output step are un-normalised, the reference is subtracted,
         and the result is normalised again as a source carrying that step's tendency statistics
         (:meth:`_as_tendency`). Diagnostic variables stay normalised states. The processors leave
-        missing values missing, so a gap in a state stays a gap in its tendency.
+        missing values missing, so a gap in a state stays a gap in its tendency. The tendency is the
+        raw change of the data, matching its statistics: the processors that apply to states only
+        (output constraints such as ReLU bounds, and remappings such as ``sqrt``) are not applied to it,
+        see ``Processors(..., tendency=True)``.
 
         Parameters
         ----------
@@ -1097,24 +1077,29 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         state_positions, reference_positions = self._prognostic_positions(dataset_name, state, reference)
         prognostic = torch.as_tensor(state_positions, dtype=torch.long, device=state.device)
 
-        state_physical = post_processors(state, in_place=False, skip_imputation=True)
-        reference_physical = post_processors(reference, in_place=False, skip_imputation=True)
-        reference_prognostic = reference_physical.data[..., reference_positions]
+        # Only the prognostic variables have tendencies; the diagnostics are copied from ``state``.
+        state_physical = post_processors(
+            state.select_variables(state_positions), in_place=False, skip_imputation=True, skip_output_constraints=True
+        )
+        reference_physical = post_processors(
+            reference.select_variables(reference_positions),
+            in_place=False,
+            skip_imputation=True,
+            skip_output_constraints=True,
+        ).data
 
         steps = []
         for step, statistics in enumerate(tendency_statistics):
             step_state = state_physical.select(time=[step])
-            step_data = step_state.data.index_add(
-                -1, prognostic, reference_prognostic.to(step_state.data.dtype), alpha=-1
-            )
-            tendency = step_state.clone(data=step_data)
-            steps.append(
-                pre_processors(
-                    self._as_tendency(dataset_name, tendency, statistics),
-                    in_place=True,
-                    skip_imputation=True,
-                ).data,
-            )
+            tendency = step_state.clone(data=step_state.data - reference_physical.to(step_state.data.dtype))
+            normalised = pre_processors(
+                self._as_tendency(dataset_name, tendency, statistics),
+                in_place=True,
+                skip_imputation=True,
+                tendency=True,
+            ).data
+            step_output = state.select(time=[step]).data
+            steps.append(step_output.index_copy(-1, prognostic, normalised.to(step_output.dtype)))
         return state.clone(data=torch.cat(steps, dim=1))
 
     def add_tendency_to_state(
@@ -1128,7 +1113,12 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     ) -> "Source":
         """Turn normalised tendencies back into states; the inverse of :meth:`compute_tendency`.
 
-        The processors leave missing values missing, as in :meth:`compute_tendency`.
+        The processors leave missing values missing, as in :meth:`compute_tendency`. As there, the
+        prognostic tendencies are converted without the processors that apply to states only
+        (``Processors(..., tendency=True)``), and the diagnostics are converted as states. Output
+        constraints (post-processors such as ReLU bounds) are not applied to the rebuilt states either:
+        they constrain predicted states, so apply them by post-processing the normalised states (pass
+        ``pre_processors``) like any state prediction, as :meth:`_sampled_to_physical` does.
 
         Parameters
         ----------
@@ -1143,8 +1133,10 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         post_processors : nn.Module
             The dataset's state post-processors.
         pre_processors : nn.Module, optional
-            The dataset's state pre-processors. When given, the states are normalised again;
-            otherwise they are returned un-normalised.
+            The dataset's state pre-processors. When given, the states are normalised again, first
+            clipped to the domains of the remappings (``clip_to_domain``): a state rebuilt from a
+            tendency can leave them, unlike a state predicted in remapped space. Otherwise the states
+            are returned un-normalised and unclipped.
 
         Returns
         -------
@@ -1157,19 +1149,40 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 f"{len(tendency_statistics)} tendency statistics."
             )
         tendency_positions, reference_positions = self._prognostic_positions(dataset_name, tendency, reference)
+        prognostic_set = set(tendency_positions)
+        diagnostic_positions = [i for i in range(tendency.n_variables) if i not in prognostic_set]
         prognostic = torch.as_tensor(tendency_positions, dtype=torch.long, device=tendency.device)
-        reference_physical = post_processors(reference, in_place=False, skip_imputation=True)
-        reference_prognostic = reference_physical.data[..., reference_positions]
+        diagnostic = torch.as_tensor(diagnostic_positions, dtype=torch.long, device=tendency.device)
+        reference_physical = post_processors(
+            reference.select_variables(reference_positions),
+            in_place=False,
+            skip_imputation=True,
+            skip_output_constraints=True,
+        ).data
 
         steps = []
         for step, statistics in enumerate(tendency_statistics):
-            step_tendency = self._as_tendency(dataset_name, tendency.select(time=[step]), statistics)
-            physical = post_processors(step_tendency, in_place=False, skip_imputation=True).data
-            steps.append(physical.index_add(-1, prognostic, reference_prognostic.to(physical.dtype)))
+            step_view = tendency.select(time=[step])
+            step_tendency = self._as_tendency(dataset_name, step_view.select_variables(tendency_positions), statistics)
+            prognostic_state = post_processors(step_tendency, in_place=False, skip_imputation=True, tendency=True).data
+            prognostic_state = prognostic_state + reference_physical.to(prognostic_state.dtype)
+            physical = prognostic_state.new_empty(step_view.data.shape)
+            physical.index_copy_(-1, prognostic, prognostic_state)
+            if diagnostic_positions:
+                diagnostic_state = post_processors(
+                    step_view.select_variables(diagnostic_positions),
+                    in_place=False,
+                    skip_imputation=True,
+                    skip_output_constraints=True,
+                ).data
+                physical.index_copy_(-1, diagnostic, diagnostic_state.to(physical.dtype))
+            steps.append(physical)
 
         state = tendency.clone(data=torch.cat(steps, dim=1))
         if pre_processors is not None:
-            state = pre_processors(state, in_place=True, skip_imputation=True)
+            state = pre_processors(
+                state, in_place=True, skip_imputation=True, skip_output_constraints=True, clip_to_domain=True
+            )
         return state
 
     def _sampled_to_physical(
@@ -1179,9 +1192,17 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         post_processors: nn.ModuleDict,
         model_comm_group: Optional[ProcessGroup] = None,
         statistics_tendencies: Optional[dict[str, Mapping]] = None,
+        pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> Batch:
-        """Turn sampled tendencies into states in physical units, added to the latest input state."""
+        """Turn sampled tendencies into states in physical units, added to the latest input state.
+
+        The processors that apply to states only (output constraints such as ReLU bounds, and
+        remappings, whose domains bound the states) apply to the states, not to the tendencies: when
+        the post-processors include any, the states are rebuilt normalised (clipped to the remapping
+        domains) and then post-processed like a state prediction, which needs ``pre_processors``.
+        Otherwise the states are rebuilt directly in physical units.
+        """
         del kwargs
         if statistics_tendencies is None:
             raise ValueError("Tendency statistics must be provided to convert sampled tendencies into states.")
@@ -1191,17 +1212,30 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             {name: source.grid_shard_sizes for name, source in x.items()},
             model_comm_group,
         )
-        return sampled.with_sources(
-            {
-                dataset_name: self.add_tendency_to_state(
-                    dataset_name,
-                    references[dataset_name],
-                    tendency,
-                    self.tendency_statistics(dataset_name, statistics_tendencies.get(dataset_name)),
-                    post_processors[dataset_name],
+
+        def to_physical(dataset_name: str, tendency: "Source") -> "Source":
+            post = post_processors[dataset_name]
+            add_kwargs = {
+                "dataset_name": dataset_name,
+                "reference": references[dataset_name],
+                "tendency": tendency,
+                "tendency_statistics": self.tendency_statistics(dataset_name, statistics_tendencies.get(dataset_name)),
+                "post_processors": post,
+            }
+            if not getattr(post, "has_state_only_processors", False):
+                return self.add_tendency_to_state(**add_kwargs)
+            if pre_processors is None:
+                msg = (
+                    f"Dataset '{dataset_name}' has post-processors that apply to states only (output "
+                    "constraints, remappings); applying them to the states rebuilt from tendencies needs "
+                    "the pre-processors."
                 )
-                for dataset_name, tendency in sampled.items()
-            },
+                raise ValueError(msg)
+            normalised = self.add_tendency_to_state(**add_kwargs, pre_processors=pre_processors[dataset_name])
+            return post(normalised, in_place=True)
+
+        return sampled.with_sources(
+            {dataset_name: to_physical(dataset_name, tendency) for dataset_name, tendency in sampled.items()},
         )
 
     def apply_reference_state_truncation(

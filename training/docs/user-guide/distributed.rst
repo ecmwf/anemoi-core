@@ -301,16 +301,19 @@ across and ``config.training.ensemble_size_per_device`` to the number of
 ensemble members per GPU.
 
 Both strategies pass ``static_graph`` and ``find_unused_parameters`` on
-to PyTorch's ``DistributedDataParallel``. ``static_graph: true``, the
-default, tells it that the same parameters are trained in every step; it
-must be ``false`` when ``config.training.accum_grad_batches`` is larger
-than 1. With ``static_graph: false`` and ``find_unused_parameters:
-true``, the gradients of all GPUs are summed in the same order in every
-step, so a resumed run continues bitwise identically, at some cost in
-speed. Runs with tabular (observation) datasets must use
-``static_graph: false`` and ``find_unused_parameters: true``: a dataset
-with no observations in a batch leaves its encoder and decoder without
-gradients in that step. Training stops with an error otherwise.
+to PyTorch's ``DistributedDataParallel``. With the defaults,
+``static_graph: false`` and ``find_unused_parameters: true``, the
+gradients of all GPUs are summed in the same order in every step, so a
+resumed run continues bitwise identically. ``static_graph: true`` with
+``find_unused_parameters: false`` tells DDP that the same parameters are
+trained in every step, which can make training of large models faster
+(about 6% for a 1B parameter model), but gives up this exact reproducibility.
+``static_graph`` must be ``false`` when
+``config.training.accum_grad_batches`` is larger than 1. Runs with tabular
+(observation) datasets must keep the defaults, ``static_graph: false``
+and ``find_unused_parameters: true``: a dataset with no observations in
+a batch leaves its encoder and decoder without gradients in that step.
+Training stops with an error otherwise.
 
 **********
  Examples

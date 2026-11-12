@@ -150,7 +150,7 @@ def test_graph_trainable_features_plot_handles_noop_processor_graph_provider():
 
     model = DummyModel()
     model._graph_name_data = "data"
-    model._graph_name_hidden = "hidden"
+    model.dataset2hidden = {"data": "hidden"}
     model.encoder_graph_provider = None
     model.decoder_graph_provider = None
     model.processor_graph_provider = NoOpGraphProvider()
@@ -169,7 +169,7 @@ def test_graph_trainable_features_plot_handles_noop_mapper_graph_providers():
 
     model = DummyModel()
     model._graph_name_data = "data"
-    model._graph_name_hidden = "hidden"
+    model.dataset2hidden = {"data": "hidden"}
     model.encoder_graph_provider = NoOpGraphProvider()
     model.decoder_graph_provider = NoOpGraphProvider()
     model.processor_graph_provider = NoOpGraphProvider()
@@ -191,7 +191,7 @@ def test_graph_trainable_features_plot_handles_missing_dataset_key_in_provider_m
 
     model = DummyModel()
     model._graph_name_data = "data"
-    model._graph_name_hidden = "hidden"
+    model.dataset2hidden = {"data": "hidden"}
     model.encoder_graph_provider = {"other": TrainableProvider()}
     model.decoder_graph_provider = {"other": TrainableProvider()}
     model.processor_graph_provider = None
@@ -199,6 +199,30 @@ def test_graph_trainable_features_plot_handles_missing_dataset_key_in_provider_m
     edge_modules = get_edge_trainable_modules(model, dataset_name="data")
 
     assert edge_modules == {}
+
+
+def test_graph_trainable_features_plot_finds_processor_provider_by_hidden_mesh():
+    class TrainableTensor:
+        trainable = object()
+
+    class TrainableProvider:
+        trainable = TrainableTensor()
+
+    class DummyModel:
+        pass
+
+    data_provider = TrainableProvider()
+    other_provider = TrainableProvider()
+
+    model = DummyModel()
+    model.dataset2hidden = {"data": "hidden_a", "other": "hidden_b"}
+    model.encoder_graph_provider = None
+    model.decoder_graph_provider = None
+    model.processor_graph_provider = {"hidden_a": data_provider, "hidden_b": other_provider}
+
+    edge_modules = get_edge_trainable_modules(model, dataset_name="data")
+
+    assert edge_modules == {("hidden_a", "hidden_a"): data_provider}
 
 
 # ---- Mocks for BasePlotAdditionalMetrics.process and task-type tests ----
@@ -246,9 +270,9 @@ def _make_pl_module_forecaster(
     pl_module.data_indices = {"data": data_indices}
 
     # Mock graph latlons (radians), converted to deg in process
-    pl_module.model.model._graph_data = {"data": MagicMock()}
-    pl_module.model.model._graph_data["data"].__getitem__ = lambda _self, _k: MagicMock()
-    graph_data = pl_module.model.model._graph_data["data"]
+    pl_module.model.graph_data = {"data": MagicMock()}
+    pl_module.model.graph_data["data"].__getitem__ = lambda _self, _k: MagicMock()
+    graph_data = pl_module.model.graph_data["data"]
     graph_data.__getitem__ = lambda k: torch.zeros(nlatlon, 2) if k == pl_module.model.model._graph_name_data else None
 
     # Use no-op output_mask
@@ -282,8 +306,8 @@ def _make_pl_module_temporal_downscaler(*, nlatlon=50) -> MagicMock:
     pl_module.data_indices = {"data": data_indices}
 
     # Mock graph data
-    pl_module.model.model._graph_data = {"data": MagicMock()}
-    pl_module.model.model._graph_data["data"].__getitem__ = lambda _k: torch.zeros(nlatlon, 2)
+    pl_module.model.graph_data = {"data": MagicMock()}
+    pl_module.model.graph_data["data"].__getitem__ = lambda _k: torch.zeros(nlatlon, 2)
 
     # Use no-op output_mask
     pl_module.output_mask = {"data": NoOutputMask()}
@@ -510,6 +534,33 @@ def test_batch_output_plot_sparse_forwards_auxiliary_output() -> None:
     torch.testing.assert_close(torch.as_tensor(kwargs["auxiliary"]), torch.full((3, 2), 3.0))
     assert kwargs["sparse"] is True
     assert kwargs["output_latlons"].shape == (3, 2)
+
+
+def test_per_batch_plot_skips_datasets_missing_from_batch():
+    """A domain-homogeneous batch only plots the configured datasets it contains."""
+    callback = _sample_plot(
+        sample_idx=0,
+        parameters=["a", "b"],
+        accumulation_levels_plot=[0.5],
+        dataset_names=["data", "data_2"],
+    )
+
+    batch_size, n_ens, nlatlon, nvar = 2, 1, 20, 2
+    pl_module = _make_pl_module_forecaster(validation_rollout=1, nlatlon=nlatlon)
+    pl_module.allgather_batch = lambda tensor, _grid_shard_sizes: tensor
+    # Like the module, only know the shard sizes of the datasets in the batch.
+    pl_module.grid_shard_sizes = {"data_2": None}
+    pl_module.model.post_processors = {"data": _IdentityProcessor(), "data_2": _IdentityProcessor()}
+
+    batch = _make_gridded_batch(torch.randn(batch_size, 3, n_ens, nlatlon, nvar), dataset_name="data_2")
+    output = _step_output([{"data_2": torch.zeros(batch_size, 1, n_ens, nlatlon, nvar)}])
+    trainer = MagicMock()
+    trainer.current_epoch = 0
+
+    callback.plot = MagicMock()
+    callback.on_validation_batch_end(trainer, pl_module, output, batch, batch_idx=0)
+
+    assert callback.plot.call_args.args[2] == ["data_2"]
 
 
 def test_process_time_interpolator_output_shapes():

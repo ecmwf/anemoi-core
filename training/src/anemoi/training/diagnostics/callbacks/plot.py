@@ -33,7 +33,6 @@ from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.data import Batch
 from anemoi.models.data import Source
-from anemoi.models.data import TabularSource
 from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.evaluation.plotting.graph import graph_plot_fn as _default_graph_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as _default_loss_plot_fn
@@ -117,7 +116,7 @@ def _is_sparse_dataset(batch: "Batch | dict", dataset_name: str) -> bool:
         ``True`` for sparse/observation datasets, ``False`` otherwise.
     """
     if isinstance(batch, Batch):
-        return dataset_name in batch and isinstance(batch[dataset_name], TabularSource)
+        return dataset_name in batch and batch[dataset_name].is_tabular
     return False
 
 
@@ -444,7 +443,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if batch_idx % self.every_n_batches == 0:
-
             # Gather grid-sharded tensors while preserving the Batch envelope
             # (layouts / statistics / coordinates) so downstream view-based access
             # (Batch.__getitem__ / task.get_targets) keeps working. Shard metadata
@@ -467,7 +465,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 raise TypeError(msg)
             preds = output.predictions
             if not isinstance(preds, list):
-
                 raise TypeError(preds)
             gathered_predictions = [
                 {dataset_name: _allgather_view(pl_module, dataset_pred) for dataset_name, dataset_pred in pred.items()}
@@ -479,7 +476,13 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             # The refactored preprocessors are stateless (no per-instance ``nan_locations`` buffer to gather),
             # so only the device move is required here.
             self.post_processors = copy.deepcopy(pl_module.model.post_processors)
-            for dataset_name in self.post_processors:
+            for dataset_name in batch:
+                for post_processor in self.post_processors[dataset_name].processors.values():
+                    if isinstance(getattr(post_processor, "nan_locations", None), torch.Tensor):
+                        post_processor.nan_locations = pl_module.allgather_batch(
+                            post_processor.nan_locations,
+                            pl_module.grid_shard_sizes[dataset_name],
+                        )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
             plot_kwargs = self._plot_kwargs_from_output(pl_module, output)
@@ -488,10 +491,11 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 metrics=output.metrics,
                 predictions=gathered_predictions,
             )
+            # A batch may hold only some datasets (e.g. one domain with MultiDomainLoadingPolicy).
             self.plot(
                 trainer,
                 pl_module,
-                self.dataset_names,
+                [dataset_name for dataset_name in self.dataset_names if dataset_name in batch],
                 output,
                 batch,
                 batch_idx,
@@ -535,7 +539,6 @@ class BasePerEpochPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if trainer.current_epoch % self.every_n_epochs == 0:
-
             self.plot(
                 trainer,
                 pl_module,
@@ -1124,7 +1127,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
 
             if auxiliary_tensor is not None:
                 latlons, data, output_tensor, auxiliary_tensor = self.focus_mask.apply(
-                    pl_module.model.model._graph_data,
+                    pl_module.model.graph_data,
                     data_latlons,
                     data,
                     output_tensor,
@@ -1132,7 +1135,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                 )
             else:
                 latlons, data, output_tensor = self.focus_mask.apply(
-                    pl_module.model.model._graph_data,
+                    pl_module.model.graph_data,
                     data_latlons,
                     data,
                     output_tensor,

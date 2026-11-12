@@ -23,6 +23,8 @@ from anemoi.models.layers.bounding import LeakyReluBounding
 from anemoi.models.layers.bounding import NormalizedLeakyReluBounding
 from anemoi.models.layers.bounding import NormalizedReluBounding
 from anemoi.models.layers.bounding import ReluBounding
+from anemoi.models.preprocessing.normalization import NORMALIZATION_STATISTICS
+from anemoi.models.preprocessing.normalizer import InputNormalizer
 from anemoi.utils.config import DotDict
 
 
@@ -44,8 +46,8 @@ def statistics():
     statistics = {
         "mean": np.array([1.0, 2.0, 3.0]),
         "stdev": np.array([0.5, 0.5, 0.5]),
-        "min": np.array([1.0, 1.0, 1.0]),
-        "max": np.array([11.0, 10.0, 10.0]),
+        "minimum": np.array([1.0, 1.0, 1.0]),
+        "maximum": np.array([11.0, 10.0, 10.0]),
     }
     return statistics
 
@@ -323,3 +325,32 @@ def test_fraction_fail_with_missing_total_var(cls, source):
     bounding = cls(variables=["var1"], min_val=0.0, max_val=1.0, total_var="missing_total")
     with pytest.raises(KeyError):
         bounding(source)
+
+
+@pytest.mark.parametrize("method", list(NORMALIZATION_STATISTICS))
+@pytest.mark.parametrize("cls", [NormalizedReluBounding, NormalizedLeakyReluBounding])
+def test_normalized_bounding_thresholds_match_the_normalizer(cls, method, source):
+    """Each threshold lands where the normaliser puts the same physical value, for every method.
+
+    The source carries anemoi-datasets statistics keys (``minimum``/``maximum``), as real sources do.
+    """
+    min_val = [2.0, -3.0]
+    bounding = cls(variables=["var1", "var2"], min_val=min_val, normalizer=[method, method])
+
+    norm_min_val = bounding._compute_norm_min_val(source.name_to_index, source.statistics)
+
+    normalizer = InputNormalizer(config={"default": method})
+    norm_mul, norm_add = normalizer.get_norm_parameters(source.statistics, source.name_to_index, torch.device("cpu"))
+    indices = [source.name_to_index["var1"], source.name_to_index["var2"]]
+    expected = torch.tensor(min_val) * norm_mul[indices] + norm_add[indices]
+    torch.testing.assert_close(norm_min_val, expected)
+
+
+def test_normalized_bounding_rejects_unknown_methods_and_missing_statistics(source):
+    with pytest.raises(ValueError, match="unknown normalisation method 'robust'"):
+        NormalizedReluBounding(variables=["var1"], min_val=[0.0], normalizer=["robust"])
+
+    bounding = NormalizedReluBounding(variables=["var1"], min_val=[0.0], normalizer=["min-max"])
+    statistics = {key: value for key, value in source.statistics.items() if key != "minimum"}
+    with pytest.raises(ValueError, match=r"needs the statistics \['minimum'\]"):
+        bounding(source.clone(statistics=statistics))

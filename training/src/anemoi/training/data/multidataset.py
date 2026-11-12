@@ -55,8 +55,6 @@ class MultiDataset(Dataset):
         """
         self.data_readers = data_readers
         self.dataset_names = list(data_readers.keys())
-        self.relative_date_indices_are_native = True
-        self.frequency_seconds: int | None = None
         self.stride = self._sampling_stride(data_readers)
 
         self.fake_dataloading = fake_dataloading
@@ -199,7 +197,8 @@ class MultiDataset(Dataset):
         return capture.get()
 
     def tree(self) -> Tree:
-        tree = Tree(f"{self.__class__.__name__}")
+        prefix = "Fake " if self.fake_dataloading else ""
+        tree = Tree(prefix + f"{self.__class__.__name__}")
         for name, reader in self.data_readers.items():
             subtree = reader.tree(prefix=name)
             tree.add(subtree)
@@ -219,7 +218,6 @@ class MixedFrequencyDataset(MultiDataset):
     ) -> None:
         self.data_readers = data_readers
         self.dataset_names = list(data_readers)
-        self.relative_date_indices_are_native = False
         self.frequency_seconds = int(frequency.total_seconds())
         self.tolerance = tolerance
         self.stride = self._sampling_stride(data_readers)

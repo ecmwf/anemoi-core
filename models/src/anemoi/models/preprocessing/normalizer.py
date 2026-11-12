@@ -17,6 +17,9 @@ import torch
 
 from anemoi.models.preprocessing import BasePreprocessor
 from anemoi.models.preprocessing._caching import cached_parameters
+from anemoi.models.preprocessing.normalization import NORMALIZATION_STATISTICS
+from anemoi.models.preprocessing.normalization import missing_statistics
+from anemoi.models.preprocessing.normalization import normalization_coefficients
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,7 +47,12 @@ class InputNormalizer(BasePreprocessor):
     This preprocessor is stateless at forward time: normalization parameters
     are computed (and cached) from the statistics carried by each
     :class:`Source`, not from registered buffers.
+
+    Its ``remap`` also applies to the thresholds of later processors and of the output boundings,
+    see :attr:`~anemoi.models.preprocessing.BasePreprocessor.shares_statistics_remap`.
     """
+
+    shares_statistics_remap = True
 
     def __init__(self, config=None, **kwargs) -> None:
         """Initialize the normalizer.
@@ -72,7 +80,11 @@ class InputNormalizer(BasePreprocessor):
         statistics : dict
             Data statistics dictionary (numpy arrays).
         name_to_index : dict
-            Dictionary mapping variable names to their indices.
+            Dictionary mapping variable names to their indices: the
+            :attr:`~anemoi.models.data.sources.Source.name_to_index` of the view being
+            normalized, i.e. one entry per variable, indexed ``0..n-1`` in variable order and
+            aligned with the ``statistics`` arrays. A sparse or model-space mapping (e.g. from
+            ``data_indices``) is not valid here.
         device : torch.device
             Target device for the returned tensors.
 
@@ -81,21 +93,14 @@ class InputNormalizer(BasePreprocessor):
         tuple[torch.Tensor, torch.Tensor]
             (norm_mul, norm_add) tensors of shape (len(name_to_index), ).
         """
-        required_by_method = {
-            "mean-std": ("mean", "stdev"),
-            "std": ("stdev",),
-            "min-max": ("minimum", "maximum"),
-            "max": ("maximum",),
-            "none": (),
-        }
         methods = {self.methods.get(name, self.default) for name in name_to_index}
-        unknown = methods - required_by_method.keys()
+        unknown = methods - NORMALIZATION_STATISTICS.keys()
         if unknown:
             raise ValueError(f"Unknown normalisation methods: {sorted(unknown)}")
-        required = {key for method in methods for key in required_by_method[method]}
-        missing = required - statistics.keys()
+        missing = missing_statistics(sorted(methods), statistics)
         if missing:
-            raise ValueError(f"Normalization requires statistics: {sorted(missing)}")
+            raise ValueError(f"Normalization requires statistics: {missing}")
+        required = {key for method in methods for key in NORMALIZATION_STATISTICS[method]}
         # Computed in float64 and rounded once to float32 at the end: rounding the statistics first
         # changes the last bit of many parameters.
         values = {key: torch.as_tensor(statistics[key], dtype=torch.float64, device=device) for key in required}
@@ -118,43 +123,9 @@ class InputNormalizer(BasePreprocessor):
 
         norm_mul = torch.ones(len(name_to_index), dtype=torch.float64, device=device)
         norm_add = torch.zeros(len(name_to_index), dtype=torch.float64, device=device)
-        eps = 1e-8
-
         for name, i in name_to_index.items():
             method = self.methods.get(name, self.default)
-
-            if method == "mean-std":
-                if values["stdev"][i] < eps:
-                    warnings.warn(f"Variable {name} has near-zero variance. Skipping scale adjustments.")
-                else:
-                    norm_mul[i] = 1.0 / values["stdev"][i]
-                    norm_add[i] = -values["mean"][i] / values["stdev"][i]
-
-            elif method == "std":
-                if values["stdev"][i] < eps:
-                    warnings.warn(f"Variable {name} has near-zero variance. Skipping scale adjustments.")
-                else:
-                    norm_mul[i] = 1.0 / values["stdev"][i]
-
-            elif method == "min-max":
-                rng = values["maximum"][i] - values["minimum"][i]
-                if rng < eps:
-                    warnings.warn(f"Variable {name} has a near-zero range. Skipping scale adjustments.")
-                    norm_add[i] = -values["minimum"][i]
-                else:
-                    norm_mul[i] = 1.0 / rng
-                    norm_add[i] = -values["minimum"][i] / rng
-
-            elif method == "max":
-                if torch.abs(values["maximum"][i]) < eps:
-                    warnings.warn(f"Variable {name} has a near-zero maximum. Skipping scale adjustments.")
-                else:
-                    norm_mul[i] = 1.0 / values["maximum"][i]
-
-            elif method == "none":
-                continue
-            else:
-                raise ValueError(f"Unknown normalisation method for {name}: {method}")
+            norm_mul[i], norm_add[i] = normalization_coefficients(method, values, i, name)
 
         return norm_mul.to(torch.float32), norm_add.to(torch.float32)
 
@@ -175,14 +146,9 @@ class InputNormalizer(BasePreprocessor):
         # Check for typos in method config
         assert isinstance(self.methods, dict)
         for name, method in self.methods.items():
-            assert method in [
-                "mean-std",
-                "std",
-                # "robust",
-                "min-max",
-                "max",
-                "none",
-            ], f"{method} is not a valid normalisation method for variable {name}."
+            assert method in NORMALIZATION_STATISTICS, (
+                f"{method} is not a valid normalisation method for variable {name}."
+            )
 
     def transform(
         self,
@@ -202,6 +168,8 @@ class InputNormalizer(BasePreprocessor):
             Statistics dictionary required for normalization.
         name_to_index : dict[str, int]
             Dictionary mapping variable names to their indices, required for normalization.
+            Normally the view's :attr:`~anemoi.models.data.sources.Source.name_to_index`, passed in by
+            :meth:`~anemoi.models.data.sources.Source.apply_func`; see :meth:`get_norm_parameters`.
         data_index : torch.Tensor, optional
             Unused deprecated argument. Select variables on the source view before normalization.
 
@@ -245,6 +213,8 @@ class InputNormalizer(BasePreprocessor):
             Statistics dictionary required for normalization.
         name_to_index : dict[str, int]
             Dictionary mapping variable names to their indices, required for normalization.
+            Normally the view's :attr:`~anemoi.models.data.sources.Source.name_to_index`, passed in by
+            :meth:`~anemoi.models.data.sources.Source.apply_func`; see :meth:`get_norm_parameters`.
         data_index : torch.Tensor, optional
             Unused deprecated argument. Select variables on the source view before normalization.
 

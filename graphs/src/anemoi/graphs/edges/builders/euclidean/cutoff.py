@@ -37,15 +37,15 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
         max_num_neighbours: int = 64,
         backend: Literal["auto", "sklearn"] = "auto",
     ) -> None:
-        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
+        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name, backend=backend)
 
         # Validate that exactly one of cutoff_factor or cutoff_distance_km is provided
-        assert not (
-            cutoff_factor is None and cutoff_distance_km is None
-        ), "Either cutoff_factor or cutoff_distance_km must be provided."
-        assert not (
-            cutoff_factor is not None and cutoff_distance_km is not None
-        ), "cutoff_factor and cutoff_distance_km are mutually exclusive. Provide only one."
+        assert not (cutoff_factor is None and cutoff_distance_km is None), (
+            "Either cutoff_factor or cutoff_distance_km must be provided."
+        )
+        assert not (cutoff_factor is not None and cutoff_distance_km is not None), (
+            "cutoff_factor and cutoff_distance_km are mutually exclusive. Provide only one."
+        )
 
         if cutoff_factor is not None:
             assert isinstance(cutoff_factor, (int, float)), "Cutoff factor must be a float."
@@ -57,12 +57,10 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
 
         assert isinstance(max_num_neighbours, int), "Number of nearest neighbours must be an integer."
         assert max_num_neighbours > 0, "Number of nearest neighbours must be positive."
-        assert backend in ("auto", "sklearn"), "Backend must be 'auto' or 'sklearn'."
 
         self.cutoff_factor = cutoff_factor
         self.cutoff_distance_km = cutoff_distance_km
         self.max_num_neighbours = max_num_neighbours
-        self.backend = backend
 
     def _use_pyg_lib(self) -> bool:
         """Use pyg-lib unless the sklearn backend is requested."""

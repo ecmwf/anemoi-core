@@ -148,11 +148,12 @@ things can prevent this:
 -  Some GPU kernels add up results, such as gradients, in an order that can change
    between runs.
 -  With several GPUs, the gradients of all GPUs are summed in an order that can
-   change between runs, for example when a run is resumed. Setting
+   change between runs, for example when a run is resumed. The default settings
    ``training.strategy.static_graph: false`` and
-   ``training.strategy.find_unused_parameters: true`` keeps this order fixed, so a
+   ``training.strategy.find_unused_parameters: true`` keep this order fixed, so a
    resumed run continues bitwise identically if the GPU kernels are reproducible.
-   These settings may make training slower.
+   Setting them to ``true`` and ``false`` can make training of large models
+   faster, but gives up this guarantee.
 
 Metrics that PyTorch Lightning averages over an epoch, such as the epoch value of
 the training loss, can differ for the epoch in which a run was resumed: Lightning

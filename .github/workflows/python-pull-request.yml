@@ -1,4 +1,4 @@
-name: Code Quality and Testing
+name: Test against PyPI
 
 on:
   pull_request:
@@ -13,6 +13,8 @@ on:
 
 env:
   UV_SYSTEM_PYTHON: 1
+  # CUDA torch only where uv finds a GPU, which the runners lack; as torch-backend in .ci/.
+  UV_TORCH_BACKEND: auto
 
 jobs:
   quality:

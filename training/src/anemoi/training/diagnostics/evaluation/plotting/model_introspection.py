@@ -45,9 +45,14 @@ __all__ = [
 ]
 
 
+def unwrap_anemoi_interface(pl_module: pl.LightningModule) -> Any:
+    """Return the anemoi model interface, unwrapping DDP."""
+    return pl_module.model.module if hasattr(pl_module.model, "module") else pl_module.model
+
+
 def unwrap_anemoi_model(pl_module: pl.LightningModule) -> Any:
     """Return the underlying anemoi model, unwrapping DDP / interface layers."""
-    return pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
+    return unwrap_anemoi_interface(pl_module).model
 
 
 def extract_node_coordinates(pl_module: pl.LightningModule) -> dict[str, torch.Tensor]:
@@ -56,7 +61,7 @@ def extract_node_coordinates(pl_module: pl.LightningModule) -> dict[str, torch.T
     Call this function on the main thread. The checkpoint callback sets the raw graph to ``None``
     on the main thread while it saves a checkpoint, so a read from the asynchronous plot thread can fail.
     """
-    graph = unwrap_anemoi_model(pl_module)._graph_data
+    graph = unwrap_anemoi_interface(pl_module).graph_data
     return {name: torch.atan2(torch.sin(graph[name].x), torch.cos(graph[name].x)) for name in graph.node_types}
 
 

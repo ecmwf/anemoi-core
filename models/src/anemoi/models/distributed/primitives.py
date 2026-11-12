@@ -242,9 +242,11 @@ def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup]
     # All-reduce.
     input_format = get_memory_format(input_)
     if use_fp32:
-        # Sum in at least float32; wider types such as float64 keep their own precision.
         dtype = input_.dtype
-        inputf_ = input_.to(torch.promote_types(dtype, torch.float32)).contiguous(memory_format=input_format)
+        # Sum in at least float32: half-precision inputs are raised to float32,
+        # float64 inputs keep their precision.
+        reduce_dtype = torch.promote_types(dtype, torch.float32)
+        inputf_ = input_.to(reduce_dtype).contiguous(memory_format=input_format)
         dist.all_reduce(inputf_, group=group)
         input_ = inputf_.to(dtype)
     else:
@@ -268,7 +270,6 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
 
     # cant call dist.get_backend(group) in torch.compile() so we check is_compiling first
     if (not torch.compiler.is_compiling()) and dist.get_backend(group) == "gloo":
-
         # Need to check torch version here bc the syntax for dist.send/recv changed in torch v2.6
         torch_version = torch.__version__.split(".")
         torch_major_version = int(torch_version[0])

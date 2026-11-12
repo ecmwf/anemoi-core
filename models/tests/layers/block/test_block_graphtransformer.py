@@ -133,12 +133,12 @@ def test_GraphTransformerProcessorBlock_init(init_proc, block):
         _backend,
         _edge_pre_mlp,
     ) = init_proc
-    assert isinstance(
-        block, GraphTransformerProcessorBlock
-    ), "block is not an instance of GraphTransformerProcessorBlock"
-    assert (
-        block.out_channels_conv == out_channels // num_heads
-    ), f"block.out_channels_conv ({block.out_channels_conv}) != out_channels // num_heads ({out_channels // num_heads})"
+    assert isinstance(block, GraphTransformerProcessorBlock), (
+        "block is not an instance of GraphTransformerProcessorBlock"
+    )
+    assert block.out_channels_conv == out_channels // num_heads, (
+        f"block.out_channels_conv ({block.out_channels_conv}) != out_channels // num_heads ({out_channels // num_heads})"
+    )
     assert block.num_heads == num_heads, f"block.num_heads ({block.num_heads}) != num_heads ({num_heads})"
     assert isinstance(block.lin_key, torch.nn.Linear), "block.lin_key is not an instance of torch.nn.Linear"
     assert isinstance(block.lin_query, torch.nn.Linear), "block.lin_query is not an instance of torch.nn.Linear"
@@ -150,9 +150,9 @@ def test_GraphTransformerProcessorBlock_init(init_proc, block):
     assert isinstance(block.node_dst_mlp, MLP), "block.node_dst_mlp is not an instance of MLP"
     assert block.q_norm.bias is None
     assert block.k_norm.bias is None
-    assert isinstance(
-        block.edge_pre_mlp, torch.nn.Identity
-    ), "block.edge_pre_mlp is not an instance of torch.nn.Identity"
+    assert isinstance(block.edge_pre_mlp, torch.nn.Identity), (
+        "block.edge_pre_mlp is not an instance of torch.nn.Identity"
+    )
 
 
 def test_GraphTransformerProcessorBlock_init_edge_mlp(init_proc, block_with_edge_mlp):
@@ -168,49 +168,49 @@ def test_GraphTransformerProcessorBlock_init_edge_mlp(init_proc, block_with_edge
         _backend,
         _edge_pre_mlp,
     ) = init_proc
-    assert isinstance(
-        block_with_edge_mlp, GraphTransformerProcessorBlock
-    ), "block is not an instance of GraphTransformerProcessorBlock"
-    assert (
-        block_with_edge_mlp.out_channels_conv == out_channels // num_heads
-    ), f"block.out_channels_conv ({block_with_edge_mlp.out_channels_conv}) != out_channels // num_heads ({out_channels // num_heads})"
-    assert (
-        block_with_edge_mlp.num_heads == num_heads
-    ), f"block.num_heads ({block_with_edge_mlp.num_heads}) != num_heads ({num_heads})"
-    assert isinstance(
-        block_with_edge_mlp.lin_key, torch.nn.Linear
-    ), "block.lin_key is not an instance of torch.nn.Linear"
-    assert isinstance(
-        block_with_edge_mlp.lin_query, torch.nn.Linear
-    ), "block.lin_query is not an instance of torch.nn.Linear"
-    assert isinstance(
-        block_with_edge_mlp.lin_value, torch.nn.Linear
-    ), "block.lin_value is not an instance of torch.nn.Linear"
-    assert isinstance(
-        block_with_edge_mlp.lin_self, torch.nn.Linear
-    ), "block.lin_self is not an instance of torch.nn.Linear"
-    assert isinstance(
-        block_with_edge_mlp.lin_edge, torch.nn.Linear
-    ), "block.lin_edge is not an instance of torch.nn.Linear"
-    assert isinstance(
-        block_with_edge_mlp.conv, GraphTransformerConv
-    ), "block.conv is not an instance of GraphTransformerConv"
-    assert isinstance(
-        block_with_edge_mlp.projection, torch.nn.Linear
-    ), "block.projection is not an instance of torch.nn.Linear"
+    assert isinstance(block_with_edge_mlp, GraphTransformerProcessorBlock), (
+        "block is not an instance of GraphTransformerProcessorBlock"
+    )
+    assert block_with_edge_mlp.out_channels_conv == out_channels // num_heads, (
+        f"block.out_channels_conv ({block_with_edge_mlp.out_channels_conv}) != out_channels // num_heads ({out_channels // num_heads})"
+    )
+    assert block_with_edge_mlp.num_heads == num_heads, (
+        f"block.num_heads ({block_with_edge_mlp.num_heads}) != num_heads ({num_heads})"
+    )
+    assert isinstance(block_with_edge_mlp.lin_key, torch.nn.Linear), (
+        "block.lin_key is not an instance of torch.nn.Linear"
+    )
+    assert isinstance(block_with_edge_mlp.lin_query, torch.nn.Linear), (
+        "block.lin_query is not an instance of torch.nn.Linear"
+    )
+    assert isinstance(block_with_edge_mlp.lin_value, torch.nn.Linear), (
+        "block.lin_value is not an instance of torch.nn.Linear"
+    )
+    assert isinstance(block_with_edge_mlp.lin_self, torch.nn.Linear), (
+        "block.lin_self is not an instance of torch.nn.Linear"
+    )
+    assert isinstance(block_with_edge_mlp.lin_edge, torch.nn.Linear), (
+        "block.lin_edge is not an instance of torch.nn.Linear"
+    )
+    assert isinstance(block_with_edge_mlp.conv, GraphTransformerConv), (
+        "block.conv is not an instance of GraphTransformerConv"
+    )
+    assert isinstance(block_with_edge_mlp.projection, torch.nn.Linear), (
+        "block.projection is not an instance of torch.nn.Linear"
+    )
     assert isinstance(block_with_edge_mlp.node_dst_mlp, MLP), "block.node_dst_mlp is not an instance of MLP"
     assert block_with_edge_mlp.q_norm.bias is None
     assert block_with_edge_mlp.k_norm.bias is None
-    assert isinstance(
-        block_with_edge_mlp.edge_pre_mlp, torch.nn.Sequential
-    ), "block_with_edge_mlp.edge_pre_mlp is not an instance of torch.nn.Sequential"
-    assert isinstance(
-        block_with_edge_mlp.edge_pre_mlp[0], torch.nn.Linear
-    ), "block.edge_pre_mlp[0] is not an instance of torch.nn.Linear"
+    assert isinstance(block_with_edge_mlp.edge_pre_mlp, torch.nn.Sequential), (
+        "block_with_edge_mlp.edge_pre_mlp is not an instance of torch.nn.Sequential"
+    )
+    assert isinstance(block_with_edge_mlp.edge_pre_mlp[0], torch.nn.Linear), (
+        "block.edge_pre_mlp[0] is not an instance of torch.nn.Linear"
+    )
     assert block_with_edge_mlp.edge_pre_mlp[0].weight.shape == torch.Size([_edge_dim, _edge_dim])
-    assert isinstance(
-        block_with_edge_mlp.edge_pre_mlp[1], _layer_kernels.Activation.func
-    ), "block.edge_pre_mlp[1] is not an instance of layer_kernels.Activation"
+    assert isinstance(block_with_edge_mlp.edge_pre_mlp[1], _layer_kernels.Activation.func), (
+        "block.edge_pre_mlp[1] is not an instance of layer_kernels.Activation"
+    )
 
 
 def test_edge_pre_mlp_remains_plain_when_node_mlp_is_gated():
@@ -561,9 +561,9 @@ def test_GraphTransformerProcessorBlock_forward_backward(init_proc, block):
     # Check gradients
     for param in block.parameters():
         assert param.grad is not None, f"param.grad is None for {param}"
-        assert (
-            param.grad.shape == param.shape
-        ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+        assert param.grad.shape == param.shape, (
+            f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+        )
 
 
 @pytest.fixture
@@ -678,9 +678,9 @@ def test_GraphTransformerMapperBlock_init(init_mapper, mapper_block):
     ) = init_mapper
     block = mapper_block
     assert isinstance(block, GraphTransformerMapperBlock), "block is not an instance of GraphTransformerMapperBlock"
-    assert (
-        block.out_channels_conv == out_channels // num_heads
-    ), f"block.out_channels_conv ({block.out_channels_conv}) != out_channels // num_heads ({out_channels // num_heads})"
+    assert block.out_channels_conv == out_channels // num_heads, (
+        f"block.out_channels_conv ({block.out_channels_conv}) != out_channels // num_heads ({out_channels // num_heads})"
+    )
     assert block.num_heads == num_heads, f"block.num_heads ({block.num_heads}) != num_heads ({num_heads})"
     assert isinstance(block.lin_key, torch.nn.Linear), "block.lin_key is not an instance of torch.nn.Linear"
     assert isinstance(block.lin_query, torch.nn.Linear), "block.lin_query is not an instance of torch.nn.Linear"
@@ -689,9 +689,9 @@ def test_GraphTransformerMapperBlock_init(init_mapper, mapper_block):
     assert isinstance(block.lin_edge, torch.nn.Linear), "block.lin_edge is not an instance of torch.nn.Linear"
     assert isinstance(block.conv, GraphTransformerConv), "block.conv is not an instance of GraphTransformerConv"
     assert isinstance(block.projection, torch.nn.Linear), "block.projection is not an instance of torch.nn.Linear"
-    assert isinstance(
-        block.edge_pre_mlp, torch.nn.Identity
-    ), "block.edge_pre_mlp is not an instance of torch.nn.Identity"
+    assert isinstance(block.edge_pre_mlp, torch.nn.Identity), (
+        "block.edge_pre_mlp is not an instance of torch.nn.Identity"
+    )
 
 
 def test_GraphTransformerMapperBlock_custom_attn_channels(init_mapper):
@@ -825,6 +825,6 @@ def test_GraphTransformerMapperBlock_forward_backward(init_mapper, mapper_block)
     # Check gradients
     for param in block.parameters():
         assert param.grad is not None, f"param.grad is None for {param}"
-        assert (
-            param.grad.shape == param.shape
-        ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+        assert param.grad.shape == param.shape, (
+            f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+        )

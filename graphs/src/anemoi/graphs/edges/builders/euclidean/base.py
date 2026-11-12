@@ -11,6 +11,7 @@
 import logging
 from abc import ABC
 from abc import abstractmethod
+from typing import Literal
 
 import numpy as np
 import torch
@@ -26,20 +27,42 @@ LOGGER = logging.getLogger(__name__)
 
 
 class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
-    """Base class for edge builders based on distance."""
+    """Base class for edge builders based on distance.
 
-    #: Whether the neighbour search runs from the source nodes rather than from the target nodes, as
-    #: the ``Reversed*`` builders do. The coordinates are swapped before the search and the result is
-    #: left unflipped, so the edge index still comes back with (source, target) rows.
+    Attributes
+    ----------
+    reversed_search : bool, optional
+        Whether the neighbour search runs from the source nodes rather than from the target nodes. Default is False.
+    backend : Literal["auto", "sklearn"]
+        The backend to use for computing edges. "auto" will choose pyg-lib if available, otherwise sklearn.
+    """
+
     reversed_search: bool = False
+
+    def __init__(
+        self,
+        source_name: str,
+        target_name: str,
+        source_mask_attr_name: str | None = None,
+        target_mask_attr_name: str | None = None,
+        backend: Literal["auto", "sklearn"] = "auto",
+    ):
+        assert backend in ("auto", "sklearn"), "Backend must be 'auto' or 'sklearn'."
+        self.backend = backend
+        super().__init__(
+            source_name=source_name,
+            target_name=target_name,
+            source_mask_attr_name=source_mask_attr_name,
+            target_mask_attr_name=target_mask_attr_name,
+        )
 
     def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
         """Prepare keyword arguments."""
         return {}
 
     def _use_pyg_lib(self) -> bool:
-        """Whether to compute the edges with pyg-lib rather than sklearn."""
-        return is_pyg_lib_available()
+        """Whether to compute the edges with pyg-lib or sklearn."""
+        return self.backend == "auto" and is_pyg_lib_available()
 
     @abstractmethod
     def _compute_edge_index_pyg(

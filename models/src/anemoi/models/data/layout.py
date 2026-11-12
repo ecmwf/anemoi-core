@@ -29,9 +29,15 @@ class TensorLayout:
     ensemble : int or None
         Position of the ensemble dimension (``None`` when absent).
     grid : int
-        Position of the grid / spatial-points dimension.
+        Position of the grid / spatial-points dimension. Defaults to the second-last axis.
     variables : int
-        Position of the variable (channel) dimension.
+        Position of the variable (channel) dimension. Defaults to the last axis.
+
+    A layout names every axis of its tensors, so its rank is the number of axes it
+    defines. Negative positions count from the end of that rank, as in Python indexing,
+    and are resolved on construction: the stored positions are always non-negative, so
+    ``TensorLayout(time=0, ensemble=1)`` equals ``TensorLayout(time=0, ensemble=1, grid=2,
+    variables=3)``.
 
     Notes
     -----
@@ -49,6 +55,30 @@ class TensorLayout:
 
     #: Logical axis names, in canonical order.
     AXES = ("batch", "time", "ensemble", "grid", "variables")
+
+    def __post_init__(self) -> None:
+        """Resolve negative positions against the layout's rank, and check the axes.
+
+        A layout names every axis of its tensors, so its rank is the number of axes it
+        defines and every position is known on construction. Storing them non-negative
+        makes equivalent layouts equal and keeps :attr:`pattern` in physical order.
+        """
+        ndim = self.ndim
+        positions = {}
+        for name in self.AXES:
+            pos = getattr(self, name)
+            if pos is None:
+                continue
+            if not -ndim <= pos < ndim:
+                msg = f"TensorLayout axis {name}={pos} is out of range for a layout of {ndim} axes."
+                raise ValueError(msg)
+            if pos < 0:
+                pos += ndim
+                object.__setattr__(self, name, pos)
+            positions[name] = pos
+        if len(set(positions.values())) != len(positions):
+            msg = f"TensorLayout places several axes at the same position: {positions}."
+            raise ValueError(msg)
 
     @classmethod
     def from_tuple(cls, *args) -> "TensorLayout":
@@ -95,42 +125,52 @@ class TensorLayout:
         parts = list(sorted(self.dims, key=lambda x: getattr(self, x)))
         return " ".join(parts)
 
+    @property
+    def canonical_permutation(self) -> tuple[int, ...]:
+        """Physical positions of this layout's axes, in canonical (:attr:`AXES`) order.
+
+        ``tensor.permute(layout.canonical_permutation)`` reorders a tensor with this
+        layout into :meth:`canonical` order.
+        """
+        return tuple(getattr(self, name) for name in self.AXES if self.has_axis(name))
+
+    @property
+    def is_canonical(self) -> bool:
+        """Whether the axes are laid out in canonical (:attr:`AXES`) order."""
+        return self.canonical_permutation == tuple(range(self.ndim))
+
+    def canonical(self) -> "TensorLayout":
+        """Return the layout with the same axes, laid out in canonical (:attr:`AXES`) order."""
+        if self.is_canonical:
+            return self
+        return TensorLayout.from_tuple(*(name for name in self.AXES if self.has_axis(name)))
+
     def with_batch_dim(self) -> "TensorLayout":
-        """Return a new layout shifted by +1 to account for a leading batch dim.
+        """Return a new layout with a leading batch axis, every other axis shifted by +1.
 
         Returns the layout unchanged when it already has a batch axis.
         """
         if self.batch is not None:
             return self
 
-        return TensorLayout(
-            batch=0,
-            time=self.time + 1 if self.time is not None else None,
-            ensemble=self.ensemble + 1 if self.ensemble is not None else None,
-            grid=self.grid + 1 if self.grid >= 0 else self.grid,
-            variables=self.variables + 1 if self.variables >= 0 else self.variables,
-        )
+        shifted = {name: getattr(self, name) + 1 for name in self.dims}
+        return TensorLayout(batch=0, **shifted)
 
     def without_batch_dim(self) -> "TensorLayout":
-        """Return a new layout with the batch dim removed (inverse of :meth:`with_batch_dim`).
+        """Return a new layout with the batch axis removed (inverse of :meth:`with_batch_dim`).
 
-        Positive non-``None`` axis positions are shifted by ``-1``; negative
-        positions are left unchanged.
+        The axes after the batch axis move one position forward.
         """
         if self.batch is None:
             return self
-        return TensorLayout(
-            batch=None,
-            time=self.time - 1 if self.time is not None and self.time > 0 else self.time,
-            ensemble=self.ensemble - 1 if self.ensemble is not None and self.ensemble > 0 else self.ensemble,
-            grid=self.grid - 1 if self.grid > 0 else self.grid,
-            variables=self.variables - 1 if self.variables > 0 else self.variables,
-        )
+        remaining = {name: getattr(self, name) for name in self.dims - {"batch"}}
+        return TensorLayout(**{name: pos - 1 if pos > self.batch else pos for name, pos in remaining.items()})
 
     def axis(self, name: str, *, ndim: int | None = None) -> int:
         """Return the physical dim index for logical axis ``name``.
 
-        Negative indices are normalised against ``ndim`` when provided.
+        Positions are stored non-negative, so ``ndim`` only matters for a layout
+        unpickled from before they were resolved on construction.
 
         Raises
         ------
@@ -154,7 +194,8 @@ class TensorLayout:
         """Return a layout with physical axes resolved against the tensor rank."""
         positions = {name: self.axis(name, ndim=ndim) for name in self.AXES if self.has_axis(name)}
         if len(positions) != ndim or set(positions.values()) != set(range(ndim)):
-            raise ValueError(f"Layout {self!r} must describe each of the {ndim} tensor axes exactly once.")
+            msg = f"Layout {self!r} must describe each of the {ndim} tensor axes exactly once."
+            raise ValueError(msg)
         return TensorLayout(**positions)
 
     def __repr__(self) -> str:

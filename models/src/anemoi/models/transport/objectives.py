@@ -239,21 +239,21 @@ class EDMDiffusionModelObjective(TransportModelObjective):
         return c_skip, c_out, c_in, c_noise
 
 
-class StochasticInterpolantModelObjective(TransportModelObjective):
-    """Stochastic-interpolant model objective that predicts bridge drift."""
+class FlowMatchingModelObjective(TransportModelObjective):
+    """Flow-matching model objective that predicts the velocity from the source field to the target."""
 
     def forward(
         self,
         model: Any,
         x: Batch,
-        interpolant_state: Batch,
+        state: Batch,
         time_level: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs: Any,
     ) -> Batch:
         return model._forward_transport_network(
             x,
-            interpolant_state,
+            state,
             time_level,
             model_comm_group=model_comm_group,
             **kwargs,
@@ -283,7 +283,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         time_schedule = _build_inference_schedule(
             model,
             TIME_SCHEDULES,
-            "stochastic-interpolant schedule",
+            "flow-matching schedule",
             schedule_params,
             x_device,
         )
@@ -306,7 +306,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         sampler_instance = _build_inference_sampler(
             model,
             transport_samplers.VECTOR_FIELD_SAMPLERS,
-            "stochastic-interpolant sampler",
+            "flow-matching sampler",
             sampler_params,
             time_schedule.dtype,
         )
@@ -321,7 +321,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
 
 TRANSPORT_MODEL_OBJECTIVES = {
     "edm_diffusion": EDMDiffusionModelObjective,
-    "stochastic_interpolant": StochasticInterpolantModelObjective,
+    "flow_matching": FlowMatchingModelObjective,
 }
 
 

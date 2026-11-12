@@ -115,12 +115,12 @@ class TestGNNBaseMapper:
         x = pair_tensor
 
         x_src, x_dst = mapper.pre_process(x)
-        assert x_src.shape == torch.Size(
-            x[0].shape
-        ), f"x_src.shape ({x_src.shape}) != torch.Size(x[0].shape) ({torch.Size(x[0].shape)})"
-        assert x_dst.shape == torch.Size(
-            x[1].shape
-        ), f"x_dst.shape ({x_dst.shape}) != torch.Size(x[1].shape) ({x[1].shape})"
+        assert x_src.shape == torch.Size(x[0].shape), (
+            f"x_src.shape ({x_src.shape}) != torch.Size(x[0].shape) ({torch.Size(x[0].shape)})"
+        )
+        assert x_dst.shape == torch.Size(x[1].shape), (
+            f"x_dst.shape ({x_dst.shape}) != torch.Size(x[1].shape) ({x[1].shape})"
+        )
 
     def test_post_process(self, mapper, pair_tensor):
         # Should be a no-op in the base class
@@ -191,9 +191,9 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
 
         for param in mapper.parameters():
             assert param.grad is not None, f"param.grad is None for {param}"
-            assert (
-                param.grad.shape == param.shape
-            ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            assert param.grad.shape == param.shape, (
+                f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            )
 
     def test_unsorted_edge_flag_reaches_sharding(self, mapper_init, mapper, pair_tensor, graph_provider, monkeypatch):
         x = pair_tensor
@@ -264,9 +264,9 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
         )
 
         result = mapper.post_process(x_dst)
-        assert (
-            torch.Size([self.NUM_DST_NODES, mapper_init.out_channels_dst]) == result.shape
-        ), f"[self.NUM_DST_NODES, out_channels_dst] ({[self.NUM_DST_NODES, mapper_init.out_channels_dst]}) != result.shape ({result.shape})"
+        assert torch.Size([self.NUM_DST_NODES, mapper_init.out_channels_dst]) == result.shape, (
+            f"[self.NUM_DST_NODES, out_channels_dst] ({[self.NUM_DST_NODES, mapper_init.out_channels_dst]}) != result.shape ({result.shape})"
+        )
 
     def test_forward_backward(self, mapper_init, mapper, pair_tensor, graph_provider):
         pair_tensor
@@ -302,9 +302,9 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
 
         for param in mapper.parameters():
             assert param.grad is not None, f"param.grad is None for {param}"
-            assert (
-                param.grad.shape == param.shape
-            ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            assert param.grad.shape == param.shape, (
+                f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            )
 
     def test_unsorted_edge_flag_reaches_sharding(self, mapper_init, mapper, graph_provider, device, monkeypatch):
         batch_size = 1

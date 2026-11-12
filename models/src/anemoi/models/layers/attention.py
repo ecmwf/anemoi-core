@@ -191,8 +191,10 @@ class MultiHeadSelfAttention(nn.Module):
             )
             self.attention_implementation = ATTENTION_BACKEND
 
-        assert self.attention_implementation in attn_funcs, f"backend '{self.attention_implementation}' not supported. \
+        assert self.attention_implementation in attn_funcs, (
+            f"backend '{self.attention_implementation}' not supported. \
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
+        )
 
         # initalise the attn func here
         if self.attention_implementation == "flash_attention":
@@ -219,9 +221,9 @@ class MultiHeadSelfAttention(nn.Module):
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
         if model_comm_group:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded accross GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                "Only batch size of 1 is supported when model is sharded accross GPUs"
+            )
 
         query, key, value = (
             einops.rearrange(

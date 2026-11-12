@@ -18,6 +18,7 @@ from anemoi.models.samplers.transport_samplers import DPMpp2MSampler
 from anemoi.models.samplers.transport_samplers import EDMHeunSampler
 from anemoi.models.samplers.transport_samplers import VectorFieldEulerSampler
 from anemoi.models.samplers.transport_samplers import VectorFieldHeunSampler
+from anemoi.models.samplers.transport_samplers import _expand_scalar_condition
 from anemoi.models.transport.schedules import DEFAULT_FINAL_SIGMA_EPS
 from anemoi.models.transport.schedules import CosineSigmaSchedule
 from anemoi.models.transport.schedules import ExponentialSigmaSchedule
@@ -330,3 +331,16 @@ def test_vector_field_heun_can_use_predictor_corrector_on_final_step() -> None:
     f2 = 2.0 * y_predictor + times[1]
     expected = y[DATASET_NAME].data + dt * (f1 + f2) / 2.0
     torch.testing.assert_close(result[DATASET_NAME].data, expected)
+
+
+def test_scalar_condition_keeps_at_least_float32() -> None:
+    """A time or noise level stays float32 for bfloat16 data, and float64 for float64 data."""
+    _, y_bfloat16 = make_inputs(dtype=torch.bfloat16)
+    _, y_float64 = make_inputs(dtype=torch.float64)
+    value = torch.tensor(0.123456789, dtype=torch.float64)
+
+    condition = _expand_scalar_condition(value, y_bfloat16)[DATASET_NAME]
+
+    assert condition.dtype == torch.float32
+    assert condition.flatten()[0].item() == pytest.approx(value.item(), rel=1e-7)
+    assert _expand_scalar_condition(value, y_float64)[DATASET_NAME].dtype == torch.float64

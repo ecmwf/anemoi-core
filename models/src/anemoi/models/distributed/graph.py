@@ -141,8 +141,7 @@ def shard_tensor(
         total_size = sum(sizes)
         if total_size != input_size:
             raise ValueError(
-                f"sizes must sum exactly to {input_size} "
-                f"(input tensor's size at dimension {dim}), but got {total_size}"
+                f"sizes must sum exactly to {input_size} (input tensor's size at dimension {dim}), but got {total_size}"
             )
     return _ShardParallelSection.apply(input_, dim, sizes, gather_in_backward, mgroup)
 
@@ -185,8 +184,7 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
         input_size = input_.size(dim)
         if input_size != sizes[rank]:
             raise ValueError(
-                f"input tensor's size at dimension {dim} must match sizes[{rank}] "
-                f"({sizes[rank]}), but got {input_size}"
+                f"input tensor's size at dimension {dim} must match sizes[{rank}] ({sizes[rank]}), but got {input_size}"
             )
     return _GatherParallelSection.apply(input_, dim, sizes, mgroup)
 
@@ -255,8 +253,7 @@ def sync_tensor(
         input_size = input_.size(dim)
         if input_size != sizes[rank]:
             raise ValueError(
-                f"input tensor's size at dimension {dim} must match sizes[{rank}] "
-                f"({sizes[rank]}), but got {input_size}"
+                f"input tensor's size at dimension {dim} must match sizes[{rank}] ({sizes[rank]}), but got {input_size}"
             )
     return _SyncParallelSection.apply(input_, dim, sizes, mgroup, gather_in_fwd)
 
@@ -290,8 +287,7 @@ def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: Pro
         total_size = sum(sizes)
         if total_size != input_size:
             raise ValueError(
-                f"sizes must sum exactly to {input_size} "
-                f"(input tensor's size at dimension {dim}), but got {total_size}"
+                f"sizes must sum exactly to {input_size} (input tensor's size at dimension {dim}), but got {total_size}"
             )
     return _ReduceShardParallelSection.apply(input_, dim, sizes, mgroup)
 
@@ -592,6 +588,16 @@ def halo_exchange(input_: Tensor, halo_info, mgroup: ProcessGroup) -> Tensor:
     Tensor
         ``(num_local_src_nodes + num_halo_nodes, ...)`` — local + halo features.
     """
+    if model_is_distributed(mgroup):
+        group_size = mgroup.size()
+        if len(halo_info.send_indices) != group_size:
+            raise ValueError(
+                f"halo_info.send_indices must contain {group_size} entries, but got {len(halo_info.send_indices)}"
+            )
+        if len(halo_info.recv_counts) != group_size:
+            raise ValueError(
+                f"halo_info.recv_counts must contain {group_size} entries, but got {len(halo_info.recv_counts)}"
+            )
     return _HaloExchangeParallelSection.apply(input_, halo_info, mgroup)
 
 

@@ -35,7 +35,9 @@ First, let's take the model configuration ``transformer.yaml``:
    encoders:
      0:                        # user-defined group name (appears in the state-dict)
        source_datasets: [ "data" ]           # datasets encoded by this group
-       dataset_fusing_strategy: "none"
+       dataset_fusing_strategy: "none"     # "none" or "sequential" ("joint" is planned)
+       node_embedder:                      # pass-through for "none"; "sequential" needs e.g. LinearNodeEmbedder
+         _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024
@@ -239,8 +241,10 @@ In this example, ``model_interface.model`` is the following:
        )
      )
      (latent_aggregator): SumAggregator()
-     (processor_graph_provider): StaticGraphProvider(
-       (trainable): TrainableTensor()
+     (processor_graph_provider): ModuleDict(
+       (hidden): StaticGraphProvider(
+         (trainable): TrainableTensor()
+       )
      )
      (processor): TransformerProcessor(
        ...
@@ -266,7 +270,8 @@ are merged by the ``latent_aggregator`` before the processor. Each
 encoder, processor, and decoder has a corresponding ``*_graph_provider``
 that manages the graph edges and trainable edge parameters, supplying
 edge attributes and indices to its mapper/processor during the forward
-pass.
+pass. The encoder and decoder providers are keyed by dataset name, and
+the processor provider by hidden mesh name (here ``hidden``).
 
 .. _layer-kernels:
 

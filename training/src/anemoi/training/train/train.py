@@ -299,6 +299,13 @@ class AnemoiTrainer(ABC):
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
+        # Fail before the graph and model are built if a non-fusing encoder would receive
+        # several of its source datasets in one batch under the configured loading policy.
+        self.datamodule.loading_policy.check_encoder_fusion(
+            OmegaConf.select(self.config, "model.encoders", default={}),
+            list(self.datamodule.ds_train.data_readers),
+        )
+
         kwargs = {
             "config": self.config,
             "task": self.task,
@@ -470,7 +477,7 @@ class AnemoiTrainer(ABC):
         # - timesteps, specifying the time steps used during training for input and output
 
         md_dict = {
-            "version": "2.0",
+            "version": "3.0",
             "config": self.config,
             "seed": self.initial_seed,
             "base_seed": self.base_seed,
@@ -478,6 +485,7 @@ class AnemoiTrainer(ABC):
             "provenance_training": gather_provenance_info(),
             "timestamp": datetime.datetime.now(tz=datetime.UTC),
             "metadata_inference": metadata_inference,
+            "checkpoint_lineage": [],
         }
         self.datamodule.fill_metadata(md_dict)
         self.task.fill_metadata(md_dict)
