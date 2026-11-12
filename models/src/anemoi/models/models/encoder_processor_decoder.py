@@ -574,23 +574,24 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # The decoder output becomes a source shaped and named like the template.
         pred = template.unflatten(x_out.to(torch.promote_types(dtype, torch.float32)))
-
-        if x_skip is not None:
-            assert x_skip.ndim == 5, (
-                f"Residual must be (batch, time, ensemble, grid, variables), but got shape {x_skip.shape}"
-            )
-            assert x_skip.shape[1] == pred.data.shape[1], (
-                f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({pred.data.shape[1]})."
-            )
-            new_data = pred.data.clone()
-            new_data[..., self._internal_output_idx[dataset_name]] += x_skip[
-                ..., self._internal_input_idx[dataset_name]
-            ]
-            pred = pred.clone(data=new_data)
-
+        pred = self._add_residual(pred, x_skip, dataset_name)
         pred = self.boundings[dataset_name](pred)
 
         return pred
+
+    def _add_residual(self, pred: "Source", x_skip: torch.Tensor | None, dataset_name: str) -> "Source":
+        """Add the residual connection to the prognostic variables of ``pred``; the diagnostics stay as they are."""
+        if x_skip is None:
+            return pred
+        assert x_skip.ndim == 5, (
+            f"Residual must be (batch, time, ensemble, grid, variables), but got shape {x_skip.shape}"
+        )
+        assert x_skip.shape[1] == pred.data.shape[1], (
+            f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({pred.data.shape[1]})."
+        )
+        new_data = pred.data.clone()
+        new_data[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+        return pred.clone(data=new_data)
 
     def _assert_valid_sharding(
         self,

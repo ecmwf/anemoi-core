@@ -61,6 +61,18 @@ class PredictionMode:
 class StatePredictionMode(PredictionMode):
     """Prediction mode where the model learns the future state directly."""
 
+    def __init__(self, module: BaseTransportTraining) -> None:
+        super().__init__(module)
+        model = self.module.model.model
+        if isinstance(model, AnemoiTransportTendModelEncProcDec):
+            msg = (
+                "training.transport.prediction_mode='state' needs a state transport model "
+                "(AnemoiTransportModelEncProcDec), got AnemoiTransportTendModelEncProcDec, which reads its sampled "
+                "output as a tendency at inference. Use prediction_mode 'tendency' with this model, or a state "
+                "model config."
+            )
+            raise TypeError(msg)
+
     def prepare_target(
         self,
         batch: Batch,

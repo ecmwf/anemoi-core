@@ -568,10 +568,8 @@ model:
       era: []
       combined_surface: []
   residual:
-    datasets:
-      era:
-        _target_: anemoi.models.layers.residual.SkipConnection
-        step: -1
+    # No residual connection by default; a SkipConnection entry adds the latest input state to the outputs.
+    datasets: {}
   output_mask:
     datasets:
       era:

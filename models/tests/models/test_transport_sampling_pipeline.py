@@ -1542,3 +1542,47 @@ def test_sampling_template_describes_interface_templates_in_output_variables() -
     assert source.layout == TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
     assert source.data.shape == (1, 2, 1, 4, 3)
     assert set(source.data.stride()) == {0}  # zero-stride view
+
+
+def test_sample_rejects_unknown_keyword_arguments() -> None:
+    """Sampler and schedule settings go in sampler_params and schedule_params; a stray keyword is an error."""
+    model = _transport_model_stub()
+    model.transport_model_objective = FlowMatchingModelObjective()
+
+    with pytest.raises(TypeError, match="num_steps"):
+        model.sample(None, target_template={}, num_steps=20)
+
+
+def _residual_case(model: AnemoiTransportModelEncProcDec) -> tuple[torch.Tensor, object]:
+    """Zero network output for 2 prognostic variables and 1 diagnostic, and a residual on the prognostic ones."""
+    model._internal_output_idx = {"data": [0, 1]}
+    model._internal_input_idx = {"data": [0, 1]}
+    target = build_batch(
+        data={"data": torch.zeros(1, 1, 1, 4, 3)},
+        coordinates={"data": torch.zeros(4, 2)},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": ["prog_a", "prog_b", "diag"]},
+    )["data"]
+    x_skip = torch.arange(8, dtype=torch.float32).reshape(1, 1, 1, 4, 2) + 1.0
+    return x_skip, target
+
+
+def test_state_transport_output_adds_the_residual_to_the_prognostic_variables() -> None:
+    model = _transport_model_stub()
+    x_skip, target = _residual_case(model)
+
+    pred = model._assemble_output(torch.zeros(4, 3), x_skip, target, torch.float32, "data")
+
+    torch.testing.assert_close(pred.data[..., :2], x_skip)
+    torch.testing.assert_close(pred.data[..., 2], torch.zeros(1, 1, 1, 4))
+
+
+def test_tendency_transport_output_leaves_the_residual_out() -> None:
+    """The tendency model uses the residual for conditioning and the reference state only."""
+    model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
+    torch.nn.Module.__init__(model)
+    x_skip, target = _residual_case(model)
+
+    pred = model._assemble_output(torch.zeros(4, 3), x_skip, target, torch.float32, "data")
+
+    torch.testing.assert_close(pred.data, torch.zeros(1, 1, 1, 4, 3))

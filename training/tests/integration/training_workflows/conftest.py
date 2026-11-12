@@ -578,6 +578,42 @@ def edm_transport_config(
 
 
 @pytest.fixture(
+    params=[
+        ("transport_edm_diffusion", "graphtransformer_transport_edm"),
+        ("transport_edm_diffusion", "transformer_transport_edm"),
+        ("transport_edm_diffusion_tendency", "graphtransformer_transport_tendency_edm"),
+        ("transport_edm_diffusion_tendency", "transformer_transport_tendency_edm"),
+        ("transport_flow_matching", "graphtransformer_transport_fm"),
+        ("transport_flow_matching", "transformer_transport_fm"),
+        ("transport_flow_matching_tendency", "graphtransformer_transport_tendency_fm"),
+        ("transport_flow_matching_tendency", "transformer_transport_tendency_fm"),
+    ],
+    ids=lambda param: param[1],
+)
+def transport_model_config(
+    request: pytest.FixtureRequest,
+    testing_modifications_with_temp_dir: OmegaConf,
+    get_tmp_path: GetTmpPath,
+) -> tuple[OmegaConf, str]:
+    """Each transport model config, composed with the entry config of its objective and mode."""
+    entry_config, model_config = request.param
+    with initialize_config_module(
+        version_base=None,
+        config_module="anemoi.training.config",
+        job_name="test_transport_model_configs",
+    ):
+        template = compose(config_name=entry_config, overrides=[f"model={model_config}"])
+
+    use_case_modifications = OmegaConf.load(CONFIG_DIR / "test_transport.yaml")
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg, url_dataset
+
+
+@pytest.fixture(
     params=["transport_flow_matching", "transport_flow_matching_tendency"],
     ids=["transport_flow_matching", "transport_flow_matching_tendency"],
 )

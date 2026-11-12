@@ -67,6 +67,7 @@ encoders:
       _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+      num_channels: ${model.num_channels}
       trainable_size: ${model.edge_trainable_parameters.data2hidden}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
@@ -89,6 +90,7 @@ decoders:
     target_node_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+      num_channels: ${model.num_channels}
       trainable_size: ${model.edge_trainable_parameters.hidden2data}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4

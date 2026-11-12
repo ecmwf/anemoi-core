@@ -219,6 +219,24 @@ def test_training_cycle_flow_matching(
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_flow_matching_with_residual(
+    flow_matching_config: tuple[DictConfig, str],
+    get_test_archive: callable,
+) -> None:
+    """The state transport model adds a configured residual connection to its prognostic outputs."""
+    cfg, url = flow_matching_config
+    if cfg.training.transport.prediction_mode != "state":
+        pytest.skip("Tendency models use their residual connection for the reference state.")
+    with open_dict(cfg):
+        cfg.model.residual = {
+            "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection", "step": -1}},
+        }
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+@skip_if_offline
+@pytest.mark.slow
 @pytest.mark.mlflow
 def test_training_cycle_mlflow_dry_run(
     mlflow_dry_run_config: tuple[DictConfig, str],

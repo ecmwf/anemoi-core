@@ -42,9 +42,16 @@ def _get_inference_defaults_section(model: Any, name: str) -> dict:
     return dict(section) if section is not None else {}
 
 
-def _get_inference_config(model: Any, section: str, overrides: Optional[dict]) -> dict:
+def _get_inference_config(model: Any, section: str, overrides: Optional[dict], selector: str) -> dict:
+    """Return the settings of the sampler or schedule: the model's defaults, updated with ``overrides``.
+
+    Overrides that choose a different sampler or schedule (``selector``) replace the defaults, which belong to the
+    default choice and may not apply to the new one.
+    """
     config = _get_inference_defaults_section(model, section)
     if overrides is not None:
+        if selector in overrides and overrides[selector] != config.get(selector):
+            config = {}
         config.update(overrides)
     LOGGER.debug("%s_config: %s", section, config)
     return config
@@ -78,7 +85,7 @@ def _build_inference_schedule(
     schedule_params: Optional[dict],
     device: torch.device,
 ) -> torch.Tensor:
-    schedule_config = _get_inference_config(model, "sampling_schedule", schedule_params)
+    schedule_config = _get_inference_config(model, "sampling_schedule", schedule_params, "schedule_type")
     scheduler_cls = _resolve_registry_entry(schedule_config, "schedule_type", registry, context)
     scheduler = scheduler_cls(**schedule_config)
     return scheduler.get_schedule(device, _sampling_dtype(device))
@@ -91,7 +98,7 @@ def _build_inference_sampler(
     sampler_params: Optional[dict],
     dtype: torch.dtype,
 ) -> Any:
-    sampler_config = _get_inference_config(model, "sampler", sampler_params)
+    sampler_config = _get_inference_config(model, "sampler", sampler_params, "sampler")
     sampler_cls = _resolve_registry_entry(sampler_config, "sampler", registry, context)
     return sampler_cls(dtype=dtype, **sampler_config)
 
@@ -119,7 +126,7 @@ class TransportModelObjective:
         model_comm_group: Optional[ProcessGroup] = None,
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
-        **kwargs,
+        target_forcing: Optional[Batch] = None,
     ) -> Batch:
         raise NotImplementedError
 
@@ -167,7 +174,6 @@ class EDMDiffusionModelObjective(TransportModelObjective):
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         target_forcing: Optional[Batch] = None,
-        **kwargs,
     ) -> Batch:
         """Sample from an EDM diffusion model."""
         x_device = x.device
@@ -282,7 +288,6 @@ class FlowMatchingModelObjective(TransportModelObjective):
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         target_forcing: Optional[Batch] = None,
-        **kwargs,
     ) -> Batch:
         x_device = x.device
 

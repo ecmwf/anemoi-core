@@ -155,7 +155,7 @@ model.predict_step(
 | Model | `predict_step` | Extra keyword arguments |
 |---|---|---|
 | Deterministic and ensemble (`AnemoiModelEncProcDec` and subclasses) | `BaseGraphModel.predict_step` (`models/base.py`): pre-process, `forward`, post-process, gather | none; remaining `kwargs` go to the pre-processors and `forward` |
-| Transport, state (`AnemoiTransportModelEncProcDec`) | samples with the transport objective, then post-processes | `schedule_params`, `sampler_params` (override the checkpoint's `inference_defaults`); remaining `kwargs` go to the sampler |
+| Transport, state (`AnemoiTransportModelEncProcDec`) | samples with the transport objective, then post-processes | `schedule_params`, `sampler_params` (override the checkpoint's `inference_defaults`; choosing another schedule or sampler type starts from the overrides alone); other keyword arguments from the runner, such as `fcstep`, are not used |
 | Transport, tendency (`AnemoiTransportTendModelEncProcDec`) | as above; the sampled tendencies are added to the latest input state | needs `statistics_tendencies` (passed by the interface); output constraints and remappings apply to the rebuilt states, not to the tendencies |
 
 All return a `Batch` on the template's nodes, post-processed and, with `gather_out=True`, gathered across

@@ -169,7 +169,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         batch_size: int,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, None, ShardSizes, tuple[int, ...] | None, torch.Tensor | None]:
+    ) -> tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor | None, ShardSizes, tuple[int, ...] | None, torch.Tensor | None
+    ]:
         """Build the encoder rows of one dataset from its history ``x`` and its noisy target ``y_noised``.
 
         A gridded dataset has the same nodes at input and target time, so each row holds both:
@@ -215,6 +217,16 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             inputs.append(flag)
         x_data_latent = torch.cat(inputs, dim=-1)
 
+        # A residual connection, when the dataset configures one, is added to the prognostic outputs.
+        x_skip = None
+        if dataset_name in self.residual:
+            x_skip = self.residual[dataset_name](
+                x.data,
+                grid_shard_sizes=grid_shard_sizes,
+                model_comm_group=model_comm_group,
+                n_step_output=self.n_step_output[dataset_name],
+            )
+
         # Gather the coordinates so the encoder graph is built on all nodes, as in the base model.
         batch_sizes = gathered_batch_sizes(nodes.batch_sizes, grid_shard_sizes)
         data_coords = nodes.coordinates
@@ -227,7 +239,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         return (
             data_coords,
             x_data_latent,
-            None,
+            x_skip,
             grid_shard_sizes,
             batch_sizes,
             timedeltas,
@@ -270,9 +282,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _assemble_output(self, x_out: torch.Tensor, x_skip, target: "Source", dtype: torch.dtype, dataset_name: str):
         # The transport network predicts the conditioned target itself, so the output takes its shape and variables.
-        del x_skip
-        del dataset_name
-        return target.template().unflatten(x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
+        # A configured residual connection is added to its prognostic variables, as in the base model.
+        pred = target.template().unflatten(x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
+        return self._add_residual(pred, x_skip, dataset_name)
 
     def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
         assert noise_emb.ndim == 5, "noise_emb must be (batch, time, ensemble, 1, channels)."
@@ -799,7 +811,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Per-dataset tendency statistics, used by tendency models to convert
             the sampled tendencies into states.
         **kwargs
-            Additional sampling parameters.
+            Further keyword arguments from the inference runner (e.g. ``fcstep``, ``step``, ``date``), which the
+            transport models do not use. Sampler and schedule settings go in ``sampler_params`` and
+            ``schedule_params``.
 
         Returns
         -------
@@ -823,7 +837,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 schedule_params=schedule_params,
                 sampler_params=sampler_params,
                 target_forcing=target_forcing,
-                **kwargs,
             )
             y_hat = self._sampled_to_physical(
                 sampled,
@@ -849,7 +862,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         model_comm_group: Optional[ProcessGroup] = None,
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
-        **kwargs,
+        target_forcing: Optional[Batch] = None,
     ) -> Batch:
         """Run the sampler selected by the transport objective."""
         return self.transport_model_objective.sample(
@@ -859,7 +872,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             model_comm_group=model_comm_group,
             schedule_params=schedule_params,
             sampler_params=sampler_params,
-            **kwargs,
+            target_forcing=target_forcing,
         )
 
     def fill_metadata(self, md_dict) -> None:
@@ -917,7 +930,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         (
             data_coords,
             x_data_latent,
-            _x_skip,
+            residual,
             shard_sizes_data,
             batch_sizes,
             timedeltas,
@@ -931,12 +944,10 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
         x_skip = None
         if self.condition_on_residual:
-            x_skip = self.residual[dataset_name](
-                x.data,
-                shard_sizes_data,
-                model_comm_group,
-                n_step_output=self.n_step_output[dataset_name],
-            )[..., self._internal_input_idx[dataset_name]]
+            if residual is None:
+                msg = f"condition_on_residual needs a residual connection for dataset '{dataset_name}'."
+                raise ValueError(msg)
+            x_skip = residual[..., self._internal_input_idx[dataset_name]]
             assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
             x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
             x_data_latent = torch.cat(
@@ -944,6 +955,11 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             )
 
         return data_coords, x_data_latent, x_skip, shard_sizes_data, batch_sizes, timedeltas
+
+    def _assemble_output(self, x_out: torch.Tensor, x_skip, target: "Source", dtype: torch.dtype, dataset_name: str):
+        # The network predicts the tendency. The residual connection conditions the encoder and gives the
+        # reference state the tendency is added to, so it is left out of the output.
+        return super()._assemble_output(x_out, None, target, dtype, dataset_name)
 
     def tendency_statistics(self, dataset_name: str, statistics_tendencies: Optional[Mapping]) -> list[Mapping]:
         """Return the tendency statistics of each output step of ``dataset_name``, in lead-time order.

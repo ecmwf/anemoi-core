@@ -76,3 +76,25 @@ def test_inference_schedule_takes_the_sampling_dtype(monkeypatch) -> None:
     model = SimpleNamespace(inference_defaults={"sampling_schedule": {"schedule_type": "unit_time", "num_steps": 4}})
     schedule = objectives._build_inference_schedule(model, TIME_SCHEDULES, "test schedule", None, torch.device("cpu"))
     assert schedule.dtype == torch.float32
+
+
+def test_inference_override_of_the_same_type_keeps_the_other_defaults() -> None:
+    model = SimpleNamespace(
+        inference_defaults={"sampling_schedule": {"schedule_type": "karras", "rho": 7.0, "num_steps": 50}},
+    )
+
+    config = objectives._get_inference_config(model, "sampling_schedule", {"num_steps": 20}, "schedule_type")
+
+    assert config == {"schedule_type": "karras", "rho": 7.0, "num_steps": 20}
+
+
+def test_inference_override_of_another_type_starts_from_the_overrides() -> None:
+    """The Karras settings (``rho``) do not apply to a linear schedule, so they are dropped."""
+    model = SimpleNamespace(
+        inference_defaults={"sampling_schedule": {"schedule_type": "karras", "rho": 7.0, "num_steps": 50}},
+    )
+    overrides = {"schedule_type": "linear", "sigma_max": 1.0, "sigma_min": 0.02, "num_steps": 3}
+
+    config = objectives._get_inference_config(model, "sampling_schedule", overrides, "schedule_type")
+
+    assert config == overrides

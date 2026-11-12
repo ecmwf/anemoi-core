@@ -32,6 +32,7 @@ from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.layers.graph import StaticGraphGeometry
+from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.imputer import InputImputer
 from anemoi.models.preprocessing.normalizer import InputNormalizer
@@ -3259,3 +3260,12 @@ def test_single_compute_metrics_produces_per_step_key_suffix(
     assert "rmse_metric/data/z500/2" in metrics_step1
     # Keys must be distinct across steps
     assert set(metrics_step0.keys()).isdisjoint(set(metrics_step1.keys()))
+
+
+def test_state_prediction_mode_rejects_a_tendency_model() -> None:
+    """A tendency model in state mode would read its sampled states as tendencies at inference."""
+    tendency_model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
+    module = SimpleNamespace(model=SimpleNamespace(model=tendency_model))
+
+    with pytest.raises(TypeError, match="prediction_mode='state' needs a state transport model"):
+        StatePredictionMode(module)

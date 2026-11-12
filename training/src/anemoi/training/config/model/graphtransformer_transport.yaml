@@ -103,10 +103,9 @@ decoders:
       graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 residual:
-  datasets:
-    data:
-      _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
-      step: -1 # use the latest step as skip connection
+  # No residual connection by default. A SkipConnection or TruncatedConnection entry per dataset adds that
+  # input state to the prognostic outputs of the transport network.
+  datasets: {}
 
 output_mask:
   datasets:
