@@ -133,6 +133,37 @@ class CoordinatesFeature(DecodingTargetFeature):
         return einops.repeat(coords, "e f -> (repeat e) f", repeat=batch_size)
 
 
+@register_target_feature("static_context")
+class StaticContextFeature(DecodingTargetFeature):
+    """Fixed per-node context loaded from the graph for a decoder skip connection."""
+
+    needs_sharding = True
+
+    def validate(self) -> None:
+        dimensions = {}
+        for dataset_name in self.datasets_names:
+            attribute_name = f"static_context_{dataset_name}"
+            if not hasattr(self.model.node_attributes, attribute_name):
+                raise ValueError(
+                    f"'{self.name}' requires graph node attribute 'static_context' for dataset '{dataset_name}'."
+                )
+            dimensions[dataset_name] = getattr(self.model.node_attributes, attribute_name).shape[1]
+        assert len(set(dimensions.values())) == 1, (
+            "Static context must have the same dimension across all datasets decoded by the same decoder. "
+            f"Found dimensions: {dimensions}"
+        )
+
+    @cached_property
+    def dim(self) -> int:
+        return getattr(self.model.node_attributes, f"static_context_{self.datasets_names[0]}").shape[1]
+
+    def _compute(
+        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
+    ) -> Tensor:
+        context = getattr(self.model.node_attributes, f"static_context_{dataset_name}")
+        return einops.repeat(context, "e f -> (repeat e) f", repeat=batch_size)
+
+
 @register_target_feature("forcings")
 class InputForcingsFeature(DecodingTargetFeature):
     """Forcing variables over the output timestep window."""

@@ -84,7 +84,17 @@ class NamedNodesAttributes(nn.Module):
         self.trainable_tensors = nn.ModuleDict()
         for nodes_name, nodes in graph_data.node_items():
             self.register_coordinates(nodes_name, nodes.x)
+            if "static_context" in nodes:
+                self.register_static_context(nodes_name, nodes.static_context)
             self.register_tensor(nodes_name, self.num_trainable_parameters[nodes_name])
+
+    def register_static_context(self, name: str, static_context: Tensor) -> None:
+        """Register fixed per-node context used by a decoder target feature."""
+        if static_context.ndim != 2 or static_context.shape[0] != self.num_nodes[name]:
+            raise ValueError(
+                f"Static context for '{name}' must have shape (nodes, features), got {tuple(static_context.shape)}."
+            )
+        self.register_buffer(f"static_context_{name}", static_context, persistent=True)
 
     def define_fixed_attributes(self, graph_data: HeteroData, trainable_parameters: dict[str, int]) -> None:
         """Define fixed attributes."""

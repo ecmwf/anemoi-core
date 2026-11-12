@@ -366,6 +366,8 @@ class BaseGraphModel(nn.Module):
         for dataset_name in self.dataset_names:
             node_attributes_graph[dataset_name].x = self._graph_data[dataset_name].x
             node_attributes_graph[dataset_name].num_nodes = self._graph_data[dataset_name].num_nodes
+            if "static_context" in self._graph_data[dataset_name]:
+                node_attributes_graph[dataset_name].static_context = self._graph_data[dataset_name].static_context
 
         for hidden_name in self.hidden_names:
             node_attributes_graph[hidden_name].x = self._graph_data[hidden_name].x

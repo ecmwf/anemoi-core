@@ -141,3 +141,12 @@ class TestNamedNodesAttributes:
             latlons = getattr(no_trainable_attributes, f"latlons_{nodes_name}")
             repeated_latlons = einops.repeat(latlons, "n f -> (b n) f", b=batch_size)
             assert torch.allclose(output, repeated_latlons)
+
+    def test_registers_static_context_without_adding_it_to_encoder_attributes(self, graph_data):
+        context = torch.rand(graph_data["nodes1"].num_nodes, 6)
+        graph_data["nodes1"].static_context = context
+
+        node_attributes = NamedNodesAttributes(self.num_trainable_params, graph_data)
+
+        torch.testing.assert_close(node_attributes.static_context_nodes1, context)
+        assert node_attributes.attr_ndims["nodes1"] == 2 * self.ndim + self.num_trainable_params["nodes1"]

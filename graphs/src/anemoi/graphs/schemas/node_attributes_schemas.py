@@ -73,6 +73,18 @@ class NonmissingAnemoiDatasetVariableSchema(BaseModel):
     "The anemoi-datasets variable to use."
 
 
+class CutOutNumpyAttributeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.attributes.CutOutNumpyAttribute"] = Field(..., alias="_target_")
+    "Static regional and global arrays joined onto cutout nodes by coordinates."
+    regional_values: str
+    regional_coordinates: str
+    global_values: str
+    global_coordinates: str
+    mask_node_attr_name: str = "cutout_mask"
+    coordinate_tolerance_degrees: float = 1e-3
+    dtype: str = "float32"
+
+
 SingleAttributeSchema = (
     PlanarAreaWeightSchema
     | MaskedPlanarAreaWeightsSchema
@@ -80,6 +92,7 @@ SingleAttributeSchema = (
     | CutOutMaskSchema
     | GridsMaskSchema
     | NonmissingAnemoiDatasetVariableSchema
+    | CutOutNumpyAttributeSchema
 )
 
 

@@ -63,6 +63,7 @@ class FakeModelConfig:
 
         for name, spec in self.specs.items():
             setattr(node_attributes, f"latlons_{name}", torch.rand((self.num_nodes, spec.coord_dim)))
+            setattr(node_attributes, f"static_context_{name}", torch.rand((self.num_nodes, 6)))
             trainable = torch.rand(self.num_nodes, spec.num_trainable) if spec.num_trainable > 0 else None
             node_attributes.trainable_tensors[name] = SimpleNamespace(trainable=trainable)
             node_attributes.num_trainable_parameters[name] = spec.num_trainable
@@ -121,6 +122,7 @@ class TestTargetFeatures(TargetFeatureTestCase):
         ("feature_name", "expected_dim"),
         [
             ("coordinates", 4),  # spec.coord_dim
+            ("static_context", 6),
             ("forcings", 2 * 2),  # n_step_input * len(spec.forcing_idx)
             ("prognostics", 2 * 3),  # n_step_input * len(spec.prognostic_idx)
             ("trainable_parameters", 3),  # spec.num_trainable
@@ -170,6 +172,13 @@ class TestTargetFeatures(TargetFeatureTestCase):
             # Test coordinates feature requires dataset_name to be provided
             with pytest.raises(AssertionError, match="dataset_name must be provided"):
                 feature.tensor(x_input_data, None, batch_size=self.BATCH_SIZE)
+
+    def test_static_context_requires_graph_attribute(self, model: SimpleNamespace) -> None:
+        delattr(model.node_attributes, f"static_context_{self.DATASET}")
+        feature = create_decoding_target_features(["static_context"], [self.DATASET], model)
+
+        with pytest.raises(ValueError, match="requires graph node attribute 'static_context'"):
+            feature.validate()
 
     def test_composite_dim_is_the_sum_of_its_features(self, model: SimpleNamespace) -> None:
         """Test that the composite feature's dimension is the sum of its child features."""
