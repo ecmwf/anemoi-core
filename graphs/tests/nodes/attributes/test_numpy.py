@@ -49,6 +49,34 @@ def test_cutout_numpy_attribute_joins_regional_and_global_values(tmp_path):
     )
 
 
+def test_cutout_numpy_attribute_accepts_postprocessed_column_mask(tmp_path):
+    regional_values, regional_coordinates = _write_source(
+        tmp_path,
+        "regional",
+        [(51.0, 11.0)],
+        [[3.0, 4.0]],
+    )
+    global_values, global_coordinates = _write_source(
+        tmp_path,
+        "global",
+        [(0.0, 0.0)],
+        [[7.0, 8.0]],
+    )
+    graph = HeteroData()
+    graph["data"].x = torch.deg2rad(torch.tensor([[0.0, 0.0], [51.0, 11.0]]))
+    # Boolean node attributes are postprocessed to (num_nodes, 1) by the graph builder.
+    graph["data"].cutout_mask = torch.tensor([[False], [True]])
+
+    result = CutOutNumpyAttribute(
+        regional_values=regional_values,
+        regional_coordinates=regional_coordinates,
+        global_values=global_values,
+        global_coordinates=global_coordinates,
+    ).compute(graph, "data")
+
+    torch.testing.assert_close(result, torch.tensor([[7.0, 8.0], [3.0, 4.0]]))
+
+
 def test_cutout_numpy_attribute_requires_mask(tmp_path):
     values, coordinates = _write_source(tmp_path, "source", [(0.0, 0.0)], [[1.0]])
     graph = HeteroData()

@@ -81,7 +81,12 @@ class CutOutNumpyAttribute(BaseNodeAttribute):
             raise ValueError(f"Node attribute '{self.mask_node_attr_name}' must be built before this attribute.")
 
         target_coordinates = nodes.x.detach().cpu().numpy().astype(np.float64, copy=False)
-        regional_mask = nodes[self.mask_node_attr_name].detach().cpu().numpy().astype(bool, copy=False)
+        regional_mask = nodes[self.mask_node_attr_name].detach().cpu().numpy().astype(bool, copy=False).reshape(-1)
+        if len(regional_mask) != len(target_coordinates):
+            raise ValueError(
+                f"Node attribute '{self.mask_node_attr_name}' contains {len(regional_mask)} entries, "
+                f"but the graph has {len(target_coordinates)} nodes."
+            )
         output: np.ndarray | None = None
         sources = (
             (regional_mask, self.regional_values, self.regional_coordinates),
