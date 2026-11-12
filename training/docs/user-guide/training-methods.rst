@@ -25,6 +25,10 @@ The built-in methods are:
 ``LatentRolloutTraining`` (``anemoi.training.train.methods.latent_rollout``)
    ``SingleTraining`` with the rollout in latent space: the inputs are encoded
    once and the processor advances its own output at every rollout step.
+   The decoder still gets the current input at every step (residual, target
+   node features); ``encoded_data`` is rebuilt from it for encoders that pass
+   their input through (graph transformer, transformer, point-wise), and
+   refused for encoders that change it (GNN), which would need to run again.
    Works with ``AnemoiModelEncProcDec``; models that replace its forward pass
    (hierarchical, ensemble, transport) are not supported.
 

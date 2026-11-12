@@ -56,6 +56,13 @@ class BaseMapper(nn.Module, ABC):
     specialized for their mapper type.
     """
 
+    passes_source_through: bool = False
+    """Whether ``forward`` returns its source input unchanged as the first output.
+
+    Then the source output depends only on the input, so a model can rebuild it for a new
+    input without running the mapper (used by latent rollout for the decoder inputs).
+    """
+
     def __init__(
         self,
         *,
@@ -481,6 +488,8 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
 
 class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
     """Graph Transformer Mapper from data -> hidden."""
+
+    passes_source_through = True  # forward returns x[0] unchanged
 
     def __init__(
         self,
@@ -1170,6 +1179,8 @@ class PointWiseMapper(BaseMapper, ABC):
 class PointWiseForwardMapper(PointWiseMapper):
     """PointWise Mapper from data -> hidden."""
 
+    passes_source_through = True  # forward returns x[0] unchanged
+
     def __init__(
         self,
         *,
@@ -1433,6 +1444,8 @@ class TransformerBaseMapper(BaseMapper, ABC):
 
 class TransformerForwardMapper(TransformerBaseMapper):
     """Transformer Mapper from data -> hidden."""
+
+    passes_source_through = True  # forward returns x[0] unchanged
 
     def __init__(
         self,
