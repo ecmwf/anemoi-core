@@ -418,6 +418,18 @@ def test_transport_inference_checkpoint_round_trips(
 
 
 @skip_if_offline
+@pytest.mark.slow
+def test_flow_matching_inference_checkpoint_round_trips(
+    flow_matching_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
+    """As ``test_inference_checkpoint_round_trips``, for the flow-matching transport models (state and tendency)."""
+    cfg, url = flow_matching_config
+    _check_inference_checkpoint(cfg, url, get_test_archive, partial_metadata_schema)
+
+
+@skip_if_offline
 def test_loading_checkpoint(
     global_config_with_checkpoint: tuple[DictConfig, str],
     get_test_archive: callable,

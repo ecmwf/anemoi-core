@@ -9,6 +9,7 @@
 
 import dataclasses
 
+import numpy as np
 import pytest
 import torch
 
@@ -116,6 +117,16 @@ def test_tabular_payload_without_data_builds_a_template():
     for coordinates, timedeltas in zip(template.coordinates, template.timedeltas, strict=True):
         torch.testing.assert_close(coordinates[:, 0], torch.deg2rad(torch.tensor(LATS)))
         assert timedeltas.dtype == torch.float32
+
+
+def test_template_geometry_reaches_the_device_as_float32():
+    # Templates have no data to take a device from. Numpy float64 geometry (inference payloads) must reach
+    # the device as float32 only: MPS has no float64. The meta device stands in for an accelerator.
+    geometry = {"latitudes": np.asarray(LATS), "longitudes": np.asarray(LONS), "device": torch.device("meta")}
+    gridded = _gridded(data=None, **geometry, **TEMPLATE_SIZES)
+    tabular = _tabular(data=None, **geometry, **TEMPLATE_SIZES)
+    for tensor in [gridded.coordinates, *tabular.coordinates, *tabular.timedeltas]:
+        assert (tensor.device.type, tensor.dtype) == ("meta", torch.float32)
 
 
 @pytest.mark.parametrize("build", [_gridded, _tabular])

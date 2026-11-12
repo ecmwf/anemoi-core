@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
 
+import numpy as np
 import torch
 
 from anemoi.models.data.layout import TensorLayout
@@ -34,6 +35,7 @@ sample_registry = Registry(__name__)
 
 # Imported after the registry is defined: each kind registers itself on import.
 from anemoi.models.data.sample.base import BaseSample  # noqa: E402
+from anemoi.models.data.sample.base import host_float32  # noqa: E402
 from anemoi.models.data.sample.gridded import GriddedSample  # noqa: E402
 from anemoi.models.data.sample.tabular import TabularSample  # noqa: E402
 
@@ -55,6 +57,7 @@ def create_batched_struct(
     longitudes: Any,
     data: torch.Tensor | None = None,
     statistics: Mapping[str, Any] | None = None,
+    device: torch.device | None = None,
     **kwargs: Any,
 ) -> BaseSample | BaseTemplate:
     """Validate the inputs and build the sample, or template, of the kind registered as ``data_type``.
@@ -82,6 +85,8 @@ def create_batched_struct(
         geometry, e.g. an inference target.
     statistics : Mapping[str, Any], optional
         Per-statistic arrays over the variable axis.
+    device : torch.device, optional
+        Device of a template's geometry; a sample's follows its ``data``.
     **kwargs
         Arguments specific to the kind: ``grid_size`` (samples only) and ``shard_sizes``
         for gridded data; ``timedeltas``, ``boundaries`` (slices or ``(start, stop)``
@@ -99,17 +104,18 @@ def create_batched_struct(
     """
     sample_cls = sample_registry.lookup(data_type)
 
-    device = data.device if data is not None else None
+    device = data.device if data is not None else device
 
-    latitudes = _as_radians(latitudes, device)
-    longitudes = _as_radians(longitudes, device)
+    # Degrees to radians in float64, rounded once to float32, as the graph builders do.
+    latitudes = host_float32(latitudes, np.deg2rad)
+    longitudes = host_float32(longitudes, np.deg2rad)
     if latitudes.shape != longitudes.shape:
         msg = (
             f"latitudes {tuple(latitudes.shape)} and longitudes {tuple(longitudes.shape)} "
             "must describe the same points."
         )
         raise ValueError(msg)
-    coordinates = torch.stack((latitudes, longitudes), dim=-1)
+    coordinates = torch.from_numpy(np.stack((latitudes, longitudes), axis=-1)).to(device)
     num_points = coordinates.shape[0]
 
     if not isinstance(layout, TensorLayout):
@@ -155,12 +161,3 @@ def create_batched_struct(
         statistics={} if statistics is None else statistics,
         **kwargs,
     )
-
-
-def _as_radians(degrees: Any, device: torch.device | None) -> torch.Tensor:
-    """Return ``degrees`` as a flat float32 tensor in radians.
-
-    Converted in float64 and rounded once to float32, as the graph builders do.
-    """
-    radians = torch.deg2rad(torch.as_tensor(degrees, dtype=torch.float64, device=device).reshape(-1))
-    return radians.to(torch.float32)

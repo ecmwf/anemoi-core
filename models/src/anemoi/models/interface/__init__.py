@@ -234,19 +234,12 @@ class AnemoiModelInterface(torch.nn.Module):
         A template has no data to take a device from, so its geometry (coordinates and, for tabular
         templates, timedeltas) is placed on ``device``, the device of the input batch.
         """
-        geometry_keys = ("latitudes", "longitudes", "timedeltas")
         return {
             name: create_batched_struct(
                 name=name,
                 statistics=self._statistics_for(name, payload["variables"]),
-                **{
-                    key: (
-                        torch.as_tensor(value, device=device)
-                        if device is not None and key in geometry_keys and value is not None
-                        else value
-                    )
-                    for key, value in payload.items()
-                },
+                device=device,
+                **payload,
                 ensemble_size=ensemble_size,
                 batch_size=batch_size,
                 time_size=self.n_step_output[name],

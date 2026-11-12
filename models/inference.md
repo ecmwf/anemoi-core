@@ -292,8 +292,8 @@ raises a `RuntimeError`. Give the model the training graph once, after loading, 
 
 ```python
 model = torch.load(path, map_location="cpu", weights_only=False)
-model.model.restore_graph_geometry(graph)  # the training graph file, or rebuilt with anemoi-graphs from
-# the checkpoint's metadata["config"]["graph"]
+# graph: the training graph file, or rebuilt with anemoi-graphs from the checkpoint's metadata["config"]["graph"]
+model.model.restore_graph_geometry(graph)
 ```
 
 Older checkpoints, which still carry the graph, build the geometry from it on load.

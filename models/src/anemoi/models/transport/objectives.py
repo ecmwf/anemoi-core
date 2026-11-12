@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Optional
@@ -58,6 +59,18 @@ def _resolve_registry_entry(config: dict, selector: str, registry: dict, context
     return registry[entry_name]
 
 
+def _sampling_dtype(device: torch.device) -> torch.dtype:
+    """Return the dtype of the sampling schedule and solver state on ``device``: float64, or float32 on MPS."""
+    if device.type != "mps":
+        return torch.float64
+    warnings.warn(
+        "Transport sampling runs in float32 on MPS, which has no float64; predictions differ slightly from "
+        "those of the float64 sampler on CPU or CUDA.",
+        stacklevel=2,
+    )
+    return torch.float32
+
+
 def _build_inference_schedule(
     model: Any,
     registry: dict,
@@ -68,7 +81,7 @@ def _build_inference_schedule(
     schedule_config = _get_inference_config(model, "sampling_schedule", schedule_params)
     scheduler_cls = _resolve_registry_entry(schedule_config, "schedule_type", registry, context)
     scheduler = scheduler_cls(**schedule_config)
-    return scheduler.get_schedule(device, torch.float64)
+    return scheduler.get_schedule(device, _sampling_dtype(device))
 
 
 def _build_inference_sampler(
