@@ -67,9 +67,11 @@ strategy:
   read_group_size: ${dataloader.read_group_size}
   use_local_synchronization: True
   broadcast_buffers: False
-  # must be False when accum_grad_batches > 1
-  static_graph: True
-  find_unused_parameters: False
+  # False with find_unused_parameters: True makes resumed runs bitwise reproducible.
+  # static_graph: True with find_unused_parameters: False can be faster for large models,
+  # but static_graph must be False when accum_grad_batches > 1
+  static_graph: False
+  find_unused_parameters: True
 
 # loss functions
 

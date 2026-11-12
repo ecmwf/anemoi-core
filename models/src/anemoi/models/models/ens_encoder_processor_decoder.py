@@ -147,9 +147,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
         if x_skip is not None:
             assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
-            assert (
-                x_skip.shape[1] == x_out.shape[1]
-            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+            assert x_skip.shape[1] == x_out.shape[1], (
+                f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+            )
             x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:

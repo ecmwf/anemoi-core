@@ -148,9 +148,9 @@ class NoiseConditioning(BaseNoiseInjector):
 
         self.noise_graph_provider = None
         self._sparse_projector = None
-        assert not (
-            noise_matrix is not None and noise_edges_name is not None
-        ), "Specify either noise_matrix or noise_edges_name, not both."
+        assert not (noise_matrix is not None and noise_edges_name is not None), (
+            "Specify either noise_matrix or noise_edges_name, not both."
+        )
 
         if noise_edges_name is not None:
             assert graph_data is not None, "graph_data must be provided when using noise_edges_name."

@@ -35,9 +35,9 @@ def get_single_checkpoint_dir(cfg: DictConfig) -> Path:
     assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
 
     run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
-    assert (
-        len(run_dirs) == 1
-    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
+    assert len(run_dirs) == 1, (
+        f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
+    )
     return run_dirs[0]
 
 
@@ -166,16 +166,82 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     trainer.train()
 
     assert start.epoch == parent_epoch, f"resumed run started at epoch {start.epoch}, checkpoint has {parent_epoch}"
-    assert (
-        start.global_step == parent_global_step
-    ), f"resumed run started at step {start.global_step}, checkpoint has {parent_global_step}"
+    assert start.global_step == parent_global_step, (
+        f"resumed run started at step {start.global_step}, checkpoint has {parent_global_step}"
+    )
 
     expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
-    assert (
-        trainer.model.trainer.global_step == expected_global_step
-    ), f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+    assert trainer.model.trainer.global_step == expected_global_step, (
+        f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+    )
 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_resumed_run_is_bitwise_identical(
+    gnn_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """A run resumed from a mid-epoch checkpoint has the losses and weights of the uninterrupted run.
+
+    A resumed run must not use state that is not in the checkpoint. The test uses the
+    default DDP strategy settings and deterministic GPU kernels. With one GPU, the test
+    does not examine the order in which DDP sums the gradients of different GPUs.
+    """
+    cfg, url = gnn_config
+    get_test_archive(url)
+    cfg.training.strategy._target_ = "anemoi.training.distributed.strategy.DDPGroupStrategy"
+    cfg.training.deterministic = True
+    cfg.dataloader.limit_batches.validation = 1
+    # Log the training loss of every step to a local MLflow file store.
+    cfg.diagnostics.log.mlflow.enabled = True
+    cfg.diagnostics.log.mlflow.offline = True
+    cfg.diagnostics.log.interval = 1
+    # Two epochs of 3 steps each, with a checkpoint in the middle of the second epoch.
+    total_steps = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    checkpoint_step = 4
+    cfg.diagnostics.checkpoint.every_n_train_steps.save_frequency = checkpoint_step
+    cfg.diagnostics.checkpoint.every_n_train_steps.num_models_saved = -1
+    checkpoints_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+
+    def train(run_cfg: DictConfig) -> tuple[dict[int, float], dict[str, torch.Tensor]]:
+        trainer = AnemoiTrainer(run_cfg)
+        trainer.train()
+        logger = trainer.mlflow_logger
+        history = logger.experiment.get_metric_history(logger.run_id, "train_multi_dataset_loss_step")
+        losses = {metric.step: metric.value for metric in history}
+        weights = {name: param.detach().cpu().clone() for name, param in trainer.model.state_dict().items()}
+        return losses, weights
+
+    uninterrupted_cfg = deepcopy(cfg)
+    uninterrupted_cfg.training.seed = 42
+    uninterrupted_losses, uninterrupted_weights = train(uninterrupted_cfg)
+    assert len(uninterrupted_losses) == total_steps
+    (uninterrupted_dir,) = checkpoints_dir.iterdir()
+    (checkpoint_path,) = uninterrupted_dir.glob(f"anemoi-by_step-*-step_{checkpoint_step:06d}.ckpt")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    assert checkpoint["global_step"] == checkpoint_step
+
+    resumed_cfg = deepcopy(cfg)
+    # A LocalSource without a loading strategy resumes through Lightning's ckpt_path.
+    with open_dict(resumed_cfg):
+        resumed_cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.local.LocalSource",
+                "path": str(checkpoint_path),
+            },
+        }
+    # Without a seed in the config, the resumed run takes the checkpoint's seed.
+    resumed_cfg.training.seed = None
+    resumed_losses, resumed_weights = train(resumed_cfg)
+
+    assert len(resumed_losses) == total_steps - checkpoint_step
+    assert resumed_losses == {step: uninterrupted_losses[step] for step in resumed_losses}
+    assert resumed_weights.keys() == uninterrupted_weights.keys()
+    for name in resumed_weights:
+        assert torch.equal(resumed_weights[name], uninterrupted_weights[name]), f"weights of {name} differ"
 
 
 @skip_if_offline
@@ -224,9 +290,9 @@ def test_restart_training_architectures(
     trainer.train()
 
     expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
-    assert (
-        trainer.model.trainer.global_step == expected_global_step
-    ), f"{config_fixture} resume: expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+    assert trainer.model.trainer.global_step == expected_global_step, (
+        f"{config_fixture} resume: expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+    )
 
 
 @skip_if_offline
@@ -320,9 +386,9 @@ def test_loading_strategy_loads_real_checkpoint(
 
     # The pipeline applies weights at model-build and marks the model; if the strategy
     # had silently failed to load, this would be unset (or the run would have crashed).
-    assert (
-        getattr(trainer.model, "weights_initialized", False) is True
-    ), f"{loader} did not mark the model weights as initialised"
+    assert getattr(trainer.model, "weights_initialized", False) is True, (
+        f"{loader} did not mark the model weights as initialised"
+    )
 
 
 @skip_if_offline
@@ -432,9 +498,9 @@ def test_restart_training_with_rollout(
     trainer.train()
     assert_keys_exist(trainer.metadata, partial_metadata_schema)
     # The rollout step should be incremented after each epoch, so after 2 epochs it should be 3
-    assert (
-        trainer.task.rollout.step == 3
-    ), f"Expected rollout step after 2 epochs to be 1+2=3, got {trainer.task.rollout.step}"
+    assert trainer.task.rollout.step == 3, (
+        f"Expected rollout step after 2 epochs to be 1+2=3, got {trainer.task.rollout.step}"
+    )
 
     # Resume training from the checkpoint and verify the rollout counter is restored
     # correctly and continues to increment on further epochs.
