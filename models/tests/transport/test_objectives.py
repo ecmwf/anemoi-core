@@ -5,11 +5,16 @@
 from __future__ import annotations
 
 import math
+import warnings
+from types import SimpleNamespace
 
+import pytest
 import torch
 
 from anemoi.models.data import TensorLayout
+from anemoi.models.transport import objectives
 from anemoi.models.transport.objectives import EDMDiffusionModelObjective
+from anemoi.models.transport.schedules import TIME_SCHEDULES
 from anemoi.models.transport.settings import EdmSettings
 from tests.batch_builders import build_batch
 
@@ -49,3 +54,25 @@ def test_edm_model_preconditioning_handles_sparse_targets() -> None:
     torch.testing.assert_close(model.scaled_noised["obs"].data[1], torch.full((3, 1), math.sqrt(2.0)))
     torch.testing.assert_close(out["obs"].data[0], torch.full((2, 1), 0.5))
     torch.testing.assert_close(out["obs"].data[1], torch.full((3, 1), 1.0))
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda", "meta"])
+def test_sampling_runs_in_float64_where_the_device_has_it(device: str) -> None:
+    """The schedule and solver state are float64 on every device that has float64."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert objectives._sampling_dtype(torch.device(device)) == torch.float64
+
+
+def test_sampling_runs_in_float32_with_a_warning_on_mps() -> None:
+    """MPS has no float64, so the sampler falls back to float32."""
+    with pytest.warns(UserWarning, match="float32 on MPS"):
+        assert objectives._sampling_dtype(torch.device("mps")) == torch.float32
+
+
+def test_inference_schedule_takes_the_sampling_dtype(monkeypatch) -> None:
+    """The inference schedule, which sets the sampler's dtype, is built in the device's sampling dtype."""
+    monkeypatch.setattr(objectives, "_sampling_dtype", lambda device: torch.float32)
+    model = SimpleNamespace(inference_defaults={"sampling_schedule": {"schedule_type": "unit_time", "num_steps": 4}})
+    schedule = objectives._build_inference_schedule(model, TIME_SCHEDULES, "test schedule", None, torch.device("cpu"))
+    assert schedule.dtype == torch.float32
