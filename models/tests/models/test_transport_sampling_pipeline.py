@@ -48,6 +48,7 @@ def _transport_model_stub() -> AnemoiTransportModelEncProcDec:
     model = AnemoiTransportModelEncProcDec.__new__(AnemoiTransportModelEncProcDec)
     torch.nn.Module.__init__(model)
     model.dynamic_node_attributes = {}
+    model.residual = torch.nn.ModuleDict()  # no residual connection
     # Single hidden mesh: every dataset routes to "hidden".
     model.hidden_names = ["hidden"]
     model.dataset2hidden = defaultdict(lambda: "hidden")

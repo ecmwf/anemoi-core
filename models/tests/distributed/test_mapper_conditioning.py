@@ -181,6 +181,7 @@ def _check_transport_conditioning(*, rank, world_size, device, group) -> None:
     model.dataset2hidden = {"data": "hidden"}
     model.static_graph_geometry = stub_graph_geometry(hidden=hidden_nodes)
     model.dynamic_node_attributes = {}
+    model.residual = torch.nn.ModuleDict()  # no residual connection
     model.noise_embedder = torch.nn.Identity()
     model.noise_cond_mlp = torch.nn.Linear(1, 2, bias=False).to(device)
     with torch.no_grad():
