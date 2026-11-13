@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import math
+import pickle
 import warnings
 from types import SimpleNamespace
 
@@ -14,6 +15,7 @@ import torch
 from anemoi.models.data import TensorLayout
 from anemoi.models.transport import objectives
 from anemoi.models.transport.objectives import EDMDiffusionModelObjective
+from anemoi.models.transport.objectives import FlowMatchingModelObjective
 from anemoi.models.transport.paths import edm_loss_weight
 from anemoi.models.transport.schedules import SIGMA_SCHEDULES
 from anemoi.models.transport.schedules import TIME_SCHEDULES
@@ -139,3 +141,33 @@ def test_edm_preconditioning_gives_unit_variance_inputs_and_targets() -> None:
     torch.testing.assert_close(c_noise, sigma_values.log() / 4)
     # At sigma = sigma_data the output is half skip, half network.
     assert c_skip[1].item() == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        pytest.param(EDMDiffusionModelObjective(sigma_data=0.5), id="edm_diffusion"),
+        pytest.param(FlowMatchingModelObjective(), id="flow_matching"),
+    ],
+)
+def test_model_objectives_survive_pickling(objective: objectives.TransportModelObjective) -> None:
+    """Inference checkpoints pickle the model together with its objective; a restored objective behaves the same."""
+    restored = pickle.loads(pickle.dumps(objective))
+
+    assert type(restored) is type(objective)
+    assert vars(restored) == vars(objective)
+    noisy = build_batch(
+        data={"data": torch.linspace(-1.0, 1.0, 6).reshape(1, 1, 1, 3, 2)},
+        coordinates={"data": torch.zeros(3, 2)},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": ["a", "b"]},
+        statistics={"data": {}},
+    )
+    condition = {"data": torch.full((1, 1, 1, 1, 1), 0.7)}
+
+    def network(x, conditioned_target, condition):
+        del x, condition
+        return conditioned_target.map_data(lambda data: 2.0 * data + 1.0)
+
+    expected = objective.forward(network, noisy, noisy, condition)
+    torch.testing.assert_close(restored.forward(network, noisy, noisy, condition)["data"].data, expected["data"].data)
