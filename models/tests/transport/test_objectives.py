@@ -14,6 +14,7 @@ import torch
 from anemoi.models.data import TensorLayout
 from anemoi.models.transport import objectives
 from anemoi.models.transport.objectives import EDMDiffusionModelObjective
+from anemoi.models.transport.paths import edm_loss_weight
 from anemoi.models.transport.schedules import SIGMA_SCHEDULES
 from anemoi.models.transport.schedules import TIME_SCHEDULES
 from anemoi.models.transport.settings import EdmSettings
@@ -112,3 +113,26 @@ def test_inference_override_of_another_schedule_type_keeps_the_settings_it_takes
     )
 
     torch.testing.assert_close(schedule, torch.tensor([1.0, 0.75, 0.5, 0.25, 0.0], dtype=torch.float64))
+
+
+def test_edm_preconditioning_gives_unit_variance_inputs_and_targets() -> None:
+    """Karras et al. (2022), table 1: with data of standard deviation sigma_data, the scaled network input
+    has unit variance, the network target has unit variance, and the loss weight is 1 / c_out^2.
+    """
+    sigma_data = 0.5
+    sigma_values = torch.tensor([0.02, 0.5, 80.0], dtype=torch.float64)
+    sigma = {"data": sigma_values.view(3, 1, 1, 1, 1)}
+    model = SimpleNamespace(_assert_condition_shapes=lambda condition: (3, 1))
+
+    c_skip, c_out, c_in, c_noise = EDMDiffusionModelObjective._get_preconditioning(model, sigma, sigma_data)
+    c_skip, c_out, c_in, c_noise = (factor["data"].flatten() for factor in (c_skip, c_out, c_in, c_noise))
+
+    # Noised input y = x + n has variance sigma_data^2 + sigma^2.
+    torch.testing.assert_close(c_in**2 * (sigma_data**2 + sigma_values**2), torch.ones(3, dtype=torch.float64))
+    # Target F = (x - c_skip y) / c_out has unit variance.
+    target_variance = ((1 - c_skip) ** 2 * sigma_data**2 + c_skip**2 * sigma_values**2) / c_out**2
+    torch.testing.assert_close(target_variance, torch.ones(3, dtype=torch.float64))
+    torch.testing.assert_close(edm_loss_weight(sigma_values, sigma_data), 1 / c_out**2)
+    torch.testing.assert_close(c_noise, sigma_values.log() / 4)
+    # At sigma = sigma_data the output is half skip, half network.
+    assert c_skip[1].item() == pytest.approx(0.5)

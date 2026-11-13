@@ -10,6 +10,7 @@
 import pytest
 import torch
 
+from anemoi.models.transport.schedules import SIGMA_TRAINING_DISTRIBUTIONS
 from anemoi.models.transport.schedules import KarrasSigmaTrainingDistribution
 from anemoi.models.transport.schedules import UniformTimeTrainingDistribution
 from anemoi.models.transport.schedules import UnitTimeSchedule
@@ -55,3 +56,31 @@ def test_training_condition_distribution_samples_one_shared_condition_per_sample
     assert condition["a"].shape == condition["b"].shape == (2, 1, 3, 1, 1)
     assert condition["a"].dtype == condition["b"].dtype == torch.float64
     torch.testing.assert_close(condition["a"], condition["b"])
+
+
+@pytest.mark.parametrize("name", sorted(SIGMA_TRAINING_DISTRIBUTIONS))
+def test_sigma_training_distributions_map_unit_time_onto_the_noise_range(name: str) -> None:
+    """Unit time 0 is the largest noise level and 1 the smallest; noise falls steadily in between."""
+    settings = {"sigma_max": 80.0, "sigma_min": 0.02}
+    if name == "karras":
+        settings["rho"] = 7.0
+    distribution = SIGMA_TRAINING_DISTRIBUTIONS[name](**settings)
+
+    sigma = distribution._sigma_from_unit_time(torch.linspace(0.0, 1.0, 101, dtype=torch.float64))
+
+    assert sigma[0].item() == pytest.approx(80.0)
+    assert sigma[-1].item() == pytest.approx(0.02)
+    assert torch.all(sigma[1:] < sigma[:-1])
+
+
+@pytest.mark.parametrize("name", sorted(SIGMA_TRAINING_DISTRIBUTIONS))
+def test_sigma_training_distributions_sample_within_the_noise_range(name: str) -> None:
+    settings = {"sigma_max": 80.0, "sigma_min": 0.02}
+    if name == "karras":
+        settings["rho"] = 7.0
+    distribution = SIGMA_TRAINING_DISTRIBUTIONS[name](**settings)
+
+    sigma = distribution.sample({"a": (64, 1, 4, 5, 3)}, device=torch.device("cpu"), dtype=torch.float64)["a"]
+
+    assert sigma.shape == (64, 1, 4, 1, 1)
+    assert torch.all((sigma >= 0.02 * (1 - 1e-12)) & (sigma <= 80.0 * (1 + 1e-12)))

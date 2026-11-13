@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import math
 from collections.abc import Callable
 
 import pytest
@@ -15,6 +16,7 @@ import torch
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.samplers.transport_samplers import DPMpp2MSampler
+from anemoi.models.samplers.transport_samplers import EDMDiffusionSampler
 from anemoi.models.samplers.transport_samplers import EDMHeunSampler
 from anemoi.models.samplers.transport_samplers import VectorFieldEulerSampler
 from anemoi.models.samplers.transport_samplers import VectorFieldHeunSampler
@@ -320,3 +322,36 @@ def test_scalar_condition_keeps_at_least_float32() -> None:
     assert condition.dtype == torch.float32
     assert condition.flatten()[0].item() == pytest.approx(value.item(), rel=1e-7)
     assert _expand_scalar_condition(value, y_float64)[DATASET_NAME].dtype == torch.float64
+
+
+@pytest.mark.parametrize("sampler_cls", [EDMHeunSampler, DPMpp2MSampler])
+def test_edm_samplers_follow_the_exact_flow_of_gaussian_data(sampler_cls: type[EDMDiffusionSampler]) -> None:
+    """For data drawn from N(0, sd^2) the ideal denoiser is known, D(y, sigma) = y sd^2 / (sd^2 + sigma^2).
+
+    The probability-flow ODE then scales each value by sqrt(sd^2 + sigma^2), so a sample that starts at
+    sigma_max ends at y_start * sd / sqrt(sd^2 + sigma_max^2). Both samplers are second order: doubling the
+    number of steps divides their error by about four (about 1 % at 40 Karras steps, 0.06 % at 160).
+    """
+    sigma_data, sigma_max = 0.5, 80.0
+    x, y = make_inputs(dtype=torch.float64)
+    start = y[DATASET_NAME].data
+
+    def gaussian_denoiser(x: Batch, y: Batch, sigma: dict[str, torch.Tensor], model_comm_group=None) -> Batch:
+        del x, model_comm_group
+        return y.with_data(
+            {name: source.data * sigma_data**2 / (sigma_data**2 + sigma[name] ** 2) for name, source in y.items()},
+        )
+
+    def relative_error(num_steps: int) -> float:
+        sigmas = KarrasSigmaSchedule(sigma_max=sigma_max, sigma_min=0.002, num_steps=num_steps, rho=7.0).get_schedule()
+        result = sampler_cls(dtype=torch.float64).sample(x=x, y=y, sigmas=sigmas, denoising_fn=gaussian_denoiser)
+        # The flow is linear, so the sample is the start scaled by one factor.
+        factor = (result[DATASET_NAME].data * start).sum() / (start * start).sum()
+        torch.testing.assert_close(result[DATASET_NAME].data, factor * start)
+        return (factor / (sigma_data / math.sqrt(sigma_data**2 + sigma_max**2)) - 1).item()
+
+    error_40, error_80, error_160 = relative_error(40), relative_error(80), relative_error(160)
+
+    assert 3.5 < error_40 / error_80 < 4.5
+    assert 3.5 < error_80 / error_160 < 4.5
+    assert abs(error_160) < 1e-3
