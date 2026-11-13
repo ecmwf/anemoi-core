@@ -151,9 +151,9 @@ def test_on_load_checkpoint_rebuilds_tendency_processors_for_fewer_steps() -> No
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
     state_dict = checkpoint["state_dict"]
-    assert not any(
-        "18h" in key for key in state_dict if key.startswith("model.pre_processors_tendencies.")
-    ), "Extra tendency processors from the checkpoint should be dropped."
+    assert not any("18h" in key for key in state_dict if key.startswith("model.pre_processors_tendencies.")), (
+        "Extra tendency processors from the checkpoint should be dropped."
+    )
 
     new_state = new_model.state_dict()
     old_state = old_model.state_dict()
@@ -179,9 +179,9 @@ def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
     state_dict = checkpoint["state_dict"]
-    assert any(
-        "18h" in key for key in state_dict if key.startswith("model.pre_processors_tendencies.")
-    ), "Checkpoint tendency processors should be preserved when rebuilding is disabled."
+    assert any("18h" in key for key in state_dict if key.startswith("model.pre_processors_tendencies.")), (
+        "Checkpoint tendency processors should be preserved when rebuilding is disabled."
+    )
 
     old_state = old_model.state_dict()
     for key, value in old_state.items():
@@ -220,9 +220,9 @@ def test_on_load_checkpoint_applies_corrections_regardless_of_weights_initialize
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
     state_dict = checkpoint["state_dict"]
-    assert not any(
-        "18h" in key for key in state_dict if key.startswith("model.pre_processors_tendencies.")
-    ), "Stale tendency processors from the checkpoint must be dropped, not preserved by the flag."
+    assert not any("18h" in key for key in state_dict if key.startswith("model.pre_processors_tendencies.")), (
+        "Stale tendency processors from the checkpoint must be dropped, not preserved by the flag."
+    )
     for key, value in new_model.state_dict().items():
         if key.startswith(("pre_processors_tendencies.", "post_processors_tendencies.")):
             assert torch.equal(state_dict[f"model.{key}"], value)

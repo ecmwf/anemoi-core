@@ -3,7 +3,7 @@
 # This software is licensed under the terms of the Apache Licence Version 2.0.
 
 from .objectives import EDMDiffusionModelObjective
-from .objectives import StochasticInterpolantModelObjective
+from .objectives import FlowMatchingModelObjective
 from .objectives import TransportModelObjective
 from .objectives import get_transport_model_objective
 from .schedules import SIGMA_SCHEDULES
@@ -16,11 +16,7 @@ from .schedules import UniformTimeTrainingDistribution
 from .schedules import UnitTimeSchedule
 from .settings import EdmSettings
 from .settings import NoiseConditioningSettings
-from .settings import StochasticInterpolantSettings
-from .settings import TransportSourceSettings
-from .sources import TransportSourceBuilder
-from .sources import TransportSourceRequest
-from .sources import reference_state_sampling_source
+from .sources import gaussian_source
 
 __all__ = [
     "EDMDiffusionModelObjective",
@@ -30,16 +26,12 @@ __all__ = [
     "NoiseConditioningSettings",
     "SIGMA_SCHEDULES",
     "SIGMA_TRAINING_DISTRIBUTIONS",
-    "StochasticInterpolantModelObjective",
+    "FlowMatchingModelObjective",
     "TIME_SCHEDULES",
     "TIME_TRAINING_DISTRIBUTIONS",
-    "TransportSourceBuilder",
-    "TransportSourceRequest",
     "TransportModelObjective",
-    "TransportSourceSettings",
     "UnitTimeSchedule",
     "UniformTimeTrainingDistribution",
+    "gaussian_source",
     "get_transport_model_objective",
-    "reference_state_sampling_source",
-    "StochasticInterpolantSettings",
 ]

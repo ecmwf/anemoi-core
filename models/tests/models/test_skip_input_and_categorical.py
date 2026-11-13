@@ -82,6 +82,8 @@ def _build(
         n_step_input={"grid": 2, "obs": 2},
         n_step_output={"grid": 1, "obs": 1},
     )
+    # _synthetic_batches reads the grid coordinates from here: the model no longer keeps the graph.
+    model.test_grid_coordinates = static_graph_data["grid"].x
     if isinstance(model, AnemoiEnsModelEncProcDec):
         # The ensemble model draws its noise in the injector's default float32.
         model.noise_injector.forward = partial(model.noise_injector.forward, noise_dtype=DTYPE)

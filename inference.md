@@ -143,15 +143,15 @@ Not returned: `statistics`, `grid_size`, `shard_sizes` (?).
 result = model.predict_step(
     {
         "era5": {
-            "data": x,                       # (2, 1, N, V_in)  time, ensemble, grid, vars
-            "latitudes": lats,               # (N,) degrees
-            "longitudes": lons,              # (N,) degrees
+            "data": x,  # (2, 1, N, V_in)  time, ensemble, grid, vars
+            "latitudes": lats,  # (N,) degrees
+            "longitudes": lons,  # (N,) degrees
             "layout": ("time", "ensemble", "grid", "variables"),
         }
     },
     target={
         "era5": {
-            "data": forcings,                # (1, 1, N, V_forcing) at the OUTPUT valid time
+            "data": forcings,  # (1, 1, N, V_forcing) at the OUTPUT valid time
             "latitudes": lats,
             "longitudes": lons,
             "layout": ("time", "ensemble", "grid", "variables"),
@@ -160,9 +160,9 @@ result = model.predict_step(
 )
 
 out = result["era5"]
-out["data"]       # (1, 1, N, V_out)
+out["data"]  # (1, 1, N, V_out)
 out["variables"]  # model output names, in tensor column order
-out["layout"]     # ("time", "ensemble", "grid", "variables")
+out["layout"]  # ("time", "ensemble", "grid", "variables")
 out["latitudes"]  # (N,) degrees
 ```
 
@@ -175,15 +175,15 @@ graph nodes.
 model.predict_step(
     {
         "obs": {
-            "data": y,                       # (M, V_in)  grid, vars — time folded into grid
-            "latitudes": obs_lats,           # (M,) degrees
-            "longitudes": obs_lons,          # (M,) degrees
-            "timedeltas": offsets,           # (M,) seconds
+            "data": y,  # (M, V_in)  grid, vars — time folded into grid
+            "latitudes": obs_lats,  # (M,) degrees
+            "longitudes": obs_lons,  # (M,) degrees
+            "timedeltas": offsets,  # (M,) seconds
             "boundaries": [(0, k), (k, M)],  # one (start, stop) per input time slot
             "layout": ("grid", "variables"),
         }
     },
-    target={"obs": {...}},                   # same shape, at the output window
+    target={"obs": {...}},  # same shape, at the output window
 )
 ```
 
@@ -191,8 +191,8 @@ model.predict_step(
 
 ```python
 model.predict_step(
-    {"era5": {...}, "obs": {...}},   # every dataset the model encodes
-    target_template={"era5": {...}},          # only model.target_datasets
+    {"era5": {...}, "obs": {...}},  # every dataset the model encodes
+    target_template={"era5": {...}},  # only model.target_datasets
 )
 # result.keys() == {"era5"}
 ```

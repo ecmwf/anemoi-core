@@ -124,12 +124,12 @@ class TestGraphTransformerBaseMapper:
         x = pair_tensor
 
         x_src, x_dst = mapper.pre_process(x)
-        assert x_src.shape == torch.Size(
-            x[0].shape
-        ), f"x_src.shape ({x_src.shape}) != torch.Size(x[0].shape) ({torch.Size(x[0].shape)})"
-        assert x_dst.shape == torch.Size(
-            x[1].shape
-        ), f"x_dst.shape ({x_dst.shape}) != torch.Size(x[1].shape) ({x[1].shape})"
+        assert x_src.shape == torch.Size(x[0].shape), (
+            f"x_src.shape ({x_src.shape}) != torch.Size(x[0].shape) ({torch.Size(x[0].shape)})"
+        )
+        assert x_dst.shape == torch.Size(x[1].shape), (
+            f"x_dst.shape ({x_dst.shape}) != torch.Size(x[1].shape) ({x[1].shape})"
+        )
 
     def test_post_process(self, mapper, pair_tensor):
         # Should be a no-op in the base class
@@ -192,9 +192,9 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
 
         for param in mapper.parameters():
             assert param.grad is not None, f"param.grad is None for {param}"
-            assert (
-                param.grad.shape == param.shape
-            ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            assert param.grad.shape == param.shape, (
+                f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            )
 
     def test_chunking(self, mapper, pair_tensor, graph_provider):
         x = pair_tensor
@@ -211,12 +211,12 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         mapper.num_chunks = 1
         x_src, x_dst = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
 
-        assert torch.allclose(
-            x_src, x_src_c, atol=1e-4
-        ), f"x_src ({x_src}) != x_src_c ({x_src_c}) when num_chunks is changed"
-        assert torch.allclose(
-            x_dst, x_dst_c, atol=1e-4
-        ), f"x_dst ({x_dst}) != x_dst_c ({x_dst_c}) when num_chunks is changed"
+        assert torch.allclose(x_src, x_src_c, atol=1e-4), (
+            f"x_src ({x_src}) != x_src_c ({x_src_c}) when num_chunks is changed"
+        )
+        assert torch.allclose(x_dst, x_dst_c, atol=1e-4), (
+            f"x_dst ({x_dst}) != x_dst_c ({x_dst_c}) when num_chunks is changed"
+        )
 
     def test_unsorted_edges_are_sorted_before_partitioning(self, mapper, pair_tensor, graph_provider):
         x = pair_tensor
@@ -251,9 +251,9 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
 
         out_edges = mapper.mapper_forward_with_edge_sharding(x, batch_size, shard_info, edge_attr, edge_index)
 
-        assert torch.allclose(
-            out_heads, out_edges, atol=1e-4
-        ), f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies"
+        assert torch.allclose(out_heads, out_edges, atol=1e-4), (
+            f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies"
+        )
 
     def test_custom_attn_channels(self, mapper_init, graph_provider, pair_tensor, device):
         config = asdict(mapper_init)
@@ -308,9 +308,9 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
         )
 
         result = mapper.post_process(x_dst)
-        assert (
-            torch.Size([self.NUM_DST_NODES, self.OUT_CHANNELS_DST]) == result.shape
-        ), f"[self.NUM_DST_NODES, out_channels_dst] ({[self.NUM_DST_NODES, self.OUT_CHANNELS_DST]}) != result.shape ({result.shape})"
+        assert torch.Size([self.NUM_DST_NODES, self.OUT_CHANNELS_DST]) == result.shape, (
+            f"[self.NUM_DST_NODES, out_channels_dst] ({[self.NUM_DST_NODES, self.OUT_CHANNELS_DST]}) != result.shape ({result.shape})"
+        )
 
     def test_forward_backward(self, mapper_init, mapper, pair_tensor, graph_provider):
         shard_info = BipartiteGraphShardInfo(
@@ -346,9 +346,9 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
 
         for param in mapper.parameters():
             assert param.grad is not None, f"param.grad is None for {param}"
-            assert (
-                param.grad.shape == param.shape
-            ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            assert param.grad.shape == param.shape, (
+                f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+            )
 
     def test_chunking(self, mapper_init, mapper, pair_tensor, graph_provider):
         shard_info = BipartiteGraphShardInfo(
@@ -388,6 +388,6 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
 
         out_edges = mapper.mapper_forward_with_edge_sharding(x, batch_size, shard_info, edge_attr, edge_index)
 
-        assert torch.allclose(
-            out_heads, out_edges, atol=1e-4
-        ), f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies"
+        assert torch.allclose(out_heads, out_edges, atol=1e-4), (
+            f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies"
+        )

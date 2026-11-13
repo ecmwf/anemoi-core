@@ -92,9 +92,9 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         if pred.is_tabular:
             msg = "TimeAggregateLossWrapper needs an explicit time axis; it does not support tabular sources."
             raise NotImplementedError(msg)
-        assert (
-            pred.time_size > 1
-        ), "TimeAggregateLossWrapper requires an output time dimension of size > 1 for aggregation."
+        assert pred.time_size > 1, (
+            "TimeAggregateLossWrapper requires an output time dimension of size > 1 for aggregation."
+        )
         loss = torch.tensor(0.0, dtype=pred.dtype, device=pred.device, requires_grad=False)
 
         # Exclude the TIME scaler from inner loss calls since we iterate per-step

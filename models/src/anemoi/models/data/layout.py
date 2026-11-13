@@ -125,6 +125,26 @@ class TensorLayout:
         parts = list(sorted(self.dims, key=lambda x: getattr(self, x)))
         return " ".join(parts)
 
+    @property
+    def canonical_permutation(self) -> tuple[int, ...]:
+        """Physical positions of this layout's axes, in canonical (:attr:`AXES`) order.
+
+        ``tensor.permute(layout.canonical_permutation)`` reorders a tensor with this
+        layout into :meth:`canonical` order.
+        """
+        return tuple(getattr(self, name) for name in self.AXES if self.has_axis(name))
+
+    @property
+    def is_canonical(self) -> bool:
+        """Whether the axes are laid out in canonical (:attr:`AXES`) order."""
+        return self.canonical_permutation == tuple(range(self.ndim))
+
+    def canonical(self) -> "TensorLayout":
+        """Return the layout with the same axes, laid out in canonical (:attr:`AXES`) order."""
+        if self.is_canonical:
+            return self
+        return TensorLayout.from_tuple(*(name for name in self.AXES if self.has_axis(name)))
+
     def with_batch_dim(self) -> "TensorLayout":
         """Return a new layout with a leading batch axis, every other axis shifted by +1.
 

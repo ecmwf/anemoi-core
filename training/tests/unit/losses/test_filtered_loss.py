@@ -298,7 +298,6 @@ class CapturingLoss(BaseLoss):
 
 
 class TestVariableAxisScalerFiltering:
-
     def test_mixed_dim_scaler_filtered_to_predicted(self, data_indices_forcing_gaps: IndexCollection) -> None:
         """Multi-dim (BATCH, GRID, VARIABLE) scaler is sliced on the VARIABLE axis."""
         w = _mapper(data_indices_forcing_gaps, ["var_0"], ["imerg"])
@@ -417,7 +416,6 @@ def test_rejects_invalid_layout_string(data_indices_forcing_gaps: IndexCollectio
 
 
 class TestScalerIndicesRemapping:
-
     def test_global_to_local_remap(self, data_indices_forcing_gaps: IndexCollection) -> None:
         """Global scaler_indices are translated to filtered-tensor-local positions."""
         w = _mapper(data_indices_forcing_gaps, ["var_0", "var_3"])

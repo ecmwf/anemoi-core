@@ -49,9 +49,9 @@ class NormaliserMixin:
 
             statistics = (std,)
 
-        assert (
-            statistics[-1] != 0
-        ), f"Normalisation by zero encountered in {self.__class__.__name__} with norm '{self.norm}'."
+        assert statistics[-1] != 0, (
+            f"Normalisation by zero encountered in {self.__class__.__name__} with norm '{self.norm}'."
+        )
         return statistics
 
     def compute_grouped_statistics(
@@ -101,9 +101,9 @@ class NormaliserMixin:
             group_std[group_std == 0] = 1
             group_statistics = (group_std[index],)
 
-        assert torch.all(
-            group_statistics[-1] != 0
-        ), f"Normalisation by zero encountered in {self.__class__.__name__} with norm '{self.norm}'."
+        assert torch.all(group_statistics[-1] != 0), (
+            f"Normalisation by zero encountered in {self.__class__.__name__} with norm '{self.norm}'."
+        )
         return group_statistics
 
     def normalise(self, values: torch.Tensor, *args) -> torch.Tensor:
@@ -130,7 +130,9 @@ class NormaliserMixin:
             "unit-max",
             "unit-range",
             "log1p",
-        }, f"Attribute normalisation '{self.norm}' is not valid. Options are: 'l1', 'l2', 'unit-max', 'unit-range', 'unit-std', 'log1p'."
+        }, (
+            f"Attribute normalisation '{self.norm}' is not valid. Options are: 'l1', 'l2', 'unit-max', 'unit-range', 'unit-std', 'log1p'."
+        )
 
         if self.norm == "log1p":
             return torch.log1p(values)

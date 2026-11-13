@@ -401,9 +401,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def _build_processing_networks(self, processor_config: DotDict) -> None:
         processor_edge_dims = [provider.edge_dim for provider in self.processor_graph_provider.values()]
-        assert all(
-            dim == processor_edge_dims[0] for dim in processor_edge_dims
-        ), f"All hidden meshes must have the same processor edge dimension, got {processor_edge_dims}."
+        assert all(dim == processor_edge_dims[0] for dim in processor_edge_dims), (
+            f"All hidden meshes must have the same processor edge dimension, got {processor_edge_dims}."
+        )
         processor_edge_dim = processor_edge_dims[0]
 
         self.processor = instantiate(
@@ -643,23 +643,24 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # The decoder output becomes a source shaped and named like the template.
         pred = template.unflatten(x_out.to(torch.promote_types(dtype, torch.float32)))
-
-        if x_skip is not None:
-            assert (
-                x_skip.ndim == 5
-            ), f"Residual must be (batch, time, ensemble, grid, variables), but got shape {x_skip.shape}"
-            assert (
-                x_skip.shape[1] == pred.data.shape[1]
-            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({pred.data.shape[1]})."
-            new_data = pred.data.clone()
-            new_data[..., self._internal_output_idx[dataset_name]] += x_skip[
-                ..., self._internal_input_idx[dataset_name]
-            ]
-            pred = pred.clone(data=new_data)
-
+        pred = self._add_residual(pred, x_skip, dataset_name)
         pred = self.boundings[dataset_name](pred)
 
         return pred
+
+    def _add_residual(self, pred: "Source", x_skip: torch.Tensor | None, dataset_name: str) -> "Source":
+        """Add the residual connection to the prognostic variables of ``pred``; the diagnostics stay as they are."""
+        if x_skip is None:
+            return pred
+        assert x_skip.ndim == 5, (
+            f"Residual must be (batch, time, ensemble, grid, variables), but got shape {x_skip.shape}"
+        )
+        assert x_skip.shape[1] == pred.data.shape[1], (
+            f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({pred.data.shape[1]})."
+        )
+        new_data = pred.data.clone()
+        new_data[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+        return pred.clone(data=new_data)
 
     def _assert_valid_sharding(
         self,
@@ -668,18 +669,18 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         in_out_sharded: bool,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> None:
-        assert not (
-            in_out_sharded and model_comm_group is None
-        ), "If input is sharded, model_comm_group must be provided."
+        assert not (in_out_sharded and model_comm_group is None), (
+            "If input is sharded, model_comm_group must be provided."
+        )
 
         if model_comm_group is not None:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded across GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                "Only batch size of 1 is supported when model is sharded across GPUs"
+            )
 
-            assert (
-                model_comm_group.size() == 1 or ensemble_size == 1
-            ), "Ensemble size per device must be 1 when model is sharded across GPUs"
+            assert model_comm_group.size() == 1 or ensemble_size == 1, (
+                "Ensemble size per device must be 1 when model is sharded across GPUs"
+            )
 
     def _prepare_encoder_source(
         self,
@@ -1218,12 +1219,4 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         return Batch(x_out_dict)
 
     def fill_metadata(self, md_dict) -> None:
-        for dataset in self.input_dim.keys():
-            dataset_md = md_dict["metadata_inference"][dataset]
-            shapes = {
-                "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input[dataset],
-                "ensemble": 1,
-                "grid": dataset_md.get("grid_size"),  # None for tabular data
-            }
-            dataset_md["shapes"] = shapes
+        pass

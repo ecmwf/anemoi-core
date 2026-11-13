@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Optional
@@ -41,9 +42,16 @@ def _get_inference_defaults_section(model: Any, name: str) -> dict:
     return dict(section) if section is not None else {}
 
 
-def _get_inference_config(model: Any, section: str, overrides: Optional[dict]) -> dict:
+def _get_inference_config(model: Any, section: str, overrides: Optional[dict], selector: str) -> dict:
+    """Return the settings of the sampler or schedule: the model's defaults, updated with ``overrides``.
+
+    Overrides that choose a different sampler or schedule (``selector``) replace the defaults, which belong to the
+    default choice and may not apply to the new one.
+    """
     config = _get_inference_defaults_section(model, section)
     if overrides is not None:
+        if selector in overrides and overrides[selector] != config.get(selector):
+            config = {}
         config.update(overrides)
     LOGGER.debug("%s_config: %s", section, config)
     return config
@@ -58,6 +66,18 @@ def _resolve_registry_entry(config: dict, selector: str, registry: dict, context
     return registry[entry_name]
 
 
+def _sampling_dtype(device: torch.device) -> torch.dtype:
+    """Return the dtype of the sampling schedule and solver state on ``device``: float64, or float32 on MPS."""
+    if device.type != "mps":
+        return torch.float64
+    warnings.warn(
+        "Transport sampling runs in float32 on MPS, which has no float64; predictions differ slightly from "
+        "those of the float64 sampler on CPU or CUDA.",
+        stacklevel=2,
+    )
+    return torch.float32
+
+
 def _build_inference_schedule(
     model: Any,
     registry: dict,
@@ -65,10 +85,10 @@ def _build_inference_schedule(
     schedule_params: Optional[dict],
     device: torch.device,
 ) -> torch.Tensor:
-    schedule_config = _get_inference_config(model, "sampling_schedule", schedule_params)
+    schedule_config = _get_inference_config(model, "sampling_schedule", schedule_params, "schedule_type")
     scheduler_cls = _resolve_registry_entry(schedule_config, "schedule_type", registry, context)
     scheduler = scheduler_cls(**schedule_config)
-    return scheduler.get_schedule(device, torch.float64)
+    return scheduler.get_schedule(device, _sampling_dtype(device))
 
 
 def _build_inference_sampler(
@@ -78,7 +98,7 @@ def _build_inference_sampler(
     sampler_params: Optional[dict],
     dtype: torch.dtype,
 ) -> Any:
-    sampler_config = _get_inference_config(model, "sampler", sampler_params)
+    sampler_config = _get_inference_config(model, "sampler", sampler_params, "sampler")
     sampler_cls = _resolve_registry_entry(sampler_config, "sampler", registry, context)
     return sampler_cls(dtype=dtype, **sampler_config)
 
@@ -106,7 +126,7 @@ class TransportModelObjective:
         model_comm_group: Optional[ProcessGroup] = None,
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
-        **kwargs,
+        target_forcing: Optional[Batch] = None,
     ) -> Batch:
         raise NotImplementedError
 
@@ -154,7 +174,6 @@ class EDMDiffusionModelObjective(TransportModelObjective):
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         target_forcing: Optional[Batch] = None,
-        **kwargs,
     ) -> Batch:
         """Sample from an EDM diffusion model."""
         x_device = x.device
@@ -239,21 +258,21 @@ class EDMDiffusionModelObjective(TransportModelObjective):
         return c_skip, c_out, c_in, c_noise
 
 
-class StochasticInterpolantModelObjective(TransportModelObjective):
-    """Stochastic-interpolant model objective that predicts bridge drift."""
+class FlowMatchingModelObjective(TransportModelObjective):
+    """Flow-matching model objective that predicts the velocity from the source field to the target."""
 
     def forward(
         self,
         model: Any,
         x: Batch,
-        interpolant_state: Batch,
+        state: Batch,
         time_level: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs: Any,
     ) -> Batch:
         return model._forward_transport_network(
             x,
-            interpolant_state,
+            state,
             time_level,
             model_comm_group=model_comm_group,
             **kwargs,
@@ -269,7 +288,6 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         target_forcing: Optional[Batch] = None,
-        **kwargs,
     ) -> Batch:
         x_device = x.device
 
@@ -283,7 +301,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         time_schedule = _build_inference_schedule(
             model,
             TIME_SCHEDULES,
-            "stochastic-interpolant schedule",
+            "flow-matching schedule",
             schedule_params,
             x_device,
         )
@@ -306,7 +324,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         sampler_instance = _build_inference_sampler(
             model,
             transport_samplers.VECTOR_FIELD_SAMPLERS,
-            "stochastic-interpolant sampler",
+            "flow-matching sampler",
             sampler_params,
             time_schedule.dtype,
         )
@@ -321,7 +339,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
 
 TRANSPORT_MODEL_OBJECTIVES = {
     "edm_diffusion": EDMDiffusionModelObjective,
-    "stochastic_interpolant": StochasticInterpolantModelObjective,
+    "flow_matching": FlowMatchingModelObjective,
 }
 
 

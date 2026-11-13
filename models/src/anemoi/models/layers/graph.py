@@ -10,6 +10,7 @@
 
 import logging
 from collections import defaultdict
+from collections.abc import Iterable
 
 import einops
 import torch
@@ -108,6 +109,12 @@ class NodeTrainableParameters(nn.Module):
             Batch size; the (per-node) coordinate features are repeated
             ``batch_size`` times along the leading axis to match the
             flattened ``(batch * grid)`` layout used by the encoder/decoder.
+
+        Returns
+        -------
+        Tensor or None
+            The trainable node parameters, repeated ``batch_size`` times, or ``None`` for a
+            node group without them.
         """
         if name not in self.trainable_tensors:
             return None
@@ -130,3 +137,43 @@ class NodeTrainableParameters(nn.Module):
         with console.capture() as capture:
             console.print(self.tree())
         return capture.get()
+
+
+class StaticGraphGeometry:
+    """What the forward pass reads from the static graph: node coordinates, node and edge counts.
+
+    The model builds its layers from the static graph but does not keep it: the graph
+    providers hold the edges, and this object holds the rest of what the forward pass reads:
+    the node and edge counts, and the coordinates of the hidden nodes and of the gridded
+    datasets' grids (which spatial pre-processors project onto). So the model runs
+    without the graph, and inference checkpoints, which pickle the whole model, do not carry it.
+
+    The coordinates are plain tensors, not buffers, as they were in the graph. They are
+    pickled with the model but are not part of the ``state_dict``, so training checkpoints are
+    unchanged. Casting the model (``model.to(torch.float64)``) leaves them alone: they are
+    geometry, combined with the batch coordinates to build the dynamic graphs, not model
+    features. They stay on the graph's device; the forward pass moves them to the batch's.
+
+    Parameters
+    ----------
+    graph : HeteroData
+        The static graph.
+    coordinate_node_names : Iterable[str]
+        Node sets whose coordinates are kept, e.g. the hidden meshes and the dataset grids.
+    """
+
+    def __init__(self, graph: HeteroData, coordinate_node_names: Iterable[str]) -> None:
+        self.num_nodes: dict[str, int] = {name: int(graph[name].num_nodes) for name in graph.node_types}
+        self.num_edges: dict[tuple[str, str, str], int] = {
+            edge_type: int(graph[edge_type].num_edges) for edge_type in graph.edge_types
+        }
+        self._coordinates: dict[str, Tensor] = {
+            name: graph[name].x.detach().clone() for name in dict.fromkeys(coordinate_node_names)
+        }
+
+    def coordinates(self, name: str) -> Tensor:
+        """Return the ``(num_nodes, 2)`` coordinates of the node set ``name``."""
+        if name not in self._coordinates:
+            msg = f"No coordinates kept for node set {name!r}; kept: {list(self._coordinates)}."
+            raise KeyError(msg)
+        return self._coordinates[name]

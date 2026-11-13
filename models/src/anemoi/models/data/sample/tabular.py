@@ -19,6 +19,7 @@ import torch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import sample_registry
 from anemoi.models.data.sample.base import BaseSample
+from anemoi.models.data.sample.base import host_float32
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.data.sources import TabularTemplate
 from anemoi.models.distributed.shapes import ShardSizes
@@ -163,7 +164,9 @@ class TabularSample(BaseSample):
             msg = "tabular samples require timedeltas and boundaries."
             raise ValueError(msg)
 
-        timedeltas = torch.as_tensor(timedeltas, dtype=torch.float32, device=device).reshape(-1)
+        if not (torch.is_tensor(timedeltas) and timedeltas.dtype == torch.float32):
+            timedeltas = torch.from_numpy(host_float32(timedeltas))
+        timedeltas = timedeltas.reshape(-1).to(device)
         if timedeltas.shape[0] != n_points:
             msg = f"{timedeltas.shape[0]} timedeltas were given for {n_points} points."
             raise ValueError(msg)

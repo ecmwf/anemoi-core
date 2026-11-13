@@ -178,7 +178,7 @@ def build_graph_partition(edge_index: Adj, num_parts: int, num_nodes: tuple[int,
 
     if ANEMOI_DEBUG_SHARDING:
         assert is_edge_index_dst_sorted(edge_index), (
-            "build_graph_partition requires edge_index sorted by destination node, " "but received unsorted edges."
+            "build_graph_partition requires edge_index sorted by destination node, but received unsorted edges."
         )
 
     dst_splits = get_balanced_partition_sizes(n_dst, num_parts)
@@ -364,26 +364,26 @@ def shard_graph_to_local(
     if not model_is_distributed(model_comm_group):
         return x, edge_attr, edge_index, shard_info, cond
 
-    assert (
-        model_comm_group.size() == partition.num_parts
-    ), f"Expected comm group size {partition.num_parts} but got {model_comm_group.size()}"
+    assert model_comm_group.size() == partition.num_parts, (
+        f"Expected comm group size {partition.num_parts} but got {model_comm_group.size()}"
+    )
 
     x_src, x_dst = x
     my_rank = torch.distributed.get_rank(group=model_comm_group)
 
     # shard or validate dst nodes
     if shard_info.dst_is_sharded():
-        assert (
-            shard_info.dst_nodes == partition.dst_splits
-        ), f"Expected dst shard shapes {partition.dst_splits} but got {shard_info.dst_nodes}"
+        assert shard_info.dst_nodes == partition.dst_splits, (
+            f"Expected dst shard shapes {partition.dst_splits} but got {shard_info.dst_nodes}"
+        )
     else:
         x_dst = shard_tensor(x_dst, 0, partition.dst_splits, model_comm_group)
 
     # shard or validate edges
     if shard_info.edges_are_sharded():
-        assert (
-            shard_info.edges == partition.edge_splits
-        ), f"Expected edge shard shapes {partition.edge_splits} but got {shard_info.edges}"
+        assert shard_info.edges == partition.edge_splits, (
+            f"Expected edge shard shapes {partition.edge_splits} but got {shard_info.edges}"
+        )
     else:
         edge_attr = shard_tensor(edge_attr, 0, partition.edge_splits, model_comm_group)
         edge_index = shard_tensor(edge_index, 1, partition.edge_splits, model_comm_group)

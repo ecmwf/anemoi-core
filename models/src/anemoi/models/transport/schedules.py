@@ -336,7 +336,7 @@ class CosineSigmaTrainingDistribution(SigmaTrainingDistribution):
 
 
 class UniformTimeTrainingDistribution(TrainingConditionDistribution):
-    """Uniform bridge-time distribution used by stochastic-interpolant training."""
+    """Uniform time distribution used by flow-matching training."""
 
     def _sample_base(
         self,

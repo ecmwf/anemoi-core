@@ -75,7 +75,6 @@ def _make_reader(sampling: dict | None = None, **fake_kwargs) -> TrajectoryDataR
 
 
 class TestTrajectoryDataReaderProperties:
-
     def test_is_a_gridded_reader(self) -> None:
         reader = _make_reader()
         assert isinstance(reader, GriddedDataReader)
@@ -116,13 +115,15 @@ class TestTrajectoryDataReaderProperties:
 
 
 class TestTrajectoryDataReaderOpen:
-
     def test_start_end_become_base_start_end(self) -> None:
-        start, end = datetime.datetime(2020, 1, 1, tzinfo=datetime.UTC), datetime.datetime(
-            2020,
-            2,
-            1,
-            tzinfo=datetime.UTC,
+        start, end = (
+            datetime.datetime(2020, 1, 1, tzinfo=datetime.UTC),
+            datetime.datetime(
+                2020,
+                2,
+                1,
+                tzinfo=datetime.UTC,
+            ),
         )
         with patch("anemoi.training.data.readers.base.open_dataset", return_value=FakeTrajectoryDataset()) as mock:
             TrajectoryDataReader(dataset_config="fake.zarr", start=start, end=end)
@@ -142,7 +143,6 @@ class TestTrajectoryDataReaderOpen:
 
 
 class TestTrajectoryDataReaderGetSample:
-
     @pytest.mark.parametrize(
         ("positions", "num_steps"),
         [([2, 3, 4], 3), (slice(0, 5), 5), ([0, 4, 5], 3)],
@@ -234,7 +234,6 @@ class TestTrajectoryDataReaderGetSample:
 
 
 class TestCreateDatasetWithTrajectory:
-
     @pytest.mark.parametrize("trajectory", [{}, {"sampling": {"stride": 2}}])
     def test_create_reader_selects_trajectory_reader(self, trajectory: dict) -> None:
         config = OmegaConf.create({"dataset_config": {"dataset": "fake.zarr"}, "trajectory": trajectory})

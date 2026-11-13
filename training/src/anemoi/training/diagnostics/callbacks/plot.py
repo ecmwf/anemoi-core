@@ -460,7 +460,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if batch_idx % self.every_n_batches == 0:
-
             # Gather grid-sharded tensors while preserving the Batch envelope
             # (layouts / statistics / coordinates) so downstream view-based access
             # (Batch.__getitem__ / task.get_targets) keeps working. Shard metadata
@@ -483,7 +482,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 raise TypeError(msg)
             preds = output.predictions
             if not isinstance(preds, list):
-
                 raise TypeError(preds)
             gathered_predictions = [
                 {dataset_name: _allgather_view(pl_module, dataset_pred) for dataset_name, dataset_pred in pred.items()}
@@ -559,7 +557,6 @@ class BasePerEpochPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if trainer.current_epoch % self.every_n_epochs == 0:
-
             self.plot(
                 trainer,
                 pl_module,
@@ -1205,7 +1202,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
 
             if auxiliary_tensor is not None:
                 latlons, data, output_tensor, auxiliary_tensor = self.focus_mask.apply(
-                    pl_module.model.model._graph_data,
+                    pl_module.model.graph_data,
                     data_latlons,
                     data,
                     output_tensor,
@@ -1213,7 +1210,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                 )
             else:
                 latlons, data, output_tensor = self.focus_mask.apply(
-                    pl_module.model.model._graph_data,
+                    pl_module.model.graph_data,
                     data_latlons,
                     data,
                     output_tensor,

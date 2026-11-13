@@ -47,9 +47,15 @@ def _axpy(y: Batch, direction: Batch, step: torch.Tensor | float) -> Batch:
 
 
 def _expand_scalar_condition(value: torch.Tensor, y: Batch) -> dict[str, torch.Tensor]:
-    """Expand one scalar condition so each dataset can pass it to the model."""
+    """Expand one scalar condition so each dataset can pass it to the model.
+
+    The condition keeps at least float32 precision, also when the data is in a lower precision:
+    the model embeds it at the frequencies of its noise or time embedding.
+    """
     return {
-        dataset_name: value.view(1, 1, 1, 1, 1).expand(source.condition_shape).to(source.dtype)
+        dataset_name: value.view(1, 1, 1, 1, 1)
+        .expand(source.condition_shape)
+        .to(torch.promote_types(source.dtype, torch.float32))
         for dataset_name, source in y.items()
     }
 
@@ -253,8 +259,9 @@ class DPMpp2MSampler(EDMDiffusionSampler):
 
             if old_denoised is None:
                 y_solver = y_solver.zip_map_data(
-                    lambda y_sample, denoised_sample: (sigma_next / sigma) * y_sample
-                    - (torch.exp(-h) - 1) * denoised_sample,
+                    lambda y_sample, denoised_sample: (
+                        (sigma_next / sigma) * y_sample - (torch.exp(-h) - 1) * denoised_sample
+                    ),
                     denoised_solver,
                 )
             else:
@@ -270,8 +277,9 @@ class DPMpp2MSampler(EDMDiffusionSampler):
                     old_denoised,
                 )
                 y_solver = y_solver.zip_map_data(
-                    lambda y_sample, direction_sample: (sigma_next / sigma) * y_sample
-                    - (torch.exp(-h) - 1) * direction_sample,
+                    lambda y_sample, direction_sample: (
+                        (sigma_next / sigma) * y_sample - (torch.exp(-h) - 1) * direction_sample
+                    ),
                     direction,
                 )
 
@@ -348,7 +356,7 @@ class VectorFieldEulerSampler(VectorFieldSampler):
 
 
 class VectorFieldHeunSampler(VectorFieldSampler):
-    """Second-order Heun sampler for deterministic bridge models."""
+    """Second-order Heun sampler for learned ODE vector fields."""
 
     def __init__(
         self,

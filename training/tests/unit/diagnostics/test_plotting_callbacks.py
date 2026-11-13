@@ -270,9 +270,9 @@ def _make_pl_module_forecaster(
     pl_module.data_indices = {"data": data_indices}
 
     # Mock graph latlons (radians), converted to deg in process
-    pl_module.model.model._graph_data = {"data": MagicMock()}
-    pl_module.model.model._graph_data["data"].__getitem__ = lambda _self, _k: MagicMock()
-    graph_data = pl_module.model.model._graph_data["data"]
+    pl_module.model.graph_data = {"data": MagicMock()}
+    pl_module.model.graph_data["data"].__getitem__ = lambda _self, _k: MagicMock()
+    graph_data = pl_module.model.graph_data["data"]
     graph_data.__getitem__ = lambda k: torch.zeros(nlatlon, 2) if k == pl_module.model.model._graph_name_data else None
 
     # Use no-op output_mask
@@ -306,8 +306,8 @@ def _make_pl_module_temporal_downscaler(*, nlatlon=50) -> MagicMock:
     pl_module.data_indices = {"data": data_indices}
 
     # Mock graph data
-    pl_module.model.model._graph_data = {"data": MagicMock()}
-    pl_module.model.model._graph_data["data"].__getitem__ = lambda _k: torch.zeros(nlatlon, 2)
+    pl_module.model.graph_data = {"data": MagicMock()}
+    pl_module.model.graph_data["data"].__getitem__ = lambda _k: torch.zeros(nlatlon, 2)
 
     # Use no-op output_mask
     pl_module.output_mask = {"data": NoOutputMask()}

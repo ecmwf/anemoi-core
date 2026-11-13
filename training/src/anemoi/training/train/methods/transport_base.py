@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from typing import Any
 
-from anemoi.models.transport import TransportSourceRequest
+from anemoi.models.transport import gaussian_source
 from anemoi.training.train.methods.base import BaseTrainingModule
 
 if TYPE_CHECKING:
@@ -34,8 +34,8 @@ class PreparedPredictionTarget:
     validation metrics, because those may live in different variable spaces.
 
     model_target:
-        Target in MODEL_OUTPUT space. This is the tensor that EDM diffusion or SI
-        corrupts before passing it to the model.
+        Target in MODEL_OUTPUT space. This is the tensor that EDM diffusion or flow
+        matching corrupts before passing it to the model.
 
     loss_target:
         Clean target used by the training loss before the transport objective
@@ -53,9 +53,7 @@ class PreparedPredictionTarget:
 
     aux:
         Extra prediction-mode data needed later, such as the latest input state
-        for tendency reconstruction. ``transport_reference_source``, when present,
-        is a zero-argument factory returning a dictionary of per-dataset tensors
-        or sparse sample lists. It is evaluated only for a reference-state source.
+        for tendency reconstruction.
     """
 
     model_target: Batch
@@ -71,21 +69,21 @@ class PreparedTransportObjective:
 
     The transport objective decides how to corrupt the prediction target and
     what the model should learn from that corrupted input. EDM diffusion
-    predicts a clean endpoint. SI predicts the bridge drift.
+    predicts a clean endpoint. Flow matching predicts a velocity.
 
     conditioned_target:
         Corrupted target passed to the model together with the normal input.
-        For EDM diffusion this is the noised target. For SI this is the interpolated
-        bridge state.
+        For EDM diffusion this is the noised target. For flow matching this is the
+        point on the path from the source field to the target.
 
     condition:
         Scalar conditioning value expanded to tensor form. For EDM diffusion this is
-        sigma. For SI this is the bridge time.
+        sigma. For flow matching this is the time.
 
     loss_target:
         Target used by the loss after the transport objective has prepared it.
-        For EDM diffusion this is usually the clean endpoint. For SI this is the
-        drift target.
+        For EDM diffusion this is usually the clean endpoint. For flow matching this
+        is the velocity.
 
     loss_target_layout:
         Variable layout of loss_target. The loss uses this to align loss_target
@@ -97,11 +95,11 @@ class PreparedTransportObjective:
 
     weights:
         Optional per-sample/per-variable loss weights. EDM diffusion uses this for
-        EDM noise-level weighting. SI usually leaves this as None.
+        EDM noise-level weighting. Flow matching leaves this as None.
 
     aux:
-        Extra objective-specific tensors needed later, for example SI source,
-        bridge state, and bridge time for validation reconstruction.
+        Extra objective-specific tensors needed later, for example the flow-matching
+        state and time for validation reconstruction.
     """
 
     conditioned_target: Batch
@@ -114,7 +112,7 @@ class PreparedTransportObjective:
 
 
 class TransportObjective:
-    """Common interface for training objectives such as EDM diffusion and stochastic interpolants."""
+    """Common interface for training objectives such as EDM diffusion and flow matching."""
 
     def __init__(self, module: TransportTraining) -> None:
         self.module = module
@@ -171,38 +169,7 @@ class TransportObjective:
             **kwargs,
         )
 
-    def build_transport_source(
-        self,
-        prepared: PreparedPredictionTarget,
-        default_kind: str = "gaussian",
-    ) -> Batch:
+    def build_transport_source(self, prepared: PreparedPredictionTarget) -> Batch:
         """Build the transport source field, as a batch shaped and described like the model target."""
-        transport_source = self.module.model.model.transport_source
-        kind = transport_source.resolve_kind(default_kind)
-        if kind == "reference_state":
-            sparse_datasets = [
-                dataset_name for dataset_name, source in prepared.model_target.items() if source.is_tabular
-            ]
-            if sparse_datasets:
-                msg = (
-                    "reference_state transport sources are not implemented for sparse datasets. "
-                    f"Use a non-reference source for: {sparse_datasets}."
-                )
-                raise NotImplementedError(msg)
-
-        def reference_source_factory() -> dict[str, torch.Tensor | list[torch.Tensor]]:
-            reference_factory = prepared.aux.get("transport_reference_source")
-            if reference_factory is None:
-                msg = "Transport source kind 'reference_state' requires a reference source in the prediction mode."
-                raise ValueError(msg)
-            return reference_factory()
-
         # The model target describes the field to build, including its grid shard sizes.
-        request = TransportSourceRequest(
-            templates=prepared.model_target,
-            default_kind=default_kind,
-            custom_source_factories={"reference_state": reference_source_factory},
-            model_comm_group=getattr(self.module, "model_comm_group", None),
-            error_context="training",
-        )
-        return transport_source.build(request)
+        return gaussian_source(prepared.model_target, getattr(self.module, "model_comm_group", None))

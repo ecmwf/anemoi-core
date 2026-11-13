@@ -27,6 +27,7 @@ class WeightedMSELoss(MSELoss):
     """
 
     name: str = "weighted_mse"
+    applies_weights: bool = True
 
     def _forward_impl(
         self,

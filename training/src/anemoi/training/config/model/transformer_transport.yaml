@@ -90,6 +90,7 @@ decoders:
     target_node_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+      num_channels: ${model.num_channels}
       trainable_size: ${model.edge_trainable_parameters.hidden2data}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
@@ -105,10 +106,9 @@ decoders:
       graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 residual:
-  datasets:
-    data:
-      _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
-      step: -1 # use the latest step as skip connection
+  # No residual connection by default. A SkipConnection or TruncatedConnection entry per dataset adds that
+  # input state to the prognostic outputs of the transport network.
+  datasets: {}
 
 output_mask:
   datasets:

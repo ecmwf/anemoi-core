@@ -11,6 +11,7 @@
 
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Callable
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -248,3 +249,14 @@ def validate_layout_against(name: str, layout: TensorLayout, data: torch.Tensor 
                 f"Layout: {layout!r}."
             )
             raise ValueError(msg)
+
+
+def host_float32(values: Any, op: Callable[[np.ndarray], np.ndarray] | None = None) -> np.ndarray:
+    """Return ``values`` flat, as float32 on the host, after applying ``op`` in float64.
+
+    One rounding to float32, at the end. Runs in numpy, on the host.
+    """
+    if torch.is_tensor(values):
+        values = values.detach().cpu().numpy()
+    host = np.asarray(values, dtype=np.float64).reshape(-1)
+    return (host if op is None else op(host)).astype(np.float32)

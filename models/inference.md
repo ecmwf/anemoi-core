@@ -4,7 +4,7 @@
 
 **Description:** The interface between `anemoi-models` and `anemoi-inference`, as implemented on `feat/richer-batch`.
 
-**Version:** 8 November 2026
+**Version:** 10 November 2026
 
 ## What changed
 
@@ -68,11 +68,20 @@ Per input dataset (every dataset the model encodes):
 
 - gridded: `("time", "ensemble", "grid", "variables")`. All four axes are **required**: a gridded payload
   without an `ensemble` axis fails inside the model (an `EinopsError`). Use an ensemble axis of size 1 for a
-  single member. The axis order is free.
+  single member.
 - tabular: `("grid", "variables")`, or `("ensemble", "grid", "variables")`. There is no `time` axis: the time
   slots are stacked along the grid axis and described by `boundaries`.
 - No layout may contain a `batch` axis: the interface adds it (gridded) or holds the batch as a list
   (tabular). A `batch` axis fails at collation with a dimension-count `ValueError`.
+- The axis order is free, for inputs, forcings and templates alike. `create_batched_struct` permutes `data`
+  to the canonical order above (`TensorLayout.AXES`: `time`, `ensemble`, `grid`, `variables`), so the model
+  only ever sees that order. The output always comes back in the canonical order, whatever order the
+  template named, and its `layout` says so.
+- The layout names the axes; nothing checks their **lengths** against the checkpoint. In particular the
+  `time` axis must hold exactly `n_step_input` steps, i.e.
+  `len(metadata_inference[<dataset>]["timesteps"]["input_relative_date_indices"])` (what `anemoi-inference`
+  reads as `multi_step_input`). A tensor with the right rank but mislabelled axes passes validation and fails deep
+  in the model (see "What to expect when it goes wrong").
 
 ### Variable order
 
@@ -115,7 +124,7 @@ One payload per decoded dataset (the keys of `target_template` that are decoder 
 |---|---|---|---|
 | `data` | `torch.Tensor` | physical | Post-processed. No batch axis. |
 | `variables` | `list[str]` | — | Output names, in tensor column order. |
-| `layout` | `tuple[str, ...]` | — | Axis names, no `batch`. |
+| `layout` | `tuple[str, ...]` | — | Axis names, no `batch`, always in canonical order: `("time", "ensemble", "grid", "variables")` for gridded, `("grid", "variables")` or `("ensemble", "grid", "variables")` for tabular. |
 | `latitudes`, `longitudes` | `torch.Tensor` | **degrees** | Converted back from radians. Always present. |
 | `timedeltas` | `torch.Tensor` | seconds | Tabular only. |
 | `boundaries` | `list[(int, int)]` | — | Tabular only. Back as int pairs. |
@@ -130,19 +139,23 @@ unwrapped (asserted).
 
 ```python
 model.predict_step(
-    x=Batch, target_template=dict[str, BaseTemplate], target_forcing=Batch,
-    pre_processors=..., post_processors=..., n_step_input=dict[str, int],
-    model_comm_group=..., gather_out=...,
-    statistics_tendencies=...,       # only when the checkpoint has tendency statistics
-    spatial_pre_processors=...,      # only when a dataset has a spatial processor
-    **kwargs,                        # from the caller
+    x=Batch,
+    target_template=dict[str, BaseTemplate],
+    target_forcing=Batch,
+    pre_processors=...,
+    post_processors=...,
+    model_comm_group=...,
+    gather_out=...,
+    statistics_tendencies=...,  # only when the checkpoint has tendency statistics
+    spatial_pre_processors=...,  # only when a dataset has a spatial processor
+    **kwargs,  # from the caller
 )
 ```
 
 | Model | `predict_step` | Extra keyword arguments |
 |---|---|---|
 | Deterministic and ensemble (`AnemoiModelEncProcDec` and subclasses) | `BaseGraphModel.predict_step` (`models/base.py`): pre-process, `forward`, post-process, gather | none; remaining `kwargs` go to the pre-processors and `forward` |
-| Transport, state (`AnemoiTransportModelEncProcDec`) | samples with the transport objective, then post-processes | `schedule_params`, `sampler_params` (override the checkpoint's `inference_defaults`); remaining `kwargs` go to the sampler |
+| Transport, state (`AnemoiTransportModelEncProcDec`) | samples with the transport objective, then post-processes | `schedule_params`, `sampler_params` (override the checkpoint's `inference_defaults`; choosing another schedule or sampler type starts from the overrides alone); other keyword arguments from the runner, such as `fcstep`, are not used |
 | Transport, tendency (`AnemoiTransportTendModelEncProcDec`) | as above; the sampled tendencies are added to the latest input state | needs `statistics_tendencies` (passed by the interface); output constraints and remappings apply to the rebuilt states, not to the tendencies |
 
 All return a `Batch` on the template's nodes, post-processed and, with `gather_out=True`, gathered across
@@ -153,26 +166,26 @@ All return a `Batch` on the template's nodes, post-processed and, with `gather_o
 ### Gridded, one dataset, 2 input steps → 1 output step
 
 ```python
-names_in = list(md["era5"]["data_indices"]["input"])       # model-input order
-names_out = list(md["era5"]["data_indices"]["output"])     # model-output order
+names_in = list(md["era5"]["data_indices"]["input"])  # model-input order
+names_out = list(md["era5"]["data_indices"]["output"])  # model-output order
 forcings = [n for n in names_in if n in md["era5"]["variable_types"]["forcing"]]
 geometry = {
     "data_type": "gridded",
-    "latitudes": lats,                                     # (N,) degrees
-    "longitudes": lons,                                    # (N,) degrees
+    "latitudes": lats,  # (N,) degrees
+    "longitudes": lons,  # (N,) degrees
     "layout": ("time", "ensemble", "grid", "variables"),
 }
 
 result = model.predict_step(
-    {"era5": {**geometry, "data": x, "variables": names_in}},              # x: (2, 1, N, V_in)
+    {"era5": {**geometry, "data": x, "variables": names_in}},  # x: (2, 1, N, V_in)
     target_template={"era5": {**geometry, "variables": names_out}},
     target_forcing={"era5": {**geometry, "data": f, "variables": forcings}},  # f: (1, 1, N, V_forcing), OUTPUT time
 )
 
 out = result["era5"]
-out["data"]       # (1, 1, N, V_out)
+out["data"]  # (1, 1, N, V_out)
 out["variables"]  # == names_out
-out["layout"]     # ("time", "ensemble", "grid", "variables")
+out["layout"]  # ("time", "ensemble", "grid", "variables")
 out["latitudes"]  # (N,) degrees
 ```
 
@@ -183,17 +196,17 @@ model.predict_step(
     {
         "obs": {
             "data_type": "tabular",
-            "data": y,                       # (M, V_in)  grid, vars; time folded into grid
+            "data": y,  # (M, V_in)  grid, vars; time folded into grid
             "variables": obs_names_in,
-            "latitudes": obs_lats,           # (M,) degrees
-            "longitudes": obs_lons,          # (M,) degrees
-            "timedeltas": offsets,           # (M,) seconds
+            "latitudes": obs_lats,  # (M,) degrees
+            "longitudes": obs_lons,  # (M,) degrees
+            "timedeltas": offsets,  # (M,) seconds
             "boundaries": [(0, k), (k, M)],  # one (start, stop) per input time slot
             "layout": ("grid", "variables"),
         }
     },
-    target_template={"obs": {...}},          # the output points and window(s), no data
-    target_forcing={"obs": {...}},           # forcings at the output points and times
+    target_template={"obs": {...}},  # the output points and window(s), no data
+    target_forcing={"obs": {...}},  # forcings at the output points and times
 )
 # out["obs"]["data"]: (M_out, V_out), layout ("grid", "variables"), with timedeltas and boundaries
 ```
@@ -202,8 +215,8 @@ model.predict_step(
 
 ```python
 model.predict_step(
-    {"era5": {...}, "obs": {...}},   # every dataset the model encodes
-    target_template={"era5": {...}}, # the datasets to decode
+    {"era5": {...}, "obs": {...}},  # every dataset the model encodes
+    target_template={"era5": {...}},  # the datasets to decode
     target_forcing={"era5": {...}},
 )
 # result.keys() == {"era5"}
@@ -213,7 +226,9 @@ model.predict_step(
 
 ```python
 model.predict_step(
-    x, target_template=templates, target_forcing=forcings,
+    x,
+    target_template=templates,
+    target_forcing=forcings,
     schedule_params={"num_steps": 20},
     sampler_params={"sampler": "heun"},
 )
@@ -239,10 +254,12 @@ then again at collation:
 | tabular layout with `time` or `batch` | `ValueError("TabularSample requires a layout without time and batch axes ...")` |
 | gridded layout with `batch` | `ValueError` at collation: the layout describes fewer axes than the data |
 | gridded layout without `ensemble` | `EinopsError` inside the model |
+| `time` axis length ≠ `n_step_input` (e.g. `(1, T, grid, vars)` labelled `("time", "ensemble", "grid", "variables")`) | `RuntimeError` inside the model, e.g. `mat1 and mat2 shapes cannot be multiplied`; not checked at the boundary |
+| inference checkpoint saved without the graph, before the model kept its graph geometry | `RuntimeError` naming `restore_graph_geometry(graph)`; see "The model in the checkpoint" |
 | `encoded_data` target feature on a dataset whose input and target nodes differ | `AssertionError("Decoder x_dst rows ... != target node count ...")` |
 
-Not caught: a wrong variable order (see "Variable order"), and a decoded dataset missing from
-`target_template`.
+Not caught: a wrong variable order (see "Variable order"), a decoded dataset missing from
+`target_template`, and axis lengths that do not match the checkpoint.
 
 ## Checkpoint metadata
 
@@ -251,11 +268,35 @@ Under `metadata_inference`: `dataset_names` and `task`, and per dataset:
 | Key | Content |
 |---|---|
 | `data_type` | `"gridded"` or `"tabular"` (replaces the old `is_static_grid` / `is_tabular`) |
-| `grid_size` | gridded only |
+| `grid_size` | always present: the full grid size for gridded datasets, `None` for tabular |
 | `data_indices` | `{"input": name → model-input index, "output": name → model-output index}` |
 | `variable_types` | `forcing`, `target`, `prognostic`, `diagnostic` name lists |
-| `shapes` | `variables`, `input_timesteps`, `ensemble`, `grid` (`None` for tabular and transport models) |
-| `timesteps` | relative date indices, `timestep`, and for forecasters `input_offsets`, `output_offsets`, `rollout_shift`, `advance_map` |
+| `timesteps` | `input_relative_date_indices`, `output_relative_date_indices`, `relative_date_indices_training`, `timestep`, and for forecasters `input_offsets`, `output_offsets`, `rollout_shift`, `advance_map` |
+
+There is no `shapes` entry any more: the number of input and output steps is the length of
+`timesteps["input_relative_date_indices"]` / `["output_relative_date_indices"]`, the number of variables the
+length of `data_indices["input"]` / `["output"]`, and the grid size is `grid_size`. The model's own
+`fill_metadata` writes nothing; every entry comes from the data module and the task.
+
+## The model in the checkpoint
+
+The inference checkpoint pickles the whole `AnemoiModelInterface`, without the static graph: its
+`graph_data` is `None`, and the model itself does not keep the graph. It does not need it, and the caller
+passes none: the graph providers hold the edges, and `model.model.graph_geometry` holds the node and edge
+counts and the coordinates of the hidden nodes and of the gridded datasets' grids (what spatial
+pre-processors project onto; the pre-processors themselves stay stateless).
+
+Inference checkpoints written between the checkpoint trim (#1456, merged into `feat/richer-batch` on
+22 October 2026) and the graph geometry have neither the graph nor the geometry. `predict_step` on them
+raises a `RuntimeError`. Give the model the training graph once, after loading, and they run:
+
+```python
+model = torch.load(path, map_location="cpu", weights_only=False)
+# graph: the training graph file, or rebuilt with anemoi-graphs from the checkpoint's metadata["config"]["graph"]
+model.model.restore_graph_geometry(graph)
+```
+
+Older checkpoints, which still carry the graph, build the geometry from it on load.
 
 ## Open questions for the team
 
@@ -278,6 +319,7 @@ Under `metadata_inference`: `dataset_names` and `task`, and per dataset:
 | Model-side `predict_step` (deterministic, ensemble) | `models/src/anemoi/models/models/base.py` |
 | Transport `predict_step`, tendency `_sampled_to_physical` | `models/src/anemoi/models/models/transport_encoder_processor_decoder.py` |
 | Output assembly / target node assert | `models/src/anemoi/models/models/encoder_processor_decoder.py` |
-| Checkpoint metadata | `training/src/anemoi/training/data/datamodule.py` (`fill_metadata`), model and task `fill_metadata` |
+| Checkpoint metadata | `training/src/anemoi/training/data/datamodule.py` (`fill_metadata`) and the task's `fill_metadata` (`training/src/anemoi/training/tasks/`) |
+| What the model keeps of the graph (`StaticGraphGeometry`) | `models/src/anemoi/models/layers/graph.py`; `BaseGraphModel.graph_geometry` / `restore_graph_geometry` in `models/base.py` |
 | End-to-end tests of the boundary | `models/tests/interface/test_predict_step.py` |
 | Inference-side caller | `anemoi-inference`: `src/anemoi/inference/runners/richer_batch.py` |

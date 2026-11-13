@@ -71,7 +71,6 @@ def _anchors(readers: dict, offsets: dict, stride: int | None = 1) -> Anchors:
 
 
 class TestReaderValidAnchors:
-
     def test_gridded_anchor_times_are_its_dates(self) -> None:
         reader = _gridded(length=10)
         table = reader.valid_anchors([0, 1, 2])
@@ -216,7 +215,6 @@ class TestAlignmentAcrossReaders:
 
 
 class TestMultiDatasetSamplingStride:
-
     def test_unconfigured_readers_use_stride_1(self) -> None:
         assert MultiDataset._sampling_stride({"a": _gridded(5), "b": _gridded(5)}) == 1
 

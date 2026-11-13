@@ -42,9 +42,7 @@ def hidden_node_names(hidden_nodes_name: str | list[str] | Mapping[str, str]) ->
         return list(dict.fromkeys(hidden_nodes_name.values()))
     if isinstance(hidden_nodes_name, (list, tuple, ListConfig)):
         return list(dict.fromkeys(hidden_nodes_name))
-    msg = (
-        "Hidden nodes name must be a string, a list of strings, or a dataset mapping, " f"got {type(hidden_nodes_name)}"
-    )
+    msg = f"Hidden nodes name must be a string, a list of strings, or a dataset mapping, got {type(hidden_nodes_name)}"
     raise TypeError(msg)
 
 

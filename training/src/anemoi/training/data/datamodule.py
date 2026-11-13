@@ -292,9 +292,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             metadata["metadata_inference"][dataset_name] = {}
             reader = self.ds_train.data_readers[dataset_name]
             metadata["metadata_inference"][dataset_name]["data_type"] = reader.data_type
-
-            if reader.data_type == "gridded":
-                metadata["metadata_inference"][dataset_name]["grid_size"] = reader.grid_size
+            metadata["metadata_inference"][dataset_name]["grid_size"] = reader.grid_size
 
             name_to_index = {
                 "input": data_indices[dataset_name].model.input.name_to_index,

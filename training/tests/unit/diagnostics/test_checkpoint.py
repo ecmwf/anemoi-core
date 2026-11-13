@@ -11,7 +11,6 @@
 import datetime
 import shutil
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -37,10 +36,9 @@ class DummyModel(torch.nn.Module):
         self.config = config
         self.metadata = metadata
         self.supporting_arrays = {}
-        # Mirror AnemoiModelInterface's graph_data/model._graph_data shape so
-        # AnemoiCheckpoint._save_checkpoint's graph_data null-out has something to act on.
+        # Mirror AnemoiModelInterface's graph_data so AnemoiCheckpoint._save_checkpoint's
+        # graph_data null-out has something to act on.
         self.graph_data = {"dummy": "graph"}
-        self.model = SimpleNamespace(_graph_data={"dummy": "graph"})
         self.fc1 = nn.Linear(32, 5)
         self.fc2 = nn.Linear(5, 1)
         self.relu = nn.ReLU()
@@ -131,12 +129,12 @@ def test_on_train_start_initializes_timer(tmp_path: Path) -> None:
     callback.on_train_start(trainer, pl_module)
     after = time.monotonic()
 
-    assert (
-        callback._last_time_checked is not None
-    ), "_last_time_checked is still None after on_train_start — super().on_train_start() is probably missing"
-    assert (
-        before <= callback._last_time_checked <= after
-    ), "_last_time_checked value is outside the expected time window"
+    assert callback._last_time_checked is not None, (
+        "_last_time_checked is still None after on_train_start — super().on_train_start() is probably missing"
+    )
+    assert before <= callback._last_time_checked <= after, (
+        "_last_time_checked value is outside the expected time window"
+    )
 
 
 def test_time_based_checkpoint_skip_logic_after_interval(tmp_path: Path) -> None:

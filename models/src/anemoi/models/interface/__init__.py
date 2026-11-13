@@ -202,7 +202,7 @@ class AnemoiModelInterface(torch.nn.Module):
             if dataset_name in batch:
                 projected = projector.project_source(
                     batch[dataset_name],
-                    self.graph_data[dataset_name].x,
+                    self.model.graph_geometry.coordinates(dataset_name),
                     model_comm_group=model_comm_group,
                 )
                 batch = batch.replace(dataset_name, projected)
@@ -237,19 +237,12 @@ class AnemoiModelInterface(torch.nn.Module):
         A template has no data to take a device from, so its geometry (coordinates and, for tabular
         templates, timedeltas) is placed on ``device``, the device of the input batch.
         """
-        geometry_keys = ("latitudes", "longitudes", "timedeltas")
         return {
             name: create_batched_struct(
                 name=name,
                 statistics=self._statistics_for(name, payload["variables"]),
-                **{
-                    key: (
-                        torch.as_tensor(value, device=device)
-                        if device is not None and key in geometry_keys and value is not None
-                        else value
-                    )
-                    for key, value in payload.items()
-                },
+                device=device,
+                **payload,
                 ensemble_size=ensemble_size,
                 batch_size=batch_size,
                 time_size=self.n_step_output[name],
@@ -277,8 +270,7 @@ class AnemoiModelInterface(torch.nn.Module):
                 batch_axis = sample.layout.axis("batch", ndim=data.ndim) if sample.layout.batch is not None else None
                 if batch_axis is not None:
                     assert data.shape[batch_axis] == 1, (
-                        f"Dataset {dataset_name!r}: expected a single sample to unwrap, got "
-                        f"{data.shape[batch_axis]}."
+                        f"Dataset {dataset_name!r}: expected a single sample to unwrap, got {data.shape[batch_axis]}."
                     )
                     data = data.squeeze(batch_axis)
                 layout = layout.without_batch_dim()
@@ -360,7 +352,6 @@ class AnemoiModelInterface(torch.nn.Module):
             "target_forcing": target_forcing,
             "pre_processors": self.pre_processors,
             "post_processors": self.post_processors,
-            "n_step_input": self.n_step_input,
             "model_comm_group": model_comm_group,
             "gather_out": gather_out,
         }

@@ -65,3 +65,28 @@ def test_without_batch_dim_shifts_only_the_axes_after_the_batch():
 
 def test_tabular_layout_with_batch_dim():
     assert TensorLayout(ensemble=0).with_batch_dim() == TensorLayout(batch=0, ensemble=1, grid=2, variables=3)
+
+
+@pytest.mark.parametrize(
+    ("names", "permutation"),
+    [
+        (("time", "ensemble", "grid", "variables"), (0, 1, 2, 3)),
+        (("grid", "time", "ensemble", "variables"), (1, 2, 0, 3)),
+        (("variables", "grid", "ensemble", "time"), (3, 2, 1, 0)),
+        (("grid", "ensemble", "variables"), (1, 0, 2)),
+        (("variables", "grid"), (1, 0)),
+    ],
+)
+def test_canonical_reorders_the_axes(names, permutation):
+    layout = TensorLayout.from_tuple(*names)
+    assert layout.canonical_permutation == permutation
+    assert layout.is_canonical == (permutation == tuple(range(len(names))))
+    canonical = layout.canonical()
+    assert canonical.is_canonical
+    assert canonical.axis_names == tuple(name for name in TensorLayout.AXES if name in names)
+    # the permutation takes a tensor in this layout to the canonical one
+    assert tuple(names[i] for i in permutation) == canonical.axis_names
+
+
+def test_canonical_layout_is_returned_unchanged():
+    assert EXPLICIT.canonical() is EXPLICIT

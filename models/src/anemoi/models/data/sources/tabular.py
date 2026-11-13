@@ -672,12 +672,12 @@ class TabularSource(Source):
         for axis in range(self.data[0].ndim):
             name = dims[axis]
             if name == "grid":
-                tree.add(f"Dim {axis+1} ({name}): {self.time_size} time slices")
+                tree.add(f"Dim {axis + 1} ({name}): {self.time_size} time slices")
                 for i, sample in enumerate(self.data):
                     time_slice_lengths = [str(s.stop - s.start) for s in self.boundaries[i]]
-                    tree.add(f"\tSample {i+1}: {sample.shape[axis]} <- {' + '.join(time_slice_lengths)}")
+                    tree.add(f"\tSample {i + 1}: {sample.shape[axis]} <- {' + '.join(time_slice_lengths)}")
             else:
-                tree.add(f"Dim {axis+1} ({name}): {self.data[0].shape[axis]}")
+                tree.add(f"Dim {axis + 1} ({name}): {self.data[0].shape[axis]}")
 
         return tree
 

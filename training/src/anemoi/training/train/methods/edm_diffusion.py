@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 
 from anemoi.models.transport.paths import edm_loss_weight
 from anemoi.models.transport.schedules import SIGMA_TRAINING_DISTRIBUTIONS
+from anemoi.training.losses.base import BaseLoss
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import PreparedTransportObjective
 from anemoi.training.train.methods.transport_base import TransportObjective
@@ -79,29 +81,43 @@ class EDMDiffusionTransportObjective(TransportObjective):
         weights: dict[str, torch.Tensor | list[torch.Tensor]] | None = None,
         **_kwargs,
     ) -> torch.Tensor:
-        """Compute EDM diffusion loss with noise weighting."""
+        """Compute the EDM loss, weighting each sample's error by its noise level.
+
+        The loss runs through the shared loss path, which checks the targets for NaNs and adds the
+        grid shard layout. A loss that leaves the weights unused would train a different objective
+        without any warning, so it is rejected.
+        """
         assert weights is not None, f"{self.__class__.__name__} requires weights for EDM diffusion loss computation."
+        self._check_loss_applies_weights(dataset_name)
 
-        loss = self.module.loss[dataset_name]
-        loss_kwargs = {
-            "grid_shard_slice": grid_shard_slice,
-            "group": self.module.model_comm_group,
-        }
+        dataset_weights = weights[dataset_name]
         if y_pred.is_tabular:
-            loss_kwargs["per_sample_kwargs"] = {"weights": weights[dataset_name]}
+            loss_kwargs = {"per_sample_kwargs": {"weights": dataset_weights}}
         else:
-            loss_kwargs["weights"] = weights[dataset_name]
-        if pred_layout is not None:
-            loss_kwargs["pred_layout"] = pred_layout
-        if target_layout is not None:
-            loss_kwargs["target_layout"] = target_layout
-        if getattr(loss, "needs_shard_layout_info", False):
-            loss_kwargs.update(
-                grid_dim=self.module.grid_dim,
-                grid_shard_sizes=self.module._grid_shard_sizes(y),
-            )
+            loss_kwargs = {"weights": dataset_weights}
+        return BaseTrainingModule._compute_loss(
+            self.module,
+            y_pred=y_pred,
+            y=y,
+            grid_shard_slice=grid_shard_slice,
+            dataset_name=dataset_name,
+            pred_layout=pred_layout,
+            target_layout=target_layout,
+            extra_loss_kwargs=loss_kwargs,
+        )
 
-        return self.module._evaluate_loss(loss, y_pred, y, **loss_kwargs)
+    def _check_loss_applies_weights(self, dataset_name: str) -> None:
+        """Reject a training loss that would leave the EDM noise-level weights unused."""
+        loss = self.module.loss[dataset_name]
+        leaves = loss.iter_leaf_losses() if isinstance(loss, BaseLoss) else [loss]
+        ignoring = sorted({type(leaf).__name__ for leaf in leaves if not getattr(leaf, "applies_weights", False)})
+        if ignoring:
+            msg = (
+                f"EDM diffusion weights each sample's loss by its noise level, but the training loss of dataset "
+                f"'{dataset_name}' leaves the weights unused ({', '.join(ignoring)}). Use "
+                "anemoi.training.losses.WeightedMSELoss, as in training/edm_diffusion.yaml."
+            )
+            raise ValueError(msg)
 
     def _noise_target(
         self,

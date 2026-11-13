@@ -9,6 +9,7 @@
 
 import dataclasses
 
+import numpy as np
 import pytest
 import torch
 
@@ -72,6 +73,26 @@ def test_layout_object_and_slices_are_accepted():
     assert sample.boundaries == (slice(0, 3),)
 
 
+@pytest.mark.parametrize(
+    ("build", "names", "permutation"),
+    [
+        (_gridded, ("grid", "variables", "time", "ensemble"), (2, 3, 0, 1)),
+        (_tabular, ("grid", "variables", "ensemble"), (1, 2, 0)),
+    ],
+)
+def test_any_axis_order_is_stored_canonically(build, names, permutation):
+    """A payload in any axis order is permuted to the canonical one, data and layout alike."""
+    reference = build()
+    data = reference.data.permute(permutation)
+    assert not TensorLayout.from_tuple(*names).is_canonical
+
+    sample = build(data=data, layout=names)
+
+    assert sample.layout == reference.layout
+    assert sample.layout.is_canonical
+    assert torch.equal(sample.data, reference.data)
+
+
 #: What the interface passes, besides the payload, to build a template.
 TEMPLATE_SIZES = {"name": "ds", "ensemble_size": 1, "batch_size": 1, "time_size": 2}
 
@@ -96,6 +117,23 @@ def test_tabular_payload_without_data_builds_a_template():
     for coordinates, timedeltas in zip(template.coordinates, template.timedeltas, strict=True):
         torch.testing.assert_close(coordinates[:, 0], torch.deg2rad(torch.tensor(LATS)))
         assert timedeltas.dtype == torch.float32
+
+
+def test_template_geometry_reaches_the_device_as_float32():
+    # Templates have no data to take a device from. Numpy float64 geometry (inference payloads) must reach
+    # the device as float32 only: MPS has no float64. The meta device stands in for an accelerator.
+    geometry = {"latitudes": np.asarray(LATS), "longitudes": np.asarray(LONS), "device": torch.device("meta")}
+    gridded = _gridded(data=None, **geometry, **TEMPLATE_SIZES)
+    tabular = _tabular(data=None, **geometry, **TEMPLATE_SIZES)
+    for tensor in [gridded.coordinates, *tabular.coordinates, *tabular.timedeltas]:
+        assert (tensor.device.type, tensor.dtype) == ("meta", torch.float32)
+
+
+@pytest.mark.parametrize("build", [_gridded, _tabular])
+def test_template_layout_is_stored_canonically(build):
+    names = tuple(reversed(build().layout.axis_names))
+    template = build(data=None, layout=names, **TEMPLATE_SIZES)
+    assert template.layout == build(data=None, **TEMPLATE_SIZES).layout
 
 
 def test_tabular_template_checks_its_time_windows():
