@@ -751,7 +751,19 @@ class TabularTemplate(BaseTemplate):
         repeated_timedeltas = [td.repeat(self.ensemble_size) for td in self.timedeltas]
         coordinates = torch.cat(repeated_coords, dim=0) if len(repeated_coords) > 1 else repeated_coords[0]
         timedeltas = torch.cat(repeated_timedeltas, dim=0) if len(repeated_timedeltas) > 1 else repeated_timedeltas[0]
+        flat_shard_sizes, batch_sizes = self.flat_sizes()
 
+        return FlatSource(
+            data=None,
+            coordinates=coordinates,
+            timedeltas=timedeltas.to(coordinates.device),
+            device=coordinates.device,
+            shard_sizes=flat_shard_sizes,
+            batch_sizes=batch_sizes,
+        )
+
+    def flat_sizes(self) -> tuple[ShardSizes, tuple[int, ...]]:
+        """Return the ``shard_sizes`` and ``batch_sizes`` of :meth:`flatten`, without joining the nodes."""
         # Flatten per-window shard sizes into one list for the concatenated data.
         # NOTE this changes the order of observations when gathering:
         #   GPU0  GPU1   GPU0  GPU1            GPU0        GPU1
@@ -772,15 +784,7 @@ class TabularTemplate(BaseTemplate):
 
         # moving grids need one graph per (sample, member); see DynamicGraphProvider
         batch_sizes = tuple(count for count in self.node_counts for _ in range(self.ensemble_size))
-
-        return FlatSource(
-            data=None,
-            coordinates=coordinates,
-            timedeltas=timedeltas.to(coordinates.device),
-            device=coordinates.device,
-            shard_sizes=flat_shard_sizes,
-            batch_sizes=batch_sizes,
-        )
+        return flat_shard_sizes, batch_sizes
 
     def unflatten(self, data: torch.Tensor) -> TabularSource:
         """Build a :class:`TabularSource` from rows laid out like :meth:`flatten`."""

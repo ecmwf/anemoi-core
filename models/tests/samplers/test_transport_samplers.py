@@ -355,3 +355,31 @@ def test_edm_samplers_follow_the_exact_flow_of_gaussian_data(sampler_cls: type[E
     assert 3.5 < error_40 / error_80 < 4.5
     assert 3.5 < error_80 / error_160 < 4.5
     assert abs(error_160) < 1e-3
+
+
+def test_dpmpp_hands_the_denoiser_its_solver_state_rounded_once() -> None:
+    """DPM++ keeps its state in float64 and only rounds the copy handed to a float32 denoiser.
+
+    With a zero denoiser each step scales the state by sigma_next / sigma, so at step k the denoiser must see
+    the float64 state y_0 * sigma_k / sigma_0 rounded once to float32, without rounding errors carried over.
+    """
+    torch.manual_seed(0)
+    x, _ = make_inputs(dtype=torch.float32)
+    start = torch.randn(2, 3, 1, 5, 4, dtype=torch.float64)
+    y = _batch({DATASET_NAME: start})
+    sigmas = KarrasSigmaSchedule(sigma_max=80.0, sigma_min=0.002, num_steps=12, rho=7.0).get_schedule()
+    received = []
+
+    def zero_denoiser(x: Batch, y: Batch, sigma: dict[str, torch.Tensor], model_comm_group=None) -> Batch:
+        del x, sigma, model_comm_group
+        received.append(y[DATASET_NAME].data.clone())
+        return y.with_data({name: torch.zeros_like(source.data) for name, source in y.items()})
+
+    DPMpp2MSampler(dtype=torch.float64).sample(x=x, y=y, sigmas=sigmas, denoising_fn=zero_denoiser)
+
+    state = start.clone()
+    for step, seen in enumerate(received):
+        assert seen.dtype == torch.float32
+        torch.testing.assert_close(seen, state.to(torch.float32), rtol=0.0, atol=0.0)
+        if step + 1 < len(sigmas) - 1:
+            state = state * (sigmas[step + 1] / sigmas[step])

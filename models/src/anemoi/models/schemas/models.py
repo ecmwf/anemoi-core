@@ -103,11 +103,11 @@ class TransportConfig(BaseModel):
     noise_cond_dim: PositiveInt = Field(default=16, examples=[16])
     "Size of the conditioning vector passed to conditional layers."
     sigma_max: PositiveFloat = Field(default=100.0, examples=[100.0])
-    "Maximum EDM diffusion noise level used during training."
+    "Largest EDM noise level of the training distribution; the included configs interpolate it into training_condition."
     sigma_min: PositiveFloat = Field(default=0.02, examples=[0.02])
-    "Minimum EDM diffusion noise level used during training."
+    "Smallest EDM noise level of the training distribution; the included configs interpolate it into training_condition."
     rho: PositiveFloat = Field(default=7.0, examples=[7.0])
-    "Shape parameter for the Karras EDM noise schedule."
+    "Karras shape parameter of the training distribution; inference_defaults sets the sampling schedule separately."
     training_condition: dict = Field(default_factory=dict)
     "Distribution used to sample one training noise level or time per sample."
     noise_embedder: dict = Field(default_factory=dict)
@@ -388,28 +388,12 @@ class TransportModelSchema(BaseModelSchema):
                     f"Please remove all bounding configurations for transport models."
                 )
                 raise ValueError(msg)
-            if "datasets" in self.bounding:
-                for dataset_name, bounding_list in self.bounding["datasets"].items():
-                    if (bounding_list is not None) and len(bounding_list) > 0:
-                        msg = (
-                            "Transport models do not support bounding layers. "
-                            f"Found {len(bounding_list)} bounding configuration(s) for dataset '{dataset_name}'. "
-                            f"Please remove all bounding configurations for transport models."
-                        )
-                        raise ValueError(msg)
-            elif len(self.bounding) > 0:
-                msg = (
-                    "Transport models do not support bounding layers. "
-                    f"Found {len(self.bounding)} bounding configuration(s). "
-                    f"Please remove all bounding configurations for transport models."
-                )
-                raise ValueError(msg)
         return self
 
 
 class TransportTendModelSchema(TransportModelSchema):
     condition_on_residual: bool = Field(default=False)
-    "Whether to condition the noise injection on the residual connection."
+    "Whether the encoder also reads the residual connection's reference state next to the noisy tendency."
 
 
 class HierarchicalModelSchema(BaseModelSchema):

@@ -456,6 +456,10 @@ class GriddedTemplate(BaseTemplate):
             device=self.coordinates.device,
         )
 
+    def flat_sizes(self) -> tuple[ShardSizes, None]:
+        """Return the ``shard_sizes`` and ``batch_sizes`` of :meth:`flatten`: a static grid has no batch sizes."""
+        return self.shard_sizes, None
+
     def unflatten(self, data: torch.Tensor) -> GriddedSource:
         """Build a :class:`GriddedSource` from ``(batch ensemble grid, time variables)`` rows."""
         expected = (

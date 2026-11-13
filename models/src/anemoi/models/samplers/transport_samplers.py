@@ -146,50 +146,44 @@ class EDMHeunSampler(EDMDiffusionSampler):
                     {name: source.randn_like(model_comm_group) for name, source in y_solver.items()},
                 ).map_data(lambda noise: noise * S_noise)
                 y_solver = _axpy(y_solver, epsilon, torch.sqrt(sigma_effective**2 - sigma_i**2))
+                del epsilon
             else:
                 sigma_effective = sigma_i
 
-            # Cast for model evaluation: run denoiser in model/input dtype.
+            # The denoiser runs in the model dtype; the update arithmetic stays in the solver dtype.
+            # Each field is dropped as soon as it has been used, so at most the state, the first update
+            # direction and the predictor state are held in solver precision while the network runs.
             y_model = _in_model_dtype(y_solver, x)
-
-            sigma_effective_expanded = _expand_scalar_condition(sigma_effective, y_model)
-
-            D1 = denoising_fn(
-                x,
-                y_model,
-                sigma_effective_expanded,
-                model_comm_group,
-            )
-            D1_solver = _in_dtype(D1, dtype)
-
-            # Predictor state in solver precision; for Heun corrector evaluation.
+            denoised = denoising_fn(x, y_model, _expand_scalar_condition(sigma_effective, y_model), model_comm_group)
+            del y_model
             update_direction = y_solver.zip_map_data(
                 lambda y_sample, denoised_sample: (y_sample - denoised_sample) / sigma_effective,
-                D1_solver,
+                _in_dtype(denoised, dtype),
             )
+            del denoised
             y_next_solver = _axpy(y_solver, update_direction, sigma_next - sigma_effective)
 
             if sigma_next != 0:
                 y_next_model = _in_model_dtype(y_next_solver, x)
-                sigma_next_expanded = _expand_scalar_condition(sigma_next, y_next_model)
-
-                D2 = denoising_fn(
+                denoised = denoising_fn(
                     x,
                     y_next_model,
-                    sigma_next_expanded,
+                    _expand_scalar_condition(sigma_next, y_next_model),
                     model_comm_group,
                 )
-                D2_solver = _in_dtype(D2, dtype)
-
+                del y_next_model
                 corrected_update_direction = y_next_solver.zip_map_data(
                     lambda y_sample, denoised_sample: (y_sample - denoised_sample) / sigma_next,
-                    D2_solver,
+                    _in_dtype(denoised, dtype),
                 )
+                del denoised, y_next_solver
                 combined_direction = update_direction.zip_map_data(
                     lambda update_sample, corrected_sample: (update_sample + corrected_sample) / 2,
                     corrected_update_direction,
                 )
+                del update_direction, corrected_update_direction
                 y_solver = _axpy(y_solver, combined_direction, sigma_next - sigma_effective)
+                del combined_direction
             else:
                 y_solver = y_next_solver
 
@@ -215,8 +209,9 @@ class DPMpp2MSampler(EDMDiffusionSampler):
     ) -> Batch:
         dtype = self.dtype
 
-        # Keep model evaluations in model dtype, but run solver updates in sampler dtype.
-        y_model = _in_model_dtype(y, x)
+        # The state stays in the solver dtype for the whole run; only the copy handed to the denoiser is cast
+        # to the model dtype, so the multistep update does not lose precision between steps.
+        y_solver = _in_dtype(y, dtype)
         sigmas = sigmas.to(dtype)
 
         num_steps = len(sigmas) - 1
@@ -229,16 +224,16 @@ class DPMpp2MSampler(EDMDiffusionSampler):
             sigma = sigmas[i]
             sigma_next = sigmas[i + 1]
 
-            sigma_expanded = _expand_scalar_condition(sigma, y_model)
-            denoised = denoising_fn(x, y_model, sigma_expanded, model_comm_group)
+            y_model = _in_model_dtype(y_solver, x)
+            denoised = denoising_fn(x, y_model, _expand_scalar_condition(sigma, y_model), model_comm_group)
+            del y_model
             denoised_solver = _in_dtype(denoised, dtype)
+            del denoised
 
             if sigma_next == 0:
                 # The final state is the denoised field, described like the sampled target.
-                y_model = _in_model_dtype(y_model.with_data({n: s.data for n, s in denoised_solver.items()}), x)
-                break
+                return _in_model_dtype(y_solver.with_data({n: s.data for n, s in denoised_solver.items()}), x)
 
-            y_solver = _in_dtype(y_model, dtype)
             t = -torch.log(sigma)
             t_next = -torch.log(sigma_next)
             h = t_next - t
@@ -270,9 +265,8 @@ class DPMpp2MSampler(EDMDiffusionSampler):
                 )
 
             old_denoised = denoised_solver
-            y_model = _in_model_dtype(y_solver, x)
 
-        return y_model
+        return _in_model_dtype(y_solver, x)
 
 
 DIFFUSION_SAMPLERS = {

@@ -322,17 +322,10 @@ class TransportTraining(BaseTrainingModule):
         """Select only the variables that the model predicts."""
         y_reduced = y_data_output
         for dataset_name, y_dataset in y_data_output.items():
-            dataset_indices = self.data_indices[dataset_name]
-            if dataset_indices.model_output_in_data_output_is_identity:
-                continue
-            if dataset_indices.model_output_in_data_output_is_contiguous:
-                start = dataset_indices.model_output_in_data_output_contiguous_start
-                length = dataset_indices.model_output_in_data_output_contiguous_length
-                selected = y_dataset.select(variables=slice(start, start + length))
-            else:
-                selected = y_dataset.select(
-                    variables=dataset_indices.model_output_positions_in_data_output,
-                )
+            # select() only copies when the kept variables are not a run of neighbours, such as 3, 4, 5.
+            selected = y_dataset.select(
+                variables=self.data_indices[dataset_name].model_output_positions_in_data_output,
+            )
             y_reduced = y_reduced.replace(dataset_name, selected)
             LOGGER.debug(
                 "SHAPE: y_model_output[%s].shape = %s",

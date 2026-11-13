@@ -336,13 +336,12 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         model_comm_group: Optional[ProcessGroup],
     ) -> torch.Tensor:
         """Conditioning over the nodes of ``view``, split across the model group like them."""
-        flat = view.template().flatten()
-        shard_sizes = flat.shard_sizes
+        shard_sizes, batch_sizes = view.template().flat_sizes()
         if shard_sizes is not None and len(shard_sizes) > 1:
             # Model sharding permits one sample and member, so the nodes of all ranks form one block.
             block_sizes = [sum(shard_sizes)] * rows.shape[0]
         elif view.is_tabular:
-            block_sizes = flat.batch_sizes
+            block_sizes = batch_sizes
         else:
             grid_size = view.data.shape[view.layout.axis("grid", ndim=view.data.ndim)]
             block_sizes = [grid_size] * rows.shape[0]
@@ -413,9 +412,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 c_history = self._node_conditioning(rows, history_view, model_comm_group)
                 c_encoder = _join_blocks(
                     c_history,
-                    history_view.template().flatten().batch_sizes,
+                    history_view.template().flat_sizes()[1],
                     c_target,
-                    target_view.template().flatten().batch_sizes,
+                    target_view.template().flat_sizes()[1],
                 )
 
             fwd_mapper_kwargs[dataset_name] = {"cond": (c_encoder, c_hidden)}
@@ -551,8 +550,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             if batch[dataset_name].is_tabular and dataset_name in conditioned_target:
                 x_data_latent_dict[dataset_name] = _second_blocks(
                     encoded,
-                    batch[dataset_name].template().flatten().batch_sizes,
-                    conditioned_target[dataset_name].template().flatten().batch_sizes,
+                    batch[dataset_name].template().flat_sizes()[1],
+                    conditioned_target[dataset_name].template().flat_sizes()[1],
                 )
 
         # Combine all dataset latents

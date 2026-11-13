@@ -108,6 +108,20 @@ class TestSourceMetadata:
         assert nodes.shard_sizes == flat.shard_sizes
 
     @pytest.mark.parametrize("payload", [gridded_sample, tabular_sample])
+    def test_template_flat_sizes_match_flatten(self, payload) -> None:
+        view = Batch.collate([{"src": payload()}, {"src": payload()}])["src"]
+        nodes = view.template().flatten()
+
+        assert view.template().flat_sizes() == (nodes.shard_sizes, nodes.batch_sizes)
+
+    def test_sharded_tabular_template_flat_sizes_match_flatten(self) -> None:
+        view = Batch.collate([{"obs": tabular_sample(shard_sizes=[[1, 1], [1, 1]])}])["obs"]
+        nodes = view.template().flatten()
+
+        assert view.template().flat_sizes() == (nodes.shard_sizes, nodes.batch_sizes)
+        assert nodes.shard_sizes is not None
+
+    @pytest.mark.parametrize("payload", [gridded_sample, tabular_sample])
     def test_template_unflatten_rejects_a_wrong_shape(self, payload) -> None:
         template = Batch.collate([{"src": payload()}])["src"].template()
         with pytest.raises(ValueError, match="expects flat data of shape"):

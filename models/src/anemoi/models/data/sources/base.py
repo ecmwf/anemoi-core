@@ -629,6 +629,11 @@ class BaseTemplate(ABC):
         ...
 
     @abstractmethod
+    def flat_sizes(self) -> tuple[ShardSizes, tuple[int, ...] | None]:
+        """Return the ``shard_sizes`` and ``batch_sizes`` that :meth:`flatten` gives, without building its nodes."""
+        ...
+
+    @abstractmethod
     def unflatten(self, data: torch.Tensor) -> Source:
         """Build a source from ``data``, a flat ``(nodes, features)`` tensor laid out like :meth:`flatten`.
 

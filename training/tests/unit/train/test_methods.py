@@ -2423,7 +2423,7 @@ def test_edm_transport_training_uses_data_full_target_layout(
 
 
 def test_transport_training_target_reduction_fast_paths() -> None:
-    """BaseTransportTraining.reduce_data_output_target_to_model_output uses fast paths when possible."""
+    """reduce_data_output_target_to_model_output keeps the payload when every variable is kept in order."""
     module = TransportTraining.__new__(TransportTraining)
     pl.LightningModule.__init__(module)
 
