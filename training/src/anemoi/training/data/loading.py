@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import itertools
 from abc import ABC
 from abc import abstractmethod
 from collections import Counter
@@ -346,3 +347,58 @@ class MultiDomainBatchSampler(Sampler[list[int]]):
     def sampler(self) -> "MultiDomainBatchSampler":
         """Expose the epoch setter under the same interface as torchdata's BatchSampler."""
         return self
+
+
+class GroupedDatasetLoadingPolicy(MultiDomainLoadingPolicy):
+    """Multi-domain loading where each sample combines one dataset from every group.
+
+    ``dataset_groups`` lists groups of interchangeable datasets, e.g. ``[[era5, cerra], [land]]``
+    feeds either era5 or cerra to one encoder and always land to another. Every combination that
+    takes one dataset per group becomes a synchronized dataset (here ``(era5, land)`` and
+    ``(cerra, land)``), and batches are drawn from one combination at a time as in
+    :class:`MultiDomainLoadingPolicy`.
+    """
+
+    def __init__(self, dataset_groups: list[list[str]]) -> None:
+        self.dataset_groups = [list(group) for group in dataset_groups]
+        if not all(self.dataset_groups):
+            msg = f"dataset_groups must not contain an empty group, got {self.dataset_groups}."
+            raise ValueError(msg)
+        counts = Counter(name for group in self.dataset_groups for name in group)
+        if duplicates := sorted(name for name, count in counts.items() if count > 1):
+            msg = f"Datasets must belong to a single group, but {duplicates} appear more than once."
+            raise ValueError(msg)
+        self.combinations = list(itertools.product(*self.dataset_groups))
+
+    def build_dataset(
+        self,
+        data_readers: dict[str, BaseAnemoiReader],
+        relative_date_indices: dict[str, TimeIndices],
+        *,
+        fake_dataloading: bool = False,
+    ) -> MultiDomainDataset:
+        if set(data_readers) != set(itertools.chain.from_iterable(self.dataset_groups)):
+            msg = (
+                f"dataset_groups {self.dataset_groups} must contain exactly the configured datasets "
+                f"{list(data_readers)}."
+            )
+            raise ValueError(msg)
+        return MultiDomainDataset(
+            [
+                MultiDataset(
+                    {name: data_readers[name] for name in combination},
+                    {name: relative_date_indices[name] for name in combination},
+                    fake_dataloading=fake_dataloading,
+                )
+                for combination in self.combinations
+            ],
+        )
+
+    def check_dataset_compatibility(self, dataset: MultiDomainDataset, **options: object) -> None:
+        # Datasets of one group feed the same encoder, so they must share their variable order.
+        for group in self.dataset_groups:
+            check_datasets_variables_order({name: dataset.name_to_index[name] for name in group})
+        check_datasets_variables_compatibility(
+            {name: data.typed_variables for name, data in dataset.data.items()},
+            **options,
+        )
