@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from torch_geometric.data import HeteroData
 
 import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
 from anemoi.graphs.nodes.attributes import Timedeltas
@@ -24,6 +25,7 @@ from anemoi.models.data.sources import GriddedTemplate
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.layers.aggregator import SumAggregator
 from anemoi.models.layers.diffusion import SinusoidalEmbeddings
+from anemoi.models.layers.graph import StaticGraphGeometry
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.samplers import transport_samplers
@@ -1587,3 +1589,59 @@ def test_tendency_transport_output_leaves_the_residual_out() -> None:
     pred = model._assemble_output(torch.zeros(4, 3), x_skip, target, torch.float32, "data")
 
     torch.testing.assert_close(pred.data, torch.zeros(1, 1, 1, 4, 3))
+
+
+def _gridded_batch(name: str, batch: int, members: int, grid: int) -> Batch:
+    return build_batch(
+        data={name: torch.empty(batch, 1, members, grid, 1)},
+        coordinates={name: torch.zeros(grid, 2)},
+        metadata={"static_coords": frozenset({name})},
+        layouts={name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={name: ["a"]},
+        statistics={name: {}},
+    )
+
+
+def test_transport_conditioning_of_an_input_only_dataset() -> None:
+    """A dataset the model only reads is conditioned on its own nodes and shares the hidden-node conditioning."""
+    model = _transport_model_stub()
+    model.static_graph_geometry = stub_graph_geometry(data=4, extra=3, hidden=5)
+    model._embed_noise_conditioning = lambda sigma: (
+        torch.arange(sigma.shape[0], dtype=sigma.dtype).view(-1, 1, 1).expand(*sigma.shape[:-1], 2)
+    )
+    x = Batch({**_gridded_batch("data", 2, 1, 4), **_gridded_batch("extra", 2, 1, 3)})
+    target = _gridded_batch("data", 2, 1, 4)
+    condition = {"data": torch.zeros(2, 1, 1, 1, 1)}
+
+    fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = model._build_conditioning_kwargs(x, target, condition)
+
+    extra_cond, extra_hidden_cond = fwd_mapper_kwargs["extra"]["cond"]
+    torch.testing.assert_close(extra_cond[:, 0], torch.tensor([0.0] * 3 + [1.0] * 3))
+    assert "extra" not in bwd_mapper_kwargs
+    # The hidden-node conditioning is built once and handed to every mapper and the processor.
+    assert extra_hidden_cond is fwd_mapper_kwargs["data"]["cond"][1] is processor_kwargs["cond"]
+    torch.testing.assert_close(processor_kwargs["cond"][:, 0], torch.tensor([0.0] * 5 + [1.0] * 5))
+
+
+def test_transport_edge_conditioning_covers_every_edge() -> None:
+    graph = HeteroData()
+    graph["data"].num_nodes = 4
+    graph["hidden"].num_nodes = 3
+    for edges, num_edges in [
+        (("data", "to", "hidden"), 6),
+        (("hidden", "to", "data"), 5),
+        (("hidden", "to", "hidden"), 7),
+    ]:
+        graph[edges].edge_index = torch.zeros(2, num_edges, dtype=torch.long)
+    model = _transport_model_stub()
+    model.static_graph_geometry = StaticGraphGeometry(graph, coordinate_node_names=[])
+    rows = torch.arange(4.0).reshape(4, 1)  # 2 samples x 2 members
+
+    conditioning = model._edge_conditioning(rows, "data", "hidden")
+
+    assert {edges: cond.shape for edges, cond in conditioning.items()} == {
+        ("data", "to", "hidden"): (4 * 6, 1),
+        ("hidden", "to", "data"): (4 * 5, 1),
+        ("hidden", "to", "hidden"): (4 * 7, 1),
+    }
+    torch.testing.assert_close(conditioning[("hidden", "to", "data")][:, 0], torch.arange(4.0).repeat_interleave(5))

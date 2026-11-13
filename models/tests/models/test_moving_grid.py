@@ -181,7 +181,7 @@ def test_sparse_transport_noise_embeddings_follow_member_node_order(members):
     )
     noise = torch.arange(1.0, 2 * members + 1).reshape(2, 1, members, 1, 1).requires_grad_()
     model = _model(AnemoiTransportModelEncProcDec)
-    result = model._make_noise_emb_for_view(noise, view)
+    result = model._node_conditioning(noise[:, 0, :, 0, :].reshape(-1, 1), view, None)
     expected = [
         float(sample * members + member + 1)
         for sample, nodes in enumerate([2, 3])

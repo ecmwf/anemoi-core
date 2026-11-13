@@ -286,16 +286,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         pred = target.template().unflatten(x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
         return self._add_residual(pred, x_skip, dataset_name)
 
-    def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
-        assert noise_emb.ndim == 5, "noise_emb must be (batch, time, ensemble, 1, channels)."
-        out = einops.repeat(
-            noise_emb,
-            "batch time ensemble noise_level vars -> batch time ensemble (repeat noise_level) vars",
-            repeat=repeat,
-        )
-        out = einops.rearrange(out, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
-        return out
-
     def _embed_noise_conditioning(self, sigma: torch.Tensor) -> torch.Tensor:
         """Embed the noise level or time, and pass it through the conditioning MLP.
 
@@ -311,23 +301,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         if torch.is_autocast_enabled(device_type):
             embedding = embedding.to(torch.get_autocast_dtype(device_type))
         return embedding
-
-    def _make_noise_emb_for_view(self, noise_emb: torch.Tensor, view: "Source") -> torch.Tensor:
-        """Repeat noise embeddings over the actual flattened nodes in a source view."""
-        if not view.is_tabular:
-            grid_size = view.data.shape[view.layout.axis("grid", ndim=view.data.ndim)]
-            return self._make_noise_emb(noise_emb, repeat=grid_size)
-
-        noise_base = noise_emb[:, 0, :, 0, :]
-        if noise_base.shape[1] != view.ensemble_size:
-            raise ValueError("Sparse transport noise embeddings must match the source view's ensemble size.")
-        chunks = []
-        for sample_index, sample in enumerate(view.data):
-            num_nodes = sample.shape[view.layout.axis("grid", ndim=sample.ndim)]
-            # Flatten in the same (sample, member, node) order as TabularSource.
-            sample_noise = noise_base[sample_index, :, None, :].expand(-1, num_nodes, -1)
-            chunks.append(sample_noise.reshape(-1, noise_base.shape[-1]).to(sample.device))
-        return torch.cat(chunks, dim=0)
 
     def _assert_condition_shapes(self, condition: dict[str, torch.Tensor]) -> tuple[int, int]:
         dataset_names = list(condition)
@@ -347,47 +320,84 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
         return batch_size, ensemble_size
 
-    def _noise_emb_over_view(
-        self, noise_cond: torch.Tensor, view: "Source", shard_sizes: ShardSizes = None
-    ) -> torch.Tensor:
-        """Repeat the noise embedding over every node of ``view``, also the nodes held by other ranks."""
-        if shard_sizes is not None and len(shard_sizes) > 1:
-            # Model sharding permits one sample/member, so all nodes share one embedding.
-            return self._make_noise_emb(noise_cond, repeat=sum(shard_sizes))
-        return self._make_noise_emb_for_view(noise_cond, view)
+    def _embed_condition_per_member(self, condition: dict[str, torch.Tensor]) -> torch.Tensor:
+        """Embed the noise level or time once, as one row per ``(sample, member)``.
 
-    def _generate_noise_conditioning(
+        Transport uses one noise level or time per sample and ensemble member, shared across datasets and
+        output steps. The training objectives build the condition that way, so it is read from the first
+        dataset. The rows run sample by sample and, within a sample, member by member: the order in which
+        the sources flatten their nodes.
+        """
+        self._assert_condition_shapes(condition)
+        condition_base = next(iter(condition.values()))[:, 0, :, 0]
+        embedding = self._embed_noise_conditioning(condition_base)
+        return embedding.reshape(-1, embedding.shape[-1])
+
+    @staticmethod
+    def _repeat_rows(rows: torch.Tensor, block_sizes: Sequence[int]) -> torch.Tensor:
+        """Repeat row ``i`` ``block_sizes[i]`` times, giving one conditioning vector per node or edge."""
+        if len(block_sizes) != rows.shape[0]:
+            msg = (
+                f"Expected one block size per (sample, member) row, got {len(block_sizes)} block sizes "
+                f"for {rows.shape[0]} rows."
+            )
+            raise ValueError(msg)
+        counts = torch.as_tensor(list(block_sizes), device=rows.device)
+        return torch.repeat_interleave(rows, counts, dim=0)
+
+    def _node_conditioning(
         self,
-        noise_cond: torch.Tensor,
-        dataset_name: str,
-        data_view: "Source",
-        data_shard_sizes: ShardSizes = None,
-        edge_conditioning: bool = False,
-    ) -> tuple[torch.Tensor, ...]:
-        hidden_name = self.dataset2hidden[dataset_name]
-
-        c_data = self._noise_emb_over_view(noise_cond, data_view, data_shard_sizes)
-        c_hidden = self._make_noise_emb(noise_cond, repeat=self.graph_geometry.num_nodes[hidden_name])
-
-        if edge_conditioning:  # currently unused, but available if graph edges need conditioning later
-            c_data_to_hidden = self._make_noise_emb(
-                noise_cond,
-                repeat=self.graph_geometry.num_edges[(dataset_name, "to", hidden_name)],
-            )
-            c_hidden_to_data = self._make_noise_emb(
-                noise_cond,
-                repeat=self.graph_geometry.num_edges[(hidden_name, "to", dataset_name)],
-            )
-            c_hidden_to_hidden = self._make_noise_emb(
-                noise_cond,
-                repeat=self.graph_geometry.num_edges[(hidden_name, "to", hidden_name)],
-            )
+        rows: torch.Tensor,
+        view: "Source",
+        model_comm_group: Optional[ProcessGroup],
+    ) -> torch.Tensor:
+        """Conditioning over the nodes of ``view``, split across the model group like them."""
+        flat = view.template().flatten()
+        shard_sizes = flat.shard_sizes
+        if shard_sizes is not None and len(shard_sizes) > 1:
+            # Model sharding permits one sample and member, so the nodes of all ranks form one block.
+            block_sizes = [sum(shard_sizes)] * rows.shape[0]
+        elif view.is_tabular:
+            block_sizes = flat.batch_sizes
         else:
-            c_data_to_hidden = None
-            c_hidden_to_data = None
-            c_hidden_to_hidden = None
+            grid_size = view.data.shape[view.layout.axis("grid", ndim=view.data.ndim)]
+            block_sizes = [grid_size] * rows.shape[0]
+        conditioning = self._repeat_rows(rows, block_sizes)
+        if shard_sizes is not None:
+            conditioning = shard_tensor(conditioning, 0, shard_sizes, model_comm_group)
+        return conditioning
 
-        return c_data, c_hidden, c_data_to_hidden, c_hidden_to_data, c_hidden_to_hidden
+    def _hidden_conditioning(
+        self,
+        rows: torch.Tensor,
+        hidden_name: str,
+        model_comm_group: Optional[ProcessGroup],
+    ) -> torch.Tensor:
+        """Conditioning over all nodes of the hidden mesh ``hidden_name``, split evenly across the model group."""
+        conditioning = self._repeat_rows(rows, [self.graph_geometry.num_nodes[hidden_name]] * rows.shape[0])
+        shard_sizes = get_shard_sizes(conditioning, 0, model_comm_group=model_comm_group)
+        return shard_tensor(conditioning, 0, shard_sizes, model_comm_group)
+
+    def _edge_conditioning(
+        self,
+        rows: torch.Tensor,
+        dataset_name: str,
+        hidden_name: str,
+    ) -> dict[tuple[str, str, str], torch.Tensor]:
+        """Conditioning over the encoder, decoder and processor edges of ``dataset_name``.
+
+        The current mappers and processor condition their nodes only; this serves layers that condition
+        their edges.
+        """
+        edge_sets = (
+            (dataset_name, "to", hidden_name),
+            (hidden_name, "to", dataset_name),
+            (hidden_name, "to", hidden_name),
+        )
+        return {
+            edges: self._repeat_rows(rows, [self.graph_geometry.num_edges[edges]] * rows.shape[0])
+            for edges in edge_sets
+        }
 
     def _build_conditioning_kwargs(
         self,
@@ -396,30 +406,27 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[dict[str, dict], dict[str, torch.Tensor], dict[str, dict]]:
-        self._assert_condition_shapes(condition)
-        dataset_names = list(conditioned_target.keys())
+        rows = self._embed_condition_per_member(condition)
 
-        # Transport assumes one noise level or time per sample and
-        # ensemble member, shared across datasets. The training objectives build
-        # the condition that way, so we can read it from the first dataset,
-        # embed it once, and repeat it over each dataset's graph nodes below.
-        condition_base = condition[dataset_names[0]][:, 0, :, 0]
-        # The same transport noise/time embedding is shared across all output steps.
-        noise_cond = self._embed_noise_conditioning(condition_base)[:, None, :, None, :]
+        # The hidden-node conditioning is built once per hidden mesh and shared by the datasets using it.
+        hidden_conditioning: dict[str, torch.Tensor] = {}
+
+        def conditioning_of_hidden(hidden_name: str) -> torch.Tensor:
+            if hidden_name not in hidden_conditioning:
+                hidden_conditioning[hidden_name] = self._hidden_conditioning(rows, hidden_name, model_comm_group)
+            return hidden_conditioning[hidden_name]
 
         fwd_mapper_kwargs, bwd_mapper_kwargs = {}, {}
-        for dataset_name in dataset_names:
-            target_view = conditioned_target[dataset_name]
-            c_target, c_hidden = self._view_conditioning(noise_cond, dataset_name, target_view, model_comm_group)
-            c_hidden_shard_sizes = get_shard_sizes(c_hidden, 0, model_comm_group=model_comm_group)
-            c_hidden = shard_tensor(c_hidden, 0, c_hidden_shard_sizes, model_comm_group)
+        for dataset_name, target_view in conditioned_target.items():
+            c_target = self._node_conditioning(rows, target_view, model_comm_group)
+            c_hidden = conditioning_of_hidden(self.dataset2hidden[dataset_name])
 
             # Conditioning enters each mapper with the same node layout as its features: the encoder
             # of a tabular dataset sees its history nodes and its noisy-target nodes, block by block.
             c_encoder = c_target
             if dataset_name in x and x[dataset_name].is_tabular:
                 history_view = x[dataset_name]
-                c_history = self._data_node_conditioning(noise_cond, history_view, model_comm_group)
+                c_history = self._node_conditioning(rows, history_view, model_comm_group)
                 c_encoder = _join_blocks(
                     c_history,
                     history_view.template().flatten().batch_sizes,
@@ -434,44 +441,14 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         for dataset_name, history_view in x.items():
             if dataset_name in conditioned_target:
                 continue
-            c_history = self._data_node_conditioning(noise_cond, history_view, model_comm_group)
-            fwd_mapper_kwargs[dataset_name] = {"cond": (c_history, c_hidden)}
+            c_history = self._node_conditioning(rows, history_view, model_comm_group)
+            fwd_mapper_kwargs[dataset_name] = {
+                "cond": (c_history, conditioning_of_hidden(self.dataset2hidden[dataset_name])),
+            }
 
-        processor_kwargs = {"cond": c_hidden}
+        dataset_names = list(dict.fromkeys([*x.keys(), *conditioned_target.keys()]))
+        processor_kwargs = {"cond": conditioning_of_hidden(self._get_active_hidden_name(dataset_names))}
         return fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs
-
-    def _view_conditioning(
-        self,
-        noise_cond: torch.Tensor,
-        dataset_name: str,
-        view: "Source",
-        model_comm_group: Optional[ProcessGroup],
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Noise conditioning over the nodes of ``view`` (split like them) and over all hidden nodes."""
-        shard_sizes = view.template().flatten().shard_sizes
-        c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
-            noise_cond,
-            dataset_name=dataset_name,
-            data_view=view,
-            data_shard_sizes=shard_sizes,
-            edge_conditioning=False,
-        )
-        if shard_sizes is not None:
-            c_data = shard_tensor(c_data, 0, shard_sizes, model_comm_group)
-        return c_data, c_hidden
-
-    def _data_node_conditioning(
-        self,
-        noise_cond: torch.Tensor,
-        view: "Source",
-        model_comm_group: Optional[ProcessGroup],
-    ) -> torch.Tensor:
-        """Noise conditioning over the nodes of ``view`` only, split like them."""
-        shard_sizes = view.template().flatten().shard_sizes
-        c_data = self._noise_emb_over_view(noise_cond, view, shard_sizes)
-        if shard_sizes is not None:
-            c_data = shard_tensor(c_data, 0, shard_sizes, model_comm_group)
-        return c_data
 
     def forward(
         self,
