@@ -10,12 +10,11 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from typing import Any
 
 from anemoi.models.transport.paths import edm_loss_weight
-from anemoi.models.transport.registry import build_registered
 from anemoi.models.transport.schedules import SIGMA_TRAINING_DISTRIBUTIONS
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import PreparedTransportObjective
 from anemoi.training.train.methods.transport_base import TransportObjective
@@ -33,15 +32,15 @@ if TYPE_CHECKING:
 class EDMDiffusionTransportObjective(TransportObjective):
     """EDM diffusion objective."""
 
+    distributions = SIGMA_TRAINING_DISTRIBUTIONS
+    name = "EDM"
+
     def prepare(
         self,
         prepared: PreparedPredictionTarget,
     ) -> PreparedTransportObjective:
         model_target = prepared.model_target
-        sigma = self._sample_training_sigma(
-            shape={name: source.condition_shape for name, source in model_target.items()},
-            device=model_target.device,
-        )
+        sigma = self.draw_condition(model_target)
         noise_weights = self._loss_weights(sigma, model_target)
         source = self.build_transport_source(prepared)
         target_noised = self._noise_target(model_target, sigma, source)
@@ -57,54 +56,21 @@ class EDMDiffusionTransportObjective(TransportObjective):
             weights=noise_weights,
         )
 
-    def forward(
-        self,
-        x: Batch,
-        conditioned_target: Batch,
-        condition: dict[str, torch.Tensor],
-        target_forcing: Batch | None = None,
-    ) -> Batch:
-        return self.module.model.model(
-            x,
-            conditioned_target,
-            condition,
-            model_comm_group=self.module.model_comm_group,
-            target_forcing=target_forcing,
-        )
-
-    def compute_loss(
+    def loss_kwargs(
         self,
         y_pred: Source,
-        y: Source,
-        grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,
-        pred_layout: IndexSpace | str | None = None,
-        target_layout: IndexSpace | str | None = None,
-        weights: dict[str, torch.Tensor | list[torch.Tensor]] | None = None,
-        **_kwargs,
-    ) -> torch.Tensor:
-        """Compute the EDM loss, weighting each sample's error by its noise level.
+        dataset_name: str,
+        weights: dict[str, torch.Tensor | list[torch.Tensor]] | None,
+    ) -> dict[str, Any]:
+        """Return the noise-level weights of ``dataset_name``, laid out for the loss.
 
-        The loss runs through the shared loss path, which checks the targets for NaNs and adds the
-        grid shard layout. :meth:`check_losses` has made sure that the loss applies the weights.
+        :meth:`check_losses` has made sure that the loss applies them.
         """
         assert weights is not None, f"{self.__class__.__name__} requires weights for EDM diffusion loss computation."
-
         dataset_weights = weights[dataset_name]
         if y_pred.is_tabular:
-            loss_kwargs = {"per_sample_kwargs": {"weights": dataset_weights}}
-        else:
-            loss_kwargs = {"weights": dataset_weights}
-        return BaseTrainingModule._compute_loss(
-            self.module,
-            y_pred=y_pred,
-            y=y,
-            grid_shard_slice=grid_shard_slice,
-            dataset_name=dataset_name,
-            pred_layout=pred_layout,
-            target_layout=target_layout,
-            extra_loss_kwargs=loss_kwargs,
-        )
+            return {"per_sample_kwargs": {"weights": dataset_weights}}
+        return {"weights": dataset_weights}
 
     def check_losses(self, losses: Mapping[str, BaseLoss]) -> None:
         """Reject a training loss that would leave the EDM noise-level weights unused.
@@ -139,26 +105,6 @@ class EDMDiffusionTransportObjective(TransportObjective):
                 for name, target in x.items()
             },
         )
-
-    def _sample_training_sigma(
-        self,
-        shape: dict[str, tuple[int, ...]],
-        device: torch.device,
-    ) -> dict[str, torch.Tensor]:
-        """Sample one EDM noise level per sample and ensemble member."""
-        training_condition_config = dict(self.module.model.model.training_condition)
-        try:
-            distribution_name = training_condition_config.pop("distribution")
-        except KeyError as exc:
-            msg = "EDM training_condition must define 'distribution'."
-            raise ValueError(msg) from exc
-        distribution = build_registered(
-            SIGMA_TRAINING_DISTRIBUTIONS,
-            distribution_name,
-            training_condition_config,
-            "EDM training condition distribution",
-        )
-        return distribution.sample(shape, device=device)
 
     def _loss_weights(
         self,

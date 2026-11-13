@@ -17,18 +17,12 @@ from anemoi.models.transport.objectives import EDMDiffusionModelObjective
 from anemoi.models.transport.paths import edm_loss_weight
 from anemoi.models.transport.schedules import SIGMA_SCHEDULES
 from anemoi.models.transport.schedules import TIME_SCHEDULES
-from anemoi.models.transport.settings import EdmSettings
 from tests.batch_builders import build_batch
 
 
 class _Model:
-    edm = EdmSettings(sigma_data=1.0)
-
     def __init__(self):
         self.scaled_noised = None
-
-    def _assert_condition_shapes(self, sigma):
-        return 2, 1
 
     def _forward_transport_network(self, _x, scaled_noised, _c_noise, **_kwargs):
         self.scaled_noised = scaled_noised
@@ -50,7 +44,12 @@ def test_edm_model_preconditioning_handles_sparse_targets() -> None:
     )
     sigma = {"obs": torch.ones(2, 1, 1, 1, 1)}
 
-    out = EDMDiffusionModelObjective().forward(model, noised.with_data({}), noised, sigma)
+    out = EDMDiffusionModelObjective(sigma_data=1.0).forward(
+        model._forward_transport_network,
+        noised.with_data({}),
+        noised,
+        sigma,
+    )
 
     torch.testing.assert_close(model.scaled_noised["obs"].data[0], torch.full((2, 1), 1.0 / math.sqrt(2.0)))
     torch.testing.assert_close(model.scaled_noised["obs"].data[1], torch.full((3, 1), math.sqrt(2.0)))
@@ -76,7 +75,13 @@ def test_inference_schedule_takes_the_sampling_dtype(monkeypatch) -> None:
     """The inference schedule, which sets the sampler's dtype, is built in the device's sampling dtype."""
     monkeypatch.setattr(objectives, "_sampling_dtype", lambda device: torch.float32)
     model = SimpleNamespace(inference_defaults={"sampling_schedule": {"schedule_type": "unit_time", "num_steps": 4}})
-    schedule = objectives._build_inference_schedule(model, TIME_SCHEDULES, "test schedule", None, torch.device("cpu"))
+    schedule = objectives._build_inference_schedule(
+        model.inference_defaults,
+        TIME_SCHEDULES,
+        "test schedule",
+        None,
+        torch.device("cpu"),
+    )
     assert schedule.dtype == torch.float32
 
 
@@ -85,7 +90,7 @@ def test_inference_override_keeps_the_other_defaults() -> None:
         inference_defaults={"sampling_schedule": {"schedule_type": "karras", "rho": 7.0, "num_steps": 50}},
     )
 
-    config = objectives._get_inference_config(model, "sampling_schedule", {"num_steps": 20})
+    config = objectives._get_inference_config(model.inference_defaults, "sampling_schedule", {"num_steps": 20})
 
     assert config == {"schedule_type": "karras", "rho": 7.0, "num_steps": 20}
 
@@ -105,7 +110,7 @@ def test_inference_override_of_another_schedule_type_keeps_the_settings_it_takes
     )
 
     schedule = objectives._build_inference_schedule(
-        model,
+        model.inference_defaults,
         SIGMA_SCHEDULES,
         "test schedule",
         {"schedule_type": "linear"},
@@ -122,9 +127,7 @@ def test_edm_preconditioning_gives_unit_variance_inputs_and_targets() -> None:
     sigma_data = 0.5
     sigma_values = torch.tensor([0.02, 0.5, 80.0], dtype=torch.float64)
     sigma = {"data": sigma_values.view(3, 1, 1, 1, 1)}
-    model = SimpleNamespace(_assert_condition_shapes=lambda condition: (3, 1))
-
-    c_skip, c_out, c_in, c_noise = EDMDiffusionModelObjective._get_preconditioning(model, sigma, sigma_data)
+    c_skip, c_out, c_in, c_noise = objectives.edm_preconditioning(sigma, sigma_data)
     c_skip, c_out, c_in, c_noise = (factor["data"].flatten() for factor in (c_skip, c_out, c_in, c_noise))
 
     # Noised input y = x + n has variance sigma_data^2 + sigma^2.

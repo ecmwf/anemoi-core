@@ -33,6 +33,7 @@ from anemoi.models.transport import EDMDiffusionModelObjective
 from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import FlowMatchingModelObjective
 from anemoi.models.transport import schedules
+from anemoi.models.transport.objectives import condition_batch_shape
 from anemoi.models.transport.paths import flow_matching_state
 from tests.batch_builders import build_batch
 from tests.graph_stubs import stub_graph_geometry
@@ -780,11 +781,11 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
 
 
 def test_transport_conditioning_rejects_expanded_condition_shape() -> None:
-    model = _transport_model_stub()
+    """The condition holds one value per sample and member, not one per output step or grid point."""
     expanded_condition = {"data": torch.zeros(2, 4, 3, 7, 1)}
 
     with pytest.raises(AssertionError, match="Expected condition to have shape"):
-        model._assert_condition_shapes(expanded_condition)
+        condition_batch_shape(expanded_condition)
 
 
 class AddOneProcessor(torch.nn.Module):
@@ -1273,7 +1274,10 @@ def test_sample_can_use_vector_field_sampler_for_flow_matching(
 
 
 def test_flow_matching_objective_returns_raw_velocity_prediction() -> None:
-    """The flow-matching model objective leaves velocity predictions in model-output space."""
+    """The flow-matching model objective leaves velocity predictions in model-output space.
+
+    The model hands the objective its network with the further forward arguments already bound.
+    """
     state = build_batch(
         data={"data": torch.full((1, 1, 1, 2, 1), 2.0)},
         coordinates={"data": torch.zeros(2, 2)},
@@ -1297,10 +1301,11 @@ def test_flow_matching_objective_returns_raw_velocity_prediction() -> None:
         assert _kwargs["marker"] is marker
         return velocity
 
-    model = SimpleNamespace(_forward_transport_network=_forward_transport_network)
+    model = _transport_model_stub()
+    model._forward_transport_network = _forward_transport_network
+    model.transport_model_objective = FlowMatchingModelObjective()
 
-    out = FlowMatchingModelObjective().forward(
-        model,
+    out = model.forward(
         state.with_data({"data": torch.zeros_like(state["data"].data)}),
         state,
         time_level,

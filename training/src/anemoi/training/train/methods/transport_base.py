@@ -10,10 +10,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING
+from typing import Any
+from typing import ClassVar
 
 from anemoi.models.transport import gaussian_source
-from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.models.transport.registry import build_registered
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -120,10 +123,39 @@ class PreparedTransportObjective:
 
 
 class TransportObjective:
-    """Common interface for training objectives such as EDM diffusion and flow matching."""
+    """Common interface for training objectives such as EDM diffusion and flow matching.
+
+    Subclasses name the registry of training distributions their condition is drawn from.
+    """
+
+    distributions: ClassVar[dict[str, type]]
+    name: ClassVar[str]
 
     def __init__(self, module: TransportTraining) -> None:
         self.module = module
+
+    @cached_property
+    def distribution(self) -> Any:
+        """The training distribution of the noise level or time, built the first time it is needed."""
+        settings = dict(self.module.model.model.training_condition)
+        try:
+            distribution_name = settings.pop("distribution")
+        except KeyError as exc:
+            msg = f"{self.name} training_condition must define 'distribution'."
+            raise ValueError(msg) from exc
+        return build_registered(
+            self.distributions,
+            distribution_name,
+            settings,
+            f"{self.name} training condition distribution",
+        )
+
+    def draw_condition(self, target: Batch) -> dict[str, torch.Tensor]:
+        """Draw one noise level or time per sample and ensemble member, shaped for each dataset of ``target``."""
+        return self.distribution.sample(
+            {name: source.condition_shape for name, source in target.items()},
+            device=target.device,
+        )
 
     def check_losses(self, losses: Mapping[str, BaseLoss]) -> None:
         """Check, once when training is set up, that the training losses suit this objective."""
@@ -133,15 +165,6 @@ class TransportObjective:
         self,
         prepared: PreparedPredictionTarget,
     ) -> PreparedTransportObjective:
-        raise NotImplementedError
-
-    def forward(
-        self,
-        x: Batch,
-        conditioned_target: Batch,
-        condition: dict[str, torch.Tensor],
-        target_forcing: Batch | None = None,
-    ) -> Batch:
         raise NotImplementedError
 
     def reconstruct_endpoint(
@@ -160,26 +183,15 @@ class TransportObjective:
         del objective
         return prediction
 
-    def compute_loss(
+    def loss_kwargs(
         self,
         y_pred: Source,
-        y: Source,
-        grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,
-        pred_layout: IndexSpace | str | None = None,
-        target_layout: IndexSpace | str | None = None,
-        **kwargs,
-    ) -> torch.Tensor:
-        return BaseTrainingModule._compute_loss(
-            self.module,
-            y_pred=y_pred,
-            y=y,
-            grid_shard_slice=grid_shard_slice,
-            dataset_name=dataset_name,
-            pred_layout=pred_layout,
-            target_layout=target_layout,
-            **kwargs,
-        )
+        dataset_name: str,
+        weights: dict[str, torch.Tensor | list[torch.Tensor]] | None,
+    ) -> dict[str, Any]:
+        """Return further arguments for the training loss of ``dataset_name``, such as per-sample weights."""
+        del y_pred, dataset_name, weights
+        return {}
 
     def build_transport_source(self, prepared: PreparedPredictionTarget) -> Batch:
         """Build the transport source field, as a batch shaped and described like the model target."""

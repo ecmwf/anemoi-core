@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import functools
 import logging
 from collections.abc import Mapping
 from collections.abc import Sequence
@@ -39,6 +40,7 @@ from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import NoiseConditioningSettings
 from anemoi.models.transport import gaussian_source
 from anemoi.models.transport import get_transport_model_objective
+from anemoi.models.transport.objectives import condition_batch_shape
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
@@ -103,7 +105,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self.noise_channels = self.noise_conditioning.channels
         self.noise_cond_dim = self.noise_conditioning.cond_dim
         self.inference_defaults = transport_params.get("inference_defaults", {})
-        self.transport_model_objective = get_transport_model_objective(transport_params.objective)
+        self.transport_model_objective = get_transport_model_objective(transport_params.objective, self.edm)
 
         super().__init__(
             model_config=model_config,
@@ -302,24 +304,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             embedding = embedding.to(torch.get_autocast_dtype(device_type))
         return embedding
 
-    def _assert_condition_shapes(self, condition: dict[str, torch.Tensor]) -> tuple[int, int]:
-        dataset_names = list(condition)
-        condition_ref = condition[dataset_names[0]]
-        assert condition_ref.ndim == 5, "Expected condition to have shape (batch, 1, ensemble, 1, 1)."
-        batch_size, _, ensemble_size = condition_ref.shape[:3]
-        for dataset_name in dataset_names:
-            condition_shape = condition[dataset_name].shape
-            assert len(condition_shape) == 5, (
-                f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
-            )
-            assert condition_shape[1] == condition_shape[3] == condition_shape[4] == 1, (
-                f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
-            )
-            assert condition_shape[0] == batch_size and condition_shape[2] == ensemble_size, (
-                "Batch or ensemble dimension mismatch across datasets for conditioned inputs."
-            )
-        return batch_size, ensemble_size
-
     def _embed_condition_per_member(self, condition: dict[str, torch.Tensor]) -> torch.Tensor:
         """Embed the noise level or time once, as one row per ``(sample, member)``.
 
@@ -328,7 +312,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         dataset. The rows run sample by sample and, within a sample, member by member: the order in which
         the sources flatten their nodes.
         """
-        self._assert_condition_shapes(condition)
+        condition_batch_shape(condition)
         condition_base = next(iter(condition.values()))[:, 0, :, 0]
         embedding = self._embed_noise_conditioning(condition_base)
         return embedding.reshape(-1, embedding.shape[-1])
@@ -459,15 +443,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         target_forcing: Optional[Batch] = None,
         **kwargs,
     ) -> Batch:
-        return self.transport_model_objective.forward(
-            self,
-            x,
-            conditioned_target,
-            condition,
+        network = functools.partial(
+            self._forward_transport_network,
             model_comm_group=model_comm_group,
             target_forcing=target_forcing,
             **kwargs,
         )
+        return self.transport_model_objective.forward(network, x, conditioned_target, condition)
 
     def _forward_transport_network(
         self,
@@ -841,15 +823,21 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         sampler_params: Optional[dict] = None,
         target_forcing: Optional[Batch] = None,
     ) -> Batch:
-        """Run the sampler selected by the transport objective."""
+        """Run the sampler selected by the transport objective, from a fresh source field."""
+        source = self.build_sampling_source(x, target_template=target_template, model_comm_group=model_comm_group)
+        network = functools.partial(
+            self._forward_transport_network,
+            model_comm_group=model_comm_group,
+            target_forcing=target_forcing,
+        )
         return self.transport_model_objective.sample(
-            self,
+            network,
             x,
-            target_template=target_template,
+            source,
+            self.inference_defaults,
             model_comm_group=model_comm_group,
             schedule_params=schedule_params,
             sampler_params=sampler_params,
-            target_forcing=target_forcing,
         )
 
     def fill_metadata(self, md_dict) -> None:

@@ -13,6 +13,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import pytest
@@ -741,7 +742,7 @@ def test_validation_step_logs_loss_and_metrics() -> None:
 
 
 def test_edm_transport_compute_loss_forwards_standard_loss_kwargs() -> None:
-    """EDMDiffusionTransportObjective.compute_loss passes noise weights to the loss function."""
+    """TransportTraining._compute_loss passes the EDM noise weights to the loss function."""
     module = MagicMock(spec=TransportTraining)
     loss = CaptureLoss()
     loss.applies_weights = True
@@ -760,7 +761,9 @@ def test_edm_transport_compute_loss_forwards_standard_loss_kwargs() -> None:
     y = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
     grid_shard_slice = slice(0, 2)
 
-    result = EDMDiffusionTransportObjective(module).compute_loss(
+    module.transport_objective = EDMDiffusionTransportObjective(module)
+    result = TransportTraining._compute_loss(
+        module,
         y_pred=y_pred,
         y=y,
         dataset_name="data",
@@ -778,7 +781,7 @@ def test_edm_transport_compute_loss_forwards_standard_loss_kwargs() -> None:
 
 
 def test_edm_transport_compute_loss_forwards_sharding_metadata_when_requested() -> None:
-    """EDMDiffusionTransportObjective.compute_loss adds shard layout when loss.needs_shard_layout_info."""
+    """TransportTraining._compute_loss adds shard layout when loss.needs_shard_layout_info."""
     module = MagicMock(spec=TransportTraining)
     loss = ShardingAwareCaptureLoss()
     loss.applies_weights = True
@@ -798,7 +801,9 @@ def test_edm_transport_compute_loss_forwards_sharding_metadata_when_requested() 
     y = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
     grid_shard_slice = slice(0, 2)
 
-    EDMDiffusionTransportObjective(module).compute_loss(
+    module.transport_objective = EDMDiffusionTransportObjective(module)
+    TransportTraining._compute_loss(
+        module,
         y_pred=y_pred,
         y=y,
         dataset_name="data",
@@ -2544,16 +2549,6 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
                 weights=None,
             )
 
-        def forward(
-            self,
-            x: Batch,
-            conditioned_target: Batch,
-            condition: dict[str, torch.Tensor],
-            target_forcing: Batch | None = None,
-        ) -> Batch:
-            del x, condition, target_forcing
-            return conditioned_target
-
         def reconstruct_endpoint(
             self,
             prediction: Batch,
@@ -2575,8 +2570,18 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
     forecaster = TransportTraining.__new__(TransportTraining)
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
+
+    class _EchoTransportModel:
+        """Predicts the conditioned target it is given."""
+
+        target_datasets: ClassVar[list[str]] = ["data"]
+
+        def __call__(self, x: Batch, conditioned_target: Batch, condition: dict, **_kwargs: Any) -> Batch:
+            del x, condition
+            return conditioned_target
+
     forecaster.model = SimpleNamespace(
-        model=SimpleNamespace(target_datasets=["data"]),
+        model=_EchoTransportModel(),
         pre_processors={"data": Processors([])},
         post_processors={"data": Processors([], inverse=True)},
     )

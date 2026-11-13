@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 from anemoi.models.transport.paths import flow_matching_clean
 from anemoi.models.transport.paths import flow_matching_state
 from anemoi.models.transport.paths import flow_matching_velocity
-from anemoi.models.transport.registry import build_registered
 from anemoi.models.transport.schedules import TIME_TRAINING_DISTRIBUTIONS
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import PreparedTransportObjective
@@ -30,16 +29,16 @@ if TYPE_CHECKING:
 class FlowMatchingTransportObjective(TransportObjective):
     """Flow-matching objective: learn the velocity of the straight path from Gaussian noise to the target."""
 
+    distributions = TIME_TRAINING_DISTRIBUTIONS
+    name = "Flow-matching"
+
     def prepare(
         self,
         prepared: PreparedPredictionTarget,
     ) -> PreparedTransportObjective:
         target = prepared.model_target
         source = self.build_transport_source(prepared)
-        time_level = self._sample_training_time(
-            {name: clean.condition_shape for name, clean in target.items()},
-            device=target.device,
-        )
+        time_level = self.draw_condition(target)
 
         state = target.with_sources(
             {
@@ -63,21 +62,6 @@ class FlowMatchingTransportObjective(TransportObjective):
             weights=None,
         )
 
-    def forward(
-        self,
-        x: Batch,
-        conditioned_target: Batch,
-        condition: dict[str, torch.Tensor],
-        target_forcing: Batch | None = None,
-    ) -> Batch:
-        return self.module.model.model(
-            x,
-            conditioned_target,
-            condition,
-            model_comm_group=self.module.model_comm_group,
-            target_forcing=target_forcing,
-        )
-
     def reconstruct_endpoint(
         self,
         prediction: Batch,
@@ -96,23 +80,3 @@ class FlowMatchingTransportObjective(TransportObjective):
                 for name, velocity in prediction.items()
             },
         )
-
-    def _sample_training_time(
-        self,
-        shape: dict[str, tuple[int, ...]],
-        device: torch.device,
-    ) -> dict[str, torch.Tensor]:
-        """Draw one time per sample and ensemble member."""
-        training_condition_config = dict(self.module.model.model.training_condition)
-        try:
-            distribution_name = training_condition_config.pop("distribution")
-        except KeyError as exc:
-            msg = "Flow-matching training_condition must define 'distribution'."
-            raise ValueError(msg) from exc
-        distribution = build_registered(
-            TIME_TRAINING_DISTRIBUTIONS,
-            distribution_name,
-            training_condition_config,
-            "flow-matching training condition distribution",
-        )
-        return distribution.sample(shape, device=device)

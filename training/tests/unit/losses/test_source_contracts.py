@@ -194,7 +194,8 @@ def test_edm_loss_passes_sparse_weights_and_preserves_gradients() -> None:
         _check_nan_targets=lambda *_args: None,
     )
     weights = {"obs": [torch.full((2, 1), 2.0), torch.full((3, 1), 3.0)]}
-    result = EDMDiffusionTransportObjective(module).compute_loss(pred, target, dataset_name="obs", weights=weights)
+    loss_kwargs = EDMDiffusionTransportObjective(module).loss_kwargs(pred, "obs", weights)
+    result = BaseTrainingModule._compute_loss(module, pred, target, dataset_name="obs", extra_loss_kwargs=loss_kwargs)
     torch.testing.assert_close(result, torch.tensor(7.0))
     result.backward()
     torch.testing.assert_close(pred.data[0].grad, torch.full((2, 2), 0.5))

@@ -37,7 +37,7 @@ LOGGER = logging.getLogger(__name__)
 class PredictionMode:
     """Prepare either state targets or tendency targets for transport training."""
 
-    def __init__(self, module: BaseTransportTraining) -> None:
+    def __init__(self, module: TransportTraining) -> None:
         self.module = module
 
     def prepare_target(
@@ -61,7 +61,7 @@ class PredictionMode:
 class StatePredictionMode(PredictionMode):
     """Prediction mode where the model learns the future state directly."""
 
-    def __init__(self, module: BaseTransportTraining) -> None:
+    def __init__(self, module: TransportTraining) -> None:
         super().__init__(module)
         model = self.module.model.model
         if isinstance(model, AnemoiTransportTendModelEncProcDec):
@@ -122,7 +122,7 @@ class TendencyPredictionMode(PredictionMode):
     ``AnemoiTransportTendModelEncProcDec.compute_tendency``.
     """
 
-    def __init__(self, module: BaseTransportTraining) -> None:
+    def __init__(self, module: TransportTraining) -> None:
         super().__init__(module)
         self._tendency_statistics = self._resolve_tendency_statistics()
 
@@ -236,13 +236,20 @@ TRANSPORT_OBJECTIVE_CLASSES = {
 }
 
 
-class BaseTransportTraining(BaseTrainingModule):
-    """Shared training code for transport methods that corrupt targets before prediction."""
+class TransportTraining(BaseTrainingModule):
+    """Training module for EDM diffusion and flow-matching transport models.
+
+    The prediction mode turns the batch into state or tendency targets; the transport objective corrupts
+    them and says what the model learns from the corrupted target.
+    """
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._validate_single_step_task()
         self._prediction_mode = self._get_prediction_mode_cls()(self)
+        self._validate_model_transport_objective()
+        self._transport_objective = self._get_transport_objective_cls()(self)
+        self._transport_objective.check_losses(self.loss)
 
     def _validate_single_step_task(self) -> None:
         """Reject rollout configs: transport steps train and validate on the first rollout step only."""
@@ -390,16 +397,6 @@ class BaseTransportTraining(BaseTrainingModule):
 
         return loss, metrics_next, y_pred
 
-
-class TransportTraining(BaseTransportTraining):
-    """Training module for EDM diffusion and flow-matching transport models."""
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._validate_model_transport_objective()
-        self._transport_objective = self._get_transport_objective_cls()(self)
-        self._transport_objective.check_losses(self.loss)
-
     def _validate_model_transport_objective(self) -> None:
         """Check that training and inference use the same transport objective."""
         training_objective = self.config.training.transport.objective
@@ -433,7 +430,13 @@ class TransportTraining(BaseTransportTraining):
         condition: dict[str, torch.Tensor],
         target_forcing: Batch | None = None,
     ) -> Batch:
-        return self.transport_objective.forward(x, conditioned_target, condition, target_forcing=target_forcing)
+        return self.model.model(
+            x,
+            conditioned_target,
+            condition,
+            model_comm_group=self.model_comm_group,
+            target_forcing=target_forcing,
+        )
 
     def _compute_loss(
         self,
@@ -443,15 +446,18 @@ class TransportTraining(BaseTransportTraining):
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
+        weights: dict[str, torch.Tensor | list[torch.Tensor]] | None = None,
         **kwargs,
     ) -> torch.Tensor:
-        return self.transport_objective.compute_loss(
-            y_pred=y_pred,
-            y=y,
+        """Compute the training loss, with any further arguments the transport objective adds (EDM: weights)."""
+        return super()._compute_loss(
+            y_pred,
+            y,
             grid_shard_slice=grid_shard_slice,
             dataset_name=dataset_name,
             pred_layout=pred_layout,
             target_layout=target_layout,
+            extra_loss_kwargs=self.transport_objective.loss_kwargs(y_pred, dataset_name, weights),
             **kwargs,
         )
 
