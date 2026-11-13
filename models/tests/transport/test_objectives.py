@@ -14,6 +14,7 @@ import torch
 from anemoi.models.data import TensorLayout
 from anemoi.models.transport import objectives
 from anemoi.models.transport.objectives import EDMDiffusionModelObjective
+from anemoi.models.transport.schedules import SIGMA_SCHEDULES
 from anemoi.models.transport.schedules import TIME_SCHEDULES
 from anemoi.models.transport.settings import EdmSettings
 from tests.batch_builders import build_batch
@@ -78,23 +79,36 @@ def test_inference_schedule_takes_the_sampling_dtype(monkeypatch) -> None:
     assert schedule.dtype == torch.float32
 
 
-def test_inference_override_of_the_same_type_keeps_the_other_defaults() -> None:
+def test_inference_override_keeps_the_other_defaults() -> None:
     model = SimpleNamespace(
         inference_defaults={"sampling_schedule": {"schedule_type": "karras", "rho": 7.0, "num_steps": 50}},
     )
 
-    config = objectives._get_inference_config(model, "sampling_schedule", {"num_steps": 20}, "schedule_type")
+    config = objectives._get_inference_config(model, "sampling_schedule", {"num_steps": 20})
 
     assert config == {"schedule_type": "karras", "rho": 7.0, "num_steps": 20}
 
 
-def test_inference_override_of_another_type_starts_from_the_overrides() -> None:
-    """The Karras settings (``rho``) do not apply to a linear schedule, so they are dropped."""
+def test_inference_override_of_another_schedule_type_keeps_the_settings_it_takes() -> None:
+    """Switching from Karras to linear keeps the noise range and step count; the Karras ``rho`` is left out."""
     model = SimpleNamespace(
-        inference_defaults={"sampling_schedule": {"schedule_type": "karras", "rho": 7.0, "num_steps": 50}},
+        inference_defaults={
+            "sampling_schedule": {
+                "schedule_type": "karras",
+                "sigma_max": 1.0,
+                "sigma_min": 0.25,
+                "rho": 7.0,
+                "num_steps": 4,
+            },
+        },
     )
-    overrides = {"schedule_type": "linear", "sigma_max": 1.0, "sigma_min": 0.02, "num_steps": 3}
 
-    config = objectives._get_inference_config(model, "sampling_schedule", overrides, "schedule_type")
+    schedule = objectives._build_inference_schedule(
+        model,
+        SIGMA_SCHEDULES,
+        "test schedule",
+        {"schedule_type": "linear"},
+        torch.device("cpu"),
+    )
 
-    assert config == overrides
+    torch.testing.assert_close(schedule, torch.tensor([1.0, 0.75, 0.5, 0.25, 0.0], dtype=torch.float64))

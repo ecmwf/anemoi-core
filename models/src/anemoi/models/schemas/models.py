@@ -88,9 +88,10 @@ class SparseProjectorSchema(BaseModel):
 class TransportConfig(BaseModel):
     """Configuration of the transport objective, path, conditioning and inference.
 
-    The defaults map 1:1 to :class:`EdmSettings` and :class:`NoiseConditioningSettings`
-    in ``anemoi.models.transport.settings`` and are restated here so that importing the
-    schemas does not pull in the model code.
+    The defaults of ``sigma_data`` and of the noise conditioning map 1:1 to :class:`EdmSettings`
+    and :class:`NoiseConditioningSettings` in ``anemoi.models.transport.settings`` and are restated
+    here so that importing the schemas does not pull in the model code. ``sigma_max``, ``sigma_min``
+    and ``rho`` are read by the config, which interpolates them into ``training_condition``.
     """
 
     objective: Literal["edm_diffusion", "flow_matching"] = "edm_diffusion"

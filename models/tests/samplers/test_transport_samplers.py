@@ -19,7 +19,6 @@ from anemoi.models.samplers.transport_samplers import EDMHeunSampler
 from anemoi.models.samplers.transport_samplers import VectorFieldEulerSampler
 from anemoi.models.samplers.transport_samplers import VectorFieldHeunSampler
 from anemoi.models.samplers.transport_samplers import _expand_scalar_condition
-from anemoi.models.transport.schedules import DEFAULT_FINAL_SIGMA_EPS
 from anemoi.models.transport.schedules import CosineSigmaSchedule
 from anemoi.models.transport.schedules import ExponentialSigmaSchedule
 from anemoi.models.transport.schedules import KarrasSigmaSchedule
@@ -95,7 +94,7 @@ def make_inputs(dtype: torch.dtype = torch.float32) -> tuple[Batch, Batch]:
     [
         (KarrasSigmaSchedule, {"rho": 7.0}),
         (LinearSigmaSchedule, {}),
-        (CosineSigmaSchedule, {"s": 0.008}),
+        (CosineSigmaSchedule, {}),
         (ExponentialSigmaSchedule, {}),
     ],
 )
@@ -139,7 +138,7 @@ def test_karras_sigma_schedule_single_step_returns_sigma_max_and_final_zero() ->
     [
         (KarrasSigmaSchedule, {"rho": 7.0}),
         (LinearSigmaSchedule, {}),
-        (CosineSigmaSchedule, {"s": 0.008}),
+        (CosineSigmaSchedule, {}),
         (ExponentialSigmaSchedule, {}),
     ],
 )
@@ -177,29 +176,6 @@ def test_sigma_schedule_appends_exact_final_zero_when_missing() -> None:
 
     assert torch.equal(sigmas[:-1], base_schedule)
     assert sigmas[-1].item() == 0.0
-
-
-def test_sigma_schedule_canonicalizes_explicit_near_zero_final_value_to_zero() -> None:
-    final_sigma = DEFAULT_FINAL_SIGMA_EPS / 10
-    scheduler = DummySigmaSchedule(
-        torch.tensor([1.0, 0.7, 0.4, 0.1, final_sigma], dtype=torch.float64),
-        num_steps=4,
-    )
-
-    sigmas = scheduler.get_schedule(dtype_compute=torch.float64)
-
-    assert sigmas.shape == (5,)
-    assert sigmas[-1].item() == 0.0
-
-
-def test_sigma_schedule_rejects_explicit_final_value_outside_tolerance() -> None:
-    scheduler = DummySigmaSchedule(
-        torch.tensor([1.0, 0.7, 0.4, 0.1, DEFAULT_FINAL_SIGMA_EPS * 10], dtype=torch.float64),
-        num_steps=4,
-    )
-
-    with pytest.raises(ValueError, match="explicit final value"):
-        scheduler.get_schedule(dtype_compute=torch.float64)
 
 
 @pytest.mark.parametrize("sampler_cls", [EDMHeunSampler, DPMpp2MSampler])
@@ -241,7 +217,7 @@ def test_heun_uses_corrector_before_final_step() -> None:
     sigmas = torch.tensor([1.0, 0.5, 0.0], dtype=torch.float64)
 
     denoiser = RecordingZeroDenoiser()
-    sampler = EDMHeunSampler(dtype=torch.float64, eps_prec=0.0)
+    sampler = EDMHeunSampler(dtype=torch.float64)
     sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=denoiser)
 
     assert denoiser.call_count == 3

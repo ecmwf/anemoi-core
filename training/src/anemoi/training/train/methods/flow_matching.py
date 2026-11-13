@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from anemoi.models.transport.paths import flow_matching_clean
 from anemoi.models.transport.paths import flow_matching_state
 from anemoi.models.transport.paths import flow_matching_velocity
+from anemoi.models.transport.registry import build_registered
 from anemoi.models.transport.schedules import TIME_TRAINING_DISTRIBUTIONS
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import PreparedTransportObjective
@@ -49,12 +50,10 @@ class FlowMatchingTransportObjective(TransportObjective):
         velocity = source.zip_map_data(flow_matching_velocity, target)
         # The model target is imputed so it can be fed through the network; put the NaNs back into
         # the loss target at missing values so the loss (with ignore_nans) skips them.
-        missing = prepared.aux.get("model_target_missing")
-        if missing is not None:
-            velocity = velocity.zip_map_data(
-                lambda values, target_values: values.masked_fill(target_values.isnan(), float("nan")),
-                missing,
-            )
+        velocity = velocity.zip_map_data(
+            lambda values, target_values: values.masked_fill(target_values.isnan(), float("nan")),
+            prepared.model_target_missing,
+        )
         return PreparedTransportObjective(
             conditioned_target=state,
             condition=time_level,
@@ -62,10 +61,6 @@ class FlowMatchingTransportObjective(TransportObjective):
             loss_target_layout=IndexSpace.MODEL_OUTPUT,
             pred_layout=IndexSpace.MODEL_OUTPUT,
             weights=None,
-            aux={
-                "state": state,
-                "time_level": time_level,
-            },
         )
 
     def forward(
@@ -89,8 +84,8 @@ class FlowMatchingTransportObjective(TransportObjective):
         objective: PreparedTransportObjective,
     ) -> Batch:
         """Estimate the clean target from the predicted velocity, for validation metrics."""
-        state = objective.aux["state"]
-        time_level = objective.aux["time_level"]
+        state = objective.conditioned_target
+        time_level = objective.condition
 
         def clean(velocity: torch.Tensor, state_data: torch.Tensor, time: torch.Tensor) -> torch.Tensor:
             return flow_matching_clean(state_data, velocity, time)
@@ -114,9 +109,10 @@ class FlowMatchingTransportObjective(TransportObjective):
         except KeyError as exc:
             msg = "Flow-matching training_condition must define 'distribution'."
             raise ValueError(msg) from exc
-        if distribution_name not in TIME_TRAINING_DISTRIBUTIONS:
-            msg = f"Unknown flow-matching training condition distribution: {distribution_name}"
-            raise ValueError(msg)
-        distribution_cls = TIME_TRAINING_DISTRIBUTIONS[distribution_name]
-        distribution = distribution_cls(**training_condition_config)
+        distribution = build_registered(
+            TIME_TRAINING_DISTRIBUTIONS,
+            distribution_name,
+            training_condition_config,
+            "flow-matching training condition distribution",
+        )
         return distribution.sample(shape, device=device)

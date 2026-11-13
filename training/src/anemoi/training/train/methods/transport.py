@@ -101,11 +101,8 @@ class StatePredictionMode(PredictionMode):
             loss_target=target_full,
             loss_target_layout=IndexSpace.DATA_FULL,
             metric_target=target_full,
-            aux={
-                # Output-time decoding forcings, normalized like the model inputs.
-                "target_forcing": self.module.preprocess_inputs(target_forcing),
-                "model_target_missing": model_target_missing,
-            },
+            model_target_missing=model_target_missing,
+            target_forcing=self.module.preprocess_inputs(target_forcing),
         )
 
     def reconstruct_prediction(
@@ -201,14 +198,9 @@ class TendencyPredictionMode(PredictionMode):
             loss_target=tendency_target_full,
             loss_target_layout=IndexSpace.DATA_OUTPUT,
             metric_target=state_target_full,
-            aux={
-                "reference": reference,
-                # NaN-keeping counterpart of model_target, used by objectives that derive their
-                # loss target from model_target (e.g. the flow-matching velocity) to re-mask missing values.
-                "model_target_missing": self.module.reduce_data_output_target_to_model_output(tendency_target_full),
-                # Output-time decoding forcings, normalized like the model inputs.
-                "target_forcing": self.module.preprocess_inputs(target_forcing),
-            },
+            model_target_missing=self.module.reduce_data_output_target_to_model_output(tendency_target_full),
+            target_forcing=self.module.preprocess_inputs(target_forcing),
+            reference=reference,
         )
 
     def reconstruct_prediction(
@@ -221,7 +213,7 @@ class TendencyPredictionMode(PredictionMode):
             {
                 dataset_name: self._tendency_model.add_tendency_to_state(
                     dataset_name,
-                    prepared.aux["reference"][dataset_name],
+                    prepared.reference[dataset_name],
                     tendency,
                     self._tendency_statistics[dataset_name],
                     self.module.model.post_processors[dataset_name],
@@ -406,6 +398,7 @@ class TransportTraining(BaseTransportTraining):
         super().__init__(*args, **kwargs)
         self._validate_model_transport_objective()
         self._transport_objective = self._get_transport_objective_cls()(self)
+        self._transport_objective.check_losses(self.loss)
 
     def _validate_model_transport_objective(self) -> None:
         """Check that training and inference use the same transport objective."""
@@ -497,7 +490,7 @@ class TransportTraining(BaseTransportTraining):
             x,
             prepared_objective.conditioned_target,
             prepared_objective.condition,
-            target_forcing=prepared_target.aux.get("target_forcing"),
+            target_forcing=prepared_target.target_forcing,
         )
         loss_prediction = self.transport_objective.prepare_loss_prediction(prediction, prepared_objective)
 

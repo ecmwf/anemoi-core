@@ -71,7 +71,6 @@ class EDMDiffusionSampler(ABC):
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        **kwargs,
     ) -> Batch:
         """Run EDM diffusion sampling from the initial noisy field to a clean prediction.
 
@@ -88,8 +87,6 @@ class EDMDiffusionSampler(ABC):
             Function that performs denoising.
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training.
-        **kwargs
-            Additional sampler-specific parameters.
 
         Returns
         -------
@@ -109,14 +106,12 @@ class EDMHeunSampler(EDMDiffusionSampler):
         S_max: float = float("inf"),
         S_noise: float = 1.0,
         dtype: torch.dtype = torch.float64,
-        eps_prec: float = 1e-10,
     ):
         self.S_churn = S_churn
         self.S_min = S_min
         self.S_max = S_max
         self.S_noise = S_noise
         self.dtype = dtype
-        self.eps_prec = eps_prec
 
     def sample(
         self,
@@ -125,15 +120,8 @@ class EDMHeunSampler(EDMDiffusionSampler):
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        **kwargs,
     ) -> Batch:
-        # Override instance defaults with any kwargs
-        S_churn = kwargs.get("S_churn", self.S_churn)
-        S_min = kwargs.get("S_min", self.S_min)
-        S_max = kwargs.get("S_max", self.S_max)
-        S_noise = kwargs.get("S_noise", self.S_noise)
-        dtype = kwargs.get("dtype", self.dtype)
-        eps_prec = kwargs.get("eps_prec", self.eps_prec)
+        S_churn, S_min, S_max, S_noise, dtype = self.S_churn, self.S_min, self.S_max, self.S_noise, self.dtype
         sigmas = sigmas.to(dtype)
 
         num_steps = len(sigmas) - 1
@@ -176,7 +164,7 @@ class EDMHeunSampler(EDMDiffusionSampler):
 
             # Predictor state in solver precision; for Heun corrector evaluation.
             update_direction = y_solver.zip_map_data(
-                lambda y_sample, denoised_sample: (y_sample - denoised_sample) / (sigma_effective + eps_prec),
+                lambda y_sample, denoised_sample: (y_sample - denoised_sample) / sigma_effective,
                 D1_solver,
             )
             y_next_solver = _axpy(y_solver, update_direction, sigma_next - sigma_effective)
@@ -194,7 +182,7 @@ class EDMHeunSampler(EDMDiffusionSampler):
                 D2_solver = _in_dtype(D2, dtype)
 
                 corrected_update_direction = y_next_solver.zip_map_data(
-                    lambda y_sample, denoised_sample: (y_sample - denoised_sample) / (sigma_next + eps_prec),
+                    lambda y_sample, denoised_sample: (y_sample - denoised_sample) / sigma_next,
                     D2_solver,
                 )
                 combined_direction = update_direction.zip_map_data(
@@ -216,7 +204,6 @@ class DPMpp2MSampler(EDMDiffusionSampler):
         dtype: torch.dtype = torch.float64,
     ):
         self.dtype = dtype
-        pass  # No parameters needed for DPM++ 2M
 
     def sample(
         self,
@@ -225,9 +212,8 @@ class DPMpp2MSampler(EDMDiffusionSampler):
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        **kwargs,
     ) -> Batch:
-        dtype = kwargs.get("dtype", self.dtype)
+        dtype = self.dtype
 
         # Keep model evaluations in model dtype, but run solver updates in sampler dtype.
         y_model = _in_model_dtype(y, x)
@@ -253,8 +239,8 @@ class DPMpp2MSampler(EDMDiffusionSampler):
                 break
 
             y_solver = _in_dtype(y_model, dtype)
-            t = -torch.log(sigma + 1e-10)
-            t_next = -torch.log(sigma_next + 1e-10) if sigma_next != 0 else float("inf")
+            t = -torch.log(sigma)
+            t_next = -torch.log(sigma_next)
             h = t_next - t
 
             if old_denoised is None:
@@ -266,7 +252,7 @@ class DPMpp2MSampler(EDMDiffusionSampler):
                 )
             else:
                 # Second order multistep
-                h_last = t - (-torch.log(sigmas[i - 1] + 1e-10)) if i > 0 else h
+                h_last = t + torch.log(sigmas[i - 1])
                 r = h_last / h
 
                 coeff1 = 1 + 1 / (2 * r)
@@ -306,7 +292,6 @@ class VectorFieldSampler(ABC):
         times: torch.Tensor,
         vector_field_fn: VectorFieldFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        **kwargs,
     ) -> Batch:
         """Move the field along the provided time grid."""
         pass
@@ -326,13 +311,10 @@ class VectorFieldEulerSampler(VectorFieldSampler):
         x: Batch,
         y: Batch,
         times: torch.Tensor,
-        vector_field_fn: VectorFieldFunction = None,
+        vector_field_fn: VectorFieldFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        **kwargs,
     ) -> Batch:
-        if vector_field_fn is None:
-            raise ValueError("VectorFieldEulerSampler requires a vector_field_fn callable.")
-        dtype = kwargs.get("dtype", self.dtype)
+        dtype = self.dtype
         times = times.to(dtype)
         y_solver = _in_dtype(y, dtype)
 
@@ -371,13 +353,10 @@ class VectorFieldHeunSampler(VectorFieldSampler):
         x: Batch,
         y: Batch,
         times: torch.Tensor,
-        vector_field_fn: VectorFieldFunction = None,
+        vector_field_fn: VectorFieldFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        **kwargs,
     ) -> Batch:
-        if vector_field_fn is None:
-            raise ValueError("VectorFieldHeunSampler requires a vector_field_fn callable.")
-        dtype = kwargs.get("dtype", self.dtype)
+        dtype = self.dtype
         times = times.to(dtype)
         y_solver = _in_dtype(y, dtype)
 

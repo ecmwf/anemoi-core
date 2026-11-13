@@ -681,11 +681,11 @@ training:
   training_loss:
     datasets:
       era:
-        _target_: anemoi.training.losses.WeightedMSELoss
+        _target_: anemoi.training.losses.MSELoss
         scalers: ["general_variable", "pressure_level", "node_weights"]
         ignore_nans: true
       combined_surface:
-        _target_: anemoi.training.losses.WeightedMSELoss
+        _target_: anemoi.training.losses.MSELoss
         scalers: ["general_variable"]
         ignore_nans: true
   validation_metrics:

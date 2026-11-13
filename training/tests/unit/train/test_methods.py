@@ -38,8 +38,9 @@ from anemoi.models.preprocessing.imputer import InputImputer
 from anemoi.models.preprocessing.normalizer import InputNormalizer
 from anemoi.models.transport import EdmSettings
 from anemoi.training.losses import CombinedLoss
+from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
-from anemoi.training.losses import WeightedMSELoss
+from anemoi.training.losses import RMSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
@@ -161,13 +162,8 @@ class DummyTransportModel(DummyModel):
 
     def __init__(self) -> None:
         super().__init__()
-        self.edm = EdmSettings(sigma_max=4.0, sigma_min=1.0, sigma_data=0.5)
-        self.training_condition = {
-            "distribution": "karras",
-            "sigma_max": self.edm.sigma_max,
-            "sigma_min": self.edm.sigma_min,
-            "rho": self.edm.rho,
-        }
+        self.edm = EdmSettings(sigma_data=0.5)
+        self.training_condition = {"distribution": "karras", "sigma_max": 4.0, "sigma_min": 1.0, "rho": 7.0}
         self.target_datasets = ["data"]
 
     def __call__(
@@ -781,21 +777,6 @@ def test_edm_transport_compute_loss_forwards_standard_loss_kwargs() -> None:
     module._check_nan_targets.assert_called_once_with(y, "data", {"training_loss": loss})
 
 
-def test_edm_transport_compute_loss_rejects_a_loss_that_leaves_the_weights_unused() -> None:
-    """MSELoss accepts the EDM noise weights and drops them, so EDM refuses it."""
-    module = MagicMock(spec=TransportTraining)
-    module.loss = {"data": MSELoss()}
-    y = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
-
-    with pytest.raises(ValueError, match="leaves the weights unused"):
-        EDMDiffusionTransportObjective(module).compute_loss(
-            y_pred=y,
-            y=y,
-            dataset_name="data",
-            weights={"data": torch.tensor([0.25])},
-        )
-
-
 def test_edm_transport_compute_loss_forwards_sharding_metadata_when_requested() -> None:
     """EDMDiffusionTransportObjective.compute_loss adds shard layout when loss.needs_shard_layout_info."""
     module = MagicMock(spec=TransportTraining)
@@ -884,7 +865,7 @@ def test_flow_matching_prepare_builds_state_and_velocity(
         loss_target=clean_batch,
         loss_target_layout=IndexSpace.MODEL_OUTPUT,
         metric_target=clean_batch,
-        aux={},
+        model_target_missing=clean_batch,
     )
 
     monkeypatch.setattr(
@@ -931,7 +912,7 @@ def test_flow_matching_prepare_remasks_missing_observations(
         loss_target=_value_batch(clean),
         loss_target_layout=IndexSpace.MODEL_OUTPUT,
         metric_target=_value_batch(clean),
-        aux={"model_target_missing": _value_batch(missing)},
+        model_target_missing=_value_batch(missing),
     )
 
     monkeypatch.setattr(
@@ -1005,7 +986,7 @@ def test_state_prepare_target_imputes_model_target_and_keeps_loss_nans() -> None
 
     assert not torch.isnan(prepared.model_target["data"].data).any()
     assert torch.isnan(prepared.loss_target["data"].data).any()
-    assert torch.isnan(prepared.aux["model_target_missing"]["data"].data).any()
+    assert torch.isnan(prepared.model_target_missing["data"].data).any()
 
 
 def test_state_model_target_and_missing_stay_consistent_with_real_processors() -> None:
@@ -1054,7 +1035,7 @@ def test_state_model_target_and_missing_stay_consistent_with_real_processors() -
     prepared = mode.prepare_target(batch, x=None)
 
     model_target = prepared.model_target["data"].data
-    missing = prepared.aux["model_target_missing"]["data"].data
+    missing = prepared.model_target_missing["data"].data
     assert model_target.shape == missing.shape
 
     # NaNs sit exactly where the raw output-step target had missing values.
@@ -1117,7 +1098,7 @@ def test_state_model_target_and_missing_stay_consistent_for_sparse_obs() -> None
     prepared = mode.prepare_target(batch, x=None)
 
     model_target = prepared.model_target["data"].data[0]
-    missing = prepared.aux["model_target_missing"]["data"].data[0]
+    missing = prepared.model_target_missing["data"].data[0]
     assert model_target.shape == missing.shape == (3, len(_NAME_TO_INDEX))
 
     # NaNs sit exactly where the raw output-step rows had missing values.
@@ -1881,7 +1862,7 @@ def test_edm_transport_training_step_with_forecaster() -> None:
     forecaster.is_first_step = False
     forecaster.updating_scalars = {}
     forecaster.target_dataset_names = forecaster.dataset_names
-    forecaster.loss = {"data": WeightedMSELoss()}
+    forecaster.loss = {"data": MSELoss()}
     forecaster.loss_supports_sharding = False
     forecaster.metrics_support_sharding = True
 
@@ -2561,7 +2542,6 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
                 loss_target_layout=IndexSpace.MODEL_OUTPUT,
                 pred_layout=IndexSpace.MODEL_OUTPUT,
                 weights=None,
-                aux={},
             )
 
         def forward(
@@ -2693,7 +2673,7 @@ def test_flow_matching_tendency_training_step_uses_model_output_velocity_target(
                 loss_target=tendency_target,
                 loss_target_layout=IndexSpace.MODEL_OUTPUT,
                 metric_target=state_target,
-                aux={},
+                model_target_missing=tendency_target,
             )
 
         def reconstruct_prediction(
@@ -2917,7 +2897,7 @@ def test_tendency_prediction_mode_reads_input_only_sparse_obs() -> None:
 
     assert list(prepared.model_target.keys()) == ["data"]
     assert list(prepared.metric_target.keys()) == ["data"]
-    assert list(prepared.aux["reference"].keys()) == ["data"]
+    assert list(prepared.reference.keys()) == ["data"]
     torch.testing.assert_close(prepared.model_target["data"].data, batch["data"].data - 1.0)
 
 
@@ -2956,7 +2936,7 @@ def test_tendency_prediction_mode_only_the_network_target_is_imputed() -> None:
     torch.testing.assert_close(prepared.model_target["data"].data, imputed["data"].data - 1.0)
     expected_full = raw_target["data"].data - 1.0
     torch.testing.assert_close(prepared.loss_target["data"].data, expected_full, equal_nan=True)
-    torch.testing.assert_close(prepared.aux["model_target_missing"]["data"].data, expected_full, equal_nan=True)
+    torch.testing.assert_close(prepared.model_target_missing["data"].data, expected_full, equal_nan=True)
     torch.testing.assert_close(prepared.metric_target["data"].data, raw_target["data"].data, equal_nan=True)
 
 
@@ -3019,7 +2999,8 @@ def test_tendency_prediction_mode_reconstruct_prediction_uses_step_statistics() 
         loss_target=prediction,
         loss_target_layout=IndexSpace.DATA_OUTPUT,
         metric_target=prediction,
-        aux={"reference": reference},
+        model_target_missing=prediction,
+        reference=reference,
     )
 
     state = mode.reconstruct_prediction(prediction, prepared)
@@ -3269,3 +3250,24 @@ def test_state_prediction_mode_rejects_a_tendency_model() -> None:
 
     with pytest.raises(TypeError, match="prediction_mode='state' needs a state transport model"):
         StatePredictionMode(module)
+
+
+@pytest.mark.parametrize(
+    "loss",
+    [
+        pytest.param(RMSELoss(), id="rmse"),
+        pytest.param(CombinedLoss(MSELoss(), RMSELoss()), id="combined_with_rmse"),
+    ],
+)
+def test_edm_transport_rejects_a_loss_that_leaves_the_weights_unused(loss: RMSELoss | CombinedLoss) -> None:
+    """A loss that drops the EDM noise weights would train another objective, so EDM refuses it at set-up."""
+    objective = EDMDiffusionTransportObjective(MagicMock(spec=TransportTraining))
+
+    with pytest.raises(ValueError, match="leaves the weights unused"):
+        objective.check_losses({"data": loss})
+
+
+def test_edm_transport_accepts_pointwise_losses() -> None:
+    objective = EDMDiffusionTransportObjective(MagicMock(spec=TransportTraining))
+
+    objective.check_losses({"data": MSELoss(), "obs": CombinedLoss(MSELoss(), MAELoss())})

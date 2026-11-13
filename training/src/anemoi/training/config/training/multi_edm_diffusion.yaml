@@ -6,10 +6,10 @@ defaults:
 transport:
   objective: edm_diffusion
 
-# EDM weights each sample's loss by its noise level, which WeightedMSELoss applies.
+# EDM weights each sample's loss by its noise level; MSELoss applies those weights.
 training_loss:
   datasets:
     era5:
-      _target_: anemoi.training.losses.WeightedMSELoss
+      _target_: anemoi.training.losses.MSELoss
     cerra:
-      _target_: anemoi.training.losses.WeightedMSELoss
+      _target_: anemoi.training.losses.MSELoss

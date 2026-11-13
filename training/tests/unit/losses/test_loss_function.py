@@ -34,7 +34,6 @@ from anemoi.training.losses import PowerSpectrumLoss
 from anemoi.training.losses import RMSELoss
 from anemoi.training.losses import SpectralAMSELoss
 from anemoi.training.losses import SpectralCRPSLoss
-from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
@@ -50,7 +49,7 @@ spectral_loss_kwargs: dict[type[BaseLoss], dict[str, object]] = {
     PowerSpectrumLoss: {"transform": "octahedral_sht", "nlat": 8},
 }
 spectral_losses = list(spectral_loss_kwargs)
-losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss, *spectral_losses]
+losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, *spectral_losses]
 
 
 GRIDDED_LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)

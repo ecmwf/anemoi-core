@@ -16,8 +16,5 @@ def test_schema_defaults_match_transport_settings() -> None:
     """The schema defaults are restated literals, so pin them to the dataclasses."""
     transport = TransportConfig()
     assert transport.sigma_data == EdmSettings.sigma_data
-    assert transport.sigma_max == EdmSettings.sigma_max
-    assert transport.sigma_min == EdmSettings.sigma_min
-    assert transport.rho == EdmSettings.rho
     assert transport.noise_channels == NoiseConditioningSettings.channels
     assert transport.noise_cond_dim == NoiseConditioningSettings.cond_dim

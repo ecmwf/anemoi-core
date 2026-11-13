@@ -25,7 +25,6 @@ from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import PowerSpectrumLoss
 from anemoi.training.losses import SpectralCRPSLoss
-from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.variable_mapper import LossVariableMapper
@@ -306,7 +305,7 @@ def test_combined_loss_mixed_children_filter_shard_layout_kwargs(monkeypatch: py
 
     loss = CombinedLoss(
         multiscale_loss,
-        WeightedMSELoss(),
+        MSELoss(),
     )
 
     result = loss(
@@ -374,7 +373,7 @@ def test_combined_loss_with_spectral_crps_backward() -> None:
     # Node weights are commonly required by the weighted loss base class; keep them neutral.
     node_weights = torch.ones(points)
 
-    mse = WeightedMSELoss()
+    mse = MSELoss()
     spectral = SpectralCRPSLoss(node_weights=node_weights, transform="fft2d", x_dim=x_dim, y_dim=y_dim)
 
     loss = CombinedLoss(
@@ -405,7 +404,7 @@ def test_combined_loss_with_spectral_l2_loss_backward() -> None:
     pred = torch.zeros((2, 1, 1, expected_points, nvars), requires_grad=True)
     target = torch.zeros_like(pred)
 
-    mse = WeightedMSELoss()
+    mse = MSELoss()
     spectral = PowerSpectrumLoss(
         transform="octahedral_sht",
         nlat=nlat,

@@ -67,7 +67,7 @@ def _prepared_sparse_target() -> PreparedPredictionTarget:
         loss_target=batch,
         loss_target_layout=IndexSpace.MODEL_OUTPUT,
         metric_target=batch,
-        aux={},
+        model_target_missing=batch,
     )
 
 

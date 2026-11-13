@@ -21,7 +21,6 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import EnergyScoreLoss
 from anemoi.training.losses import MSELoss
-from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses.graph_energy_score import GraphEnergyScoreLoss
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.train.methods.base import BaseTrainingModule
@@ -189,7 +188,7 @@ def test_edm_loss_passes_sparse_weights_and_preserves_gradients() -> None:
     )
     target = pred.map_data(torch.zeros_like)
     module = SimpleNamespace(
-        loss={"obs": WeightedMSELoss()},
+        loss={"obs": MSELoss()},
         model_comm_group=None,
         _evaluate_loss=BaseTrainingModule._evaluate_loss,
         _check_nan_targets=lambda *_args: None,

@@ -9,6 +9,6 @@ transport:
 training_loss:
   datasets:
     data:
-      _target_: anemoi.training.losses.WeightedMSELoss
+      _target_: anemoi.training.losses.MSELoss
       scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
       ignore_nans: True

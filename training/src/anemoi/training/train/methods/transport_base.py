@@ -11,16 +11,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
-from typing import Any
 
 from anemoi.models.transport import gaussian_source
 from anemoi.training.train.methods.base import BaseTrainingModule
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import torch
 
     from anemoi.models.data import Batch
     from anemoi.models.data.sources import Source
+    from anemoi.training.losses.base import BaseLoss
     from anemoi.training.train.methods.transport import TransportTraining
     from anemoi.training.utils.index_space import IndexSpace
 
@@ -51,16 +53,27 @@ class PreparedPredictionTarget:
         the model output is reconstructed back to state space before comparing
         against this target.
 
-    aux:
-        Extra prediction-mode data needed later, such as the latest input state
-        for tendency reconstruction.
+    model_target_missing:
+        Counterpart of model_target that keeps the NaNs of missing values.
+        Objectives that derive their loss target from model_target (the
+        flow-matching velocity) use it to mask the missing values again.
+
+    target_forcing:
+        Forcings at the output times, normalised like the model inputs, which
+        the decoder reads.
+
+    reference:
+        Latest input state that predicted tendencies are added to. Set by the
+        tendency prediction mode only.
     """
 
     model_target: Batch
     loss_target: Batch
     loss_target_layout: IndexSpace
     metric_target: Batch
-    aux: dict[str, Any]
+    model_target_missing: Batch
+    target_forcing: Batch | None = None
+    reference: Batch | None = None
 
 
 @dataclass
@@ -96,10 +109,6 @@ class PreparedTransportObjective:
     weights:
         Optional per-sample/per-variable loss weights. EDM diffusion uses this for
         EDM noise-level weighting. Flow matching leaves this as None.
-
-    aux:
-        Extra objective-specific tensors needed later, for example the flow-matching
-        state and time for validation reconstruction.
     """
 
     conditioned_target: Batch
@@ -108,7 +117,6 @@ class PreparedTransportObjective:
     loss_target_layout: IndexSpace
     pred_layout: IndexSpace
     weights: dict[str, torch.Tensor | list[torch.Tensor]] | None
-    aux: dict[str, Any]
 
 
 class TransportObjective:
@@ -116,6 +124,10 @@ class TransportObjective:
 
     def __init__(self, module: TransportTraining) -> None:
         self.module = module
+
+    def check_losses(self, losses: Mapping[str, BaseLoss]) -> None:
+        """Check, once when training is set up, that the training losses suit this objective."""
+        del losses
 
     def prepare(
         self,

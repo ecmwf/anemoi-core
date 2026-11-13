@@ -408,7 +408,7 @@ configs specialize it:
    training_loss:
      datasets:
        data:
-         _target_: anemoi.training.losses.WeightedMSELoss
+         _target_: anemoi.training.losses.MSELoss
 
 .. code:: yaml
 
@@ -420,7 +420,10 @@ configs specialize it:
    transport:
      objective: flow_matching
 
-EDM diffusion uses a weighted clean-endpoint objective. Flow matching
+EDM diffusion uses a clean-endpoint objective weighted by noise level. Its
+training loss must apply these weights; ``MSELoss`` and the other pointwise
+losses do, and a loss that would leave them unused is rejected when training
+starts. Flow matching
 trains the velocity between the source field and the target with the
 ``MSELoss`` that ``training/transport.yaml`` selects by default.
 

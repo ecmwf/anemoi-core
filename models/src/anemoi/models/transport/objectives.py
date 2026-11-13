@@ -20,6 +20,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import Batch
 from anemoi.models.samplers import transport_samplers
+from anemoi.models.transport.registry import build_registered
 from anemoi.models.transport.schedules import SIGMA_SCHEDULES
 from anemoi.models.transport.schedules import TIME_SCHEDULES
 
@@ -42,28 +43,21 @@ def _get_inference_defaults_section(model: Any, name: str) -> dict:
     return dict(section) if section is not None else {}
 
 
-def _get_inference_config(model: Any, section: str, overrides: Optional[dict], selector: str) -> dict:
-    """Return the settings of the sampler or schedule: the model's defaults, updated with ``overrides``.
-
-    Overrides that choose a different sampler or schedule (``selector``) replace the defaults, which belong to the
-    default choice and may not apply to the new one.
-    """
+def _get_inference_config(model: Any, section: str, overrides: Optional[dict]) -> dict:
+    """Return the settings of the sampler or schedule: the model's defaults, updated with ``overrides``."""
     config = _get_inference_defaults_section(model, section)
     if overrides is not None:
-        if selector in overrides and overrides[selector] != config.get(selector):
-            config = {}
         config.update(overrides)
     LOGGER.debug("%s_config: %s", section, config)
     return config
 
 
-def _resolve_registry_entry(config: dict, selector: str, registry: dict, context: str) -> type:
+def _build_from_config(config: dict, selector: str, registry: dict, context: str, **fixed: Any) -> Any:
+    """Build the registry entry that ``config[selector]`` names, from the other settings in ``config``."""
+    config = dict(config)
     if selector not in config:
         raise ValueError(f"{context} must define '{selector}'.")
-    entry_name = config.pop(selector)
-    if entry_name not in registry:
-        raise ValueError(f"Unknown {context}: {entry_name}")
-    return registry[entry_name]
+    return build_registered(registry, config.pop(selector), config, context, **fixed)
 
 
 def _sampling_dtype(device: torch.device) -> torch.dtype:
@@ -85,9 +79,8 @@ def _build_inference_schedule(
     schedule_params: Optional[dict],
     device: torch.device,
 ) -> torch.Tensor:
-    schedule_config = _get_inference_config(model, "sampling_schedule", schedule_params, "schedule_type")
-    scheduler_cls = _resolve_registry_entry(schedule_config, "schedule_type", registry, context)
-    scheduler = scheduler_cls(**schedule_config)
+    schedule_config = _get_inference_config(model, "sampling_schedule", schedule_params)
+    scheduler = _build_from_config(schedule_config, "schedule_type", registry, context)
     return scheduler.get_schedule(device, _sampling_dtype(device))
 
 
@@ -98,9 +91,8 @@ def _build_inference_sampler(
     sampler_params: Optional[dict],
     dtype: torch.dtype,
 ) -> Any:
-    sampler_config = _get_inference_config(model, "sampler", sampler_params, "sampler")
-    sampler_cls = _resolve_registry_entry(sampler_config, "sampler", registry, context)
-    return sampler_cls(dtype=dtype, **sampler_config)
+    sampler_config = _get_inference_config(model, "sampler", sampler_params)
+    return _build_from_config(sampler_config, "sampler", registry, context, dtype=dtype)
 
 
 class TransportModelObjective:

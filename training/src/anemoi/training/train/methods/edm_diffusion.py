@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from anemoi.models.transport.paths import edm_loss_weight
+from anemoi.models.transport.registry import build_registered
 from anemoi.models.transport.schedules import SIGMA_TRAINING_DISTRIBUTIONS
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.train.methods.base import BaseTrainingModule
@@ -21,6 +22,8 @@ from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import torch
 
     from anemoi.models.data import Batch
@@ -52,7 +55,6 @@ class EDMDiffusionTransportObjective(TransportObjective):
             loss_target_layout=prepared.loss_target_layout,
             pred_layout=IndexSpace.MODEL_OUTPUT,
             weights=noise_weights,
-            aux={},
         )
 
     def forward(
@@ -84,11 +86,9 @@ class EDMDiffusionTransportObjective(TransportObjective):
         """Compute the EDM loss, weighting each sample's error by its noise level.
 
         The loss runs through the shared loss path, which checks the targets for NaNs and adds the
-        grid shard layout. A loss that leaves the weights unused would train a different objective
-        without any warning, so it is rejected.
+        grid shard layout. :meth:`check_losses` has made sure that the loss applies the weights.
         """
         assert weights is not None, f"{self.__class__.__name__} requires weights for EDM diffusion loss computation."
-        self._check_loss_applies_weights(dataset_name)
 
         dataset_weights = weights[dataset_name]
         if y_pred.is_tabular:
@@ -106,18 +106,21 @@ class EDMDiffusionTransportObjective(TransportObjective):
             extra_loss_kwargs=loss_kwargs,
         )
 
-    def _check_loss_applies_weights(self, dataset_name: str) -> None:
-        """Reject a training loss that would leave the EDM noise-level weights unused."""
-        loss = self.module.loss[dataset_name]
-        leaves = loss.iter_leaf_losses() if isinstance(loss, BaseLoss) else [loss]
-        ignoring = sorted({type(leaf).__name__ for leaf in leaves if not getattr(leaf, "applies_weights", False)})
-        if ignoring:
-            msg = (
-                f"EDM diffusion weights each sample's loss by its noise level, but the training loss of dataset "
-                f"'{dataset_name}' leaves the weights unused ({', '.join(ignoring)}). Use "
-                "anemoi.training.losses.WeightedMSELoss, as in training/edm_diffusion.yaml."
-            )
-            raise ValueError(msg)
+    def check_losses(self, losses: Mapping[str, BaseLoss]) -> None:
+        """Reject a training loss that would leave the EDM noise-level weights unused.
+
+        Such a loss would train a different objective without any warning.
+        """
+        for dataset_name, loss in losses.items():
+            leaves = loss.iter_leaf_losses() if isinstance(loss, BaseLoss) else [loss]
+            ignoring = sorted({type(leaf).__name__ for leaf in leaves if not getattr(leaf, "applies_weights", False)})
+            if ignoring:
+                msg = (
+                    f"EDM diffusion weights each sample's loss by its noise level, but the training loss of dataset "
+                    f"'{dataset_name}' leaves the weights unused ({', '.join(ignoring)}). Use a loss that applies "
+                    "them, such as anemoi.training.losses.MSELoss, as in training/edm_diffusion.yaml."
+                )
+                raise ValueError(msg)
 
     def _noise_target(
         self,
@@ -149,11 +152,12 @@ class EDMDiffusionTransportObjective(TransportObjective):
         except KeyError as exc:
             msg = "EDM training_condition must define 'distribution'."
             raise ValueError(msg) from exc
-        if distribution_name not in SIGMA_TRAINING_DISTRIBUTIONS:
-            msg = f"Unknown EDM training condition distribution: {distribution_name}"
-            raise ValueError(msg)
-        distribution_cls = SIGMA_TRAINING_DISTRIBUTIONS[distribution_name]
-        distribution = distribution_cls(**training_condition_config)
+        distribution = build_registered(
+            SIGMA_TRAINING_DISTRIBUTIONS,
+            distribution_name,
+            training_condition_config,
+            "EDM training condition distribution",
+        )
         return distribution.sample(shape, device=device)
 
     def _loss_weights(
