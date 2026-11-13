@@ -243,12 +243,9 @@ class BaseModelSchema(PydanticBaseModel):
     bounding: DatasetDict[list[BoundingSchema]]
     "List of bounding configuration applied in order to the specified variables."
     output_mask: DatasetDict[OutputMaskSchemas]  # !TODO CHECK!
-    output_mask: DatasetDict[OutputMaskSchemas]  # !TODO CHECK!
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
-    latent_aggregator: AggregatorSchema
-    "Latent aggregator schema."
     latent_aggregator: AggregatorSchema
     "Latent aggregator schema."
     processor: Union[
@@ -261,12 +258,6 @@ class BaseModelSchema(PydanticBaseModel):
         ...,
         discriminator="target_",
     )
-    "Model processor schema."
-    encoders: dict[str, EncodersSchema]
-    "Model encoders schemas."
-    decoders: dict[str, DecodersSchema]
-    "Model decoders schemas."
-    residual: DatasetDict[ResidualConnectionSchema]
     "Model processor schema."
     encoders: dict[str, EncodersSchema]
     "Model encoders schemas."
