@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 from typing import Any
 from typing import ClassVar
 
-from anemoi.models.transport import gaussian_source
 from anemoi.models.transport.registry import build_registered
 
 if TYPE_CHECKING:
@@ -193,7 +192,10 @@ class TransportObjective:
         del y_pred, dataset_name, weights
         return {}
 
-    def build_transport_source(self, prepared: PreparedPredictionTarget) -> Batch:
-        """Build the transport source field, as a batch shaped and described like the model target."""
-        # The model target describes the field to build, including its grid shard sizes.
-        return gaussian_source(prepared.model_target, getattr(self.module, "model_comm_group", None))
+    def draw_noise(self, prepared: PreparedPredictionTarget) -> Batch:
+        """Draw the Gaussian noise the transport starts from, shaped and described like the model target."""
+        # The model target also carries the grid shard sizes the noise is split by.
+        group = getattr(self.module, "model_comm_group", None)
+        return prepared.model_target.with_sources(
+            {name: target.randn_like(group) for name, target in prepared.model_target.items()},
+        )

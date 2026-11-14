@@ -42,8 +42,8 @@ class EDMDiffusionTransportObjective(TransportObjective):
         model_target = prepared.model_target
         sigma = self.draw_condition(model_target)
         noise_weights = self._loss_weights(sigma, model_target)
-        source = self.build_transport_source(prepared)
-        target_noised = self._noise_target(model_target, sigma, source)
+        noise = self.draw_noise(prepared)
+        target_noised = self._noise_target(model_target, sigma, noise)
         # EDM diffusion predicts the clean target. The prediction mode decides
         # whether that clean target is a full state or a tendency field.
         # state uses DATA_FULL, tendency uses DATA_OUTPUT.
@@ -92,15 +92,15 @@ class EDMDiffusionTransportObjective(TransportObjective):
         self,
         x: Batch,
         sigma: dict[str, torch.Tensor],
-        source: Batch,
+        noise: Batch,
     ) -> Batch:
-        """Create the corrupted target by adding scaled source noise to the clean target."""
+        """Create the corrupted target by adding noise, scaled by sigma, to the clean target."""
         return x.with_sources(
             {
                 name: target.map_with_condition(
                     lambda clean, noise, sigma_sample: clean + noise * sigma_sample,
                     sigma[name],
-                    source[name],
+                    noise[name],
                 )
                 for name, target in x.items()
             },

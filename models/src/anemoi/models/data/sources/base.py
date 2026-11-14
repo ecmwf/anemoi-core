@@ -430,13 +430,12 @@ class Source(ABC):
         """Return ``condition`` (see :meth:`map_with_condition`) laid out like this source's payload."""
         ...
 
-    @abstractmethod
     def randn_like(self, model_comm_group: ProcessGroup | None = None) -> "Source":
-        """Return a new view whose payload is standard-normal noise of the same structure.
+        """Return standard Gaussian noise shaped and described like this source, in its dtype.
 
-        Grid-sharded payloads draw noise consistently across ``model_comm_group``.
+        See :meth:`BaseTemplate.randn` for how noise is drawn when the nodes are split across ranks.
         """
-        ...
+        return self.template().randn(self.dtype, model_comm_group)
 
     @abstractmethod
     def pairwise(self, other: "Source", func: Callable[..., torch.Tensor], *args: Any, **kwargs) -> torch.Tensor:
@@ -626,6 +625,16 @@ class BaseTemplate(ABC):
     @abstractmethod
     def flatten(self) -> "FlatSource":
         """Return the flat nodes (``data=None``): the decoder's target coordinates, timedeltas and sizes."""
+        ...
+
+    @abstractmethod
+    def randn(self, dtype: torch.dtype, model_comm_group: ProcessGroup | None = None) -> Source:
+        """Return a source described by this template, filled with standard Gaussian noise.
+
+        The noise is on the device of the template's nodes. When the nodes are split across
+        ``model_comm_group``, each rank draws the noise for all nodes of the group and keeps its own part
+        (see :func:`anemoi.models.distributed.noise.draw_noise`).
+        """
         ...
 
     @abstractmethod

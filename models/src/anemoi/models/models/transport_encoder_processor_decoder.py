@@ -38,7 +38,6 @@ from anemoi.models.models.encoder_processor_decoder import gathered_batch_sizes
 from anemoi.models.models.encoder_processor_decoder import latlons_to_sincos
 from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import NoiseConditioningSettings
-from anemoi.models.transport import gaussian_source
 from anemoi.models.transport import get_transport_model_objective
 from anemoi.models.transport.objectives import condition_batch_shape
 from anemoi.utils.config import DotDict
@@ -690,40 +689,40 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         positions = [name_to_index[name] for name in variables]
         return {key: values[positions] for key, values in self.statistics[dataset_name].items()}
 
-    def _sampling_template(self, target_template: dict[str, "BaseTemplate"], x: Batch) -> Batch:
-        """Describe the sampled field: the template's nodes, layout and sizes, with the model's output variables.
+    def _sampling_templates(self, target_template: dict[str, "BaseTemplate"], x: Batch) -> dict[str, "BaseTemplate"]:
+        """Describe the sampled fields: the templates' nodes, layout and sizes, with the model's output variables.
 
-        Only decoded datasets are sampled. The payloads are zero-stride views in the output width;
-        only their shape, dtype and device are read. They take the dtype and device of the matching
-        input, and the template's nodes are moved to that device.
+        Only decoded datasets are sampled. The templates' nodes are moved to the device of the matching input.
         """
-        sources = {}
+        templates = {}
         for name, template in target_template.items():
             if name not in self.target_datasets:
                 continue
             template = _template_to(
-                template.with_variables(
-                    self._sampling_variables(name),
-                    self._sampling_statistics(name),
-                ),
+                template.with_variables(self._sampling_variables(name), self._sampling_statistics(name)),
                 x[name].device,
             )
-            flat = template.flatten()
-            payload = torch.zeros((), dtype=x[name].dtype, device=flat.device).expand(
-                flat.coordinates.shape[0], self._calculate_output_dim(name)
-            )
-            sources[name] = template.unflatten(payload)
-        return Batch(sources)
+            # A gridded node carries every output step; a tabular node carries one.
+            steps = template.time_size if template.coordinates_are_static else 1
+            if steps * template.n_variables != self._calculate_output_dim(name):
+                msg = (
+                    f"The target template of {name!r} describes {steps} step(s) of {template.n_variables} "
+                    f"variable(s) per node, but the model outputs {self._calculate_output_dim(name)} values per node."
+                )
+                raise ValueError(msg)
+            templates[name] = template
+        return templates
 
-    def build_sampling_source(
+    def draw_sampling_noise(
         self,
         x: Batch,
         *,
         target_template: dict[str, "BaseTemplate"],
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> Batch:
-        """Build the starting/source field used by transport sampling, in model-output space."""
-        return gaussian_source(self._sampling_template(target_template, x), model_comm_group)
+        """Draw the Gaussian noise sampling starts from, in model-output space and in the dtype of the inputs."""
+        templates = self._sampling_templates(target_template, x)
+        return Batch({name: template.randn(x[name].dtype, model_comm_group) for name, template in templates.items()})
 
     def predict_step(
         self,
@@ -822,8 +821,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         sampler_params: Optional[dict] = None,
         target_forcing: Optional[Batch] = None,
     ) -> Batch:
-        """Run the sampler selected by the transport objective, from a fresh source field."""
-        source = self.build_sampling_source(x, target_template=target_template, model_comm_group=model_comm_group)
+        """Run the sampler selected by the transport objective, from freshly drawn noise."""
+        noise = self.draw_sampling_noise(x, target_template=target_template, model_comm_group=model_comm_group)
         network = functools.partial(
             self._forward_transport_network,
             model_comm_group=model_comm_group,
@@ -832,7 +831,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         return self.transport_model_objective.sample(
             network,
             x,
-            source,
+            noise,
             self.inference_defaults,
             model_comm_group=model_comm_group,
             schedule_params=schedule_params,

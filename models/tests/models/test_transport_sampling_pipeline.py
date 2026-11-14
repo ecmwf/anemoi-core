@@ -103,7 +103,7 @@ def _configure_sampling_model(
     model: AnemoiTransportModelEncProcDec,
     specs: dict[str, tuple[int, int, int]],
 ) -> None:
-    """Attach the metadata needed by ``_sampling_template`` to a lightweight model stub.
+    """Attach the metadata needed by ``_sampling_templates`` to a lightweight model stub.
 
     ``specs`` maps dataset name to ``(num_input_channels, num_output_channels, grid_size)``.
     """
@@ -1186,7 +1186,7 @@ def test_sample_dispatches_flow_matching_to_default_heun_sampler(
     model.num_output_channels = {"ds_a": 3}
     model._forward_transport_network = lambda _x, y, *_args, **_kwargs: y
     _configure_sampling_model(model, {"ds_a": (6, 3, 5)})
-    model.build_sampling_source = lambda x, **_kwargs: {
+    model.draw_sampling_noise = lambda x, **_kwargs: {
         "ds_a": torch.zeros(
             x["ds_a"].data.shape[0],
             model.n_step_output["ds_a"],
@@ -1247,7 +1247,7 @@ def test_sample_can_use_vector_field_sampler_for_flow_matching(
     model.num_output_channels = {"ds_a": 3}
     model._forward_transport_network = lambda _x, y, *_args, **_kwargs: y
     _configure_sampling_model(model, {"ds_a": (6, 3, 5)})
-    model.build_sampling_source = lambda x, **_kwargs: {
+    model.draw_sampling_noise = lambda x, **_kwargs: {
         "ds_a": torch.zeros(
             x["ds_a"].data.shape[0],
             model.n_step_output["ds_a"],
@@ -1481,10 +1481,10 @@ def test_sampling_statistics_follow_output_variable_order() -> None:
         "stdev": torch.tensor([1.0, 2.0, 3.0, 4.0]),
     }
     model.num_output_channels = {"data": 2}
-    batch = model._sampling_template(template, _sampling_batch(model, {"data": torch.zeros(1, 1, 1, 3, 2)}))
-    assert batch["data"].variables == ["out_1", "in_0"]
-    torch.testing.assert_close(batch["data"].statistics["mean"], torch.tensor([40.0, 10.0]))
-    torch.testing.assert_close(batch["data"].statistics["stdev"], torch.tensor([4.0, 1.0]))
+    templates = model._sampling_templates(template, _sampling_batch(model, {"data": torch.zeros(1, 1, 1, 3, 2)}))
+    assert templates["data"].variables == ["out_1", "in_0"]
+    torch.testing.assert_close(templates["data"].statistics["mean"], torch.tensor([40.0, 10.0]))
+    torch.testing.assert_close(templates["data"].statistics["stdev"], torch.tensor([4.0, 1.0]))
 
 
 def test_sampling_allows_empty_statistics_for_unprocessed_data() -> None:
@@ -1494,9 +1494,12 @@ def test_sampling_allows_empty_statistics_for_unprocessed_data() -> None:
     model.statistics["data"] = {}
     template = _target_template(model, {"data": torch.zeros(1, 1, 1, 3, 1)})
     model.num_output_channels = {"data": 1}
-    batch = model._sampling_template(template, _sampling_batch(model, {"data": torch.zeros(1, 1, 1, 3, 1)}))
-    assert batch["data"].statistics == {}
-    assert batch["data"].data.shape == (1, 1, 1, 3, 1)
+    noise = model.draw_sampling_noise(
+        _sampling_batch(model, {"data": torch.zeros(1, 1, 1, 3, 1)}),
+        target_template=template,
+    )
+    assert noise["data"].statistics == {}
+    assert noise["data"].data.shape == (1, 1, 1, 3, 1)
 
 
 def test_sampling_batch_preserves_sparse_ensemble_template_layout() -> None:
@@ -1516,7 +1519,7 @@ def test_sampling_batch_preserves_sparse_ensemble_template_layout() -> None:
     model.num_output_channels = {"obs": 1}
     model.n_step_output = {"obs": 1}
 
-    batch = model._sampling_template(_templates(obs), obs)
+    batch = model.draw_sampling_noise(obs, target_template=_templates(obs))
 
     assert batch["obs"].layout == layout
     assert batch["obs"].ensemble_size == 2
@@ -1524,8 +1527,8 @@ def test_sampling_batch_preserves_sparse_ensemble_template_layout() -> None:
     assert [sample.shape for sample in batch["obs"].data] == [(2, 3, 1), (2, 2, 1)]
 
 
-def test_sampling_template_describes_interface_templates_in_output_variables() -> None:
-    """Templates as the inference interface builds them become zero-stride sources in output variables."""
+def test_sampling_noise_describes_interface_templates_in_output_variables() -> None:
+    """Templates as the inference interface builds them give noise in the model's output variables."""
     model = _transport_model_stub()
     _configure_sampling_model(model, {"ds": (2, 3, 4)})
     model.n_step_output = {"ds": 2}
@@ -1542,14 +1545,33 @@ def test_sampling_template_describes_interface_templates_in_output_variables() -
     )
     x = _sampling_batch(model, {"ds": torch.zeros(1, 2, 1, 4, 2)})
 
-    batch = model._sampling_template({"ds": template, "input_only": template}, x)
+    batch = model.draw_sampling_noise(x, target_template={"ds": template, "input_only": template})
 
     assert list(batch.keys()) == ["ds"]
-    source = batch["ds"]
-    assert source.variables == ["out_0", "out_1", "out_2"]
-    assert source.layout == TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    assert source.data.shape == (1, 2, 1, 4, 3)
-    assert set(source.data.stride()) == {0}  # zero-stride view
+    noise = batch["ds"]
+    assert noise.variables == ["out_0", "out_1", "out_2"]
+    assert noise.layout == TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+    assert noise.data.shape == (1, 2, 1, 4, 3)
+
+
+def test_sampling_noise_rejects_a_template_with_the_wrong_number_of_steps() -> None:
+    model = _transport_model_stub()
+    _configure_sampling_model(model, {"ds": (2, 3, 4)})
+    model.n_step_output = {"ds": 2}
+    model.num_output_channels = {"ds": 3}
+    template = GriddedTemplate(
+        name="ds",
+        variables=["in_0"],
+        layout=TensorLayout(time=0, ensemble=1, grid=2, variables=3),
+        coordinates=torch.zeros(4, 2),
+        batch_size=1,
+        ensemble_size=1,
+        time_size=1,
+    )
+    x = _sampling_batch(model, {"ds": torch.zeros(1, 2, 1, 4, 2)})
+
+    with pytest.raises(ValueError, match="describes 1 step"):
+        model.draw_sampling_noise(x, target_template={"ds": template})
 
 
 def test_sample_rejects_unknown_keyword_arguments() -> None:

@@ -24,6 +24,7 @@ from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources.base import _index_list
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.noise import draw_noise
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.shapes import get_shard_sizes
@@ -198,17 +199,6 @@ class GriddedSource(Source):
 
     def condition_per_sample(self, condition: torch.Tensor) -> torch.Tensor:
         return condition
-
-    def randn_like(self, model_comm_group: ProcessGroup | None = None) -> "GriddedSource":
-        # Imported here: anemoi.models.transport imports this package.
-        from anemoi.models.transport.random_fields import randn_like_with_grid_sharding
-
-        noise = randn_like_with_grid_sharding(
-            self.data,
-            model_comm_group=model_comm_group,
-            grid_shard_sizes=self.grid_shard_sizes,
-        )
-        return self.clone(data=noise)
 
     def pairwise(self, other: Source, func: Callable[..., torch.Tensor], *args, **kwargs) -> torch.Tensor:
         if not isinstance(other, GriddedSource):
@@ -454,6 +444,31 @@ class GriddedTemplate(BaseTemplate):
             coordinates=coordinates,
             shard_sizes=self.shard_sizes,
             device=self.coordinates.device,
+        )
+
+    def randn(self, dtype: torch.dtype, model_comm_group: ProcessGroup | None = None) -> GriddedSource:
+        """Return a :class:`GriddedSource` of standard Gaussian noise laid out as :meth:`unflatten` lays out data."""
+        layout = self.layout if self.layout.batch is not None else self.layout.with_batch_dim()
+        sizes = {
+            "batch": self.batch_size,
+            "time": self.time_size,
+            "ensemble": self.ensemble_size,
+            "grid": self.grid_size,
+            "variables": self.n_variables,
+        }
+        noise = draw_noise(
+            tuple(sizes[name] for name in layout.axis_names),
+            device=self.coordinates.device,
+            dtype=dtype,
+            model_comm_group=model_comm_group,
+            shard_sizes=self.shard_sizes,
+            shard_dim=layout.axis("grid"),
+        )
+        return GriddedSource(
+            data=noise,
+            coordinates=self.coordinates,
+            shard_sizes=self.shard_sizes,
+            **{**self._metadata_kwargs(), "layout": layout},
         )
 
     def flat_sizes(self) -> tuple[ShardSizes, None]:

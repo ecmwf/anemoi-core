@@ -24,6 +24,7 @@ from anemoi.models.data.sources.base import BaseTemplate
 from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources.base import _index_list
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.noise import draw_noise
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.utils import model_is_distributed
@@ -296,30 +297,6 @@ class TabularSource(Source):
     def condition_per_sample(self, condition: torch.Tensor) -> list[torch.Tensor]:
         self._check_condition_batch(condition)
         return [_sample_condition(sample, condition, index) for index, sample in enumerate(self.data)]
-
-    def randn_like(self, model_comm_group: ProcessGroup | None = None) -> "TabularSource":
-        """Gaussian noise shaped like this source, with distinct values on every rank of a sharded source.
-
-        Each rank draws the noise for all points of the model group and keeps its own rows, so ranks
-        that share a random seed do not repeat values and consume the same amount of randomness.
-        """
-        # Imported here: anemoi.models.transport imports this package.
-        from anemoi.models.transport.random_fields import randn_with_grid_sharding
-
-        shard_sizes = self.template().flatten().shard_sizes
-        return self.clone(
-            data=[
-                randn_with_grid_sharding(
-                    tuple(sample.shape),
-                    device=sample.device,
-                    dtype=sample.dtype,
-                    model_comm_group=model_comm_group,
-                    grid_shard_sizes=shard_sizes,
-                    shard_dim=self.layout.axis("grid", ndim=sample.ndim),
-                )
-                for sample in self.data
-            ],
-        )
 
     def pairwise(self, other: Source, func: Callable[..., torch.Tensor], *args, **kwargs) -> torch.Tensor:
         if not isinstance(other, TabularSource):
@@ -760,6 +737,38 @@ class TabularTemplate(BaseTemplate):
             device=coordinates.device,
             shard_sizes=flat_shard_sizes,
             batch_sizes=batch_sizes,
+        )
+
+    def randn(self, dtype: torch.dtype, model_comm_group: ProcessGroup | None = None) -> TabularSource:
+        """Return a :class:`TabularSource` of standard Gaussian noise, one tensor per sample as :meth:`unflatten` builds.
+
+        When the points are split across ``model_comm_group``, each rank draws the noise for all points of the
+        group and keeps its own rows, so ranks that share a random seed do not repeat values.
+        """
+        shard_sizes, _ = self.flat_sizes()
+        samples = []
+        for coordinates, count in zip(self.coordinates, self.node_counts, strict=True):
+            if self.layout.ensemble is not None:
+                shape = (self.ensemble_size, count, self.n_variables)
+            else:
+                shape = (self.ensemble_size * count, self.n_variables)
+            samples.append(
+                draw_noise(
+                    shape,
+                    device=coordinates.device,
+                    dtype=dtype,
+                    model_comm_group=model_comm_group,
+                    shard_sizes=shard_sizes,
+                    shard_dim=self.layout.axis("grid", ndim=len(shape)),
+                ),
+            )
+        return TabularSource(
+            **self._metadata_kwargs(),
+            data=samples,
+            coordinates=self.coordinates,
+            timedeltas=self.timedeltas,
+            boundaries=self.boundaries,
+            shard_sizes=self.shard_sizes,
         )
 
     def flat_sizes(self) -> tuple[ShardSizes, tuple[int, ...]]:

@@ -37,16 +37,16 @@ class FlowMatchingTransportObjective(TransportObjective):
         prepared: PreparedPredictionTarget,
     ) -> PreparedTransportObjective:
         target = prepared.model_target
-        source = self.build_transport_source(prepared)
+        noise = self.draw_noise(prepared)
         time_level = self.draw_condition(target)
 
         state = target.with_sources(
             {
-                name: source[name].map_with_condition(flow_matching_state, time_level[name], clean)
+                name: noise[name].map_with_condition(flow_matching_state, time_level[name], clean)
                 for name, clean in target.items()
             },
         )
-        velocity = source.zip_map_data(flow_matching_velocity, target)
+        velocity = noise.zip_map_data(flow_matching_velocity, target)
         # The model target is imputed so it can be fed through the network; put the NaNs back into
         # the loss target at missing values so the loss (with ignore_nans) skips them.
         velocity = velocity.zip_map_data(

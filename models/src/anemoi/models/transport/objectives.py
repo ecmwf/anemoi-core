@@ -163,23 +163,23 @@ class TransportModelObjective:
     ) -> Batch:
         raise NotImplementedError
 
-    def initial_state(self, source: Batch, schedule: torch.Tensor) -> Batch:
-        """Return the state sampling starts from, given the source field and the schedule."""
+    def initial_state(self, noise: Batch, schedule: torch.Tensor) -> Batch:
+        """Return the state sampling starts from, given unit Gaussian noise and the schedule."""
         del schedule
-        return source
+        return noise
 
     def sample(
         self,
         network: TransportNetwork,
         x: Batch,
-        source: Batch,
+        noise: Batch,
         inference_defaults: Mapping,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
     ) -> Batch:
-        """Integrate from the source field to a sample of the target.
+        """Integrate from Gaussian noise to a sample of the target.
 
         ``inference_defaults`` holds the model's ``sampling_schedule`` and ``sampler`` settings, which
         ``schedule_params`` and ``sampler_params`` update.
@@ -209,7 +209,7 @@ class TransportModelObjective:
             del comm_arg
             return self.forward(network, x_arg, y_arg, condition)
 
-        return sampler.sample(x, self.initial_state(source, schedule), schedule, step, model_comm_group)
+        return sampler.sample(x, self.initial_state(noise, schedule), schedule, step, model_comm_group)
 
 
 class EDMDiffusionModelObjective(TransportModelObjective):
@@ -244,13 +244,13 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             },
         )
 
-    def initial_state(self, source: Batch, schedule: torch.Tensor) -> Batch:
-        """Scale the unit source to the largest noise level, in the schedule's precision."""
-        return source.map_data(lambda data: data.to(dtype=schedule.dtype) * schedule[0])
+    def initial_state(self, noise: Batch, schedule: torch.Tensor) -> Batch:
+        """Scale unit noise to the largest noise level, in the schedule's precision."""
+        return noise.map_data(lambda data: data.to(dtype=schedule.dtype) * schedule[0])
 
 
 class FlowMatchingModelObjective(TransportModelObjective):
-    """Flow matching: the network predicts the velocity from the source field to the target."""
+    """Flow matching: the network predicts the velocity from Gaussian noise to the target."""
 
     schedules = TIME_SCHEDULES
     samplers = transport_samplers.VECTOR_FIELD_SAMPLERS
