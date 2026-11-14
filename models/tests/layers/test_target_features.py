@@ -78,6 +78,8 @@ class FakeModelConfig:
             model.num_input_channels_prognostic[name] = len(spec.prognostic_idx)
             model.input_dim[name] = spec.input_dim
 
+        # Every dataset has its own encoder, so the encoder mapper takes the dataset's own input.
+        model.encoded_input_dim = model.input_dim.__getitem__
         return model
 
 

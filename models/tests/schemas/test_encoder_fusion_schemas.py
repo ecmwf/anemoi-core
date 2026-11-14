@@ -94,9 +94,12 @@ def test_node_embedder_target_must_be_known() -> None:
         )
 
 
-def test_joint_is_rejected_as_not_yet_supported() -> None:
-    with pytest.raises(ValueError, match="'joint' is planned but not yet supported"):
-        EncodersSchema(**_encoder(dataset_fusing_strategy="joint", node_embedder=LINEAR_NODE_EMBEDDER))
+def test_joint_ignores_a_node_embedder_with_a_warning(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        schema = EncodersSchema(**_encoder(dataset_fusing_strategy="joint", node_embedder=LINEAR_NODE_EMBEDDER))
+
+    assert schema.dataset_fusing_strategy == "joint"
+    assert "'joint'; its node embedder" in caplog.text
 
 
 def test_none_ignores_a_node_embedder_with_a_warning(caplog: pytest.LogCaptureFixture) -> None:

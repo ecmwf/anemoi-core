@@ -49,10 +49,10 @@ LOGGER = logging.getLogger(__name__)
 # - "sequential": a projecting node embedder (e.g. LinearNodeEmbedder) projects every source dataset onto a
 #   common number of input channels; each is then encoded in its own pass with the shared mapper weights, and the
 #   per-dataset latents are combined by the latent aggregator.
-SUPPORTED_FUSING_STRATEGIES = {"none", "sequential"}
-
-# Strategies that are documented but not implemented yet.
-PLANNED_FUSING_STRATEGIES = {"joint"}
+# - "joint": all source datasets sit on the same grid nodes. Their assembled inputs are joined along the
+#   features, node by node, and encoded in one pass with the encoder edges of the first source dataset, which
+#   gives one latent per encoder. The node embedder is a NoOpNodeEmbedder, as for "none".
+SUPPORTED_FUSING_STRATEGIES = {"none", "sequential", "joint"}
 
 
 class BaseGraphModel(nn.Module):
@@ -292,12 +292,6 @@ class BaseGraphModel(nn.Module):
         """
         strategy = encoder_config.get("dataset_fusing_strategy", "none")
         node_embedder_config = encoder_config.get("node_embedder")
-        if strategy in PLANNED_FUSING_STRATEGIES:
-            msg = (
-                f"Encoder '{encoder_name}' sets dataset_fusing_strategy '{strategy}', which is planned but "
-                f"not yet supported. Valid options are: {sorted(SUPPORTED_FUSING_STRATEGIES)}."
-            )
-            raise ValueError(msg)
         if strategy not in SUPPORTED_FUSING_STRATEGIES:
             msg = (
                 f"Encoder '{encoder_name}' has unsupported dataset_fusing_strategy '{strategy}'. "
@@ -313,14 +307,33 @@ class BaseGraphModel(nn.Module):
                 "      num_channels: 512"
             )
             raise ValueError(msg)
-        if strategy == "none" and not is_noop_node_embedder_config(node_embedder_config):
+        if strategy in ("none", "joint") and not is_noop_node_embedder_config(node_embedder_config):
             LOGGER.warning(
-                "Encoder '%s' uses dataset_fusing_strategy 'none'; its node embedder %s is ignored and "
+                "Encoder '%s' uses dataset_fusing_strategy '%s'; its node embedder %s is ignored and "
                 "NoOpNodeEmbedder is used instead.",
                 encoder_name,
+                strategy,
                 node_embedder_config.get("_target_"),
             )
         return strategy
+
+    def _encoded_latent_names(self) -> list[str]:
+        """Names of the latents the encoders produce, in config order.
+
+        One per source dataset, except that a 'joint' encoder produces a single latent for all its
+        source datasets, named after the first one.
+        """
+        names = []
+        for encoder_name, datasets in self.encoder2datasets.items():
+            names.extend(datasets[:1] if self.encoder_fusing_strategy[encoder_name] == "joint" else datasets)
+        return names
+
+    def _joint_follower(self, dataset_name: str) -> bool:
+        """Whether ``dataset_name`` is encoded jointly with, and on the edges of, an earlier source dataset."""
+        encoder_name = self.dataset2encoder.get(dataset_name)
+        if encoder_name is None or self.encoder_fusing_strategy[encoder_name] != "joint":
+            return False
+        return self.encoder2datasets[encoder_name][0] != dataset_name
 
     def _build_decoder_routing(self, decoders_config: DotDict) -> None:
         """Builds the dataset routing for decoders."""
@@ -359,7 +372,7 @@ class BaseGraphModel(nn.Module):
         """Build the latent aggregator."""
         latent_aggregator_channels = {
             dataset_name: self.encoder[self.dataset2encoder[dataset_name]].hidden_dim
-            for dataset_name in self.input_datasets
+            for dataset_name in self._encoded_latent_names()
         }
 
         self.latent_aggregator = instantiate(
@@ -396,6 +409,10 @@ class BaseGraphModel(nn.Module):
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
+
+        # A decoder target feature can read the input of other datasets (the joined input of a 'joint'
+        # encoder), so the target dimensions follow once every input dimension is known.
+        for dataset_name in data_indices:
             self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 

@@ -137,11 +137,13 @@ class DataLoadingPolicy(ABC):
         return [frozenset(dataset_names)]
 
     def check_encoder_fusion(self, encoders: Mapping[str, Mapping], dataset_names: Sequence[str]) -> None:
-        """Check that no 'none' encoder can receive several of its source datasets in one batch.
+        """Check that each encoder gets the source datasets its fusing strategy can encode together.
 
         An encoder with ``dataset_fusing_strategy: "none"`` does not fuse, so it may list several
         ``source_datasets`` only if no batch holds more than one of them (e.g. multi-domain
-        training). The model enforces this per batch; this check catches it before the model is built.
+        training). A ``"joint"`` encoder joins its source datasets node by node, so a batch that holds
+        one of them must hold all of them. The model enforces both per batch; this check catches them
+        before the model is built.
 
         Parameters
         ----------
@@ -153,13 +155,26 @@ class DataLoadingPolicy(ABC):
         Raises
         ------
         ValueError
-            If a batch can hold two or more source datasets of a 'none' encoder.
+            If a batch can hold two or more source datasets of a 'none' encoder, or only some of the
+            source datasets of a 'joint' encoder.
         """
         groups = self.co_loaded_datasets(dataset_names)
         for encoder_name, encoder_config in encoders.items():
-            if encoder_config.get("dataset_fusing_strategy", "none") != "none":
-                continue
+            strategy = encoder_config.get("dataset_fusing_strategy", "none")
             sources = list(encoder_config.get("source_datasets", []))
+            if strategy == "joint":
+                for group in groups:
+                    missing = [name for name in sources if name not in group]
+                    if missing and len(missing) < len(sources):
+                        msg = (
+                            f"Encoder '{encoder_name}' has dataset_fusing_strategy 'joint', which joins its source "
+                            f"datasets {sources} node by node, so every batch must hold all of them; with "
+                            f"{type(self).__name__} a batch of {sorted(group)} lacks {missing}."
+                        )
+                        raise ValueError(msg)
+                continue
+            if strategy != "none":
+                continue
             for group in groups:
                 together = [name for name in sources if name in group]
                 if len(together) > 1:

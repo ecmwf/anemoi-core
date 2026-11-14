@@ -325,7 +325,7 @@ class EncodedDataFeature(DecodingTargetFeature):
                     f'"{self.name}" requires dataset "{dataset_name}" to have an encoder. '
                     f"Update decoder.{decoder_name}.target_node_features."
                 )
-            input_dims[dataset_name] = self.model.input_dim[dataset_name]
+            input_dims[dataset_name] = self.model.encoded_input_dim(dataset_name)
         assert len(set(input_dims.values())) == 1, (
             f"Encoded data feature must have the same dimension across all datasets encoded with the same encoder. "
             f"Found dimensions: {input_dims}"
@@ -335,12 +335,13 @@ class EncodedDataFeature(DecodingTargetFeature):
     def dim(self) -> int:
         dataset_name = self.datasets_names[0]
         # An encoder whose mapper updates its source nodes (e.g. GNNForwardMapper) returns the
-        # source latent; other mappers, and projecting encoders, hand over the assembled input.
+        # source latent; other mappers, and projecting encoders, hand over the assembled input (for a
+        # 'joint' encoder, the joined input of all its source datasets).
         encoder_name = getattr(self.model, "dataset2encoder", {}).get(dataset_name)
         latent_dim = getattr(self.model, "encoder_src_latent_dim", {}).get(encoder_name)
         if latent_dim is not None and not self.model._encoder_projects_sources(encoder_name):
             return latent_dim
-        return self.model.input_dim[dataset_name]
+        return self.model.encoded_input_dim(dataset_name)
 
     def _compute(
         self,

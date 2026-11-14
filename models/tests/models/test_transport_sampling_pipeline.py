@@ -371,6 +371,8 @@ def test_transport_encodes_a_sparse_dataset_without_points_in_the_batch() -> Non
     model = _transport_model_stub()
     model.node_attributes = _EmptyNodeAttributes()
     model.encoder_graph_provider = {"obs": _EmptyGraphProvider()}
+    model.dataset2encoder = {"obs": "obs"}
+    model.encoder_fusing_strategy = {"obs": "none"}
     x = _obs_source([0], n_variables=2, value=1.0, coordinate_offset=-1.0)
     noisy_target = _obs_source([0], n_variables=1, value=5.0, coordinate_offset=1.0)
 

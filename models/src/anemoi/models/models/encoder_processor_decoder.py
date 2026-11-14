@@ -136,19 +136,29 @@ def _mismatched_edge_dims_message(encoder_name: str, edge_dims: dict[str, int]) 
     )
 
 
+def _mismatched_joint_rows_message(encoder_name: str, rows: dict[str, tuple]) -> str:
+    """Explain why the source datasets of a 'joint' encoder cannot be joined node by node."""
+    return (
+        f"Encoder '{encoder_name}' has dataset_fusing_strategy 'joint', which joins its source datasets node by "
+        "node, so they must have the same nodes, split the same way across ranks. Got (rows, shard sizes):\n"
+        + "\n".join(f"      {name}: {value}" for name, value in rows.items())
+    )
+
+
 @dataclass(frozen=True)
 class EncoderSource:
     """One source dataset, assembled and paired with its encoder edges.
 
     Produced by _prepare_encoder_source and consumed by the fusing strategies, so that
-    assembling a source is done identically however it is later encoded.
+    assembling a source is done identically however it is later encoded. A source that a
+    'joint' encoder encodes on the edges of its first source dataset has no edges of its own.
     """
 
     dataset_name: str
     x_data_latent: Tensor
     x_skip: Tensor | None
-    edge_attr: Tensor
-    edge_index: Tensor
+    edge_attr: Tensor | None
+    edge_index: Tensor | None
     shard_info: BipartiteGraphShardInfo
 
 
@@ -262,18 +272,25 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         self.encoder = torch.nn.ModuleDict()
         for encoder_name, encoder_config in encoders_config.items():
-            in_dims = {d: self.input_dim[d] for d in self.encoder2datasets[encoder_name]}
-            edge_dims = {d: self.encoder_graph_provider[d].edge_dim for d in self.encoder2datasets[encoder_name]}
+            source_datasets = self.encoder2datasets[encoder_name]
+            strategy = self.encoder_fusing_strategy[encoder_name]
+            in_dims = {d: self.input_dim[d] for d in source_datasets}
+            edge_dims = {
+                d: self.encoder_graph_provider[d].edge_dim for d in source_datasets if d in self.encoder_graph_provider
+            }
             if len(set(edge_dims.values())) > 1:
                 raise ValueError(_mismatched_edge_dims_message(encoder_name, edge_dims))
 
             node_embedder_config = encoder_config.get("node_embedder")
-            if self.encoder_fusing_strategy[encoder_name] == "none":
-                # 'none' never projects: null or another node embedder falls back to the pass-through one.
+            if strategy in ("none", "joint"):
+                # 'none' and 'joint' never project: null or another node embedder falls back to the pass-through one.
                 if node_embedder_config is None or not is_noop_node_embedder_config(node_embedder_config):
                     node_embedder_config = DotDict({"_target_": NOOP_NODE_EMBEDDER_TARGET})
-                if len(set(in_dims.values())) > 1:
-                    raise ValueError(_mismatched_input_dims_message(encoder_name, in_dims))
+            if strategy == "joint":
+                # The mapper takes the joined input of all source datasets, as one source.
+                in_dims = {source_datasets[0]: self.encoded_input_dim(source_datasets[0])}
+            elif strategy == "none" and len(set(in_dims.values())) > 1:
+                raise ValueError(_mismatched_input_dims_message(encoder_name, in_dims))
             layer_kernels = node_embedder_config.get("layer_kernels") or encoder_config.mapper.get("layer_kernels")
             node_embedder = instantiate(
                 node_embedder_config,
@@ -292,10 +309,51 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_dim=next(iter(edge_dims.values())),
             )
 
+    def encoded_input_dim(self, dataset_name: str) -> int:
+        """Input channels the encoder mapper takes for ``dataset_name``.
+
+        The dataset's assembled input channels, or for a 'joint' encoder those of all its source
+        datasets together.
+        """
+        encoder_name = self.dataset2encoder[dataset_name]
+        if self.encoder_fusing_strategy[encoder_name] == "joint":
+            return sum(self.input_dim[d] for d in self.encoder2datasets[encoder_name])
+        return self.input_dim[dataset_name]
+
+    def _check_joint_sources(self, static_graph: HeteroData, atol: float = 1e-6) -> None:
+        """Check that the source datasets of each 'joint' encoder sit on the same grid nodes.
+
+        Coordinates are compared with a tolerance, since a node set built on the output grid of a
+        spatial processor may be rounded differently from the native one.
+        """
+        for encoder_name, datasets in self.encoder2datasets.items():
+            if self.encoder_fusing_strategy[encoder_name] != "joint":
+                continue
+            tabular = [d for d in datasets if not self.is_dataset_static.get(d, True)]
+            if tabular:
+                raise ValueError(
+                    f"Encoder '{encoder_name}' has dataset_fusing_strategy 'joint', which joins its source datasets "
+                    f"node by node, but {tabular} have no fixed grid. Use 'sequential' for them."
+                )
+            lead = static_graph[datasets[0]].x
+            for dataset_name in datasets[1:]:
+                coordinates = static_graph[dataset_name].x
+                if coordinates.shape != lead.shape or not torch.allclose(coordinates, lead, rtol=0, atol=atol):
+                    raise ValueError(
+                        f"Encoder '{encoder_name}' has dataset_fusing_strategy 'joint', which joins its source "
+                        f"datasets node by node, but the nodes of '{dataset_name}' ({coordinates.shape[0]}) differ "
+                        f"from those of '{datasets[0]}' ({lead.shape[0]}). Build both node sets on the same grid, "
+                        "e.g. on the output grid of a spatial processor."
+                    )
+
     def _build_encoding_graphproviders(
         self, encoders_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict
     ) -> None:
-        """Builds the graph providers for the encoding networks."""
+        """Builds the graph providers for the encoding networks.
+
+        A dataset that a 'joint' encoder encodes on the edges of its first source dataset gets none.
+        """
+        self._check_joint_sources(static_graph)
 
         self.encoder_graph_provider = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
@@ -303,6 +361,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 LOGGER.info(
                     f"Dataset {dataset_name} is not part of the input as it doesn't have a corresponding encoder."
                 )
+                continue
+            if self._joint_follower(dataset_name):
                 continue
 
             encoder_config = encoders_config[self.dataset2encoder[dataset_name]]
@@ -669,6 +729,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         samples in its batch have observations.
         """
         data_coords, x_data_latent, x_skip, shard_sizes_data, data_batch_sizes, data_timedeltas = assembled
+        if self._joint_follower(dataset_name):
+            # Encoded on the edges of the first source dataset of its 'joint' encoder.
+            return EncoderSource(
+                dataset_name=dataset_name,
+                x_data_latent=x_data_latent,
+                x_skip=x_skip,
+                edge_attr=None,
+                edge_index=None,
+                shard_info=BipartiteGraphShardInfo(src_nodes=shard_sizes_data, dst_nodes=shard_sizes_hidden),
+            )
         if data_coords.shape[0] == 0:
             LOGGER.debug(
                 "No data points for dataset %s in the batch (data_coords.shape = %s), "
@@ -797,6 +867,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         """
         if self.encoder_fusing_strategy[encoder_name] == "none" and len(sources) > 1:
             raise ValueError(_several_sources_message(encoder_name, [source.dataset_name for source in sources]))
+        if self.encoder_fusing_strategy[encoder_name] == "joint":
+            return self._encode_joint(
+                encoder_name,
+                sources,
+                x_hidden_latent=x_hidden_latent,
+                x_data_latent_dict=x_data_latent_dict,
+                batch_size=batch_size,
+                model_comm_group=model_comm_group,
+                mapper_kwargs=mapper_kwargs,
+            )
 
         projects = self._encoder_projects_sources(encoder_name)
         latents: dict[str, Tensor] = {}
@@ -825,6 +905,52 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             latents[source.dataset_name] = x_latent
 
         return latents
+
+    def _encode_joint(
+        self,
+        encoder_name: str,
+        sources: list[EncoderSource],
+        *,
+        x_hidden_latent: Tensor,
+        x_data_latent_dict: dict[str, Tensor],
+        batch_size: int,
+        model_comm_group: ProcessGroup | None = None,
+        mapper_kwargs: dict[str, dict] | None = None,
+    ) -> dict[str, Tensor]:
+        """Encode all source datasets of a 'joint' encoder in one pass.
+
+        Their assembled inputs are joined along the features, node by node, in the order listed
+        under ``source_datasets``, and encoded with the edges (and the extra mapper arguments) of
+        the first source dataset. The one latent is named after the first source dataset. Every
+        source dataset gets the joined encoder input as its encoded data, so its decoder sees the
+        other datasets at its nodes too.
+        """
+        expected = self.encoder2datasets[encoder_name]
+        present = [source.dataset_name for source in sources]
+        if present != expected:
+            raise ValueError(
+                f"Encoder '{encoder_name}' has dataset_fusing_strategy 'joint', which needs all its source datasets "
+                f"{expected} in every batch; got {present}."
+            )
+        lead = sources[0]
+        rows = {source.dataset_name: (source.x_data_latent.shape[0], source.shard_info.src_nodes) for source in sources}
+        if any(value != rows[lead.dataset_name] for value in rows.values()):
+            raise ValueError(_mismatched_joint_rows_message(encoder_name, rows))
+
+        x_src = torch.cat([source.x_data_latent for source in sources], dim=-1)
+        x_data_latent, x_latent = self.encoder[encoder_name](
+            (x_src, x_hidden_latent),
+            batch_size=batch_size,
+            shard_info=lead.shard_info,
+            edge_attr=lead.edge_attr,
+            edge_index=lead.edge_index,
+            model_comm_group=model_comm_group,
+            keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+            **(mapper_kwargs or {}).get(lead.dataset_name, {}),
+        )
+        for source in sources:
+            x_data_latent_dict[source.dataset_name] = x_data_latent
+        return {lead.dataset_name: x_latent}
 
     def forward(
         self,

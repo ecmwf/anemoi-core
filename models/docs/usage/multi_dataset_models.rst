@@ -103,7 +103,19 @@ choose stable, descriptive names.
      source dataset. The node embedder aligns node features only: the encoder edges of
      all source datasets must still carry the same number of edge features
      (see :ref:`usage-multi-dataset-edge-features`).
-   - ``"joint"``: planned, not yet supported. Setting it raises an error.
+   - ``"joint"``: all source datasets sit on the same grid nodes, for example a
+     low-resolution dataset projected onto a high-resolution grid by its
+     ``spatial_processor`` next to the high-resolution dataset. Their assembled
+     inputs are joined along the features, node by node, in the order listed in
+     ``source_datasets``, and encoded in one pass with the encoder edges of the
+     first source dataset. The mapper's input channels are the sum of the
+     datasets' assembled input channels, and the encoder gives one latent, named
+     after the first source dataset in the latent aggregator. Only the first
+     source dataset needs ``<dataset> -> hidden`` edges in the graph. The model
+     checks that the node sets have the same coordinates, every batch must hold
+     all source datasets, and observation (tabular) datasets cannot be joined.
+     With ``encoded_data`` as a decoder target feature, each source dataset's
+     decoder gets the joined input at its nodes.
 
 ``node_embedder``
    The per-dataset input embedding applied before the encoder mapper, named by
@@ -112,9 +124,9 @@ choose stable, descriptive names.
 
    - ``NoOpNodeEmbedder`` passes each source dataset's input through unchanged,
      much like ``NoOpProcessor`` stands in for a processor. It is the node embedder
-     of ``"none"`` groups and the default. ``null`` is read as
+     of ``"none"`` and ``"joint"`` groups and the default. ``null`` is read as
      ``NoOpNodeEmbedder`` too, and any other node embedder set on a ``"none"``
-     group is ignored with a warning. It has no parameters.
+     or ``"joint"`` group is ignored with a warning. It has no parameters.
    - ``LinearNodeEmbedder`` applies one linear layer per source dataset onto a
      positive ``num_channels``. ``"sequential"`` groups need it (or another
      projecting node embedder); ``NoOpNodeEmbedder`` is rejected there. It uses
