@@ -424,7 +424,7 @@ def test_flow_matching_inference_checkpoint_round_trips(
     get_test_archive: GetTestArchive,
     partial_metadata_schema: dict[str, Any],
 ) -> None:
-    """As ``test_inference_checkpoint_round_trips``, for the flow-matching transport models (state and tendency)."""
+    """As ``test_inference_checkpoint_round_trips``, for the flow-matching transport model."""
     cfg, url = flow_matching_config
     _check_inference_checkpoint(cfg, url, get_test_archive, partial_metadata_schema)
 

@@ -145,9 +145,6 @@ def _model_config() -> DictConfig:
                     "sigma_data": 1.0,
                     "noise_channels": 8,
                     "noise_cond_dim": 4,
-                    "sigma_max": 100.0,
-                    "sigma_min": 0.02,
-                    "rho": 7.0,
                     "noise_embedder": {
                         "_target_": "anemoi.models.layers.diffusion.SinusoidalEmbeddings",
                         "num_channels": 8,

@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from pydantic import ValidationError
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
@@ -149,9 +150,14 @@ def test_config_validation_flow_matching(flow_matching_config: tuple[DictConfig,
     BaseSchema(**cfg)
 
 
-def test_config_validation_transport_model_configs(transport_model_config: tuple[DictConfig, str]) -> None:
-    cfg, _ = transport_model_config
-    BaseSchema(**cfg)
+def test_config_validation_rejects_a_training_condition_of_the_other_objective(
+    flow_matching_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = flow_matching_config
+    cfg.training.transport.training_condition = {"distribution": "karras", "sigma_max": 1.0, "sigma_min": 0.1}
+
+    with pytest.raises(ValidationError, match="'karras', which is not one of its distributions"):
+        BaseSchema(**cfg)
 
 
 def test_config_validation_multidatasets_transport(

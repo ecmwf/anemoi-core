@@ -343,6 +343,37 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
         return self
 
     @model_validator(mode="after")
+    def check_training_condition_matches_transport_objective(self) -> Self:
+        """Check that the training distribution of the noise level or time suits the model's objective.
+
+        The objective is set in the model config and the distribution in the training config, so a model of one
+        objective can be combined with the training config of the other; this catches it before anything is built.
+        """
+        transport = getattr(self.training, "transport", None)
+        model_transport = getattr(self.model.model, "transport", None)
+        if transport is None or model_transport is None:
+            return self
+        # Imported here: the distribution registries live with the model code.
+        from anemoi.models.transport.schedules import SIGMA_TRAINING_DISTRIBUTIONS
+        from anemoi.models.transport.schedules import TIME_TRAINING_DISTRIBUTIONS
+
+        registries = {"edm_diffusion": SIGMA_TRAINING_DISTRIBUTIONS, "flow_matching": TIME_TRAINING_DISTRIBUTIONS}
+        objective = model_transport.objective
+        distribution = transport.training_condition.get("distribution")
+        allowed = registries.get(objective, {})
+        if distribution not in allowed:
+            # The training configs are named after their objective.
+            msg = (
+                f"model.model.transport.objective is {objective!r}, but training.transport.training_condition."
+                f"distribution is {distribution!r}, which is not one of its distributions "
+                f"({', '.join(sorted(allowed))}). Use the training config of the same objective, "
+                f"training={objective} (or multi_{objective} for several datasets)."
+            )
+            error = "transport_training_condition_mismatch"
+            raise PydanticCustomError(error, msg)
+        return self
+
+    @model_validator(mode="after")
     def check_bounding_not_used_with_data_extractor_zero(self) -> Self:
         """Check that bounding is not used with zero data extractor."""
         bounding = self.model.bounding

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import torch
+from omegaconf import DictConfig
 
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.transport.settings import EdmSettings
@@ -23,11 +24,13 @@ if TYPE_CHECKING:
 
 def _module() -> SimpleNamespace:
     return SimpleNamespace(
-        model=SimpleNamespace(
-            model=SimpleNamespace(
-                edm=EdmSettings(sigma_data=0.5),
-                training_condition={"distribution": "linear", "sigma_max": 1.0, "sigma_min": 0.1},
-            ),
+        model=SimpleNamespace(model=SimpleNamespace(edm=EdmSettings(sigma_data=0.5))),
+        config=DictConfig(
+            {
+                "training": {
+                    "transport": {"training_condition": {"distribution": "linear", "sigma_max": 1.0, "sigma_min": 0.1}},
+                },
+            },
         ),
         model_comm_group=None,
     )
@@ -35,11 +38,7 @@ def _module() -> SimpleNamespace:
 
 def _fm_module() -> SimpleNamespace:
     return SimpleNamespace(
-        model=SimpleNamespace(
-            model=SimpleNamespace(
-                training_condition={"distribution": "uniform_time"},
-            ),
-        ),
+        config=DictConfig({"training": {"transport": {"training_condition": {"distribution": "uniform_time"}}}}),
         model_comm_group=None,
     )
 

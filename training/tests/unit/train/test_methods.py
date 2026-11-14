@@ -33,11 +33,14 @@ from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.layers.graph import StaticGraphGeometry
+from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.imputer import InputImputer
 from anemoi.models.preprocessing.normalizer import InputNormalizer
 from anemoi.models.transport import EdmSettings
+from anemoi.models.transport.objectives import EDMDiffusionModelObjective
+from anemoi.models.transport.objectives import FlowMatchingModelObjective
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
@@ -164,7 +167,6 @@ class DummyTransportModel(DummyModel):
     def __init__(self) -> None:
         super().__init__()
         self.edm = EdmSettings(sigma_data=0.5)
-        self.training_condition = {"distribution": "karras", "sigma_max": 4.0, "sigma_min": 1.0, "rho": 7.0}
         self.target_datasets = ["data"]
 
     def __call__(
@@ -546,12 +548,15 @@ def test_spatial_processor_target_grid_skips_without_processors() -> None:
 
 # Shared minimal configs
 _CFG_EMPTY = DictConfig(
-    {"training": {"transport": {"prediction_mode": "state", "objective": "flow_matching"}}},
+    {"training": {"transport": {"training_condition": {"distribution": "uniform_time"}}}},
 )
 _CFG_DIFFUSION = DictConfig(
     {
-        "training": {"transport": {"prediction_mode": "state", "objective": "edm_diffusion"}},
-        "model": {"model": {"transport": {"rho": 7.0}}},
+        "training": {
+            "transport": {
+                "training_condition": {"distribution": "karras", "sigma_max": 4.0, "sigma_min": 1.0, "rho": 7.0},
+            },
+        },
     },
 )
 
@@ -850,13 +855,7 @@ def _value_batch(data: dict[str, torch.Tensor | list[torch.Tensor]]) -> Batch:
 
 
 def _flow_matching_module() -> SimpleNamespace:
-    return SimpleNamespace(
-        model=SimpleNamespace(
-            model=SimpleNamespace(
-                training_condition={"distribution": "uniform_time"},
-            ),
-        ),
-    )
+    return SimpleNamespace(config=_CFG_EMPTY)
 
 
 def test_flow_matching_prepare_builds_state_and_velocity(
@@ -2479,7 +2478,6 @@ def test_flow_matching_training_uses_model_output_target_layout(
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
     transport_model = DummyTransportModel()
-    transport_model.training_condition = {"distribution": "uniform_time"}
     forecaster.model = _DummyTransportWrapper(transport_model)
     forecaster._prediction_mode = StatePredictionMode(forecaster)
     forecaster._transport_objective = FlowMatchingTransportObjective(forecaster)
@@ -2639,7 +2637,6 @@ def test_flow_matching_tendency_training_step_uses_model_output_velocity_target(
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
     transport_model = DummyTransportModel()
-    transport_model.training_condition = {"distribution": "uniform_time"}
     forecaster.model = _DummyTransportWrapper(transport_model)
     forecaster._transport_objective = FlowMatchingTransportObjective(forecaster)
     forecaster.is_first_step = False
@@ -3023,7 +3020,7 @@ def test_tendency_prediction_mode_requires_tendency_model() -> None:
     mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
     mode.module = SimpleNamespace(model=SimpleNamespace(model=object()), statistics_tendencies={})
 
-    with pytest.raises(TypeError, match="requires a tendency transport model"):
+    with pytest.raises(TypeError, match="needs a tendency transport model"):
         mode._resolve_tendency_statistics()
 
 
@@ -3247,15 +3244,6 @@ def test_single_compute_metrics_produces_per_step_key_suffix(
     assert set(metrics_step0.keys()).isdisjoint(set(metrics_step1.keys()))
 
 
-def test_state_prediction_mode_rejects_a_tendency_model() -> None:
-    """A tendency model in state mode would read its sampled states as tendencies at inference."""
-    tendency_model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
-    module = SimpleNamespace(model=SimpleNamespace(model=tendency_model))
-
-    with pytest.raises(TypeError, match="prediction_mode='state' needs a state transport model"):
-        StatePredictionMode(module)
-
-
 @pytest.mark.parametrize(
     "loss",
     [
@@ -3275,3 +3263,45 @@ def test_edm_transport_accepts_pointwise_losses() -> None:
     objective = EDMDiffusionTransportObjective(MagicMock(spec=TransportTraining))
 
     objective.check_losses({"data": MSELoss(), "obs": CombinedLoss(MSELoss(), MAELoss())})
+
+
+@pytest.mark.parametrize(
+    ("model_cls", "mode_cls"),
+    [
+        pytest.param(AnemoiTransportModelEncProcDec, StatePredictionMode, id="state_model"),
+        pytest.param(AnemoiTransportTendModelEncProcDec, TendencyPredictionMode, id="tendency_model"),
+    ],
+)
+def test_transport_training_takes_the_prediction_mode_from_the_model_class(
+    model_cls: type[AnemoiTransportModelEncProcDec],
+    mode_cls: type[StatePredictionMode | TendencyPredictionMode],
+) -> None:
+    module = TransportTraining.__new__(TransportTraining)
+    module.model = SimpleNamespace(model=model_cls.__new__(model_cls))
+
+    assert module._get_prediction_mode_cls() is mode_cls
+
+
+def test_transport_training_rejects_a_model_with_an_unknown_prediction_mode() -> None:
+    module = TransportTraining.__new__(TransportTraining)
+    module.model = SimpleNamespace(model=SimpleNamespace(prediction_mode="residual"))
+
+    with pytest.raises(ValueError, match="declares the prediction mode 'residual'"):
+        module._get_prediction_mode_cls()
+
+
+@pytest.mark.parametrize(
+    ("model_objective", "objective_cls"),
+    [
+        pytest.param(EDMDiffusionModelObjective(), EDMDiffusionTransportObjective, id="edm_diffusion"),
+        pytest.param(FlowMatchingModelObjective(), FlowMatchingTransportObjective, id="flow_matching"),
+    ],
+)
+def test_transport_training_takes_the_objective_from_the_model(
+    model_objective: EDMDiffusionModelObjective | FlowMatchingModelObjective,
+    objective_cls: type[EDMDiffusionTransportObjective | FlowMatchingTransportObjective],
+) -> None:
+    module = TransportTraining.__new__(TransportTraining)
+    module.model = SimpleNamespace(model=SimpleNamespace(transport_model_objective=model_objective))
+
+    assert module._get_transport_objective_cls() is objective_cls

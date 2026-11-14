@@ -135,12 +135,15 @@ class TransportObjective:
 
     @cached_property
     def distribution(self) -> Any:
-        """The training distribution of the noise level or time, built the first time it is needed."""
-        settings = dict(self.module.model.model.training_condition)
+        """The training distribution of the noise level or time, built the first time it is needed.
+
+        It is set by ``training.transport.training_condition``.
+        """
+        settings = dict(self.module.config.training.transport.training_condition)
         try:
             distribution_name = settings.pop("distribution")
         except KeyError as exc:
-            msg = f"{self.name} training_condition must define 'distribution'."
+            msg = f"{self.name} training.transport.training_condition must define 'distribution'."
             raise ValueError(msg) from exc
         return build_registered(
             self.distributions,

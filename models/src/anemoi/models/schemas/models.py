@@ -86,12 +86,12 @@ class SparseProjectorSchema(BaseModel):
 
 
 class TransportConfig(BaseModel):
-    """Configuration of the transport objective, path, conditioning and inference.
+    """Configuration of the transport objective, conditioning and inference.
 
     The defaults of ``sigma_data`` and of the noise conditioning map 1:1 to :class:`EdmSettings`
     and :class:`NoiseConditioningSettings` in ``anemoi.models.transport.settings`` and are restated
-    here so that importing the schemas does not pull in the model code. ``sigma_max``, ``sigma_min``
-    and ``rho`` are read by the config, which interpolates them into ``training_condition``.
+    here so that importing the schemas does not pull in the model code. The distribution of the noise
+    level or time drawn during training is a training setting, ``training.transport.training_condition``.
     """
 
     objective: Literal["edm_diffusion", "flow_matching"] = "edm_diffusion"
@@ -102,14 +102,6 @@ class TransportConfig(BaseModel):
     "Number of channels in the noise-level or time embedding."
     noise_cond_dim: PositiveInt = Field(default=16, examples=[16])
     "Size of the conditioning vector passed to conditional layers."
-    sigma_max: PositiveFloat = Field(default=100.0, examples=[100.0])
-    "Largest EDM noise level of the training distribution; the included configs interpolate it into training_condition."
-    sigma_min: PositiveFloat = Field(default=0.02, examples=[0.02])
-    "Smallest EDM noise level of the training distribution; the included configs interpolate it into training_condition."
-    rho: PositiveFloat = Field(default=7.0, examples=[7.0])
-    "Karras shape parameter of the training distribution; inference_defaults sets the sampling schedule separately."
-    training_condition: dict = Field(default_factory=dict)
-    "Distribution used to sample one training noise level or time per sample."
     noise_embedder: dict = Field(default_factory=dict)
     "Hydra configuration for embedding the current noise level or time."
     inference_defaults: dict = Field(default_factory=dict)

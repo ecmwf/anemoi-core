@@ -16,6 +16,8 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
+from anemoi.models.transport.objectives import EDMDiffusionModelObjective
+from anemoi.models.transport.objectives import FlowMatchingModelObjective
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
@@ -60,18 +62,6 @@ class PredictionMode:
 
 class StatePredictionMode(PredictionMode):
     """Prediction mode where the model learns the future state directly."""
-
-    def __init__(self, module: TransportTraining) -> None:
-        super().__init__(module)
-        model = self.module.model.model
-        if isinstance(model, AnemoiTransportTendModelEncProcDec):
-            msg = (
-                "training.transport.prediction_mode='state' needs a state transport model "
-                "(AnemoiTransportModelEncProcDec), got AnemoiTransportTendModelEncProcDec, which reads its sampled "
-                "output as a tendency at inference. Use prediction_mode 'tendency' with this model, or a state "
-                "model config."
-            )
-            raise TypeError(msg)
 
     def prepare_target(
         self,
@@ -134,7 +124,7 @@ class TendencyPredictionMode(PredictionMode):
         """Return the tendency statistics of each output step, per dataset."""
         if not isinstance(self._tendency_model, AnemoiTransportTendModelEncProcDec):
             msg = (
-                "training.transport.prediction_mode='tendency' requires a tendency transport model "
+                "The tendency prediction mode needs a tendency transport model "
                 f"(AnemoiTransportTendModelEncProcDec), got {type(self._tendency_model).__name__}."
             )
             raise TypeError(msg)
@@ -230,9 +220,10 @@ PREDICTION_MODE_CLASSES = {
 }
 
 
+# The training-side objective that goes with each model-side objective.
 TRANSPORT_OBJECTIVE_CLASSES = {
-    "edm_diffusion": EDMDiffusionTransportObjective,
-    "flow_matching": FlowMatchingTransportObjective,
+    EDMDiffusionModelObjective: EDMDiffusionTransportObjective,
+    FlowMatchingModelObjective: FlowMatchingTransportObjective,
 }
 
 
@@ -246,8 +237,9 @@ class TransportTraining(BaseTrainingModule):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._validate_single_step_task()
+        # The model decides both: its class says whether it predicts states or tendencies, and its
+        # objective says how the target is made noisy.
         self._prediction_mode = self._get_prediction_mode_cls()(self)
-        self._validate_model_transport_objective()
         self._transport_objective = self._get_transport_objective_cls()(self)
         self._transport_objective.check_losses(self.loss)
 
@@ -265,11 +257,15 @@ class TransportTraining(BaseTrainingModule):
             raise ValueError(msg)
 
     def _get_prediction_mode_cls(self) -> type[PredictionMode]:
-        prediction_mode = self.config.training.transport.prediction_mode
+        model = self.model.model
+        prediction_mode = getattr(model, "prediction_mode", None)
         try:
             return PREDICTION_MODE_CLASSES[prediction_mode]
         except KeyError as exc:
-            msg = f"Unknown training.transport.prediction_mode '{prediction_mode}'."
+            msg = (
+                f"{type(model).__name__} declares the prediction mode {prediction_mode!r}; transport training "
+                f"supports {', '.join(PREDICTION_MODE_CLASSES)}."
+            )
             raise ValueError(msg) from exc
 
     @property
@@ -390,25 +386,12 @@ class TransportTraining(BaseTrainingModule):
 
         return loss, metrics_next, y_pred
 
-    def _validate_model_transport_objective(self) -> None:
-        """Check that training and inference use the same transport objective."""
-        training_objective = self.config.training.transport.objective
-        model_config = getattr(getattr(self.config, "model", None), "model", None)
-        model_transport_config = getattr(model_config, "transport", None)
-        model_objective = getattr(model_transport_config, "objective", None)
-        if model_objective is not None and model_objective != training_objective:
-            msg = (
-                "training.transport.objective must match model.model.transport.objective "
-                f"({training_objective!r} != {model_objective!r})."
-            )
-            raise ValueError(msg)
-
     def _get_transport_objective_cls(self) -> type[TransportObjective]:
-        transport_objective = self.config.training.transport.objective
+        model_objective = self.model.model.transport_model_objective
         try:
-            return TRANSPORT_OBJECTIVE_CLASSES[transport_objective]
+            return TRANSPORT_OBJECTIVE_CLASSES[type(model_objective)]
         except KeyError as exc:
-            msg = f"Unknown training.transport.objective '{transport_objective}'."
+            msg = f"No transport training objective for the model objective {type(model_objective).__name__}."
             raise ValueError(msg) from exc
 
     @property

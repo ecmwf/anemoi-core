@@ -8,13 +8,10 @@ model:
   hidden_nodes_name: "hidden"
   latent_skip: True
   transport:
-    objective: edm_diffusion
+    # The entry config sets the objective and its sampling defaults (inference_defaults).
     sigma_data: 1.0
     noise_channels: 32
     noise_cond_dim: 16
-    sigma_max: 100.0
-    sigma_min: 0.02
-    rho: 7.0
     noise_embedder:
       _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
       num_channels: ${model.model.transport.noise_channels}
@@ -25,7 +22,7 @@ layer_kernels:
   LayerNorm:
     _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
     normalized_shape: ${model.num_channels}
-    condition_shape: 16
+    condition_shape: ${model.model.transport.noise_cond_dim}
     zero_init: True
     autocast: false
   Linear:
@@ -148,12 +145,9 @@ attributes:
 #       section of code it can't compile. When False, it will fallback to
 #       non-compiled ("eager") execution for those lines.
 # options (dict): a dict of further options which can be passed to torch.compile
-compile:
-  - module: anemoi.models.layers.conv.GraphTransformerConv
-    #options: # An example of setting torch.compile options
-      #dynamic: false
-      #mode: max-autotune
-  - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+# Nothing is compiled for now: compiled modules inside the activation-checkpointed mappers raise a
+# CheckpointError on torch 2.9 and 2.10.
+compile: []
 
 # Bounding configuration
 bounding:

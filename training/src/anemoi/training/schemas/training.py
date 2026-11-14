@@ -914,16 +914,16 @@ class EnsembleTrainingSchema(BaseTrainingSchema):
 
 
 class TransportTrainingConfigSchema(BaseModel):
-    prediction_mode: Literal["state", "tendency"] = "state"
-    "Endpoint semantics for the transport objective."
-    objective: Literal["edm_diffusion", "flow_matching"] = "edm_diffusion"
-    "Transport objective used to perturb targets and train the model."
+    training_condition: dict = Field(..., examples=[{"distribution": "karras", "sigma_max": 100.0}])
+    """Distribution of the noise level (EDM) or time (flow matching) drawn once per sample and member during
+    training: ``distribution`` names a registered distribution, the other keys are its settings. The objective
+    and the prediction mode come from the model."""
 
 
 class TransportTrainingSchema(BaseTrainingSchema):
     method: TransportTrainingMethodSchema
     "Training method."
-    transport: TransportTrainingConfigSchema = Field(default_factory=TransportTrainingConfigSchema)
+    transport: TransportTrainingConfigSchema
     "Transport training configuration."
 
 

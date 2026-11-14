@@ -84,7 +84,7 @@ class EDMDiffusionTransportObjective(TransportObjective):
                 msg = (
                     f"EDM diffusion weights each sample's loss by its noise level, but the training loss of dataset "
                     f"'{dataset_name}' leaves the weights unused ({', '.join(ignoring)}). Use a loss that applies "
-                    "them, such as anemoi.training.losses.MSELoss, as in training/edm_diffusion.yaml."
+                    "them, such as anemoi.training.losses.MSELoss, the default of training/transport.yaml."
                 )
                 raise ValueError(msg)
 

@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
+from typing import ClassVar
 from typing import Optional
 
 import einops
@@ -83,6 +84,9 @@ def _second_blocks(joined: torch.Tensor, first_sizes: Sequence[int], second_size
 class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     """Encoder-processor-decoder model conditioned on diffusion noise level or flow-matching time."""
 
+    # What the model learns, which sets how training prepares its targets: the future state itself.
+    prediction_mode: ClassVar[str] = "state"
+
     def __init__(
         self,
         *,
@@ -100,7 +104,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         transport_params = model_config.model.transport
         self.noise_conditioning = NoiseConditioningSettings.from_config(transport_params)
         self.edm = EdmSettings.from_config(transport_params)
-        self.training_condition = dict(transport_params.get("training_condition", {}))
         self.noise_channels = self.noise_conditioning.channels
         self.noise_cond_dim = self.noise_conditioning.cond_dim
         self.inference_defaults = transport_params.get("inference_defaults", {})
@@ -844,6 +847,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
 class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     """Transport model that predicts tendencies and converts them back to state fields."""
+
+    prediction_mode: ClassVar[str] = "tendency"
 
     def __init__(
         self,
