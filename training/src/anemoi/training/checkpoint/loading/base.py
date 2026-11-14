@@ -276,6 +276,74 @@ def _inject_model_weights(
 # ---------------------------------------------------------------------------
 
 
+def _training_worker_count(config: Any) -> int | None:
+    """Return the configured training worker count, if it is usable."""
+    workers = getattr(getattr(config, "dataloader", None), "num_workers", None)
+    desired = getattr(workers, "training", None)
+    if desired is None and isinstance(workers, dict):
+        desired = workers.get("training")
+    if desired is None or int(desired) <= 0:
+        return None
+    return int(desired)
+
+
+def _fit_loader_states(checkpoint: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return serialized loader states from Lightning's fit-loop state."""
+    combined_loader = checkpoint.get("loops", {}).get("fit_loop", {}).get("state_dict", {}).get("combined_loader", {})
+    values = combined_loader.values() if isinstance(combined_loader, dict) else combined_loader
+    if not isinstance(values, (list, tuple)) and not hasattr(values, "__iter__"):
+        return []
+    return [value for value in values if isinstance(value, dict)]
+
+
+def reconcile_stateful_dataloader_workers(checkpoint: dict[str, Any], config: Any) -> None:
+    """Keep a map-style loader resume valid when ``num_workers`` changes.
+
+    ``torchdata.StatefulDataLoader`` stores the worker count alongside the
+    stateful index sampler and rejects the checkpoint when the next allocation
+    uses a different count.  The index sampler is the authoritative source of
+    the consumed batch position for Anemoi's map-style datasets; worker
+    snapshots only hold per-process delivery state.  Update that topology while
+    retaining the sampler position, initializing newly added workers without a
+    snapshot and discarding snapshots for workers that no longer exist.
+
+    Iterable datasets cannot in general be repartitioned without changing their
+    stream, so snapshots without a stateful index sampler are deliberately left
+    untouched and retain torchdata's strict failure.
+    """
+    desired = _training_worker_count(config)
+    if desired is None:
+        return
+
+    for loader_state in _fit_loader_states(checkpoint):
+        snapshot = loader_state.get("_snapshot")
+        if not isinstance(snapshot, dict):
+            continue
+        main_snapshot = snapshot.get("_main_snapshot")
+        if not isinstance(main_snapshot, dict) or main_snapshot.get("_index_sampler_state") is None:
+            continue
+        previous = main_snapshot.get("_num_workers")
+        if previous is None or int(previous) == desired:
+            continue
+
+        worker_snapshots = snapshot.get("_worker_snapshots")
+        if isinstance(worker_snapshots, dict) and len(worker_snapshots) > desired:
+            snapshot["_worker_snapshots"] = {
+                f"worker_{worker_id}": worker_snapshots[f"worker_{worker_id}"]
+                for worker_id in range(desired)
+                if f"worker_{worker_id}" in worker_snapshots
+            }
+        last_worker = snapshot.get("_last_yielded_worker_id")
+        if isinstance(last_worker, int):
+            snapshot["_last_yielded_worker_id"] = last_worker % desired
+        main_snapshot["_num_workers"] = desired
+        LOGGER.warning(
+            "Reconciled StatefulDataLoader worker topology from %s to %d while preserving index-sampler progress",
+            previous,
+            desired,
+        )
+
+
 def apply_checkpoint_corrections(
     checkpoint: dict[str, Any] | None,
     model: nn.Module | None,
@@ -285,10 +353,12 @@ def apply_checkpoint_corrections(
 
     The one place the load-time corrections live, in one fixed order:
 
-    1. ``chunking_fix`` — only when the processor declares the geometry it reads
+    1. StatefulDataLoader worker topology — only for a stateful map-style index
+       sampler when the configured training worker count changed;
+    2. ``chunking_fix`` — only when the processor declares the geometry it reads
        (see :func:`_chunking_fix_applicable`);
-    2. ``trainable_edge_perm_fix`` — takes the live model;
-    3. :func:`refresh_checkpoint_processors` — driven by
+    3. ``trainable_edge_perm_fix`` — takes the live model;
+    4. :func:`refresh_checkpoint_processors` — driven by
        ``config.training.update_ds_stats_on_ckpt_load``.
 
     Each migration's return value is the checkpoint the next step works on.
@@ -326,6 +396,7 @@ def apply_checkpoint_corrections(
     if checkpoint is None:
         return checkpoint
 
+    reconcile_stateful_dataloader_workers(checkpoint, config)
     if _chunking_fix_applicable(checkpoint):
         checkpoint = _chunking_fix(checkpoint)
     else:

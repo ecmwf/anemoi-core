@@ -142,6 +142,72 @@ def test_missing_config_disables_the_refresh() -> None:
     assert torch.all(corrected["state_dict"]["model.pre_processors.weight"] == 99.0)
 
 
+def _loader_checkpoint(*, workers: int, sampler_state: object = None) -> dict[str, Any]:
+    if sampler_state is None:
+        sampler_state = {"batches_yielded": 800}
+    return {
+        "loops": {
+            "fit_loop": {
+                "state_dict": {
+                    "combined_loader": {
+                        "0": {
+                            "_snapshot": {
+                                "_last_yielded_worker_id": workers - 1,
+                                "_main_snapshot": {
+                                    "_num_workers": workers,
+                                    "_index_sampler_state": sampler_state,
+                                },
+                                "_worker_snapshots": {
+                                    f"worker_{worker}": {"worker_id": worker} for worker in range(workers)
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+
+def test_stateful_loader_workers_increase_preserves_sampler_progress(caplog: pytest.LogCaptureFixture) -> None:
+    checkpoint = _loader_checkpoint(workers=1)
+    config = OmegaConf.create({"dataloader": {"num_workers": {"training": 11}}})
+
+    with caplog.at_level(logging.WARNING):
+        corrected = apply_checkpoint_corrections(checkpoint, None, config)
+
+    snapshot = corrected["loops"]["fit_loop"]["state_dict"]["combined_loader"]["0"]["_snapshot"]
+    assert snapshot["_main_snapshot"]["_num_workers"] == 11
+    assert snapshot["_main_snapshot"]["_index_sampler_state"] == {"batches_yielded": 800}
+    assert snapshot["_worker_snapshots"] == {"worker_0": {"worker_id": 0}}
+    assert any("worker topology from 1 to 11" in record.getMessage() for record in caplog.records)
+
+
+def test_stateful_loader_workers_decrease_drops_only_removed_worker_snapshots() -> None:
+    checkpoint = _loader_checkpoint(workers=3)
+    config = OmegaConf.create({"dataloader": {"num_workers": {"training": 2}}})
+
+    corrected = apply_checkpoint_corrections(checkpoint, None, config)
+
+    snapshot = corrected["loops"]["fit_loop"]["state_dict"]["combined_loader"]["0"]["_snapshot"]
+    assert snapshot["_main_snapshot"]["_num_workers"] == 2
+    assert list(snapshot["_worker_snapshots"]) == ["worker_0", "worker_1"]
+    assert snapshot["_last_yielded_worker_id"] == 0
+
+
+def test_iterable_loader_worker_topology_remains_strict() -> None:
+    checkpoint = _loader_checkpoint(workers=1)
+    checkpoint["loops"]["fit_loop"]["state_dict"]["combined_loader"]["0"]["_snapshot"]["_main_snapshot"][
+        "_index_sampler_state"
+    ] = None
+    config = OmegaConf.create({"dataloader": {"num_workers": {"training": 11}}})
+
+    corrected = apply_checkpoint_corrections(checkpoint, None, config)
+
+    snapshot = corrected["loops"]["fit_loop"]["state_dict"]["combined_loader"]["0"]["_snapshot"]
+    assert snapshot["_main_snapshot"]["_num_workers"] == 1
+
+
 def test_refresh_without_an_inner_model_keeps_the_processor_entries(caplog: pytest.LogCaptureFixture) -> None:
     """Dropping without re-injecting would leave a strict load missing keys, so nothing is dropped.
 
