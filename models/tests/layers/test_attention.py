@@ -23,6 +23,7 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.attention import PointwiseMultiHeadCrossAttention
+from anemoi.models.layers.attention import SDPAAttentionWrapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.triton.utils import is_triton_available
 
@@ -298,3 +299,26 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
         assert peak_alloc_memory_after_sliding_window_mb <= peak_alloc_memory_after_global_mb, (
             "Sliding window attention should not use more memory than global attention"
         )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="The fused attention kernels need a GPU.")
+def test_sdpa_wrapper_runs_one_head_with_any_head_stride() -> None:
+    """One head per rank leaves the head axis with stride 1, which the fused kernel rejects unless the wrapper fixes it."""
+
+    def heads(seq: int, head_stride: int) -> torch.Tensor:
+        base = torch.randn(1, 1, seq, 4, device="cuda")
+        return base.as_strided((1, 1, seq, 4), (seq * 4, head_stride, 4, 1)).requires_grad_()
+
+    torch.manual_seed(0)
+    query, key, value = heads(7, 1), heads(5, 1), heads(5, 1)
+    wrapper = SDPAAttentionWrapper()
+
+    out = wrapper(query, key, value, batch_size=1)
+    out.sum().backward()
+
+    # Fresh tensors have the usual strides.
+    expected = torch.nn.functional.scaled_dot_product_attention(
+        *(torch.empty(t.shape, device="cuda").copy_(t.detach()) for t in (query, key, value)),
+    )
+    torch.testing.assert_close(out.detach(), expected)
+    assert query.grad is not None
