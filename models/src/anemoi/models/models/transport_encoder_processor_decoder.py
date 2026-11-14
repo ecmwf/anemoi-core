@@ -847,7 +847,16 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
 
 class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
-    """Transport model that predicts tendencies and converts them back to state fields."""
+    """Transport model that predicts tendencies and converts them back to state fields.
+
+    A tendency is the change of a predicted dataset against a reference state. By default the
+    reference is the dataset's own latest input. ``model.residual_reference`` can name another
+    dataset for it (``{<predicted dataset>: <reference dataset>}``), such as a low-resolution
+    dataset projected onto the predicted dataset's grid by a spatial preprocessor. The reference
+    is built from that dataset's input by its own residual connection (``model.residual``), and
+    the predicted dataset's outputs that the reference dataset has as inputs under the same name
+    are learned as tendencies (:meth:`residual_variables`). The other outputs are learned as states.
+    """
 
     prediction_mode: ClassVar[str] = "tendency"
 
@@ -865,6 +874,15 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         model_config = DotDict(model_config)
 
         self.condition_on_residual = model_config.condition_on_residual
+        configured_references = dict(model_config.get("residual_reference") or {})
+        other_references = {target: ref for target, ref in configured_references.items() if ref != target}
+        if self.condition_on_residual and other_references:
+            msg = (
+                "condition_on_residual reads a dataset's own residual connection, so it cannot be combined with "
+                f"tendency references from other datasets ({other_references})."
+            )
+            raise ValueError(msg)
+
         super().__init__(
             model_config=model_config,
             static_graph_data=static_graph_data,
@@ -874,6 +892,60 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )
+
+        self.residual_reference = self._resolve_residual_reference(configured_references)
+
+    def _resolve_residual_reference(self, configured_references: Mapping[str, str]) -> dict[str, str]:
+        """Return the reference dataset of every predicted dataset, checking the configured ones."""
+        unknown_targets = sorted(set(configured_references) - set(self.target_datasets))
+        if unknown_targets:
+            raise ValueError(
+                f"model.residual_reference names datasets the model does not predict: {unknown_targets}. "
+                f"Predicted datasets: {self.target_datasets}."
+            )
+        references = {target: configured_references.get(target, target) for target in self.target_datasets}
+        for target, reference in references.items():
+            if reference not in self.data_indices:
+                raise ValueError(
+                    f"Dataset '{target}' takes its tendency reference from '{reference}', which is not a dataset "
+                    f"of the model ({list(self.data_indices)})."
+                )
+            if reference not in self.residual:
+                raise ValueError(
+                    f"Dataset '{target}' takes its tendency reference from '{reference}', which needs a residual "
+                    f"connection: add model.residual.datasets.{reference}."
+                )
+            if reference == target:
+                continue
+            if target in self.residual:
+                raise ValueError(
+                    f"Dataset '{target}' takes its tendency reference from '{reference}', built by the residual "
+                    f"connection of '{reference}', so nothing uses model.residual.datasets.{target}; remove it."
+                )
+            if not self.residual_variables(target, reference):
+                raise ValueError(
+                    f"Dataset '{target}' takes its tendency reference from '{reference}', but none of its output "
+                    f"variables is an input of '{reference}'."
+                )
+        return references
+
+    def residual_variables(self, dataset_name: str, reference_name: str | None = None) -> list[str]:
+        """Output variables of ``dataset_name`` learned as tendencies, in model output order.
+
+        These are the outputs that the reference dataset has as model inputs under the same name.
+        For a dataset that is its own reference, they are its prognostic variables.
+
+        Parameters
+        ----------
+        dataset_name : str
+            Predicted dataset.
+        reference_name : str, optional
+            Its reference dataset; by default the one in :attr:`residual_reference`.
+        """
+        if reference_name is None:
+            reference_name = self.residual_reference[dataset_name]
+        reference_inputs = set(self.data_indices[reference_name].model.input.ordered_names)
+        return [name for name in self.data_indices[dataset_name].model.output.ordered_names if name in reference_inputs]
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         input_dim = super()._calculate_input_dim(dataset_name)
@@ -935,6 +1007,8 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
         ``statistics_tendencies`` holds one statistics mapping per lead time, listed in order under
         ``"lead_times"``. Each mapping has per-variable arrays over the dataset's full variable set.
+        The values of the variables learned as tendencies (:meth:`residual_variables`) must be finite;
+        the other variables are learned as states and their values are not read.
         """
         n_step_output = self.n_step_output[dataset_name]
         if statistics_tendencies is None:
@@ -953,18 +1027,31 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         missing = [lead_time for lead_time in lead_times if statistics_tendencies.get(lead_time) is None]
         if missing:
             raise ValueError(f"Missing tendency statistics for dataset '{dataset_name}', lead times {missing}.")
+
+        name_to_index = self.data_indices[dataset_name].name_to_index
+        residual_variables = self.residual_variables(dataset_name)
+        positions = [name_to_index[name] for name in residual_variables]
+        for lead_time in lead_times:
+            for key, values in statistics_tendencies[lead_time].items():
+                finite = np.isfinite(np.asarray(values, dtype=np.float64)[positions])
+                if not finite.all():
+                    bad = [name for name, ok in zip(residual_variables, finite, strict=True) if not ok]
+                    raise ValueError(
+                        f"Tendency statistics '{key}' of dataset '{dataset_name}' at lead time {lead_time} are "
+                        f"missing or not finite for variables {bad}."
+                    )
         return [statistics_tendencies[lead_time] for lead_time in lead_times]
 
     def _as_tendency(self, dataset_name: str, source: "Source", tendency_statistics: Mapping) -> "Source":
-        """Return ``source`` with the tendency statistics on its prognostic variables.
+        """Return ``source`` with the tendency statistics on the variables learned as tendencies.
 
-        The other variables (diagnostics) keep their state statistics: the model predicts them as states.
+        The other variables keep their state statistics: the model predicts them as states.
         Statistic keys without a tendency counterpart are dropped, so a processor that needs them fails
         instead of normalising a tendency with state statistics.
         """
         data_indices = self.data_indices[dataset_name]
-        prognostic = set(data_indices.prognostic)
-        positions = [position for position, name in enumerate(source.variables) if name in prognostic]
+        residual = set(self.residual_variables(dataset_name))
+        positions = [position for position, name in enumerate(source.variables) if name in residual]
         full_positions = [data_indices.name_to_index[source.variables[position]] for position in positions]
 
         statistics = {}
@@ -976,15 +1063,13 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             statistics[key] = mixed
         return source.clone(statistics=statistics)
 
-    def _prognostic_positions(self, dataset_name: str, state: "Source", reference: "Source") -> tuple[list, list]:
-        """Positions of the prognostic variables of ``state`` in ``state`` and in ``reference``."""
-        prognostic = set(self.data_indices[dataset_name].prognostic)
-        names = [name for name in state.variables if name in prognostic]
+    def _residual_positions(self, dataset_name: str, state: "Source", reference: "Source") -> tuple[list, list]:
+        """Positions of the variables of ``state`` learned as tendencies, in ``state`` and in ``reference``."""
+        residual = set(self.residual_variables(dataset_name))
+        names = [name for name in state.variables if name in residual]
         missing = [name for name in names if name not in reference.name_to_index]
         if missing:
-            raise ValueError(
-                f"The tendency reference of dataset '{dataset_name}' lacks prognostic variables {missing}."
-            )
+            raise ValueError(f"The tendency reference of dataset '{dataset_name}' lacks variables {missing}.")
         return [state.name_to_index[name] for name in names], [reference.name_to_index[name] for name in names]
 
     def reference_state(
@@ -992,28 +1077,35 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         x: Batch,
         grid_shard_sizes: DatasetShardSizes | None,
         model_comm_group: Optional[ProcessGroup],
+        post_processors: nn.ModuleDict,
     ) -> Batch:
-        """Return the tendency reference: the latest input state, truncated like the residual.
+        """Return the tendency reference of every predicted dataset, in physical units.
 
-        ``x`` holds the normalised model inputs. Each returned source is ``(batch, 1, ensemble, grid,
-        variables)`` over the prognostic input variables, with their statistics. Datasets the model
-        only reads have no tendency and get no reference.
+        ``x`` holds the normalised model inputs. The reference of a predicted dataset is built from
+        the latest input of its reference dataset (:attr:`residual_reference`), passed through that
+        dataset's residual connection and converted to physical units with that dataset's
+        post-processors, which match its normalisation. It holds the variables learned as tendencies
+        (:meth:`residual_variables`), as ``(batch, 1, ensemble, grid, variables)``. Missing values stay
+        missing, and the processors that apply to predicted states only (output constraints) are
+        not applied. Datasets the model only reads have no tendency and get no reference.
         """
-        predicted = {name: source for name, source in x.items() if name in self.target_datasets}
-        truncated = self.apply_residual_connections(
-            {name: source.data for name, source in predicted.items()},
-            grid_shard_sizes,
-            model_comm_group,
-        )
-        return x.with_sources(
-            {
-                name: source.clone(
-                    data=truncated[name][:, -1:],
-                    **source._select_variable_metadata(self.data_indices[name].model.input.prognostic),
-                )
-                for name, source in predicted.items()
-            },
-        )
+        references = {}
+        for target in self.target_datasets:
+            reference_name = self.residual_reference[target]
+            source = x[reference_name]
+            shard_sizes = grid_shard_sizes[reference_name] if grid_shard_sizes is not None else None
+            connected = self.residual[reference_name](
+                source.data, shard_sizes, model_comm_group, n_step_output=self.n_step_output[target]
+            )
+            assert connected.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+            positions = [source.name_to_index[name] for name in self.residual_variables(target)]
+            reference = source.clone(
+                data=connected[..., positions][:, -1:], **source._select_variable_metadata(positions)
+            )
+            references[target] = post_processors[reference_name](
+                reference, in_place=False, skip_imputation=True, skip_output_constraints=True
+            )
+        return x.with_sources(references)
 
     def compute_tendency(
         self,
@@ -1026,9 +1118,10 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     ) -> "Source":
         """Turn normalised output states into normalised tendencies.
 
-        The prognostic variables of each output step are un-normalised, the reference is subtracted,
-        and the result is normalised again as a source carrying that step's tendency statistics
-        (:meth:`_as_tendency`). Diagnostic variables stay normalised states. The processors leave
+        The variables learned as tendencies (:meth:`residual_variables`) of each output step are
+        un-normalised, the reference is subtracted, and the result is normalised again as a source
+        carrying that step's tendency statistics (:meth:`_as_tendency`). The other variables stay
+        normalised states. The processors leave
         missing values missing, so a gap in a state stays a gap in its tendency. The tendency is the
         raw change of the data, matching its statistics: the processors that apply to states only
         (output constraints such as ReLU bounds, and remappings such as ``sqrt``) are not applied to it,
@@ -1041,7 +1134,8 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         state : Source
             Normalised states, ``(batch, time, ensemble, grid, variables)`` with one time step per output step.
         reference : Source
-            Normalised reference state ``(batch, 1, ensemble, grid, variables)``, see :meth:`reference_state`.
+            Reference state in physical units, ``(batch, 1, ensemble, grid, variables)``, see
+            :meth:`reference_state`.
         tendency_statistics : list[Mapping]
             Tendency statistics of each output step, see :meth:`tendency_statistics`.
         pre_processors, post_processors : nn.Module
@@ -1059,19 +1153,14 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 f"Dataset '{dataset_name}' has {state.time_size} output steps but "
                 f"{len(tendency_statistics)} tendency statistics."
             )
-        state_positions, reference_positions = self._prognostic_positions(dataset_name, state, reference)
-        prognostic = torch.as_tensor(state_positions, dtype=torch.long, device=state.device)
+        state_positions, reference_positions = self._residual_positions(dataset_name, state, reference)
+        residual = torch.as_tensor(state_positions, dtype=torch.long, device=state.device)
 
-        # Only the prognostic variables have tendencies; the diagnostics are copied from ``state``.
+        # Only the variables learned as tendencies change; the others are copied from ``state``.
         state_physical = post_processors(
             state.select_variables(state_positions), in_place=False, skip_imputation=True, skip_output_constraints=True
         )
-        reference_physical = post_processors(
-            reference.select_variables(reference_positions),
-            in_place=False,
-            skip_imputation=True,
-            skip_output_constraints=True,
-        ).data
+        reference_physical = reference.select_variables(reference_positions).data
 
         steps = []
         for step, statistics in enumerate(tendency_statistics):
@@ -1084,7 +1173,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 tendency=True,
             ).data
             step_output = state.select(time=[step]).data
-            steps.append(step_output.index_copy(-1, prognostic, normalised.to(step_output.dtype)))
+            steps.append(step_output.index_copy(-1, residual, normalised.to(step_output.dtype)))
         return state.clone(data=torch.cat(steps, dim=1))
 
     def add_tendency_to_state(
@@ -1099,8 +1188,8 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         """Turn normalised tendencies back into states; the inverse of :meth:`compute_tendency`.
 
         The processors leave missing values missing, as in :meth:`compute_tendency`. As there, the
-        prognostic tendencies are converted without the processors that apply to states only
-        (``Processors(..., tendency=True)``), and the diagnostics are converted as states. Output
+        tendencies are converted without the processors that apply to states only
+        (``Processors(..., tendency=True)``), and the variables learned as states are converted as states. Output
         constraints (post-processors such as ReLU bounds) are not applied to the rebuilt states either:
         they constrain predicted states, so apply them by post-processing the normalised states (pass
         ``pre_processors``) like any state prediction, as :meth:`_sampled_to_physical` does.
@@ -1110,7 +1199,8 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         dataset_name : str
             Dataset of ``tendency``.
         reference : Source
-            Normalised reference state ``(batch, 1, ensemble, grid, variables)``, see :meth:`reference_state`.
+            Reference state in physical units, ``(batch, 1, ensemble, grid, variables)``, see
+            :meth:`reference_state`.
         tendency : Source
             Normalised tendencies, one time step per output step, carrying the state statistics of its variables.
         tendency_statistics : list[Mapping]
@@ -1133,34 +1223,29 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 f"Dataset '{dataset_name}' has {tendency.time_size} output steps but "
                 f"{len(tendency_statistics)} tendency statistics."
             )
-        tendency_positions, reference_positions = self._prognostic_positions(dataset_name, tendency, reference)
-        prognostic_set = set(tendency_positions)
-        diagnostic_positions = [i for i in range(tendency.n_variables) if i not in prognostic_set]
-        prognostic = torch.as_tensor(tendency_positions, dtype=torch.long, device=tendency.device)
-        diagnostic = torch.as_tensor(diagnostic_positions, dtype=torch.long, device=tendency.device)
-        reference_physical = post_processors(
-            reference.select_variables(reference_positions),
-            in_place=False,
-            skip_imputation=True,
-            skip_output_constraints=True,
-        ).data
+        tendency_positions, reference_positions = self._residual_positions(dataset_name, tendency, reference)
+        residual_set = set(tendency_positions)
+        state_positions = [i for i in range(tendency.n_variables) if i not in residual_set]
+        residual = torch.as_tensor(tendency_positions, dtype=torch.long, device=tendency.device)
+        as_state = torch.as_tensor(state_positions, dtype=torch.long, device=tendency.device)
+        reference_physical = reference.select_variables(reference_positions).data
 
         steps = []
         for step, statistics in enumerate(tendency_statistics):
             step_view = tendency.select(time=[step])
             step_tendency = self._as_tendency(dataset_name, step_view.select_variables(tendency_positions), statistics)
-            prognostic_state = post_processors(step_tendency, in_place=False, skip_imputation=True, tendency=True).data
-            prognostic_state = prognostic_state + reference_physical.to(prognostic_state.dtype)
-            physical = prognostic_state.new_empty(step_view.data.shape)
-            physical.index_copy_(-1, prognostic, prognostic_state)
-            if diagnostic_positions:
-                diagnostic_state = post_processors(
-                    step_view.select_variables(diagnostic_positions),
+            residual_state = post_processors(step_tendency, in_place=False, skip_imputation=True, tendency=True).data
+            residual_state = residual_state + reference_physical.to(residual_state.dtype)
+            physical = residual_state.new_empty(step_view.data.shape)
+            physical.index_copy_(-1, residual, residual_state)
+            if state_positions:
+                predicted_state = post_processors(
+                    step_view.select_variables(state_positions),
                     in_place=False,
                     skip_imputation=True,
                     skip_output_constraints=True,
                 ).data
-                physical.index_copy_(-1, diagnostic, diagnostic_state.to(physical.dtype))
+                physical.index_copy_(-1, as_state, predicted_state.to(physical.dtype))
             steps.append(physical)
 
         state = tendency.clone(data=torch.cat(steps, dim=1))
@@ -1180,7 +1265,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> Batch:
-        """Turn sampled tendencies into states in physical units, added to the latest input state.
+        """Turn sampled tendencies into states in physical units, added to the tendency reference.
 
         The processors that apply to states only (output constraints such as ReLU bounds, and
         remappings, whose domains bound the states) apply to the states, not to the tendencies: when
@@ -1196,6 +1281,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             x,
             {name: source.grid_shard_sizes for name, source in x.items()},
             model_comm_group,
+            post_processors,
         )
 
         def to_physical(dataset_name: str, tendency: "Source") -> "Source":
@@ -1222,40 +1308,3 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         return sampled.with_sources(
             {dataset_name: to_physical(dataset_name, tendency) for dataset_name, tendency in sampled.items()},
         )
-
-    def apply_residual_connections(
-        self,
-        x: dict[str, torch.Tensor],
-        grid_shard_sizes: DatasetShardSizes | None,
-        model_comm_group: Optional[ProcessGroup],
-    ) -> dict[str, torch.Tensor]:
-        """Project the latest input state to the variables needed as the tendency reference.
-
-        The tendency model predicts changes relative to this reference state.
-
-        Parameters
-        ----------
-        x : dict[str, torch.Tensor]
-            Input tensor with shape {dataset_name: (batch, time, ensemble, grid, variables)}.
-        grid_shard_sizes : DatasetShardSizes
-            Per-dataset grid shard sizes used when the model grid is sharded.
-        model_comm_group : ProcessGroup
-            Communication group used by model-parallel grid sharding.
-
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Reference states containing the prognostic input variables.
-        """
-        x_skips = {}
-
-        for dataset_name, in_x in x.items():
-            grid_shard_sizes_i = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
-            x_skip = self.residual[dataset_name](
-                in_x, grid_shard_sizes_i, model_comm_group, n_step_output=self.n_step_output[dataset_name]
-            )
-            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
-            # Keep only prognostic input variables, matching the tendency reference state.
-            x_skips[dataset_name] = x_skip[..., self.data_indices[dataset_name].model.input.prognostic]
-
-        return x_skips

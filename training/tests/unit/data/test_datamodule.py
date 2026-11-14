@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
 import pytorch_lightning as pl
 import torch
@@ -20,7 +21,9 @@ from pytest_mock import MockFixture
 from torch.utils.data import Dataset
 from torch.utils.data import default_collate
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+from anemoi.training.data.residual_statistics import RESIDUAL_STATISTICS_KEYS
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.tasks.base import BaseTask
@@ -82,6 +85,8 @@ def _make_datamodule(
                 "persistent_workers": persistent_workers,
                 "loading_policy": {"_target_": "anemoi.training.data.loading.SynchronizedLoadingPolicy"},
             },
+            "data": {"datasets": {"data": {}}},
+            "model": {},
         },
     )
     return datamodule
@@ -137,6 +142,39 @@ def test_temporal_downscaler_uses_cumulative_tendency_statistics_per_lead_time(m
         },
     }
     assert [call.args[0] for call in reader.statistics_tendencies.call_args_list] == ["2h", "4h"]
+
+
+def test_residual_statistics_file_replaces_tendency_statistics_for_every_lead_time(
+    mocker: MockFixture,
+    tmp_path: Path,
+) -> None:
+    """A dataset with ``residual_statistics`` takes them from the file for every step; its reader is not asked."""
+    task = Forecaster(multistep_input=1, multistep_output=2, timestep="6h")
+    datamodule = _make_datamodule(task)
+    reader = _attach_statistics_reader(datamodule, mocker)
+    path = tmp_path / "residual_statistics.npz"
+    np.savez(path, **{key: np.array({"a": 1.0, "b": 2.0}, dtype=object) for key in RESIDUAL_STATISTICS_KEYS})
+    datamodule.config.data.datasets.data.residual_statistics = str(path)
+    datamodule.__dict__["data_indices"] = {
+        "data": IndexCollection(DictConfig({"forcing": ["f"]}), {"a": 0, "f": 1, "b": 2}),
+    }
+
+    statistics = datamodule.statistics_tendencies["data"]
+
+    assert statistics["lead_times"] == ["6h", "12h"]
+    assert statistics["6h"] is statistics["12h"]
+    np.testing.assert_array_equal(statistics["6h"]["mean"], [1.0, np.nan, 2.0])
+    reader.statistics_tendencies.assert_not_called()
+
+
+def test_reference_from_another_dataset_needs_residual_statistics(mocker: MockFixture) -> None:
+    """Tendencies against another dataset cannot use the dataset's own tendency statistics."""
+    datamodule = _make_datamodule(Forecaster(multistep_input=1, multistep_output=1, timestep="6h"))
+    _attach_statistics_reader(datamodule, mocker)
+    datamodule.config.model.residual_reference = {"data": "lres"}
+
+    with pytest.raises(ValueError, match=r"Datasets \['data'\] take their tendency reference from another dataset"):
+        _ = datamodule.statistics_tendencies
 
 
 @pytest.mark.parametrize(

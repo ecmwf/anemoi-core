@@ -105,7 +105,10 @@ class StatePredictionMode(PredictionMode):
 
 
 class TendencyPredictionMode(PredictionMode):
-    """Prediction mode where the model learns changes from the latest input state.
+    """Prediction mode where the model learns changes against a reference state.
+
+    The reference is the latest input of the dataset itself or of another dataset, see
+    ``AnemoiTransportTendModelEncProcDec.reference_state``.
 
     A tendency is normalised like any other source, by the state processors, as a source
     carrying the tendency statistics of its lead time; see
@@ -151,11 +154,12 @@ class TendencyPredictionMode(PredictionMode):
             msg = "Tendency prediction mode is not implemented for predicting sparse observation datasets."
             raise NotImplementedError(msg)
 
-        # The latest input state, which turns states into tendencies and tendencies back into states.
+        # The reference state in physical units, which turns states into tendencies and back.
         reference = self._tendency_model.reference_state(
             x,
             {name: self.module._grid_shard_sizes(view) for name, view in x.items()},
             self.module.model_comm_group,
+            self.module.model.post_processors,
         )
 
         def tendencies(states: Batch) -> Batch:

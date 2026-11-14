@@ -432,7 +432,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_sizes = x_flat.shard_sizes
         batch_sizes = gathered_batch_sizes(x_flat.batch_sizes, grid_shard_sizes)
 
-        if dataset_name in self.residual:
+        # Only a dataset with a decoder has outputs to add its residual connection to. A dataset the model
+        # only reads can still have one, to build the reference another dataset's tendencies are taken against.
+        if dataset_name in self.residual and dataset_name in self.dataset2decoder:
             x_skip = self.residual[dataset_name](
                 x.data,
                 grid_shard_sizes=grid_shard_sizes,

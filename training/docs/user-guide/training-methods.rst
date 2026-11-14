@@ -369,6 +369,49 @@ and switches to :class:`AnemoiTransportTendModelEncProcDec`, with a skip
 connection from the latest input state. Both objectives start from Gaussian
 noise.
 
+Tendencies against another dataset
+----------------------------------
+
+By default the tendency model learns each predicted dataset's change
+against its own latest input. ``model.residual_reference`` takes the
+reference from another dataset instead, for example a low-resolution
+dataset projected onto the high-resolution grid by its
+``spatial_processor``:
+
+.. code:: yaml
+
+   model:
+     residual_reference:
+       hres: lres
+     residual:
+       datasets:
+         lres:
+           _target_: anemoi.models.layers.residual.SkipConnection
+           step: -1
+
+   data:
+     datasets:
+       hres:
+         residual_statistics: /path/to/residual_statistics.npz
+
+-  The outputs of ``hres`` that ``lres`` has as inputs under the same name
+   are learned as residuals: the ``hres`` value minus the latest ``lres``
+   input. The other outputs of ``hres`` are learned as states.
+-  The reference is built by the residual connection of the reference
+   dataset (``model.residual.datasets.lres``) and converted to physical
+   units with that dataset's processors, so the two datasets can be
+   normalised differently. A residual connection for ``hres`` would not be
+   used and is rejected.
+-  The residuals are normalised with the statistics in
+   ``residual_statistics``: an ``.npz`` file with ``mean``, ``minimum``,
+   ``maximum`` and ``stdev`` entries, each a ``{variable: value}`` mapping.
+   They are used for every output step. A dataset with a reference from
+   another dataset needs this file.
+-  Remappings such as ``sqrt`` and output constraints act on states only,
+   so they do not act on residuals, and a residual is not kept positive.
+-  ``condition_on_residual`` cannot be combined with a reference from
+   another dataset.
+
 Flow matching
 =============
 

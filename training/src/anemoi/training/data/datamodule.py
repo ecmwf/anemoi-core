@@ -25,6 +25,7 @@ from anemoi.training.data.loading import DataLoadingPolicy
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.readers import create_reader
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
+from anemoi.training.data.residual_statistics import load_residual_statistics
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.seeding import SeedContext
@@ -78,11 +79,42 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None] | None:
-        """Return tendency statistics from all training datasets."""
+        """Return tendency statistics from all training datasets.
+
+        A dataset that sets ``data.datasets.<name>.residual_statistics`` takes them from that file, the
+        same for every lead time; the others from their reader. A dataset that takes its tendency
+        reference from another dataset (``model.residual_reference``) must set the file: its own
+        tendency statistics describe changes over time, not differences to the other dataset.
+        """
         lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
+        data_config = get_multiple_datasets_config(self.config.data)
+
+        references = self.config.model.get("residual_reference") or {}
+        without_file = sorted(
+            target
+            for target, reference in references.items()
+            if reference != target and data_config[target].get("residual_statistics") is None
+        )
+        if without_file:
+            msg = (
+                f"Datasets {without_file} take their tendency reference from another dataset "
+                "(model.residual_reference) and need data.datasets.<name>.residual_statistics."
+            )
+            raise ValueError(msg)
 
         stats_by_dataset: dict[str, dict | None] = {}
         for dataset_name, reader in self.ds_train.data_readers.items():
+            path = data_config[dataset_name].get("residual_statistics")
+            if path is not None:
+                residual_statistics = load_residual_statistics(
+                    path,
+                    list(self.data_indices[dataset_name].name_to_index),
+                )
+                stats_by_dataset[dataset_name] = {
+                    **dict.fromkeys(lead_times, residual_statistics),
+                    "lead_times": lead_times,
+                }
+                continue
             stats_by_lead = {lead_time: reader.statistics_tendencies(lead_time) for lead_time in lead_times}
             if all(stats is None for stats in stats_by_lead.values()):
                 stats_by_dataset[dataset_name] = None
