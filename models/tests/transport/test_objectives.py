@@ -92,34 +92,52 @@ def test_inference_override_keeps_the_other_defaults() -> None:
         inference_defaults={"sampling_schedule": {"schedule_type": "karras", "rho": 7.0, "num_steps": 50}},
     )
 
-    config = objectives._get_inference_config(model.inference_defaults, "sampling_schedule", {"num_steps": 20})
+    config = objectives._get_inference_config(
+        model.inference_defaults,
+        "sampling_schedule",
+        {"num_steps": 20},
+        "schedule_type",
+    )
+
+    assert config == {"schedule_type": "karras", "rho": 7.0, "num_steps": 20}
+
+    config = objectives._get_inference_config(
+        model.inference_defaults,
+        "sampling_schedule",
+        {"schedule_type": "karras", "num_steps": 20},
+        "schedule_type",
+    )
 
     assert config == {"schedule_type": "karras", "rho": 7.0, "num_steps": 20}
 
 
-def test_inference_override_of_another_schedule_type_keeps_the_settings_it_takes() -> None:
-    """Switching from Karras to linear keeps the noise range and step count; the Karras ``rho`` is left out."""
-    model = SimpleNamespace(
-        inference_defaults={
-            "sampling_schedule": {
-                "schedule_type": "karras",
-                "sigma_max": 1.0,
-                "sigma_min": 0.25,
-                "rho": 7.0,
-                "num_steps": 4,
-            },
-        },
-    )
+KARRAS_DEFAULTS = {
+    "sampling_schedule": {"schedule_type": "karras", "sigma_max": 1.0, "sigma_min": 0.25, "rho": 7.0, "num_steps": 4},
+}
 
+
+def test_inference_override_of_another_schedule_type_uses_only_its_own_settings() -> None:
+    """Switching from Karras to linear starts from the override alone; the Karras defaults are not carried over."""
     schedule = objectives._build_inference_schedule(
-        model.inference_defaults,
+        KARRAS_DEFAULTS,
         SIGMA_SCHEDULES,
         "test schedule",
-        {"schedule_type": "linear"},
+        {"schedule_type": "linear", "sigma_max": 1.0, "sigma_min": 0.25, "num_steps": 3},
         torch.device("cpu"),
     )
 
-    torch.testing.assert_close(schedule, torch.tensor([1.0, 0.75, 0.5, 0.25, 0.0], dtype=torch.float64))
+    torch.testing.assert_close(schedule, torch.tensor([1.0, 0.625, 0.25, 0.0], dtype=torch.float64))
+
+
+def test_inference_override_of_another_schedule_type_must_give_its_settings() -> None:
+    with pytest.raises(TypeError, match="sigma_max"):
+        objectives._build_inference_schedule(
+            KARRAS_DEFAULTS,
+            SIGMA_SCHEDULES,
+            "test schedule",
+            {"schedule_type": "linear", "num_steps": 3},
+            torch.device("cpu"),
+        )
 
 
 def test_edm_preconditioning_gives_unit_variance_inputs_and_targets() -> None:

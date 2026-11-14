@@ -90,12 +90,22 @@ def edm_preconditioning(
     return c_skip, c_out, c_in, c_noise
 
 
-def _get_inference_config(inference_defaults: Mapping, section: str, overrides: Optional[dict]) -> dict:
-    """Return the settings of the sampler or schedule: the model's defaults, updated with ``overrides``."""
+def _get_inference_config(
+    inference_defaults: Mapping,
+    section: str,
+    overrides: Optional[dict],
+    selector: str,
+) -> dict:
+    """Return the settings of the sampler or schedule.
+
+    An override of the same type, or one that names no type in ``selector``, updates the model's defaults. An
+    override that names another type replaces them, since the defaults are the settings of their own type.
+    """
     defaults = inference_defaults.get(section)
     config = dict(defaults) if defaults is not None else {}
     if overrides is not None:
-        config.update(overrides)
+        switches_type = selector in overrides and overrides[selector] != config.get(selector)
+        config = dict(overrides) if switches_type else {**config, **overrides}
     LOGGER.debug("%s_config: %s", section, config)
     return config
 
@@ -127,7 +137,7 @@ def _build_inference_schedule(
     schedule_params: Optional[dict],
     device: torch.device,
 ) -> torch.Tensor:
-    schedule_config = _get_inference_config(inference_defaults, "sampling_schedule", schedule_params)
+    schedule_config = _get_inference_config(inference_defaults, "sampling_schedule", schedule_params, "schedule_type")
     scheduler = _build_from_config(schedule_config, "schedule_type", registry, context)
     return scheduler.get_schedule(device, _sampling_dtype(device))
 
@@ -139,7 +149,7 @@ def _build_inference_sampler(
     sampler_params: Optional[dict],
     dtype: torch.dtype,
 ) -> Any:
-    sampler_config = _get_inference_config(inference_defaults, "sampler", sampler_params)
+    sampler_config = _get_inference_config(inference_defaults, "sampler", sampler_params, "sampler")
     return _build_from_config(sampler_config, "sampler", registry, context, dtype=dtype)
 
 

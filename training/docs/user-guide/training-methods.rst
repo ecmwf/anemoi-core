@@ -429,6 +429,11 @@ Default sampler settings live under
 
 These defaults can be overridden at inference time with
 ``schedule_params`` and ``sampler_params`` passed to ``predict_step``.
+An override of the same ``schedule_type`` or ``sampler`` (or one that names
+none) changes only the settings it gives. An override that names another
+type replaces the defaults and must give that type's own settings, for
+example ``{"schedule_type": "linear", "sigma_max": 100.0, "sigma_min": 0.02,
+"num_steps": 20}``; a setting the new type does not take is an error.
 For flow matching, use the same structure with
 ``sampling_schedule.schedule_type: unit_time`` and a vector-field sampler
 such as ``heun`` or ``euler``.
