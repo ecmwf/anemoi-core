@@ -1,0 +1,37 @@
+# Modifications for the spatial downscaler template "spatial_downscaler.yaml"
+#
+# lres: O48 ERA5 (2t, 10u, 10v, tp), projected onto O96
+# hres: O96 forcings and targets from the ERA5 testing dataset (2t, 10u, 10v, tp, all learned as residuals)
+system:
+  input:
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    dataset_lres: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o48-2017-2017-6h-v1-testing.zarr
+    truncation: anemoi-integration-tests/training/assets/o48-o96-linear.mat.npz
+    # Written to a temporary directory by the fixture.
+    residual_statistics: null
+
+# Two snapshots, each downscaled against the lres snapshot at the same time.
+task:
+  offsets: ["0H", "6H"]
+
+dataloader:
+  training:
+    datasets:
+      lres:
+        end: 2017-01-08 12:00:00
+      hres:
+        end: 2017-01-08 12:00:00
+  validation:
+    datasets:
+      lres:
+        start: 2017-01-08 18:00:00
+        end: null
+      hres:
+        start: 2017-01-08 18:00:00
+        end: null
+  test:
+    datasets:
+      lres:
+        start: 2017-01-08 18:00:00
+      hres:
+        start: 2017-01-08 18:00:00

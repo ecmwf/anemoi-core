@@ -1,0 +1,63 @@
+# Graph of the spatial downscaler. The spatial processor projects lres onto the hres grid before the
+# encoder, so both data node sets are built on the hres grid. The joint encoder joins lres and hres
+# node by node and uses the lres encoder edges; the decoder predicts hres.
+overwrite: True
+
+nodes:
+  hres:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${dataloader.training.datasets.hres.dataset_config}
+    attributes: ${graph.attributes.nodes}
+  lres:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      # The output grid of lres's spatial processor: the hres grid.
+      dataset: ${dataloader.training.datasets.hres.dataset_config}
+    attributes: ${graph.attributes.nodes}
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.TriNodes
+      resolution: 5
+
+edges:
+# Encoder
+- source_name: "lres"
+  target_name: "hidden"
+  edge_builders:
+  - _target_: anemoi.graphs.edges.CutOffEdges
+    cutoff_factor: 0.7
+  attributes: ${graph.attributes.edges}
+# Processor
+- source_name: "hidden"
+  target_name: "hidden"
+  edge_builders:
+  - _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
+    scale_resolutions: ${graph.nodes.hidden.node_builder.resolution}
+  attributes: ${graph.attributes.edges}
+# Decoder
+- source_name: "hidden"
+  target_name: "hres"
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 3
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+
+attributes:
+  nodes:
+    area_weight:
+      _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+      norm: unit-max
+      fill_value: 0
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+
+post_processors: []

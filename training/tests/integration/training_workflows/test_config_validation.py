@@ -167,6 +167,13 @@ def test_config_validation_multidatasets_transport(
     BaseSchema(**cfg)
 
 
+def test_config_validation_spatial_downscaler(
+    spatial_downscaler_config: tuple[DictConfig, list[str], list[str]],
+) -> None:
+    cfg, _, _ = spatial_downscaler_config
+    BaseSchema(**cfg)
+
+
 def test_config_validation_temporal_downscaler_ensemble(
     temporal_downscaler_ensemble_config: tuple[DictConfig, str],
 ) -> None:

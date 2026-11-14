@@ -15,6 +15,7 @@ from omegaconf import open_dict
 
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
+from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import skip_if_offline
 from tests.integration.helpers import assert_keys_exist
 
@@ -289,6 +290,25 @@ def test_training_cycle_multidatasets_transport(
     cfg, urls = multidatasets_transport_config
     for url in urls:
         get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_spatial_downscaler(
+    spatial_downscaler_config: tuple[DictConfig, list[str], list[str]],
+    get_test_archive: GetTestArchive,
+    get_test_data: GetTestData,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
+    """Training cycle of the spatial downscaler (O48 to O96, two snapshots)."""
+    cfg, urls, test_data_paths = spatial_downscaler_config
+    for url in urls:
+        get_test_archive(url)
+    for path in test_data_paths:
+        get_test_data(path)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, partial_metadata_schema)

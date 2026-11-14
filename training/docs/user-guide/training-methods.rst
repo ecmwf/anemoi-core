@@ -420,6 +420,12 @@ dataset projected onto the high-resolution grid by its
 -  ``condition_on_residual`` cannot be combined with a reference from
    another dataset.
 
+``spatial_downscaler.yaml`` sets up a spatial downscaler this way: ``lres``
+is read only and projected onto the ``hres`` grid by its
+``spatial_processor``, ``hres`` has the forcings as inputs and the fields
+to downscale as outputs only, and one ``joint`` encoder joins ``lres`` and
+``hres`` node by node.
+
 Flow matching
 =============
 

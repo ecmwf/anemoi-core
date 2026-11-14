@@ -1,0 +1,54 @@
+# Spatial downscaling with EDM diffusion: the model predicts the high-resolution dataset hres from the
+# low-resolution dataset lres, projected onto the hres grid, and the hres forcings. The fields lres
+# also has are learned as residuals against it (model.residual_reference).
+defaults:
+- data: downscaling
+- dataloader: downscaling
+- diagnostics: evaluation
+- system: example
+- graph: downscaling
+- model: graphtransformer_transport_downscaler
+- task: spatial_downscaler
+- training: downscaling
+- _self_
+
+config_validation: True
+
+system:
+  input:
+    # High-resolution dataset (hres: forcings and the fields to downscale).
+    dataset: ???
+    # Low-resolution dataset (lres).
+    dataset_lres: ???
+    # Sparse projection matrix (.npz) from the lres grid onto the hres grid, used by lres's spatial processor.
+    truncation: ???
+    # Normalisation statistics of the residuals hres - lres (.npz), see data.datasets.hres.residual_statistics.
+    residual_statistics: ???
+
+diagnostics:
+  plot:
+    # The plot callbacks for downscaling are not set up yet.
+    callbacks: []
+
+model:
+  model:
+    transport:
+      objective: edm_diffusion
+      inference_defaults:
+        sampling_schedule:
+          schedule_type: karras
+          sigma_max: 100.0
+          sigma_min: 0.02
+          rho: 7.0
+          num_steps: 50
+        sampler:
+          sampler: heun
+
+training:
+  transport:
+    # Noise level drawn once per sample and ensemble member during training.
+    training_condition:
+      distribution: karras
+      sigma_max: 100.0
+      sigma_min: 0.02
+      rho: 7.0
