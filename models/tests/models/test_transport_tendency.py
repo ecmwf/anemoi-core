@@ -16,6 +16,7 @@ from anemoi.models.data import Batch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.layers.residual import BaseResidualConnection
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.imputer import InputImputer
@@ -35,7 +36,7 @@ class IdentityProcessor(torch.nn.Module):
         return x
 
 
-class DummyResidual(torch.nn.Module):
+class DummyResidual(BaseResidualConnection):
     def forward(
         self,
         x: torch.Tensor,
@@ -48,7 +49,7 @@ class DummyResidual(torch.nn.Module):
         return x
 
 
-class ConstantResidual(torch.nn.Module):
+class ConstantResidual(BaseResidualConnection):
     """Residual connection that returns fixed values, whatever its input."""
 
     def __init__(self, values: torch.Tensor) -> None:

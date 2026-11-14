@@ -927,7 +927,30 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                     f"Dataset '{target}' takes its tendency reference from '{reference}', but none of its output "
                     f"variables is an input of '{reference}'."
                 )
+            self._check_reference_steps(target, reference)
         return references
+
+    def _check_reference_steps(self, target: str, reference: str) -> None:
+        """Check that each output step of ``target`` has a step of the reference from another dataset.
+
+        The two datasets describe the same times, so output step i is taken against input step i of the
+        reference dataset. With several output steps this needs a residual connection that pairs the steps
+        (``SkipConnection`` with ``step: matching``) and as many reference input steps as output steps.
+        """
+        n_step_output = self.n_step_output[target]
+        n_step_reference = self.n_step_input[reference]
+        if self.residual[reference].pairs_output_steps:
+            if n_step_reference != n_step_output:
+                raise ValueError(
+                    f"Dataset '{target}' takes output step i against input step i of '{reference}', but has "
+                    f"{n_step_output} output steps and '{reference}' has {n_step_reference} input steps."
+                )
+        elif n_step_output > 1:
+            raise ValueError(
+                f"Dataset '{target}' has {n_step_output} output steps and takes its tendency reference from "
+                f"'{reference}', so output step i is taken against input step i of '{reference}': set "
+                f"model.residual.datasets.{reference} to a SkipConnection with step: matching."
+            )
 
     def residual_variables(self, dataset_name: str, reference_name: str | None = None) -> list[str]:
         """Output variables of ``dataset_name`` learned as tendencies, in model output order.
@@ -1072,6 +1095,25 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             raise ValueError(f"The tendency reference of dataset '{dataset_name}' lacks variables {missing}.")
         return [state.name_to_index[name] for name in names], [reference.name_to_index[name] for name in names]
 
+    @staticmethod
+    def _reference_steps(
+        dataset_name: str, reference: "Source", positions: list[int], n_steps: int
+    ) -> list[torch.Tensor]:
+        """The reference values of the variables at ``positions`` for each of the ``n_steps`` output steps.
+
+        Each entry is ``(batch, 1, ensemble, grid, variables)``. A reference with one time step serves
+        every output step; otherwise it has one step per output step.
+        """
+        if reference.time_size not in (1, n_steps):
+            raise ValueError(
+                f"The tendency reference of dataset '{dataset_name}' has {reference.time_size} time steps; "
+                f"expected 1 or one per output step ({n_steps})."
+            )
+        data = reference.select_variables(positions).data
+        if reference.time_size == 1:
+            return [data] * n_steps
+        return [data[:, step : step + 1] for step in range(n_steps)]
+
     def reference_state(
         self,
         x: Batch,
@@ -1082,26 +1124,30 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         """Return the tendency reference of every predicted dataset, in physical units.
 
         ``x`` holds the normalised model inputs. The reference of a predicted dataset is built from
-        the latest input of its reference dataset (:attr:`residual_reference`), passed through that
-        dataset's residual connection and converted to physical units with that dataset's
-        post-processors, which match its normalisation. It holds the variables learned as tendencies
-        (:meth:`residual_variables`), as ``(batch, 1, ensemble, grid, variables)``. Missing values stay
-        missing, and the processors that apply to predicted states only (output constraints) are
-        not applied. Datasets the model only reads have no tendency and get no reference.
+        the input of its reference dataset (:attr:`residual_reference`) by that dataset's residual
+        connection, and converted to physical units with that dataset's post-processors, which match
+        its normalisation. It holds the variables learned as tendencies (:meth:`residual_variables`),
+        as ``(batch, time, ensemble, grid, variables)``. ``time`` is 1 when every output step is taken
+        against the same reference (by default the latest input step), and the number of output steps
+        when the residual connection pairs output step i with input step i (``pairs_output_steps``).
+        Missing values stay missing, and the processors that apply to predicted states only (output
+        constraints) are not applied. Datasets the model only reads have no tendency and get no
+        reference.
         """
         references = {}
         for target in self.target_datasets:
             reference_name = self.residual_reference[target]
             source = x[reference_name]
             shard_sizes = grid_shard_sizes[reference_name] if grid_shard_sizes is not None else None
-            connected = self.residual[reference_name](
-                source.data, shard_sizes, model_comm_group, n_step_output=self.n_step_output[target]
-            )
+            connection = self.residual[reference_name]
+            connected = connection(source.data, shard_sizes, model_comm_group, n_step_output=self.n_step_output[target])
             assert connected.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
             positions = [source.name_to_index[name] for name in self.residual_variables(target)]
-            reference = source.clone(
-                data=connected[..., positions][:, -1:], **source._select_variable_metadata(positions)
-            )
+            reference_data = connected[..., positions]
+            if not connection.pairs_output_steps:
+                # Every output step is taken against the same reference, so one step is enough.
+                reference_data = reference_data[:, -1:]
+            reference = source.clone(data=reference_data, **source._select_variable_metadata(positions))
             references[target] = post_processors[reference_name](
                 reference, in_place=False, skip_imputation=True, skip_output_constraints=True
             )
@@ -1134,8 +1180,8 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         state : Source
             Normalised states, ``(batch, time, ensemble, grid, variables)`` with one time step per output step.
         reference : Source
-            Reference state in physical units, ``(batch, 1, ensemble, grid, variables)``, see
-            :meth:`reference_state`.
+            Reference state in physical units, ``(batch, time, ensemble, grid, variables)`` with one
+            time step for all output steps or one per output step, see :meth:`reference_state`.
         tendency_statistics : list[Mapping]
             Tendency statistics of each output step, see :meth:`tendency_statistics`.
         pre_processors, post_processors : nn.Module
@@ -1160,12 +1206,13 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         state_physical = post_processors(
             state.select_variables(state_positions), in_place=False, skip_imputation=True, skip_output_constraints=True
         )
-        reference_physical = reference.select_variables(reference_positions).data
+        reference_physical = self._reference_steps(dataset_name, reference, reference_positions, state.time_size)
 
         steps = []
         for step, statistics in enumerate(tendency_statistics):
             step_state = state_physical.select(time=[step])
-            tendency = step_state.clone(data=step_state.data - reference_physical.to(step_state.data.dtype))
+            step_reference = reference_physical[step].to(step_state.data.dtype)
+            tendency = step_state.clone(data=step_state.data - step_reference)
             normalised = pre_processors(
                 self._as_tendency(dataset_name, tendency, statistics),
                 in_place=True,
@@ -1199,8 +1246,8 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         dataset_name : str
             Dataset of ``tendency``.
         reference : Source
-            Reference state in physical units, ``(batch, 1, ensemble, grid, variables)``, see
-            :meth:`reference_state`.
+            Reference state in physical units, ``(batch, time, ensemble, grid, variables)`` with one
+            time step for all output steps or one per output step, see :meth:`reference_state`.
         tendency : Source
             Normalised tendencies, one time step per output step, carrying the state statistics of its variables.
         tendency_statistics : list[Mapping]
@@ -1228,14 +1275,14 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         state_positions = [i for i in range(tendency.n_variables) if i not in residual_set]
         residual = torch.as_tensor(tendency_positions, dtype=torch.long, device=tendency.device)
         as_state = torch.as_tensor(state_positions, dtype=torch.long, device=tendency.device)
-        reference_physical = reference.select_variables(reference_positions).data
+        reference_physical = self._reference_steps(dataset_name, reference, reference_positions, tendency.time_size)
 
         steps = []
         for step, statistics in enumerate(tendency_statistics):
             step_view = tendency.select(time=[step])
             step_tendency = self._as_tendency(dataset_name, step_view.select_variables(tendency_positions), statistics)
             residual_state = post_processors(step_tendency, in_place=False, skip_imputation=True, tendency=True).data
-            residual_state = residual_state + reference_physical.to(residual_state.dtype)
+            residual_state = residual_state + reference_physical[step].to(residual_state.dtype)
             physical = residual_state.new_empty(step_view.data.shape)
             physical.index_copy_(-1, residual, residual_state)
             if state_positions:

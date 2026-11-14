@@ -369,6 +369,8 @@ and switches to :class:`AnemoiTransportTendModelEncProcDec`, with a skip
 connection from the latest input state. Both objectives start from Gaussian
 noise.
 
+.. _tendencies-against-another-dataset:
+
 Tendencies against another dataset
 ----------------------------------
 
@@ -387,7 +389,7 @@ dataset projected onto the high-resolution grid by its
        datasets:
          lres:
            _target_: anemoi.models.layers.residual.SkipConnection
-           step: -1
+           step: matching
 
    data:
      datasets:
@@ -395,8 +397,14 @@ dataset projected onto the high-resolution grid by its
          residual_statistics: /path/to/residual_statistics.npz
 
 -  The outputs of ``hres`` that ``lres`` has as inputs under the same name
-   are learned as residuals: the ``hres`` value minus the latest ``lres``
-   input. The other outputs of ``hres`` are learned as states.
+   are learned as residuals: the ``hres`` value minus the ``lres`` input.
+   The other outputs of ``hres`` are learned as states.
+-  With ``step: matching``, output step i is taken against ``lres`` input
+   step i, so several snapshots (``SpatialDownscaler`` with several
+   ``offsets``) are each taken against the ``lres`` snapshot at the same
+   time. This needs as many ``lres`` input steps as ``hres`` output steps.
+   With one output step, ``step: -1`` (the latest ``lres`` input) works
+   too; with several, ``step: matching`` is required.
 -  The reference is built by the residual connection of the reference
    dataset (``model.residual.datasets.lres``) and converted to physical
    units with that dataset's processors, so the two datasets can be

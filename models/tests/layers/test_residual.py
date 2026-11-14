@@ -185,6 +185,22 @@ def test_skipconnection(flat_data):
     assert torch.allclose(out, expected_out), "SkipConnection did not return the expected output."
 
 
+def test_skipconnection_matching_pairs_each_output_step_with_its_input_step():
+    connection = SkipConnection(step="matching")
+    x = torch.randn(2, 3, 1, 10, 4)  # batch, time, ens, nodes, features
+
+    assert connection.pairs_output_steps
+    assert not SkipConnection().pairs_output_steps
+    torch.testing.assert_close(connection(x, n_step_output=3), x, rtol=0, atol=0)
+    with pytest.raises(ValueError, match="as many input steps as output steps; got 3 input and 2 output steps"):
+        connection(x, n_step_output=2)
+
+
+def test_skipconnection_rejects_an_unknown_step_name():
+    with pytest.raises(ValueError, match="integer or 'matching'"):
+        SkipConnection(step="latest")
+
+
 # ── ScalarOrnsteinConnection tests ───────────────────────────────────────
 
 

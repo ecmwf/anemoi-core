@@ -10,6 +10,7 @@
 
 from abc import ABC
 from abc import abstractmethod
+from typing import Literal
 from typing import Optional
 
 import einops
@@ -31,7 +32,16 @@ from anemoi.models.layers.spectral_transforms import InverseRegularSHT
 
 
 class BaseResidualConnection(nn.Module, ABC):
-    """Base class for residual connection modules."""
+    """Base class for residual connection modules.
+
+    Attributes
+    ----------
+    pairs_output_steps : bool
+        True when output step i is built from input step i, so the input has one step per output
+        step. Otherwise every output step is built from the same input.
+    """
+
+    pairs_output_steps: bool = False
 
     def __init__(self, graph: HeteroData | None = None, **_) -> None:
         super().__init__()
@@ -65,14 +75,20 @@ class SkipConnection(BaseResidualConnection):
 
     Parameters
     ----------
-    step : int, default -1
-        Index along the time dimension of the input to return.
-        -1 selects the most recent (last) input step.
+    step : int or "matching", default -1
+        Index along the time dimension of the input to return for every output step.
+        -1 selects the most recent (last) input step. ``"matching"`` returns input step i
+        for output step i, which needs as many input steps as output steps; a spatial
+        downscaler uses it to take each high-resolution snapshot against the
+        low-resolution snapshot at the same time.
     """
 
-    def __init__(self, step: int = -1, **_) -> None:
+    def __init__(self, step: int | Literal["matching"] = -1, **_) -> None:
         super().__init__()
+        if isinstance(step, str) and step != "matching":
+            raise ValueError(f"SkipConnection step must be an integer or 'matching', got '{step}'.")
         self.step = step
+        self.pairs_output_steps = step == "matching"
 
     def forward(
         self,
@@ -81,8 +97,16 @@ class SkipConnection(BaseResidualConnection):
         model_comm_group=None,
         n_step_output: int | None = None,
     ) -> torch.Tensor:
-        """Return one of the input steps."""
-        x_skip = x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
+        """Return one of the input steps, or with ``step="matching"`` all of them, one per output step."""
+        # x shape: (batch, time, ens, nodes, features)
+        if self.pairs_output_steps:
+            if n_step_output != x.shape[1]:
+                raise ValueError(
+                    "A skip connection with step 'matching' pairs output step i with input step i, so it needs "
+                    f"as many input steps as output steps; got {x.shape[1]} input and {n_step_output} output steps."
+                )
+            return x
+        x_skip = x[:, self.step, ...]
         return self._expand_time(x_skip, n_step_output)
 
 

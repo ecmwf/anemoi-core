@@ -1,0 +1,4 @@
+_target_: anemoi.training.tasks.SpatialDownscaler
+# Times of the snapshots, relative to the sample's reference time. Output step i is valid at the
+# time of input step i. Several snapshots must be evenly spaced, e.g. ["0H", "6H"].
+offsets: ["0H"]
