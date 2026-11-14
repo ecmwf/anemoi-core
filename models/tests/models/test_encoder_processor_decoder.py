@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 from omegaconf import OmegaConf
@@ -109,3 +111,35 @@ def test_build_latent_aggregator_passes_layer_kernels_to_aggregator() -> None:
     assert model.latent_aggregator.input_channels == 4
     assert model.latent_aggregator.source_channels == {"dataset_a": 4, "dataset_b": 4}
     assert model.latent_aggregator.hidden_projection.bias is None
+
+
+def test_union_decoder_projects_to_each_dataset_output_order() -> None:
+    model = object.__new__(AnemoiModelEncProcDec)
+    nn.Module.__init__(model)
+    model.n_step_output = 2
+    model.decoder2datasets = {"shared": ["dataset_a", "dataset_b"]}
+    model.dataset2decoder = {"dataset_a": "shared", "dataset_b": "shared"}
+    model.decoder_fusing_strategy = {"shared": "union"}
+    model.data_indices = {
+        "dataset_a": SimpleNamespace(
+            model=SimpleNamespace(output=SimpleNamespace(ordered_names=["a", "shared"])),
+        ),
+        "dataset_b": SimpleNamespace(
+            model=SimpleNamespace(output=SimpleNamespace(ordered_names=["shared", "b"])),
+        ),
+    }
+
+    model._build_decoder_output_routing()
+
+    assert model.decoder_output_names == {"shared": ["a", "shared", "b"]}
+    assert model.decoder_output_indices == {"dataset_a": [0, 1], "dataset_b": [1, 2]}
+
+    union_output = torch.tensor([[10.0, 11.0, 12.0, 20.0, 21.0, 22.0]])
+    torch.testing.assert_close(
+        model._select_decoder_output(union_output, "dataset_a"),
+        torch.tensor([[10.0, 11.0, 20.0, 21.0]]),
+    )
+    torch.testing.assert_close(
+        model._select_decoder_output(union_output, "dataset_b"),
+        torch.tensor([[11.0, 12.0, 21.0, 22.0]]),
+    )

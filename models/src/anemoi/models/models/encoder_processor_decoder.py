@@ -138,10 +138,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 f"but got {decoder_in_channels_dst}."
             )
             decoder_output_channels_dst = [self.output_dim[d] for d in self.decoder2datasets[decoder_name]]
-            assert all(ch == decoder_output_channels_dst[0] for ch in decoder_output_channels_dst), (
-                f"All datasets for decoder {decoder_name} must have the same output dimension, "
-                f"but got {decoder_output_channels_dst}."
-            )
+            if self.decoder_fusing_strategy[decoder_name] == "not_supported":
+                assert all(ch == decoder_output_channels_dst[0] for ch in decoder_output_channels_dst), (
+                    f"All datasets for decoder {decoder_name} must have the same output dimension, "
+                    f"but got {decoder_output_channels_dst}."
+                )
             decoder_edge_dims = [self.decoder_graph_provider[d].edge_dim for d in decoder_config.target_datasets]
             assert all(dim == decoder_edge_dims[0] for dim in decoder_edge_dims), (
                 f"All datasets for decoder {decoder_name} must have the same edge dimension, "
@@ -153,9 +154,21 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.latent_aggregator.hidden_dim,
                 in_channels_dst=decoder_in_channels_dst[0],
-                out_channels_dst=decoder_output_channels_dst[0],
+                out_channels_dst=self.n_step_output * len(self.decoder_output_names[decoder_name]),
                 edge_dim=decoder_edge_dims[0],
             )
+
+    def _select_decoder_output(self, x_out: Tensor, dataset_name: str) -> Tensor:
+        """Project a shared union decoder output to one dataset's native variables."""
+        decoder_name = self.dataset2decoder[dataset_name]
+        output_names = self.decoder_output_names[decoder_name]
+        output_indices = self.decoder_output_indices[dataset_name]
+        if output_indices == list(range(len(output_names))):
+            return x_out
+
+        x_out = x_out.reshape(*x_out.shape[:-1], self.n_step_output, len(output_names))
+        x_out = x_out[..., output_indices]
+        return x_out.flatten(start_dim=-2)
 
     def _assemble_input(
         self,
@@ -485,6 +498,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
             )
+            x_out = self._select_decoder_output(x_out, dataset_name)
 
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,

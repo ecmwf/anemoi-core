@@ -81,6 +81,7 @@ class BaseGraphModel(nn.Module):
         self._build_decoder_routing(model_config.decoders)
 
         self._calculate_shapes_and_indices(data_indices)
+        self._build_decoder_output_routing()
 
         self._assert_model_routing()
         self._assert_matching_indices(data_indices)
@@ -141,10 +142,15 @@ class BaseGraphModel(nn.Module):
         """Builds the dataset routing for decoders."""
         self.dataset2decoder: dict[str, str] = {}
         self.decoder2datasets: dict[str, list[str]] = {}
+        self.decoder_fusing_strategy: dict[str, str] = {}
         self.decoders_target_input: dict[str, DecodingTargetFeature] = {}
         for decoder_name, decoder_config in decoders_config.items():
             datasets_to_decode = decoder_config["target_datasets"]
             self.decoder2datasets[decoder_name] = datasets_to_decode
+            self.decoder_fusing_strategy[decoder_name] = decoder_config.get(
+                "dataset_fusing_strategy",
+                "not_supported",
+            )
             for d in datasets_to_decode:
                 self.dataset2decoder[d] = decoder_name
 
@@ -153,6 +159,40 @@ class BaseGraphModel(nn.Module):
             )
 
         self.target_datasets = list(self.dataset2decoder.keys())
+
+    def _build_decoder_output_routing(self) -> None:
+        """Build union output names and per-dataset projections for shared decoders."""
+        self.decoder_output_names: dict[str, list[str]] = {}
+        self.decoder_output_indices: dict[str, list[int]] = {}
+
+        for decoder_name, datasets in self.decoder2datasets.items():
+            outputs_by_dataset = {
+                dataset_name: list(self.data_indices[dataset_name].model.output.ordered_names)
+                for dataset_name in datasets
+            }
+            strategy = self.decoder_fusing_strategy[decoder_name]
+            if strategy == "union":
+                output_names = list(
+                    dict.fromkeys(
+                        name
+                        for dataset_name in datasets
+                        for name in outputs_by_dataset[dataset_name]
+                    )
+                )
+            elif strategy == "not_supported":
+                output_names = outputs_by_dataset[datasets[0]]
+            else:
+                raise ValueError(
+                    f"Decoder '{decoder_name}' has unsupported dataset fusing strategy '{strategy}'."
+                )
+
+            output_index = {name: index for index, name in enumerate(output_names)}
+            self.decoder_output_names[decoder_name] = output_names
+            for dataset_name, dataset_outputs in outputs_by_dataset.items():
+                if strategy == "not_supported":
+                    self.decoder_output_indices[dataset_name] = list(range(len(dataset_outputs)))
+                    continue
+                self.decoder_output_indices[dataset_name] = [output_index[name] for name in dataset_outputs]
 
     def _assert_model_routing(self) -> None:
         """Asserts that the model routing is valid."""

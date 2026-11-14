@@ -182,6 +182,8 @@ class DecodersSchema(BaseModel):
 
     target_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the decoder is applicable."
+    dataset_fusing_strategy: Literal["not_supported", "union"] = Field(default="not_supported")
+    "How heterogeneous output variables are represented by a shared decoder."
     target_node_features: list[Literal[tuple(sorted(VALID_TARGET_FEATURES))]] = Field(
         default_factory=lambda: ["encoded_data"]
     )

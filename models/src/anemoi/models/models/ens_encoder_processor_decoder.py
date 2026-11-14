@@ -330,6 +330,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
             )
+            # A shared ``union`` decoder emits the union of every target dataset's
+            # variables. Narrow that tensor to this dataset before residuals,
+            # boundings, losses, and post-processing consume it. The deterministic
+            # model does this in its forward method as well; the ensemble override
+            # must preserve the same routing contract.
+            x_out = self._select_decoder_output(x_out, dataset_name)
 
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,
