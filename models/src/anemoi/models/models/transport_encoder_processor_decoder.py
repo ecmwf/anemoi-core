@@ -606,7 +606,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                     batch[dataset_name],
                     x_data_latent_dict.get(dataset_name),
                     decoder_target_view,
-                    noisy_target[dataset_name],
+                    # Only the layout of the target nodes is read here (coordinates, sizes, time offsets).
+                    noisy_target[dataset_name].template(),
                     batch_size=bse,
                     model_comm_group=model_comm_group,
                     dataset_name=dataset_name,
