@@ -370,24 +370,24 @@ Flow-matching time runs from 0 to 1, so the ``*_fm`` configs set
 Flow matching
 =============
 
-Flow matching follows a straight path from the Gaussian source to the
-training target:
+Flow matching follows a straight path from Gaussian noise to the training
+target. The noisy target the model sees at time ``t`` is
 
 .. math::
 
-   x_s = (1 - s) x_0 + s x_1
+   x_t = (1 - t) x_0 + t x_1
 
-where ``x_0`` is the source, ``x_1`` is the training target and ``s`` is
+where ``x_0`` is the noise, ``x_1`` is the training target and ``t`` is
 drawn uniformly between 0 and 1. The model learns the velocity
 ``x_1 - x_0``.
 
-Sampling integrates that velocity from ``s = 0`` to ``s = 1`` with an ODE
+Sampling integrates that velocity from ``t = 0`` to ``t = 1`` with an ODE
 sampler such as ``euler`` or ``heun``. The sampler itself adds no noise:
 ensemble members differ because each one starts from its own Gaussian
-source.
+noise.
 
 Validation metrics estimate the target in one step from the predicted
-velocity, ``x_s + (1 - s) v``, at the time drawn for that batch.
+velocity, ``x_t + (1 - t) v``, at the time drawn for that batch.
 
 Training configuration
 ======================
@@ -424,7 +424,7 @@ EDM diffusion uses a clean-endpoint objective weighted by noise level. Its
 training loss must apply these weights; ``MSELoss`` and the other pointwise
 losses do, and a loss that would leave them unused is rejected when training
 starts. Flow matching
-trains the velocity between the source field and the target with the
+trains the velocity between the noise and the target with the
 ``MSELoss`` that ``training/transport.yaml`` selects by default.
 
 Sampling defaults

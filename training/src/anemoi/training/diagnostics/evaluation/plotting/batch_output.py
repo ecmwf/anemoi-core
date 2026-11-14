@@ -24,7 +24,7 @@ Built-in plot functions and their optional kwargs
     - ``accumulation_levels_plot`` (list, default ``DEFAULT_ACCUMULATION_LEVELS``):
       colour levels in mm for precipitation fields.
     - ``prediction_label`` (str, default ``"pred"``): label for the prediction panel.
-    - ``auxiliary_label`` (str, default ``"corrupted targets"``): label for the
+    - ``auxiliary_label`` (str, default ``"noisy targets"``): label for the
       auxiliary panel (only shown when ``with_auxiliary: true`` on the callback).
 
 ``spectrum_plot_fn``
@@ -78,7 +78,7 @@ def sample_plot_fn(
     per_sample: int = 6,
     accumulation_levels_plot: list | None = None,
     prediction_label: str = "pred",
-    auxiliary_label: str = "corrupted targets",
+    auxiliary_label: str = "noisy targets",
     sparse: bool = False,
     output_latlons: np.ndarray | None = None,
     **_kwargs: Any,

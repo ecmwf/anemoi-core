@@ -39,7 +39,7 @@ def _add(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
 
 
 TransportNetwork = Callable[[Batch, Batch, dict[str, torch.Tensor]], Batch]
-"""The model's encoder, processor and decoder: ``network(x, conditioned_target, condition) -> prediction``."""
+"""The model's encoder, processor and decoder: ``network(x, noisy_target, condition) -> prediction``."""
 
 
 def condition_batch_shape(condition: dict[str, torch.Tensor]) -> tuple[int, int]:
@@ -158,7 +158,7 @@ class TransportModelObjective:
         self,
         network: TransportNetwork,
         x: Batch,
-        conditioned_target: Batch,
+        noisy_target: Batch,
         condition: dict[str, torch.Tensor],
     ) -> Batch:
         raise NotImplementedError
@@ -226,21 +226,21 @@ class EDMDiffusionModelObjective(TransportModelObjective):
         self,
         network: TransportNetwork,
         x: Batch,
-        y_noised: Batch,
+        noisy_target: Batch,
         sigma: dict[str, torch.Tensor],
     ) -> Batch:
         c_skip, c_out, c_in, c_noise = edm_preconditioning(sigma, self.sigma_data)
-        scaled_noised = y_noised.with_sources(
-            {name: noised.map_with_condition(_multiply, c_in[name]) for name, noised in y_noised.items()},
+        scaled_noised = noisy_target.with_sources(
+            {name: noised.map_with_condition(_multiply, c_in[name]) for name, noised in noisy_target.items()},
         )
         pred = network(x, scaled_noised, c_noise)
-        return y_noised.with_sources(
+        return noisy_target.with_sources(
             {
                 name: noised.map_with_condition(_multiply, c_skip[name]).zip_map_data(
                     _add,
                     pred[name].map_with_condition(_multiply, c_out[name]),
                 )
-                for name, noised in y_noised.items()
+                for name, noised in noisy_target.items()
             },
         )
 
@@ -260,10 +260,10 @@ class FlowMatchingModelObjective(TransportModelObjective):
         self,
         network: TransportNetwork,
         x: Batch,
-        state: Batch,
-        time_level: dict[str, torch.Tensor],
+        noisy_target: Batch,
+        time: dict[str, torch.Tensor],
     ) -> Batch:
-        return network(x, state, time_level)
+        return network(x, noisy_target, time)
 
 
 def get_transport_model_objective(name: str, edm: EdmSettings) -> TransportModelObjective:

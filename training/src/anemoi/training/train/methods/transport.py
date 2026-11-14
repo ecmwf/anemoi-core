@@ -79,11 +79,11 @@ class StatePredictionMode(PredictionMode):
         x: Batch,
     ) -> PreparedPredictionTarget:
         del x
-        raw_target, target_forcing = self.module.predicted_targets(batch)
+        raw_target, target_forcings = self.module.predicted_targets(batch)
         # Loss and metric targets keep their NaNs so missing observations are
         # masked in the loss (imputation skipped).
         target_full = self.module.preprocess_targets(raw_target)
-        # The model target is corrupted and fed through the network, so it must
+        # The model target is made noisy and fed through the network, so it must
         # be imputed like the model inputs: NaNs would spread through message
         # passing and poison the whole prediction.
         model_state = self.module.preprocess_inputs(raw_target)
@@ -102,7 +102,7 @@ class StatePredictionMode(PredictionMode):
             loss_target_layout=IndexSpace.DATA_FULL,
             metric_target=target_full,
             model_target_missing=model_target_missing,
-            target_forcing=self.module.preprocess_inputs(target_forcing),
+            target_forcings=self.module.preprocess_inputs(target_forcings),
         )
 
     def reconstruct_prediction(
@@ -156,7 +156,7 @@ class TendencyPredictionMode(PredictionMode):
 
         Only the predicted datasets get targets; the datasets the model only reads stay inputs.
         """
-        raw_state_target, target_forcing = self.module.predicted_targets(batch)
+        raw_state_target, target_forcings = self.module.predicted_targets(batch)
         if any(source.is_tabular for source in raw_state_target.values()):
             msg = "Tendency prediction mode is not implemented for predicting sparse observation datasets."
             raise NotImplementedError(msg)
@@ -184,7 +184,7 @@ class TendencyPredictionMode(PredictionMode):
                 },
             )
 
-        # The tendency fed through the network (as the corrupted target) is built from states
+        # The tendency fed through the network (as the noisy target) is built from states
         # imputed like the model inputs, since NaNs would spread through message passing. The
         # loss and metric targets keep their NaNs, so the loss (with ignore_nans) and the
         # validation metrics skip missing values instead of fitting imputed ones.
@@ -199,7 +199,7 @@ class TendencyPredictionMode(PredictionMode):
             loss_target_layout=IndexSpace.DATA_OUTPUT,
             metric_target=state_target_full,
             model_target_missing=self.module.reduce_data_output_target_to_model_output(tendency_target_full),
-            target_forcing=self.module.preprocess_inputs(target_forcing),
+            target_forcings=self.module.preprocess_inputs(target_forcings),
             reference=reference,
         )
 
@@ -240,7 +240,7 @@ class TransportTraining(BaseTrainingModule):
     """Training module for EDM diffusion and flow-matching transport models.
 
     The prediction mode turns the batch into state or tendency targets; the transport objective corrupts
-    them and says what the model learns from the corrupted target.
+    them and says what the model learns from the noisy target.
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -294,11 +294,11 @@ class TransportTraining(BaseTrainingModule):
 
         Datasets the model only reads need no output-time window, so the task never sees them here.
         """
-        target, _, target_forcing = self.task.get_targets(
+        target, _, target_forcings = self.task.get_targets(
             self.predicted_datasets(batch),
             data_indices=self.data_indices,
         )
-        return target, target_forcing
+        return target, target_forcings
 
     def get_data_output_target(self, target_full: Batch) -> Batch:
         """Select the target variables that are present in the dataset output."""
@@ -419,16 +419,16 @@ class TransportTraining(BaseTrainingModule):
     def forward(
         self,
         x: Batch,
-        conditioned_target: Batch,
+        noisy_target: Batch,
         condition: dict[str, torch.Tensor],
-        target_forcing: Batch | None = None,
+        target_forcings: Batch | None = None,
     ) -> Batch:
         return self.model.model(
             x,
-            conditioned_target,
+            noisy_target,
             condition,
             model_comm_group=self.model_comm_group,
-            target_forcing=target_forcing,
+            target_forcings=target_forcings,
         )
 
     def _compute_loss(
@@ -457,7 +457,7 @@ class TransportTraining(BaseTrainingModule):
     def _check_nan_network_target(self, model_target: Batch) -> None:
         """Fail loudly when the target passed through the network still contains NaNs.
 
-        The corrupted target goes through the network together with the inputs, diagnostics
+        The noisy target goes through the network together with the inputs, diagnostics
         included, so it is imputed like the inputs. A variable the imputer does not cover keeps
         its NaNs, and one NaN spreads through the graph and makes the whole prediction NaN.
         """
@@ -487,9 +487,9 @@ class TransportTraining(BaseTrainingModule):
 
         prediction = self(
             x,
-            prepared_objective.conditioned_target,
+            prepared_objective.noisy_target,
             prepared_objective.condition,
-            target_forcing=prepared_target.target_forcing,
+            target_forcings=prepared_target.target_forcings,
         )
         loss_prediction = self.transport_objective.prepare_loss_prediction(prediction, prepared_objective)
 
@@ -498,7 +498,7 @@ class TransportTraining(BaseTrainingModule):
         plot_kwargs: dict[str, dict[str, Source]] = {}
         if validation_mode:
             conditioned_endpoint = self.prediction_mode.reconstruct_prediction(
-                prepared_objective.conditioned_target,
+                prepared_objective.noisy_target,
                 prepared_target,
             )
             plot_kwargs["auxiliary_output"] = {

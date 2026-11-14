@@ -60,7 +60,7 @@ class PreparedPredictionTarget:
         Objectives that derive their loss target from model_target (the
         flow-matching velocity) use it to mask the missing values again.
 
-    target_forcing:
+    target_forcings:
         Forcings at the output times, normalised like the model inputs, which
         the decoder reads.
 
@@ -74,7 +74,7 @@ class PreparedPredictionTarget:
     loss_target_layout: IndexSpace
     metric_target: Batch
     model_target_missing: Batch
-    target_forcing: Batch | None = None
+    target_forcings: Batch | None = None
     reference: Batch | None = None
 
 
@@ -82,12 +82,12 @@ class PreparedPredictionTarget:
 class PreparedTransportObjective:
     """Inputs and targets prepared by the selected transport objective.
 
-    The transport objective decides how to corrupt the prediction target and
-    what the model should learn from that corrupted input. EDM diffusion
+    The transport objective decides how to make the prediction target noisy and
+    what the model should learn from that noisy input. EDM diffusion
     predicts a clean endpoint. Flow matching predicts a velocity.
 
-    conditioned_target:
-        Corrupted target passed to the model together with the normal input.
+    noisy_target:
+        Noisy target passed to the model together with the normal input.
         For EDM diffusion this is the noised target. For flow matching this is the
         point on the path from the source field to the target.
 
@@ -113,7 +113,7 @@ class PreparedTransportObjective:
         EDM noise-level weighting. Flow matching leaves this as None.
     """
 
-    conditioned_target: Batch
+    noisy_target: Batch
     condition: dict[str, torch.Tensor]
     loss_target: Batch
     loss_target_layout: IndexSpace

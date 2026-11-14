@@ -469,12 +469,12 @@ def test_batch_output_plot_forwards_auxiliary_from_validation_output():
     pl_module = _make_pl_module_forecaster(validation_rollout=1, nlatlon=nlatlon)
     pl_module.allgather_batch = lambda tensor, _grid_shard_sizes: tensor
     pl_module.model.post_processors = {"data": _IdentityProcessor()}
-    conditioned_target = {"data": _pred_view(torch.full((batch_size, 1, n_ens, nlatlon, nvar), 3.0))}
+    noisy_target = {"data": _pred_view(torch.full((batch_size, 1, n_ens, nlatlon, nvar), 3.0))}
 
     batch = _make_gridded_batch(torch.randn(batch_size, 3, n_ens, nlatlon, nvar))
     output = _step_output(
         [{"data": torch.zeros(batch_size, 1, n_ens, nlatlon, nvar)}],
-        plot_kwargs={"auxiliary_output": conditioned_target},
+        plot_kwargs={"auxiliary_output": noisy_target},
     )
     trainer = MagicMock()
     trainer.current_epoch = 0
@@ -486,7 +486,7 @@ def test_batch_output_plot_forwards_auxiliary_from_validation_output():
     plotted_auxiliary = callback.plot.call_args.kwargs["auxiliary_output"]
     # predictions / auxiliary are per-dataset Sources (single-process allgather is a no-op).
     torch.testing.assert_close(plotted_output.predictions[0]["data"].data, output.predictions[0]["data"].data)
-    torch.testing.assert_close(plotted_auxiliary["data"].data, conditioned_target["data"].data)
+    torch.testing.assert_close(plotted_auxiliary["data"].data, noisy_target["data"].data)
     assert plotted_output.plot_kwargs == {}
 
 
@@ -1165,14 +1165,14 @@ def test_plots_plot_predicted_multilevel_flat_sample_accepts_auxiliary_panel():
         y_true,
         y_pred,
         auxiliary=auxiliary,
-        auxiliary_label="corrupted targets",
+        auxiliary_label="noisy targets",
         datashader=False,
     )
 
     assert fig is not None
     plot_titles = [ax.get_title() for ax in fig.axes]
-    assert any(title == "t2m corrupted targets" for title in plot_titles)
-    assert any(title == "tp corrupted targets" for title in plot_titles)
+    assert any(title == "t2m noisy targets" for title in plot_titles)
+    assert any(title == "tp noisy targets" for title in plot_titles)
     assert "tp increment [pred - input]" not in plot_titles
     assert "tp persist err" not in plot_titles
     fig.clear()

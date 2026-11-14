@@ -48,7 +48,7 @@ class EDMDiffusionTransportObjective(TransportObjective):
         # whether that clean target is a full state or a tendency field.
         # state uses DATA_FULL, tendency uses DATA_OUTPUT.
         return PreparedTransportObjective(
-            conditioned_target=target_noised,
+            noisy_target=target_noised,
             condition=sigma,
             loss_target=prepared.loss_target,
             loss_target_layout=prepared.loss_target_layout,
@@ -94,7 +94,7 @@ class EDMDiffusionTransportObjective(TransportObjective):
         sigma: dict[str, torch.Tensor],
         noise: Batch,
     ) -> Batch:
-        """Create the corrupted target by adding noise, scaled by sigma, to the clean target."""
+        """Create the noisy target by adding noise, scaled by sigma, to the clean target."""
         return x.with_sources(
             {
                 name: target.map_with_condition(

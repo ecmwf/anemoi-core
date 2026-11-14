@@ -11,7 +11,7 @@ import pytest
 import torch
 
 from anemoi.models.transport.paths import flow_matching_clean
-from anemoi.models.transport.paths import flow_matching_state
+from anemoi.models.transport.paths import flow_matching_noisy_target
 from anemoi.models.transport.paths import flow_matching_velocity
 from anemoi.models.transport.paths import karras_sigma_from_unit_time
 from anemoi.models.transport.schedules import KarrasSigmaSchedule
@@ -41,8 +41,12 @@ def test_flow_matching_path_runs_from_source_to_target() -> None:
     source = torch.tensor([1.0, -2.0], dtype=torch.float64)
     target = torch.tensor([3.0, 4.0], dtype=torch.float64)
 
-    torch.testing.assert_close(flow_matching_state(source, target, torch.tensor(0.0, dtype=torch.float64)), source)
-    torch.testing.assert_close(flow_matching_state(source, target, torch.tensor(1.0, dtype=torch.float64)), target)
+    torch.testing.assert_close(
+        flow_matching_noisy_target(source, target, torch.tensor(0.0, dtype=torch.float64)), source
+    )
+    torch.testing.assert_close(
+        flow_matching_noisy_target(source, target, torch.tensor(1.0, dtype=torch.float64)), target
+    )
     torch.testing.assert_close(flow_matching_velocity(source, target), torch.tensor([2.0, 6.0], dtype=torch.float64))
 
 
@@ -52,7 +56,9 @@ def test_flow_matching_clean_recovers_the_target_from_the_true_velocity(time: fl
     target = torch.tensor([3.0, 4.0], dtype=torch.float64)
     t = torch.tensor(time, dtype=torch.float64)
 
-    clean = flow_matching_clean(flow_matching_state(source, target, t), flow_matching_velocity(source, target), t)
+    clean = flow_matching_clean(
+        flow_matching_noisy_target(source, target, t), flow_matching_velocity(source, target), t
+    )
 
     torch.testing.assert_close(clean, target)
 

@@ -34,7 +34,7 @@ from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import FlowMatchingModelObjective
 from anemoi.models.transport import schedules
 from anemoi.models.transport.objectives import condition_batch_shape
-from anemoi.models.transport.paths import flow_matching_state
+from anemoi.models.transport.paths import flow_matching_noisy_target
 from tests.batch_builders import build_batch
 from tests.graph_stubs import stub_graph_geometry
 
@@ -339,10 +339,10 @@ def test_transport_assemble_input_stacks_history_and_noisy_target_rows_of_sparse
     model = _transport_model_stub()
     model.node_attributes = _EmptyNodeAttributes()
     x = _obs_source([2, 1], n_variables=2, value=1.0, coordinate_offset=-1.0)
-    y_noised = _obs_source([3, 2], n_variables=1, value=5.0, coordinate_offset=1.0)
+    noisy_target = _obs_source([3, 2], n_variables=1, value=5.0, coordinate_offset=1.0)
 
     data_coords, x_data_latent, x_skip, shard_sizes, batch_sizes, timedeltas = model._assemble_transport_input(
-        x, y_noised, batch_size=2, dataset_name="obs"
+        x, noisy_target, batch_size=2, dataset_name="obs"
     )
 
     history_row = torch.tensor([1.0, 1.0, 0.0])
@@ -350,7 +350,7 @@ def test_transport_assemble_input_stacks_history_and_noisy_target_rows_of_sparse
     expected_values = torch.stack([history_row] * 2 + [target_row] * 3 + [history_row] + [target_row] * 2)
     expected_flag = torch.tensor([0.0] * 2 + [1.0] * 3 + [0.0] + [1.0] * 2)
     expected_coords = torch.cat(
-        [x.coordinates[0], y_noised.coordinates[0], x.coordinates[1], y_noised.coordinates[1]],
+        [x.coordinates[0], noisy_target.coordinates[0], x.coordinates[1], noisy_target.coordinates[1]],
     )
     assert x_skip is None
     assert shard_sizes is None
@@ -372,9 +372,9 @@ def test_transport_encodes_a_sparse_dataset_without_points_in_the_batch() -> Non
     model.node_attributes = _EmptyNodeAttributes()
     model.encoder_graph_provider = {"obs": _EmptyGraphProvider()}
     x = _obs_source([0], n_variables=2, value=1.0, coordinate_offset=-1.0)
-    y_noised = _obs_source([0], n_variables=1, value=5.0, coordinate_offset=1.0)
+    noisy_target = _obs_source([0], n_variables=1, value=5.0, coordinate_offset=1.0)
 
-    assembled = model._assemble_transport_input(x, y_noised, batch_size=1, dataset_name="obs")
+    assembled = model._assemble_transport_input(x, noisy_target, batch_size=1, dataset_name="obs")
     source = model._encoder_source_from_rows(
         "obs",
         assembled,
@@ -397,9 +397,9 @@ def test_transport_assemble_input_adds_timedelta_features_to_sparse_rows() -> No
     model.node_attributes = _EmptyNodeAttributes()
     model.dynamic_node_attributes = {"obs": {"timedeltas": Timedeltas(scale_seconds=1.0)}}
     x = _obs_source([2], n_variables=1, value=1.0, coordinate_offset=-3.0)
-    y_noised = _obs_source([1], n_variables=1, value=5.0, coordinate_offset=4.0)
+    noisy_target = _obs_source([1], n_variables=1, value=5.0, coordinate_offset=4.0)
 
-    _, x_data_latent, _, _, _, _ = model._assemble_transport_input(x, y_noised, batch_size=1, dataset_name="obs")
+    _, x_data_latent, _, _, _, _ = model._assemble_transport_input(x, noisy_target, batch_size=1, dataset_name="obs")
 
     # [history | noisy target | sin/cos coordinates | scaled timedelta | flag]
     assert x_data_latent.shape == (3, 1 + 1 + 4 + 1 + 1)
@@ -471,7 +471,7 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
         statistics={},
         layout=layout,
     )
-    y_noised = GriddedSource(
+    noisy_target = GriddedSource(
         name="data",
         data=y_noised_data,
         coordinates=coordinates,
@@ -482,7 +482,7 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
 
     data_coords, x_data_latent, x_skip, shard_sizes, batch_sizes, timedeltas = model._assemble_transport_input(
         x,
-        y_noised,
+        noisy_target,
         batch_size=1,
         dataset_name="data",
     )
@@ -619,11 +619,11 @@ def test_tendency_transport_forward_network_uses_dense_source_view_override() ->
         variables={"data": ["a", "b"]},
         statistics={"data": {}},
     )
-    conditioned_target = batch.with_data({"data": torch.randn(1, 1, 1, 3, 2)})
+    noisy_target = batch.with_data({"data": torch.randn(1, 1, 1, 3, 2)})
 
     out = model._forward_transport_network(
         batch,
-        conditioned_target,
+        noisy_target,
         {"data": torch.zeros(1, 1, 1, 1, 1)},
     )
 
@@ -632,7 +632,7 @@ def test_tendency_transport_forward_network_uses_dense_source_view_override() ->
     # Rows: [history (2 steps x 2 variables) | noisy target (2) | coordinates (4) | residual (4)].
     history = batch["data"].data[0, :, 0].permute(1, 0, 2).reshape(3, 4)
     torch.testing.assert_close(received["encoder_rows"][:, :4], history)
-    torch.testing.assert_close(received["encoder_rows"][:, 4:6], conditioned_target["data"].data[0, 0, 0])
+    torch.testing.assert_close(received["encoder_rows"][:, 4:6], noisy_target["data"].data[0, 0, 0])
     assert received["encoder"] is encoder_cond
     assert received["processor"] is processor_cond
     assert received["decoder"] is decoder_cond
@@ -768,13 +768,13 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
         batch,
         batch,
         {"obs": torch.zeros(1, 1, 1, 1, 1)},
-        target_forcing=target_forcing,
+        target_forcings=target_forcing,
     )
 
     assert encoder.source_width == (4 if shared_encoder else 22)
     assert decoder.destination_features.shape == (3, 5)
     torch.testing.assert_close(decoder.destination_features[:, 0], torch.ones(3))
-    # Explicit target features receive the forcing view; the corrupted target is prepended separately.
+    # Explicit target features receive the forcing view; the noisy target is prepended separately.
     assembled_data = assembled_views["obs"].data[0]
     assert assembled_data.shape == (3, 2)
     torch.testing.assert_close(assembled_data, torch.full((3, 2), 5.0))
@@ -827,7 +827,7 @@ def test_predict_step_samples_onto_the_target_and_postprocesses() -> None:
 
     # Inputs and target forcings are normalised before sampling.
     torch.testing.assert_close(captured["x"]["ds_a"].data, torch.ones(1, 2, 1, 4, 2))
-    torch.testing.assert_close(captured["target_forcing"]["ds_a"].data, torch.ones(1, 1, 1, 4, 2))
+    torch.testing.assert_close(captured["target_forcings"]["ds_a"].data, torch.ones(1, 1, 1, 4, 2))
     # The templates give the nodes to sample onto.
     assert captured["target_template"] is target_template
     assert captured["sampler_params"] == {"sampler": "heun"}
@@ -886,7 +886,7 @@ def test_predict_step_runs_without_target_forcings() -> None:
         post_processors=torch.nn.ModuleDict({"ds_a": AddOneProcessor()}),
     )
 
-    assert list(captured["target_forcing"].keys()) == []
+    assert list(captured["target_forcings"].keys()) == []
 
 
 def test_transport_models_reject_configured_boundings() -> None:
@@ -1278,7 +1278,7 @@ def test_flow_matching_objective_returns_raw_velocity_prediction() -> None:
 
     The model hands the objective its network with the further forward arguments already bound.
     """
-    state = build_batch(
+    given_target = build_batch(
         data={"data": torch.full((1, 1, 1, 2, 1), 2.0)},
         coordinates={"data": torch.zeros(2, 2)},
         metadata={"static_coords": frozenset({"data"})},
@@ -1286,18 +1286,18 @@ def test_flow_matching_objective_returns_raw_velocity_prediction() -> None:
         variables={"data": ["x"]},
         statistics={"data": {}},
     )
-    time_level = {"data": torch.full_like(state["data"].data, 0.25)}
-    velocity = state.with_data({"data": torch.full_like(state["data"].data, 0.5)})
+    time = {"data": torch.full_like(given_target["data"].data, 0.25)}
+    velocity = given_target.with_data({"data": torch.full_like(given_target["data"].data, 0.5)})
     marker = object()
 
     def _forward_transport_network(
         _x: Batch,
-        conditioned_target: Batch,
+        noisy_target: Batch,
         condition: dict[str, torch.Tensor],
         **_kwargs,
     ) -> Batch:
-        assert conditioned_target is state
-        assert condition is time_level
+        assert noisy_target is given_target
+        assert condition is time
         assert _kwargs["marker"] is marker
         return velocity
 
@@ -1306,9 +1306,9 @@ def test_flow_matching_objective_returns_raw_velocity_prediction() -> None:
     model.transport_model_objective = FlowMatchingModelObjective()
 
     out = model.forward(
-        state.with_data({"data": torch.zeros_like(state["data"].data)}),
-        state,
-        time_level,
+        given_target.with_data({"data": torch.zeros_like(given_target["data"].data)}),
+        given_target,
+        time,
         marker=marker,
     )
 
@@ -1325,7 +1325,7 @@ def test_flow_matching_samples_differ_because_the_source_is_random() -> None:
     }
     model.n_step_output = {"ds_a": 1}
     model.num_output_channels = {"ds_a": 3}
-    # A velocity that depends only on the state: all randomness comes from the source.
+    # A velocity that depends only on the noisy target: all randomness comes from the starting noise.
     model._forward_transport_network = lambda _x, y, *_args, **_kwargs: y.map_data(torch.zeros_like)
     _configure_sampling_model(model, {"ds_a": (3, 3, 5)})
     x = {"ds_a": torch.randn(1, 2, 1, 5, 3, dtype=torch.float32)}
@@ -1364,9 +1364,9 @@ def test_flow_matching_sampling_retraces_the_training_path(sampler: str) -> None
     """With the exact velocity, sampling visits the training states and ends on the target.
 
     The network is replaced by the velocity that ``flow_matching_clean`` follows from the current
-    state at time ``t`` to the target at time 1. Every state the sampler passes to the network must
-    then be the training state ``flow_matching_state`` between the starting noise and the target,
-    and the last state must be the target. A reversed time grid, or a network given ``1 - t``,
+    state at time ``t`` to the target at time 1. Every noisy target the sampler passes to the network must
+    then be the training noisy target ``flow_matching_noisy_target`` between the starting noise and the target,
+    and the last noisy target must be the target. A reversed time grid, or a network given ``1 - t``,
     leaves that path.
     """
     model = _transport_model_stub()
@@ -1380,10 +1380,10 @@ def test_flow_matching_sampling_retraces_the_training_path(sampler: str) -> None
     target = torch.randn(1, 1, 1, 5, 3, dtype=torch.float64)
     visited = []
 
-    def _exact_velocity(_x: Batch, state: Batch, time_level: dict[str, torch.Tensor], *_args, **_kwargs) -> Batch:
-        t = time_level["ds_a"].to(torch.float64)
-        visited.append((t, state["ds_a"].data.to(torch.float64)))
-        return state.map_data(lambda data: ((target - data.to(torch.float64)) / (1.0 - t)).to(data.dtype))
+    def _exact_velocity(_x: Batch, noisy_target: Batch, time: dict[str, torch.Tensor], *_args, **_kwargs) -> Batch:
+        t = time["ds_a"].to(torch.float64)
+        visited.append((t, noisy_target["ds_a"].data.to(torch.float64)))
+        return noisy_target.map_data(lambda data: ((target - data.to(torch.float64)) / (1.0 - t)).to(data.dtype))
 
     model._forward_transport_network = _exact_velocity
     _configure_sampling_model(model, {"ds_a": (3, 3, 5)})
@@ -1396,8 +1396,8 @@ def test_flow_matching_sampling_retraces_the_training_path(sampler: str) -> None
     first_time, noise = visited[0]
     assert first_time.flatten()[0].item() == 0.0
     assert len(visited) == (4 if sampler == "euler" else 7)
-    for t, state in visited:
-        torch.testing.assert_close(state, flow_matching_state(noise, target, t), atol=1e-5, rtol=1e-5)
+    for t, noisy_target in visited:
+        torch.testing.assert_close(noisy_target, flow_matching_noisy_target(noise, target, t), atol=1e-5, rtol=1e-5)
     torch.testing.assert_close(sampled.to(torch.float64), target, atol=1e-5, rtol=1e-5)
 
 
@@ -1430,14 +1430,14 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
 
     def _network(
         x: Batch,
-        conditioned_target: Batch,
+        noisy_target: Batch,
         condition: dict[str, torch.Tensor],
         model_comm_group=None,
-        target_forcing=None,
+        target_forcings=None,
     ) -> Batch:
-        del model_comm_group, target_forcing
+        del model_comm_group, target_forcings
         out = {}
-        for dataset_name, target_data in ((n, s.data) for n, s in conditioned_target.items()):
+        for dataset_name, target_data in ((n, s.data) for n, s in noisy_target.items()):
             condition_data = condition[dataset_name]
             assert condition_data.shape == (
                 target_data.shape[0],
@@ -1450,7 +1450,7 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
             assert condition_data.dtype == torch.promote_types(x[dataset_name].data.dtype, torch.float32)
             assert target_data.dtype == condition_data.dtype
             out[dataset_name] = 0.8 * target_data + 0.02 * condition_data
-        return conditioned_target.with_data(out)
+        return noisy_target.with_data(out)
 
     model._forward_transport_network = _network
 

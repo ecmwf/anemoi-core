@@ -327,7 +327,7 @@ def test_apply_reference_state_truncation_without_shards() -> None:
     model.residual = torch.nn.ModuleDict({"data": DummyResidual()})
 
     x = {"data": torch.arange(1 * 1 * 1 * 2 * 4, dtype=torch.float32).reshape(1, 1, 1, 2, 4)}
-    out = model.apply_reference_state_truncation(x, grid_shard_sizes=None, model_comm_group=None)
+    out = model.apply_residual_connections(x, grid_shard_sizes=None, model_comm_group=None)
 
     indices = model.data_indices["data"].model.input.prognostic
     expected = x["data"][..., indices]
@@ -341,7 +341,7 @@ def test_sampled_to_physical_uses_latest_reference_and_per_step_statistics() -> 
     ref = torch.zeros((1, 2, 1, 2, 2), dtype=torch.float32)
     ref[:, 0] = 1.0
     ref[:, 1] = 2.0
-    model.apply_reference_state_truncation = lambda *_args, **_kwargs: {"data": ref}
+    model.apply_residual_connections = lambda *_args, **_kwargs: {"data": ref}
 
     captured = []
 
@@ -460,7 +460,7 @@ def test_compute_tendency_does_not_constrain_target_states() -> None:
 def _bounded_sampling_model() -> tuple[AnemoiTransportTendModelEncProcDec, Batch, Batch]:
     model = _tendency_model(n_step_output=1)
     reference, tendency = _bounded_case()
-    model.apply_reference_state_truncation = lambda *_args, **_kwargs: {"data": reference.data}
+    model.apply_residual_connections = lambda *_args, **_kwargs: {"data": reference.data}
     x = Batch({"data": _source(torch.zeros(1, 1, 1, 2, 3), ["prog0", "prog1", "force"])})
     return model, x, Batch({"data": tendency})
 
@@ -575,7 +575,7 @@ def test_states_rebuilt_from_tendencies_are_clipped_to_remapping_domains() -> No
     torch.testing.assert_close(normalised.data[0, 0, 0, :, 1], torch.tensor([1.5**0.5, 0.0]))
 
     # Inference post-processes the clipped state, as a state predicted in remapped space would be.
-    model.apply_reference_state_truncation = lambda *_args, **_kwargs: {"data": reference.data}
+    model.apply_residual_connections = lambda *_args, **_kwargs: {"data": reference.data}
     x = Batch({"data": _source(torch.zeros(1, 1, 1, 2, 3), ["prog0", "prog1", "force"])})
     out = model._sampled_to_physical(
         Batch({"data": tendency}),

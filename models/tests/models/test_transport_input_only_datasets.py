@@ -322,7 +322,7 @@ def test_input_only_observations_shape_the_grid_prediction(kind: str) -> None:
     batches = _synthetic_batches(model)
     sigma = torch.full((1, 1, 1, 1, 1), 0.7)
 
-    out = model(batches["x"], batches["noisy_target"], {"grid": sigma}, target_forcing=batches["target_forcing"])
+    out = model(batches["x"], batches["noisy_target"], {"grid": sigma}, target_forcings=batches["target_forcing"])
 
     assert list(out.keys()) == ["grid"]
     assert out["grid"].data.shape == batches["noisy_target"]["grid"].data.shape

@@ -84,9 +84,9 @@ def test_edm_prepare_accepts_sparse_targets(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert objective_data.condition["grid"].shape == (2, 1, 1, 1, 1)
     assert objective_data.condition["obs"].shape == (2, 1, 1, 1, 1)
-    torch.testing.assert_close(objective_data.conditioned_target["grid"].data, prepared.model_target["grid"].data)
-    torch.testing.assert_close(objective_data.conditioned_target["obs"].data[0], prepared.model_target["obs"].data[0])
-    torch.testing.assert_close(objective_data.conditioned_target["obs"].data[1], prepared.model_target["obs"].data[1])
+    torch.testing.assert_close(objective_data.noisy_target["grid"].data, prepared.model_target["grid"].data)
+    torch.testing.assert_close(objective_data.noisy_target["obs"].data[0], prepared.model_target["obs"].data[0])
+    torch.testing.assert_close(objective_data.noisy_target["obs"].data[1], prepared.model_target["obs"].data[1])
     # One weight per sample, shaped to spread over its (ensemble, observations, variables) values.
     assert isinstance(objective_data.weights["obs"], list)
     assert [weight.shape for weight in objective_data.weights["obs"]] == [torch.Size([1, 1, 1])] * 2
@@ -123,11 +123,11 @@ def test_flow_matching_prepare_accepts_sparse_targets(
     grid = prepared.model_target["grid"].data
     assert objective_data.condition["grid"].shape == (2, 1, 1, 1, 1)
     assert objective_data.condition["obs"].shape == (2, 1, 1, 1, 1)
-    torch.testing.assert_close(objective_data.conditioned_target["grid"].data, 0.75 * 2.0 + 0.25 * grid)
+    torch.testing.assert_close(objective_data.noisy_target["grid"].data, 0.75 * 2.0 + 0.25 * grid)
     torch.testing.assert_close(objective_data.loss_target["grid"].data, grid - 2.0)
 
     obs = prepared.model_target["obs"].data
-    _assert_sparse_close(objective_data.conditioned_target["obs"].data, [0.75 * 2.0 + 0.25 * sample for sample in obs])
+    _assert_sparse_close(objective_data.noisy_target["obs"].data, [0.75 * 2.0 + 0.25 * sample for sample in obs])
     _assert_sparse_close(objective_data.loss_target["obs"].data, [sample - 2.0 for sample in obs])
 
     reconstructed = objective.reconstruct_endpoint(objective_data.loss_target, objective_data)

@@ -43,7 +43,7 @@ callbacks:
       # per_sample: 6
       # accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]  # mm
       # prediction_label: pred
-      # auxiliary_label: corrupted targets
+      # auxiliary_label: noisy targets
   - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
     tag_infix: spec
     dataset_names: ${diagnostics.plot.datasets_to_plot}

@@ -208,7 +208,7 @@ class BatchOutputPlotSchema(PydanticBaseModel):
     plot_fn: BatchOutputPlotFnSchema
     "Hydra-instantiable plot function (use ``_partial_: true``)."
     with_auxiliary: bool = Field(default=False)
-    "Forward the auxiliary tensor (e.g. corrupted targets) to ``plot_fn``."
+    "Forward the auxiliary tensor (e.g. noisy targets) to ``plot_fn``."
     members: list[int] | int | None = Field(default=None)
     "Ensemble members to select; None means adapter default (all for ensembles)."
     dataset_names: list[str] = Field(default_factory=lambda: ["data"], examples=["data"])

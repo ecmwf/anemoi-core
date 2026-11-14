@@ -170,17 +170,17 @@ class DummyTransportModel(DummyModel):
     def __call__(
         self,
         x: Batch,
-        conditioned_target: Batch,
+        noisy_target: Batch,
         condition: dict[str, torch.Tensor],
         model_comm_group: Any | None = None,
         **kwargs: Any,
     ) -> Batch:
         del model_comm_group, kwargs
         assert isinstance(x, Batch), f"the model takes a Batch, got {type(x).__name__}"
-        for dataset_name, target in conditioned_target.items():
+        for dataset_name, target in noisy_target.items():
             # One noise level or time per sample and member, as the transport objectives build it.
             assert condition[dataset_name].shape == (target.batch_size, 1, target.ensemble_size, 1, 1)
-        return conditioned_target.map_data(lambda data: data + 0.1 * torch.randn_like(data))
+        return noisy_target.map_data(lambda data: data + 0.1 * torch.randn_like(data))
 
 
 def _make_minimal_index_collection(
@@ -888,7 +888,7 @@ def test_flow_matching_prepare_builds_state_and_velocity(
     objective = FlowMatchingTransportObjective(module).prepare(prepared)
 
     torch.testing.assert_close(objective.condition["data"], torch.full((1, 1, 1, 1, 1), 0.25))
-    torch.testing.assert_close(objective.conditioned_target["data"].data, 0.75 * 3.0 + 0.25 * clean["data"])
+    torch.testing.assert_close(objective.noisy_target["data"].data, 0.75 * 3.0 + 0.25 * clean["data"])
     torch.testing.assert_close(objective.loss_target["data"].data, clean["data"] - 3.0)
     assert objective.loss_target_layout == IndexSpace.MODEL_OUTPUT
     assert objective.pred_layout == IndexSpace.MODEL_OUTPUT
@@ -935,7 +935,7 @@ def test_flow_matching_prepare_remasks_missing_observations(
 
     loss_data = objective.loss_target["data"].data
     target = loss_data[0] if sparse else loss_data
-    network_input = objective.conditioned_target["data"].data
+    network_input = objective.noisy_target["data"].data
     network_input = network_input[0] if sparse else network_input
     torch.testing.assert_close(target.flatten(), torch.tensor([4.0, float("nan")]), equal_nan=True)
     assert torch.isfinite(network_input).all()
@@ -2532,16 +2532,15 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
 
     class _DummyTransportObjective:
         def __init__(self) -> None:
-            self.conditioned_target: Batch | None = None
+            self.noisy_target: Batch | None = None
 
         def prepare(self, prepared: PreparedPredictionTarget) -> PreparedTransportObjective:
-            self.conditioned_target = prepared.model_target.map_data(lambda data: data + 3.0)
+            self.noisy_target = prepared.model_target.map_data(lambda data: data + 3.0)
             condition = {
-                dataset_name: torch.zeros(target.condition_shape)
-                for dataset_name, target in self.conditioned_target.items()
+                dataset_name: torch.zeros(target.condition_shape) for dataset_name, target in self.noisy_target.items()
             }
             return PreparedTransportObjective(
-                conditioned_target=self.conditioned_target,
+                noisy_target=self.noisy_target,
                 condition=condition,
                 loss_target=prepared.model_target,
                 loss_target_layout=IndexSpace.MODEL_OUTPUT,
@@ -2576,9 +2575,9 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
 
         target_datasets: ClassVar[list[str]] = ["data"]
 
-        def __call__(self, x: Batch, conditioned_target: Batch, condition: dict, **_kwargs: Any) -> Batch:
+        def __call__(self, x: Batch, noisy_target: Batch, condition: dict, **_kwargs: Any) -> Batch:
             del x, condition
-            return conditioned_target
+            return noisy_target
 
     forecaster.model = SimpleNamespace(
         model=_EchoTransportModel(),
@@ -2613,11 +2612,11 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
     )
     output = forecaster._step(batch=batch, validation_mode=True)
 
-    assert objective.conditioned_target is not None
+    assert objective.noisy_target is not None
     auxiliary_output = output.plot_kwargs["auxiliary_output"]
     torch.testing.assert_close(
         auxiliary_output["data"].data,
-        objective.conditioned_target["data"].data,
+        objective.noisy_target["data"].data,
     )
     assert auxiliary_output["data"].data.requires_grad is False
 
@@ -2861,10 +2860,10 @@ def test_transport_training_targets_cover_predicted_datasets_only() -> None:
         statistics={"obs": {}},
     )
 
-    target, target_forcing = forecaster.predicted_targets(Batch({**grid.sources, **obs.sources}))
+    target, target_forcings = forecaster.predicted_targets(Batch({**grid.sources, **obs.sources}))
 
     assert list(target.keys()) == ["data"]
-    assert list(target_forcing.keys()) == ["data"]
+    assert list(target_forcings.keys()) == ["data"]
     torch.testing.assert_close(target["data"].data, grid["data"].data[:, 1:])
 
 

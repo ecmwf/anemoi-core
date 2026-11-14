@@ -136,7 +136,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         if dataset_name not in self.dataset2decoder:
             # A dataset the model only reads is encoded from its input history alone.
             return input_dim
-        input_dim += super()._calculate_output_dim(dataset_name)  # corrupted target
+        input_dim += super()._calculate_output_dim(dataset_name)  # noisy target
         if not self.is_dataset_static.get(dataset_name, True):
             input_dim += 1  # flag: 1 on a noisy-target row, 0 on a history row
         return input_dim
@@ -148,7 +148,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         if "encoded_data" not in self._decoder_target_feature_names(dataset_name):
             # In addition to the deterministic decoder inputs (output-time
             # target features), the transport decoder
-            # consumes the corrupted target values at the target locations.
+            # consumes the noisy target values at the target locations.
             target_dim += super()._calculate_output_dim(dataset_name)
         return target_dim
 
@@ -166,14 +166,14 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     def _assemble_transport_input(
         self,
         x: "Source",
-        y_noised: "Source",
+        noisy_target: "Source",
         batch_size: int,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
     ) -> tuple[
         torch.Tensor, torch.Tensor, torch.Tensor | None, ShardSizes, tuple[int, ...] | None, torch.Tensor | None
     ]:
-        """Build the encoder rows of one dataset from its history ``x`` and its noisy target ``y_noised``.
+        """Build the encoder rows of one dataset from its history ``x`` and its noisy target ``noisy_target``.
 
         A gridded dataset has the same nodes at input and target time, so each row holds both:
         ``[history | noisy target | coordinates | ...]``. A tabular dataset has different nodes, so
@@ -183,14 +183,14 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
         x_flat = x.flatten()
-        y_noised_flat = y_noised.flatten()
+        noisy_target_flat = noisy_target.flatten()
         if x.is_tabular:
-            nodes, values, flag = self._history_and_noisy_target_rows(x_flat, y_noised_flat)
+            nodes, values, flag = self._history_and_noisy_target_rows(x_flat, noisy_target_flat)
         else:
-            if not torch.equal(x_flat.coordinates, y_noised_flat.coordinates):
-                raise AssertionError("Input and conditioned target coordinates must match for gridded transport data.")
+            if not torch.equal(x_flat.coordinates, noisy_target_flat.coordinates):
+                raise AssertionError("Input and noisy target coordinates must match for gridded transport data.")
             nodes = x_flat
-            values = torch.cat([x_flat.data.to(y_noised_flat.data.dtype), y_noised_flat.data], dim=-1)
+            values = torch.cat([x_flat.data.to(noisy_target_flat.data.dtype), noisy_target_flat.data], dim=-1)
             flag = None
 
         grid_shard_sizes = nodes.shard_sizes
@@ -248,41 +248,41 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     @staticmethod
     def _history_and_noisy_target_rows(
-        x_flat: FlatSource, y_noised_flat: FlatSource
+        x_flat: FlatSource, noisy_target_flat: FlatSource
     ) -> tuple[FlatSource, torch.Tensor, torch.Tensor]:
         """Stack a tabular dataset's history nodes and noisy-target nodes, block by block.
 
         Returns the stacked nodes, their values ``[history | noisy target]`` with zeros in the
         part a row does not have, and the flag column (1 on noisy-target rows).
         """
-        history = x_flat.data.to(y_noised_flat.data.dtype)
-        noisy_target = y_noised_flat.data
+        history = x_flat.data.to(noisy_target_flat.data.dtype)
+        noisy_target = noisy_target_flat.data
         n_history, n_target = history.shape[0], noisy_target.shape[0]
         history_rows = torch.cat([history, history.new_zeros(n_history, noisy_target.shape[-1])], dim=-1)
         target_rows = torch.cat([noisy_target.new_zeros(n_target, history.shape[-1]), noisy_target], dim=-1)
 
-        history_sizes, target_sizes = x_flat.batch_sizes, y_noised_flat.batch_sizes
+        history_sizes, target_sizes = x_flat.batch_sizes, noisy_target_flat.batch_sizes
         values = _join_blocks(history_rows, history_sizes, target_rows, target_sizes)
         flag = _join_blocks(history.new_zeros(n_history, 1), history_sizes, history.new_ones(n_target, 1), target_sizes)
 
-        if (x_flat.shard_sizes is None) != (y_noised_flat.shard_sizes is None):
+        if (x_flat.shard_sizes is None) != (noisy_target_flat.shard_sizes is None):
             raise ValueError("The history and the noisy target of a tabular dataset must be sharded alike.")
         shard_sizes = None
         if x_flat.shard_sizes is not None:
-            shard_sizes = [a + b for a, b in zip(x_flat.shard_sizes, y_noised_flat.shard_sizes, strict=True)]
+            shard_sizes = [a + b for a, b in zip(x_flat.shard_sizes, noisy_target_flat.shard_sizes, strict=True)]
 
         nodes = FlatSource(
             data=None,
-            coordinates=_join_blocks(x_flat.coordinates, history_sizes, y_noised_flat.coordinates, target_sizes),
-            device=y_noised_flat.device,
+            coordinates=_join_blocks(x_flat.coordinates, history_sizes, noisy_target_flat.coordinates, target_sizes),
+            device=noisy_target_flat.device,
             shard_sizes=shard_sizes,
             batch_sizes=tuple(a + b for a, b in zip(history_sizes, target_sizes, strict=True)),
-            timedeltas=_join_blocks(x_flat.timedeltas, history_sizes, y_noised_flat.timedeltas, target_sizes),
+            timedeltas=_join_blocks(x_flat.timedeltas, history_sizes, noisy_target_flat.timedeltas, target_sizes),
         )
         return nodes, values, flag
 
     def _assemble_output(self, x_out: torch.Tensor, x_skip, target: "Source", dtype: torch.dtype, dataset_name: str):
-        # The transport network predicts the conditioned target itself, so the output takes its shape and variables.
+        # The transport network predicts the noisy target itself, so the output takes its shape and variables.
         # A configured residual connection is added to its prognostic variables, as in the base model.
         pred = target.template().unflatten(x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
         return self._add_residual(pred, x_skip, dataset_name)
@@ -384,7 +384,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     def _build_conditioning_kwargs(
         self,
         x: Batch,
-        conditioned_target: Batch,
+        noisy_target: Batch,
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[dict[str, dict], dict[str, torch.Tensor], dict[str, dict]]:
@@ -399,7 +399,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             return hidden_conditioning[hidden_name]
 
         fwd_mapper_kwargs, bwd_mapper_kwargs = {}, {}
-        for dataset_name, target_view in conditioned_target.items():
+        for dataset_name, target_view in noisy_target.items():
             c_target = self._node_conditioning(rows, target_view, model_comm_group)
             c_hidden = conditioning_of_hidden(self.dataset2hidden[dataset_name])
 
@@ -421,41 +421,41 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         # A dataset the model only reads has no noisy target: its encoder sees its history nodes alone.
         for dataset_name, history_view in x.items():
-            if dataset_name in conditioned_target:
+            if dataset_name in noisy_target:
                 continue
             c_history = self._node_conditioning(rows, history_view, model_comm_group)
             fwd_mapper_kwargs[dataset_name] = {
                 "cond": (c_history, conditioning_of_hidden(self.dataset2hidden[dataset_name])),
             }
 
-        dataset_names = list(dict.fromkeys([*x.keys(), *conditioned_target.keys()]))
+        dataset_names = list(dict.fromkeys([*x.keys(), *noisy_target.keys()]))
         processor_kwargs = {"cond": conditioning_of_hidden(self._get_active_hidden_name(dataset_names))}
         return fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs
 
     def forward(
         self,
         x: Batch,
-        conditioned_target: Batch,
+        noisy_target: Batch,
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        target_forcing: Optional[Batch] = None,
+        target_forcings: Optional[Batch] = None,
         **kwargs,
     ) -> Batch:
         network = functools.partial(
             self._forward_transport_network,
             model_comm_group=model_comm_group,
-            target_forcing=target_forcing,
+            target_forcings=target_forcings,
             **kwargs,
         )
-        return self.transport_model_objective.forward(network, x, conditioned_target, condition)
+        return self.transport_model_objective.forward(network, x, noisy_target, condition)
 
     def _forward_transport_network(
         self,
         batch: Batch,
-        conditioned_target: Batch,
+        noisy_target: Batch,
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        target_forcing: Optional[Batch] = None,
+        target_forcings: Optional[Batch] = None,
         **kwargs,
     ) -> Batch:
         # Multi-dataset case
@@ -472,7 +472,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         # Embed the current noise level or time and pass it to the conditional layers.
         fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = self._build_conditioning_kwargs(
-            batch, conditioned_target, condition, model_comm_group=model_comm_group
+            batch, noisy_target, condition, model_comm_group=model_comm_group
         )
 
         # Process each dataset through its corresponding encoder
@@ -500,10 +500,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 if dataset_name not in batch:
                     continue
 
-                if dataset_name in conditioned_target:
+                if dataset_name in noisy_target:
                     assembled = self._assemble_transport_input(
                         batch[dataset_name],
-                        conditioned_target[dataset_name],
+                        noisy_target[dataset_name],
                         batch_size=bse,
                         model_comm_group=model_comm_group,
                         dataset_name=dataset_name,
@@ -546,11 +546,11 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         # Decoder features read the encoded rows of a tabular dataset at its target nodes only.
         for dataset_name, encoded in x_data_latent_dict.items():
-            if batch[dataset_name].is_tabular and dataset_name in conditioned_target:
+            if batch[dataset_name].is_tabular and dataset_name in noisy_target:
                 x_data_latent_dict[dataset_name] = _second_blocks(
                     encoded,
                     batch[dataset_name].template().flat_sizes()[1],
-                    conditioned_target[dataset_name].template().flat_sizes()[1],
+                    noisy_target[dataset_name].template().flat_sizes()[1],
                 )
 
         # Combine all dataset latents
@@ -585,25 +585,25 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             x_latent_proc = x_latent_proc + x_latent
 
         # Decoder
-        out_batch = conditioned_target
+        out_batch = noisy_target
         for dataset_name in self.target_datasets:
             target_feature_names = self._decoder_target_feature_names(dataset_name)
-            decoder_target_view = conditioned_target[dataset_name]
+            decoder_target_view = noisy_target[dataset_name]
             if "target_forcings" in target_feature_names:
-                if target_forcing is None or dataset_name not in target_forcing:
+                if target_forcings is None or dataset_name not in target_forcings:
                     msg = (
                         f"Dataset '{dataset_name}' configures the 'target_forcings' decoder feature; "
-                        "a 'target_forcing' batch with the output-time forcings is required."
+                        "a 'target_forcings' batch with the output-time forcings is required."
                     )
                     raise ValueError(msg)
-                decoder_target_view = target_forcing[dataset_name]
+                decoder_target_view = target_forcings[dataset_name]
 
             target_coords, target_data_latent, shard_sizes_target, target_batch_sizes, target_timedeltas = (
                 self._assemble_target(
                     batch[dataset_name],
                     x_data_latent_dict.get(dataset_name),
                     decoder_target_view,
-                    conditioned_target[dataset_name],
+                    noisy_target[dataset_name],
                     batch_size=bse,
                     model_comm_group=model_comm_group,
                     dataset_name=dataset_name,
@@ -611,7 +611,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
             if "encoded_data" not in target_feature_names:
                 # The transport decoder also takes the noisy target at the target nodes.
-                conditioned_target_data = conditioned_target[dataset_name].flatten().data
+                conditioned_target_data = noisy_target[dataset_name].flatten().data
                 conditioned_target_data = conditioned_target_data.to(
                     device=target_data_latent.device,
                     dtype=target_data_latent.dtype,
@@ -633,7 +633,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 mapper_kwargs=bwd_mapper_kwargs[dataset_name],
             )
 
-            target_view = conditioned_target[dataset_name]
+            target_view = noisy_target[dataset_name]
             out_view = self._assemble_output(
                 x_out,
                 x_skip_dict.get(dataset_name),
@@ -793,7 +793,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 model_comm_group=model_comm_group,
                 schedule_params=schedule_params,
                 sampler_params=sampler_params,
-                target_forcing=target_forcing,
+                target_forcings=target_forcing,
             )
             y_hat = self._sampled_to_physical(
                 sampled,
@@ -819,14 +819,14 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         model_comm_group: Optional[ProcessGroup] = None,
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
-        target_forcing: Optional[Batch] = None,
+        target_forcings: Optional[Batch] = None,
     ) -> Batch:
         """Run the sampler selected by the transport objective, from freshly drawn noise."""
         noise = self.draw_sampling_noise(x, target_template=target_template, model_comm_group=model_comm_group)
         network = functools.partial(
             self._forward_transport_network,
             model_comm_group=model_comm_group,
-            target_forcing=target_forcing,
+            target_forcings=target_forcings,
         )
         return self.transport_model_objective.sample(
             network,
@@ -878,7 +878,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     def _assemble_transport_input(
         self,
         x: "Source",
-        y_noised: "Source",
+        noisy_target: "Source",
         batch_size: int,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
@@ -887,7 +887,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     ]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
-        if x.is_tabular or y_noised.is_tabular:
+        if x.is_tabular or noisy_target.is_tabular:
             raise NotImplementedError("Tendency transport is not implemented for sparse observation datasets.")
 
         (
@@ -899,7 +899,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             timedeltas,
         ) = super()._assemble_transport_input(
             x,
-            y_noised,
+            noisy_target,
             batch_size,
             model_comm_group=model_comm_group,
             dataset_name=dataset_name,
@@ -994,7 +994,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         only reads have no tendency and get no reference.
         """
         predicted = {name: source for name, source in x.items() if name in self.target_datasets}
-        truncated = self.apply_reference_state_truncation(
+        truncated = self.apply_residual_connections(
             {name: source.data for name, source in predicted.items()},
             grid_shard_sizes,
             model_comm_group,
@@ -1217,7 +1217,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             {dataset_name: to_physical(dataset_name, tendency) for dataset_name, tendency in sampled.items()},
         )
 
-    def apply_reference_state_truncation(
+    def apply_residual_connections(
         self,
         x: dict[str, torch.Tensor],
         grid_shard_sizes: DatasetShardSizes | None,

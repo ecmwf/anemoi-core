@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from anemoi.models.transport.paths import flow_matching_clean
-from anemoi.models.transport.paths import flow_matching_state
+from anemoi.models.transport.paths import flow_matching_noisy_target
 from anemoi.models.transport.paths import flow_matching_velocity
 from anemoi.models.transport.schedules import TIME_TRAINING_DISTRIBUTIONS
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
@@ -38,11 +38,11 @@ class FlowMatchingTransportObjective(TransportObjective):
     ) -> PreparedTransportObjective:
         target = prepared.model_target
         noise = self.draw_noise(prepared)
-        time_level = self.draw_condition(target)
+        time = self.draw_condition(target)
 
-        state = target.with_sources(
+        noisy_target = target.with_sources(
             {
-                name: noise[name].map_with_condition(flow_matching_state, time_level[name], clean)
+                name: noise[name].map_with_condition(flow_matching_noisy_target, time[name], clean)
                 for name, clean in target.items()
             },
         )
@@ -54,8 +54,8 @@ class FlowMatchingTransportObjective(TransportObjective):
             prepared.model_target_missing,
         )
         return PreparedTransportObjective(
-            conditioned_target=state,
-            condition=time_level,
+            noisy_target=noisy_target,
+            condition=time,
             loss_target=velocity,
             loss_target_layout=IndexSpace.MODEL_OUTPUT,
             pred_layout=IndexSpace.MODEL_OUTPUT,
@@ -68,15 +68,15 @@ class FlowMatchingTransportObjective(TransportObjective):
         objective: PreparedTransportObjective,
     ) -> Batch:
         """Estimate the clean target from the predicted velocity, for validation metrics."""
-        state = objective.conditioned_target
-        time_level = objective.condition
+        noisy_target = objective.noisy_target
+        time = objective.condition
 
-        def clean(velocity: torch.Tensor, state_data: torch.Tensor, time: torch.Tensor) -> torch.Tensor:
-            return flow_matching_clean(state_data, velocity, time)
+        def clean(velocity: torch.Tensor, noisy_target_data: torch.Tensor, time_data: torch.Tensor) -> torch.Tensor:
+            return flow_matching_clean(noisy_target_data, velocity, time_data)
 
         return prediction.with_sources(
             {
-                name: velocity.map_with_condition(clean, time_level[name], state[name])
+                name: velocity.map_with_condition(clean, time[name], noisy_target[name])
                 for name, velocity in prediction.items()
             },
         )

@@ -972,7 +972,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
         parameters : list[str]
             Parameters to plot.
         with_auxiliary : bool, optional
-            Forward the optional auxiliary tensor (e.g. corrupted targets) to
+            Forward the optional auxiliary tensor (e.g. noisy targets) to
             ``plot_fn``, by default False.
         members : int | list[int] | None, optional
             Ensemble members to select. None selects all of them. Left unset,

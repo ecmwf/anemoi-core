@@ -270,7 +270,7 @@ def _model_config(model_class: type, obs_predicted: bool, with_grid: bool = True
             # The tendency model takes the latest grid state as its reference and is conditioned on it.
             config["condition_on_residual"] = True
         else:
-            # The transport network predicts the corrupted target itself, without a skip connection.
+            # The transport network predicts the noisy target itself, without a skip connection.
             config["residual"] = {"datasets": {}}
     if ensemble:
         config["condition_on_residual"] = False
@@ -518,7 +518,7 @@ def _forward(model, batches: dict[str, Batch], transport: bool, group) -> Batch:
             batches["noisy_target"],
             {name: sigma for name in batches["noisy_target"].dataset_names},
             model_comm_group=group,
-            target_forcing=batches["target_forcing"],
+            target_forcings=batches["target_forcing"],
         )
     return model(
         batches["x"],
