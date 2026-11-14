@@ -896,3 +896,221 @@ def test_offset_convert_and_validate_returns_sorted_timedeltas(
     assert converted_inputs == expected_inputs
     assert converted_outputs == expected_outputs
     assert all(isinstance(offset, datetime.timedelta) for offset in converted_inputs + converted_outputs)
+
+
+def _mixed_frequency_metadata(*, coarse_inputs: list[int] | None = None) -> dict:
+    coarse_inputs = [0] if coarse_inputs is None else coarse_inputs
+    fine_targets = [list(range(step * 12 + 1, (step + 1) * 12 + 1)) for step in range(6)]
+    timesteps = {
+        "model_timestep": "5m",
+        "relative_date_input_indices_training_by_dataset": {"coarse": coarse_inputs, "fine": [0]},
+        "relative_date_indices_training_by_dataset": {"coarse": [0, 72], "fine": list(range(73))},
+        "relative_date_target_indices_training_by_dataset": {"coarse": [], "fine": list(range(1, 73))},
+        "relative_date_target_indices_training_by_dataset_by_step": {
+            "coarse": [[] for _step in range(6)],
+            "fine": fine_targets,
+        },
+    }
+    return {
+        "metadata_inference": {
+            "dataset_names": ["coarse", "fine"],
+            "coarse": {"timesteps": timesteps},
+            "fine": {"timesteps": timesteps},
+        },
+    }
+
+
+def _mixed_frequency_batch() -> Batch:
+    layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+    coarse = torch.tensor([10.0, 20.0]).reshape(1, 2, 1, 1, 1).expand(-1, -1, -1, -1, 2).clone()
+    fine = torch.arange(73, dtype=torch.float32).reshape(1, 73, 1, 1, 1).expand(-1, -1, -1, -1, 2).clone()
+    return build_batch(
+        data={"coarse": coarse, "fine": fine},
+        coordinates={"coarse": torch.zeros(1, 2), "fine": torch.zeros(1, 2)},
+        layouts={"coarse": layout, "fine": layout},
+        variables={"coarse": ["A", "B"], "fine": ["A", "B"]},
+    )
+
+
+def test_mixed_frequency_metadata_preserves_empty_inputs_and_sets_per_dataset_counts() -> None:
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=12,
+        timestep="5m",
+        rollout={"start": 6, "maximum": 6},
+    )
+    task.configure_from_metadata(_mixed_frequency_metadata(coarse_inputs=[]))
+    data_indices = {
+        "coarse": _make_minimal_index_collection(_NAME_TO_INDEX),
+        "fine": _make_minimal_index_collection(_NAME_TO_INDEX),
+    }
+
+    inputs = task.get_inputs(_mixed_frequency_batch(), data_indices)
+
+    assert inputs["coarse"].time_size == 0
+    assert inputs["fine"].time_size == 1
+    assert task.num_input_timesteps_by_dataset == {"coarse": 0, "fine": 1}
+    assert task.num_output_timesteps_by_dataset == {"coarse": 0, "fine": 12}
+
+
+def test_mixed_frequency_rollout_refreshes_coarse_context_and_reuses_fine_predictions() -> None:
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=12,
+        timestep="5m",
+        rollout={"start": 6, "maximum": 6},
+    )
+    task.configure_from_metadata(_mixed_frequency_metadata())
+    batch = _mixed_frequency_batch()
+    data_indices = {
+        "coarse": _make_minimal_index_collection(_NAME_TO_INDEX, forcing=["A"]),
+        "fine": _make_minimal_index_collection(_NAME_TO_INDEX, forcing=["A"]),
+    }
+    x = task.get_inputs(batch, data_indices)
+    prediction = build_batch(
+        data={"fine": torch.arange(100, 112, dtype=torch.float32).reshape(1, 12, 1, 1, 1)},
+        coordinates={"fine": torch.zeros(1, 2)},
+        layouts={"fine": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"fine": ["B"]},
+    )
+
+    next_inputs = task.advance_input(
+        x,
+        prediction,
+        task.get_input_times(batch, rollout_step=1),
+        rollout_step=0,
+        data_indices=data_indices,
+    )
+    assert next_inputs["coarse"].data[0, 0, 0, 0, 1] == 10
+    assert next_inputs["fine"].data[0, 0, 0, 0, 1] == 111
+
+    refreshed = task.advance_input(
+        x,
+        prediction,
+        task.get_input_times(batch, rollout_step=6),
+        rollout_step=5,
+        data_indices=data_indices,
+    )
+    assert refreshed["coarse"].data[0, 0, 0, 0, 1] == 20
+
+
+def test_mixed_frequency_rollout_preserves_previous_gridded_predictions() -> None:
+    task = Forecaster(
+        multistep_input=3,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+    )
+    timesteps = {
+        "model_timestep": "6h",
+        "relative_date_input_indices_training_by_dataset": {"data": [-2, -1, 0]},
+        "relative_date_indices_training_by_dataset": {"data": [-2, -1, 0, 1, 2]},
+        "relative_date_target_indices_training_by_dataset": {"data": [1, 2]},
+        "relative_date_target_indices_training_by_dataset_by_step": {"data": [[1], [2]]},
+    }
+    task.configure_from_metadata(
+        {"metadata_inference": {"dataset_names": ["data"], "data": {"timesteps": timesteps}}},
+    )
+    layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+    full_batch = build_batch(
+        data={"data": torch.arange(10.0, 15.0).reshape(1, 5, 1, 1, 1).expand(-1, -1, -1, -1, 2)},
+        coordinates={"data": torch.zeros(1, 2)},
+        layouts={"data": layout},
+        variables={"data": ["A", "B"]},
+    )
+    data_indices = _data_indices_single()
+    x = task.get_inputs(full_batch, data_indices)
+
+    for rollout_step, value in enumerate((100.0, 200.0)):
+        prediction = build_batch(
+            data={"data": torch.full((1, 1, 1, 1, 2), value)},
+            coordinates={"data": torch.zeros(1, 2)},
+            layouts={"data": layout},
+            variables={"data": ["A", "B"]},
+        )
+        x = task.advance_input(
+            x,
+            prediction,
+            task.get_input_times(full_batch, rollout_step=rollout_step + 1),
+            rollout_step=rollout_step,
+            data_indices=data_indices,
+        )
+
+    assert x["data"].data[0, :, 0, 0, 0].tolist() == [12.0, 100.0, 200.0]
+
+
+def test_mixed_frequency_rollout_preserves_previous_tabular_predictions() -> None:
+    task = Forecaster(
+        multistep_input=3,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+    )
+    timesteps = {
+        "model_timestep": "6h",
+        "relative_date_input_indices_training_by_dataset": {"obs": [-2, -1, 0]},
+        "relative_date_indices_training_by_dataset": {"obs": [-2, -1, 0, 1, 2]},
+        "relative_date_target_indices_training_by_dataset": {"obs": [1, 2]},
+        "relative_date_target_indices_training_by_dataset_by_step": {"obs": [[1], [2]]},
+    }
+    task.configure_from_metadata(
+        {"metadata_inference": {"dataset_names": ["obs"], "obs": {"timesteps": timesteps}}},
+    )
+    full_batch = _obs_batch(
+        [
+            (_obs_window(2, p=[value], f=0.0), offset * SIX_HOURS)
+            for value, offset in zip(range(10, 15), range(-2, 3), strict=True)
+        ],
+    )
+    data_indices = _obs_data_indices()
+    x = task.get_inputs(full_batch, data_indices)
+
+    for rollout_step, value in enumerate((100.0, 200.0)):
+        prediction = _obs_batch([(_obs_window(2, p=[value]), SIX_HOURS)], variables=["p"])
+        x = task.advance_input(
+            x,
+            prediction,
+            task.get_input_times(full_batch, rollout_step=rollout_step + 1),
+            rollout_step=rollout_step,
+            data_indices=data_indices,
+        )
+
+    assert x["obs"].data[0][0, ::2, 0].tolist() == [12.0, 100.0, 200.0]
+    torch.testing.assert_close(
+        x["obs"].timedeltas[0][::2],
+        torch.tensor([-2 * SIX_HOURS, -SIX_HOURS, 0.0]),
+    )
+
+
+def test_mixed_frequency_rollout_supports_empty_tabular_inputs() -> None:
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    timesteps = {
+        "model_timestep": "6h",
+        "relative_date_input_indices_training_by_dataset": {"obs": []},
+        "relative_date_indices_training_by_dataset": {"obs": [0, 1]},
+        "relative_date_target_indices_training_by_dataset": {"obs": [1]},
+        "relative_date_target_indices_training_by_dataset_by_step": {"obs": [[1]]},
+    }
+    task.configure_from_metadata(
+        {"metadata_inference": {"dataset_names": ["obs"], "obs": {"timesteps": timesteps}}},
+    )
+    full_batch = _obs_batch(
+        [
+            (_obs_window(2, p=[0.0], f=0.0), 0.0),
+            (_obs_window(2, p=[1.0], f=0.0), SIX_HOURS),
+        ],
+    )
+    data_indices = _obs_data_indices()
+    x = task.get_inputs(full_batch, data_indices)
+
+    advanced = task.advance_input(
+        x,
+        Batch({}),
+        task.get_input_times(full_batch, rollout_step=1),
+        rollout_step=0,
+        data_indices=data_indices,
+    )
+
+    assert advanced["obs"].time_size == 0
+    assert advanced["obs"].variables == ["p", "f"]
+    assert list(task._plot_adapter.iter_plot_samples(torch.zeros(2, 1), torch.zeros(1), dataset_name="obs")) == []

@@ -226,8 +226,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.dataset_names = list(data_indices.keys())
 
         # Define number of input/output timesteps per node for each dataset
-        self.n_step_input = dict.fromkeys(self.dataset_names, self.task.num_input_timesteps)
-        self.n_step_output = dict.fromkeys(self.dataset_names, self.task.num_output_timesteps)
+        self.n_step_input = self.task.num_input_timesteps_by_dataset or dict.fromkeys(
+            self.dataset_names,
+            self.task.num_input_timesteps,
+        )
+        self.n_step_output = self.task.num_output_timesteps_by_dataset or dict.fromkeys(
+            self.dataset_names,
+            self.task.num_output_timesteps,
+        )
 
         self.model = AnemoiModelInterface(
             config=config,
@@ -275,6 +281,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
         loss_configs = self._build_loss_configs()
+        zero_target_losses = [
+            name
+            for name, loss_config in loss_configs.items()
+            if loss_config is not None and self.n_step_output[name] == 0
+        ]
+        if zero_target_losses:
+            msg = f"Datasets {zero_target_losses} have a training loss configured but no model targets."
+            raise ValueError(msg)
 
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
@@ -300,6 +314,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
             dataset_scalers, dataset_updating_scalars = create_scalers(
                 scalers_configs[dataset_name],
+                dataset_name=dataset_name,
                 data_indices=data_indices[dataset_name],
                 task=self.task,
                 graph_data=graph_data,
