@@ -535,6 +535,12 @@ class GraphTransformerProcessor(BaseProcessor):
             f"Supported strategies are 'edges' and 'heads'."
         )
         self.shard_strategy = shard_strategy
+        # A processor can be shared by several static domain graphs. Keep one
+        # halo plan per sharding layout so revisiting a domain does not rebuild
+        # its collective communication metadata. ``_cached_halo_info`` and
+        # ``_cached_halo_cache_specs`` retain the most-recent-entry interface
+        # used by diagnostics and older tests.
+        self._halo_info_cache = {}
         self._cached_halo_info = None
         self._cached_halo_cache_specs = None
 
@@ -564,10 +570,11 @@ class GraphTransformerProcessor(BaseProcessor):
         batch_size: int,
         model_comm_group: Optional[ProcessGroup],
     ) -> Optional[HaloInfo]:
-        """Return one halo plan shared by all processor layers.
+        """Return a halo plan shared by all layers for this graph layout.
 
-        The plan is kept for as long as the shard sizes stay the same, so the
-        processor graph must not change between calls.
+        Multi-domain models reuse one processor for several static graphs.
+        Cache every distinct sharding layout so interleaving domains does not
+        rebuild a collective halo plan on every batch.
         """
         if self.shard_strategy != "edges" or not model_is_distributed(model_comm_group):
             return None
@@ -583,8 +590,11 @@ class GraphTransformerProcessor(BaseProcessor):
         assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
 
         cache_specs = halo_cache_specs(shard_info, model_comm_group)
-        if self._cached_halo_info is not None and self._cached_halo_cache_specs == cache_specs:
-            return self._cached_halo_info
+        if cache_specs in self._halo_info_cache:
+            halo_info = self._halo_info_cache[cache_specs]
+            self._cached_halo_info = halo_info
+            self._cached_halo_cache_specs = cache_specs
+            return halo_info
 
         LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
 
@@ -607,6 +617,7 @@ class GraphTransformerProcessor(BaseProcessor):
             debug=ANEMOI_DEBUG_SHARDING,
         )
 
+        self._halo_info_cache[cache_specs] = halo_info
         self._cached_halo_info = halo_info
         self._cached_halo_cache_specs = cache_specs
         return halo_info

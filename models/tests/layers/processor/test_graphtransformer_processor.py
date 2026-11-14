@@ -219,6 +219,36 @@ class TestGraphTransformerProcessor:
                 x, edge_index, GraphShardInfo(nodes=None, edges=[self.NUM_EDGES, 0]), 1, group
             )
 
+    def test_processor_caches_halo_info_for_each_graph_layout(self, graphtransformer_processor, monkeypatch):
+        group = Mock()
+        graph_a = GraphShardInfo(nodes=[60, 40], edges=[120, 80])
+        graph_b = GraphShardInfo(nodes=[50, 50], edges=[100, 100])
+        x = torch.empty(60, graphtransformer_processor.num_channels)
+        edge_index = torch.empty(2, 120, dtype=torch.long)
+        halo_a = Mock(spec=HaloInfo)
+        halo_b = Mock(spec=HaloInfo)
+
+        monkeypatch.setattr(
+            "anemoi.models.layers.processor.model_is_distributed",
+            lambda _group: True,
+        )
+        monkeypatch.setattr(
+            "anemoi.models.layers.processor.halo_cache_specs",
+            lambda shard_info, _group: (tuple(shard_info.nodes), tuple(shard_info.edges)),
+        )
+        monkeypatch.setattr(
+            "anemoi.models.layers.processor.build_graph_partition_from_shard_info",
+            Mock(),
+        )
+        build_halo = Mock(side_effect=[halo_a, halo_b])
+        monkeypatch.setattr("anemoi.models.layers.processor.build_halo_info", build_halo)
+
+        assert graphtransformer_processor._get_or_build_cached_halo_info(x, edge_index, graph_a, 1, group) is halo_a
+        assert graphtransformer_processor._get_or_build_cached_halo_info(x, edge_index, graph_b, 1, group) is halo_b
+        assert graphtransformer_processor._get_or_build_cached_halo_info(x, edge_index, graph_a, 1, group) is halo_a
+        assert build_halo.call_count == 2
+        assert len(graphtransformer_processor._halo_info_cache) == 2
+
     def test_unsorted_edges_are_sorted_before_forward(
         self, graphtransformer_processor, graphtransformer_init, graph_provider
     ):
