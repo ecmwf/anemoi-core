@@ -357,6 +357,33 @@ def test_edm_samplers_follow_the_exact_flow_of_gaussian_data(sampler_cls: type[E
     assert abs(error_160) < 1e-3
 
 
+@pytest.mark.parametrize("sampler_cls", [EDMHeunSampler, DPMpp2MSampler])
+def test_edm_samplers_accept_repeated_noise_levels(sampler_cls: type[EDMDiffusionSampler]) -> None:
+    """A step between two equal noise levels leaves the state as it is.
+
+    With sigma_max == sigma_min every step but the last has zero length, so the sample is the denoised start
+    at that level. For data drawn from N(0, sd^2) the denoiser is D(y, sigma) = y sd^2 / (sd^2 + sigma^2).
+    A repeated level inside a schedule must also give a finite sample.
+    """
+    sigma_data = 0.5
+    x, y = make_inputs(dtype=torch.float64)
+
+    def gaussian_denoiser(x: Batch, y: Batch, sigma: dict[str, torch.Tensor], model_comm_group=None) -> Batch:
+        del x, model_comm_group
+        return y.with_data(
+            {name: source.data * sigma_data**2 / (sigma_data**2 + sigma[name] ** 2) for name, source in y.items()},
+        )
+
+    sampler = sampler_cls(dtype=torch.float64)
+    one_level = KarrasSigmaSchedule(sigma_max=1.0, sigma_min=1.0, num_steps=4, rho=7.0).get_schedule()
+    result = sampler.sample(x=x, y=y, sigmas=one_level, denoising_fn=gaussian_denoiser)
+    torch.testing.assert_close(result[DATASET_NAME].data, y[DATASET_NAME].data * sigma_data**2 / (sigma_data**2 + 1.0))
+
+    repeated_inside = torch.tensor([80.0, 10.0, 10.0, 1.0, 0.1, 0.0], dtype=torch.float64)
+    result = sampler.sample(x=x, y=y, sigmas=repeated_inside, denoising_fn=gaussian_denoiser)
+    assert torch.isfinite(result[DATASET_NAME].data).all()
+
+
 def test_dpmpp_hands_the_denoiser_its_solver_state_rounded_once() -> None:
     """DPM++ keeps its state in float64 and only rounds the copy handed to a float32 denoiser.
 

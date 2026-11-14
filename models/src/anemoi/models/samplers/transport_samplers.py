@@ -237,8 +237,9 @@ class DPMpp2MSampler(EDMDiffusionSampler):
             t = -torch.log(sigma)
             t_next = -torch.log(sigma_next)
             h = t_next - t
+            h_last = t + torch.log(sigmas[i - 1]) if i > 0 else None
 
-            if old_denoised is None:
+            if old_denoised is None or h == 0 or h_last == 0:
                 y_solver = y_solver.zip_map_data(
                     lambda y_sample, denoised_sample: (
                         (sigma_next / sigma) * y_sample - (torch.exp(-h) - 1) * denoised_sample
@@ -247,7 +248,6 @@ class DPMpp2MSampler(EDMDiffusionSampler):
                 )
             else:
                 # Second order multistep
-                h_last = t + torch.log(sigmas[i - 1])
                 r = h_last / h
 
                 coeff1 = 1 + 1 / (2 * r)
