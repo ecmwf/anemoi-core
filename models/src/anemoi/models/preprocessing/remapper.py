@@ -15,6 +15,7 @@ import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
+from anemoi.models.preprocessing import resolve_variable_indices
 from anemoi.models.preprocessing.mappings import affine_transform
 from anemoi.models.preprocessing.mappings import asinh_converter
 from anemoi.models.preprocessing.mappings import atanh_converter
@@ -36,8 +37,31 @@ from anemoi.models.preprocessing.mappings import sqrt_converter
 LOGGER = logging.getLogger(__name__)
 
 
+def _domain(remapper, kwargs: dict, dtype: torch.dtype) -> tuple[float | None, float | None]:
+    """Bounds of the values ``remapper`` accepts (``None`` for unbounded), for :meth:`Remapper.transform`.
+
+    Open bounds are moved inside by the smallest step that keeps the result finite. Keyed on the
+    converter functions, which pickled processors reference by name.
+    """
+    if remapper in (sqrt_converter, power_transform):
+        return 0.0, None
+    if remapper is boxcox_converter:
+        return (torch.finfo(dtype).tiny if kwargs.get("lambd", 0.5) == 0 else 0.0), None
+    if remapper is log1p_converter:
+        return -1.0 + torch.finfo(dtype).eps, None
+    if remapper is atanh_converter:
+        return 0.0, 1.0
+    return None, None
+
+
 class Remapper(BasePreprocessor):
-    """Remap and convert variables for single variables."""
+    """Remap and convert variables for single variables.
+
+    The remappings act on state values (their domains and shifts make no sense for a difference of
+    states), so they are skipped when a tendency is converted (:attr:`applies_to_tendencies`).
+    """
+
+    applies_to_tendencies = False
 
     supported_methods = {
         method: [f, inv]
@@ -72,10 +96,9 @@ class Remapper(BasePreprocessor):
         self,
         config=None,
         data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
     ) -> None:
-        super().__init__(config, data_indices, statistics)
-        self._create_remapping_indices(statistics)
+        super().__init__(config, data_indices)
+        self._create_remapping_indices()
         self._validate_indices()
 
     def _validate_indices(self):
@@ -90,10 +113,7 @@ class Remapper(BasePreprocessor):
             f"{len(self.index_inference_input)}, {len(self.index_training_input)}, {len(self.index_training_out)}, {len(self.remappers)}"
         )
 
-    def _create_remapping_indices(
-        self,
-        statistics=None,
-    ):
+    def _create_remapping_indices(self):
         """Create the parameter indices for remapping."""
         # list for training and inference mode as position of parameters can change
         name_to_index_training_input = self.data_indices.data.input.name_to_index
@@ -105,6 +125,7 @@ class Remapper(BasePreprocessor):
         self.num_training_output_vars = len(name_to_index_training_output)
         self.num_inference_output_vars = len(name_to_index_inference_output)
 
+        self.remapped_names = []
         (
             self.remappers,
             self.backmappers,
@@ -127,6 +148,7 @@ class Remapper(BasePreprocessor):
         for name in name_to_index_training_input:
             method = self.methods.get(name, self.default)
             if method in self.supported_methods:
+                self.remapped_names.append(name)
                 self.remappers.append(self.supported_methods[method][0])
                 self.backmappers.append(self.supported_methods[method][1])
                 self.index_training_input.append(name_to_index_training_input[name])
@@ -150,35 +172,61 @@ class Remapper(BasePreprocessor):
             else:
                 raise KeyError(f"Unknown remapping method for {name}: {method}")
 
-    def transform(self, x, in_place: bool = True) -> torch.Tensor:
+    def transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        name_to_index: Optional[dict[str, int]] = None,
+        clip_to_domain: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
+        """Remap the variables of ``x``, located by name (``name_to_index``) or, failing that, by width.
+
+        With ``clip_to_domain``, values outside the domain of a remapping (e.g. negative values for
+        ``sqrt``) are first clipped to it, as the inverse remappings clip their outputs. Used for states
+        rebuilt from predicted tendencies, which, unlike states predicted in remapped space, can leave it.
+        """
         if not in_place:
             x = x.clone()
-        if x.shape[-1] == self.num_training_input_vars:
-            idx = self.index_training_input
-        elif x.shape[-1] == self.num_inference_input_vars:
-            idx = self.index_inference_input
-        else:
-            raise ValueError(
-                f"Input tensor ({x.shape[-1]}) does not match the training "
-                f"({self.num_training_input_vars}) or inference shape ({self.num_inference_input_vars})",
-            )
+        idx = resolve_variable_indices(
+            self.__class__.__name__,
+            self.remapped_names,
+            x.shape[-1],
+            name_to_index,
+            {
+                "training input": (self.num_training_input_vars, self.index_training_input),
+                "inference input": (self.num_inference_input_vars, self.index_inference_input),
+            },
+        )
         for i, remapper, kwargs in zip(idx, self.remappers, self.remapper_kwargs):
             if i is not None:
+                if clip_to_domain:
+                    low, high = _domain(remapper, kwargs, x.dtype)
+                    if low is not None or high is not None:
+                        x[..., i] = x[..., i].clamp(low, high)
                 x[..., i] = remapper(x[..., i], **kwargs)
         return x
 
-    def inverse_transform(self, x, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        name_to_index: Optional[dict[str, int]] = None,
+        **_kwargs,
+    ) -> torch.Tensor:
+        """Map the variables of ``x`` back, located by name (``name_to_index``) or, failing that, by width."""
         if not in_place:
             x = x.clone()
-        if x.shape[-1] == self.num_training_output_vars:
-            idx = self.index_training_out
-        elif x.shape[-1] == self.num_inference_output_vars:
-            idx = self.index_inference_output
-        else:
-            raise ValueError(
-                f"Input tensor ({x.shape[-1]}) does not match the training "
-                f"({self.num_training_output_vars}) or inference shape ({self.num_inference_output_vars})",
-            )
+        idx = resolve_variable_indices(
+            self.__class__.__name__,
+            self.remapped_names,
+            x.shape[-1],
+            name_to_index,
+            {
+                "training output": (self.num_training_output_vars, self.index_training_out),
+                "inference output": (self.num_inference_output_vars, self.index_inference_output),
+            },
+        )
         for i, backmapper, kwargs in zip(idx, self.backmappers, self.remapper_kwargs):
             if i is not None:
                 x[..., i] = backmapper(x[..., i], **kwargs)

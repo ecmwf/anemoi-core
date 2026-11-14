@@ -8,11 +8,16 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from typing import TYPE_CHECKING
 
 from torch import Tensor
 from torch import nn
 
+from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import ShardSizes
+
+if TYPE_CHECKING:
+    from anemoi.models.data.sources import GriddedSource
 
 LOGGER = logging.getLogger(__name__)
 
@@ -71,3 +76,39 @@ class SpatialPreprocessor(nn.Module):
 
     def inverse(self, x: Tensor) -> Tensor:
         raise NotImplementedError(f"{self.__class__.__name__} does not support inverse projection.")
+
+    def project_source(
+        self,
+        source: "GriddedSource",
+        target_coordinates: Tensor,
+        model_comm_group=None,
+    ) -> "GriddedSource":
+        """Project a gridded source onto the target grid.
+
+        Parameters
+        ----------
+        source : GriddedSource
+            Source on the projector's input grid, with data ``(batch, time, ensemble, grid_src, vars)``.
+            It may be grid-sharded, as described by its ``shard_sizes``.
+        target_coordinates : Tensor
+            ``(grid_dst, 2)`` coordinates of the full target grid, in the source's coordinate convention.
+        model_comm_group : ProcessGroup, optional
+            Process group used for distributed projection.
+
+        Returns
+        -------
+        GriddedSource
+            The source on the target grid: projected data, target coordinates and target-grid
+            shard sizes (coordinates are sharded like the data). Variables and statistics are unchanged.
+        """
+        if source.is_tabular:
+            raise TypeError(f"{self.__class__.__name__} only projects gridded sources, got {source.name!r}.")
+        pattern = source.layout.normalized(source.data.ndim).pattern
+        if pattern != "batch time ensemble grid variables":
+            raise ValueError(f"{self.__class__.__name__} expects a (batch, time, ensemble, grid, variables) layout.")
+
+        data, shard_sizes = self(source.data, model_comm_group=model_comm_group, grid_shard_sizes=source.shard_sizes)
+        coordinates = target_coordinates.to(device=data.device, dtype=source.coordinates.dtype)
+        if shard_sizes is not None:
+            coordinates = shard_tensor(coordinates, -2, shard_sizes, model_comm_group, gather_in_backward=False)
+        return source.clone(data=data, coordinates=coordinates, shard_sizes=shard_sizes)

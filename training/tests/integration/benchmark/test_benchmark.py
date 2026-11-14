@@ -84,7 +84,8 @@ def test_benchmark_training_dataloader(
         # Log first batch structure
         if batch_idx == 0:
             LOGGER.info("First batch structure:")
-            for dataset_name, data in batch.items():
+            for dataset_name, source in batch.items():
+                data = source.data
                 size_mb = data.nelement() * data.element_size() / (1024 * 1024)
                 LOGGER.info(
                     "  Dataset '%s': shape %s, dtype %s, size %.2f MB",

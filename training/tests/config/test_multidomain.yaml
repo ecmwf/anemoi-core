@@ -1,0 +1,668 @@
+# Anemobs test config for multi-domain training (cf. the packaged `multidomain` config and the
+# `test_training_cycle_multidomain` integration test).
+#
+# Two gridded domains, `data` and `data_2`: each is CERRA (5.5 km, thinned to every 10th point,
+# ~55 km) over a different area, cut out of ERA5 o96, i.e. a stretched-grid global model per domain.
+# MultiDomainLoadingPolicy puts one domain in each batch. Both domains share one encoder, processor
+# and decoder; each has its own data nodes, hidden mesh and edges.
+#
+# The shared encoder lists both domains with dataset_fusing_strategy "none". Training checks against
+# the loading policy that no batch holds both (it would fail under SynchronizedLoadingPolicy), and
+# the model checks it again for every batch.
+#
+# Trainable node/edge parameters are off: they are sized by node/edge counts, which differ per domain.
+#
+#   anemoi-training train --config-dir=training/tests/config --config-name=test_multidomain
+data:
+  format: zarr
+  frequency: 6h
+  datasets:
+    data:
+      forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - insolation
+      - lsm
+      - z
+      diagnostic: []
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            std: null
+            min-max: null
+            max: [z]
+            none:
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - cos_julian_day
+            - cos_local_time
+            - sin_julian_day
+            - sin_local_time
+            - insolation
+            - lsm
+    data_2: ${data.datasets.data}
+  num_features: null
+dataloader:
+  prefetch_factor: 2
+  pin_memory: true
+  persistent_workers: false
+  fake_dataloading: false
+  loading_policy:
+    _target_: anemoi.training.data.loading.MultiDomainLoadingPolicy
+  read_group_size: ${system.hardware.num_gpus_per_model}
+  num_workers:
+    training: 4
+    validation: 4
+    test: 4
+  batch_size:
+    training: 1
+    validation: 1
+    test: 1
+  # Validation runs through the domains one after the other, so a batch limit could leave out
+  # `data_2`; the validation window is kept short instead.
+  limit_batches:
+    training: 20
+    validation: null
+    test: 20
+  # Each domain: CERRA over an area, cut out of ERA5. Both are restricted to the same variables,
+  # because soil and 100 m wind fields have incompatible level metadata between the two.
+  dataset:
+    cutout:
+    - dataset: ${system.input.cerra}
+      area: [70, -10, 55, 30]
+      thinning: 10
+      select: &domain_variables
+      - 10u
+      - 10v
+      - 2d
+      - 2t
+      - msl
+      - sp
+      - skt
+      - tcc
+      - lsm
+      - z
+      - insolation
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - q_50
+      - q_100
+      - q_150
+      - q_200
+      - q_250
+      - q_300
+      - q_400
+      - q_500
+      - q_600
+      - q_700
+      - q_850
+      - q_925
+      - q_1000
+      - t_50
+      - t_100
+      - t_150
+      - t_200
+      - t_250
+      - t_300
+      - t_400
+      - t_500
+      - t_600
+      - t_700
+      - t_850
+      - t_925
+      - t_1000
+      - u_50
+      - u_100
+      - u_150
+      - u_200
+      - u_250
+      - u_300
+      - u_400
+      - u_500
+      - u_600
+      - u_700
+      - u_850
+      - u_925
+      - u_1000
+      - v_50
+      - v_100
+      - v_150
+      - v_200
+      - v_250
+      - v_300
+      - v_400
+      - v_500
+      - v_600
+      - v_700
+      - v_850
+      - v_925
+      - v_1000
+      - z_50
+      - z_100
+      - z_150
+      - z_200
+      - z_250
+      - z_300
+      - z_400
+      - z_500
+      - z_600
+      - z_700
+      - z_850
+      - z_925
+      - z_1000
+    - dataset: ${system.input.forcing_dataset}
+      select: *domain_variables
+    adjust: all
+    min_distance_km: 0
+  dataset_2:
+    cutout:
+    - dataset: ${system.input.cerra}
+      area: [72, -25, 52, 50]
+      thinning: 10
+      select: *domain_variables
+    - dataset: ${system.input.forcing_dataset}
+      select: *domain_variables
+    adjust: all
+    min_distance_km: 0
+  training:
+    datasets:
+      data:
+        dataset_config:
+          dataset: ${dataloader.dataset}
+          frequency: ${data.frequency}
+        start: 2010
+        end: 2019
+        trajectory: null
+      data_2:
+        dataset_config:
+          dataset: ${dataloader.dataset_2}
+          frequency: ${data.frequency}
+        start: 2010
+        end: 2019
+        trajectory: null
+  validation:
+    datasets:
+      data:
+        dataset_config:
+          dataset: ${dataloader.dataset}
+          frequency: ${data.frequency}
+        start: 2020-01-01
+        end: 2020-01-05
+        trajectory: null
+      data_2:
+        dataset_config:
+          dataset: ${dataloader.dataset_2}
+          frequency: ${data.frequency}
+        start: 2020-01-01
+        end: 2020-01-05
+        trajectory: null
+  test:
+    datasets:
+      data:
+        dataset_config:
+          dataset: ${dataloader.dataset}
+          frequency: ${data.frequency}
+        start: 2021-01-01
+        end: 2021-01-31
+        trajectory: null
+      data_2:
+        dataset_config:
+          dataset: ${dataloader.dataset_2}
+          frequency: ${data.frequency}
+        start: 2021-01-01
+        end: 2021-01-31
+        trajectory: null
+diagnostics:
+  callbacks: []
+  plot:
+    settings:
+      asynchronous: true
+      datashader: true
+      projection_kind: equirectangular
+      precip_and_related_fields: []
+      colormaps:
+        default:
+          _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
+          name: viridis
+        error:
+          _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
+          name: bwr
+    frequency:
+      batch: 5
+      epoch: 1
+    parameters: []
+    sample_idx: 0
+    datasets_to_plot: []
+    focus_areas: {}
+    # As in the integration test: plot callbacks pick a dataset that a single-domain batch may not hold.
+    callbacks: []
+  benchmark_profiler:
+    memory:
+      enabled: true
+      steps: 5
+      warmup: 20
+      extra_plots: false
+      trace_rank0_only: false
+    time:
+      enabled: false
+      verbose: false
+    speed:
+      enabled: true
+    system:
+      enabled: false
+    model_summary:
+      enabled: false
+    snapshot:
+      enabled: false
+      steps: 4
+      warmup: 0
+  log:
+    mlflow:
+      enabled: true
+      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
+      offline: true
+      authentication: true
+      tracking_uri: https://mlflow.ecmwf.int
+      experiment_name: anemobs
+      project_name: AIFS
+      system: false
+      terminal: true
+      run_name: 'test-anemobs-multidomain'
+      prefix: ''
+      log_hyperparams: true
+      on_resume_create_child: true
+      expand_hyperparams:
+      - config
+      http_max_retries: 35
+      max_params_length: 3000
+      save_dir: ${system.output.logs.mlflow}
+      log_model: false
+    interval: 100
+    wandb:
+      enabled: false
+      _target_: pytorch_lightning.loggers.wandb.WandbLogger
+      offline: false
+      log_model: false
+      project: Anemoi
+      entity: a
+      gradients: false
+      parameters: false
+      interval: ${diagnostics.log.interval}
+  debug:
+    anomaly_detection: false
+  enable_checkpointing: true
+  checkpoint:
+    every_n_minutes:
+      save_frequency: null
+      num_models_saved: 0
+    every_n_epochs:
+      save_frequency: 5
+      num_models_saved: -1
+    every_n_train_steps:
+      save_frequency: null
+      num_models_saved: 0
+    exclude_hyperparameters: []
+  enable_progress_bar: true
+  progress_bar:
+    _target_: pytorch_lightning.callbacks.TQDMProgressBar
+    refresh_rate: 1
+  check_val_every_n_epoch: 1
+  print_memory_summary: false
+system:
+  output:
+    root: ${oc.env:SCRATCH}/anemoi-test/fastda-multidomain/
+    logs:
+      root: logs
+      wandb: wandb
+      mlflow: mlflow
+      tensorboard: tensorboard
+    checkpoints:
+      root: checkpoint
+      every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
+      every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
+      every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
+    plots: plots
+    profiler: profiler
+  input:
+    cerra: cerra-rr-an-oper-0001-mars-5p5km-1984-2021-3h-v3-rmi
+    forcing_dataset: aifs-ea-an-oper-0001-mars-o96-1979-2024-6h-v1-for-single-v2
+    graph: null
+    loss_matrices_path: null
+    truncation: null
+    truncation_inv: null
+  hardware:
+    accelerator: auto
+    num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE,1}}
+    num_nodes: ${oc.decode:${oc.env:SLURM_NNODES,1}}
+    num_gpus_per_model: 1
+graph:
+  overwrite: true
+  nodes:
+    data:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${dataloader.training.datasets.data.dataset_config}
+      attributes: ${graph.attributes.nodes}
+    hidden:
+      node_builder:
+        _target_: anemoi.graphs.nodes.StretchedTriNodes
+        lam_resolution: 6
+        global_resolution: 5
+        reference_node_name: data
+        mask_attr_name: cutout_mask
+        # Hidden nodes at LAM resolution are kept within this distance of a LAM point. The thinned
+        # CERRA grid is ~55 km apart, so the margin must exceed half its diagonal (~39 km).
+        margin_radius_km: 50
+    data_2:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${dataloader.training.datasets.data_2.dataset_config}
+      attributes: ${graph.attributes.nodes}
+    hidden_2:
+      node_builder:
+        _target_: anemoi.graphs.nodes.StretchedTriNodes
+        lam_resolution: ${graph.nodes.hidden.node_builder.lam_resolution}
+        global_resolution: ${graph.nodes.hidden.node_builder.global_resolution}
+        reference_node_name: data_2
+        mask_attr_name: cutout_mask
+        margin_radius_km: ${graph.nodes.hidden.node_builder.margin_radius_km}
+  edges:
+  # Domain `data`
+  - source_name: data
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.KNNEdges
+      num_nearest_neighbours: 12
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: hidden
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.MultiScaleEdges
+      x_hops: 1
+      scale_resolutions: ${graph.nodes.hidden.node_builder.lam_resolution}
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: hidden
+    target_name: data
+    edge_builders:
+    - _target_: anemoi.graphs.edges.KNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  # Domain `data_2`: same edge builders on its own nodes
+  - source_name: data_2
+    target_name: hidden_2
+    edge_builders: ${graph.edges.0.edge_builders}
+    attributes: ${graph.attributes.edges}
+  - source_name: hidden_2
+    target_name: hidden_2
+    edge_builders: ${graph.edges.1.edge_builders}
+    attributes: ${graph.attributes.edges}
+  - source_name: hidden_2
+    target_name: data_2
+    edge_builders: ${graph.edges.2.edge_builders}
+    attributes: ${graph.attributes.edges}
+  attributes:
+    nodes:
+      cutout_mask:
+        _target_: anemoi.graphs.nodes.attributes.CutOutMask
+      boundary_mask:
+        _target_: anemoi.graphs.nodes.attributes.BooleanNot
+        masks:
+          _target_: anemoi.graphs.nodes.attributes.CutOutMask
+      area_weight:
+        _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+        norm: unit-max
+        fill_value: 0
+    edges:
+      edge_length:
+        _target_: anemoi.graphs.edges.attributes.EdgeLength
+        norm: unit-max
+      edge_dirs:
+        _target_: anemoi.graphs.edges.attributes.EdgeDirection
+        norm: unit-std
+  post_processors: []
+model:
+  num_channels: 512
+  cpu_offload: false
+  keep_batch_sharded: false
+  model:
+    _target_: anemoi.models.models.AnemoiModelEncProcDec
+    hidden_nodes_name:
+      data: hidden
+      data_2: hidden_2
+    latent_skip: true
+  layer_kernels:
+    LayerNorm:
+      _target_: torch.nn.LayerNorm
+    Linear:
+      _target_: torch.nn.Linear
+    Activation:
+      _target_: torch.nn.GELU
+    QueryNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      bias: false
+    KeyNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      bias: false
+  processor:
+    _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+    num_channels: ${model.num_channels}
+    trainable_size: 0
+    sub_graph_edge_attributes: ["edge_length", "edge_dirs"]
+    num_layers: 16
+    num_chunks: 2
+    mlp_hidden_ratio: 4
+    num_heads: 16
+    qk_norm: false
+    cpu_offload: ${model.cpu_offload}
+    gradient_checkpointing: true
+    layer_kernels: ${model.layer_kernels}
+    graph_attention_backend: triton
+    edge_pre_mlp: false
+  encoders:
+    shared:
+      # Both domains, one per batch (MultiDomainLoadingPolicy): no fusion, pass-through node embedder.
+      source_datasets: [ "data", "data_2" ]
+      dataset_fusing_strategy: "none"
+      node_embedder:
+        _target_: anemoi.models.layers.node_embedder.NoOpNodeEmbedder
+      mapper:
+        _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+        num_channels: ${model.num_channels}
+        trainable_size: 0
+        sub_graph_edge_attributes: ["edge_length", "edge_dirs"]
+        num_chunks: 1
+        mlp_hidden_ratio: 4
+        num_heads: 16
+        qk_norm: false
+        cpu_offload: ${model.cpu_offload}
+        gradient_checkpointing: true
+        layer_kernels: ${model.layer_kernels}
+        shard_strategy: edges
+        graph_attention_backend: triton
+        edge_pre_mlp: false
+  latent_aggregator:
+    _target_: anemoi.models.layers.aggregator.SumAggregator
+  decoders:
+    shared:
+      target_datasets: [ "data", "data_2" ]
+      target_node_features: [ "encoded_data" ]
+      mapper:
+        _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+        num_channels: ${model.num_channels}
+        trainable_size: 0
+        sub_graph_edge_attributes: ["edge_length", "edge_dirs"]
+        num_chunks: 1
+        mlp_hidden_ratio: 4
+        num_heads: 16
+        initialise_data_extractor_zero: false
+        qk_norm: false
+        cpu_offload: ${model.cpu_offload}
+        gradient_checkpointing: true
+        layer_kernels: ${model.layer_kernels}
+        shard_strategy: edges
+        graph_attention_backend: triton
+        edge_pre_mlp: false
+  bounding:
+    datasets:
+      data: []
+      data_2: []
+  residual:
+    datasets:
+      data:
+        _target_: anemoi.models.layers.residual.SkipConnection
+        step: -1
+      data_2: ${model.residual.datasets.data}
+  output_mask:
+    datasets:
+      data:
+        _target_: anemoi.training.utils.masks.NoOutputMask
+      data_2: ${model.output_mask.datasets.data}
+  compile: []
+  node_trainable_parameters:
+    data: 0
+    hidden: 0
+    data_2: 0
+    hidden_2: 0
+task:
+  _target_: anemoi.training.tasks.Forecaster
+  multistep_input: 1
+  multistep_output: 1
+  timestep: 6H
+  rollout:
+    start: 1
+    epoch_increment: 0
+    maximum: 1
+  validation_rollout: 2
+training:
+  scalers:
+    datasets:
+      data:
+        general_variable:
+          _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+          weights:
+            default: 1
+            q: 0.6
+            t: 6
+            u: 0.8
+            v: 0.5
+            z: 12
+            sp: 10
+            10u: 0.1
+            10v: 0.1
+            2d: 0.5
+        pressure_level:
+          _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+          group: pl
+          y_intercept: 0.2
+          slope: 0.001
+        # Stretched grid: the CERRA area gets a quarter of the total weight, as in `multidomain`.
+        node_weights:
+          _target_: anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler
+          nodes_attribute_name: area_weight
+          scaling_mask_attribute_name: cutout_mask
+          weight_frac_of_total: 0.25
+          norm: unit-sum
+      data_2: ${training.scalers.datasets.data}
+  optimization:
+    optimizer:
+      _target_: torch.optim.AdamW
+      betas: [0.9, 0.95]
+      weight_decay: 0.1
+    lr_scheduler:
+      _target_: timm.scheduler.CosineLRScheduler
+      lr_min: 3.0e-07
+      t_initial: ${training.max_steps}
+      warmup_t: 1000
+      t_in_epochs: false
+    lr: 6.25e-05
+    pl_lr_scheduler:
+      interval: step
+  # fixed, so reruns of this test draw the same batches (replaces the removed ANEMOI_BASE_SEED)
+  seed: 12345678
+  update_ds_stats_on_ckpt_load:
+    states: false
+    tendencies: true
+  check_variables_compatibility:
+    ignore_units: false
+    ignore_processing_period: false
+  allow_variable_subset: false
+  deterministic: false
+  precision: bf16-mixed
+  accum_grad_batches: 1
+  num_sanity_val_steps: 0
+  gradient_clip:
+    val: 1.0
+    algorithm: norm
+  method:
+    _target_: anemoi.training.train.methods.SingleTraining
+  # Every parameter is shared by both domains, so each step uses all of them (as in `stretched`).
+  strategy:
+    _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+    num_gpus_per_model: ${system.hardware.num_gpus_per_model}
+    read_group_size: ${dataloader.read_group_size}
+    static_graph: true
+    find_unused_parameters: false
+    use_local_synchronization: true
+    broadcast_buffers: false
+  loss_gradient_scaling: false
+  max_epochs: 100
+  max_steps: 75000
+  training_loss:
+    datasets:
+      data:
+        _target_: anemoi.training.losses.MSELoss
+        scalers: ["general_variable", "pressure_level", "node_weights"]
+        ignore_nans: true
+      data_2: ${training.training_loss.datasets.data}
+  validation_metrics:
+    datasets:
+      data:
+        mse:
+          _target_: anemoi.training.losses.MSELoss
+          scalers: ["node_weights"]
+          ignore_nans: true
+      data_2: ${training.validation_metrics.datasets.data}
+  variable_groups:
+    datasets:
+      data:
+        default: sfc
+        pl:
+          param:
+          - q
+          - t
+          - u
+          - v
+          - z
+      data_2: ${training.variable_groups.datasets.data}
+  metrics:
+    datasets:
+      data:
+      - z_500
+      - t_850
+      - u_850
+      - v_850
+      - 2t
+      data_2: ${training.metrics.datasets.data}
+config_validation: false

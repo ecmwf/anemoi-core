@@ -1,0 +1,10 @@
+# The two-dataset setup of multi.yaml, with a transport model and objective.
+defaults:
+- multi
+- override model: graphtransformer_multi_transport_tendency_fm
+- override training: multi_flow_matching
+- _self_
+
+training:
+  transport:
+    prediction_mode: tendency

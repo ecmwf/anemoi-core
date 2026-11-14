@@ -1,0 +1,49 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- system: example
+- graph: multi_scale
+- model: graphtransformer
+- task: forecaster
+- training: single
+- _self_
+
+
+# set to true to switch on config validation
+config_validation: True
+
+data:
+  resolution: o96
+
+model:
+  num_channels: 1024
+
+dataloader:
+  limit_batches:
+    training: null
+    validation: 100
+
+diagnostics:
+  log:
+    mlflow:
+      enabled: False
+      tracking_uri: None
+  plot:
+    callbacks: []
+
+system:
+  input:
+    graph: graph_anemoi_new_${data.resolution}.pt
+    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2022-6h-v6
+  output:
+    root: outputs/
+  hardware:
+    accelerator: auto
+    num_gpus_per_ensemble: 1
+    num_gpus_per_node: 1
+    num_nodes: 1
+    num_gpus_per_model: 1
+
+training:
+  max_epochs: 1

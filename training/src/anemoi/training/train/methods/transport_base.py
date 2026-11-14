@@ -10,15 +10,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import ClassVar
 
-from anemoi.models.transport import TransportSourceRequest
-from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.models.transport.registry import build_registered
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import torch
 
+    from anemoi.models.data import Batch
+    from anemoi.models.data.sources import Source
+    from anemoi.training.losses.base import BaseLoss
     from anemoi.training.train.methods.transport import TransportTraining
     from anemoi.training.utils.index_space import IndexSpace
 
@@ -32,8 +38,8 @@ class PreparedPredictionTarget:
     validation metrics, because those may live in different variable spaces.
 
     model_target:
-        Target in MODEL_OUTPUT space. This is the tensor that EDM diffusion or SI
-        corrupts before passing it to the model.
+        Target in MODEL_OUTPUT space. This is the tensor that EDM diffusion or flow
+        matching corrupts before passing it to the model.
 
     loss_target:
         Clean target used by the training loss before the transport objective
@@ -49,16 +55,27 @@ class PreparedPredictionTarget:
         the model output is reconstructed back to state space before comparing
         against this target.
 
-    aux:
-        Extra prediction-mode data needed later, such as the latest input state
-        for tendency reconstruction or a reference-state source for transport.
+    model_target_missing:
+        Counterpart of model_target that keeps the NaNs of missing values.
+        Objectives that derive their loss target from model_target (the
+        flow-matching velocity) use it to mask the missing values again.
+
+    target_forcing:
+        Forcings at the output times, normalised like the model inputs, which
+        the decoder reads.
+
+    reference:
+        Latest input state that predicted tendencies are added to. Set by the
+        tendency prediction mode only.
     """
 
-    model_target: dict[str, torch.Tensor]
-    loss_target: dict[str, torch.Tensor]
+    model_target: Batch
+    loss_target: Batch
     loss_target_layout: IndexSpace
-    metric_target: dict[str, torch.Tensor]
-    aux: dict[str, Any]
+    metric_target: Batch
+    model_target_missing: Batch
+    target_forcing: Batch | None = None
+    reference: Batch | None = None
 
 
 @dataclass
@@ -67,21 +84,21 @@ class PreparedTransportObjective:
 
     The transport objective decides how to corrupt the prediction target and
     what the model should learn from that corrupted input. EDM diffusion
-    predicts a clean endpoint. SI predicts the bridge drift.
+    predicts a clean endpoint. Flow matching predicts a velocity.
 
     conditioned_target:
         Corrupted target passed to the model together with the normal input.
-        For EDM diffusion this is the noised target. For SI this is the interpolated
-        bridge state.
+        For EDM diffusion this is the noised target. For flow matching this is the
+        point on the path from the source field to the target.
 
     condition:
         Scalar conditioning value expanded to tensor form. For EDM diffusion this is
-        sigma. For SI this is the bridge time.
+        sigma. For flow matching this is the time.
 
     loss_target:
         Target used by the loss after the transport objective has prepared it.
-        For EDM diffusion this is usually the clean endpoint. For SI this is the
-        drift target.
+        For EDM diffusion this is usually the clean endpoint. For flow matching this
+        is the velocity.
 
     loss_target_layout:
         Variable layout of loss_target. The loss uses this to align loss_target
@@ -93,27 +110,55 @@ class PreparedTransportObjective:
 
     weights:
         Optional per-sample/per-variable loss weights. EDM diffusion uses this for
-        EDM noise-level weighting. SI usually leaves this as None.
-
-    aux:
-        Extra objective-specific tensors needed later, for example SI source,
-        bridge state, and bridge time for validation reconstruction.
+        EDM noise-level weighting. Flow matching leaves this as None.
     """
 
-    conditioned_target: dict[str, torch.Tensor]
+    conditioned_target: Batch
     condition: dict[str, torch.Tensor]
-    loss_target: dict[str, torch.Tensor]
+    loss_target: Batch
     loss_target_layout: IndexSpace
     pred_layout: IndexSpace
-    weights: dict[str, torch.Tensor] | None
-    aux: dict[str, Any]
+    weights: dict[str, torch.Tensor | list[torch.Tensor]] | None
 
 
 class TransportObjective:
-    """Common interface for training objectives such as EDM diffusion and stochastic interpolants."""
+    """Common interface for training objectives such as EDM diffusion and flow matching.
+
+    Subclasses name the registry of training distributions their condition is drawn from.
+    """
+
+    distributions: ClassVar[dict[str, type]]
+    name: ClassVar[str]
 
     def __init__(self, module: TransportTraining) -> None:
         self.module = module
+
+    @cached_property
+    def distribution(self) -> Any:
+        """The training distribution of the noise level or time, built the first time it is needed."""
+        settings = dict(self.module.model.model.training_condition)
+        try:
+            distribution_name = settings.pop("distribution")
+        except KeyError as exc:
+            msg = f"{self.name} training_condition must define 'distribution'."
+            raise ValueError(msg) from exc
+        return build_registered(
+            self.distributions,
+            distribution_name,
+            settings,
+            f"{self.name} training condition distribution",
+        )
+
+    def draw_condition(self, target: Batch) -> dict[str, torch.Tensor]:
+        """Draw one noise level or time per sample and ensemble member, shaped for each dataset of ``target``."""
+        return self.distribution.sample(
+            {name: source.condition_shape for name, source in target.items()},
+            device=target.device,
+        )
+
+    def check_losses(self, losses: Mapping[str, BaseLoss]) -> None:
+        """Check, once when training is set up, that the training losses suit this objective."""
+        del losses
 
     def prepare(
         self,
@@ -121,72 +166,36 @@ class TransportObjective:
     ) -> PreparedTransportObjective:
         raise NotImplementedError
 
-    def forward(
-        self,
-        x: dict[str, torch.Tensor],
-        conditioned_target: dict[str, torch.Tensor],
-        condition: dict[str, torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
-        raise NotImplementedError
-
     def reconstruct_endpoint(
         self,
-        prediction: dict[str, torch.Tensor],
+        prediction: Batch,
         objective: PreparedTransportObjective,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         del objective
         return prediction
 
     def prepare_loss_prediction(
         self,
-        prediction: dict[str, torch.Tensor],
+        prediction: Batch,
         objective: PreparedTransportObjective,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         del objective
         return prediction
 
-    def compute_loss(
+    def loss_kwargs(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
-        grid_shard_slice: slice | None = None,
-        dataset_name: str | None = None,
-        pred_layout: IndexSpace | str | None = None,
-        target_layout: IndexSpace | str | None = None,
-        **kwargs,
-    ) -> torch.Tensor:
-        return BaseTrainingModule._compute_loss(
-            self.module,
-            y_pred=y_pred,
-            y=y,
-            grid_shard_slice=grid_shard_slice,
-            dataset_name=dataset_name,
-            pred_layout=pred_layout,
-            target_layout=target_layout,
-            **kwargs,
-        )
+        y_pred: Source,
+        dataset_name: str,
+        weights: dict[str, torch.Tensor | list[torch.Tensor]] | None,
+    ) -> dict[str, Any]:
+        """Return further arguments for the training loss of ``dataset_name``, such as per-sample weights."""
+        del y_pred, dataset_name, weights
+        return {}
 
-    def build_transport_source(
-        self,
-        prepared: PreparedPredictionTarget,
-        default_kind: str = "gaussian",
-    ) -> dict[str, torch.Tensor]:
-        def reference_source_factory() -> dict[str, torch.Tensor]:
-            reference = prepared.aux.get("transport_reference_source")
-            if reference is None:
-                msg = "Transport source kind 'reference_state' requires a reference source in the prediction mode."
-                raise ValueError(msg)
-            if callable(reference):
-                # Materialise lazily built references only when reference_state is selected.
-                return reference()
-            return reference
-
-        request = TransportSourceRequest.from_tensors(
-            prepared.model_target,
-            default_kind=default_kind,
-            custom_source_factories={"reference_state": reference_source_factory},
-            model_comm_group=getattr(self.module, "model_comm_group", None),
-            grid_shard_sizes=getattr(self.module, "grid_shard_sizes", None),
-            error_context="training",
+    def draw_noise(self, prepared: PreparedPredictionTarget) -> Batch:
+        """Draw the Gaussian noise the transport starts from, shaped and described like the model target."""
+        # The model target also carries the grid shard sizes the noise is split by.
+        group = getattr(self.module, "model_comm_group", None)
+        return prepared.model_target.with_sources(
+            {name: target.randn_like(group) for name, target in prepared.model_target.items()},
         )
-        return self.module.model.model.transport_source.build(request)

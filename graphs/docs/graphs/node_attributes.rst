@@ -22,6 +22,7 @@ connections only between subsets of nodes.
    node_attributes/weights
    node_attributes/anemoi_dataset_attribute
    node_attributes/area_masks
+   node_attributes/timedeltas
 
 Additionally, different boolean operations have been implemented to
 support more complex use cases:

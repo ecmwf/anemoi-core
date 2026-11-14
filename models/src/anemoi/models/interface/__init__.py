@@ -11,15 +11,21 @@ import uuid
 from typing import Optional
 
 import torch
+from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data.batch import Batch
+from anemoi.models.data.sample import create_batched_struct
+from anemoi.models.data.sources import BaseTemplate
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing import Processors
-from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.models.utils.graphs import build_graph
+from anemoi.utils.config import DotDict
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -34,10 +40,10 @@ class AnemoiModelInterface(torch.nn.Module):
         Configuration settings for the model.
     id : str
         A unique identifier for the model instance.
-    n_step_input : int
-        Number of input timesteps provided to the model.
-    graph_data : HeteroData
-        Graph data for the model.
+    n_step_input : dict[str, int]
+        Number of input timesteps provided to the model for each dataset and location.
+    n_step_output : dict[str, int]
+        Number of output timesteps predicted by the model for each dataset and location.
     statistics : dict
         Statistics for the data.
     metadata : dict
@@ -48,6 +54,8 @@ class AnemoiModelInterface(torch.nn.Module):
         Numpy arraysto store in the checkpoint.
     data_indices : dict
         Indices for the data.
+    data_types : dict[str, str]
+        Kind of data of each dataset, as registered in the sample registry (``"gridded"``, ``"tabular"``).
     pre_processors : Processors
         Pre-processing steps to apply to the data before passing it to the model.
     post_processors : Processors
@@ -60,12 +68,12 @@ class AnemoiModelInterface(torch.nn.Module):
         self,
         *,
         config: DictConfig,
-        n_step_input: int,
-        n_step_output: int,
-        graph_data: HeteroData,
+        n_step_input: dict[str, int],
+        n_step_output: dict[str, int],
         statistics: dict,
         data_indices: dict,
         metadata: dict,
+        data_types: dict[str, str],
         statistics_tendencies: dict | None = None,
         supporting_arrays: dict | None = None,
     ) -> None:
@@ -74,120 +82,62 @@ class AnemoiModelInterface(torch.nn.Module):
         self.id = str(uuid.uuid4())
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
-        self.graph_data = graph_data
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
+        self.data_types = data_types
+
         self._build_model()
         self._update_metadata()
 
-    def _build_processors_for_dataset(
-        self,
-        processors_configs: dict,
-        statistics: dict,
-        data_indices: dict,
-        statistics_tendencies: dict | None = None,
-    ) -> tuple[
-        Processors,
-        Processors,
-        Processors | StepwiseProcessors | None,
-        Processors | StepwiseProcessors | None,
-    ]:
-        """Build processors for a single dataset.
-
-        Parameters
-        ----------
-        processors_configs : dict
-            Configuration for the processors.
-        statistics : dict
-            Statistics for the dataset.
-        data_indices : dict
-            Data indices for the dataset.
-        statistics_tendencies : dict, optional
-            Tendencies statistics for the dataset.
-
-        Returns
-        -------
-        tuple
-            (pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies).
-        """
-        pre_processors, post_processors = self._build_processor_pair(
-            processors_configs,
-            data_indices,
-            statistics,
-        )
-        pre_processors_tendencies, post_processors_tendencies = self._build_tendency_processors(
-            processors_configs,
-            data_indices,
-            statistics_tendencies,
-        )
-        return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
-
     @staticmethod
-    def _build_processor_pair(
+    def _build_processors(
         processors_configs: dict,
         data_indices: dict,
-        statistics: dict,
     ) -> tuple[Processors, Processors]:
+        """Build the (pre, post) processor pair for one dataset.
+
+        Processors are stateless: they normalise with the statistics carried by each
+        :class:`Source`. Tendencies go through the same pair, as sources carrying
+        tendency statistics (see AnemoiTransportTendModelEncProcDec.compute_tendency).
+        """
         processors = [
-            [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
-            for name, processor in processors_configs.items()
+            [name, instantiate(processor, data_indices=data_indices)] for name, processor in processors_configs.items()
         ]
         return Processors(processors), Processors(processors, inverse=True)
-
-    def _build_tendency_processors(
-        self,
-        processors_configs: dict,
-        data_indices: dict,
-        statistics_tendencies: dict | None,
-    ) -> tuple[Processors | StepwiseProcessors | None, Processors | StepwiseProcessors | None]:
-        if statistics_tendencies is None:
-            return None, None
-
-        if "lead_times" not in statistics_tendencies:
-            return self._build_processor_pair(processors_configs, data_indices, statistics_tendencies)
-
-        lead_times = list(statistics_tendencies.get("lead_times") or [])
-        if self.n_step_output == 1:
-            step_stats = statistics_tendencies.get(lead_times[0]) if lead_times else None
-            stats_for_tendencies = step_stats or statistics_tendencies
-            return self._build_processor_pair(processors_configs, data_indices, stats_for_tendencies)
-
-        pre_processors_tendencies = StepwiseProcessors(lead_times)
-        post_processors_tendencies = StepwiseProcessors(lead_times)
-        for lead_time in lead_times:
-            step_stats = statistics_tendencies.get(lead_time)
-            if step_stats is None:
-                continue
-            pre_step, post_step = self._build_processor_pair(processors_configs, data_indices, step_stats)
-            pre_processors_tendencies.set(lead_time, pre_step)
-            post_processors_tendencies.set(lead_time, post_step)
-        return pre_processors_tendencies, post_processors_tendencies
 
     def _build_model(self) -> None:
         """Builds the model and pre- and post-processors."""
         # Multi-dataset mode: create processors for each dataset
         self.pre_processors = torch.nn.ModuleDict()
         self.post_processors = torch.nn.ModuleDict()
-        self.pre_processors_tendencies = torch.nn.ModuleDict()
-        self.post_processors_tendencies = torch.nn.ModuleDict()
 
         data_config = get_multiple_datasets_config(self.config.data)
         for dataset_name in self.statistics.keys():
-            # Build processors for each dataset
-            pre, post, pre_tend, post_tend = self._build_processors_for_dataset(
+            pre, post = self._build_processors(
                 data_config[dataset_name].processors,
-                self.statistics[dataset_name],
                 self.data_indices[dataset_name],
-                self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,
             )
             self.pre_processors[dataset_name] = pre
             self.post_processors[dataset_name] = post
-            if pre_tend is not None:
-                self.pre_processors_tendencies[dataset_name] = pre_tend
-                self.post_processors_tendencies[dataset_name] = post_tend
+
+        # Instantiate the model. The class is called directly rather than through hydra's instantiate,
+        # which would convert the dynamic graph config (keyed by edge-type tuples) to an OmegaConf node.
+        self.graph_data, dynamic_graph_config = self._build_graph()
+        model_class = get_class(self.config.model.model._target_)
+        self.model = model_class(
+            model_config=self.config.model,
+            static_graph_data=self.graph_data,
+            dynamic_graph_config=dynamic_graph_config,
+            data_indices=self.data_indices,
+            statistics=self.statistics,
+            n_step_input=self.n_step_input,
+            n_step_output=self.n_step_output,
+        )
+
+        self._share_statistics_remap(self.model, self.pre_processors)
 
         # Spatial preprocessors (e.g. CrossGridProjector for downscaling).
         # Keyed by dataset name; empty by default so existing models are unaffected.
@@ -205,70 +155,207 @@ class AnemoiModelInterface(torch.nn.Module):
                 )
             self.spatial_pre_processors[dataset_name] = projector
 
-        # Instantiate the model
-        # Only pass _target_ and _convert_ from model config to avoid passing nested model settings as kwargs.
-        model_instantiate_config = {
-            "_target_": self.config.model.model._target_,
-            "_convert_": getattr(self.config.model.model, "_convert_", "none"),
-        }
-        self.model = instantiate(
-            model_instantiate_config,
-            model_config=self.config.model,
-            data_indices=self.data_indices,
-            statistics=self.statistics,
-            graph_data=self.graph_data,
-            n_step_input=self.n_step_input,
-            n_step_output=self.n_step_output,
-            _recursive_=False,  # Disables recursive instantiation by Hydra
-        )
-
         # Use the forward method of the model directly
         self.forward = self.model.forward
 
+    @staticmethod
+    def _share_statistics_remap(model: torch.nn.Module, pre_processors: torch.nn.ModuleDict) -> None:
+        """Give the output boundings that normalise thresholds their dataset's normaliser remap.
+
+        The boundings are built after the processors, so, as when the normaliser rewrote the shared
+        statistics in place, they see the remap of every normaliser of their dataset; see
+        :attr:`~anemoi.models.preprocessing.BasePreprocessor.shares_statistics_remap`.
+        """
+        for dataset_name, boundings in getattr(model, "boundings", {}).items():
+            remap = {}
+            if dataset_name in pre_processors:
+                remap = dict(getattr(pre_processors[dataset_name], "statistics_remap", {}))
+            for bounding in boundings.modules():
+                if getattr(bounding, "uses_statistics_remap", False):
+                    bounding.statistics_remap = dict(remap)
+
+    def _build_graph(self) -> tuple[HeteroData, DotDict]:
+        """Build the static graph and the dynamic graph configuration from ``config.graph``.
+
+        The graph stored at ``system.input.graph`` is loaded unless ``graph.overwrite`` is set; the
+        static nodes and edges of the config missing from it are then built. The dynamic part of
+        the config (nodes and edges touching tabular datasets) is built by the model per batch.
+        """
+        system_input = (self.config.get("system") or {}).get("input") or {}
+        return build_graph(
+            DotDict(self.config.graph),
+            is_dataset_static={name: data_type == "gridded" for name, data_type in self.data_types.items()},
+            hidden_nodes_name=self.config.model.model.hidden_nodes_name,
+            graph_path=system_input.get("graph"),
+        )
+
+    def apply_spatial_pre_processors(self, batch: Batch, model_comm_group: Optional[ProcessGroup] = None) -> Batch:
+        """Project each dataset that has a spatial preprocessor onto its graph node set.
+
+        Applied to raw (un-normalized) data. The projected source carries the coordinates
+        of the dataset's graph nodes, which is the grid the encoder runs on.
+        """
+        for dataset_name, projector in self.spatial_pre_processors.items():
+            if dataset_name in batch:
+                projected = projector.project_source(
+                    batch[dataset_name],
+                    self.model.graph_geometry.coordinates(dataset_name),
+                    model_comm_group=model_comm_group,
+                )
+                batch = batch.replace(dataset_name, projected)
+        return batch
+
+    def _statistics_for(self, dataset_name: str, variables: list[str]) -> dict:
+        """Slice the checkpoint's data-space statistics down to the variables.
+        Same alignment that is done for the model outputs in AnemoiModelEncProcDec._assemble_output.
+        """
+        name_to_index = self.data_indices[dataset_name].name_to_index
+        positions = [name_to_index[name] for name in variables]
+        return {name: values[positions] for name, values in self.statistics[dataset_name].items()}
+
+    def _get_batch(self, payloads: dict[str, dict]) -> Batch:
+        """Utility function to build a :class:`Batch` from raw per-dataset payload dicts."""
+        return Batch.collate(
+            {
+                name: create_batched_struct(statistics=self._statistics_for(name, payload["variables"]), **payload)
+                for name, payload in payloads.items()
+            }
+        )
+
+    def _get_template(
+        self,
+        target_template: dict[str, dict],
+        ensemble_size: int = 1,
+        batch_size: int = 1,
+        device: Optional[torch.device] = None,
+    ) -> dict[str, BaseTemplate]:
+        """Build a template batch with the given ensemble size, batch size, and number of target timesteps.
+
+        A template has no data to take a device from, so its geometry (coordinates and, for tabular
+        templates, timedeltas) is placed on ``device``, the device of the input batch.
+        """
+        return {
+            name: create_batched_struct(
+                name=name,
+                statistics=self._statistics_for(name, payload["variables"]),
+                device=device,
+                **payload,
+                ensemble_size=ensemble_size,
+                batch_size=batch_size,
+                time_size=self.n_step_output[name],
+            )
+            for name, payload in target_template.items()
+        }
+
+    def unwrap_batch(self, batch: Batch) -> dict[str, dict]:
+        """Convert a model output Batch back to plain per-dataset payload dicts.
+        The coordinates are converted from radians to degrees, and the batch axis of one is dropped.
+        """
+        unwrapped = {}
+        for dataset_name, sample in batch.items():
+            data, coordinates, layout = sample.data, sample.coordinates, sample.layout
+            tabular_payload = {}
+            if isinstance(sample, TabularSource):
+                # Tabular payloads keep the batch as the outer list; unwrap the one sample.
+                data = data[0]
+                coordinates = coordinates[0]
+                tabular_payload = {
+                    "timedeltas": sample.timedeltas[0],
+                    "boundaries": [(int(s.start), int(s.stop)) for s in sample.boundaries[0]],
+                }
+            else:
+                batch_axis = sample.layout.axis("batch", ndim=data.ndim) if sample.layout.batch is not None else None
+                if batch_axis is not None:
+                    assert data.shape[batch_axis] == 1, (
+                        f"Dataset {dataset_name!r}: expected a single sample to unwrap, got {data.shape[batch_axis]}."
+                    )
+                    data = data.squeeze(batch_axis)
+                layout = layout.without_batch_dim()
+
+            coords_deg = torch.rad2deg(coordinates)
+
+            payload = {
+                "data": data,
+                "latitudes": coords_deg[:, 0],
+                "longitudes": coords_deg[:, 1],
+                "variables": sample.variables,
+                "layout": layout.axis_names,
+                **tabular_payload,
+            }
+            unwrapped[dataset_name] = payload
+
+        return unwrapped
+
     def predict_step(
         self,
-        batch: dict[str, torch.Tensor],
+        x: dict[str, dict],
+        target_template: Optional[dict[str, dict]] = None,
+        target_forcing: Optional[dict[str, dict]] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         **kwargs,
-    ) -> dict[str, torch.Tensor]:
+    ) -> dict[str, dict]:
         """Prediction step for the model.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
-            Input batched data.
+        x : dict[str, dict]
+            Input data in physical units, one payload per input dataset, as taken by
+            :func:`~anemoi.models.data.sample.create_batched_struct`: the ``data`` (with
+            the model's input variables, in model-input order), its ``data_type``,
+            ``variables`` and ``layout``, and the ``latitudes`` and ``longitudes`` in
+            degrees (required; there is no fallback to the graph). Tabular payloads also
+            carry ``timedeltas`` and ``boundaries``.
+        target_template : Optional[dict[str, dict]]
+            Output geometry, one payload per dataset to decode; required despite the
+            default. Like an input payload without ``data``, naming the variables to decode.
+            Only the datasets given here are decoded.
+        target_forcing : Optional[dict[str, dict]]
+            Decoder conditioning, one payload per decoded dataset, holding the forcing
+            variables at the output valid times. ``None`` for decoders that take no forcings.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, specifies which GPUs work together.
         gather_out : bool, optional
             Whether to gather the output, by default True.
         **kwargs
-            Additional prediction keyword arguments.
+            Additional keyword arguments for the model's ``predict_step``.
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Predicted data.
+        dict[str, dict]
+            The prediction, one payload per decoded dataset.
         """
+        assert target_template is not None, "target_template must be provided for prediction."
+        if target_forcing is None:
+            target_forcing = {}
+
+        # Convert input data to batch
+        x = self._get_batch(x)
+        target_forcing = self._get_batch(target_forcing)
+
+        target = self._get_template(
+            target_template, ensemble_size=x.ensemble_size, batch_size=x.batch_size, device=x.device
+        )
+
         # Prepare kwargs for model's predict_step
         predict_kwargs = {
-            "batch": batch,
+            "x": x,
+            "target_template": target,
+            "target_forcing": target_forcing,
             "pre_processors": self.pre_processors,
             "post_processors": self.post_processors,
-            "n_step_input": self.n_step_input,
             "model_comm_group": model_comm_group,
+            "gather_out": gather_out,
         }
 
-        # Add tendency processors if they exist
-        if hasattr(self, "pre_processors_tendencies"):
-            predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies
-        if hasattr(self, "post_processors_tendencies"):
-            predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
+        # Tendency models convert sampled tendencies back to states with these statistics.
+        if self.statistics_tendencies is not None:
+            predict_kwargs["statistics_tendencies"] = self.statistics_tendencies
         if getattr(self, "spatial_pre_processors", None):
             predict_kwargs["spatial_pre_processors"] = self.spatial_pre_processors
 
-        # Delegate to the model's predict_step implementation with processors
-        return self.model.predict_step(**predict_kwargs, **kwargs)
+        pred_batch = self.model.predict_step(**predict_kwargs, **kwargs)
+        return self.unwrap_batch(pred_batch)
 
     def _update_metadata(self) -> None:
         self.model.fill_metadata(self.metadata)

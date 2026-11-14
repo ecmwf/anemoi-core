@@ -23,6 +23,8 @@ class RMSELoss(MSELoss):
     """RMSE loss."""
 
     name: str = "rmse"
+    # The square root is taken over the whole mean, and ``forward`` takes no ``weights``.
+    applies_weights: bool = False
 
     def forward(
         self,

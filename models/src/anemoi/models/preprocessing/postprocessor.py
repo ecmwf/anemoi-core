@@ -17,6 +17,12 @@ import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.activations import CustomRelu
 from anemoi.models.preprocessing import BasePreprocessor
+from anemoi.models.preprocessing import resolve_variable_indices
+from anemoi.models.preprocessing.normalization import NORMALIZATION_STATISTICS
+from anemoi.models.preprocessing.normalization import check_normalization_method
+from anemoi.models.preprocessing.normalization import missing_statistics
+from anemoi.models.preprocessing.normalization import normalize_value
+from anemoi.models.preprocessing.normalization import remapped_statistics
 
 LOGGER = logging.getLogger(__name__)
 
@@ -26,13 +32,18 @@ class Postprocessor(BasePreprocessor):
 
     For Postprocessors just the inverse_transform method is implemented.
     transform is not needed and corresponds to the identity function.
+
+    Postprocessors constrain predicted states (:attr:`constrains_output`): they are skipped when a
+    tendency is converted (:attr:`applies_to_tendencies`), and applied to the state rebuilt from it.
     """
+
+    constrains_output = True
+    applies_to_tendencies = False
 
     def __init__(
         self,
         config=None,
         data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
     ) -> None:
         """Initialize the Postprocessor.
 
@@ -42,10 +53,8 @@ class Postprocessor(BasePreprocessor):
             configuration object of the processor
         data_indices : IndexCollection
             Data indices for input and output variables
-        statistics : dict
-            Data statistics dictionary
         """
-        super().__init__(config, data_indices, statistics)
+        super().__init__(config, data_indices)
 
         self._prepare_postprocessing_indices_list()
         self._create_postprocessing_indices()
@@ -66,10 +75,11 @@ class Postprocessor(BasePreprocessor):
         self.num_inference_output_vars = len(self.data_indices.model.output.name_to_index)
 
         (
+            self.postprocessed_names,
             self.index_training_output,
             self.index_inference_output,
             self.postprocessorfunctions,
-        ) = ([], [], [])
+        ) = ([], [], [], [])
 
     def _create_postprocessing_indices(self):
         """Create the indices for postprocessing."""
@@ -85,9 +95,14 @@ class Postprocessor(BasePreprocessor):
                 f"Postprocessors cannot be applied to forcing variables."
             )
 
+            self.postprocessed_names.append(name)
             self.index_training_output.append(self._get_index(self.data_indices.data.output.name_to_index, name))
             self.index_inference_output.append(self._get_index(self.data_indices.model.output.name_to_index, name))
             self.postprocessorfunctions.append(self._get_postprocessor_function(method, name))
+
+    def transform(self, x: torch.Tensor, **_kwargs) -> torch.Tensor:
+        """Identity: postprocessors only act on the way out (``inverse_transform``)."""
+        return x
 
     def _get_index(self, name_to_index_dict, name):
         return name_to_index_dict.get(name, None)
@@ -105,20 +120,44 @@ class Postprocessor(BasePreprocessor):
         LOGGER.info(f"Postprocessor: applying {method} to {name}")
         return postprocessor_function
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def _output_indices(
+        self,
+        names: list[str],
+        x: torch.Tensor,
+        name_to_index: Optional[dict[str, int]],
+        training_indices: list[int | None],
+        inference_indices: list[int | None],
+    ) -> list[int | None]:
+        """Locate ``names`` in the model output ``x``: by name if ``name_to_index`` is given, else by width."""
+        return resolve_variable_indices(
+            self.__class__.__name__,
+            names,
+            x.shape[-1],
+            name_to_index,
+            {
+                "training output": (self.num_training_output_vars, training_indices),
+                "inference output": (self.num_inference_output_vars, inference_indices),
+            },
+        )
+
+    def inverse_transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        name_to_index: Optional[dict[str, int]] = None,
+        **_kwargs,
+    ) -> torch.Tensor:
         """Postprocess model output tensor."""
         if not in_place:
             x = x.clone()
 
-        if x.shape[-1] == self.num_training_output_vars:
-            index = self.index_training_output
-        elif x.shape[-1] == self.num_inference_output_vars:
-            index = self.index_inference_output
-        else:
-            raise ValueError(
-                f"Input tensor ({x.shape[-1]}) does not match the training "
-                f"({self.num_training_output_vars}) or inference shape ({self.num_inference_output_vars})",
-            )
+        index = self._output_indices(
+            self.postprocessed_names,
+            x,
+            name_to_index,
+            self.index_training_output,
+            self.index_inference_output,
+        )
 
         # Replace values
         for postprocessor, idx_dst in zip(self.postprocessorfunctions, index):
@@ -140,8 +179,11 @@ class NormalizedReluPostprocessor(Postprocessor):
     3.14:
         - q
     ```
-    Thresholds are in un-normalized space. If normalizer is specified, the threshold values are normalized.
-    This is necessary if in config file the normalizer is specified before the postprocessor, e.g.:
+    Thresholds are in un-normalized (physical) space. If normalizer is specified, each threshold is
+    normalized on every call with the ``statistics`` of the view being post-processed (passed in by
+    :meth:`~anemoi.models.data.sources.Source.apply_func`), the same statistics the
+    :class:`~anemoi.models.preprocessing.normalizer.InputNormalizer` uses. This is necessary if in
+    config file the normalizer is specified before the postprocessor, e.g.:
     ```
     data:
         processors:
@@ -159,47 +201,96 @@ class NormalizedReluPostprocessor(Postprocessor):
               normalizer: 'mean-std'
     """
 
+    #: Thresholds of variables the normaliser remaps (e.g. ``cp: tp``) are normalised with the remapped
+    #: statistics when the normaliser comes first in the chain, see
+    #: :attr:`~anemoi.models.preprocessing.BasePreprocessor.shares_statistics_remap`.
+    uses_statistics_remap = True
+
     def __init__(
         self,
         config=None,
         data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
     ) -> None:
+        super().__init__(config, data_indices)
 
-        self.statistics = statistics
+        check_normalization_method(self.normalizer, self.__class__.__name__)
 
-        super().__init__(config, data_indices, statistics)
-
-        # Validate normalizer input
-        if self.normalizer not in {"none", "mean-std", "min-max", "max", "std"}:
-            raise ValueError(
-                "Normalizer must be one of: 'none', 'mean-std', 'min-max', 'max', 'std' in NormalizedReluBounding."
-            )
-
-    def _get_postprocessor_function(self, method: float, name: str) -> CustomRelu:
-        """Get the relu function class for the specified threshold and name."""
-        stat_index = self.data_indices.data.input.name_to_index[name]
-        normalized_value = method
-        if self.normalizer == "mean-std":
-            mean = self.statistics["mean"][stat_index]
-            std = self.statistics["stdev"][stat_index]
-            normalized_value = (method - mean) / std
-        elif self.normalizer == "min-max":
-            min_stat = self.statistics["minimum"][stat_index]
-            max_stat = self.statistics["maximum"][stat_index]
-            normalized_value = (method - min_stat) / (max_stat - min_stat)
-        elif self.normalizer == "max":
-            max_stat = self.statistics["maximum"][stat_index]
-            normalized_value = method / max_stat
-        elif self.normalizer == "std":
-            std = self.statistics["stdev"][stat_index]
-            normalized_value = method / std
-        postprocessor_function = CustomRelu(normalized_value)
-
+    def _get_postprocessor_function(self, method: float, name: str) -> float:
+        """Return the physical threshold for ``name``; it is normalized per call in :meth:`inverse_transform`."""
         LOGGER.info(
-            f"NormalizedReluPostprocessor: applying NormalizedRelu with threshold {normalized_value} after {self.normalizer} normalization to {name}."
+            "NormalizedReluPostprocessor: applying a ReLU with threshold %s (physical units, %s normalization) to %s.",
+            method,
+            self.normalizer,
+            name,
         )
-        return postprocessor_function
+        return float(method)
+
+    def _normalized_threshold(self, threshold: float, statistics: Optional[dict], index: int) -> float:
+        """Map a physical ``threshold`` into the space of the variable at ``index`` of the view."""
+        return normalize_value(self.normalizer, threshold, statistics or {}, index)
+
+    def _check_statistics(self, statistics: Optional[dict], width: int) -> None:
+        """Raise unless ``statistics`` holds what the normalizer needs, one value per variable of the view."""
+        required = NORMALIZATION_STATISTICS[self.normalizer]
+        if not required:
+            return
+        if statistics is None:
+            msg = f"{self.__class__.__name__} with normalizer {self.normalizer!r} needs the view's statistics."
+            raise ValueError(msg)
+        missing = missing_statistics([self.normalizer], statistics)
+        if missing:
+            msg = f"{self.__class__.__name__} with normalizer {self.normalizer!r} needs the statistics {missing}."
+            raise ValueError(msg)
+        for key in required:
+            if len(statistics[key]) != width:
+                msg = (
+                    f"{self.__class__.__name__}: statistic {key!r} has {len(statistics[key])} values, "
+                    f"but the tensor has {width} variables."
+                )
+                raise ValueError(msg)
+
+    def inverse_transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        name_to_index: Optional[dict[str, int]] = None,
+        statistics: Optional[dict] = None,
+        **_kwargs,
+    ) -> torch.Tensor:
+        """Apply the thresholded ReLU, normalizing each threshold with the view's ``statistics``.
+
+        ``statistics`` and ``name_to_index`` are those of the view (see
+        :meth:`~anemoi.models.data.sources.Source.apply_func`): one value per variable along the
+        last axis of ``x``. ``statistics`` may be omitted when the normalizer is ``"none"``.
+        """
+        if not in_place:
+            x = x.clone()
+
+        index = self._output_indices(
+            self.postprocessed_names,
+            x,
+            name_to_index,
+            self.index_training_output,
+            self.index_inference_output,
+        )
+        self._check_statistics(statistics, x.shape[-1])
+        remap = getattr(self, "statistics_remap", None) or {}
+        if remap and statistics is not None and NORMALIZATION_STATISTICS[self.normalizer]:
+            if name_to_index is None:
+                msg = f"{self.__class__.__name__}: the normaliser remap {remap} needs the view's name_to_index."
+                raise ValueError(msg)
+            statistics = remapped_statistics(statistics, name_to_index, remap, self.__class__.__name__)
+
+        # The physical thresholds are read from the config (``methods``), not from
+        # ``postprocessorfunctions``: checkpoints pickled before thresholds were normalized
+        # per call hold already-normalized CustomRelu objects there.
+        for name, idx_dst in zip(self.postprocessed_names, index):
+            if idx_dst is None:
+                continue
+            threshold = float(self.methods.get(name, self.default))
+            threshold = float(self._normalized_threshold(threshold, statistics, idx_dst))
+            x[..., idx_dst] = CustomRelu(threshold)(x[..., idx_dst])
+        return x
 
 
 class ConditionalPostprocessor(Postprocessor):
@@ -208,14 +299,6 @@ class ConditionalPostprocessor(Postprocessor):
     This class is intended to be subclassed for specific implementations.
     It expects the config to have keys corresponding to customizable values and lists of variables to postprocess.
     """
-
-    def __init__(
-        self,
-        config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
-    ) -> None:
-        super().__init__(config, data_indices, statistics)
 
     def _prepare_postprocessing_indices_list(self):
         """Prepare the postprocessor indices list."""
@@ -250,24 +333,36 @@ class ConditionalPostprocessor(Postprocessor):
         """
         pass
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        name_to_index: Optional[dict[str, int]] = None,
+        **_kwargs,
+    ) -> torch.Tensor:
         """Set values in the output tensor."""
         if not in_place:
             x = x.clone()
 
-        # Replace with value if masking variable is zero
-        if x.shape[-1] == self.num_training_output_vars:
-            index = self.index_training_output
-            masking_variable = self.masking_variable_training_output
-        elif x.shape[-1] == self.num_inference_output_vars:
-            index = self.index_inference_output
-            masking_variable = self.masking_variable_inference_output
-        else:
-            raise ValueError(
-                f"Output tensor ({x.shape[-1]}) does not match the training "
-                f"({self.num_training_output_vars}) or inference shape ({self.num_inference_output_vars})",
-            )
+        index = self._output_indices(
+            self.postprocessed_names,
+            x,
+            name_to_index,
+            self.index_training_output,
+            self.index_inference_output,
+        )
+        (masking_variable,) = self._output_indices(
+            [self.masking_variable],
+            x,
+            name_to_index,
+            [self.masking_variable_training_output],
+            [self.masking_variable_inference_output],
+        )
+        if masking_variable is None:
+            msg = f"{self.__class__.__name__}: the masking variable {self.masking_variable!r} is not in the output."
+            raise ValueError(msg)
 
+        # Replace with value if masking variable is zero
         postprocessor_mask = self.get_locations(x[..., masking_variable])
 
         # Replace values

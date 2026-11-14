@@ -6,7 +6,7 @@ datasets:
     # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
     # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
     scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
-    ignore_nans: False
+    ignore_nans: True
 
     # To remap predicted variables to different target variables (e.g. model output 'tp' vs.
     # observation 'imerg') add predicted_variables / target_variables to the relevant sub-loss

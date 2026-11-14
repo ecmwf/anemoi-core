@@ -16,13 +16,13 @@ write ``training.fork_run_id`` onto the config, so the logged params carry no
 """
 
 import importlib
+import os
+import subprocess
 import sys
-from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-from unittest.mock import patch
 
 import pytest
 from pytest_mock import MockerFixture
@@ -40,6 +40,7 @@ _EXPORT_IMPORT_MODULES = [
     "mlflow_export_import.run.import_run",
     "mlflow_export_import.run.run_data_importer",
 ]
+_MLFLOW_SYNC_MODULE = "anemoi.training.utils.mlflow_sync"
 
 SRC_RUN_ID = "offline-child"
 DST_RUN_ID = "online-child"
@@ -48,14 +49,22 @@ ONLINE_PARENT_RUN_ID = "online-parent"
 
 
 @pytest.fixture
-def mlflow_sync_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[ModuleType]:
+def mlflow_sync_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ModuleType:
     """Import ``mlflow_sync`` with the optional ``mlflow-export-import`` package stubbed out."""
     # the module needs TMPDIR or SCRATCH at import time
     monkeypatch.setenv("TMPDIR", str(tmp_path))
-    stubs = {name: MagicMock() for name in _EXPORT_IMPORT_MODULES}
-    with patch.dict(sys.modules, stubs):
-        sys.modules.pop("anemoi.training.utils.mlflow_sync", None)
-        yield importlib.import_module("anemoi.training.utils.mlflow_sync")
+    # monkeypatch restores only the entries set here, so the stubbed module cannot leak into
+    # later tests. ``patch.dict(sys.modules, ...)`` would also drop every module first imported
+    # while patched (mlflow, numpy, ...), and would leave ``anemoi.training.utils.mlflow_sync``
+    # pointing at the stubbed module, which ``from anemoi.training.utils import mlflow_sync``
+    # then returns instead of the real one.
+    for name in _EXPORT_IMPORT_MODULES:
+        monkeypatch.setitem(sys.modules, name, MagicMock())
+    utils_package = importlib.import_module("anemoi.training.utils")
+    monkeypatch.setitem(sys.modules, _MLFLOW_SYNC_MODULE, None)
+    del sys.modules[_MLFLOW_SYNC_MODULE]
+    monkeypatch.setattr(utils_package, "mlflow_sync", None, raising=False)
+    return importlib.import_module(_MLFLOW_SYNC_MODULE)
 
 
 @pytest.fixture
@@ -118,6 +127,31 @@ def mlflow_sync(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ModuleType:
     from anemoi.training.utils import mlflow_sync
 
     return mlflow_sync
+
+
+def test_import_keeps_existing_loggers_enabled(tmp_path: Path) -> None:
+    """Importing mlflow_export_import must not silence the loggers created before it.
+
+    Its logging setup calls ``logging.config.dictConfig`` once per process, which disables every
+    existing logger by default, so the import runs in a fresh interpreter.
+    """
+    pytest.importorskip("mlflow_export_import")
+    code = (
+        "import logging\n"
+        "existing = logging.getLogger('anemoi.training.mlflow_sync_probe')\n"
+        "import anemoi.training.utils.mlflow_sync\n"
+        "assert not existing.disabled, 'logger created before the import was disabled'\n"
+        "assert not logging.getLogger('anemoi.training.diagnostics.mlflow.utils').disabled\n"
+    )
+    env = {**os.environ, "TMPDIR": str(tmp_path)}
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def make_params(num_params: int, max_params_length: int | None = None) -> dict[str, str]:

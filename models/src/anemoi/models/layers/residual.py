@@ -60,10 +60,9 @@ class BaseResidualConnection(nn.Module, ABC):
 class SkipConnection(BaseResidualConnection):
     """Skip connection module
 
-    This layer returns the input step selected by 'step'.
+    This layer returns the input step selected by `step` (by default the last one),
+    bypassing the processing layers.
 
-    The default is to return the last input step.
-    This module is used to bypass processing layers and directly pass the latest input forward.
     Parameters
     ----------
     step : int, default -1

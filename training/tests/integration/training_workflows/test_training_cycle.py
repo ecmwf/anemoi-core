@@ -98,8 +98,9 @@ def test_training_cycle_multidomain(
         "data": "hidden",
         "data_2": "hidden_2",
     }
-    assert trainer.graph_data["data"].num_nodes != trainer.graph_data["data_2"].num_nodes
-    assert trainer.graph_data["hidden"].num_nodes != trainer.graph_data["hidden_2"].num_nodes
+    num_nodes = model.graph_geometry.num_nodes
+    assert num_nodes["data"] != num_nodes["data_2"]
+    assert num_nodes["hidden"] != num_nodes["hidden_2"]
     assert trainer.model.trainer.global_step == 4
 
     assert_keys_exist(trainer.metadata, partial_metadata_schema)
@@ -204,6 +205,38 @@ def test_training_cycle_edm_transport(
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_flow_matching(
+    flow_matching_config: tuple[DictConfig, str],
+    get_test_archive: callable,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
+    cfg, url = flow_matching_config
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_flow_matching_with_residual(
+    flow_matching_config: tuple[DictConfig, str],
+    get_test_archive: callable,
+) -> None:
+    """The state transport model adds a configured residual connection to its prognostic outputs."""
+    cfg, url = flow_matching_config
+    if cfg.training.transport.prediction_mode != "state":
+        pytest.skip("Tendency models use their residual connection for the reference state.")
+    with open_dict(cfg):
+        cfg.model.residual = {
+            "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection", "step": -1}},
+        }
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+@skip_if_offline
+@pytest.mark.slow
 @pytest.mark.mlflow
 def test_training_cycle_mlflow_dry_run(
     mlflow_dry_run_config: tuple[DictConfig, str],
@@ -250,12 +283,12 @@ def test_training_cycle_imerg_target(
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_multidatasets_edm_transport(
-    multidatasets_edm_transport_config: tuple[DictConfig, list[str]],
+def test_training_cycle_multidatasets_transport(
+    multidatasets_transport_config: tuple[DictConfig, list[str]],
     get_test_archive: callable,
     partial_metadata_schema: dict[str, Any],
 ) -> None:
-    cfg, urls = multidatasets_edm_transport_config
+    cfg, urls = multidatasets_transport_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
@@ -307,7 +340,7 @@ def test_training_cycle_offset_forecaster_tendency_transport(
 
     assert trainer.task.name == "offset-forecaster"
     assert trainer.datamodule.statistics_tendencies["data"]["lead_times"] == ["6h", "12h"]
-    assert trainer.model.model.pre_processors_tendencies["data"].lead_times == ["6h", "12h"]
+    assert trainer.model.model.statistics_tendencies["data"]["lead_times"] == ["6h", "12h"]
     assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["input_offsets"] == ["-12h", "0h"]
     assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["output_offsets"] == ["6h", "12h"]
     assert_keys_exist(trainer.metadata, partial_metadata_schema)

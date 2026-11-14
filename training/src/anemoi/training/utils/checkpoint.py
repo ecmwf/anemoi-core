@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import copy
 import io
 import logging
 import pickle
@@ -15,14 +16,11 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from omegaconf import open_dict
 from pytorch_lightning import Callback
 from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
-from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
-from anemoi.graphs.utils import load_graph_from_file
-from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.migrations import Migrator
 from anemoi.models.preprocessing.imputer import BaseImputer
 from anemoi.utils.checkpoints import save_metadata
@@ -49,9 +47,10 @@ def load_and_prepare_model(
     lightning_checkpoint_path : str
         path to lightning checkpoint.
     graph_path : Path | str | None, optional
-        path to a graph file. If given, it is used instead of the ``graph_data`` stored in the
-        checkpoint (which is then not required). The graph is not checked against the checkpoint
-        beyond the presence of the required dataset nodes.
+        path to a graph file. The model builds its graph from the training config; if given, it loads
+        this graph instead (``system.input.graph`` is set to it and ``graph.nodes`` cleared), e.g. when
+        the datasets the config builds the graph from are not available. Gridded datasets only. The
+        graph is not checked against the checkpoint beyond the presence of the required nodes.
 
     Returns
     -------
@@ -60,6 +59,7 @@ def load_and_prepare_model(
 
     """
     from hydra.utils import get_class
+    from hydra.utils import instantiate
 
     # memory-mapped: only the hyperparameters are needed here, not the weights
     hyper_parameters = torch.load(
@@ -69,21 +69,20 @@ def load_and_prepare_model(
         weights_only=False,
     )["hyper_parameters"]
 
+    config = hyper_parameters["config"]
     overrides = {}
     if graph_path is not None:
-        dataset_names = list(hyper_parameters["data_indices"])
-        graph = load_graph_from_file(graph_path)
-        fused = uses_fused_dataset_graph(graph, dataset_names)
-        validate_loaded_graph(graph, dataset_names if fused else [DEFAULT_DATASET_NAME])
-        overrides["graph_data"] = graph
-    elif "graph_data" not in hyper_parameters:
-        msg = (
-            f"The checkpoint {lightning_checkpoint_path} does not contain the hyperparameter 'graph_data'. "
-            "Supply a graph with --graph."
-        )
-        raise ValueError(msg)
+        # Existing-graph mode: with no nodes in the graph config, the model loads system.input.graph
+        config = copy.deepcopy(config)
+        with open_dict(config):
+            config.system.input.graph = str(graph_path)
+            config.graph.nodes = None
+        overrides["config"] = config
+    # The task is not stored with the hyperparameters (it holds runtime objects): build it from the
+    # config, as the trainer does.
+    overrides["task"] = instantiate(config.task)
 
-    training_method_cls = get_class(hyper_parameters["config"].training.method._target_)
+    training_method_cls = get_class(config.training.method._target_)
 
     module = training_method_cls.load_from_checkpoint(lightning_checkpoint_path, weights_only=False, **overrides)
     model = module.model
@@ -121,7 +120,6 @@ def save_inference_checkpoint(
     """
     inference_filepath = Path(save_path)
 
-    clear_imputer_runtime_state(model)
     torch.save(model, inference_filepath)
     save_metadata(inference_filepath, metadata, supporting_arrays=supporting_arrays)
     return inference_filepath

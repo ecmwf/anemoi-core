@@ -28,9 +28,13 @@ def setup_torch():
         pytest.skip("CUDA not available")
     if not is_triton_available():
         pytest.skip("Triton not available")
+    previous_device = torch.get_default_device()
+    previous_dtype = torch.get_default_dtype()
     torch.set_default_device("cuda")
     torch.set_default_dtype(torch.float32)
     yield
+    torch.set_default_device(previous_device)
+    torch.set_default_dtype(previous_dtype)
 
 
 def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:

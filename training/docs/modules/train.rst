@@ -47,8 +47,8 @@ implement a new one by overriding the :meth:`_step` method.
 
 -  ``config``: A structured configuration (usually a dataclass) defining
    model architecture and training settings.
--  ``graph_data``: A :class:`~torch_geometric.data.HeteroData` object
-   with static node and edge features.
+-  ``data_types``: The kind of data of each dataset (``"gridded"`` or
+   ``"tabular"``). The model builds its graph from the config.
 -  ``statistics`` / ``statistics_tendencies``: Mean and std dev for
    normalization of variables.
 -  ``data_indices``: Index mappings between variable names and tensor
@@ -91,9 +91,10 @@ All methods inherit from
    execution.
 
 :class:`~anemoi.training.train.methods.transport.TransportTraining`
-   Configurable transport training for EDM diffusion and stochastic-interpolant
-   objectives. Selects state or tendency targets with ``prediction_mode``
-   and the objective with ``transport_objective``.
+   Configurable transport training for EDM diffusion and flow-matching
+   objectives. Selects state or tendency targets with
+   ``training.transport.prediction_mode`` and the objective with
+   ``training.transport.objective``.
 
 .. automodule:: anemoi.training.train.methods.single
    :members:
@@ -115,7 +116,7 @@ All methods inherit from
    :no-undoc-members:
    :show-inheritance:
 
-.. automodule:: anemoi.training.train.methods.stochastic_interpolant
+.. automodule:: anemoi.training.train.methods.flow_matching
    :members:
    :no-undoc-members:
    :show-inheritance:

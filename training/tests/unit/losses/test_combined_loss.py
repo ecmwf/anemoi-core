@@ -17,16 +17,31 @@ from hydra.errors import InstantiationException
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data import Source
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources import GriddedSource
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import PowerSpectrumLoss
 from anemoi.training.losses import SpectralCRPSLoss
-from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.variable_mapper import LossVariableMapper
+from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
+
+
+def _gridded_source_view(data: torch.Tensor) -> Source:
+    """Wrap a ``(bs, time, ens, grid, nvar)`` tensor in the source view the losses take."""
+    return GriddedSource(
+        name="data",
+        data=data,
+        variables=[f"variable_{index}" for index in range(data.shape[-1])],
+        statistics={},
+        coordinates=torch.zeros(data.shape[3], 2, device=data.device),
+        layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
+    )
 
 
 class FakeGroup:
@@ -208,9 +223,10 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
             },
         ),
         scalers={
-            "grid_uniform": (3, torch.ones(4)),
+            # Dimension tuples, as the scaler builders produce them.
+            "grid_uniform": ((TensorDim.GRID,), torch.ones(4)),
             # dynamic has one value per DATA_FULL variable: tp=2, f0=99(ignored), t2m=3, msl=5, imerg=7
-            "dynamic": (4, torch.tensor([2.0, 99.0, 3.0, 5.0, 7.0])),
+            "dynamic": ((TensorDim.VARIABLE,), torch.tensor([2.0, 99.0, 3.0, 5.0, 7.0])),
         },
         data_indices=data_indices,
     )
@@ -245,8 +261,8 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
     target[..., 4] = 5.0  # imerg: (2-5)²=9 for second subloss
 
     out = loss(
-        pred,
-        target,
+        _gridded_source_view(pred),
+        _gridded_source_view(target),
         squash_mode="sum",
         pred_layout=IndexSpace.MODEL_OUTPUT,
         target_layout=IndexSpace.DATA_FULL,
@@ -271,7 +287,7 @@ def test_combined_loss_propagates_needs_shard_layout_info() -> None:
 
 def test_combined_loss_mixed_children_filter_shard_layout_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
     pred = torch.zeros((1, 1, 1, 2, 1))
-    target = torch.zeros((1, 1, 2, 1))
+    target = torch.zeros((1, 1, 1, 2, 1))
     grid_shard_sizes = [1, 1]
     channel_shard_sizes_pred = [1, 1]
     channel_shard_sizes_y = [1, 1]
@@ -289,10 +305,17 @@ def test_combined_loss_mixed_children_filter_shard_layout_kwargs(monkeypatch: py
 
     loss = CombinedLoss(
         multiscale_loss,
-        WeightedMSELoss(),
+        MSELoss(),
     )
 
-    result = loss(pred, target, weights=weights, group=group, grid_shard_sizes=grid_shard_sizes, grid_dim=-2)
+    result = loss(
+        _gridded_source_view(pred),
+        _gridded_source_view(target),
+        weights=weights,
+        group=group,
+        grid_shard_sizes=grid_shard_sizes,
+        grid_dim=-2,
+    )
 
     assert result.shape == ()
     prepare_for_smoothing.assert_called_once_with(pred, target, group, grid_shard_sizes)
@@ -310,8 +333,8 @@ def test_combined_loss_with_multiscale_child() -> None:
         ),
     )
 
-    scalar_loss = loss(pred, target)
-    per_variable_loss = loss(pred, target, squash=False)
+    scalar_loss = loss(_gridded_source_view(pred), _gridded_source_view(target))
+    per_variable_loss = loss(_gridded_source_view(pred), _gridded_source_view(target), squash=False)
 
     assert scalar_loss.shape == ()
     assert per_variable_loss.shape == (2,)
@@ -350,7 +373,7 @@ def test_combined_loss_with_spectral_crps_backward() -> None:
     # Node weights are commonly required by the weighted loss base class; keep them neutral.
     node_weights = torch.ones(points)
 
-    mse = WeightedMSELoss()
+    mse = MSELoss()
     spectral = SpectralCRPSLoss(node_weights=node_weights, transform="fft2d", x_dim=x_dim, y_dim=y_dim)
 
     loss = CombinedLoss(
@@ -358,7 +381,7 @@ def test_combined_loss_with_spectral_crps_backward() -> None:
         loss_weights=[1.0, 0.25],
     )
 
-    out = loss(pred, target)
+    out = loss(_gridded_source_view(pred), _gridded_source_view(target))
     assert out.ndim == 0
     assert torch.isfinite(out).all()
 
@@ -381,7 +404,7 @@ def test_combined_loss_with_spectral_l2_loss_backward() -> None:
     pred = torch.zeros((2, 1, 1, expected_points, nvars), requires_grad=True)
     target = torch.zeros_like(pred)
 
-    mse = WeightedMSELoss()
+    mse = MSELoss()
     spectral = PowerSpectrumLoss(
         transform="octahedral_sht",
         nlat=nlat,
@@ -392,7 +415,7 @@ def test_combined_loss_with_spectral_l2_loss_backward() -> None:
         loss_weights=[1.0, 0.25],
     )
 
-    out = loss(pred, target)
+    out = loss(_gridded_source_view(pred), _gridded_source_view(target))
     assert out.ndim == 0
     assert torch.isfinite(out).all()
 

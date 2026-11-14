@@ -10,305 +10,267 @@
 from __future__ import annotations
 
 import logging
+import warnings
+from collections.abc import Callable
+from collections.abc import Mapping
 from typing import Any
+from typing import ClassVar
 from typing import Optional
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.data import Batch
 from anemoi.models.samplers import transport_samplers
+from anemoi.models.transport.registry import build_registered
 from anemoi.models.transport.schedules import SIGMA_SCHEDULES
 from anemoi.models.transport.schedules import TIME_SCHEDULES
+from anemoi.models.transport.settings import EdmSettings
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _get_inference_defaults_section(model: Any, name: str) -> dict:
-    section = model.inference_defaults.get(name)
-    return dict(section) if section is not None else {}
+def _multiply(data: torch.Tensor, factor: torch.Tensor) -> torch.Tensor:
+    return data * factor
 
 
-def _get_inference_config(model: Any, section: str, overrides: Optional[dict]) -> dict:
-    config = _get_inference_defaults_section(model, section)
+def _add(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+    return left + right
+
+
+TransportNetwork = Callable[[Batch, Batch, dict[str, torch.Tensor]], Batch]
+"""The model's encoder, processor and decoder: ``network(x, conditioned_target, condition) -> prediction``."""
+
+
+def condition_batch_shape(condition: dict[str, torch.Tensor]) -> tuple[int, int]:
+    """Check that ``condition`` holds one value per sample and member, and return (batch, ensemble).
+
+    Every dataset's condition has shape (batch, 1, ensemble, 1, 1), with the same batch and ensemble sizes.
+    """
+    dataset_names = list(condition)
+    condition_ref = condition[dataset_names[0]]
+    assert condition_ref.ndim == 5, "Expected condition to have shape (batch, 1, ensemble, 1, 1)."
+    batch_size, _, ensemble_size = condition_ref.shape[:3]
+    for dataset_name in dataset_names:
+        condition_shape = condition[dataset_name].shape
+        assert len(condition_shape) == 5, (
+            f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
+        )
+        assert condition_shape[1] == condition_shape[3] == condition_shape[4] == 1, (
+            f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
+        )
+        assert condition_shape[0] == batch_size and condition_shape[2] == ensemble_size, (
+            "Batch or ensemble dimension mismatch across datasets for conditioned inputs."
+        )
+    return batch_size, ensemble_size
+
+
+def edm_preconditioning(
+    sigma: dict[str, torch.Tensor],
+    sigma_data: float,
+) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+    """Return the EDM preconditioning factors c_skip, c_out, c_in and c_noise for each dataset.
+
+    Karras et al. (2022), table 1: the network sees its input scaled to unit variance, learns a target of unit
+    variance, and is told the noise level as log(sigma) / 4.
+    """
+    batch_size, ensemble_size = condition_batch_shape(sigma)
+    base_view = (batch_size, 1, ensemble_size, 1, 1)
+
+    c_skip, c_out, c_in, c_noise = {}, {}, {}, {}
+    for dataset_name, sigma_dataset in sigma.items():
+        sigma_base = sigma_dataset[:, 0, :, 0, 0]
+        shape_x = sigma_dataset.shape
+        c_skip[dataset_name] = (sigma_data**2 / (sigma_base**2 + sigma_data**2)).view(base_view).expand(shape_x)
+        c_out[dataset_name] = (
+            (sigma_base * sigma_data / (sigma_base**2 + sigma_data**2) ** 0.5).view(base_view).expand(shape_x)
+        )
+        c_in[dataset_name] = (1.0 / (sigma_data**2 + sigma_base**2) ** 0.5).view(base_view).expand(shape_x)
+        c_noise[dataset_name] = (sigma_base.log() / 4.0).view(base_view).expand(shape_x)
+    return c_skip, c_out, c_in, c_noise
+
+
+def _get_inference_config(inference_defaults: Mapping, section: str, overrides: Optional[dict]) -> dict:
+    """Return the settings of the sampler or schedule: the model's defaults, updated with ``overrides``."""
+    defaults = inference_defaults.get(section)
+    config = dict(defaults) if defaults is not None else {}
     if overrides is not None:
         config.update(overrides)
     LOGGER.debug("%s_config: %s", section, config)
     return config
 
 
-def _resolve_registry_entry(config: dict, selector: str, registry: dict, context: str) -> type:
+def _build_from_config(config: dict, selector: str, registry: dict, context: str, **fixed: Any) -> Any:
+    """Build the registry entry that ``config[selector]`` names, from the other settings in ``config``."""
+    config = dict(config)
     if selector not in config:
         raise ValueError(f"{context} must define '{selector}'.")
-    entry_name = config.pop(selector)
-    if entry_name not in registry:
-        raise ValueError(f"Unknown {context}: {entry_name}")
-    return registry[entry_name]
+    return build_registered(registry, config.pop(selector), config, context, **fixed)
+
+
+def _sampling_dtype(device: torch.device) -> torch.dtype:
+    """Return the dtype of the sampling schedule and solver state on ``device``: float64, or float32 on MPS."""
+    if device.type != "mps":
+        return torch.float64
+    warnings.warn(
+        "Transport sampling runs in float32 on MPS, which has no float64; predictions differ slightly from "
+        "those of the float64 sampler on CPU or CUDA.",
+        stacklevel=2,
+    )
+    return torch.float32
 
 
 def _build_inference_schedule(
-    model: Any,
+    inference_defaults: Mapping,
     registry: dict,
     context: str,
     schedule_params: Optional[dict],
     device: torch.device,
 ) -> torch.Tensor:
-    schedule_config = _get_inference_config(model, "sampling_schedule", schedule_params)
-    scheduler_cls = _resolve_registry_entry(schedule_config, "schedule_type", registry, context)
-    scheduler = scheduler_cls(**schedule_config)
-    return scheduler.get_schedule(device, torch.float64)
+    schedule_config = _get_inference_config(inference_defaults, "sampling_schedule", schedule_params)
+    scheduler = _build_from_config(schedule_config, "schedule_type", registry, context)
+    return scheduler.get_schedule(device, _sampling_dtype(device))
 
 
 def _build_inference_sampler(
-    model: Any,
+    inference_defaults: Mapping,
     registry: dict,
     context: str,
     sampler_params: Optional[dict],
     dtype: torch.dtype,
 ) -> Any:
-    sampler_config = _get_inference_config(model, "sampler", sampler_params)
-    sampler_cls = _resolve_registry_entry(sampler_config, "sampler", registry, context)
-    return sampler_cls(dtype=dtype, **sampler_config)
+    sampler_config = _get_inference_config(inference_defaults, "sampler", sampler_params)
+    return _build_from_config(sampler_config, "sampler", registry, context, dtype=dtype)
 
 
 class TransportModelObjective:
-    """How a transport model runs its forward pass and inference sampler."""
+    """How a transport model runs its network and its inference sampler.
+
+    The model hands the objective its network as a callable, so the objective needs nothing else from the
+    model. Subclasses name the schedules and samplers they offer and the state sampling starts from.
+    """
+
+    schedules: ClassVar[dict[str, type]]
+    samplers: ClassVar[dict[str, type]]
+    name: ClassVar[str]
 
     def forward(
         self,
-        model: Any,
-        x: dict[str, torch.Tensor],
-        conditioned_target: dict[str, torch.Tensor],
+        network: TransportNetwork,
+        x: Batch,
+        conditioned_target: Batch,
         condition: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        **kwargs: Any,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         raise NotImplementedError
+
+    def initial_state(self, noise: Batch, schedule: torch.Tensor) -> Batch:
+        """Return the state sampling starts from, given unit Gaussian noise and the schedule."""
+        del schedule
+        return noise
 
     def sample(
         self,
-        model: Any,
-        x: dict[str, torch.Tensor],
+        network: TransportNetwork,
+        x: Batch,
+        noise: Batch,
+        inference_defaults: Mapping,
+        *,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
-        **kwargs,
-    ) -> dict[str, torch.Tensor]:
-        raise NotImplementedError
+    ) -> Batch:
+        """Integrate from Gaussian noise to a sample of the target.
+
+        ``inference_defaults`` holds the model's ``sampling_schedule`` and ``sampler`` settings, which
+        ``schedule_params`` and ``sampler_params`` update.
+        """
+        schedule = _build_inference_schedule(
+            inference_defaults,
+            self.schedules,
+            f"{self.name} sampling schedule",
+            schedule_params,
+            x.device,
+        )
+        sampler = _build_inference_sampler(
+            inference_defaults,
+            self.samplers,
+            f"{self.name} sampler",
+            sampler_params,
+            schedule.dtype,
+        )
+
+        def step(
+            x_arg: Batch,
+            y_arg: Batch,
+            condition: dict[str, torch.Tensor],
+            comm_arg: Optional[ProcessGroup] = None,
+        ) -> Batch:
+            # The network is already bound to the model communication group.
+            del comm_arg
+            return self.forward(network, x_arg, y_arg, condition)
+
+        return sampler.sample(x, self.initial_state(noise, schedule), schedule, step, model_comm_group)
 
 
 class EDMDiffusionModelObjective(TransportModelObjective):
-    """EDM diffusion model objective."""
+    """EDM diffusion: the network, wrapped in the EDM preconditioning, predicts the clean target."""
+
+    schedules = SIGMA_SCHEDULES
+    samplers = transport_samplers.DIFFUSION_SAMPLERS
+    name = "EDM"
+
+    def __init__(self, sigma_data: float = 1.0) -> None:
+        self.sigma_data = float(sigma_data)
 
     def forward(
         self,
-        model: Any,
-        x: dict[str, torch.Tensor],
-        y_noised: dict[str, torch.Tensor],
+        network: TransportNetwork,
+        x: Batch,
+        y_noised: Batch,
         sigma: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        **kwargs: Any,
-    ) -> dict[str, torch.Tensor]:
-        c_skip, c_out, c_in, c_noise = self._get_preconditioning(model, sigma, model.edm.sigma_data)
-        pred = model._forward_transport_network(
-            x,
-            {key: c_in[key] * y_noised[key] for key in y_noised.keys()},
-            c_noise,
-            model_comm_group=model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
-            **kwargs,
+    ) -> Batch:
+        c_skip, c_out, c_in, c_noise = edm_preconditioning(sigma, self.sigma_data)
+        scaled_noised = y_noised.with_sources(
+            {name: noised.map_with_condition(_multiply, c_in[name]) for name, noised in y_noised.items()},
         )
-        return {key: c_skip[key] * y_noised[key] + c_out[key] * pred[key] for key in y_noised.keys()}
-
-    def sample(
-        self,
-        model: Any,
-        x: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        schedule_params: Optional[dict] = None,
-        sampler_params: Optional[dict] = None,
-        **kwargs,
-    ) -> dict[str, torch.Tensor]:
-        """Sample from an EDM diffusion model."""
-        x_device = next(iter(x.values())).device
-
-        source = model.build_sampling_source(
-            x,
-            model_comm_group=model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
-        )
-        sigma_schedule = _build_inference_schedule(
-            model,
-            SIGMA_SCHEDULES,
-            "EDM sampling schedule",
-            schedule_params,
-            x_device,
-        )
-        y_init = {
-            dataset_name: source[dataset_name].to(dtype=sigma_schedule.dtype) * sigma_schedule[0] for dataset_name in x
-        }
-
-        sampler_instance = _build_inference_sampler(
-            model,
-            transport_samplers.DIFFUSION_SAMPLERS,
-            "EDM sampler",
-            sampler_params,
-            sigma_schedule.dtype,
+        pred = network(x, scaled_noised, c_noise)
+        return y_noised.with_sources(
+            {
+                name: noised.map_with_condition(_multiply, c_skip[name]).zip_map_data(
+                    _add,
+                    pred[name].map_with_condition(_multiply, c_out[name]),
+                )
+                for name, noised in y_noised.items()
+            },
         )
 
-        def denoising_fn(
-            x_arg: dict[str, torch.Tensor],
-            y_arg: dict[str, torch.Tensor],
-            sigma_arg: dict[str, torch.Tensor],
-            comm_arg: Optional[ProcessGroup] = None,
-            shard_sizes_arg: DatasetShardSizes | None = None,
-        ) -> dict[str, torch.Tensor]:
-            return self.forward(
-                model,
-                x_arg,
-                y_arg,
-                sigma_arg,
-                model_comm_group=comm_arg,
-                grid_shard_sizes=shard_sizes_arg,
-            )
-
-        return sampler_instance.sample(
-            x,
-            y_init,
-            sigma_schedule,
-            denoising_fn,
-            model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
-        )
-
-    @staticmethod
-    def _get_preconditioning(
-        model: Any,
-        sigma: dict[str, torch.Tensor],
-        sigma_data: float,
-    ) -> tuple[
-        dict[str, torch.Tensor],
-        dict[str, torch.Tensor],
-        dict[str, torch.Tensor],
-        dict[str, torch.Tensor],
-    ]:
-        """Compute EDM preconditioning factors."""
-        batch_size, ensemble_size = model._assert_condition_shapes(sigma)
-        dataset_names = list(sigma)
-        base_view = (batch_size, 1, ensemble_size, 1, 1)
-
-        c_skip, c_out, c_in, c_noise = {}, {}, {}, {}
-        # this is per dataset ; future proof but currently not used -> we assume the same sigma for each dataset later
-        for dataset_name in dataset_names:
-            sigma_dataset = sigma[dataset_name]
-            sigma_base = sigma_dataset[:, 0, :, 0, 0]
-            c_skip_base = sigma_data**2 / (sigma_base**2 + sigma_data**2)
-            c_out_base = sigma_base * sigma_data / (sigma_base**2 + sigma_data**2) ** 0.5
-            c_in_base = 1.0 / (sigma_data**2 + sigma_base**2) ** 0.5
-            c_noise_base = sigma_base.log() / 4.0
-            shape_x = sigma_dataset.shape
-            c_skip[dataset_name] = c_skip_base.view(base_view).expand(shape_x)
-            c_out[dataset_name] = c_out_base.view(base_view).expand(shape_x)
-            c_in[dataset_name] = c_in_base.view(base_view).expand(shape_x)
-            c_noise[dataset_name] = c_noise_base.view(base_view).expand(shape_x)
-
-        return c_skip, c_out, c_in, c_noise
+    def initial_state(self, noise: Batch, schedule: torch.Tensor) -> Batch:
+        """Scale unit noise to the largest noise level, in the schedule's precision."""
+        return noise.map_data(lambda data: data.to(dtype=schedule.dtype) * schedule[0])
 
 
-class StochasticInterpolantModelObjective(TransportModelObjective):
-    """Stochastic-interpolant model objective that predicts bridge drift."""
+class FlowMatchingModelObjective(TransportModelObjective):
+    """Flow matching: the network predicts the velocity from Gaussian noise to the target."""
+
+    schedules = TIME_SCHEDULES
+    samplers = transport_samplers.VECTOR_FIELD_SAMPLERS
+    name = "flow-matching"
 
     def forward(
         self,
-        model: Any,
-        x: dict[str, torch.Tensor],
-        interpolant_state: dict[str, torch.Tensor],
+        network: TransportNetwork,
+        x: Batch,
+        state: Batch,
         time_level: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        **kwargs: Any,
-    ) -> dict[str, torch.Tensor]:
-        return model._forward_transport_network(
-            x,
-            interpolant_state,
-            time_level,
-            model_comm_group=model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
-            **kwargs,
-        )
-
-    def sample(
-        self,
-        model: Any,
-        x: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        schedule_params: Optional[dict] = None,
-        sampler_params: Optional[dict] = None,
-        **kwargs,
-    ) -> dict[str, torch.Tensor]:
-        x_device = next(iter(x.values())).device
-
-        source = model.build_sampling_source(
-            x,
-            model_comm_group=model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
-        )
-        y_init = source
-
-        time_schedule = _build_inference_schedule(
-            model,
-            TIME_SCHEDULES,
-            "stochastic-interpolant schedule",
-            schedule_params,
-            x_device,
-        )
-
-        def transport_fn(
-            x_arg: dict[str, torch.Tensor],
-            y_arg: dict[str, torch.Tensor],
-            time_arg: dict[str, torch.Tensor],
-            comm_arg: Optional[ProcessGroup] = None,
-            shard_sizes_arg: DatasetShardSizes | None = None,
-        ) -> dict[str, torch.Tensor]:
-            return self.forward(
-                model,
-                x_arg,
-                y_arg,
-                time_arg,
-                model_comm_group=comm_arg,
-                grid_shard_sizes=shard_sizes_arg,
-            )
-
-        sampler_instance = _build_inference_sampler(
-            model,
-            transport_samplers.VECTOR_FIELD_SAMPLERS,
-            "stochastic-interpolant sampler",
-            sampler_params,
-            time_schedule.dtype,
-        )
-        return sampler_instance.sample(
-            x,
-            y_init,
-            time_schedule,
-            transport_fn,
-            model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
-        )
+    ) -> Batch:
+        return network(x, state, time_level)
 
 
-TRANSPORT_MODEL_OBJECTIVES = {
-    "edm_diffusion": EDMDiffusionModelObjective,
-    "stochastic_interpolant": StochasticInterpolantModelObjective,
-}
-
-
-def get_transport_model_objective(name: str) -> TransportModelObjective:
-    try:
-        return TRANSPORT_MODEL_OBJECTIVES[name]()
-    except KeyError as exc:
-        raise ValueError(f"Unknown transport model objective: {name}") from exc
+def get_transport_model_objective(name: str, edm: EdmSettings) -> TransportModelObjective:
+    """Return the model-side objective ``name``, set up with the model's EDM settings where it uses them."""
+    if name == "edm_diffusion":
+        return EDMDiffusionModelObjective(sigma_data=edm.sigma_data)
+    if name == "flow_matching":
+        return FlowMatchingModelObjective()
+    msg = f"Unknown transport model objective: {name!r}. Available: edm_diffusion, flow_matching."
+    raise ValueError(msg)

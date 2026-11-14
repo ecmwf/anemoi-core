@@ -15,6 +15,9 @@ import torch
 import torch.distributed as dist
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources.base import Source
+from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import reduce_tensor
@@ -26,11 +29,13 @@ from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import EnergyScoreDimension
 from anemoi.training.utils.enums import TensorDim
 
+# Norm dimension name -> tensor dimension, in tensor order (batch time ensemble grid variables).
 _TENSOR_DIMENSIONS = {
-    "time": int(TensorDim.TIME),
-    "grid": int(TensorDim.GRID),
-    "variables": int(TensorDim.VARIABLE),
+    "time": TensorDim.TIME,
+    "grid": TensorDim.GRID,
+    "variables": TensorDim.VARIABLE,
 }
+_TENSOR_ORDER = {dimension: position for position, dimension in enumerate(_TENSOR_DIMENSIONS)}
 
 
 class EnergyScoreLoss(BaseLoss):
@@ -70,7 +75,7 @@ class EnergyScoreLoss(BaseLoss):
             raise ValueError(msg)
         self.fair = fair
         # Kept in tensor order so the same set of dimensions always gives the same name.
-        self.norm_over = tuple(sorted(norm_over, key=_TENSOR_DIMENSIONS.__getitem__))
+        self.norm_over = tuple(sorted(norm_over, key=_TENSOR_ORDER.__getitem__))
         self.norm_dimensions = tuple(_TENSOR_DIMENSIONS[dimension] for dimension in self.norm_over)
         self.no_autocast = no_autocast
         self.supports_sharding = True
@@ -78,16 +83,16 @@ class EnergyScoreLoss(BaseLoss):
     @property
     def variables_are_joint(self) -> bool:
         """Whether variables belong to the energy score norm."""
-        return int(TensorDim.VARIABLE) in self.norm_dimensions
+        return TensorDim.VARIABLE in self.norm_dimensions
 
     @property
     def grid_is_joint(self) -> bool:
         """Whether grid nodes belong to the energy score norm."""
-        return int(TensorDim.GRID) in self.norm_dimensions
+        return TensorDim.GRID in self.norm_dimensions
 
     @property
     def scores_across_time(self) -> bool:
-        return int(TensorDim.TIME) in self.norm_dimensions
+        return TensorDim.TIME in self.norm_dimensions
 
     @property
     def name(self) -> str:
@@ -103,14 +108,8 @@ class EnergyScoreLoss(BaseLoss):
         """
         return self.grid_is_joint and not self.variables_are_joint
 
-    @staticmethod
-    def _resolve_scaler_dimensions(dimension: int | tuple[int, ...]) -> tuple[int, ...]:
-        dimensions = (dimension,) if isinstance(dimension, int) else dimension
-        num_dimensions = int(TensorDim.VARIABLE) + 1
-        return tuple(num_dimensions + int(dim) if -num_dimensions <= int(dim) < 0 else int(dim) for dim in dimensions)
-
-    def _uses_scaler_in_norm(self, dimension: int | tuple[int, ...]) -> bool:
-        dimensions = self._resolve_scaler_dimensions(dimension)
+    def _uses_scaler_in_norm(self, dimension: str | tuple[str, ...]) -> bool:
+        dimensions = (dimension,) if isinstance(dimension, str) else dimension
         return bool(set(dimensions).intersection(self.norm_dimensions))
 
     @staticmethod
@@ -126,7 +125,7 @@ class EnergyScoreLoss(BaseLoss):
 
     def add_scaler(
         self,
-        dimension: int | tuple[int, ...],
+        dimension: str | tuple[str, ...],
         scaler: torch.Tensor,
         *,
         name: str | None = None,
@@ -141,20 +140,20 @@ class EnergyScoreLoss(BaseLoss):
         super().update_scaler(name, scaler, override=override)
 
     @staticmethod
-    def _validate_input_shapes(pred: torch.Tensor, target: torch.Tensor) -> None:
-        if pred.ndim != 5 or target.ndim != 5:
+    def _validate_input_shapes(pred: torch.Tensor, target: torch.Tensor, layout: TensorLayout) -> None:
+        if pred.ndim != 5 or target.ndim != 5 or layout.pattern != "batch time ensemble grid variables":
             msg = (
                 "EnergyScoreLoss expects prediction and target tensors with shape "
                 "(batch, time, ensemble, grid, variable)."
             )
             raise ValueError(msg)
-        if target.shape[TensorDim.ENSEMBLE_DIM] != 1:
+        if target.shape[layout.axis(TensorDim.ENSEMBLE_DIM)] != 1:
             msg = "EnergyScoreLoss requires a singleton target ensemble dimension."
             raise ValueError(msg)
         if pred.shape[:2] != target.shape[:2] or pred.shape[3:] != target.shape[3:]:
             msg = f"Prediction and target shapes are incompatible: {tuple(pred.shape)} and {tuple(target.shape)}."
             raise ValueError(msg)
-        if pred.shape[TensorDim.ENSEMBLE_DIM] <= 1:
+        if pred.shape[layout.axis(TensorDim.ENSEMBLE_DIM)] <= 1:
             msg = "EnergyScoreLoss requires at least two ensemble members."
             raise ValueError(msg)
 
@@ -174,8 +173,7 @@ class EnergyScoreLoss(BaseLoss):
         norm_dimensions = set(self.norm_dimensions)
 
         for name, (dimensions, scaler) in scale_tensor.tensors.items():
-            resolved_dimensions = self._resolve_scaler_dimensions(dimensions)
-            destination = norm_scalers if norm_dimensions.intersection(resolved_dimensions) else outer_scalers
+            destination = norm_scalers if norm_dimensions.intersection(dimensions) else outer_scalers
             destination[name] = (dimensions, scaler)
 
         return ScaleTensor(**norm_scalers), ScaleTensor(**outer_scalers)
@@ -187,6 +185,7 @@ class EnergyScoreLoss(BaseLoss):
         scaler_indices: tuple[int, ...] | None,
         without_scalers: list[str] | list[int] | None,
         grid_shard_slice: slice | None,
+        layout: TensorLayout,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         scale_tensor = self._filtered_scaler(without_scalers)
         norm_scalers, outer_scalers = self._partition_scalers(scale_tensor)
@@ -194,6 +193,7 @@ class EnergyScoreLoss(BaseLoss):
         norm_weights = norm_scalers.scale_iteratively(
             ones,
             subset_indices=scaler_indices,
+            layout=layout,
             grid_shard_slice=grid_shard_slice,
         )
         # Scalers on dimensions outside the norm are used to weight the energy
@@ -206,10 +206,11 @@ class EnergyScoreLoss(BaseLoss):
         outer_shape = list(target.shape)
         for dimension in self.norm_dimensions:
             if dimension != TensorDim.VARIABLE:
-                outer_shape[dimension] = 1
+                outer_shape[layout.axis(dimension)] = 1
         outer_weights = outer_scalers.scale_iteratively(
             target.new_ones(outer_shape),
             subset_indices=scaler_indices,
+            layout=layout,
             grid_shard_slice=grid_shard_slice,
         )
 
@@ -230,9 +231,10 @@ class EnergyScoreLoss(BaseLoss):
         group: ProcessGroup,
         grid_dim: int,
         grid_shard_sizes: list[int],
+        layout: TensorLayout,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int]]:
-        pred_variable_sizes = get_shard_sizes(pred, TensorDim.VARIABLE, group)
-        target_variable_sizes = get_shard_sizes(target, TensorDim.VARIABLE, group)
+        pred_variable_sizes = get_shard_sizes(pred, layout.axis(TensorDim.VARIABLE), group)
+        target_variable_sizes = get_shard_sizes(target, layout.axis(TensorDim.VARIABLE), group)
         if pred_variable_sizes != target_variable_sizes:
             msg = (
                 "Prediction and target variable shard sizes must match for the spatial energy score: "
@@ -242,7 +244,7 @@ class EnergyScoreLoss(BaseLoss):
 
         pred = all_to_all_transpose(
             pred,
-            TensorDim.VARIABLE,
+            layout.axis(TensorDim.VARIABLE),
             pred_variable_sizes,
             grid_dim,
             grid_shard_sizes,
@@ -250,7 +252,7 @@ class EnergyScoreLoss(BaseLoss):
         )
         target = all_to_all_transpose(
             target,
-            TensorDim.VARIABLE,
+            layout.axis(TensorDim.VARIABLE),
             target_variable_sizes,
             grid_dim,
             grid_shard_sizes,
@@ -258,7 +260,7 @@ class EnergyScoreLoss(BaseLoss):
         )
         norm_weights = all_to_all_transpose(
             norm_weights,
-            TensorDim.VARIABLE,
+            layout.axis(TensorDim.VARIABLE),
             target_variable_sizes,
             grid_dim,
             grid_shard_sizes,
@@ -282,11 +284,12 @@ class EnergyScoreLoss(BaseLoss):
         feature_valid: torch.Tensor | None,
         norm_dimensions: tuple[int, ...],
         group: ProcessGroup | None,
+        layout: TensorLayout,
     ) -> torch.Tensor:
         active = (weights > 0).expand_as(values)
 
         if feature_valid is not None:
-            valid = feature_valid.unsqueeze(TensorDim.ENSEMBLE_DIM).expand_as(values)
+            valid = feature_valid.unsqueeze(layout.axis(TensorDim.ENSEMBLE_DIM)).expand_as(values)
             active = active & valid
 
         safe_values = torch.where(active, values, torch.zeros_like(values))
@@ -328,41 +331,50 @@ class EnergyScoreLoss(BaseLoss):
         target: torch.Tensor,
         norm_weights: torch.Tensor,
         group: ProcessGroup | None,
+        layout: TensorLayout,
     ) -> torch.Tensor:
+        ensemble_dim = layout.axis(TensorDim.ENSEMBLE_DIM)
         feature_valid = None
         if self.ignore_nans:
-            feature_valid = torch.isfinite(target.squeeze(TensorDim.ENSEMBLE_DIM)) & torch.isfinite(pred).all(
-                dim=TensorDim.ENSEMBLE_DIM,
-            )
+            target_valid = torch.isfinite(target.squeeze(ensemble_dim))
+            pred_valid = torch.isfinite(pred).all(dim=ensemble_dim)
+            feature_valid = target_valid & pred_valid
 
         observation_distances = pred - target
         observation_term = self._weighted_norm(
             observation_distances,
             norm_weights,
             feature_valid,
-            self.norm_dimensions,
+            tuple(layout.axis(dim) for dim in self.norm_dimensions),
             group,
-        ).mean(dim=TensorDim.ENSEMBLE_DIM, keepdim=True)
+            layout,
+        ).mean(dim=ensemble_dim, keepdim=True)
 
-        ensemble_size = pred.shape[TensorDim.ENSEMBLE_DIM]
+        ensemble_size = pred.shape[ensemble_dim]
         pair_distance_sum = torch.zeros_like(observation_term)
         for member in range(ensemble_size - 1):
-            pair_distances = pred[:, :, member].unsqueeze(TensorDim.ENSEMBLE_DIM) - pred[:, :, member + 1 :]
+            pair_distances = pred[:, :, member].unsqueeze(ensemble_dim) - pred[:, :, member + 1 :]
             pair_distance_sum = pair_distance_sum + self._weighted_norm(
                 pair_distances,
                 norm_weights,
                 feature_valid,
-                self.norm_dimensions,
+                tuple(layout.axis(dim) for dim in self.norm_dimensions),
                 group,
-            ).sum(dim=TensorDim.ENSEMBLE_DIM, keepdim=True)
+                layout,
+            ).sum(dim=ensemble_dim, keepdim=True)
 
         pair_coefficient = 1.0 / (ensemble_size * (ensemble_size - 1)) if self.fair else 1.0 / (ensemble_size**2)
         return observation_term - pair_coefficient * pair_distance_sum
 
-    def forward(
+    def forward(self, pred: Source, target: Source, squash: bool = True, **kwargs) -> torch.Tensor:
+        """Evaluate the score using the source views' tensor layout."""
+        return apply_pairwise(pred, target, self._evaluate_loss_tensor, squash=squash, **kwargs)
+
+    def _forward_impl(
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        layout: TensorLayout,
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -375,11 +387,13 @@ class EnergyScoreLoss(BaseLoss):
         **_kwargs,
     ) -> torch.Tensor:
         """Calculate the energy score over the selected dimensions."""
-        self._validate_input_shapes(pred, target)
-        if self.scores_across_time and pred.shape[TensorDim.TIME] < 2:
+        layout = layout.normalized(pred.ndim)
+        self._validate_input_shapes(pred, target, layout)
+        num_steps = pred.shape[layout.axis(TensorDim.TIME)]
+        if self.scores_across_time and num_steps < 2:
             msg = (
                 f"EnergyScoreLoss with norm_over={list(self.norm_over)} needs at least two output steps, "
-                f"got {pred.shape[TensorDim.TIME]}."
+                f"got {num_steps}."
             )
             raise ValueError(msg)
         if self.variables_are_joint and squash and squash_mode == "sum":
@@ -392,8 +406,9 @@ class EnergyScoreLoss(BaseLoss):
             scaler_indices,
             without_scalers,
             grid_shard_slice,
+            layout,
         )
-        num_variables = pred.shape[TensorDim.VARIABLE]
+        num_variables = pred.shape[layout.axis(TensorDim.VARIABLE)]
 
         is_sharded = grid_shard_slice is not None
         variable_shard_sizes = None
@@ -417,12 +432,13 @@ class EnergyScoreLoss(BaseLoss):
                     group,
                     grid_dim,
                     grid_shard_sizes,
+                    layout,
                 )
 
         norm_group = group if is_sharded and self.grid_is_joint and self.variables_are_joint else None
         context = torch.amp.autocast(device_type=pred.device.type, enabled=False) if self.no_autocast else nullcontext()
         with context:
-            score = self._score_field(pred, target, norm_weights, norm_group)
+            score = self._score_field(pred, target, norm_weights, norm_group, layout)
 
         if variable_shard_sizes is not None:
             assert group is not None
@@ -437,4 +453,4 @@ class EnergyScoreLoss(BaseLoss):
             score = torch.where(torch.isnan(score), torch.zeros_like(score), score)
 
         reduction_group = group if is_sharded and not self.grid_is_joint else None
-        return self.reduce(score, squash=squash, squash_mode=squash_mode, group=reduction_group)
+        return self.reduce(score, layout=layout, squash=squash, squash_mode=squash_mode, group=reduction_group)

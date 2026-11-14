@@ -21,13 +21,12 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
-from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import model_validator
 
-from anemoi.models.layers.target_features import VALID_TARGET_FEATURES
+from anemoi.models.models.target_features import VALID_TARGET_FEATURES
 from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 
@@ -86,58 +85,33 @@ class SparseProjectorSchema(BaseModel):
     "Number of chunks to use for sparse projection matmuls."
 
 
-class TransportSourceConfig(BaseModel):
-    """Configuration of the starting/source field for transport objectives.
-
-    The defaults map 1:1 to :class:`TransportSourceSettings` in
-    ``anemoi.models.transport.settings`` and are restated here so that importing
-    the schemas does not pull in the model code.
-    """
-
-    kind: Literal["default", "zero", "gaussian", "reference_state"] = "default"
-    "Starting field used before the transport objective moves toward the target."
-    scale: NonNegativeFloat = Field(default=1.0, examples=[1.0])
-    "Multiplier applied to the starting/source field."
-    noise_scale: NonNegativeFloat = Field(default=0.0, examples=[0.1])
-    "Additional additive Gaussian noise applied to the starting/source field."
-
-
 class TransportConfig(BaseModel):
     """Configuration of the transport objective, path, conditioning and inference.
 
-    The defaults map 1:1 to :class:`EdmSettings`, :class:`NoiseConditioningSettings`
-    and :class:`StochasticInterpolantSettings` in ``anemoi.models.transport.settings``
-    and are restated here so that importing the schemas does not pull in the model code.
+    The defaults of ``sigma_data`` and of the noise conditioning map 1:1 to :class:`EdmSettings`
+    and :class:`NoiseConditioningSettings` in ``anemoi.models.transport.settings`` and are restated
+    here so that importing the schemas does not pull in the model code. ``sigma_max``, ``sigma_min``
+    and ``rho`` are read by the config, which interpolates them into ``training_condition``.
     """
 
-    objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
+    objective: Literal["edm_diffusion", "flow_matching"] = "edm_diffusion"
     "Training and sampling objective used by the transport model."
     sigma_data: PositiveFloat = Field(default=1.0, examples=[1.0])
     "Typical data scale used by EDM diffusion."
     noise_channels: PositiveInt = Field(default=32, examples=[32])
-    "Number of channels in the noise or bridge-time embedding."
+    "Number of channels in the noise-level or time embedding."
     noise_cond_dim: PositiveInt = Field(default=16, examples=[16])
     "Size of the conditioning vector passed to conditional layers."
     sigma_max: PositiveFloat = Field(default=100.0, examples=[100.0])
-    "Maximum EDM diffusion noise level used during training."
+    "Largest EDM noise level of the training distribution; the included configs interpolate it into training_condition."
     sigma_min: PositiveFloat = Field(default=0.02, examples=[0.02])
-    "Minimum EDM diffusion noise level used during training."
+    "Smallest EDM noise level of the training distribution; the included configs interpolate it into training_condition."
     rho: PositiveFloat = Field(default=7.0, examples=[7.0])
-    "Shape parameter for the Karras EDM noise schedule."
-    si_alpha_schedule: Literal["linear"] = "linear"
-    "Schedule for how strongly the SI bridge keeps the source field."
-    si_beta_schedule: Literal["linear", "quadratic"] = "linear"
-    "Schedule for how strongly the SI bridge moves toward the target field."
-    si_sigma_schedule: Literal["brownian_bridge", "quadratic_bridge"] = "brownian_bridge"
-    "Schedule for the SI bridge-noise amplitude."
-    source: TransportSourceConfig = Field(default_factory=TransportSourceConfig)
-    "Configuration for the starting/source field."
-    si_noise_scale: NonNegativeFloat = Field(default=1.0, examples=[1.0])
-    "Overall scale of the stochastic-interpolant bridge noise."
+    "Karras shape parameter of the training distribution; inference_defaults sets the sampling schedule separately."
     training_condition: dict = Field(default_factory=dict)
-    "Distribution used to sample one training noise level or bridge time per sample."
+    "Distribution used to sample one training noise level or time per sample."
     noise_embedder: dict = Field(default_factory=dict)
-    "Hydra configuration for embedding the current noise level or bridge time."
+    "Hydra configuration for embedding the current noise level or time."
     inference_defaults: dict = Field(default_factory=dict)
     "Default sampler parameters used during inference."
 
@@ -159,13 +133,52 @@ class Boolean1DSchema(BaseModel):
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
+class NoOpNodeEmbedderSchema(BaseModel):
+    """Pass-through node embedder: the encoder mapper takes each source dataset's input as is."""
+
+    target_: Literal["anemoi.models.layers.node_embedder.NoOpNodeEmbedder"] = Field(..., alias="_target_")
+
+
+class LinearNodeEmbedderSchema(BaseModel):
+    """Linear node embedder: one linear projection per source dataset onto ``num_channels``."""
+
+    target_: Literal["anemoi.models.layers.node_embedder.LinearNodeEmbedder"] = Field(..., alias="_target_")
+    num_channels: PositiveInt = Field(example=512)
+    "Number of channels the source datasets are projected to; the input channels of the encoder mapper."
+    layer_kernels: Union[dict[str, dict], None] = Field(default=None)
+    "Layer implementations for the projections. Defaults to the encoder mapper's layer_kernels."
+
+
+NodeEmbedderSchemas = Annotated[Union[NoOpNodeEmbedderSchema, LinearNodeEmbedderSchema], Field(discriminator="target_")]
+
+
 class EncodersSchema(BaseModel):
     """Encoder schema"""
 
     source_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the encoder is applicable."
-    dataset_fusing_strategy: Literal["not_supported"] = Field(default="not_supported")
-    "Dataset fusing strategy. Default to 'not_supported'."
+    dataset_fusing_strategy: Literal["none", "sequential", "joint"] = Field(default="none")
+    """How the source datasets of this encoder are combined.
+
+    - 'none' (default): no fusion; the node embedder is a ``NoOpNodeEmbedder``, so the mapper takes the
+      assembled input of one source dataset directly. Normally ``source_datasets`` lists one dataset; several are
+      allowed only if they have the same number of input channels and at most one of them is present in
+      any batch (e.g. multi-domain training with one domain per batch).
+    - 'sequential': each source dataset is projected by a projecting ``node_embedder`` (e.g.
+      ``LinearNodeEmbedder``) onto
+      ``node_embedder.num_channels`` and encoded in its own pass with the shared mapper weights, in
+      the order listed in ``source_datasets``. The latents are combined by the latent
+      aggregator. Source datasets may differ in their number of input channels.
+    - 'joint': planned, not yet supported.
+    """
+    node_embedder: Optional[NodeEmbedderSchemas] = Field(
+        default_factory=lambda: NoOpNodeEmbedderSchema(_target_="anemoi.models.layers.node_embedder.NoOpNodeEmbedder")
+    )
+    """Per-dataset embedding onto the mapper input channels.
+
+    'none' uses ``NoOpNodeEmbedder`` (the default; ``null`` is read as it too, and any other node embedder is
+    ignored). 'sequential' needs a projecting one such as ``LinearNodeEmbedder``. A node embedder embeds node
+    features only: the encoder edges of all source datasets must still carry the same number of edge features."""
     mapper: Union[
         GNNEncoderSchema,
         GraphTransformerEncoderSchema,
@@ -175,6 +188,28 @@ class EncodersSchema(BaseModel):
         ...,
         discriminator="target_",
     )
+
+    @model_validator(mode="after")
+    def check_fusing_strategy(self) -> EncodersSchema:
+        """Reject the planned 'joint' strategy and a 'sequential' encoder without a projecting node embedder."""
+        if self.dataset_fusing_strategy == "joint":
+            msg = "dataset_fusing_strategy 'joint' is planned but not yet supported; use 'none' or 'sequential'."
+            raise ValueError(msg)
+        pass_through = self.node_embedder is None or isinstance(self.node_embedder, NoOpNodeEmbedderSchema)
+        if self.dataset_fusing_strategy == "sequential" and pass_through:
+            msg = (
+                "dataset_fusing_strategy 'sequential' needs a projecting node embedder (not NoOpNodeEmbedder), e.g. "
+                "node_embedder: {_target_: anemoi.models.layers.node_embedder.LinearNodeEmbedder, num_channels: 512}."
+            )
+            raise ValueError(msg)
+        if self.dataset_fusing_strategy == "none" and not pass_through:
+            LOGGER.warning(
+                "Encoder with source_datasets %s has dataset_fusing_strategy 'none'; its node embedder %s is ignored "
+                "and NoOpNodeEmbedder is used instead.",
+                self.source_datasets,
+                self.node_embedder.target_,
+            )
+        return self
 
 
 class DecodersSchema(BaseModel):
@@ -358,7 +393,7 @@ class TransportModelSchema(BaseModelSchema):
 
 class TransportTendModelSchema(TransportModelSchema):
     condition_on_residual: bool = Field(default=False)
-    "Whether to condition the noise injection on the residual connection."
+    "Whether the encoder also reads the residual connection's reference state next to the noisy tendency."
 
 
 class HierarchicalModelSchema(BaseModelSchema):

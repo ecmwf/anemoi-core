@@ -20,6 +20,9 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources.base import Source
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import GraphEdgeCRPSLoss
@@ -34,12 +37,25 @@ from anemoi.training.utils.enums import TensorDim
 N_GRID = 13
 N_TIME = 2
 N_MEMBERS = 3
-GRID_AXIS = 3
+LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+GRID_AXIS = LAYOUT.axis(TensorDim.GRID)
 LOSS_GRAPH = {"edges_name": ["data", "to", "data"], "edge_weight_attribute": "weight", "row_normalize": True}
 SMOOTHING = {"num_scales": 2, "base_num_nearest_neighbours": 4, "base_sigma": 0.05}
 # Fewer, as many as, and more variables than the 2 or 3 ranks, so some ranks get no variable
 # when the variables are shared out for smoothing or for the graph scores.
 VARIABLE_COUNTS = (1, 2, 3, 4)
+
+
+def _view(data: torch.Tensor) -> Source:
+    """Wrap a (batch, time, ensemble, grid, variables) tensor in the source view the losses take."""
+    return GriddedSource(
+        name="data",
+        data=data,
+        variables=[f"v{i}" for i in range(data.shape[-1])],
+        statistics={},
+        coordinates=torch.zeros(data.shape[-2], 2, device=data.device),
+        layout=LAYOUT,
+    )
 
 
 def _graph() -> HeteroData:
@@ -115,10 +131,10 @@ def _loss_and_gradient(
         local = slice(start, start + shard_sizes[group.rank()])
         kwargs = {"grid_shard_slice": local, "group": group}
         if loss.needs_shard_layout_info:
-            kwargs |= {"grid_shard_sizes": shard_sizes, "grid_dim": -2}
+            kwargs |= {"grid_shard_sizes": shard_sizes, "grid_dim": GRID_AXIS}
     local_prediction = prediction[:, :, :, local].clone().requires_grad_()
     local_target = target[:, :, :, local].clone()
-    value = loss(local_prediction, local_target, **kwargs)
+    value = loss(_view(local_prediction), _view(local_target), **kwargs)
     value.backward()
     return value.detach(), local_prediction.grad, local
 

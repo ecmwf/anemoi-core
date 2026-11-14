@@ -64,3 +64,33 @@ def test_fail_init_invalid_cutoff_distance_km(edge_builder, cutoff_distance_km):
     """Test CutOffEdges initialization with invalid cutoff_distance_km."""
     with pytest.raises(AssertionError):
         edge_builder("test_nodes1", "test_nodes2", cutoff_distance_km=cutoff_distance_km)
+
+
+@pytest.mark.parametrize("edge_builder", [CutOffEdges, ReversedCutOffEdges])
+def test_fail_init_invalid_backend(edge_builder):
+    """Test CutOffEdges initialization with an unknown backend."""
+    with pytest.raises(AssertionError, match="Backend"):
+        edge_builder("test_nodes1", "test_nodes2", cutoff_factor=0.5, backend="pyg")
+
+
+def test_cutoff_sklearn_backend_keeps_nearest(graph_with_nodes: HeteroData, monkeypatch):
+    """backend='sklearn' bypasses pyg-lib and keeps the nearest max_num_neighbours within the cut-off."""
+    import torch
+
+    from anemoi.graphs.edges.builders.euclidean import base
+
+    monkeypatch.setattr(base, "is_pyg_lib_available", lambda: True)
+    monkeypatch.setattr(CutOffEdges, "_compute_edge_index_pyg", lambda *args, **kwargs: pytest.fail("pyg-lib used"))
+
+    k = 3
+    builder = CutOffEdges(
+        "test_nodes", "test_nodes", cutoff_distance_km=20000.0, max_num_neighbours=k, backend="sklearn"
+    )
+    edge_index = builder.update_graph(graph_with_nodes)[("test_nodes", "to", "test_nodes")].edge_index
+
+    coords, _ = builder.get_cartesian_node_coordinates(graph_with_nodes["test_nodes"], graph_with_nodes["test_nodes"])
+    dist = torch.cdist(coords.double(), coords.double())  # (source, target); the radius covers the whole sphere
+    for target in range(coords.shape[0]):
+        kept = edge_index[0, edge_index[1] == target]
+        assert len(kept) == k
+        assert dist[kept, target].max() <= torch.sort(dist[:, target]).values[k - 1] + 1e-12

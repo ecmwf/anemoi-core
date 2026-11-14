@@ -75,6 +75,7 @@ def test_base_model_schema_accepts_pointwise_mapper_configuration():
     assert schema.processor.dropout_p == 0.0
     assert schema.encoders["0"].mapper.target_ == "anemoi.models.layers.mapper.PointWiseForwardMapper"
     assert schema.decoders["0"].mapper.target_ == "anemoi.models.layers.mapper.PointWiseBackwardMapper"
+    assert schema.decoders["0"].target_node_features == ["encoded_data"]
     assert schema.recompile_limit == 8
 
 
