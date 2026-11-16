@@ -107,6 +107,26 @@ class TestMultiDomain:
         with pytest.raises(ValueError, match="same variables in the same order"):
             policy.check_dataset_compatibility(dataset)
 
+    def test_check_datasets_variables_order_allows_heterogeneous_variables(self, data_readers: dict) -> None:
+        data_readers["dataset_a"].name_to_index = {"10u": 0, "2t": 1}
+        data_readers["dataset_b"].name_to_index = {"2t": 0, "tp": 1, "10u": 2}
+        policy = MultiDomainLoadingPolicy()
+        dataset = policy.build_dataset(data_readers, {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]})
+
+        policy.check_dataset_compatibility(dataset, allow_heterogeneous_variables=True)
+
+    def test_heterogeneous_variables_still_checks_shared_units(self, data_readers: dict) -> None:
+        data_readers["dataset_a"].name_to_index = {"10u": 0, "2t": 1}
+        data_readers["dataset_b"].name_to_index = {"2t": 0, "tp": 1, "10u": 2}
+        data_readers["dataset_b"].data.typed_variables = {
+            "10u": Variable.from_dict("10u", {"units": "K"}),
+        }
+        policy = MultiDomainLoadingPolicy()
+        dataset = policy.build_dataset(data_readers, {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]})
+
+        with pytest.raises(ValueError, match="Variable compatibility check failed"):
+            policy.check_dataset_compatibility(dataset, allow_heterogeneous_variables=True)
+
     def test_check_datasets_units(self, data_readers: dict) -> None:
         data_readers["dataset_b"].data.typed_variables = {
             "10u": Variable.from_dict("10u", {"units": "K"}),

@@ -79,6 +79,7 @@ def check_variables_metadata_compatibility(
     dataset_metadata: dict[str, dict],
     *,
     allow_subset: bool = False,
+    allow_heterogeneous_variables: bool = False,
     **options: object,
 ) -> None:
     """Check unit compatibility between checkpoint and dataset variables_metadata.
@@ -101,6 +102,10 @@ def check_variables_metadata_compatibility(
         in the checkpoint are dropped before the check, since there is no counterpart in the
         current data to compare against. Unit compatibility is still enforced for every
         shared variable. Default False keeps the strict equal-variable-set check.
+    allow_heterogeneous_variables : bool, optional
+        Dataset-collection compatibility option accepted here so it is not
+        forwarded to individual variable metadata comparisons. Heterogeneous
+        dataset handling is performed by the loading policy.
     **options : object
         Additional keyword arguments forwarded to ``Variable.check_compatibility``
         (e.g. ``ignore_units``, ``ignore_processing_period``).
@@ -115,6 +120,7 @@ def check_variables_metadata_compatibility(
     If variables_metadata is missing from either the checkpoint or the current dataset,
     a warning is logged and the check is skipped.
     """
+    del allow_heterogeneous_variables
     if ckpt_variables_metadata is None:
         LOG.warning(
             "Checkpoint does not contain variables_metadata. Skipping unit compatibility check.",

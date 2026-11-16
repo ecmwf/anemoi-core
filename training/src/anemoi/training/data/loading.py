@@ -243,7 +243,9 @@ class MultiDomainLoadingPolicy(DataLoadingPolicy):
         )
 
     def check_dataset_compatibility(self, dataset: MultiDomainDataset, **options: object) -> None:
-        check_datasets_variables_order(dataset.name_to_index)
+        allow_heterogeneous_variables = bool(options.pop("allow_heterogeneous_variables", False))
+        if not allow_heterogeneous_variables:
+            check_datasets_variables_order(dataset.name_to_index)
         check_datasets_variables_compatibility(
             {name: data.typed_variables for name, data in dataset.data.items()},
             **options,

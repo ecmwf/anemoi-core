@@ -86,3 +86,10 @@ def test_check_variables_metadata_subset_still_checks_shared_units() -> None:
     dataset = {"data": {"variables_metadata": {"tp": {"units": "mm"}}}}
     with pytest.raises(ValueError, match="compatibility check failed"):
         check_variables_metadata_compatibility(ckpt, dataset, allow_subset=True)
+
+
+def test_check_variables_metadata_accepts_dataset_collection_options() -> None:
+    ckpt = {"data": {"tp": {"units": "kg m**-2"}}}
+    dataset = {"data": {"variables_metadata": {"tp": {"units": "kg m**-2"}}}}
+
+    check_variables_metadata_compatibility(ckpt, dataset, allow_heterogeneous_variables=True)

@@ -80,9 +80,18 @@ class CheckVariableOrder(pl.callbacks.Callback):
             OmegaConf.to_container(compat_cfg, resolve=True) if OmegaConf.is_config(compat_cfg) else (compat_cfg or {})
         )
 
+        # This option controls compatibility between the current datasets only.
+        # Do not forward it to Variable.check_compatibility when comparing the
+        # checkpoint metadata with each individual dataset.
+        dataset_compat_options = dict(compat_options)
+        allow_heterogeneous_variables = dataset_compat_options.pop("allow_heterogeneous_variables", None)
+        loading_policy_options = dict(dataset_compat_options)
+        if allow_heterogeneous_variables is not None:
+            loading_policy_options["allow_heterogeneous_variables"] = bool(allow_heterogeneous_variables)
+
         trainer.datamodule.loading_policy.check_dataset_compatibility(
             trainer.datamodule.ds_train,
-            **compat_options,
+            **loading_policy_options,
         )
 
         allow_subset = bool(trainer.datamodule.config.training.get("allow_variable_subset", False))
@@ -90,7 +99,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
             ckpt_variables_metadata,
             trainer.datamodule.metadata,
             allow_subset=allow_subset,
-            **compat_options,
+            **dataset_compat_options,
         )
 
     def on_validation_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
