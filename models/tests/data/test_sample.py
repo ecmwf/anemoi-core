@@ -68,6 +68,43 @@ def test_tabular_converts_boundaries_and_timedeltas():
     assert sample.timedeltas.dtype == torch.float32
 
 
+def test_with_time_offsets_moves_each_window_onto_the_reference_time():
+    # Windows 6 h before and at the reference date, as the tabular reader measures them.
+    sample = _tabular(timedeltas=[-600.0, 0.0, 1200.0])
+
+    shifted = sample.with_time_offsets([-21600.0, 0.0])
+
+    assert torch.equal(shifted.timedeltas, torch.tensor([-22200.0, -21600.0, 1200.0]))
+    assert shifted.timedeltas.dtype == torch.float32
+    assert torch.equal(sample.timedeltas, torch.tensor([-600.0, 0.0, 1200.0]))  # not modified in place
+    assert shifted.data is sample.data
+    assert shifted.coordinates is sample.coordinates
+    assert shifted.boundaries == sample.boundaries
+
+
+def test_with_time_offsets_skips_empty_windows():
+    sample = _tabular(boundaries=[(0, 0), (0, 3)], timedeltas=[0.0, 60.0, 120.0])
+
+    shifted = sample.with_time_offsets([-3600.0, 3600.0])
+
+    assert torch.equal(shifted.timedeltas, torch.tensor([3600.0, 3660.0, 3720.0]))
+
+
+def test_with_time_offsets_uses_the_rank_local_windows_of_a_sharded_sample():
+    # This rank holds 1 point of the first window and 2 of the second; the boundaries are local.
+    sample = _tabular(boundaries=[(0, 1), (1, 3)], timedeltas=[10.0, 20.0, 30.0], shard_sizes=[[1, 1], [2, 0]])
+
+    shifted = sample.with_time_offsets([-21600.0, 0.0])
+
+    assert torch.equal(shifted.timedeltas, torch.tensor([-21590.0, 20.0, 30.0]))
+    assert shifted.shard_sizes == [[1, 1], [2, 0]]
+
+
+def test_with_time_offsets_needs_one_offset_per_window():
+    with pytest.raises(ValueError, match="has 2 time windows, but 3 window offsets"):
+        _tabular().with_time_offsets([0.0, 0.0, 0.0])
+
+
 def test_layout_object_and_slices_are_accepted():
     sample = _tabular(layout=TensorLayout(ensemble=0, grid=1, variables=2), boundaries=(slice(0, 3),))
     assert sample.boundaries == (slice(0, 3),)

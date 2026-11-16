@@ -14,6 +14,7 @@ from typing import Optional
 
 import einops
 import torch
+from hydra.utils import get_class
 from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
@@ -158,7 +159,12 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 edge_dim=self.upscale_graph_providers[src_nodes_name].edge_dim,
             )
 
-        # Downscale: hidden level i + 1 -> i, keyed by the destination level
+        # Downscale: hidden level i + 1 -> i, keyed by the destination level. Its destination input is what
+        # upscale[i] returned for level i: the level latent itself, or, for a mapper that updates its source
+        # nodes (returns_src_latent), that updated latent at level i + 1's width.
+        upscale_returns_src_latent = getattr(
+            get_class(model_config.upscale_mapper._target_), "returns_src_latent", False
+        )
         self.downscale = nn.ModuleDict()
         self.downscale_graph_providers = nn.ModuleDict()
         for dst_nodes_name, src_nodes_name in zip(hidden_names[:-1], hidden_names[1:]):
@@ -169,7 +175,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 model_config.downscale_mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[src_nodes_name],
-                in_channels_dst=self.hidden_dims[dst_nodes_name],
+                in_channels_dst=self.hidden_dims[src_nodes_name if upscale_returns_src_latent else dst_nodes_name],
                 num_channels=self.hidden_dims[src_nodes_name],
                 out_channels_dst=self.hidden_dims[dst_nodes_name],
                 edge_dim=self.downscale_graph_providers[dst_nodes_name].edge_dim,
@@ -398,6 +404,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 batch_size,
                 model_comm_group,
             )
+            # The source output is the level latent, or the mapper's updated source latent at the next level's
+            # width (returns_src_latent); it is the destination input of downscale[src_hidden_name].
             x_encoded_latents[src_hidden_name], x_latent = self.upscale[src_hidden_name](
                 (x_latent, x_hidden_latents[dst_hidden_name]),
                 batch_size=batch_size,
