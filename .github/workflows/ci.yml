@@ -45,7 +45,7 @@ jobs:
     needs: ci-approval
     runs-on: ubuntu-latest
     outputs:
-      test-matrix: ${{ toJSON(fromJSON(steps.r.outputs.json)['test']) }}
+      matrices: ${{ steps.r.outputs.json }}
       dispatch-plans: ${{ steps.r.outputs.dispatch-plans }}
     steps:
       - id: mint
@@ -75,7 +75,8 @@ jobs:
         if: steps.r.outputs.dispatch-plans == '[]'
         uses: ecmwf/ci-infrastructure/actions/wait-for-deps@main
         with:
-          matrix: ${{ toJSON(fromJSON(steps.r.outputs.json)['test']) }}
+          matrix: ${{ steps.r.outputs.json }}
+          kinds: test
           token: ${{ steps.mint.outputs.token }}
     name: resolve + wait-build
 
@@ -99,7 +100,7 @@ jobs:
       image: ${{ matrix.container || '' }}
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.resolve.outputs.test-matrix) }}
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrices).test }}
     steps:
       - name: Announce image
         uses: ecmwf/ci-infrastructure/actions/announce-image@main
