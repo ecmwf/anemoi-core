@@ -67,6 +67,10 @@ jobs:
           matrix: test
           token: ${{ steps.mint.outputs.token }}
           rebuild-missing: 'true'
+      - name: Print dependency tables
+        uses: ecmwf/ci-infrastructure/actions/print-dep-table@main
+        with:
+          matrices: ${{ steps.r.outputs.json }}
       - name: Wait for the deps of test
         if: steps.r.outputs.dispatch-plans == '[]'
         uses: ecmwf/ci-infrastructure/actions/wait-for-deps@main
@@ -141,11 +145,6 @@ jobs:
         with:
           install-path: ${{ steps.build.outputs.install-root }}/anemoi-training
           artifact-name: ${{ matrix._resolved.packages['anemoi-training']['own-artifact-name'] }}
-      - name: Print dependency table
-        if: always()
-        uses: ecmwf/ci-infrastructure/actions/print-dep-table@main
-        with:
-          resolved: ${{ toJSON(matrix._resolved) }}
 
   ci-result:
     name: collect results
