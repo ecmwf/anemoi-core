@@ -67,10 +67,6 @@ jobs:
           matrix: test
           token: ${{ steps.mint.outputs.token }}
           rebuild-missing: 'true'
-      - name: Print dependency tables
-        uses: ecmwf/ci-infrastructure/actions/print-dep-table@main
-        with:
-          matrices: ${{ steps.r.outputs.json }}
       - name: Wait for the deps of test
         if: steps.r.outputs.dispatch-plans == '[]'
         uses: ecmwf/ci-infrastructure/actions/wait-for-deps@main
@@ -123,6 +119,10 @@ jobs:
         with:
           deps-json: ${{ toJSON(matrix._resolved.deps) }}
           token: ${{ steps.mint.outputs.token }}
+      - name: Print dependency table
+        uses: ecmwf/ci-infrastructure/actions/print-dep-table@main
+        with:
+          resolved: ${{ toJSON(matrix._resolved) }}
       - name: Build
         id: build
         uses: ecmwf/ci-infrastructure/actions/run-job-script@main
