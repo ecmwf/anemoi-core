@@ -9,7 +9,7 @@
 
 from itertools import pairwise
 
-from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAdapter
+from anemoi.training.diagnostics.callbacks.plot_adapter import SpatialDownscalerPlotAdapter
 from anemoi.training.tasks.base import BaseSingleStepTask
 from anemoi.utils.dates import as_timedelta
 from anemoi.utils.dates import frequency_to_string
@@ -44,7 +44,7 @@ class SpatialDownscaler(BaseSingleStepTask):
             msg = f"The offsets of the spatial downscaler must be evenly spaced, got {offsets}."
             raise ValueError(msg)
         super().__init__(input_offsets=offsets, output_offsets=offsets)
-        self._plot_adapter = AutoencoderPlotAdapter(self)
+        self._plot_adapter = SpatialDownscalerPlotAdapter(self)
 
     def _get_timestep_for_metadata(self) -> str:
         """Zero, as for any task whose outputs are valid at the times of its inputs; see :meth:`fill_metadata`."""

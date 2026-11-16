@@ -34,6 +34,7 @@ from anemoi.training.diagnostics.evaluation.plotting.batch_output import spectru
 from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_trainable_modules
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn
 from anemoi.training.tasks import Forecaster
+from anemoi.training.tasks import SpatialDownscaler
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.step_output import TrainingStepOutput
@@ -534,6 +535,138 @@ def test_batch_output_plot_sparse_forwards_auxiliary_output() -> None:
     torch.testing.assert_close(torch.as_tensor(kwargs["auxiliary"]), torch.full((3, 2), 3.0))
     assert kwargs["sparse"] is True
     assert kwargs["output_latlons"].shape == (3, 2)
+
+
+# ---- Reference input of the spatial downscaler ----
+
+
+def _make_pl_module_spatial_downscaler() -> MagicMock:
+    """Mock pl_module for a spatial downscaler that predicts the diagnostics a and b of dataset ``data``."""
+    pl_module = MagicMock()
+    pl_module.local_rank = 0
+    pl_module.grid_dim = -2
+    pl_module.task = SpatialDownscaler(offsets=["0H", "6H"])
+    pl_module.plot_adapter = pl_module.task._plot_adapter
+    pl_module.model_comm_group = None
+    pl_module.preprocess_targets = lambda batch: batch
+    pl_module._grid_shard_sizes = MethodType(BaseTrainingModule._grid_shard_sizes, pl_module)
+    pl_module.model.model.target_datasets = ["data"]
+
+    data_indices = MagicMock()
+    data_indices.data.output.full = slice(None)
+    data_indices.model.output.name_to_index = {"a": 0, "b": 1}
+    # a and b are outputs only: no input panel unless the model has a reference for them.
+    data_indices.data.input.todict.return_value = {"name_to_index": {"f": 0, "a": 1, "b": 2}, "diagnostic": [1, 2]}
+    pl_module.data_indices = {"data": data_indices}
+    pl_module.model.graph_data = {"data": MagicMock()}
+    pl_module.output_mask = {"data": NoOutputMask()}
+    return pl_module
+
+
+def _reference_view(tensor: torch.Tensor, variables: list[str]) -> Source:
+    """A ``(batch, time, ensemble, grid, variables)`` reference with the given variable names."""
+    return build_batch(
+        data={"data": tensor},
+        coordinates={"data": torch.zeros(tensor.shape[3], 2)},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": variables},
+        statistics={"data": {}},
+    )["data"]
+
+
+def test_process_plot_input_lays_out_the_reference_like_the_outputs() -> None:
+    callback = _sample_plot(sample_idx=1, parameters=["a", "b"], dataset_names=["data"])
+    pl_module = _make_pl_module_spatial_downscaler()
+    # The reference names its variables in its own order and may hold variables that are no outputs.
+    reference = torch.randn(2, 2, 3, 20, 3)
+    view = _reference_view(reference, ["z", "a", "q"])
+
+    plot_input, with_reference = callback.process_plot_input(pl_module, "data", view)
+
+    assert with_reference == {"a"}
+    assert plot_input.shape == (2, 1, 20, 2)
+    # Sample 1, first ensemble member; b has no reference.
+    np.testing.assert_array_equal(plot_input[..., 0], reference[1, :, :1, :, 1].numpy())
+    assert np.isnan(plot_input[..., 1]).all()
+
+
+def test_batch_output_plot_shows_the_reference_as_input_of_each_snapshot() -> None:
+    callback = _sample_plot(sample_idx=0, parameters=["a", "b"], dataset_names=["data"])
+    callback.plot_fn = MagicMock(return_value=None)
+    callback.post_processors = {"data": _identity_post_processor()}
+    pl_module = _make_pl_module_spatial_downscaler()
+
+    batch_size, nlatlon = 2, 20
+    batch = _make_gridded_batch(torch.randn(batch_size, 2, 1, nlatlon, 2))
+    outputs = _step_output([{"data": torch.randn(batch_size, 2, 1, nlatlon, 2)}])
+    reference = torch.randn(batch_size, 2, 1, nlatlon, 1)
+
+    callback._plot(
+        MagicMock(),
+        pl_module,
+        ["data"],
+        outputs,
+        batch,
+        batch_idx=0,
+        epoch=0,
+        plot_input={"data": _reference_view(reference, ["a"])},
+    )
+
+    calls = callback.plot_fn.call_args_list
+    assert len(calls) == 2
+    for step, call in enumerate(calls):
+        np.testing.assert_array_equal(call.kwargs["x"][:, 0], reference[0, step, 0, :, 0].numpy())
+        np.testing.assert_array_equal(call.kwargs["y_true"], batch["data"].data[0, step, 0].numpy())
+        # a has a reference, so it gets the input and residual panels; b stays an output only.
+        assert call.kwargs["parameters"] == {0: ("a", False), 1: ("b", True)}
+
+
+def test_batch_output_plot_gathers_the_reference_without_auxiliary_output() -> None:
+    """Histogram and spectrum plots take no auxiliary output but do take the reference."""
+    callback = _histogram_plot(sample_idx=0, parameters=["a", "b"], dataset_names=["data"])
+    pl_module = _make_pl_module_spatial_downscaler()
+    pl_module.model.post_processors = {"data": _IdentityProcessor()}
+    reference = {"data": _reference_view(torch.randn(2, 2, 1, 20, 1), ["a"])}
+    output = _step_output(
+        [{"data": torch.zeros(2, 2, 1, 20, 2)}],
+        plot_kwargs={"plot_input": reference, "auxiliary_output": {"data": _pred_view(torch.ones(2, 2, 1, 20, 2))}},
+    )
+    trainer = MagicMock()
+    trainer.current_epoch = 0
+    callback.plot = MagicMock()
+
+    callback.on_validation_batch_end(trainer, pl_module, output, _make_gridded_batch(torch.randn(2, 2, 1, 20, 2)), 0)
+
+    kwargs = callback.plot.call_args.kwargs
+    assert "auxiliary_output" not in kwargs
+    torch.testing.assert_close(kwargs["plot_input"]["data"].data, reference["data"].data)
+
+
+def test_batch_output_plot_leaves_out_the_reference_its_adapter_does_not_show() -> None:
+    """A forecaster plots its own inputs, so the reference of a tendency model is not gathered for it."""
+    callback = _histogram_plot(sample_idx=0, parameters=["a"], dataset_names=["data"])
+    pl_module = _make_pl_module_forecaster(validation_rollout=1, nlatlon=20)
+    pl_module.model.post_processors = {"data": _IdentityProcessor()}
+    reference = MagicMock(spec=Source)
+    output = _step_output([{"data": torch.zeros(2, 1, 1, 20, 3)}], plot_kwargs={"plot_input": {"data": reference}})
+    trainer = MagicMock()
+    trainer.current_epoch = 0
+    callback.plot = MagicMock()
+
+    callback.on_validation_batch_end(trainer, pl_module, output, _make_gridded_batch(torch.randn(2, 3, 1, 20, 3)), 0)
+
+    assert "plot_input" not in callback.plot.call_args.kwargs
+    reference.allgather.assert_not_called()
+
+
+def test_per_batch_plot_rejects_datasets_the_model_does_not_predict() -> None:
+    callback = _sample_plot(sample_idx=0, parameters=["a"], dataset_names=["lres", "data"])
+    pl_module = _make_pl_module_spatial_downscaler()
+    trainer = MagicMock()
+    trainer.strategy.read_group_size = 1
+
+    with pytest.raises(ValueError, match=r"set to plot \['lres'\], which the model does not predict"):
+        callback.on_fit_start(trainer, pl_module)
 
 
 def test_per_batch_plot_skips_datasets_missing_from_batch():
@@ -1305,8 +1438,12 @@ def test_ensemble_plot_adapter_delegates_to_inner():
 
     data = np.zeros((5, 100, 10))
     output = np.zeros((3, 100, 10))
-    list(adapter.iter_plot_samples(data, output))
-    inner.iter_plot_samples.assert_called_once_with(data, output)
+    reference = np.zeros((1, 100, 10))
+    list(adapter.iter_plot_samples(data, output, input_data=reference))
+    inner.iter_plot_samples.assert_called_once_with(data, output, input_data=reference)
+
+    inner.plots_reference_input = True
+    assert adapter.plots_reference_input
 
 
 def test_base_adapter_select_members_is_noop():

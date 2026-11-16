@@ -424,6 +424,18 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         super().__init__(dataset_names=dataset_names, plotting_settings=plotting_settings)
         self.every_n_batches = every_n_batches or 750
 
+    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Reject datasets the model only reads: they have no predictions to plot."""
+        super().on_fit_start(trainer, pl_module)
+        target_datasets = pl_module.model.model.target_datasets
+        not_predicted = [name for name in self.dataset_names if name not in target_datasets]
+        if not_predicted:
+            msg = (
+                f"{type(self).__name__} is set to plot {not_predicted}, which the model does not predict. "
+                f"Set diagnostics.plot.datasets_to_plot to predicted datasets only: {list(target_datasets)}."
+            )
+            raise ValueError(msg)
+
     def _plot_kwargs_from_output(
         self,
         pl_module: pl.LightningModule,
@@ -698,6 +710,43 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         return (
             pl_module.output_mask[dataset_name].apply(output_tensor, dim=pl_module.grid_dim, fill_value=np.nan).numpy()
         )
+
+    def process_plot_input(
+        self,
+        pl_module: pl.LightningModule,
+        dataset_name: str,
+        reference: Source,
+    ) -> tuple[np.ndarray, set[str]]:
+        """Lay out the reference of a predicted dataset like its outputs, for the input panels.
+
+        ``reference`` is the state the model adds its predicted residuals to, in physical units, as
+        ``(batch, time, ensemble, grid, variables)`` with one time step per output step or one for
+        all of them. It is taken from the same sample as the plotted data and from its first
+        ensemble member, since every member starts from the same inputs.
+
+        Returns the reference as ``(time, 1, grid, output variables)``, with NaN for the outputs that
+        have none, and the names of the outputs that have one.
+        """
+        if reference.is_tabular:
+            msg = f"The reference of '{dataset_name}' is a sparse observation dataset; it cannot be plotted as input."
+            raise NotImplementedError(msg)
+        data = reference.data.detach().cpu()
+        if data.ndim != 5:
+            msg = (
+                f"The reference of '{dataset_name}' must be (batch, time, ensemble, grid, variables), "
+                f"got {tuple(data.shape)}."
+            )
+            raise ValueError(msg)
+        sample = data[self.sample_idx, :, :1]
+        output_name_to_index = pl_module.data_indices[dataset_name].model.output.name_to_index
+        plot_input = torch.full((*sample.shape[:-1], len(output_name_to_index)), float("nan"), dtype=sample.dtype)
+        with_reference = set()
+        for position, name in enumerate(reference.variables):
+            if name in output_name_to_index:
+                plot_input[..., output_name_to_index[name]] = sample[..., position]
+                with_reference.add(name)
+        plot_input = pl_module.output_mask[dataset_name].apply(plot_input, dim=pl_module.grid_dim, fill_value=np.nan)
+        return plot_input.numpy(), with_reference
 
     @staticmethod
     def _align_output_metadata(view: Source, output_indices_full: Any) -> Source:
@@ -1033,25 +1082,35 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
         pl_module: pl.LightningModule,
         output: TrainingStepOutput,
     ) -> dict[str, Any]:
-        """Return the optional corrupted-target field for sample plots."""
-        if not self.with_auxiliary:
-            return {}
-        auxiliary_output = output.plot_kwargs.get("auxiliary_output")
-        if auxiliary_output is None:
-            return {}
-        if any(not isinstance(value, (Batch, Source)) for value in auxiliary_output.values()):
-            msg = (
-                "auxiliary_output is a dict of raw tensors without shard metadata; "
-                "cannot all-gather. Grid-shard info now lives on the Batch/Source - "
-                "have the step output carry a Source/Batch for auxiliary_output "
-                "instead of detached tensors."
-            )
-            raise TypeError(msg)
-        auxiliary_output = {
-            dataset_name: value.allgather(pl_module.model_comm_group)
-            for dataset_name, value in auxiliary_output.items()
-        }
-        return {"auxiliary_output": auxiliary_output}
+        """Return the fields of the step output that the plots use besides the predictions.
+
+        These are the reference the model adds its residuals to (``plot_input``) when the plot
+        adapter shows it, and for sample plots with ``with_auxiliary`` the corrupted target
+        (``auxiliary_output``), each gathered over the model's GPUs. The others are left out, so
+        they are not gathered to the full grid and kept until the plot is made.
+        """
+        keys = []
+        if pl_module.plot_adapter.plots_reference_input:
+            keys.append("plot_input")
+        if self.with_auxiliary:
+            keys.append("auxiliary_output")
+        plot_kwargs = {}
+        for key in keys:
+            values = output.plot_kwargs.get(key)
+            if values is None:
+                continue
+            if any(not isinstance(value, (Batch, Source)) for value in values.values()):
+                msg = (
+                    f"{key} is a dict of raw tensors without shard metadata; "
+                    "cannot all-gather. Grid-shard info now lives on the Batch/Source - "
+                    f"have the step output carry a Source/Batch for {key} "
+                    "instead of detached tensors."
+                )
+                raise TypeError(msg)
+            plot_kwargs[key] = {
+                dataset_name: value.allgather(pl_module.model_comm_group) for dataset_name, value in values.items()
+            }
+        return plot_kwargs
 
     @rank_zero_only
     def _plot(
@@ -1064,6 +1123,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
         batch_idx: int,
         epoch: int,
         auxiliary_output: dict[str, Any] | None = None,
+        plot_input: dict[str, Source] | None = None,
         processed_cache: dict | None = None,
     ) -> None:
         _ = processed_cache
@@ -1124,22 +1184,33 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                     members=self._get_process_members(pl_module),
                 )
             )
+            input_tensor = None
+            uses_reference = pl_module.plot_adapter.plots_reference_input
+            if uses_reference and plot_input is not None and dataset_name in plot_input:
+                input_tensor, with_reference = self.process_plot_input(
+                    pl_module,
+                    dataset_name,
+                    plot_input[dataset_name],
+                )
+                # The outputs with a reference get the input and residual panels, also when they are not
+                # inputs of their own dataset.
+                spatial_inputs["parameters"] = {
+                    index: (name, diagnostic_only and name not in with_reference)
+                    for index, (name, diagnostic_only) in spatial_inputs["parameters"].items()
+                }
 
+            extra_fields = [field for field in (auxiliary_tensor, input_tensor) if field is not None]
+            latlons, data, output_tensor, *extra_fields = self.focus_mask.apply(
+                pl_module.model.graph_data,
+                data_latlons,
+                data,
+                output_tensor,
+                *extra_fields,
+            )
+            if input_tensor is not None:
+                input_tensor = extra_fields.pop()
             if auxiliary_tensor is not None:
-                latlons, data, output_tensor, auxiliary_tensor = self.focus_mask.apply(
-                    pl_module.model.graph_data,
-                    data_latlons,
-                    data,
-                    output_tensor,
-                    auxiliary_tensor,
-                )
-            else:
-                latlons, data, output_tensor = self.focus_mask.apply(
-                    pl_module.model.graph_data,
-                    data_latlons,
-                    data,
-                    output_tensor,
-                )
+                auxiliary_tensor = extra_fields.pop()
 
             auxiliary_by_suffix = {}
             if auxiliary_tensor is not None:
@@ -1148,10 +1219,15 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                     for _, _, auxiliary, auxiliary_suffix in pl_module.plot_adapter.iter_plot_samples(
                         data,
                         auxiliary_tensor,
+                        input_data=input_tensor,
                     )
                 }
 
-            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(
+                data,
+                output_tensor,
+                input_data=input_tensor,
+            ):
                 fig = self.plot_fn(
                     **spatial_inputs,
                     x=x,

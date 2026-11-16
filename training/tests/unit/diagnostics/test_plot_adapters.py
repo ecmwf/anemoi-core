@@ -12,6 +12,7 @@ import torch
 
 from anemoi.training.tasks import Autoencoder
 from anemoi.training.tasks import Forecaster
+from anemoi.training.tasks import SpatialDownscaler
 from anemoi.training.tasks import TemporalDownscaler
 
 
@@ -72,3 +73,29 @@ def test_autoencoder_adapter() -> None:
     assert isinstance(y_true, torch.Tensor) and y_true.shape == (grid_size, num_vars)
     assert isinstance(y_pred, torch.Tensor) and y_pred.shape == (grid_size, num_vars)
     assert isinstance(suffix, str) and suffix.startswith("recon")
+
+
+@pytest.mark.parametrize(
+    "reference_steps",
+    [None, 1, 2],
+    ids=["no_reference", "one_reference_step", "reference_per_step"],
+)
+def test_spatial_downscaler_adapter(reference_steps: int | None) -> None:
+    """SpatialDownscaler plot_adapter: one plot per snapshot, against the reference at that time if there is one."""
+    task = SpatialDownscaler(offsets=["0H", "6H"])
+    adapter = task._plot_adapter
+    assert adapter.plots_reference_input
+
+    grid_size, num_vars = 100, 4
+    batch = torch.randn(2, 1, grid_size, num_vars)  # (time, ens, grid, vars): the snapshots
+    pred = adapter.prepare_plot_output_tensor(torch.randn(1, 2, 1, grid_size, num_vars))  # (step, time, ens, ...)
+    reference = None if reference_steps is None else torch.randn(reference_steps, 1, grid_size, num_vars)
+
+    samples = list(adapter.iter_plot_samples(batch, pred, input_data=reference))
+
+    assert [suffix for *_, suffix in samples] == ["out00", "out01"]
+    for step, (x, y_true, y_pred, _) in enumerate(samples):
+        expected_x = batch[step, 0] if reference is None else reference[min(step, reference_steps - 1), 0]
+        torch.testing.assert_close(x, expected_x)
+        torch.testing.assert_close(y_true, batch[step, 0])
+        torch.testing.assert_close(y_pred, pred[step, 0])

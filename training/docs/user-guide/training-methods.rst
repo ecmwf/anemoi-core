@@ -424,7 +424,9 @@ dataset projected onto the high-resolution grid by its
 is read only and projected onto the ``hres`` grid by its
 ``spatial_processor``, ``hres`` has the forcings as inputs and the fields
 to downscale as outputs only, and one ``joint`` encoder joins ``lres`` and
-``hres`` node by node.
+``hres`` node by node. Its plots show each snapshot of ``hres`` with the
+reference as input, so the increment panel shows the predicted residual
+and the persistence error panel the true residual.
 
 Flow matching
 =============

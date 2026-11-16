@@ -41,6 +41,11 @@ class BasePlotAdapter(ABC):
     def is_ensemble(self) -> bool:
         return False
 
+    @property
+    def plots_reference_input(self) -> bool:
+        """Whether :meth:`iter_plot_samples` plots the model's reference (``input_data``) as the input."""
+        return False
+
     @staticmethod
     def select_time(data: Any, time_indices: Any) -> Any:
         """Select timesteps along the logical time axis.
@@ -81,8 +86,18 @@ class BasePlotAdapter(ABC):
         return batch
 
     @abstractmethod
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
-        """Yield (x, y_true, y_pred, tag_suffix) or (sample, recon, tag) per plot sample."""
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        input_data: Any | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
+        """Yield (x, y_true, y_pred, tag_suffix) or (sample, recon, tag) per plot sample.
+
+        ``input_data`` is the state the model adds its predicted residuals to, laid out like the
+        outputs with one time step per output step or one for all of them, when the model has one
+        from another dataset to show; adapters that plot the dataset's own inputs ignore it.
+        """
         ...
 
 
@@ -98,12 +113,18 @@ class ForecasterPlotAdapter(BasePlotAdapter):
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         return self._task.num_input_timesteps + rollout_step * self._task.num_output_timesteps
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        input_data: Any | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
+        del input_data
         input_time_indices = self._task.get_batch_input_indices()
 
-        input_data = self.select_time(data, input_time_indices)
+        inputs = self.select_time(data, input_time_indices)
 
-        x = input_data[self.get_init_step(), ...].squeeze()
+        x = inputs[self.get_init_step(), ...].squeeze()
 
         for validation_step_kwargs in self._task.steps("validation"):
             rollout_step = validation_step_kwargs["rollout_step"]
@@ -127,14 +148,20 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
     def get_init_step(self) -> int:
         return 0
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        input_data: Any | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
+        del input_data
         input_time_indices = self._task.get_batch_input_indices()
         output_time_indices = self._task.get_batch_output_indices()
 
-        input_data = data[input_time_indices, ...]
+        inputs = data[input_time_indices, ...]
         output_data = data[output_time_indices, ...]
 
-        x = input_data[self.get_init_step(), ...].squeeze()
+        x = inputs[self.get_init_step(), ...].squeeze()
         for output_step in range(self._task.num_output_timesteps):
             y_true = output_data[output_step].squeeze()
             pred = (
@@ -149,10 +176,56 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
         return output_tensor
 
 
+class SpatialDownscalerPlotAdapter(BasePlotAdapter):
+    """Plot Adapter for the SpatialDownscaler Task: one plot per snapshot.
+
+    Output step i is valid at the time of input step i, so it is plotted against the truth and the
+    input at that time. The input is the model's reference (``input_data``) when it predicts
+    residuals against another dataset, for example the low-resolution dataset projected onto the
+    plotted grid; otherwise it is the plotted dataset's own data at that time, of which the plots
+    show only the variables that are inputs.
+    """
+
+    def get_init_step(self) -> int:
+        return 0
+
+    @property
+    def plots_reference_input(self) -> bool:
+        return True
+
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        input_data: Any | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
+        input_time_indices = self._task.get_batch_input_indices()
+        output_time_indices = self._task.get_batch_output_indices()
+        steps = enumerate(zip(input_time_indices, output_time_indices, strict=True))
+        for step, (input_index, output_index) in steps:
+            # The reference has one time step per output step, or one for all of them.
+            x = data[input_index] if input_data is None else input_data[min(step, len(input_data) - 1)]
+            y_true = data[output_index].squeeze()
+            pred = output_tensor[step, 0] if getattr(output_tensor, "ndim", 0) >= 4 else output_tensor[step]
+            y_pred = pred.squeeze() if hasattr(pred, "squeeze") else pred
+            yield x.squeeze(), y_true, y_pred, f"out{step:02d}"
+
+    def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
+        if getattr(output_tensor, "ndim", 0) == 5 and getattr(output_tensor, "shape", (0,))[0] == 1:
+            return output_tensor.squeeze(0)
+        return output_tensor
+
+
 class AutoencoderPlotAdapter(BasePlotAdapter):
     """Plot Adapter for Autoencoder Task: single (sample, recon, tag) yield."""
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        input_data: Any | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
+        del input_data
         sample = data[0, ...].squeeze()
         recon = output_tensor[0, ...].squeeze()
         yield sample, sample, recon, "recon"
@@ -173,6 +246,10 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
     @property
     def is_ensemble(self) -> bool:
         return True
+
+    @property
+    def plots_reference_input(self) -> bool:
+        return self._inner.plots_reference_input
 
     @property
     def default_plot_members(self) -> int | list[int] | None:
@@ -221,5 +298,10 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
         """Return the batch for loss plotting."""
         return batch
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
-        yield from self._inner.iter_plot_samples(data, output_tensor)
+    def iter_plot_samples(
+        self,
+        data: Any,
+        output_tensor: Any,
+        input_data: Any | None = None,
+    ) -> Iterator[tuple[Any, Any, Any, str]]:
+        yield from self._inner.iter_plot_samples(data, output_tensor, input_data=input_data)

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from typing import Any
@@ -2523,10 +2524,20 @@ def test_flow_matching_training_uses_model_output_target_layout(
     assert captured["target_vars"] == len(data_indices["data"].model.output.full)
 
 
+class _ReferencePredictionMode(StatePredictionMode):
+    """State targets with a reference, as the tendency prediction mode gives them."""
+
+    def prepare_target(self, batch: Batch, x: Batch) -> PreparedPredictionTarget:
+        prepared = super().prepare_target(batch, x)
+        return dataclasses.replace(prepared, reference=prepared.metric_target.map_data(lambda data: data + 1.0))
+
+
+@pytest.mark.parametrize("prediction_mode", [StatePredictionMode, _ReferencePredictionMode], ids=["state", "reference"])
 def test_transport_validation_returns_conditioned_target_for_plotting(
     monkeypatch: pytest.MonkeyPatch,
+    prediction_mode: type[StatePredictionMode],
 ) -> None:
-    """TransportTraining returns the validation conditioned target consumed by PlotSample."""
+    """TransportTraining returns the validation conditioned target, and the reference if any, for the plots."""
 
     class _DummyTransportObjective:
         def __init__(self) -> None:
@@ -2583,11 +2594,19 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
         post_processors={"data": Processors([], inverse=True)},
     )
     objective = _DummyTransportObjective()
-    forecaster._prediction_mode = StatePredictionMode(forecaster)
+    forecaster._prediction_mode = prediction_mode(forecaster)
     forecaster._transport_objective = objective
     forecaster.is_first_step = False
     forecaster.updating_scalars = {}
     forecaster.target_dataset_names = forecaster.dataset_names
+    prepare_target = forecaster._prediction_mode.prepare_target
+    prepared_targets = []
+
+    def _record_prepare_target(batch: Batch, x: Batch) -> PreparedPredictionTarget:
+        prepared_targets.append(prepare_target(batch, x))
+        return prepared_targets[-1]
+
+    monkeypatch.setattr(forecaster._prediction_mode, "prepare_target", _record_prepare_target)
 
     def _compute_loss_metrics_stub(
         y_pred: Batch,
@@ -2617,6 +2636,11 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
         objective.noisy_target["data"].data,
     )
     assert auxiliary_output["data"].data.requires_grad is False
+    reference = prepared_targets[-1].reference
+    if reference is None:
+        assert "plot_input" not in output.plot_kwargs
+    else:
+        torch.testing.assert_close(output.plot_kwargs["plot_input"]["data"].data, reference["data"].data)
 
 
 def test_flow_matching_tendency_training_step_uses_model_output_velocity_target(

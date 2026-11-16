@@ -27,8 +27,35 @@ system:
 
 diagnostics:
   plot:
-    # The plot callbacks for downscaling are not set up yet.
-    callbacks: []
+    # Only hres is predicted; lres is shown as the input of its plots, projected onto the hres grid,
+    # with the predicted and true residuals against it.
+    datasets_to_plot: [hres]
+    parameters: [2t, 10u, 10v, tp]
+    callbacks:
+      - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+        parameter_groups:
+          sfc_wind: [10u, 10v]
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+        tag_infix: sample
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters: ${diagnostics.plot.parameters}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        with_auxiliary: true
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
+          _partial_: true
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+        tag_infix: histo
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters: ${diagnostics.plot.parameters}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn
+          _partial_: true
 
 model:
   model:

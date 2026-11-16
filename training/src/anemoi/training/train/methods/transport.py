@@ -492,6 +492,12 @@ class TransportTraining(BaseTrainingModule):
                 dataset_name: target.map_data(torch.Tensor.detach)
                 for dataset_name, target in conditioned_endpoint.items()
             }
+            if prepared_target.reference is not None:
+                # The state the residuals are added to, shown as the input of the predicted datasets.
+                plot_kwargs["plot_input"] = {
+                    dataset_name: reference.map_data(torch.Tensor.detach)
+                    for dataset_name, reference in prepared_target.reference.items()
+                }
             endpoint_prediction = self.transport_objective.reconstruct_endpoint(prediction, prepared_objective)
             metric_prediction = self.prediction_mode.reconstruct_prediction(endpoint_prediction, prepared_target)
             metric_target = self.prediction_mode.prepare_metric_target(prepared_target)
