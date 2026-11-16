@@ -7,11 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+
 import pytest
 import torch
+from pytest_mock import MockFixture
 from torch.utils.data import ConcatDataset
 from torch.utils.data import TensorDataset
 
+from anemoi.training.data.loading import GroupedDatasetLoadingPolicy
 from anemoi.training.data.loading import MultiDomainBatchSampler
 
 
@@ -34,6 +37,79 @@ def make_sampler(
         batch_size=batch_size,
         drop_last=True,
     )
+
+
+def test_grouped_policy_stores_groups_and_combinations() -> None:
+    dataset_groups = [["dataset_a", "dataset_b"], ["dataset_c", "dataset_d"]]
+
+    policy = GroupedDatasetLoadingPolicy(dataset_groups)
+    assert policy.dataset_groups == dataset_groups
+    assert policy.combinations == [
+        ("dataset_a", "dataset_c"),
+        ("dataset_a", "dataset_d"),
+        ("dataset_b", "dataset_c"),
+        ("dataset_b", "dataset_d"),
+    ]
+
+
+@pytest.mark.parametrize("dataset_groups", [[[]], [["dataset_a"], []]])
+def test_grouped_policy_rejects_empty_groups(dataset_groups: list[list[str]]) -> None:
+    with pytest.raises(ValueError, match="must not contain an empty group"):
+        GroupedDatasetLoadingPolicy(dataset_groups)
+
+
+def test_grouped_policy_rejects_datasets_in_multiple_groups() -> None:
+    with pytest.raises(ValueError, match="must belong to a single group"):
+        GroupedDatasetLoadingPolicy([["dataset_a", "dataset_b"], ["dataset_b"]])
+
+
+def test_grouped_policy_builds_one_dataset_per_group_combination(mocker: MockFixture) -> None:
+    dataset_groups = [["dataset_a", "dataset_b"], ["dataset_c", "dataset_d"]]
+    policy = GroupedDatasetLoadingPolicy(dataset_groups)
+    data_readers = {name: mocker.MagicMock() for group in dataset_groups for name in group}
+    relative_date_indices = {name: [0, 2, 6] for name in data_readers}
+    mock_multi_dataset = mocker.patch(
+        "anemoi.training.data.loading.MultiDataset",
+        side_effect=lambda readers, **_kwargs: mocker.MagicMock(data_readers=readers),
+    )
+
+    dataset = policy.build_dataset(data_readers, relative_date_indices, fake_dataloading=True)
+
+    expected_combinations = [
+        ("dataset_a", "dataset_c"),
+        ("dataset_a", "dataset_d"),
+        ("dataset_b", "dataset_c"),
+        ("dataset_b", "dataset_d"),
+    ]
+    assert [tuple(domain.data_readers) for domain in dataset.datasets] == expected_combinations
+    assert set(dataset.data_readers) == set(data_readers)
+    assert [call.args[1] for call in mock_multi_dataset.call_args_list] == [
+        {name: relative_date_indices[name] for name in combination} for combination in expected_combinations
+    ]
+    assert all(call.kwargs["fake_dataloading"] is True for call in mock_multi_dataset.call_args_list)
+
+
+def test_grouped_policy_requires_exactly_the_configured_datasets(mocker: MockFixture) -> None:
+    policy = GroupedDatasetLoadingPolicy([["dataset_a"], ["dataset_b"]])
+    data_readers = {"dataset_a": mocker.MagicMock()}
+
+    with pytest.raises(ValueError, match="must contain exactly the configured datasets"):
+        policy.build_dataset(data_readers, {"dataset_a": [0]})
+
+
+def test_grouped_policy_check_dataset_compatibility_rejects_datasets_with_different_variable_orders(
+    mocker: MockFixture,
+) -> None:
+    policy = GroupedDatasetLoadingPolicy([["dataset_a", "dataset_b"]])
+    dataset = mocker.MagicMock(
+        name_to_index={
+            "dataset_a": {"temperature": 0, "pressure": 1},
+            "dataset_b": {"pressure": 0, "temperature": 1},
+        },
+    )
+
+    with pytest.raises(ValueError, match="must have the same variables in the same order"):
+        policy.check_dataset_compatibility(dataset)
 
 
 def test_multi_domain_sampler_preserves_domain_order_across_sample_groups() -> None:
