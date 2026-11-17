@@ -127,7 +127,9 @@ def _model(
         component.num_channels = 32 if graph_attention_backend == "triton" else 8
         component.graph_attention_backend = graph_attention_backend
     _, dynamic_graph_config = split_graph_config(
-        DotDict(config.graph), is_dataset_static={"data": True, "obs": False}, hidden_nodes_name=hidden_nodes_name,
+        DotDict(config.graph),
+        is_dataset_static={"data": True, "obs": False},
+        hidden_nodes_name=hidden_nodes_name,
     )
     return model_class(
         model_config=config.model,
@@ -248,7 +250,9 @@ class TestDynamicTargetEdgeFeatures(unittest.TestCase):
                 if isinstance(model, AnemoiTransportModelEncProcDec):
                     noisy_target = Batch({"obs": raw["obs"].select(variables=[0])})
                     output = model(
-                        inputs, noisy_target, {"obs": torch.full((batch.batch_size, 1, 1, 1, 1), 0.7)},
+                        inputs,
+                        noisy_target,
+                        {"obs": torch.full((batch.batch_size, 1, 1, 1, 1), 0.7)},
                         target_forcings=forcings,
                     )
                 else:
@@ -348,7 +352,9 @@ class TestDynamicTargetEdgeFeatures(unittest.TestCase):
         task = Autoencoder()
         _, templates, forcings = task.get_targets(batch, data_indices=_indices())
         output = model(
-            task.get_inputs(batch, data_indices=_indices()), target_forcings=forcings, target_template=templates,
+            task.get_inputs(batch, data_indices=_indices()),
+            target_forcings=forcings,
+            target_template=templates,
         )
         assert output["obs"].flatten().values.shape == (0, 1)
 

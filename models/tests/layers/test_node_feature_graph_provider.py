@@ -39,8 +39,11 @@ class TestNodeFeatureGraphProvider(unittest.TestCase):
         provider = _provider()
         features = torch.tensor([[10.0], [20.0], [30.0], [40.0], [50.0]])
         attrs, edges = provider.build_graph(
-            torch.zeros(3, 2), torch.zeros(5, 2),
-            src_batch_sizes=(1, 0, 2), dst_batch_sizes=(2, 1, 2), dst_node_features=features,
+            torch.zeros(3, 2),
+            torch.zeros(5, 2),
+            src_batch_sizes=(1, 0, 2),
+            dst_batch_sizes=(2, 1, 2),
+            dst_node_features=features,
         )
         torch.testing.assert_close(attrs, features[edges[1]])
         self.assertEqual(attrs.shape, (6, 1))
@@ -61,7 +64,8 @@ class TestNodeFeatureGraphProvider(unittest.TestCase):
                             src_coords=torch.zeros(2, 2, device=device),
                             dst_coords=torch.zeros(2, 2, device=device),
                             **{f"{'src' if axis == 0 else 'dst'}_node_features": features},
-                            shard_edges=False, act_checkpoint=checkpoint,
+                            shard_edges=False,
+                            act_checkpoint=checkpoint,
                         )
                         torch.testing.assert_close(attrs, features[edges[axis]])
                         graph = provider.consume_captured_graph()
@@ -76,8 +80,10 @@ class TestNodeFeatureGraphProvider(unittest.TestCase):
 
     def test_empty_graph(self):
         attrs, edges, _ = _provider().get_edges(
-            src_coords=torch.zeros(2, 2), dst_coords=torch.zeros(0, 2),
-            dst_node_features=torch.empty(0, 1), shard_edges=False,
+            src_coords=torch.zeros(2, 2),
+            dst_coords=torch.zeros(0, 2),
+            dst_node_features=torch.empty(0, 1),
+            shard_edges=False,
         )
         self.assertEqual(attrs.shape, (0, 1))
         self.assertEqual(edges.shape, (2, 0))

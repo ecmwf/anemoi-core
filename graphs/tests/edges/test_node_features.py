@@ -37,9 +37,7 @@ class TestNodeFeatures(unittest.TestCase):
             if features is not None:
                 nodes.features = features
             with self.subTest(features=features), self.assertRaises(ValueError):
-                NodeFeatures(node_axis="target", num_features=1)(
-                    x=(nodes, nodes), edge_index=torch.tensor([[0], [0]])
-                )
+                NodeFeatures(node_axis="target", num_features=1)(x=(nodes, nodes), edge_index=torch.tensor([[0], [0]]))
 
 
 if __name__ == "__main__":
