@@ -78,7 +78,7 @@ def benchmark_config(
     base_benchmark_config = OmegaConf.load(CONFIG_DIR / "base.yaml")
     # Settings for the specific benchmark test case
     use_case_modifications = OmegaConf.load(CONFIG_DIR / f"{test_case}.yaml")
-    OmegaConf.set_struct(template.values, False)
+    OmegaConf.set_struct(template.data, False)
     cfg = OmegaConf.merge(template, config_with_tempdir, use_case_modifications, base_benchmark_config)
 
     cfg.system.output.profiler = Path(cfg.system.output.root + "/" + cfg.system.output.profiler)
