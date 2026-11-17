@@ -308,6 +308,79 @@ class Timedeltas(BaseEdgeAttributeBuilder):
         return timedeltas / self.scale_seconds
 
 
+class NodeFeatures(BaseEdgeAttributeBuilder):
+    """Propagate runtime floating-point node features from one endpoint to each edge."""
+
+    node_attr_name = "features"
+
+    def __init__(
+        self,
+        node_axis: Literal["source", "target"],
+        num_features: int,
+        dtype: str = "float32",
+    ) -> None:
+        if node_axis not in ("source", "target"):
+            raise ValueError(f"node_axis must be 'source' or 'target', got {node_axis!r}.")
+        if num_features <= 0:
+            raise ValueError(f"num_features must be positive, got {num_features}.")
+
+        torch_dtype = getattr(torch, dtype, None)
+        if not isinstance(torch_dtype, torch.dtype) or not torch_dtype.is_floating_point:
+            raise ValueError(f"dtype must name a floating-point torch dtype, got {dtype!r}.")
+
+        self.node_axis = node_axis
+        self.num_features = num_features
+        self.torch_dtype = torch_dtype
+        super().__init__(norm=None, dtype=dtype)
+
+    @property
+    def ndim(self) -> int:
+        return self.num_features
+
+    def _get_endpoint_values(self, nodes: NodeStorage) -> torch.Tensor:
+        if self.node_attr_name not in nodes:
+            raise ValueError(
+                f"NodeFeatures requires the selected {self.node_axis} nodes to contain a "
+                f"'{self.node_attr_name}' attribute."
+            )
+
+        features = nodes[self.node_attr_name]
+        if not isinstance(features, torch.Tensor):
+            raise TypeError(
+                f"The selected {self.node_axis} node '{self.node_attr_name}' attribute must be a torch.Tensor."
+            )
+        if features.ndim == 1:
+            features = features.unsqueeze(-1)
+        elif features.ndim != 2:
+            raise ValueError(
+                f"The selected {self.node_axis} node '{self.node_attr_name}' attribute must have shape "
+                f"(num_nodes, num_features), got {tuple(features.shape)}."
+            )
+        if features.shape[1] != self.num_features:
+            raise ValueError(
+                f"The selected {self.node_axis} node '{self.node_attr_name}' attribute has "
+                f"{features.shape[1]} features, expected {self.num_features}."
+            )
+        num_nodes = nodes.x.shape[0] if "x" in nodes else nodes.get("num_nodes")
+        if num_nodes is not None and features.shape[0] != num_nodes:
+            raise ValueError(
+                f"The selected {self.node_axis} node '{self.node_attr_name}' attribute has "
+                f"{features.shape[0]} values for {num_nodes} nodes."
+            )
+        return features.to(device=self.device, dtype=self.torch_dtype)
+
+    def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
+        if self.node_axis == "source":
+            return self._get_endpoint_values(source_nodes), None
+        return None, self._get_endpoint_values(target_nodes)
+
+    def compute(self, x_i: torch.Tensor | None, x_j: torch.Tensor | None) -> torch.Tensor:
+        features = x_j if self.node_axis == "source" else x_i
+        if features is None:
+            raise ValueError(f"NodeFeatures could not read the selected {self.node_axis} endpoint values.")
+        return features
+
+
 class RadialBasisFeatures(EdgeLength):
     """Radial basis features from edge distances using Gaussian RBFs.
 

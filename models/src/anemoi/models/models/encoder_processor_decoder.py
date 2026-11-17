@@ -360,6 +360,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     ) -> None:
         """Builds the graph providers for the decoding network."""
         self.decoder_graph_provider = torch.nn.ModuleDict()
+        self.decoder_target_edge_features: dict[str, list[str]] = {}
         for dataset_name in self.dataset_names:
             if dataset_name not in self.target_datasets:
                 LOGGER.info(
@@ -369,6 +370,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
             decoder_config = decoders_config[self.dataset2decoder[dataset_name]]
             hidden_name = self.dataset2hidden[dataset_name]
+            edge_features = list(decoder_config.get("target_edge_features", []))
+            if edge_features and self.is_dataset_static[dataset_name]:
+                raise ValueError("target_edge_features requires a dynamic decoder graph.")
+            self.decoder_target_edge_features[dataset_name] = edge_features
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=_edges_or_none(static_graph, (hidden_name, "to", dataset_name)),
                 edge_attribute_names=decoder_config.mapper.get("sub_graph_edge_attributes"),
@@ -708,6 +713,42 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             ),
         )
 
+    def _get_target_forcing_node_features(
+        self,
+        *,
+        dataset_name: str,
+        target_forcings: "Source | None",
+        forcing_names: list[str],
+        target_shard_sizes: ShardSizes,
+        model_comm_group: ProcessGroup | None = None,
+    ) -> Tensor:
+        """Select preprocessed target forcings as node rows for decoder edge attributes.
+
+        Forcings must follow the target geometry's row ordering and shard partitioning.
+        Gather sharded values to match the coordinates used for graph construction,
+        preserving the configured variable order. No additional preprocessing is applied.
+        """
+        if target_forcings is None:
+            raise ValueError(f"Dataset {dataset_name!r} requires target_forcings for target_edge_features.")
+
+        missing_forcing_names = set(forcing_names) - set(target_forcings.variables)
+        if missing_forcing_names:
+            raise ValueError(
+                f"Dataset {dataset_name!r} is missing target edge forcings: {sorted(missing_forcing_names)}.",
+            )
+
+        forcing_variable_indices = [target_forcings.name_to_index[name] for name in forcing_names]
+        flattened_target_forcings = target_forcings.select(variables=forcing_variable_indices).flatten()
+        if flattened_target_forcings.shard_sizes != target_shard_sizes:
+            raise ValueError("Target edge forcings and target geometry must have matching shard sizes.")
+
+        target_forcing_values = flattened_target_forcings.values
+        if target_shard_sizes is not None:
+            target_forcing_values = gather_tensor(
+                target_forcing_values, dim=0, sizes=target_shard_sizes, mgroup=model_comm_group,
+            )
+        return target_forcing_values
+
     def _decode_rows(
         self,
         dataset_name: str,
@@ -723,11 +764,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         keep_x_dst_sharded: bool,
         model_comm_group: ProcessGroup | None = None,
         mapper_kwargs: dict | None = None,
+        target_forcings: "Source | None" = None,
     ) -> Tensor:
         """Decode the processed latent onto a dataset's target rows and return the decoder output.
 
         ``assembled_target`` is what ``_assemble_target`` returns (or rows built like it).
         ``mapper_kwargs`` are extra decoder arguments (e.g. the noise conditioning of a transport model).
+        ``target_forcings`` supplies configured ``target_edge_features`` after input preprocessing;
+        the output template describes geometry only and must not supply observed target values.
         """
         target_coords, target_data_latent, shard_sizes_data, data_batch_sizes, data_timedeltas = assembled_target
         if target_coords.numel() == 0:
@@ -743,6 +787,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             if data_batch_sizes is not None
             else {}
         )
+        target_forcing_names = getattr(self, "decoder_target_edge_features", {}).get(dataset_name, [])
+        if target_forcing_names:
+            graph_batch_kwargs["dst_node_features"] = self._get_target_forcing_node_features(
+                dataset_name=dataset_name,
+                target_forcings=target_forcings,
+                forcing_names=target_forcing_names,
+                target_shard_sizes=shard_sizes_data,
+                model_comm_group=model_comm_group,
+            )
         # Compute decoder edges using updated latent representation
         decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
             dataset_name
@@ -987,6 +1040,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_dtype=x_latent.dtype,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
                 model_comm_group=model_comm_group,
+                target_forcings=target_forcings.get(dataset_name),
             )
 
             x_out_dict[dataset_name] = self._assemble_output(

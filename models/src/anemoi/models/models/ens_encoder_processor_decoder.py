@@ -286,6 +286,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 edge_dtype=x_latent.dtype,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
                 model_comm_group=model_comm_group,
+                target_forcings=target_forcings.get(dataset_name),
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
