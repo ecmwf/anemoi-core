@@ -193,7 +193,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             if not torch.equal(x_flat.coordinates, noisy_target_flat.coordinates):
                 raise AssertionError("Input and noisy target coordinates must match for gridded transport data.")
             nodes = x_flat
-            values = torch.cat([x_flat.data.to(noisy_target_flat.data.dtype), noisy_target_flat.data], dim=-1)
+            values = torch.cat([x_flat.values.to(noisy_target_flat.values.dtype), noisy_target_flat.values], dim=-1)
             flag = None
 
         grid_shard_sizes = nodes.shard_sizes
@@ -225,7 +225,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         x_skip = None
         if dataset_name in self.residual:
             x_skip = self.residual[dataset_name](
-                x.data,
+                x.values,
                 grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
                 n_step_output=self.n_step_output[dataset_name],
@@ -258,8 +258,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         Returns the stacked nodes, their values ``[history | noisy target]`` with zeros in the
         part a row does not have, and the flag column (1 on noisy-target rows).
         """
-        history = x_flat.data.to(noisy_target_flat.data.dtype)
-        noisy_target = noisy_target_flat.data
+        history = x_flat.values.to(noisy_target_flat.values.dtype)
+        noisy_target = noisy_target_flat.values
         n_history, n_target = history.shape[0], noisy_target.shape[0]
         history_rows = torch.cat([history, history.new_zeros(n_history, noisy_target.shape[-1])], dim=-1)
         target_rows = torch.cat([noisy_target.new_zeros(n_target, history.shape[-1]), noisy_target], dim=-1)
@@ -275,7 +275,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             shard_sizes = [a + b for a, b in zip(x_flat.shard_sizes, noisy_target_flat.shard_sizes, strict=True)]
 
         nodes = FlatSource(
-            data=None,
+            values=None,
             coordinates=_join_blocks(x_flat.coordinates, history_sizes, noisy_target_flat.coordinates, target_sizes),
             device=noisy_target_flat.device,
             shard_sizes=shard_sizes,
@@ -345,7 +345,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         elif view.is_tabular:
             block_sizes = batch_sizes
         else:
-            grid_size = view.data.shape[view.layout.axis("grid", ndim=view.data.ndim)]
+            grid_size = view.values.shape[view.layout.axis("grid", ndim=view.values.ndim)]
             block_sizes = [grid_size] * rows.shape[0]
         conditioning = self._repeat_rows(rows, block_sizes)
         if shard_sizes is not None:
@@ -615,7 +615,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
             if "encoded_data" not in target_feature_names:
                 # The transport decoder also takes the noisy target at the target nodes.
-                conditioned_target_data = noisy_target[dataset_name].flatten().data
+                conditioned_target_data = noisy_target[dataset_name].flatten().values
                 conditioned_target_data = conditioned_target_data.to(
                     device=target_data_latent.device,
                     dtype=target_data_latent.dtype,
@@ -1001,14 +1001,14 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         """
         predicted = {name: source for name, source in x.items() if name in self.target_datasets}
         truncated = self.apply_residual_connections(
-            {name: source.data for name, source in predicted.items()},
+            {name: source.values for name, source in predicted.items()},
             grid_shard_sizes,
             model_comm_group,
         )
         return x.with_sources(
             {
                 name: source.clone(
-                    data=truncated[name][:, -1:],
+                    values=truncated[name][:, -1:],
                     **source._select_variable_metadata(self.data_indices[name].model.input.prognostic),
                 )
                 for name, source in predicted.items()
@@ -1071,21 +1071,21 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             in_place=False,
             skip_imputation=True,
             skip_output_constraints=True,
-        ).data
+        ).values
 
         steps = []
         for step, statistics in enumerate(tendency_statistics):
             step_state = state_physical.select(time=[step])
-            tendency = step_state.clone(data=step_state.data - reference_physical.to(step_state.data.dtype))
+            tendency = step_state.clone(values=step_state.values - reference_physical.to(step_state.values.dtype))
             normalised = pre_processors(
                 self._as_tendency(dataset_name, tendency, statistics),
                 in_place=True,
                 skip_imputation=True,
                 tendency=True,
-            ).data
-            step_output = state.select(time=[step]).data
+            ).values
+            step_output = state.select(time=[step]).values
             steps.append(step_output.index_copy(-1, prognostic, normalised.to(step_output.dtype)))
-        return state.clone(data=torch.cat(steps, dim=1))
+        return state.clone(values=torch.cat(steps, dim=1))
 
     def add_tendency_to_state(
         self,
@@ -1143,15 +1143,15 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             in_place=False,
             skip_imputation=True,
             skip_output_constraints=True,
-        ).data
+        ).values
 
         steps = []
         for step, statistics in enumerate(tendency_statistics):
             step_view = tendency.select(time=[step])
             step_tendency = self._as_tendency(dataset_name, step_view.select_variables(tendency_positions), statistics)
-            prognostic_state = post_processors(step_tendency, in_place=False, skip_imputation=True, tendency=True).data
+            prognostic_state = post_processors(step_tendency, in_place=False, skip_imputation=True, tendency=True).values
             prognostic_state = prognostic_state + reference_physical.to(prognostic_state.dtype)
-            physical = prognostic_state.new_empty(step_view.data.shape)
+            physical = prognostic_state.new_empty(step_view.values.shape)
             physical.index_copy_(-1, prognostic, prognostic_state)
             if diagnostic_positions:
                 diagnostic_state = post_processors(
@@ -1159,11 +1159,11 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                     in_place=False,
                     skip_imputation=True,
                     skip_output_constraints=True,
-                ).data
+                ).values
                 physical.index_copy_(-1, diagnostic, diagnostic_state.to(physical.dtype))
             steps.append(physical)
 
-        state = tendency.clone(data=torch.cat(steps, dim=1))
+        state = tendency.clone(values=torch.cat(steps, dim=1))
         if pre_processors is not None:
             state = pre_processors(
                 state, in_place=True, skip_imputation=True, skip_output_constraints=True, clip_to_domain=True

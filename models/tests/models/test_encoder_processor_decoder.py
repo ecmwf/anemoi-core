@@ -87,7 +87,7 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
 def test_shared_encoder_preserves_each_dataset_latent() -> None:
     model = _SharedEncoderModel()
     inputs = build_batch(
-        data={name: torch.zeros(1, 1, 1, 1, 1) for name in model.input_datasets},
+        values={name: torch.zeros(1, 1, 1, 1, 1) for name in model.input_datasets},
         coordinates={name: torch.zeros(1, 2) for name in model.input_datasets},
         layouts={name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4) for name in model.input_datasets},
         variables={name: ["a"] for name in model.input_datasets},
@@ -245,7 +245,7 @@ def test_none_rejects_source_datasets_of_differing_widths() -> None:
 
 def _forward_until_aggregation(model: _SharedEncoderModel, dataset_names: list[str]) -> None:
     inputs = build_batch(
-        data={name: torch.zeros(1, 1, 1, 1, 1) for name in dataset_names},
+        values={name: torch.zeros(1, 1, 1, 1, 1) for name in dataset_names},
         coordinates={name: torch.zeros(1, 2) for name in dataset_names},
         layouts={name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4) for name in dataset_names},
         variables={name: ["a"] for name in dataset_names},

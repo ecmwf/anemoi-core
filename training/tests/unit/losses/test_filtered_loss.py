@@ -35,7 +35,7 @@ def _gridded_source_view(data: torch.Tensor) -> GriddedSource:
     """Wrap a five-dimensional loss tensor in the public loss input type."""
     return GriddedSource(
         name="data",
-        data=data,
+        values=data,
         variables=[f"v{i}" for i in range(data.shape[-1])],
         statistics={},
         coordinates=torch.zeros(data.shape[3], 2, device=data.device),
@@ -495,10 +495,10 @@ class TestScalerIndicesRemapping:
         call = inner_loss.calls[-1]
         assert isinstance(call["pred"], GriddedSource)
         assert isinstance(call["target"], GriddedSource)
-        assert call["pred"].data.is_contiguous()
-        assert call["target"].data.is_contiguous()
-        assert call["pred"].data.shape[-1] == 2
-        assert call["target"].data.shape[-1] == 2
+        assert call["pred"].values.is_contiguous()
+        assert call["target"].values.is_contiguous()
+        assert call["pred"].values.shape[-1] == 2
+        assert call["target"].values.shape[-1] == 2
 
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
     @pytest.mark.parametrize("squash", [False, True])
@@ -516,7 +516,7 @@ class TestScalerIndicesRemapping:
         def view(nvars: int) -> GriddedSource:
             return GriddedSource(
                 name="data",
-                data=torch.ones(1, 1, 1, 8, nvars, dtype=dtype),
+                values=torch.ones(1, 1, 1, 8, nvars, dtype=dtype),
                 variables=[f"v{i}" for i in range(nvars)],
                 statistics={},
                 coordinates=torch.zeros(8, 2),
@@ -607,7 +607,7 @@ def test_select_variables_matches_advanced_indexing(indices: list[int]) -> None:
     weights = torch.randn(2, 3, 1, 7, len(indices))
 
     ref = x_ref[..., indices]
-    new = _gridded_source_view(x_new).select_variables(indices).data
+    new = _gridded_source_view(x_new).select_variables(indices).values
     torch.testing.assert_close(new, ref)
 
     (ref * weights).sum().backward()
@@ -618,5 +618,5 @@ def test_select_variables_matches_advanced_indexing(indices: list[int]) -> None:
 def test_select_variables_slice_does_not_copy() -> None:
     """A slice selection stays a view of the original storage."""
     x = torch.randn(2, 3, 1, 7, 6)
-    selected = _gridded_source_view(x).select_variables(slice(None)).data
+    selected = _gridded_source_view(x).select_variables(slice(None)).values
     assert selected.data_ptr() == x.data_ptr()

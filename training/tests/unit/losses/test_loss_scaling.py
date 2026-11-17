@@ -360,7 +360,7 @@ def _gridded_source_view(data: torch.Tensor, variables: list[str]) -> Source:
     """Wrap a five-dimensional loss tensor in the public loss input type."""
     return GriddedSource(
         name="data",
-        data=data,
+        values=data,
         variables=variables,
         statistics={},
         coordinates=torch.zeros(data.shape[3], 2, device=data.device),

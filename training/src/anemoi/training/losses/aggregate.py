@@ -134,7 +134,7 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
 
     @staticmethod
     def _time_axis(source: Source) -> int:
-        return source.layout.axis(TensorDim.TIME, ndim=source.data.ndim)
+        return source.layout.axis(TensorDim.TIME, ndim=source.values.ndim)
 
     def _compute_agg_loss(
         self,
@@ -152,8 +152,8 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
             msg = f"Unknown aggregation type '{agg_op}'. Supported: 'diff', 'mean', 'min', 'max'."
             raise ValueError(msg)
         fn = agg_fns[agg_op]
-        pred_agg = pred.clone(data=fn(pred.data, dim=self._time_axis(pred), keepdim=True))
-        target_agg = target.clone(data=fn(target.data, dim=self._time_axis(target), keepdim=True))
+        pred_agg = pred.clone(values=fn(pred.values, dim=self._time_axis(pred), keepdim=True))
+        target_agg = target.clone(values=fn(target.values, dim=self._time_axis(target), keepdim=True))
         return self.loss(pred_agg, target_agg, **shared_kwargs)
 
     def _compute_diff_loss(
@@ -167,7 +167,7 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
 
         def time_diff(source: Source) -> torch.Tensor:
             axis, n_time = self._time_axis(source), source.time_size
-            return source.data.narrow(axis, 1, n_time - 1) - source.data.narrow(axis, 0, n_time - 1)
+            return source.values.narrow(axis, 1, n_time - 1) - source.values.narrow(axis, 0, n_time - 1)
 
         pred_diff = time_diff(pred)  # (bs, time-1, ens, latlon, nvar)
         target_diff = time_diff(target)
@@ -175,8 +175,8 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         loss = torch.tensor(0.0, dtype=pred.dtype, device=pred.device, requires_grad=False)
         for step in range(pred_diff.shape[pred_axis]):
             step_loss = self.loss(
-                pred.clone(data=pred_diff.narrow(pred_axis, step, 1)),
-                target.clone(data=target_diff.narrow(target_axis, step, 1)),
+                pred.clone(values=pred_diff.narrow(pred_axis, step, 1)),
+                target.clone(values=target_diff.narrow(target_axis, step, 1)),
                 **shared_kwargs,
             )
             if time_weights is not None:

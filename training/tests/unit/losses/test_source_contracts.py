@@ -31,7 +31,7 @@ from anemoi.training.utils.index_space import IndexSpace
 def _grid(data: torch.Tensor, layout: TensorLayout | None = None) -> GriddedSource:
     return GriddedSource(
         name="grid",
-        data=data,
+        values=data,
         variables=["a", "b"],
         statistics={},
         coordinates=torch.zeros(3, 2),
@@ -71,14 +71,14 @@ def test_base_loss_pairwise_checks_gridded_layout_and_coordinates() -> None:
 
 def test_base_loss_pairwise_runs_gridded_callback() -> None:
     pred = _grid(torch.ones(1, 1, 1, 3, 2))
-    target = _grid(torch.zeros_like(pred.data))
+    target = _grid(torch.zeros_like(pred.values))
     result = apply_pairwise(pred, target, lambda p, t, **_: (p - t).abs().sum())
     torch.testing.assert_close(result, torch.tensor(6.0))
 
 
 def test_training_loss_disables_outer_autocast() -> None:
     pred = _grid(torch.ones(1, 1, 1, 3, 2, requires_grad=True))
-    target = _grid(torch.zeros_like(pred.data))
+    target = _grid(torch.zeros_like(pred.values))
 
     def loss(p: GriddedSource, t: GriddedSource) -> torch.Tensor:
         assert not torch.is_autocast_enabled("cpu")
@@ -88,14 +88,14 @@ def test_training_loss_disables_outer_autocast() -> None:
         result = BaseTrainingModule._evaluate_loss(loss, pred, target)
     torch.testing.assert_close(result, torch.tensor(3.0))
     result.backward()
-    torch.testing.assert_close(pred.data.grad, torch.ones_like(pred.data))
+    torch.testing.assert_close(pred.values.grad, torch.ones_like(pred.values))
 
 
 def test_filtered_loss_preserves_promoted_arithmetic_and_gradients() -> None:
     indices = IndexCollection(DictConfig({"forcing": [], "diagnostic": [], "target": []}), {"a": 0, "b": 1})
     loss = LossVariableMapper(MSELoss(), predicted_variables=["a"], data_indices=indices)
     pred = _grid(torch.full((1, 1, 1, 3, 2), 300.0, dtype=torch.bfloat16, requires_grad=True))
-    target = _grid(torch.zeros_like(pred.data, dtype=torch.float32))
+    target = _grid(torch.zeros_like(pred.values, dtype=torch.float32))
     with torch.autocast("cpu", dtype=torch.bfloat16):
         result = loss(
             pred,
@@ -107,8 +107,8 @@ def test_filtered_loss_preserves_promoted_arithmetic_and_gradients() -> None:
     assert result.dtype == torch.float32
     torch.testing.assert_close(result, torch.tensor([270000.0, 0.0]))
     result.sum().backward()
-    torch.testing.assert_close(pred.data.grad[..., 0], torch.full_like(pred.data.grad[..., 0], 600.0))
-    assert torch.count_nonzero(pred.data.grad[..., 1]) == 0
+    torch.testing.assert_close(pred.values.grad[..., 0], torch.full_like(pred.values.grad[..., 0], 600.0))
+    assert torch.count_nonzero(pred.values.grad[..., 1]) == 0
 
 
 @pytest.mark.parametrize("loss_type", [EnergyScoreLoss, GraphEnergyScoreLoss])
@@ -131,7 +131,7 @@ def test_scores_accept_equivalent_negative_axes(loss_type: type[EnergyScoreLoss]
 def _observations() -> TabularSource:
     return TabularSource(
         name="obs",
-        data=[torch.ones(2, 2), torch.ones(3, 2)],
+        values=[torch.ones(2, 2), torch.ones(3, 2)],
         variables=["a", "b"],
         statistics={},
         coordinates=[torch.zeros(2, 2), torch.zeros(3, 2)],
@@ -165,7 +165,7 @@ def test_sparse_pairwise_ignores_empty_samples_and_preserves_zero_gradients() ->
     non_empty = torch.ones(2, 2, requires_grad=True)
     pred = TabularSource(
         name="obs",
-        data=[empty, non_empty],
+        values=[empty, non_empty],
         variables=["a", "b"],
         statistics={},
         coordinates=[torch.zeros(0, 2), torch.zeros(2, 2)],
@@ -173,7 +173,7 @@ def test_sparse_pairwise_ignores_empty_samples_and_preserves_zero_gradients() ->
         timedeltas=[torch.zeros(0), torch.zeros(2)],
         boundaries=[(slice(0, 0),), (slice(0, 2),)],
     )
-    target = pred.clone(data=[torch.zeros_like(empty), torch.zeros_like(non_empty)])
+    target = pred.clone(values=[torch.zeros_like(empty), torch.zeros_like(non_empty)])
     result = apply_pairwise(pred, target, lambda p, t, **_: (p - t).sum())
     torch.testing.assert_close(result, torch.tensor(4.0))
     result.backward()
@@ -184,7 +184,7 @@ def test_sparse_pairwise_ignores_empty_samples_and_preserves_zero_gradients() ->
 
 def test_edm_loss_passes_sparse_weights_and_preserves_gradients() -> None:
     pred = _observations().clone(
-        data=[torch.ones(2, 2, requires_grad=True), torch.full((3, 2), 2.0, requires_grad=True)],
+        values=[torch.ones(2, 2, requires_grad=True), torch.full((3, 2), 2.0, requires_grad=True)],
     )
     target = pred.map_data(torch.zeros_like)
     module = SimpleNamespace(
@@ -198,8 +198,8 @@ def test_edm_loss_passes_sparse_weights_and_preserves_gradients() -> None:
     result = BaseTrainingModule._compute_loss(module, pred, target, dataset_name="obs", extra_loss_kwargs=loss_kwargs)
     torch.testing.assert_close(result, torch.tensor(7.0))
     result.backward()
-    torch.testing.assert_close(pred.data[0].grad, torch.full((2, 2), 0.5))
-    torch.testing.assert_close(pred.data[1].grad, torch.ones(3, 2))
+    torch.testing.assert_close(pred.values[0].grad, torch.full((2, 2), 0.5))
+    torch.testing.assert_close(pred.values[1].grad, torch.ones(3, 2))
 
 
 @pytest.mark.parametrize("case", ["length", "duplicate"])
@@ -222,7 +222,7 @@ def test_sparse_crps_ensemble_axis_and_nan_gradients(backend: str) -> None:
     data = torch.tensor([[[-1.0], [-1.0]], [[1.0], [1.0]]], requires_grad=True)
     pred = TabularSource(
         name="obs",
-        data=[data],
+        values=[data],
         variables=["a"],
         statistics={},
         coordinates=[torch.zeros(2, 2)],
@@ -230,7 +230,7 @@ def test_sparse_crps_ensemble_axis_and_nan_gradients(backend: str) -> None:
         timedeltas=[torch.zeros(2)],
         boundaries=[(slice(0, 2),)],
     )
-    target = pred.clone(data=[torch.tensor([[[0.0], [float("nan")]]])])
+    target = pred.clone(values=[torch.tensor([[[0.0], [float("nan")]]])])
     result = CRPS(alpha=0.0, backend=backend, ignore_nans=True)(pred, target)
     # Standard CRPS is 0.5 at the valid node; the masked node is left out of the mean.
     torch.testing.assert_close(result, torch.tensor(0.5))

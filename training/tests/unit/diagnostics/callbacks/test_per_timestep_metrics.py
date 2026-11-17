@@ -44,7 +44,7 @@ def callback_every_2() -> PerTimestepMetrics:
 
 def _gridded_batch(data: torch.Tensor, layout: TensorLayout = _LAYOUT) -> Batch:
     return build_batch(
-        data={"data": data},
+        values={"data": data},
         coordinates={"data": torch.zeros(data.shape[layout.grid], 2)},
         layouts={"data": layout},
         variables={"data": [f"v{i}" for i in range(data.shape[layout.variables])]},

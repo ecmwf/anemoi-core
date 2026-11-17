@@ -40,7 +40,7 @@ class _FakeGroup:
 def _tabular_source(timedeltas: list[torch.Tensor], shard_sizes: list | None = None) -> TabularSource:
     return TabularSource(
         name="obs",
-        data=[torch.zeros(2, 1), torch.zeros(3, 1)],
+        values=[torch.zeros(2, 1), torch.zeros(3, 1)],
         variables=["value"],
         statistics={},
         coordinates=[torch.zeros(2, 2), torch.ones(3, 2)],
@@ -54,7 +54,7 @@ def _tabular_source(timedeltas: list[torch.Tensor], shard_sizes: list | None = N
 def _gridded_source(shard_sizes: list[int] | None = None, grid: int = GRID) -> GriddedSource:
     return GriddedSource(
         name="era5",
-        data=torch.arange(float(grid * 2)).reshape(1, 1, 1, grid, 2),
+        values=torch.arange(float(grid * 2)).reshape(1, 1, 1, grid, 2),
         variables=["a", "b"],
         statistics={},
         coordinates=torch.zeros(grid, 2),
@@ -73,7 +73,7 @@ def test_tabular_flatten_preserves_timedelta_order() -> None:
 
     flattened = source.flatten()
 
-    assert flattened.data.shape == (5, 1)
+    assert flattened.values.shape == (5, 1)
     assert flattened.coordinates.shape == (5, 2)
     assert torch.equal(flattened.timedeltas, torch.tensor([-3600.0, 0.0, 1800.0, 3600.0, 7200.0]))
     assert flattened.batch_sizes == (2, 3)
@@ -111,7 +111,7 @@ def test_gridded_allgather_with_a_single_rank_group_drops_shard_sizes() -> None:
     gathered = source.allgather(_FakeGroup(1))
 
     assert gathered.shard_sizes is None
-    assert gathered.data is source.data  # nothing to communicate, no copy
+    assert gathered.values is source.values  # nothing to communicate, no copy
 
 
 def test_gridded_allgather_rejects_coordinates_on_another_device() -> None:
@@ -145,7 +145,7 @@ class TestSourceGuards:
     def test_tabular_source_rejects_a_gridded_layout(self) -> None:
         with pytest.raises(ValueError, match="requires a layout without time and batch axes"):
             TabularSource(
-                data=[torch.zeros(2, 2, 1, GRID, 3)],
+                values=[torch.zeros(2, 2, 1, GRID, 3)],
                 coordinates=[torch.zeros(GRID, 2)],
                 timedeltas=[torch.zeros(GRID)],
                 boundaries=[(slice(0, GRID),)],
@@ -157,7 +157,7 @@ class TestSourceGuards:
         """Tabular payloads are one tensor per sample, held in a list."""
         with pytest.raises(TypeError, match="must be a list of tensors"):
             TabularSource(
-                data=torch.zeros(GRID, 3),
+                values=torch.zeros(GRID, 3),
                 coordinates=[torch.zeros(GRID, 2)],
                 timedeltas=[torch.zeros(GRID)],
                 boundaries=[(slice(0, GRID),)],
@@ -169,7 +169,7 @@ class TestSourceGuards:
         """Gridded sources carry an explicit time axis."""
         with pytest.raises(ValueError, match="requires a layout with a time axis"):
             GriddedSource(
-                data=torch.zeros(GRID, 3),
+                values=torch.zeros(GRID, 3),
                 coordinates=torch.zeros(GRID, 2),
                 layout=TABULAR_LAYOUT,
                 **_GUARD_COMMON,
@@ -179,7 +179,7 @@ class TestSourceGuards:
         """Gridded payloads are a single stacked tensor."""
         with pytest.raises(TypeError, match="must be a single tensor"):
             GriddedSource(
-                data=[torch.zeros(2, 1, GRID, 3)],
+                values=[torch.zeros(2, 1, GRID, 3)],
                 coordinates=torch.zeros(GRID, 2),
                 layout=GRIDDED_LAYOUT,
                 **_GUARD_COMMON,
@@ -187,16 +187,16 @@ class TestSourceGuards:
 
     def test_valid_sources_index_their_variables_and_flatten(self) -> None:
         gridded = GriddedSource(
-            data=torch.zeros(2, 2, 1, GRID, 3),
+            values=torch.zeros(2, 2, 1, GRID, 3),
             coordinates=torch.zeros(GRID, 2),
             layout=GRIDDED_LAYOUT,
             **_GUARD_COMMON,
         )
         assert gridded.name_to_index == {"a": 0, "b": 1, "c": 2}
-        assert tuple(gridded.flatten().data.shape) == (2 * GRID, 2 * 3)
+        assert tuple(gridded.flatten().values.shape) == (2 * GRID, 2 * 3)
 
         tabular = TabularSource(
-            data=[torch.zeros(GRID, 3)],
+            values=[torch.zeros(GRID, 3)],
             coordinates=[torch.zeros(GRID, 2)],
             timedeltas=[torch.zeros(GRID)],
             boundaries=[(slice(0, GRID),)],
@@ -204,4 +204,4 @@ class TestSourceGuards:
             **_GUARD_COMMON,
         )
         assert tabular.name_to_index == {"a": 0, "b": 1, "c": 2}
-        assert tuple(tabular.flatten().data.shape) == (GRID, 3)
+        assert tuple(tabular.flatten().values.shape) == (GRID, 3)

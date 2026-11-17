@@ -363,7 +363,7 @@ def _make_minimal_model() -> DummyGraphModel:
 def _gridded_batch(grid: int, variables: list[str]) -> Batch:
     """Single-sample gridded batch on ``grid`` points."""
     return build_batch(
-        data={"data": torch.zeros(1, 1, 1, grid, len(variables))},
+        values={"data": torch.zeros(1, 1, 1, grid, len(variables))},
         coordinates={"data": torch.zeros(grid, 2)},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": variables},
@@ -455,7 +455,7 @@ def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
         spatial_pre_processors=nn.ModuleDict({"data": RegriddingSpatialProcessor()}),
     )
 
-    assert out["data"].data.shape[-2] == 2
+    assert out["data"].values.shape[-2] == 2
     assert out["data"].shard_sizes == target_grid_shard_sizes
 
 
@@ -464,7 +464,7 @@ def test_predict_step_skips_input_only_datasets(monkeypatch):
     model = _make_minimal_model()
 
     # `forcing` feeds an encoder but has no decoder, so forward only returns `data`
-    monkeypatch.setattr(model, "forward", lambda x, **kw: Batch({"data": x["data"].clone(data=x["data"].data + 1.0)}))
+    monkeypatch.setattr(model, "forward", lambda x, **kw: Batch({"data": x["data"].clone(values=x["data"].values + 1.0)}))
 
     class _NotCalled:
         def __call__(self, x, in_place=False):
@@ -473,7 +473,7 @@ def test_predict_step_skips_input_only_datasets(monkeypatch):
 
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
     batch = build_batch(
-        data={"data": torch.zeros(1, 1, 1, 4, 1), "forcing": torch.zeros(1, 1, 1, 4, 2)},
+        values={"data": torch.zeros(1, 1, 1, 4, 1), "forcing": torch.zeros(1, 1, 1, 4, 2)},
         coordinates={"data": torch.zeros(4, 2), "forcing": torch.zeros(4, 2)},
         layouts={"data": layout, "forcing": layout},
         variables={"data": ["var"], "forcing": ["f1", "f2"]},
@@ -488,4 +488,4 @@ def test_predict_step_skips_input_only_datasets(monkeypatch):
     )
 
     assert set(out.dataset_names) == {"data"}
-    assert torch.equal(out["data"].data, torch.ones(1, 1, 1, 4, 1))
+    assert torch.equal(out["data"].values, torch.ones(1, 1, 1, 4, 1))

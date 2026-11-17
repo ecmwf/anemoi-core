@@ -34,7 +34,7 @@ def _view(data: torch.Tensor) -> Source:
     """Wrap a (batch, time, ensemble, grid, variables) tensor in the source view the loss takes."""
     return GriddedSource(
         name="data",
-        data=data,
+        values=data,
         variables=[f"v{i}" for i in range(data.shape[-1])],
         statistics={},
         coordinates=torch.zeros(data.shape[-2], 2, device=data.device),

@@ -311,13 +311,13 @@ def test_forecaster_get_inputs_returns_correct_number_of_time_steps() -> None:
     # offsets = [-6h, 0h, +6h] → 3 time steps in batch
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
     batch = build_batch(
-        data={"data": torch.randn(b, 3, e, g, v)},
+        values={"data": torch.randn(b, 3, e, g, v)},
         coordinates={"data": torch.rand(g, 2)},
         layouts={"data": layout},
         variables={"data": list(_NAME_TO_INDEX)},
     )
     x = task.get_inputs(batch, data_indices)
-    assert x["data"].data.shape[1] == 2  # multistep_input=2
+    assert x["data"].values.shape[1] == 2  # multistep_input=2
 
 
 def test_forecaster_get_targets_returns_correct_number_of_time_steps() -> None:
@@ -327,13 +327,13 @@ def test_forecaster_get_targets_returns_correct_number_of_time_steps() -> None:
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
     batch = build_batch(
-        data={"data": torch.randn(b, 3, e, g, v)},
+        values={"data": torch.randn(b, 3, e, g, v)},
         coordinates={"data": torch.rand(g, 2)},
         layouts={"data": layout},
         variables={"data": list(_NAME_TO_INDEX)},
     )
     y, _template, _forcing = task.get_targets(batch, data_indices)
-    assert y["data"].data.shape[1] == 1  # multistep_output=1
+    assert y["data"].values.shape[1] == 1  # multistep_output=1
 
 
 def test_forecaster_get_targets_template_describes_model_outputs() -> None:
@@ -343,7 +343,7 @@ def test_forecaster_get_targets_template_describes_model_outputs() -> None:
     data_indices = {"data": _make_minimal_index_collection(_NAME_TO_INDEX, forcing=forcing)}
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     batch = build_batch(
-        data={"data": torch.randn(b, 3, e, g, v)},
+        values={"data": torch.randn(b, 3, e, g, v)},
         coordinates={"data": torch.rand(g, 2)},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": list(_NAME_TO_INDEX)},
@@ -369,13 +369,13 @@ def test_forecaster_get_targets_raises_when_batch_is_short_of_time_steps() -> No
     )
     data_indices = _data_indices_single()
     batch = build_batch(
-        data={"data": torch.randn(2, 3, 1, 4, len(_NAME_TO_INDEX))},
+        values={"data": torch.randn(2, 3, 1, 4, len(_NAME_TO_INDEX))},
         coordinates={"data": torch.rand(4, 2)},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": list(_NAME_TO_INDEX)},
     )
     targets, _, _ = task.get_targets(batch, data_indices, rollout_step=0)
-    assert targets["data"].data.shape[1] == 1
+    assert targets["data"].values.shape[1] == 1
 
     task.rollout.increase(current_epoch=0)
 
@@ -491,7 +491,7 @@ def test_rollout_shifts_true_state_into_input_only_grid(
     conditioning = torch.tensor(input_values).reshape(1, n_input, 1, 1, 1).requires_grad_()
     coordinates = {"forecast": torch.zeros(1, 2), "conditioning": torch.ones(1, 2)}
     batch = build_batch(
-        data={"forecast": forecast, "conditioning": conditioning},
+        values={"forecast": forecast, "conditioning": conditioning},
         coordinates=coordinates,
         layouts=dict.fromkeys(coordinates, layout),
         variables={name: ["A"] for name in coordinates},
@@ -511,13 +511,13 @@ def test_rollout_shifts_true_state_into_input_only_grid(
         output_mask={name: NoOutputMask() for name in coordinates},
     )
 
-    torch.testing.assert_close(advanced["forecast"].data.flatten(), torch.arange(2.0, n_input + 2))
-    torch.testing.assert_close(advanced["conditioning"].data.flatten(), torch.tensor(expected_values))
+    torch.testing.assert_close(advanced["forecast"].values.flatten(), torch.arange(2.0, n_input + 2))
+    torch.testing.assert_close(advanced["conditioning"].values.flatten(), torch.tensor(expected_values))
     assert advanced["conditioning"].coordinates is coordinates["conditioning"]
     assert advanced["conditioning"].variables == ["A"]
-    torch.testing.assert_close(batch["forecast"].data.flatten(), torch.arange(1.0, n_input + 1))
-    torch.testing.assert_close(batch["conditioning"].data.flatten(), torch.tensor(input_values))
-    (advanced["forecast"].data.sum() + advanced["conditioning"].data.sum()).backward()
+    torch.testing.assert_close(batch["forecast"].values.flatten(), torch.arange(1.0, n_input + 1))
+    torch.testing.assert_close(batch["conditioning"].values.flatten(), torch.tensor(input_values))
+    (advanced["forecast"].values.sum() + advanced["conditioning"].values.sum()).backward()
     torch.testing.assert_close(prediction.grad, torch.ones_like(prediction))
     # The oldest conditioning input is shifted out; the others stay inputs.
     expected_grad = torch.ones_like(conditioning)
@@ -556,7 +556,7 @@ def _obs_batch(windows: list[tuple[torch.Tensor, float]], variables: list[str] |
     stops = list(itertools.accumulate(window.shape[1] for window, _ in windows))
     boundaries = tuple(slice(start, stop) for start, stop in zip([0, *stops], stops, strict=False))
     return build_batch(
-        data={"obs": [data]},
+        values={"obs": [data]},
         coordinates={"obs": [coordinates]},
         timedeltas={"obs": [timedeltas]},
         boundaries={"obs": [boundaries]},
@@ -580,8 +580,8 @@ def test_advance_input_feeds_output_obs_window_back_as_input(decoded: bool, expe
 
     assert isinstance(advanced, TabularSource)
     assert advanced.boundaries == [(slice(0, 5),)]
-    torch.testing.assert_close(advanced.data[0][..., 0], torch.full((1, 5), expected_p))
-    torch.testing.assert_close(advanced.data[0][..., 1], torch.full((1, 5), 8.0))
+    torch.testing.assert_close(advanced.values[0][..., 0], torch.full((1, 5), expected_p))
+    torch.testing.assert_close(advanced.values[0][..., 1], torch.full((1, 5), 8.0))
     torch.testing.assert_close(advanced.coordinates[0], torch.full((5, 2), 6.0))
     # The forecast time moves on by one rollout shift.
     torch.testing.assert_close(advanced.timedeltas[0], torch.full((5,), 6.0 - SIX_HOURS))
@@ -599,7 +599,7 @@ def test_advance_input_cycles_each_ensemble_member_obs_window() -> None:
 
         x = task.advance_input(x, y_pred, truth, data_indices=data_indices)
 
-        torch.testing.assert_close(x["obs"].data[0], _obs_window(nodes, p=member_p, f=f))
+        torch.testing.assert_close(x["obs"].values[0], _obs_window(nodes, p=member_p, f=f))
 
 
 def test_advance_input_decoded_obs_window_becomes_most_recent_input() -> None:
@@ -613,7 +613,7 @@ def test_advance_input_decoded_obs_window_becomes_most_recent_input() -> None:
 
     assert advanced.boundaries == [(slice(0, 4), slice(4, 9))]
     expected = torch.cat([_obs_window(4, p=[0.0], f=0.0), _obs_window(5, p=[1.0], f=8.0)], dim=1)
-    torch.testing.assert_close(advanced.data[0], expected)
+    torch.testing.assert_close(advanced.values[0], expected)
     torch.testing.assert_close(advanced.timedeltas[0], torch.tensor([0.0] * 4 + [6.0] * 5) - SIX_HOURS)
 
 
@@ -658,7 +658,7 @@ def test_advance_input_advances_gridded_and_tabular_datasets_together() -> None:
 
     def mixed_batch(grid_value: float, obs: TabularSource) -> Batch:
         return build_batch(
-            data={"grid": torch.full((1, 1, 1, 2, 1), grid_value), "obs": obs.data},
+            values={"grid": torch.full((1, 1, 1, 2, 1), grid_value), "obs": obs.values},
             coordinates={"grid": grid_coordinates, "obs": obs.coordinates},
             timedeltas={"obs": obs.timedeltas},
             boundaries={"obs": obs.boundaries},
@@ -679,10 +679,10 @@ def test_advance_input_advances_gridded_and_tabular_datasets_together() -> None:
     )
 
     assert advanced.dataset_names == ("grid", "obs")
-    torch.testing.assert_close(advanced["grid"].data, torch.full((1, 1, 1, 2, 1), 2.0))
+    torch.testing.assert_close(advanced["grid"].values, torch.full((1, 1, 1, 2, 1), 2.0))
     assert advanced["grid"].coordinates is grid_coordinates
     assert advanced["obs"].boundaries == [(slice(0, 5),)]
-    torch.testing.assert_close(advanced["obs"].data[0], _obs_window(5, p=[1.0], f=8.0))
+    torch.testing.assert_close(advanced["obs"].values[0], _obs_window(5, p=[1.0], f=8.0))
 
 
 # ── OffsetForecaster: equivalence with Forecaster on a regular grid ────────────

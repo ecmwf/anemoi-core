@@ -571,9 +571,9 @@ class BaseGraphModel(nn.Module):
         Parameters
         ----------
         batch : Batch
-            Typed batch envelope carrying ``data`` (per-dataset input tensors)
+            Typed batch envelope carrying ``values`` (per-dataset input tensors)
             and ``coords`` (per-dataset coordinate tensors). Concrete model
-            implementations unpack ``batch.data`` and ``batch.coordinates`` at the
+            implementations unpack each source's ``values`` and ``coordinates`` at the
             top of the method. Per-dataset grid sharding is carried by the batch
             (``batch.shard_sizes``) and read through the source views.
         model_comm_group : Optional[ProcessGroup], optional

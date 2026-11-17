@@ -33,7 +33,7 @@ def _tabular(samples: list[torch.Tensor], layout: TensorLayout = TABULAR_LAYOUT)
         name="obs",
         variables=["a"],
         layout=layout,
-        data=samples,
+        values=samples,
         coordinates=[torch.zeros(n, 2) for n in nodes],
         timedeltas=[torch.zeros(n) for n in nodes],
         boundaries=[(slice(0, n),) for n in nodes],
@@ -45,7 +45,7 @@ def _gridded(data: torch.Tensor) -> Source:
         name="era5",
         variables=["a"],
         layout=GRIDDED_LAYOUT,
-        data=data,
+        values=data,
         coordinates=torch.zeros(data.shape[GRIDDED_LAYOUT.grid], 2),
     )
 
@@ -57,8 +57,8 @@ def test_map_with_condition_preserves_sample_and_member_alignment() -> None:
 
     result = left.map_with_condition(lambda a, b, c: a + b * c, condition, right)
 
-    torch.testing.assert_close(result.data[0], torch.tensor([[[5.0], [5.0]], [[7.0], [7.0]]]))
-    torch.testing.assert_close(result.data[1], torch.tensor([[[54.0], [54.0], [54.0]], [[74.0], [74.0], [74.0]]]))
+    torch.testing.assert_close(result.values[0], torch.tensor([[[5.0], [5.0]], [[7.0], [7.0]]]))
+    torch.testing.assert_close(result.values[1], torch.tensor([[[54.0], [54.0], [54.0]], [[74.0], [74.0], [74.0]]]))
 
 
 @pytest.mark.parametrize(

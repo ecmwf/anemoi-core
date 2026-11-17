@@ -37,7 +37,7 @@ def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
     layout = TensorLayout(batch=0, time=1, grid=2, variables=3)
     return GriddedSource(
         name="gridded",
-        data=data,
+        values=data,
         variables=list(variables),
         statistics=statistics,
         coordinates=torch.zeros(points, 2),
@@ -50,7 +50,7 @@ def make_tabular_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
     layout = TensorLayout(grid=0, variables=1)
     return TabularSource(
         name="tabular",
-        data=[payload.clone()],
+        values=[payload.clone()],
         variables=list(variables),
         statistics=statistics,
         coordinates=[torch.zeros(t.shape[0], 2) for t in [payload]],
@@ -62,11 +62,11 @@ def make_tabular_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
 
 def view_data_2d(view) -> torch.Tensor:
     """Extract the (points, variables) payload back out of either view kind."""
-    if isinstance(view.data, list):
-        return view.data[0]
-    points = view.data.shape[view.layout.grid]
-    num_vars = view.data.shape[view.layout.variables]
-    return view.data.reshape(points, num_vars)
+    if isinstance(view.values, list):
+        return view.values[0]
+    points = view.values.shape[view.layout.grid]
+    num_vars = view.values.shape[view.layout.variables]
+    return view.values.reshape(points, num_vars)
 
 
 @pytest.fixture(params=["gridded", "tabular"])
@@ -235,7 +235,7 @@ def test_tabular_multiple_tensors(default_constant_imputer) -> None:
     expected = torch.tensor([[1.0, 2.0, 3.0, 22.7, 5.0, 1.0], [6.0, 22.7, 8.0, 9.0, 22.7, 1.0]])
     view = TabularSource(
         name="tabular",
-        data=[base.clone(), base.clone()],
+        values=[base.clone(), base.clone()],
         variables=list(VARIABLES),
         statistics=STATISTICS,
         coordinates=[torch.zeros(t.shape[0], 2) for t in [base, base]],
@@ -244,6 +244,6 @@ def test_tabular_multiple_tensors(default_constant_imputer) -> None:
         boundaries=[(slice(0, t.shape[0]),) for t in [base, base]],
     )
     out = default_constant_imputer(view, in_place=False)
-    assert len(out.data) == 2
-    for tensor in out.data:
+    assert len(out.values) == 2
+    for tensor in out.values:
         assert torch.allclose(tensor, expected, equal_nan=True)

@@ -145,7 +145,7 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
     ]
     coords = [torch.zeros(2, 2), torch.zeros(3, 2)]
     inputs = build_batch(
-        data={"grid": samples},
+        values={"grid": samples},
         coordinates={"grid": coords},
         timedeltas={"grid": [torch.zeros(len(c)) for c in coords]},
         boundaries={"grid": [(slice(0, len(c)),) for c in coords]},
@@ -159,9 +159,9 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
     else:
         target = inputs.select(variables=[])
         output = model(inputs, target_forcings=target, target_template=inputs.template())
-    for expected, actual in zip(samples, output["grid"].data, strict=True):
+    for expected, actual in zip(samples, output["grid"].values, strict=True):
         torch.testing.assert_close(actual, expected)
-    sum(sample.sum() for sample in output["grid"].data).backward()
+    sum(sample.sum() for sample in output["grid"].values).backward()
     assert all(torch.isfinite(sample.grad).all() and sample.grad.abs().sum() > 0 for sample in samples)
 
 
@@ -171,7 +171,7 @@ def test_sparse_transport_noise_embeddings_follow_member_node_order(members):
     samples = [torch.zeros(members, nodes, 1) for nodes in [2, 3]]
     view = TabularSource(
         name="obs",
-        data=samples,
+        values=samples,
         variables=["a"],
         statistics={},
         coordinates=[torch.zeros(nodes, 2) for nodes in [2, 3]],

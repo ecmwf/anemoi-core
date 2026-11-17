@@ -30,7 +30,7 @@ TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2)
 def gridded_batch(variables: list[str] = ["a", "b", "c"]) -> Batch:
     n_vars = len(variables)
     return build_batch(
-        data={"grid": torch.arange(2 * 2 * 1 * 4 * n_vars, dtype=torch.float32).reshape(2, 2, 1, 4, n_vars)},
+        values={"grid": torch.arange(2 * 2 * 1 * 4 * n_vars, dtype=torch.float32).reshape(2, 2, 1, 4, n_vars)},
         coordinates={"grid": torch.zeros(4, 2)},
         layouts={"grid": GRIDDED_LAYOUT.with_batch_dim()},
         variables={"grid": variables},
@@ -45,7 +45,7 @@ class TestSourceMetadata:
                 name="grid",
                 variables=["a", "a"],
                 layout=GRIDDED_LAYOUT,
-                data=torch.zeros(1, 1, 4, 2),
+                values=torch.zeros(1, 1, 4, 2),
                 coordinates=torch.zeros(4, 2),
             )
 
@@ -90,11 +90,11 @@ class TestSourceMetadata:
     @pytest.mark.parametrize("payload", [gridded_sample, tabular_sample])
     def test_template_unflatten_inverts_flatten(self, payload) -> None:
         view = Batch.collate([{"src": payload()}, {"src": payload()}])["src"]
-        rebuilt = view.template().unflatten(view.flatten().data)
+        rebuilt = view.template().unflatten(view.flatten().values)
 
         assert type(rebuilt) is type(view)
         assert rebuilt.variables == view.variables
-        data, expected = (rebuilt.data, view.data) if isinstance(view.data, list) else ([rebuilt.data], [view.data])
+        data, expected = (rebuilt.values, view.values) if isinstance(view.values, list) else ([rebuilt.values], [view.values])
         assert all(torch.equal(a, b) for a, b in zip(data, expected, strict=True))
 
     @pytest.mark.parametrize("payload", [gridded_sample, tabular_sample])
@@ -102,7 +102,7 @@ class TestSourceMetadata:
         view = Batch.collate([{"src": payload()}])["src"]
         flat, nodes = view.flatten(), view.template().flatten()
 
-        assert nodes.data is None
+        assert nodes.values is None
         torch.testing.assert_close(nodes.coordinates, flat.coordinates)
         assert nodes.batch_sizes == flat.batch_sizes
         assert nodes.shard_sizes == flat.shard_sizes
@@ -135,7 +135,7 @@ class TestSourceMetadata:
 
         assert out.variables == ["z"]
         torch.testing.assert_close(out.statistics["mean"], torch.tensor([5.0]))
-        assert out.data.shape[out.layout.variables] == 1
+        assert out.values.shape[out.layout.variables] == 1
 
     def test_template_with_ensemble_size_tiles_the_members(self) -> None:
         template = Batch.collate([{"obs": tabular_sample()}])["obs"].template().with_ensemble_size(3)
@@ -146,7 +146,7 @@ class TestSourceMetadata:
     def test_sources_require_data(self, payload) -> None:
         view = Batch.collate([{"src": payload()}])["src"]
         with pytest.raises(ValueError, match="requires data"):
-            view.clone(data=None)
+            view.clone(values=None)
 
 
 class TestSourceTransformations:
@@ -158,14 +158,14 @@ class TestSourceTransformations:
         assert cloned.variables == ["x", "y", "z"]
         assert view.variables == ["a", "b", "c"]
         # payload is shared by reference when it is not replaced
-        assert cloned.data is view.data
+        assert cloned.values is view.values
 
     def test_select_variables_keeps_data_and_metadata_consistent(self) -> None:
         view = gridded_batch()["grid"]
         selected = view.select(variables=[0, 2])
         assert selected.variables == ["a", "c"]
         assert selected.statistics["mean"].tolist() == [0.0, 2.0]
-        assert selected.data.shape[selected.layout.variables] == 2
+        assert selected.values.shape[selected.layout.variables] == 2
         # the receiver is not mutated
         assert view.variables == ["a", "b", "c"]
 
@@ -188,16 +188,16 @@ class TestSourceTransformations:
         view = gridded_batch()["grid"]
         selected = view.select(variables=indices)
         index = torch.as_tensor(indices if isinstance(indices, list) else indices.tolist())
-        torch.testing.assert_close(selected.data, view.data.index_select(view.layout.variables, index))
-        assert (selected.data.untyped_storage().data_ptr() == view.data.untyped_storage().data_ptr()) is shares_memory
+        torch.testing.assert_close(selected.values, view.values.index_select(view.layout.variables, index))
+        assert (selected.values.untyped_storage().data_ptr() == view.values.untyped_storage().data_ptr()) is shares_memory
 
     @pytest.mark.parametrize("indices", [1, slice(1, 2), [1], torch.tensor([1])])
     def test_select_time_keeps_the_time_axis(self, indices) -> None:
         view = gridded_batch()["grid"]
         selected = view.select(time=indices)
         time_axis = selected.layout.time
-        assert selected.data.shape[time_axis] == 1
-        torch.testing.assert_close(selected.data, view.data.narrow(time_axis, 1, 1))
+        assert selected.values.shape[time_axis] == 1
+        torch.testing.assert_close(selected.values, view.values.narrow(time_axis, 1, 1))
 
     def test_select_time_on_a_tabular_source(self) -> None:
         view = Batch.collate([{"obs": tabular_sample()}])["obs"]
@@ -210,13 +210,13 @@ class TestSourceTransformations:
         selected = view.select(variables=[1])
         assert selected.variables == ["b"]
         assert selected.statistics["mean"].tolist() == [1.0]
-        assert all(sample.shape[selected.layout.variables] == 1 for sample in selected.data)
+        assert all(sample.shape[selected.layout.variables] == 1 for sample in selected.values)
 
     def test_map_data_applies_a_tensor_function_and_keeps_metadata(self) -> None:
         view = gridded_batch()["grid"]
         mapped = view.map_data(lambda t: t.to(torch.float64))
         assert mapped.dtype == torch.float64
-        torch.testing.assert_close(mapped.data, view.data.to(torch.float64))
+        torch.testing.assert_close(mapped.values, view.values.to(torch.float64))
         assert (mapped.name, mapped.variables, mapped.layout) == (view.name, view.variables, view.layout)
         assert mapped.coordinates is view.coordinates
         # the receiver is not mutated
@@ -224,14 +224,14 @@ class TestSourceTransformations:
 
     def test_map_data_does_not_clone_the_data(self) -> None:
         view = gridded_batch()["grid"]
-        assert view.map_data(lambda t: t).data is view.data
+        assert view.map_data(lambda t: t).values is view.values
 
     def test_map_data_applies_per_sample_on_a_tabular_source(self) -> None:
         view = Batch.collate([{"obs": tabular_sample(n_points=4)}, {"obs": tabular_sample(n_points=6)}])["obs"]
         seen = []
         mapped = view.map_data(lambda t: seen.append(tuple(t.shape)) or t * 2)
         assert seen == [(1, 4, 2), (1, 6, 2)]
-        assert all(torch.equal(new, old * 2) for new, old in zip(mapped.data, view.data))
+        assert all(torch.equal(new, old * 2) for new, old in zip(mapped.values, view.values))
         assert mapped.timedeltas is view.timedeltas
         assert mapped.boundaries is view.boundaries
 
@@ -280,7 +280,7 @@ class TestCollate:
     def test_sample_rejects_a_layout_of_the_other_kind(self, sample_cls, layout, extra) -> None:
         with pytest.raises(ValueError, match="requires a layout"):
             sample_cls(
-                data=torch.zeros(1, 4, 2), variables=["a", "b"], layout=layout, coordinates=torch.zeros(4, 2), **extra
+                values=torch.zeros(1, 4, 2), variables=["a", "b"], layout=layout, coordinates=torch.zeros(4, 2), **extra
             )
 
 
@@ -295,7 +295,7 @@ class TestAllgather:
         view = gridded_batch()["grid"].clone(shard_sizes=[4])
         gathered = view.allgather(None)
         assert gathered.shard_sizes is None
-        assert gathered.data is view.data
+        assert gathered.values is view.values
 
     def test_single_rank_gridded_source_must_hold_its_shard_size(self) -> None:
         # Stale shard sizes, e.g. of another grid: the source holds 4 points, its sizes say 3.
@@ -319,7 +319,7 @@ class TestAllgather:
         view = Batch.collate([{"obs": sample}])["obs"]
         gathered = view.allgather(None)
         assert gathered.shard_sizes is None
-        assert all(torch.equal(new, old) for new, old in zip(gathered.data, view.data, strict=True))
+        assert all(torch.equal(new, old) for new, old in zip(gathered.values, view.values, strict=True))
 
     def test_single_rank_observations_must_hold_their_shard_sizes(self) -> None:
         # The second window holds 2 observations, its sizes say 3.

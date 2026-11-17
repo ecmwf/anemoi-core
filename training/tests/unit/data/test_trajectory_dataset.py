@@ -151,7 +151,7 @@ class TestTrajectoryDataReaderGetSample:
         reader = _make_reader(variables=3, ensemble=2, gridpoints=10)
         sample = reader.get_sample(1, positions)
         assert isinstance(sample, GriddedSample)
-        assert sample.data.shape == (num_steps, 2, 10, 3)  # (steps, ensemble, gridpoints, variables)
+        assert sample.values.shape == (num_steps, 2, 10, 3)  # (steps, ensemble, gridpoints, variables)
         assert sample.variables == reader.variables
         assert sample.grid_size == 10
 
@@ -160,7 +160,7 @@ class TestTrajectoryDataReaderGetSample:
         sample = reader.get_sample(2, [0, 1, 2])
         raw = reader.data[2][:, :, [0, 1, 2], :]  # (vars, ens, steps, grid)
         expected = np.transpose(raw, (2, 1, 3, 0))  # (steps, ens, grid, vars)
-        np.testing.assert_allclose(sample.data.numpy(), expected, rtol=1e-6)
+        np.testing.assert_allclose(sample.values.numpy(), expected, rtol=1e-6)
 
     def test_get_sample_coordinates_in_radians(self) -> None:
         reader = _make_reader(gridpoints=10)
@@ -170,7 +170,7 @@ class TestTrajectoryDataReaderGetSample:
 
     def test_get_sample_full_grid_without_reader_group(self) -> None:
         sample = _make_reader(gridpoints=10).get_sample(0, [0, 1])
-        assert sample.data.shape[2] == 10
+        assert sample.values.shape[2] == 10
         assert sample.shard_sizes is None
 
     def test_get_sample_with_grid_shard(self) -> None:
@@ -181,14 +181,14 @@ class TestTrajectoryDataReaderGetSample:
         sample = reader.get_sample(0, [0, 1, 2])
 
         assert sample.shard_sizes == [5, 5]
-        assert sample.data.shape == (3, 2, 5, 3)
-        torch.testing.assert_close(sample.data, full.data[:, :, 5:])
+        assert sample.values.shape == (3, 2, 5, 3)
+        torch.testing.assert_close(sample.values, full.values[:, :, 5:])
         torch.testing.assert_close(sample.coordinates, full.coordinates[5:])
 
     def test_get_sample_without_grid_shard_keeps_the_full_grid(self) -> None:
         reader = _make_reader(variables=3, ensemble=2, steps=24, gridpoints=10)
         sample = reader.get_sample(0, [0, 1])
-        assert sample.data.shape == (2, 2, 10, 3)
+        assert sample.values.shape == (2, 2, 10, 3)
 
     @pytest.mark.parametrize(
         ("positions", "step_slice", "steps"),

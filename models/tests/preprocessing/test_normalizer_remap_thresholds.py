@@ -53,7 +53,7 @@ def _data_indices() -> IndexCollection:
 def _view(payload: torch.Tensor) -> GriddedSource:
     return GriddedSource(
         name="data",
-        data=payload.reshape(1, 1, 1, len(NAMES)).clone(),
+        values=payload.reshape(1, 1, 1, len(NAMES)).clone(),
         variables=list(NAMES),
         statistics={key: value.copy() for key, value in STATISTICS.items()},
         coordinates=torch.zeros(1, 2),

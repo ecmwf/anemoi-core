@@ -11,7 +11,7 @@
 
 Both builders go through :func:`~anemoi.models.data.sample.create_batched_struct`, the
 path the readers and :meth:`AnemoiModelInterface.predict_step` take, so the samples are
-validated and their coordinates converted from degrees. Pass ``data=None`` (plus the
+validated and their coordinates converted from degrees. Pass ``values=None`` (plus the
 template sizes) to build a template instead.
 
 ``n_points`` and ``n_variables`` shape the defaults. Any other keyword is passed to
@@ -67,7 +67,7 @@ def gridded_sample(
     """Build a gridded sample of shape ``(n_times, 1, n_points, n_variables)``, data ``0, 1, ...``."""
     kwargs = {
         "data_type": "gridded",
-        "data": torch.arange(n_times * n_points * n_variables, dtype=torch.float32).reshape(
+        "values": torch.arange(n_times * n_points * n_variables, dtype=torch.float32).reshape(
             n_times, 1, n_points, n_variables
         ),
         "variables": variable_names(n_variables),
@@ -93,7 +93,7 @@ def tabular_sample(
     split = (n_points + 1) // 2
     kwargs = {
         "data_type": "tabular",
-        "data": torch.arange(n_points * n_variables, dtype=torch.float32).reshape(1, n_points, n_variables),
+        "values": torch.arange(n_points * n_variables, dtype=torch.float32).reshape(1, n_points, n_variables),
         "variables": variable_names(n_variables),
         "layout": TABULAR_AXES,
         "latitudes": latitudes(n_points),

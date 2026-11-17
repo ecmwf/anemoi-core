@@ -55,7 +55,7 @@ def _record_training_batches(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int,
 
     def seed_and_record(self: BaseTrainingModule, batch: Batch, batch_idx: int) -> None:
         seed_batch(self, batch, batch_idx)
-        data = next(iter(batch.values())).data
+        data = next(iter(batch.values())).values
         records.append((self.current_epoch, batch_idx, _digest(data), _digest(torch.get_rng_state())))
 
     monkeypatch.setattr(BaseTrainingModule, "on_train_batch_start", seed_and_record)

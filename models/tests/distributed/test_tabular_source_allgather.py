@@ -56,7 +56,7 @@ def _full_source(window_sizes: list[list[int]], n_members: int | None, device: t
         layout=TensorLayout(grid=0, variables=1)
         if n_members is None
         else TensorLayout(ensemble=0, grid=1, variables=2),
-        data=data,
+        values=data,
         coordinates=coordinates,
         timedeltas=timedeltas,
         boundaries=boundaries,
@@ -78,13 +78,13 @@ def _rank_view(full: TabularSource, rank: int, world_size: int) -> TabularSource
             window_sizes.append(sizes)
             offset += end - start
         index = torch.cat([torch.arange(s.start, s.stop) for s in local_slices]).to(full.device)
-        data.append(full.data[sample_idx].index_select(grid_axis, index))
+        data.append(full.values[sample_idx].index_select(grid_axis, index))
         coordinates.append(full.coordinates[sample_idx][index])
         timedeltas.append(full.timedeltas[sample_idx][index])
         boundaries.append(tuple(local_boundaries))
         shard_sizes.append(window_sizes)
     return full.clone(
-        data=data, coordinates=coordinates, timedeltas=timedeltas, boundaries=boundaries, shard_sizes=shard_sizes
+        values=data, coordinates=coordinates, timedeltas=timedeltas, boundaries=boundaries, shard_sizes=shard_sizes
     )
 
 

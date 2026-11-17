@@ -29,14 +29,14 @@ class _Model:
     def _forward_transport_network(self, _x, scaled_noised, _c_noise, **_kwargs):
         self.scaled_noised = scaled_noised
         return scaled_noised.with_data(
-            {"obs": [torch.zeros_like(sample) for sample in scaled_noised["obs"].data]},
+            {"obs": [torch.zeros_like(sample) for sample in scaled_noised["obs"].values]},
         )
 
 
 def test_edm_model_preconditioning_handles_sparse_targets() -> None:
     model = _Model()
     noised = build_batch(
-        data={"obs": [torch.ones(2, 1), torch.full((3, 1), 2.0)]},
+        values={"obs": [torch.ones(2, 1), torch.full((3, 1), 2.0)]},
         coordinates={"obs": [torch.zeros(2, 2), torch.zeros(3, 2)]},
         timedeltas={"obs": [torch.zeros(2), torch.zeros(3)]},
         boundaries={"obs": [(slice(0, 2),), (slice(0, 3),)]},
@@ -53,10 +53,10 @@ def test_edm_model_preconditioning_handles_sparse_targets() -> None:
         sigma,
     )
 
-    torch.testing.assert_close(model.scaled_noised["obs"].data[0], torch.full((2, 1), 1.0 / math.sqrt(2.0)))
-    torch.testing.assert_close(model.scaled_noised["obs"].data[1], torch.full((3, 1), math.sqrt(2.0)))
-    torch.testing.assert_close(out["obs"].data[0], torch.full((2, 1), 0.5))
-    torch.testing.assert_close(out["obs"].data[1], torch.full((3, 1), 1.0))
+    torch.testing.assert_close(model.scaled_noised["obs"].values[0], torch.full((2, 1), 1.0 / math.sqrt(2.0)))
+    torch.testing.assert_close(model.scaled_noised["obs"].values[1], torch.full((3, 1), math.sqrt(2.0)))
+    torch.testing.assert_close(out["obs"].values[0], torch.full((2, 1), 0.5))
+    torch.testing.assert_close(out["obs"].values[1], torch.full((3, 1), 1.0))
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda", "meta"])
@@ -175,7 +175,7 @@ def test_model_objectives_survive_pickling(objective: objectives.TransportModelO
     assert type(restored) is type(objective)
     assert vars(restored) == vars(objective)
     noisy = build_batch(
-        data={"data": torch.linspace(-1.0, 1.0, 6).reshape(1, 1, 1, 3, 2)},
+        values={"data": torch.linspace(-1.0, 1.0, 6).reshape(1, 1, 1, 3, 2)},
         coordinates={"data": torch.zeros(3, 2)},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": ["a", "b"]},
@@ -188,4 +188,4 @@ def test_model_objectives_survive_pickling(objective: objectives.TransportModelO
         return noisy_target.map_data(lambda data: 2.0 * data + 1.0)
 
     expected = objective.forward(network, noisy, noisy, condition)
-    torch.testing.assert_close(restored.forward(network, noisy, noisy, condition)["data"].data, expected["data"].data)
+    torch.testing.assert_close(restored.forward(network, noisy, noisy, condition)["data"].values, expected["data"].values)

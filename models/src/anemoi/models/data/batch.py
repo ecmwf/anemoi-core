@@ -45,7 +45,7 @@ class Batch:
 
     A batch is one mapping from dataset name to
     :class:`~anemoi.models.data.sources.Source`. Each source owns its own
-    payload (data, coordinates, timedeltas, shard sizes, boundaries) together with
+    payload (values, coordinates, timedeltas, shard sizes, boundaries) together with
     the metadata that describes it (name, variables, layout, statistics), so there
     is a single place per dataset where that information lives.
 
@@ -65,7 +65,7 @@ class Batch:
 
     Every transformation returns a new batch; the receiver is never mutated.
 
-    Read a dataset's payload through its source: ``batch["era5"].data``,
+    Read a dataset's payload through its source: ``batch["era5"].values``,
     ``batch["era5"].layout``, ``batch["era5"].variables``.
     """
 
@@ -251,7 +251,7 @@ class Batch:
             msg = f"Replacement data contains unknown dataset names: {sorted(unknown_keys)}."
             raise ValueError(msg)
 
-        return Batch(sources={name: self.sources[name].clone(data=payload) for name, payload in new_data.items()})
+        return Batch(sources={name: self.sources[name].clone(values=payload) for name, payload in new_data.items()})
 
     def map_data(self, fn: Callable[[torch.Tensor], torch.Tensor]) -> "Batch":
         """Return a new batch with ``fn`` applied to every dataset's payload (see :meth:`Source.map_data`)."""

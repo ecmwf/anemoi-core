@@ -21,7 +21,7 @@ def _sparse_view(data: list[torch.Tensor]) -> Source:
     layout = TensorLayout(grid=0, variables=1)
     return TabularSource(
         name="obs",
-        data=data,
+        values=data,
         variables=["a", "b"],
         statistics={},
         coordinates=[torch.zeros(sample.shape[0], 2) for sample in data],
@@ -48,7 +48,7 @@ def test_mse_applies_gridded_weights() -> None:
     def view(data: torch.Tensor) -> Source:
         return GriddedSource(
             name="data",
-            data=data,
+            values=data,
             variables=["a", "b"],
             statistics={},
             layout=layout,

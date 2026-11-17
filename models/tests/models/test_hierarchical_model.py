@@ -351,7 +351,7 @@ def _gridded_payload(n_step: int, variables: list[str], seed: int) -> dict:
     generator = torch.Generator().manual_seed(seed)
     return {
         "data_type": "gridded",
-        "data": torch.randn(n_step, 1, len(lats), len(variables), generator=generator),
+        "values": torch.randn(n_step, 1, len(lats), len(variables), generator=generator),
         "variables": list(variables),
         "latitudes": lats,
         "longitudes": lons,
@@ -371,7 +371,7 @@ def _tabular_payload(nodes_per_step: list[int], variables: list[str], seed: int)
     generator = torch.Generator().manual_seed(seed)
     return {
         "data_type": "tabular",
-        "data": torch.randn(1, total, len(variables), generator=generator),
+        "values": torch.randn(1, total, len(variables), generator=generator),
         "variables": list(variables),
         "latitudes": rng.uniform(-70.0, 70.0, total).astype(np.float32),
         "longitudes": rng.uniform(0.0, 350.0, total).astype(np.float32),
@@ -395,7 +395,7 @@ def _sample(model_interface: AnemoiModelInterface, name: str, is_static: bool, s
 
 
 def _template(payload: dict, variables: list[str]) -> dict:
-    geometry = {key: value for key, value in payload.items() if key != "data"}
+    geometry = {key: value for key, value in payload.items() if key != "values"}
     geometry["variables"] = list(variables)
     return geometry
 
@@ -593,15 +593,15 @@ def test_forward_returns_finite_output_on_the_target_geometry(fixture, datasets,
     for name, is_static in datasets.items():
         source = out[name]
         assert source.variables == _output_names(model_interface, name)
-        assert torch.all(torch.isfinite(source.data if is_static else torch.cat(source.data, dim=-2)))
+        assert torch.all(torch.isfinite(source.values if is_static else torch.cat(source.values, dim=-2)))
         if is_static:
             assert isinstance(source, GriddedSource)
             # (batch, time, ensemble, grid, variables)
-            assert source.data.shape == (batch_size, N_STEP_OUTPUT, 1, N_LAT * N_LON, len(source.variables))
+            assert source.values.shape == (batch_size, N_STEP_OUTPUT, 1, N_LAT * N_LON, len(source.variables))
         else:
             assert isinstance(source, TabularSource)
-            assert len(source.data) == batch_size
-            for sample_data in source.data:
+            assert len(source.values) == batch_size
+            for sample_data in source.values:
                 # (ensemble, nodes, variables): the four output nodes of the template
                 assert sample_data.shape == (1, 4, len(source.variables))
 
@@ -624,8 +624,8 @@ def test_forward_samples_in_a_batch_are_independent(two_level_interface) -> None
     single_batch, single_forcings, single_templates = forward_inputs(two_level_interface, GRIDDED_ONLY, batch_size=1)
 
     with torch.no_grad():
-        pair = two_level_interface.model(batch, forcings, templates)[GRIDDED].data
-        single = two_level_interface.model(single_batch, single_forcings, single_templates)[GRIDDED].data
+        pair = two_level_interface.model(batch, forcings, templates)[GRIDDED].values
+        single = two_level_interface.model(single_batch, single_forcings, single_templates)[GRIDDED].values
 
     torch.testing.assert_close(pair[:1], single, rtol=1e-5, atol=1e-5)
 
@@ -634,7 +634,7 @@ def test_forward_rejects_mixed_ensemble_sizes(three_level_interface) -> None:
     """All datasets go through one latent, so they must agree on the number of members."""
     batch, forcings, templates = forward_inputs(three_level_interface, MIXED, batch_size=1)
     gridded = batch[GRIDDED]
-    two_members = gridded.clone(data=torch.cat([gridded.data, gridded.data], dim=gridded.layout.axis("ensemble")))
+    two_members = gridded.clone(values=torch.cat([gridded.values, gridded.values], dim=gridded.layout.axis("ensemble")))
     batch = batch.replace(GRIDDED, two_members)
 
     with pytest.raises(ValueError, match="same ensemble size"):
@@ -652,7 +652,7 @@ def test_forward_skips_a_dataset_absent_from_the_batch(three_level_interface) ->
         out = three_level_interface.model(gridded_only, forcings, {GRIDDED: templates[GRIDDED]})
 
     assert set(out.keys()) == {GRIDDED}
-    assert torch.all(torch.isfinite(out[GRIDDED].data))
+    assert torch.all(torch.isfinite(out[GRIDDED].values))
 
 
 def test_input_only_and_output_only_datasets() -> None:
@@ -673,8 +673,8 @@ def test_input_only_and_output_only_datasets() -> None:
 
     assert set(out.keys()) == {GRIDDED, "out"}
     for name in (GRIDDED, "out"):
-        assert out[name].data.shape[-2] == N_LAT * N_LON
-        assert torch.all(torch.isfinite(out[name].data))
+        assert out[name].values.shape[-2] == N_LAT * N_LON
+        assert torch.all(torch.isfinite(out[name].values))
 
 
 @pytest.mark.parametrize(
@@ -691,7 +691,7 @@ def test_backward_reaches_every_trainable_parameter(levels, datasets, level_proc
 
     out = model_interface.model(batch, forcings, templates)
     loss = sum(
-        (source.data if isinstance(source, GriddedSource) else torch.cat(source.data, dim=-2)).square().mean()
+        (source.values if isinstance(source, GriddedSource) else torch.cat(source.values, dim=-2)).square().mean()
         for source in out.values()
     )
     loss.backward()
@@ -758,8 +758,8 @@ def test_forward_with_gnn_level_mappers(
     with torch.no_grad():
         out = model_interface.model(batch, forcings, templates)
 
-    assert out[GRIDDED].data.shape[-2] == N_LAT * N_LON
-    assert torch.all(torch.isfinite(out[GRIDDED].data))
+    assert out[GRIDDED].values.shape[-2] == N_LAT * N_LON
+    assert torch.all(torch.isfinite(out[GRIDDED].values))
 
 
 def test_backward_reaches_the_updated_source_latent_of_gnn_level_mappers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -772,7 +772,7 @@ def test_backward_reaches_the_updated_source_latent_of_gnn_level_mappers(monkeyp
     batch, forcings, templates = forward_inputs(model_interface, GRIDDED_ONLY, batch_size=2)
 
     out = model_interface.model(batch, forcings, templates)
-    out[GRIDDED].data.square().mean().backward()
+    out[GRIDDED].values.square().mean().backward()
 
     upscale = dict(model_interface.model.upscale.named_parameters())
     assert upscale
@@ -799,10 +799,10 @@ def test_predict_step_round_trip(three_level_interface) -> None:
     assert set(out) == set(MIXED)
     gridded = out[GRIDDED]
     assert gridded["variables"] == _output_names(three_level_interface, GRIDDED)
-    assert gridded["data"].shape == (N_STEP_OUTPUT, 1, N_LAT * N_LON, len(gridded["variables"]))
-    assert not gridded["data"].requires_grad
-    assert torch.all(torch.isfinite(gridded["data"]))
+    assert gridded["values"].shape == (N_STEP_OUTPUT, 1, N_LAT * N_LON, len(gridded["variables"]))
+    assert not gridded["values"].requires_grad
+    assert torch.all(torch.isfinite(gridded["values"]))
 
     tabular = out[TABULAR]
-    assert tabular["data"].shape == (1, 4, len(tabular["variables"]))
-    assert torch.all(torch.isfinite(tabular["data"]))
+    assert tabular["values"].shape == (1, 4, len(tabular["variables"]))
+    assert torch.all(torch.isfinite(tabular["values"]))

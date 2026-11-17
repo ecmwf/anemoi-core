@@ -76,7 +76,7 @@ def _obs(
         variables=[chr(ord("a") + i) for i in range(n_variables)],
         layout=LAYOUT if n_members is None else ENSEMBLE_LAYOUT,
         statistics={"mean": torch.arange(n_variables, dtype=torch.float32)},
-        data=data,
+        values=data,
         coordinates=coordinates,
         timedeltas=timedeltas,
         boundaries=boundaries,
@@ -87,7 +87,7 @@ def _obs(
 def _assert_same_payload(actual: TabularSource, expected: TabularSource) -> None:
     """Assert both sources hold the same samples, points, windows and shard sizes."""
     assert actual.batch_size == expected.batch_size
-    for field_name in ("data", "coordinates", "timedeltas"):
+    for field_name in ("values", "coordinates", "timedeltas"):
         for sample_idx, (got, want) in enumerate(zip(getattr(actual, field_name), getattr(expected, field_name))):
             assert torch.equal(got, want), f"{field_name} of sample {sample_idx} differs"
     assert list(actual.boundaries) == list(expected.boundaries)
@@ -118,8 +118,8 @@ class TestPairwise:
         for sample_idx, (pred_sample, target_sample, scale, layout, statistics, name_to_index, shared) in enumerate(
             calls
         ):
-            assert pred_sample is pred.data[sample_idx]
-            assert target_sample is target.data[sample_idx]
+            assert pred_sample is pred.values[sample_idx]
+            assert target_sample is target.values[sample_idx]
             assert scale == 2.0
             assert layout == LAYOUT
             assert statistics is pred.statistics
@@ -155,7 +155,7 @@ class TestPairwise:
 
         pred.pairwise(target, _sum_difference).backward()
 
-        for sample in (pred.data[0], pred.data[2]):
+        for sample in (pred.values[0], pred.values[2]):
             torch.testing.assert_close(sample.grad, torch.full_like(sample, 0.5))
 
     def test_per_sample_kwargs_reach_their_own_sample(self) -> None:
@@ -200,7 +200,7 @@ class TestPairwise:
                     name="era5",
                     variables=["a", "b"],
                     layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
-                    data=torch.zeros(1, 1, 1, 2, 2),
+                    values=torch.zeros(1, 1, 1, 2, 2),
                     coordinates=torch.zeros(2, 2),
                 ),
                 {},
@@ -242,7 +242,7 @@ class TestPairwise:
 
     def test_rejects_a_source_without_samples(self) -> None:
         empty = TabularSource(
-            name="obs", variables=["a"], layout=LAYOUT, data=[], coordinates=[], timedeltas=[], boundaries=[]
+            name="obs", variables=["a"], layout=LAYOUT, values=[], coordinates=[], timedeltas=[], boundaries=[]
         )
         with pytest.raises(ValueError, match="empty sparse source view"):
             empty.pairwise(empty, _sum_difference)
@@ -271,7 +271,7 @@ class TestConcatTime:
             (slice(0, 1), slice(1, 1), slice(1, 3)),
         ]
         for sample_idx in range(2):
-            assert torch.equal(joined.data[sample_idx], torch.cat([first.data[sample_idx], second.data[sample_idx]]))
+            assert torch.equal(joined.values[sample_idx], torch.cat([first.values[sample_idx], second.values[sample_idx]]))
             assert torch.equal(
                 joined.timedeltas[sample_idx],
                 torch.cat([first.timedeltas[sample_idx], second.timedeltas[sample_idx]]),
@@ -302,7 +302,7 @@ class TestConcatTime:
         rejoined = source.select_time([0]).concat_time(source.select_time([1]))
 
         _assert_same_payload(rejoined, source)
-        assert rejoined.data[0].shape == (2, 5, 2)
+        assert rejoined.values[0].shape == (2, 5, 2)
 
     def test_extends_per_window_shard_sizes(self) -> None:
         # One rank's view of a source split over two ranks: shard sizes are per sample and window.
@@ -335,7 +335,7 @@ class TestConcatTime:
             name="era5",
             variables=["a", "b"],
             layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
-            data=torch.zeros(1, 1, 1, 2, 2),
+            values=torch.zeros(1, 1, 1, 2, 2),
             coordinates=torch.zeros(2, 2),
         )
         with pytest.raises(TypeError, match="Cannot append GriddedSource windows"):
@@ -357,21 +357,21 @@ class TestConditionShape:
 
         scaled = source.map_with_condition(lambda data, sigma: data * sigma, condition)
 
-        for sample_idx, sample in enumerate(source.data):
+        for sample_idx, sample in enumerate(source.values):
             for member in range(2):
                 factor = condition[sample_idx, 0, member, 0, 0]
-                torch.testing.assert_close(scaled.data[sample_idx][member], sample[member] * factor)
+                torch.testing.assert_close(scaled.values[sample_idx][member], sample[member] * factor)
 
     def test_rejects_a_source_without_samples(self) -> None:
         empty = TabularSource(
-            name="obs", variables=["a"], layout=LAYOUT, data=[], coordinates=[], timedeltas=[], boundaries=[]
+            name="obs", variables=["a"], layout=LAYOUT, values=[], coordinates=[], timedeltas=[], boundaries=[]
         )
         with pytest.raises(ValueError, match="empty sparse data list"):
             _ = empty.condition_shape
 
     def test_rejects_inconsistent_ensemble_sizes(self) -> None:
         source = _obs([[1], [1]], n_members=2)
-        source = source.clone(data=[source.data[0], source.data[1].repeat(2, 1, 1)])
+        source = source.clone(values=[source.values[0], source.values[1].repeat(2, 1, 1)])
         with pytest.raises(ValueError, match="Inconsistent ensemble sizes"):
             _ = source.condition_shape
 

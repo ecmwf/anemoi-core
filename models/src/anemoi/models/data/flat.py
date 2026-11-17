@@ -28,10 +28,10 @@ class FlatSource:
 
     Parameters
     ----------
-    data : torch.Tensor
+    values : torch.Tensor
         ``(nodes, features)``.
     coordinates : torch.Tensor
-        ``(nodes, 2)``, repeated to line up row-for-row with :attr:`data`.
+        ``(nodes, 2)``, repeated to line up row-for-row with :attr:`values`.
     device : torch.device or None
         Device the tensors live on.
     shard_sizes : ShardSizes
@@ -43,7 +43,7 @@ class FlatSource:
         ``(nodes,)`` per-node time offsets, for sources that carry them.
     """
 
-    data: torch.Tensor | None
+    values: torch.Tensor | None
     coordinates: torch.Tensor
     device: torch.device | None
     shard_sizes: ShardSizes
@@ -51,8 +51,8 @@ class FlatSource:
     timedeltas: torch.Tensor | None = None
 
     def __post_init__(self):
-        if self.data is not None and self.data.ndim != 2:
-            msg = f"{self.__class__} data must be 2-dimensional, got {self.data.ndim} dimensions."
+        if self.values is not None and self.values.ndim != 2:
+            msg = f"{self.__class__} values must be 2-dimensional, got {self.values.ndim} dimensions."
             raise ValueError(msg)
 
         if self.coordinates.ndim != 2:
@@ -67,10 +67,10 @@ class FlatSource:
             )
             raise ValueError(msg)
 
-        if self.data is not None and self.data.device != self.device:
+        if self.values is not None and self.values.device != self.device:
             msg = (
-                f"{self.__class__.__name__} data must be on the same device as the source, "
-                f"got {self.data.device} and {self.device}."
+                f"{self.__class__.__name__} values must be on the same device as the source, "
+                f"got {self.values.device} and {self.device}."
             )
             raise ValueError(msg)
 
@@ -84,7 +84,7 @@ class FlatSource:
     def to(self, device: torch.device) -> "FlatSource":
         """Return a copy of this view with all tensors moved to the given device."""
         return FlatSource(
-            data=None if self.data is None else self.data.to(device),
+            values=None if self.values is None else self.values.to(device),
             coordinates=self.coordinates.to(device),
             timedeltas=None if self.timedeltas is None else self.timedeltas.to(device),
             device=device,

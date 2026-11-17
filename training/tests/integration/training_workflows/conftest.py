@@ -94,7 +94,7 @@ def build_global_config(
 
     imputer_modifications = OmegaConf.load(CONFIG_DIR / "imputer_modifications.yaml")
 
-    OmegaConf.set_struct(template.data, False)
+    OmegaConf.set_struct(template.values, False)
     cfg = OmegaConf.merge(
         template,
         testing_modifications,
@@ -541,7 +541,7 @@ def imerg_target_config(
 
     tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
     use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
-    OmegaConf.set_struct(template.data, False)  # allow new keys under data (e.g. target)
+    OmegaConf.set_struct(template.values, False)  # allow new keys under data (e.g. target)
     OmegaConf.set_struct(
         template.training.training_loss.datasets.data,
         False,
