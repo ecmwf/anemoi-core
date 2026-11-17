@@ -223,9 +223,9 @@ def test_compute_directions_small_latitude_steps():
         # Expected direction is approximately (1, 0)
         expected = torch.tensor([[1.0, 0.0]], dtype=torch.float32)
 
-        assert torch.allclose(
-            directions, expected, atol=0.05
-        ), f"Step {i} to {i+1}: Expected ~{expected}, got {directions}"
+        assert torch.allclose(directions, expected, atol=0.05), (
+            f"Step {i} to {i + 1}: Expected ~{expected}, got {directions}"
+        )
 
 
 def test_compute_directions_symmetry():

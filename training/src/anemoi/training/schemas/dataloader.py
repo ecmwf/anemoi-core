@@ -133,7 +133,6 @@ class DataLoadingPolicySchema(GenericSchema):
 
 
 class DataLoaderSchema(PydanticBaseModel):
-
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     prefetch_factor: int = Field(example=2, ge=0)
