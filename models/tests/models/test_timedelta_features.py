@@ -86,7 +86,7 @@ def test_forecaster_assembles_timedelta_features_for_both_mappers() -> None:
     }
     view = TabularSource(
         name="obs",
-        data=[torch.ones(3, 1)],
+        values=[torch.ones(3, 1)],
         variables=["value"],
         statistics={},
         coordinates=[torch.zeros(3, 2)],
@@ -123,7 +123,7 @@ def test_forecaster_casts_configured_node_dtype_to_mapper_input_dtype() -> None:
     model.node_attributes = {}
     view = TabularSource(
         name="obs",
-        data=[torch.ones(2, 1, dtype=torch.float32)],
+        values=[torch.ones(2, 1, dtype=torch.float32)],
         variables=["value"],
         statistics={},
         coordinates=[torch.zeros(2, 2)],
@@ -148,7 +148,7 @@ def test_forecaster_reuses_encoder_output_without_duplicate_node_features() -> N
     }
     view = TabularSource(
         name="obs",
-        data=[torch.ones(2, 1)],
+        values=[torch.ones(2, 1)],
         variables=["value"],
         statistics={},
         coordinates=[torch.zeros(2, 2)],

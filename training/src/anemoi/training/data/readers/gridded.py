@@ -130,7 +130,7 @@ class GriddedDataReader(BaseAnemoiReader):
         data = self.get_data(sequence, positions)
         return create_batched_struct(
             data_type=self.data_type,
-            data=data,
+            values=data,
             variables=self.variables,
             layout=self.layout,
             statistics=self.statistics,

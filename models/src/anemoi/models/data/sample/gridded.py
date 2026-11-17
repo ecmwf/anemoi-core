@@ -32,16 +32,16 @@ class GriddedSample(BaseSample):
     A gridded dataset has a single, fixed grid: the grid belongs to the dataset, not to
     the sample. Every sample a reader returns for that dataset holds the fields at the
     sample's time steps on that same grid, so the samples share their ``coordinates``,
-    ``variables``, ``statistics`` and ``shard_sizes``, differ only in ``data``, and stack
+    ``variables``, ``statistics`` and ``shard_sizes``, differ only in ``values``, and stack
     into the single tensor of one :class:`~anemoi.models.data.sources.GriddedSource`.
     Collation checks that the shared fields agree. Points that change from sample to
     sample are tabular data instead (:class:`TabularSample`).
 
-    ``data`` has a ``time``, an ``ensemble``, a ``grid`` and a ``variables`` axis, e.g.
+    ``values`` has a ``time``, an ``ensemble``, a ``grid`` and a ``variables`` axis, e.g.
     ``(time, ensemble, grid, variables)`` in the order given by :attr:`layout`.
 
     When the grid is sharded across a reader group, each rank's sample holds only its
-    shard: ``data`` and ``coordinates`` cover the rank's points, and ``shard_sizes``
+    shard: ``values`` and ``coordinates`` cover the rank's points, and ``shard_sizes``
     gives every rank's share of the full grid.
 
     Parameters
@@ -76,7 +76,7 @@ class GriddedSample(BaseSample):
     @classmethod
     def _collate_data(cls, samples: Sequence[Self]) -> torch.Tensor:
         """Collate the per-sample data tensors into a single tensor."""
-        return default_collate([s.data for s in samples])
+        return default_collate([s.values for s in samples])
 
     @classmethod
     def from_validated(

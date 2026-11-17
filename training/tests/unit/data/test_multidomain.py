@@ -188,7 +188,7 @@ def test_temporal_downscaler_offsets_are_loaded_from_one_domain(mocker: MockFixt
 
     assert set(sample) == {"data"}
     batch = build_batch(
-        data={"data": sample["data"].unsqueeze(0)},
+        values={"data": sample["data"].unsqueeze(0)},
         coordinates={"data": torch.zeros(1, 2)},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": ["v"]},

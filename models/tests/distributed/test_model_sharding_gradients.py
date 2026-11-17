@@ -381,7 +381,7 @@ def _gridded(variables: list[str], data: torch.Tensor, coordinates: torch.Tensor
         variables=variables,
         layout=GRIDDED_LAYOUT,
         statistics=statistics,
-        data=data,
+        values=data,
         coordinates=coordinates,
     )
 
@@ -397,7 +397,7 @@ def _tabular(variables: list[str], windows: list[torch.Tensor], coordinates: lis
         variables=variables,
         layout=TABULAR_LAYOUT,
         statistics=statistics,
-        data=[torch.cat(windows)[None]],
+        values=[torch.cat(windows)[None]],
         coordinates=[torch.cat(coordinates)],
         timedeltas=[torch.cat([torch.full((window.shape[0],), float(step)) for step, window in enumerate(windows)])],
         boundaries=[tuple(slice(int(start), int(stop)) for start, stop in zip(starts[:-1], starts[1:]))],
@@ -406,7 +406,7 @@ def _tabular(variables: list[str], windows: list[torch.Tensor], coordinates: lis
 
 def _shard_tabular(source: TabularSource, rank: int, world_size: int) -> TabularSource:
     """This rank's share of every time window, as the observation reader splits it."""
-    data, coordinates, timedeltas = source.data[0], source.coordinates[0], source.timedeltas[0]
+    data, coordinates, timedeltas = source.values[0], source.coordinates[0], source.timedeltas[0]
     keep, boundaries, window_sizes, start = [], [], [], 0
     for window in source.boundaries[0]:
         sizes = get_balanced_partition_sizes(window.stop - window.start, world_size)
@@ -417,7 +417,7 @@ def _shard_tabular(source: TabularSource, rank: int, world_size: int) -> Tabular
         start += sizes[rank]
     rows = torch.cat(keep)
     return source.clone(
-        data=[data[:, rows]],
+        values=[data[:, rows]],
         coordinates=[coordinates[rows]],
         timedeltas=[timedeltas[rows]],
         boundaries=[tuple(boundaries)],
@@ -527,7 +527,7 @@ def _forward(model, batches: dict[str, Batch], transport: bool, group) -> Batch:
 
 
 def _flat_output(source) -> torch.Tensor:
-    return source.flatten().data
+    return source.flatten().values
 
 
 def _loss(outputs: Batch, weights: dict[str, torch.Tensor], rows: dict[str, torch.Tensor] | None) -> torch.Tensor:
@@ -695,7 +695,9 @@ def _shifted(batches: dict[str, Batch], shift: float) -> dict[str, Batch]:
     return {
         key: Batch(
             {
-                name: source.clone(data=[d + shift for d in source.data] if source.is_tabular else source.data + shift)
+                name: source.clone(
+                    values=[d + shift for d in source.values] if source.is_tabular else source.values + shift
+                )
                 for name, source in batch.items()
             },
         )
@@ -712,27 +714,27 @@ def _join(first: dict[str, Batch], second: dict[str, Batch], axis: str) -> dict[
             b = second[key][name]
             if axis == "member":  # same nodes, values stacked along the ensemble axis
                 data = (
-                    [torch.cat([x, y], dim=0) for x, y in zip(a.data, b.data)]
+                    [torch.cat([x, y], dim=0) for x, y in zip(a.values, b.values)]
                     if a.is_tabular
-                    else torch.cat([a.data, b.data], dim=2)
+                    else torch.cat([a.values, b.values], dim=2)
                 )
-                sources[name] = a.clone(data=data)
+                sources[name] = a.clone(values=data)
             elif a.is_tabular:
                 sources[name] = a.clone(
-                    data=a.data + b.data,
+                    values=a.values + b.values,
                     coordinates=a.coordinates + b.coordinates,
                     timedeltas=a.timedeltas + b.timedeltas,
                     boundaries=a.boundaries + b.boundaries,
                 )
             else:
-                sources[name] = a.clone(data=torch.cat([a.data, b.data], dim=0))
+                sources[name] = a.clone(values=torch.cat([a.values, b.values], dim=0))
         joined[key] = Batch(sources)
     return joined
 
 
 def _samples(source) -> list[torch.Tensor]:
     """One tensor per sample: ``(members, points, variables)`` or ``(time, members, points, variables)``."""
-    return list(source.data) if source.is_tabular else list(source.data.unbind(0))
+    return list(source.values) if source.is_tabular else list(source.values.unbind(0))
 
 
 def _weighted_run(network, batches: dict[str, Batch], weights: dict[str, list[torch.Tensor]]):

@@ -80,7 +80,7 @@ class TabularSource(Source):
 
     Parameters
     ----------
-    data : list[torch.Tensor]
+    values : list[torch.Tensor]
         One ``(ensemble, grid_i, variables)`` tensor per sample, laid out per ``layout``.
     coordinates : list[torch.Tensor]
         One ``(grid_i, 2)`` tensor of latitudes and longitudes in radians per sample.
@@ -94,13 +94,13 @@ class TabularSource(Source):
         sharding. ``None`` when the source is replicated.
     """
 
-    data: list[torch.Tensor]
+    values: list[torch.Tensor]
     coordinates: list[torch.Tensor]
     timedeltas: list[torch.Tensor]
     boundaries: list[tuple[slice, ...]]
     shard_sizes: list[list[ShardSizes] | None] | None = None
 
-    _PAYLOAD_FIELDS = ("data", "timedeltas")
+    _PAYLOAD_FIELDS = ("values", "timedeltas")
 
     @property
     def coordinates_are_static(self) -> bool:
@@ -130,13 +130,13 @@ class TabularSource(Source):
             )
             raise ValueError(msg)
 
-        if isinstance(self.data, torch.Tensor | np.ndarray):
-            msg = f"{self.__class__.__name__} data must be a list of tensors, not a single tensor."
+        if isinstance(self.values, torch.Tensor | np.ndarray):
+            msg = f"{self.__class__.__name__} values must be a list of tensors, not a single tensor."
             raise TypeError(msg)
 
-        if self.data is not None:
+        if self.values is not None:
             layout = self.layout.normalized(self.layout.ndim)
-            for sample, sample_coords in zip(self.data, self.coordinates, strict=True):
+            for sample, sample_coords in zip(self.values, self.coordinates, strict=True):
                 if tuple(sample_coords.shape) != (sample.shape[self.layout.grid], 2):
                     msg = f"Source {self.name!r} requires one latitude/longitude pair per node."
                     raise ValueError(msg)
@@ -149,7 +149,7 @@ class TabularSource(Source):
                     )
                     raise ValueError(msg)
 
-        if self.data and any(sample.dtype != self.data[0].dtype for sample in self.data):
+        if self.values and any(sample.dtype != self.values[0].dtype for sample in self.values):
             msg = f"{self.__class__.__name__} {self.name!r} requires the same dtype for every sample."
             raise ValueError(msg)
 
@@ -164,7 +164,7 @@ class TabularSource(Source):
     @property
     def batch_size(self) -> int:
         """Number of samples (batch size) in this source."""
-        return len(self.data)
+        return len(self.values)
 
     @property
     def ensemble_size(self) -> int:
@@ -172,7 +172,7 @@ class TabularSource(Source):
         if self.layout.ensemble is None:
             return 1
 
-        ensemble_size = [data.shape[self.layout.ensemble] for data in self.data]
+        ensemble_size = [data.shape[self.layout.ensemble] for data in self.values]
 
         if len(set(ensemble_size)) != 1:
             msg = f"Inconsistent ensemble sizes across batch samples: {ensemble_size}"
@@ -193,12 +193,12 @@ class TabularSource(Source):
     @property
     def device(self) -> torch.device:
         """Device of the source's data tensor."""
-        return self.data[0].device
+        return self.values[0].device
 
     @property
     def dtype(self) -> torch.dtype:
         """Data type of the source's data tensor."""
-        return self.data[0].dtype
+        return self.values[0].dtype
 
     def template(self) -> "TabularTemplate":
         """Return this source without its data (see :class:`TabularTemplate`)."""
@@ -221,8 +221,8 @@ class TabularSource(Source):
 
         ``func`` must not modify its input in place; return a new tensor instead.
         """
-        new_data = [func(t) for t in self.data]
-        return self.clone(data=new_data, **overrides)
+        new_data = [func(t) for t in self.values]
+        return self.clone(values=new_data, **overrides)
 
     def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "TabularSource":
         """Apply a function to this view, returning a new view with the same metadata."""
@@ -233,9 +233,9 @@ class TabularSource(Source):
                 name_to_index=self.name_to_index,
                 **kwargs,
             )
-            for data in self.data
+            for data in self.values
         ]
-        return self.clone(data=new_data)
+        return self.clone(values=new_data)
 
     @property
     def is_tabular(self) -> bool:
@@ -253,7 +253,7 @@ class TabularSource(Source):
 
     @property
     def condition_shape(self) -> tuple[int, int, int, int, int]:
-        if not self.data:
+        if not self.values:
             msg = "Cannot infer condition shape from an empty sparse data list."
             raise ValueError(msg)
         return self.batch_size, 1, self.ensemble_size, 1, 1
@@ -261,22 +261,22 @@ class TabularSource(Source):
     def _check_same_samples(self, others: Sequence[Source]) -> None:
         self._check_same_structure(others)
         for other in others:
-            if len(other.data) != len(self.data):
+            if len(other.values) != len(self.values):
                 msg = (
                     "Sparse transport data lists must have the same length, "
-                    f"got {len(self.data)} and {len(other.data)}."
+                    f"got {len(self.values)} and {len(other.values)}."
                 )
                 raise ValueError(msg)
 
     def _check_condition_batch(self, condition: torch.Tensor) -> None:
-        if condition.shape[0] != len(self.data):
-            msg = f"Condition batch size {condition.shape[0]} does not match sparse data length {len(self.data)}."
+        if condition.shape[0] != len(self.values):
+            msg = f"Condition batch size {condition.shape[0]} does not match sparse data length {len(self.values)}."
             raise ValueError(msg)
 
     def zip_map_data(self, fn: Callable[..., torch.Tensor], *others: Source) -> "TabularSource":
         self._check_same_samples(others)
-        samples = zip(self.data, *(other.data for other in others), strict=True)
-        return self.clone(data=[fn(*sample_group) for sample_group in samples])
+        samples = zip(self.values, *(other.values for other in others), strict=True)
+        return self.clone(values=[fn(*sample_group) for sample_group in samples])
 
     def map_with_condition(
         self,
@@ -286,9 +286,9 @@ class TabularSource(Source):
     ) -> "TabularSource":
         self._check_same_samples(others)
         self._check_condition_batch(condition)
-        samples = zip(self.data, *(other.data for other in others), strict=True)
+        samples = zip(self.values, *(other.values for other in others), strict=True)
         return self.clone(
-            data=[
+            values=[
                 fn(*sample_group, _sample_condition(sample_group[0], condition, index))
                 for index, sample_group in enumerate(samples)
             ],
@@ -296,7 +296,7 @@ class TabularSource(Source):
 
     def condition_per_sample(self, condition: torch.Tensor) -> list[torch.Tensor]:
         self._check_condition_batch(condition)
-        return [_sample_condition(sample, condition, index) for index, sample in enumerate(self.data)]
+        return [_sample_condition(sample, condition, index) for index, sample in enumerate(self.values)]
 
     def pairwise(self, other: Source, func: Callable[..., torch.Tensor], *args, **kwargs) -> torch.Tensor:
         if not isinstance(other, TabularSource):
@@ -307,8 +307,8 @@ class TabularSource(Source):
             msg = f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}."
             raise ValueError(msg)
 
-        if len(self.data) != len(other.data):
-            msg = f"Both sources must have the same number of samples; got {len(self.data)} and {len(other.data)}."
+        if len(self.values) != len(other.values):
+            msg = f"Both sources must have the same number of samples; got {len(self.values)} and {len(other.values)}."
             raise ValueError(msg)
 
         per_sample_kwargs = kwargs.pop("per_sample_kwargs", None) or {}
@@ -317,13 +317,13 @@ class TabularSource(Source):
             raise ValueError(msg)
 
         for name, values in per_sample_kwargs.items():
-            if len(values) != len(self.data):
-                msg = f"Loss argument {name!r} requires one value per sample ({len(self.data)})."
+            if len(values) != len(self.values):
+                msg = f"Loss argument {name!r} requires one value per sample ({len(self.values)})."
                 raise ValueError(msg)
 
         losses = []
         non_empty = []
-        for i, (pred_sample, target_sample) in enumerate(zip(self.data, other.data)):
+        for i, (pred_sample, target_sample) in enumerate(zip(self.values, other.values)):
             # Every axis but the ensemble one must line up for this to work.
             if self.layout.ensemble is None:
                 pred_shape = tuple(pred_sample.shape)
@@ -371,9 +371,9 @@ class TabularSource(Source):
 
         Each sample's ensemble axis is folded into its point axis, and the samples are joined.
         """
-        folded = [_fold_members(self, sample) for sample in self.data]
+        folded = [_fold_members(self, sample) for sample in self.values]
         data = torch.cat(folded, dim=0) if len(folded) > 1 else folded[0]
-        return replace(self.template().flatten().to(data.device), data=data)
+        return replace(self.template().flatten().to(data.device), values=data)
 
     def shard(self, group: ProcessGroup | None) -> "TabularSource":
         """Not supported: observation grids vary per sample."""
@@ -435,7 +435,7 @@ class TabularSource(Source):
         gathered_timedeltas = []
         gathered_boundaries = []
         for data, coords, timedeltas, boundaries, shard_sizes in zip(
-            self.data, self.coordinates, self.timedeltas, self.boundaries, self.shard_sizes
+            self.values, self.coordinates, self.timedeltas, self.boundaries, self.shard_sizes
         ):
             gathered_data.append([])
             gathered_coords.append([])
@@ -482,7 +482,7 @@ class TabularSource(Source):
             gathered_timedeltas[-1] = torch.cat(gathered_timedeltas[-1], dim=0)
 
         return self.clone(
-            data=gathered_data,
+            values=gathered_data,
             coordinates=gathered_coords,
             timedeltas=gathered_timedeltas,
             boundaries=gathered_boundaries,
@@ -496,8 +496,8 @@ class TabularSource(Source):
         ``variables`` and ``statistics``. Coordinates, timedeltas, boundaries, shard sizes
         and ``metadata`` are unchanged.
         """
-        new_data = [self._index_vars(t, indices) for t in self.data]
-        return self.clone(data=new_data, **self._select_variable_metadata(indices))
+        new_data = [self._index_vars(t, indices) for t in self.values]
+        return self.clone(values=new_data, **self._select_variable_metadata(indices))
 
     def select_time(self, indices: "slice | Sequence[int] | int") -> "TabularSource":
         """Return a new view restricted to the given time indices.
@@ -527,7 +527,7 @@ class TabularSource(Source):
 
         for sample_idx, sample_bounds in enumerate(self.boundaries):
             selected_slices = [sample_bounds[t] for t in idx_list]
-            sample_data = self.data[sample_idx]
+            sample_data = self.values[sample_idx]
             data_pieces = [sample_data.narrow(self.layout.grid, s.start, s.stop - s.start) for s in selected_slices]
             new_data.append(
                 torch.cat(data_pieces, dim=self.layout.grid)
@@ -556,7 +556,7 @@ class TabularSource(Source):
             new_boundaries.append(tuple(compact))
 
         return self.clone(
-            data=new_data,
+            values=new_data,
             coordinates=new_coords,
             timedeltas=new_timedeltas,
             boundaries=new_boundaries,
@@ -600,7 +600,7 @@ class TabularSource(Source):
         new_data, new_coords, new_timedeltas, new_boundaries = [], [], [], []
         new_shard_sizes = None if self.shard_sizes is None else []
         for sample_idx in range(self.batch_size):
-            new_data.append(torch.cat([source.data[sample_idx] for source in sources], dim=grid_axis))
+            new_data.append(torch.cat([source.values[sample_idx] for source in sources], dim=grid_axis))
             new_coords.append(torch.cat([source.coordinates[sample_idx] for source in sources], dim=0))
             new_timedeltas.append(torch.cat([source.timedeltas[sample_idx] for source in sources], dim=0))
 
@@ -616,7 +616,7 @@ class TabularSource(Source):
                 new_shard_sizes.append([sizes for source in sources for sizes in source.shard_sizes[sample_idx]])
 
         return self.clone(
-            data=new_data,
+            values=new_data,
             coordinates=new_coords,
             timedeltas=new_timedeltas,
             boundaries=new_boundaries,
@@ -642,19 +642,19 @@ class TabularSource(Source):
         """
         dims = {getattr(self.layout, name): name for name in self.layout.AXES if getattr(self.layout, name) is not None}
 
-        dtype = self.data[0].dtype
-        device = self.data[0].device
+        dtype = self.values[0].dtype
+        device = self.values[0].device
         tree = Tree(prefix + self.name + " | " + self.__class__.__name__ + f"[{dtype}, {device}]")
-        tree.add(f"Dim 0 (batch): {len(self.data)}")
-        for axis in range(self.data[0].ndim):
+        tree.add(f"Dim 0 (batch): {len(self.values)}")
+        for axis in range(self.values[0].ndim):
             name = dims[axis]
             if name == "grid":
                 tree.add(f"Dim {axis + 1} ({name}): {self.time_size} time slices")
-                for i, sample in enumerate(self.data):
+                for i, sample in enumerate(self.values):
                     time_slice_lengths = [str(s.stop - s.start) for s in self.boundaries[i]]
                     tree.add(f"\tSample {i + 1}: {sample.shape[axis]} <- {' + '.join(time_slice_lengths)}")
             else:
-                tree.add(f"Dim {axis + 1} ({name}): {self.data[0].shape[axis]}")
+                tree.add(f"Dim {axis + 1} ({name}): {self.values[0].shape[axis]}")
 
         return tree
 
@@ -731,7 +731,7 @@ class TabularTemplate(BaseTemplate):
         flat_shard_sizes, batch_sizes = self.flat_sizes()
 
         return FlatSource(
-            data=None,
+            values=None,
             coordinates=coordinates,
             timedeltas=timedeltas.to(coordinates.device),
             device=coordinates.device,
@@ -764,7 +764,7 @@ class TabularTemplate(BaseTemplate):
             )
         return TabularSource(
             **self._metadata_kwargs(),
-            data=samples,
+            values=samples,
             coordinates=self.coordinates,
             timedeltas=self.timedeltas,
             boundaries=self.boundaries,
@@ -816,7 +816,7 @@ class TabularTemplate(BaseTemplate):
 
         return TabularSource(
             **self._metadata_kwargs(),
-            data=samples,
+            values=samples,
             coordinates=self.coordinates,
             timedeltas=self.timedeltas,
             boundaries=self.boundaries,

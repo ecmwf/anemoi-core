@@ -47,7 +47,7 @@ BATCH, TIMES, ENSEMBLE, GRID, NVARS = 1, 2, 1, 4, 2
 def make_batch() -> Batch:
     """A minimal single-dataset gridded batch with two time steps."""
     return build_batch(
-        data={"data": torch.randn(BATCH, TIMES, ENSEMBLE, GRID, NVARS)},
+        values={"data": torch.randn(BATCH, TIMES, ENSEMBLE, GRID, NVARS)},
         coordinates={"data": torch.zeros(GRID, 2)},
         layouts={"data": LAYOUT},
         variables={"data": list(NAME_TO_INDEX)},
@@ -167,7 +167,7 @@ def _dummy_pair() -> tuple[Batch, Batch]:
     """Two-dataset batch; contents are irrelevant since the per-dataset loss is stubbed."""
     names = ("surface", "era5")
     batch = build_batch(
-        data={name: torch.zeros(BATCH, 1, ENSEMBLE, GRID, NVARS) for name in names},
+        values={name: torch.zeros(BATCH, 1, ENSEMBLE, GRID, NVARS) for name in names},
         coordinates={name: torch.zeros(GRID, 2) for name in names},
         layouts=dict.fromkeys(names, LAYOUT),
         variables={name: list(NAME_TO_INDEX) for name in names},

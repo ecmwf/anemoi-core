@@ -54,7 +54,7 @@ class BasePlotAdapter(ABC):
         whose leading axis is the time axis.
         """
         if isinstance(data, Source):
-            return data.select_time(time_indices).data
+            return data.select_time(time_indices).values
         return data[time_indices, ...]
 
     @property

@@ -36,7 +36,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def build_batch(
-    data: Mapping[str, torch.Tensor | list[torch.Tensor]],
+    values: Mapping[str, torch.Tensor | list[torch.Tensor]],
     coordinates: Mapping[str, Any] | None = None,
     metadata: Mapping[str, Any] | None = None,
     timedeltas: Mapping[str, Any] | None = None,
@@ -48,7 +48,7 @@ def build_batch(
 ) -> Batch:
     """Build an already-collated batch from per-dataset dicts.
 
-    ``layouts`` and ``variables`` must cover every dataset in ``data``: a source
+    ``layouts`` and ``variables`` must cover every dataset in ``values``: a source
     cannot be described without them.
     """
     coordinates = coordinates or {}
@@ -61,7 +61,7 @@ def build_batch(
     boundaries = boundaries or {}
 
     sources: dict[str, Source] = {}
-    for name, payload in data.items():
+    for name, payload in values.items():
         if name not in layouts or name not in variables:
             missing = "layout" if name not in layouts else "variables"
             msg = f"build_batch() needs a {missing} for dataset {name!r}."
@@ -74,7 +74,7 @@ def build_batch(
             "variables": variables[name],
             "layout": layouts[name],
             "statistics": statistics.get(name, {}),
-            "data": payload,
+            "values": payload,
             "coordinates": coordinates.get(name),
             "shard_sizes": shard_sizes.get(name),
         }

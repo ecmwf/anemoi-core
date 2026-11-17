@@ -55,7 +55,7 @@ def create_batched_struct(
     layout: TensorLayout | Sequence[str],
     latitudes: Any,
     longitudes: Any,
-    data: torch.Tensor | None = None,
+    values: torch.Tensor | None = None,
     statistics: Mapping[str, Any] | None = None,
     device: torch.device | None = None,
     **kwargs: Any,
@@ -65,7 +65,7 @@ def create_batched_struct(
     This is the single entry point used by the data readers and by
     :meth:`~anemoi.models.interface.AnemoiModelInterface.predict_step`. The fields
     common to every kind are checked and converted here; the rest is handed to the
-    kind's :meth:`BaseSample.from_validated` or, without ``data``, to its
+    kind's :meth:`BaseSample.from_validated` or, without ``values``, to its
     :meth:`BaseSample.template_from_validated`.
 
     Parameters
@@ -76,17 +76,17 @@ def create_batched_struct(
         Variable names along the layout's ``variables`` axis, in order.
     layout : TensorLayout or Sequence[str]
         The per-sample layout (no batch axis), or its axis names in order. Any axis
-        order is accepted: ``data`` is permuted to the canonical order of
+        order is accepted: ``values`` is permuted to the canonical order of
         :attr:`TensorLayout.AXES`, and the sample or template carries the canonical layout.
     latitudes, longitudes : array-like
         ``(N,)`` coordinates in **degrees**; converted to radians here.
-    data : torch.Tensor, optional
-        The sample's data. ``None`` to build a template that only describes the
+    values : torch.Tensor, optional
+        The sample's values. ``None`` to build a template that only describes the
         geometry, e.g. an inference target.
     statistics : Mapping[str, Any], optional
         Per-statistic arrays over the variable axis.
     device : torch.device, optional
-        Device of a template's geometry; a sample's follows its ``data``.
+        Device of a template's geometry; a sample's follows its ``values``.
     **kwargs
         Arguments specific to the kind: ``grid_size`` (samples only) and ``shard_sizes``
         for gridded data; ``timedeltas``, ``boundaries`` (slices or ``(start, stop)``
@@ -99,12 +99,12 @@ def create_batched_struct(
     Returns
     -------
     BaseSample or BaseTemplate
-        The sample of the registered kind or, without ``data``, the kind's
+        The sample of the registered kind or, without ``values``, the kind's
         :attr:`BaseSample.template_type`, built from the same validated geometry.
     """
     sample_cls = sample_registry.lookup(data_type)
 
-    device = data.device if data is not None else device
+    device = values.device if values is not None else device
 
     # Degrees to radians in float64, rounded once to float32, as the graph builders do.
     latitudes = host_float32(latitudes, np.deg2rad)
@@ -123,15 +123,15 @@ def create_batched_struct(
     variables = list(variables)
 
     # Callers may order the axes freely; everything downstream sees the canonical order.
-    if data is not None:
-        if data.ndim != layout.ndim:
-            msg = f"data of shape {tuple(data.shape)} does not match the layout {layout!r}."
+    if values is not None:
+        if values.ndim != layout.ndim:
+            msg = f"values of shape {tuple(values.shape)} does not match the layout {layout!r}."
             raise ValueError(msg)
         if not layout.is_canonical:
-            data = data.permute(layout.canonical_permutation).contiguous()
+            values = values.permute(layout.canonical_permutation).contiguous()
     layout = layout.canonical()
 
-    if data is None:
+    if values is None:
         return sample_cls.template_from_validated(
             n_points=num_points,
             device=device,
@@ -142,19 +142,19 @@ def create_batched_struct(
             **kwargs,
         )
 
-    n_vars = data.shape[layout.axis("variables", ndim=data.ndim)]
+    n_vars = values.shape[layout.axis("variables", ndim=values.ndim)]
     if n_vars != len(variables):
-        msg = f"data carries {n_vars} variables but {len(variables)} names were given."
+        msg = f"values carries {n_vars} variables but {len(variables)} names were given."
         raise ValueError(msg)
-    n_grid = data.shape[layout.axis("grid", ndim=data.ndim)]
+    n_grid = values.shape[layout.axis("grid", ndim=values.ndim)]
     if n_grid != num_points:
-        msg = f"data carries {n_grid} points but {num_points} coordinates were given."
+        msg = f"values carries {n_grid} points but {num_points} coordinates were given."
         raise ValueError(msg)
 
     return sample_cls.from_validated(
         n_points=num_points,
         device=device,
-        data=data,
+        values=values,
         variables=variables,
         layout=layout,
         coordinates=coordinates,

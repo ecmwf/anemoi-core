@@ -43,7 +43,7 @@ def _gridded_source_view(data: torch.Tensor) -> Source:
     """Wrap a ``(bs, time, ens, latlon, nvar)`` tensor in the source view the losses take."""
     return GriddedSource(
         name="data",
-        data=data,
+        values=data,
         variables=[f"variable_{index}" for index in range(data.shape[-1])],
         statistics={},
         coordinates=torch.zeros(data.shape[3], 2, device=data.device),

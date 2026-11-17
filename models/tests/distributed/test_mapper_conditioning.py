@@ -190,14 +190,14 @@ def _check_transport_conditioning(*, rank, world_size, device, group) -> None:
     common = dict(name="data", variables=["a"], statistics={})
     gridded = GriddedSource(
         **common,
-        data=torch.zeros(1, 1, 1, local_nodes, 1, device=device),
+        values=torch.zeros(1, 1, 1, local_nodes, 1, device=device),
         coordinates=torch.zeros(local_nodes, 2, device=device),
         layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
         shard_sizes=node_sizes,
     )
     tabular = TabularSource(
         **common,
-        data=[torch.zeros(1, local_nodes, 1, device=device)],
+        values=[torch.zeros(1, local_nodes, 1, device=device)],
         coordinates=[torch.zeros(local_nodes, 2, device=device)],
         timedeltas=[torch.zeros(local_nodes, device=device)],
         boundaries=[(slice(0, window_sizes[rank]), slice(window_sizes[rank], local_nodes))],

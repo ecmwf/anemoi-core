@@ -51,7 +51,7 @@ def _sharded_obs_source(local_nodes: int, rank_sizes: list[int]) -> TabularSourc
     """A one-sample, one-window observation source holding ``local_nodes`` of the model group's points."""
     return TabularSource(
         name="obs",
-        data=[torch.zeros(1, local_nodes, 2)],
+        values=[torch.zeros(1, local_nodes, 2)],
         coordinates=[torch.zeros(local_nodes, 2)],
         variables=["a", "b"],
         statistics={},
@@ -79,8 +79,8 @@ def test_sharded_tabular_noise_differs_across_ranks_and_keeps_the_random_state_i
 
     torch.manual_seed(0)
     full = torch.randn(1, 5, 2)
-    torch.testing.assert_close(noises[0].data[0], full[:, :2])
-    torch.testing.assert_close(noises[1].data[0], full[:, 2:])
+    torch.testing.assert_close(noises[0].values[0], full[:, :2])
+    torch.testing.assert_close(noises[1].values[0], full[:, 2:])
     # Both ranks consumed the same amount of randomness, so later draws (noise levels, times) agree.
     torch.testing.assert_close(next_draws[0], next_draws[1])
 
@@ -89,7 +89,7 @@ def test_gridded_noise_is_drawn_like_its_source() -> None:
     """A gridded source's noise has its shape, dtype and description, and is one draw of torch.randn."""
     source = GriddedSource(
         name="data",
-        data=torch.zeros(2, 1, 3, 4, 5, dtype=torch.float64),
+        values=torch.zeros(2, 1, 3, 4, 5, dtype=torch.float64),
         variables=[f"v{index}" for index in range(5)],
         statistics={},
         layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
@@ -102,7 +102,7 @@ def test_gridded_noise_is_drawn_like_its_source() -> None:
     expected = torch.randn(2, 1, 3, 4, 5, dtype=torch.float64)
 
     assert (noise.variables, noise.layout, noise.dtype) == (source.variables, source.layout, torch.float64)
-    torch.testing.assert_close(noise.data, expected, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(noise.values, expected, rtol=0.0, atol=0.0)
 
 
 def test_gridded_template_noise_adds_the_batch_axis_like_unflatten() -> None:
@@ -120,4 +120,4 @@ def test_gridded_template_noise_adds_the_batch_axis_like_unflatten() -> None:
     noise = template.randn(torch.float32)
 
     assert noise.layout == template.unflatten(torch.zeros(8, 5)).layout
-    assert noise.data.shape == (1, 1, 2, 4, 5)
+    assert noise.values.shape == (1, 1, 2, 4, 5)

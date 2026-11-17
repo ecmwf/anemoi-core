@@ -131,11 +131,11 @@ class TestGriddedDataReader:
         sample = dataset.get_sample(0, slice(0, 3))
 
         assert isinstance(sample, GriddedSample)
-        assert isinstance(sample.data, torch.Tensor)
-        assert sample.data.ndim == 4  # dates, ensemble, gridpoints, variables
-        assert sample.data.shape[0] == 3  # 3 time steps
-        assert sample.data.shape[2] == dataset.grid_size
-        assert sample.data.shape[3] == len(dataset.variables)
+        assert isinstance(sample.values, torch.Tensor)
+        assert sample.values.ndim == 4  # dates, ensemble, gridpoints, variables
+        assert sample.values.shape[0] == 3  # 3 time steps
+        assert sample.values.shape[2] == dataset.grid_size
+        assert sample.values.shape[3] == len(dataset.variables)
         assert sample.coordinates.shape == (dataset.grid_size, 2)
         assert sample.shard_sizes is None
 
@@ -146,10 +146,10 @@ class TestGriddedDataReader:
 
         sample = dataset.get_sample(0, [0, 2, 5])
 
-        assert sample.data.ndim == 4
-        assert sample.data.shape[0] == 3  # 3 time steps
-        expected = dataset.get_sample(0, slice(0, 6)).data[[0, 2, 5]]
-        torch.testing.assert_close(sample.data, expected)
+        assert sample.values.ndim == 4
+        assert sample.values.shape[0] == 3  # 3 time steps
+        expected = dataset.get_sample(0, slice(0, 6)).values[[0, 2, 5]]
+        torch.testing.assert_close(sample.values, expected)
 
     @skip_if_offline
     def test_get_sample_with_grid_shard(self, dataset_path: str) -> None:
@@ -162,8 +162,8 @@ class TestGriddedDataReader:
 
         assert sample.shard_sizes == dataset.grid_shard_sizes
         assert sum(dataset.grid_shard_sizes) == dataset.grid_size
-        assert sample.data.shape[2] == dataset.grid_shard_sizes[1]
-        torch.testing.assert_close(sample.data, full.data[:, :, dataset.grid_shard_slice])
+        assert sample.values.shape[2] == dataset.grid_shard_sizes[1]
+        torch.testing.assert_close(sample.values, full.values[:, :, dataset.grid_shard_slice])
         torch.testing.assert_close(sample.coordinates, full.coordinates[dataset.grid_shard_slice])
 
 

@@ -103,12 +103,12 @@ class SpatialPreprocessor(nn.Module):
         """
         if source.is_tabular:
             raise TypeError(f"{self.__class__.__name__} only projects gridded sources, got {source.name!r}.")
-        pattern = source.layout.normalized(source.data.ndim).pattern
+        pattern = source.layout.normalized(source.values.ndim).pattern
         if pattern != "batch time ensemble grid variables":
             raise ValueError(f"{self.__class__.__name__} expects a (batch, time, ensemble, grid, variables) layout.")
 
-        data, shard_sizes = self(source.data, model_comm_group=model_comm_group, grid_shard_sizes=source.shard_sizes)
+        data, shard_sizes = self(source.values, model_comm_group=model_comm_group, grid_shard_sizes=source.shard_sizes)
         coordinates = target_coordinates.to(device=data.device, dtype=source.coordinates.dtype)
         if shard_sizes is not None:
             coordinates = shard_tensor(coordinates, -2, shard_sizes, model_comm_group, gather_in_backward=False)
-        return source.clone(data=data, coordinates=coordinates, shard_sizes=shard_sizes)
+        return source.clone(values=data, coordinates=coordinates, shard_sizes=shard_sizes)

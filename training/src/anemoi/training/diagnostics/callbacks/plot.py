@@ -649,7 +649,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
         selected = batch.select(variables={dataset_name: feature_indices})
         input_view = pl_module.preprocess_targets(selected)[dataset_name].map_data(lambda t: t.detach().cpu())
-        data = self.post_processors[dataset_name](input_view, in_place=False).data[self.sample_idx]
+        data = self.post_processors[dataset_name](input_view, in_place=False).values[self.sample_idx]
 
         output_tensor = self.process_output_tensor(pl_module, dataset_name, outputs.predictions, members=members)
 
@@ -679,7 +679,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 Source,
             ), f"Expected a prediction of type Source, got {type(prediction)}."
             aligned = self._align_output_metadata(prediction, output_indices_full)
-            processed = post_processor(aligned.map_data(lambda t: t.detach().cpu()), in_place=False).data
+            processed = post_processor(aligned.map_data(lambda t: t.detach().cpu()), in_place=False).values
             # Gridded views wrap a single ``(batch, ...)`` tensor; tabular/obs views wrap a
             # list of per-sample tensors. Select the requested sample, keeping a leading
             # size-1 axis so per-step outputs can be concatenated along dim 0.
@@ -730,7 +730,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         if reference.is_tabular:
             msg = f"The reference of '{dataset_name}' is a sparse observation dataset; it cannot be plotted as input."
             raise NotImplementedError(msg)
-        data = reference.data.detach().cpu()
+        data = reference.values.detach().cpu()
         if data.ndim != 5:
             msg = (
                 f"The reference of '{dataset_name}' must be (batch, time, ensemble, grid, variables), "
@@ -751,7 +751,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
     @staticmethod
     def _align_output_metadata(view: Source, output_indices_full: Any) -> Source:
         """Re-slice a prediction view's metadata to its (model-output) variables."""
-        data0 = view.data[0] if view.is_tabular else view.data
+        data0 = view.values[0] if view.is_tabular else view.values
         var_width = data0.shape[view.layout.variables]
         if len(view.variables) == var_width:
             return view
@@ -820,7 +820,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             return field.squeeze(axis) if field.shape[axis] == 1 else field.movedim(axis, 0)
 
         def _field_and_coords(sub_view: Source) -> tuple[np.ndarray, np.ndarray]:
-            field = _select_member(sub_view.data[self.sample_idx], sub_view)  # (grid, vars)
+            field = _select_member(sub_view.values[self.sample_idx], sub_view)  # (grid, vars)
             coords = sub_view.coordinates[self.sample_idx]
             return field.detach().cpu().numpy(), np.rad2deg(coords.detach().cpu().numpy())
 
@@ -841,7 +841,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 output_view.map_data(lambda t: t.detach().cpu()),
                 in_place=False,
             )
-            return _select_pred_members(output_view.data[self.sample_idx], output_view).numpy()
+            return _select_pred_members(output_view.values[self.sample_idx], output_view).numpy()
 
         # Prediction (already at the output/target observation locations).
         y_pred = _output_field(outputs.predictions[0][dataset_name])

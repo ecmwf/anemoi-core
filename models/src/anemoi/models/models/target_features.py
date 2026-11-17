@@ -190,7 +190,7 @@ class InputForcingsFeature(DecodingTargetFeature):
         # Layout-agnostic: for gridded views flatten folds time into the feature axis
         # ((batch ensemble grid) (time vars)); for tabular obs time lives on the node axis.
         x_flat = x_input_data.select(time=slice(0, self.model.n_step_input[dataset_name]), variables=indices)
-        return x_flat.flatten().data
+        return x_flat.flatten().values
 
 
 @register_target_feature("target_forcings")
@@ -225,10 +225,10 @@ class TargetForcingsFeature(DecodingTargetFeature):
         dataset_name: str,
     ) -> Tensor:
         x_target_forcing = x_target.flatten()
-        assert x_target_forcing.data.shape[-1] == self.dim, (
-            f"Expected flattened target forcing width {self.dim}, but got {x_target_forcing.data.shape[-1]}."
+        assert x_target_forcing.values.shape[-1] == self.dim, (
+            f"Expected flattened target forcing width {self.dim}, but got {x_target_forcing.values.shape[-1]}."
         )
-        return x_target_forcing.data
+        return x_target_forcing.values
 
 
 @register_target_feature("prognostics")
@@ -266,7 +266,7 @@ class PrognosticsFeature(DecodingTargetFeature):
         # Layout-agnostic: for gridded views flatten folds time into the feature axis
         # ((batch ensemble grid) (time vars)); for tabular obs time lives on the node axis.
         prognostics = x_input_data.select(time=slice(0, self.model.n_step_input[dataset_name]), variables=indices)
-        return prognostics.flatten().data
+        return prognostics.flatten().values
 
 
 @register_target_feature("trainable_parameters")

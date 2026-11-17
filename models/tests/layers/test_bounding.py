@@ -57,7 +57,7 @@ def _make_gridded(payload: torch.Tensor, variables: list[str], statistics: dict)
     points, num_vars = payload.shape
     return GriddedSource(
         name="gridded",
-        data=payload.reshape(1, 1, points, num_vars).clone(),
+        values=payload.reshape(1, 1, points, num_vars).clone(),
         variables=list(variables),
         statistics=statistics,
         coordinates=torch.zeros(points, 2),
@@ -70,7 +70,7 @@ def _make_tabular(payload: torch.Tensor, variables: list[str], statistics: dict)
     points = payload.shape[0]
     return TabularSource(
         name="tabular",
-        data=[payload.clone()],
+        values=[payload.clone()],
         variables=list(variables),
         statistics=statistics,
         coordinates=[torch.zeros(points, 2)],
@@ -83,8 +83,8 @@ def _make_tabular(payload: torch.Tensor, variables: list[str], statistics: dict)
 def _to_2d(source) -> torch.Tensor:
     """Return the (points, variables) payload of a source built by the helpers above."""
     if isinstance(source, TabularSource):
-        return source.data[0]
-    return source.data.reshape(-1, source.data.shape[-1])
+        return source.values[0]
+    return source.values.reshape(-1, source.values.shape[-1])
 
 
 @pytest.fixture(params=["gridded", "tabular"])

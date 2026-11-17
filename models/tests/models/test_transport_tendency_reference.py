@@ -155,7 +155,7 @@ def _gridded(dataset: str, variables: list[str], data: torch.Tensor, coordinates
         variables=variables,
         layout=GRIDDED_LAYOUT,
         statistics={key: value[positions] for key, value in STATISTICS[dataset].items()},
-        data=data,
+        values=data,
         coordinates=coordinates,
     )
 
@@ -209,10 +209,10 @@ def test_reference_is_the_latest_reference_input_in_its_own_physical_units() -> 
 
     assert list(reference.keys()) == ["hres"]
     assert reference["hres"].variables == ["a", "b"]
-    lres = batches["x"]["lres"].data
+    lres = batches["x"]["lres"].values
     # "a" is not normalised in lres; "b" is normalised with lres's statistics, not with hres's.
-    torch.testing.assert_close(reference["hres"].data[..., 0], lres[:, -1:, ..., 0])
-    torch.testing.assert_close(reference["hres"].data[..., 1], lres[:, -1:, ..., 1] * 0.5 - 3.0)
+    torch.testing.assert_close(reference["hres"].values[..., 0], lres[:, -1:, ..., 0])
+    torch.testing.assert_close(reference["hres"].values[..., 1], lres[:, -1:, ..., 1] * 0.5 - 3.0)
 
 
 def test_residuals_are_taken_against_the_reference_dataset() -> None:
@@ -227,21 +227,21 @@ def test_residuals_are_taken_against_the_reference_dataset() -> None:
         "hres", state, reference, per_step, pre_processors["hres"], post_processors["hres"]
     )
 
-    physical_state = post_processors["hres"](state, in_place=False).data
+    physical_state = post_processors["hres"](state, in_place=False).values
     for position, name in enumerate(["a", "b"]):
         index = state.name_to_index[name]
         expected = (
-            physical_state[..., index] - reference.data[..., position] - RESIDUAL_STATISTICS["mean"][position]
+            physical_state[..., index] - reference.values[..., position] - RESIDUAL_STATISTICS["mean"][position]
         ) / (RESIDUAL_STATISTICS["stdev"][position])
-        torch.testing.assert_close(tendency.data[..., index], expected.float())
+        torch.testing.assert_close(tendency.values[..., index], expected.float())
     # "s" has no reference and stays a normalised state.
     index = state.name_to_index["s"]
-    torch.testing.assert_close(tendency.data[..., index], state.data[..., index], rtol=0, atol=0)
+    torch.testing.assert_close(tendency.values[..., index], state.values[..., index], rtol=0, atol=0)
 
     rebuilt = model.add_tendency_to_state(
         "hres", reference, tendency, per_step, post_processors["hres"], pre_processors=pre_processors["hres"]
     )
-    torch.testing.assert_close(rebuilt.data, state.data)
+    torch.testing.assert_close(rebuilt.values, state.values)
 
 
 def test_predict_step_adds_the_sampled_residual_to_the_reference_dataset() -> None:
@@ -253,7 +253,7 @@ def test_predict_step_adds_the_sampled_residual_to_the_reference_dataset() -> No
     add_tendency_to_state = model.add_tendency_to_state
 
     def spy(dataset_name, reference, tendency, *args, **kwargs):
-        seen.append((dataset_name, reference.variables, reference.data.clone()))
+        seen.append((dataset_name, reference.variables, reference.values.clone()))
         return add_tendency_to_state(dataset_name, reference, tendency, *args, **kwargs)
 
     model.add_tendency_to_state = spy
@@ -269,10 +269,10 @@ def test_predict_step_adds_the_sampled_residual_to_the_reference_dataset() -> No
 
     assert list(out.keys()) == ["hres"]
     assert out["hres"].variables == ["a", "b", "s"]
-    assert torch.isfinite(out["hres"].data).all()
+    assert torch.isfinite(out["hres"].values).all()
     # predict_step takes inputs in physical units, so the reference is the latest lres input of a and b.
     assert [(name, variables) for name, variables, _ in seen] == [("hres", ["a", "b"])]
-    torch.testing.assert_close(seen[0][2], batches["x"]["lres"].data[:, -1:, ..., :2])
+    torch.testing.assert_close(seen[0][2], batches["x"]["lres"].values[:, -1:, ..., :2])
 
 
 def _build_matching_model(n_step_input_lres: int = 2) -> AnemoiTransportTendModelEncProcDec:
@@ -297,32 +297,32 @@ def test_matching_reference_keeps_one_reference_step_per_output_step() -> None:
     pre_processors, post_processors = _processors()
     per_step = model.tendency_statistics("hres", TWO_STEP_STATISTICS)
     reference = model.reference_state(batches["x"], None, None, post_processors)["hres"]
-    lres = batches["x"]["lres"].data
+    lres = batches["x"]["lres"].values
 
     assert reference.time_size == 2
-    torch.testing.assert_close(reference.data[..., 0], lres[..., 0])
-    torch.testing.assert_close(reference.data[..., 1], lres[..., 1] * 0.5 - 3.0)
+    torch.testing.assert_close(reference.values[..., 0], lres[..., 0])
+    torch.testing.assert_close(reference.values[..., 1], lres[..., 1] * 0.5 - 3.0)
 
     state = batches["state"]["hres"]
     tendency = model.compute_tendency(
         "hres", state, reference, per_step, pre_processors["hres"], post_processors["hres"]
     )
 
-    physical_state = post_processors["hres"](state, in_place=False).data
+    physical_state = post_processors["hres"](state, in_place=False).values
     for step, statistics in enumerate((RESIDUAL_STATISTICS, SECOND_STEP_STATISTICS)):
         for position, name in enumerate(["a", "b"]):
             index = state.name_to_index[name]
             expected = (
                 physical_state[:, step, ..., index]
-                - reference.data[:, step, ..., position]
+                - reference.values[:, step, ..., position]
                 - statistics["mean"][position]
             ) / statistics["stdev"][position]
-            torch.testing.assert_close(tendency.data[:, step, ..., index], expected.float())
+            torch.testing.assert_close(tendency.values[:, step, ..., index], expected.float())
 
     rebuilt = model.add_tendency_to_state(
         "hres", reference, tendency, per_step, post_processors["hres"], pre_processors=pre_processors["hres"]
     )
-    torch.testing.assert_close(rebuilt.data, state.data)
+    torch.testing.assert_close(rebuilt.values, state.values)
 
 
 def test_predict_step_with_a_matching_reference_adds_each_residual_to_its_snapshot() -> None:
@@ -333,7 +333,7 @@ def test_predict_step_with_a_matching_reference_adds_each_residual_to_its_snapsh
     add_tendency_to_state = model.add_tendency_to_state
 
     def spy(dataset_name, reference, tendency, *args, **kwargs):
-        seen.append(reference.data.clone())
+        seen.append(reference.values.clone())
         return add_tendency_to_state(dataset_name, reference, tendency, *args, **kwargs)
 
     model.add_tendency_to_state = spy
@@ -348,8 +348,8 @@ def test_predict_step_with_a_matching_reference_adds_each_residual_to_its_snapsh
     )
 
     assert out["hres"].time_size == 2
-    assert torch.isfinite(out["hres"].data).all()
-    torch.testing.assert_close(seen[0], batches["x"]["lres"].data[..., :2])
+    assert torch.isfinite(out["hres"].values).all()
+    torch.testing.assert_close(seen[0], batches["x"]["lres"].values[..., :2])
 
 
 def test_several_output_steps_need_a_matching_reference() -> None:

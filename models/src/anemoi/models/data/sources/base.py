@@ -130,7 +130,7 @@ class Source(ABC):
     operation maps onto the payload.
 
     This base class only holds the metadata. The payload fields are declared by each
-    subclass with its own types: every subclass has ``data``, ``coordinates``,
+    subclass with its own types: every subclass has ``values``, ``coordinates``,
     ``shard_sizes`` and ``coordinates_are_static``, and may add more (e.g. the
     ``timedeltas`` and ``boundaries`` of :class:`TabularSource`).
 
@@ -162,7 +162,7 @@ class Source(ABC):
     _name_to_index: dict[str, int] = field(init=False, repr=False, compare=False)
 
     # Tensor fields, besides ``coordinates``, that :meth:`to` moves and :meth:`pin_memory` pins.
-    _PAYLOAD_FIELDS = ("data",)
+    _PAYLOAD_FIELDS = ("values",)
 
     def __post_init__(self) -> None:
         """Validate the metadata and the payload it describes."""
@@ -170,7 +170,7 @@ class Source(ABC):
             msg = f"Source {self.name!r} requires unique variable names."
             raise ValueError(msg)
 
-        if self.data is None:
+        if self.values is None:
             msg = (
                 f"{self.__class__.__name__} {self.name!r} requires data; "
                 "use a template (see Source.template) to describe a source without data."
@@ -338,7 +338,7 @@ class Source(ABC):
     def flatten(self) -> "FlatSource":
         """Return a flat source (nodes, features).
 
-        The inverse is ``self.template().unflatten(flat.data)``.
+        The inverse is ``self.template().unflatten(flat.values)``.
         """
         pass
 
@@ -624,7 +624,7 @@ class BaseTemplate(ABC):
 
     @abstractmethod
     def flatten(self) -> "FlatSource":
-        """Return the flat nodes (``data=None``): the decoder's target coordinates, timedeltas and sizes."""
+        """Return the flat nodes (``values=None``): the decoder's target coordinates, timedeltas and sizes."""
         ...
 
     @abstractmethod

@@ -114,7 +114,7 @@ class TargetFeatureTestCase:
         )
         return GriddedSource(
             name=self.DATASET,
-            data=torch.rand(shape, dtype=torch.float32),
+            values=torch.rand(shape, dtype=torch.float32),
             coordinates=torch.zeros(model_init.num_nodes, 2),
             variables=[f"v{i}" for i in range(model_init.num_vars)],
             statistics={},
@@ -192,7 +192,7 @@ class TestTargetFeatures(TargetFeatureTestCase):
                     for node in range(num_nodes):
                         row = (batch * ensemble_size + ens) * num_nodes + node
                         expected = torch.cat(
-                            [x_input_data.data[batch, step, ens, node, var_idx] for step in range(n_step_input)],
+                            [x_input_data.values[batch, step, ens, node, var_idx] for step in range(n_step_input)],
                         )
                         torch.testing.assert_close(out[row], expected)
         elif feature_name == "encoded_data":
@@ -256,7 +256,7 @@ class TestTargetGeometryAndForcings(TargetFeatureTestCase):
         )
         return GriddedSource(
             name=self.DATASET,
-            data=torch.rand(shape, dtype=torch.float32),
+            values=torch.rand(shape, dtype=torch.float32),
             coordinates=torch.zeros(model_init.num_nodes, 2),
             variables=[f"f{i}" for i in range(len(spec.forcing_idx))],
             statistics={},
@@ -300,7 +300,7 @@ class TestTargetGeometryAndForcings(TargetFeatureTestCase):
         )
 
         assert out.shape == (self.BATCH_SIZE * self.ENSEMBLE_SIZE * model_init.num_nodes, feature.dim)
-        torch.testing.assert_close(out, x_target.flatten().data)
+        torch.testing.assert_close(out, x_target.flatten().values)
 
     def test_target_forcings_reject_a_mismatched_width(
         self,

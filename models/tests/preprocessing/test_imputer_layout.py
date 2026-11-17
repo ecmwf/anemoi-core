@@ -46,20 +46,20 @@ def test_transform_inverse_tabular_roundtrip():
     )
     view = TabularSource(
         name="tabular",
-        data=[x],
+        values=[x],
         variables=VARIABLES,
         coordinates=[torch.zeros(x.shape[0], 2)],
         layout=TensorLayout(grid=0, variables=1),
         timedeltas=[torch.zeros(x.shape[0])],
         boundaries=[(slice(0, x.shape[0]),)],
     )
-    transformed = imputer(view, in_place=False).data[0]
+    transformed = imputer(view, in_place=False).values[0]
     # NaNs replaced by configured constants (1 for "a", 2 for "b").
     assert transformed[0, 0].item() == pytest.approx(1.0)
     assert transformed[1, 1].item() == pytest.approx(2.0)
     assert not torch.isnan(transformed).any()
 
-    restored = imputer(view.clone(data=[transformed]), in_place=False, inverse=True).data[0]
+    restored = imputer(view.clone(values=[transformed]), in_place=False, inverse=True).values[0]
     assert torch.equal(restored, transformed)
 
 
@@ -72,17 +72,17 @@ def test_transform_inverse_gridded_roundtrip_with_ensemble():
     base[0, 0, 1, 0, 2] = float("nan")  # "c" has no replacement configured
     view = GriddedSource(
         name="gridded",
-        data=base,
+        values=base,
         variables=VARIABLES,
         coordinates=torch.zeros(2, 2),
         layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
     )
 
-    transformed = imputer(view, in_place=False).data
+    transformed = imputer(view, in_place=False).values
     assert torch.all(transformed[0, 0, :, 0, 0] == 1.0)
     assert torch.all(transformed[0, 0, :, 1, 1] == 2.0)
     assert torch.isnan(transformed[0, 0, 1, 0, 2])
-    assert torch.isnan(view.data[0, 0, 0, 0, 0]), "in_place=False must not modify the input."
+    assert torch.isnan(view.values[0, 0, 0, 0, 0]), "in_place=False must not modify the input."
 
-    restored = imputer(view.clone(data=transformed), in_place=False, inverse=True).data
+    restored = imputer(view.clone(values=transformed), in_place=False, inverse=True).values
     assert torch.allclose(restored, transformed, equal_nan=True)

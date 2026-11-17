@@ -29,7 +29,7 @@ def _obs_batch(samples: list[torch.Tensor], variables: list[str]) -> Batch:
                 name="obs",
                 variables=variables,
                 layout=OBS_LAYOUT,
-                data=samples,
+                values=samples,
                 coordinates=[torch.zeros(n, 2) for n in nodes],
                 timedeltas=[torch.zeros(n) for n in nodes],
                 boundaries=[(slice(0, n),) for n in nodes],
@@ -58,7 +58,7 @@ def test_sampling_noise_supports_sparse_obs_shapes() -> None:
     noise = model.draw_sampling_noise(obs, target_template={"obs": obs["obs"].template()})
 
     assert noise["obs"].is_tabular
-    assert [tuple(sample.shape) for sample in noise["obs"].data] == [(2, 4), (5, 4)]
+    assert [tuple(sample.shape) for sample in noise["obs"].values] == [(2, 4), (5, 4)]
     assert noise["obs"].variables == list(output_names)
 
 
@@ -73,6 +73,6 @@ def test_randn_like_creates_sparse_gaussian_noise(monkeypatch: pytest.MonkeyPatc
     noise = target["obs"].randn_like()
 
     assert noise.is_tabular
-    assert [sample.shape for sample in noise.data] == [torch.Size([2, 3]), torch.Size([5, 3])]
-    torch.testing.assert_close(noise.data[0], torch.full((2, 3), 4.0))
-    torch.testing.assert_close(noise.data[1], torch.full((5, 3), 4.0))
+    assert [sample.shape for sample in noise.values] == [torch.Size([2, 3]), torch.Size([5, 3])]
+    torch.testing.assert_close(noise.values[0], torch.full((2, 3), 4.0))
+    torch.testing.assert_close(noise.values[1], torch.full((5, 3), 4.0))

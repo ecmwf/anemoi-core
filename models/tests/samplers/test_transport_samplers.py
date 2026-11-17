@@ -71,12 +71,12 @@ class RecordingZeroDenoiser:
         self.call_count += 1
         if self.validator is not None:
             self.validator(x, y, sigma)
-        return y.with_data({name: torch.zeros_like(src.data) for name, src in y.items()})
+        return y.with_data({name: torch.zeros_like(src.values) for name, src in y.items()})
 
 
 def _batch(data: dict[str, torch.Tensor]) -> Batch:
     return build_batch(
-        data=data,
+        values=data,
         coordinates={DATASET_NAME: torch.zeros(data[DATASET_NAME].shape[-2], 2)},
         metadata={"static_coords": frozenset({DATASET_NAME})},
         layouts={DATASET_NAME: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -194,11 +194,11 @@ def test_samplers_expand_sigma_to_model_dtype_and_return_model_dtype(
     ) -> None:
         assert set(sigma.keys()) == set(y.keys())
         sigma_expanded = sigma[DATASET_NAME]
-        assert sigma_expanded.dtype == x[DATASET_NAME].data.dtype == y[DATASET_NAME].data.dtype
+        assert sigma_expanded.dtype == x[DATASET_NAME].values.dtype == y[DATASET_NAME].values.dtype
         assert sigma_expanded.shape == (
-            y[DATASET_NAME].data.shape[0],
+            y[DATASET_NAME].values.shape[0],
             1,
-            y[DATASET_NAME].data.shape[2],
+            y[DATASET_NAME].values.shape[2],
             1,
             1,
         )
@@ -209,9 +209,9 @@ def test_samplers_expand_sigma_to_model_dtype_and_return_model_dtype(
     result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=denoiser)
 
     assert denoiser.call_count == 1
-    assert result[DATASET_NAME].data.shape == y[DATASET_NAME].data.shape
-    assert result[DATASET_NAME].data.dtype == x[DATASET_NAME].data.dtype
-    assert torch.allclose(result[DATASET_NAME].data, torch.zeros_like(result[DATASET_NAME].data))
+    assert result[DATASET_NAME].values.shape == y[DATASET_NAME].values.shape
+    assert result[DATASET_NAME].values.dtype == x[DATASET_NAME].values.dtype
+    assert torch.allclose(result[DATASET_NAME].values, torch.zeros_like(result[DATASET_NAME].values))
 
 
 def test_heun_uses_corrector_before_final_step() -> None:
@@ -240,21 +240,21 @@ def test_vector_field_samplers_integrate_constant_velocity(
     ) -> Batch:
         del model_comm_group
         time_expanded = time[DATASET_NAME]
-        assert time_expanded.dtype == x[DATASET_NAME].data.dtype == y[DATASET_NAME].data.dtype
+        assert time_expanded.dtype == x[DATASET_NAME].values.dtype == y[DATASET_NAME].values.dtype
         assert time_expanded.shape == (
-            y[DATASET_NAME].data.shape[0],
+            y[DATASET_NAME].values.shape[0],
             1,
-            y[DATASET_NAME].data.shape[2],
+            y[DATASET_NAME].values.shape[2],
             1,
             1,
         )
-        return y.with_data({name: torch.ones_like(src.data) for name, src in y.items()})
+        return y.with_data({name: torch.ones_like(src.values) for name, src in y.items()})
 
     sampler = sampler_cls(dtype=torch.float64)
     result = sampler.sample(x=x, y=y, times=times, vector_field_fn=velocity_fn)
 
-    assert result[DATASET_NAME].data.dtype == x[DATASET_NAME].data.dtype
-    assert torch.allclose(result[DATASET_NAME].data, y[DATASET_NAME].data + 1.0)
+    assert result[DATASET_NAME].values.dtype == x[DATASET_NAME].values.dtype
+    assert torch.allclose(result[DATASET_NAME].values, y[DATASET_NAME].values + 1.0)
 
 
 def test_vector_field_heun_matches_linear_ode_euler_final_step() -> None:
@@ -269,21 +269,21 @@ def test_vector_field_heun_matches_linear_ode_euler_final_step() -> None:
         model_comm_group=None,
     ) -> Batch:
         del x, model_comm_group
-        return y.with_data({DATASET_NAME: 2.0 * y[DATASET_NAME].data + time[DATASET_NAME]})
+        return y.with_data({DATASET_NAME: 2.0 * y[DATASET_NAME].values + time[DATASET_NAME]})
 
     sampler = VectorFieldHeunSampler(dtype=torch.float64, euler_final_step=True)
     result = sampler.sample(x=x, y=y, times=times, vector_field_fn=vector_field_fn)
 
     first_dt = times[1] - times[0]
-    first_f1 = 2.0 * y[DATASET_NAME].data + times[0]
-    first_predictor = y[DATASET_NAME].data + first_dt * first_f1
+    first_f1 = 2.0 * y[DATASET_NAME].values + times[0]
+    first_predictor = y[DATASET_NAME].values + first_dt * first_f1
     first_f2 = 2.0 * first_predictor + times[1]
-    first_corrected = y[DATASET_NAME].data + first_dt * (first_f1 + first_f2) / 2.0
+    first_corrected = y[DATASET_NAME].values + first_dt * (first_f1 + first_f2) / 2.0
 
     final_dt = times[2] - times[1]
     final_f1 = 2.0 * first_corrected + times[1]
     expected = first_corrected + final_dt * final_f1
-    torch.testing.assert_close(result[DATASET_NAME].data, expected)
+    torch.testing.assert_close(result[DATASET_NAME].values, expected)
 
 
 def test_vector_field_heun_can_use_predictor_corrector_on_final_step() -> None:
@@ -298,17 +298,17 @@ def test_vector_field_heun_can_use_predictor_corrector_on_final_step() -> None:
         model_comm_group=None,
     ) -> Batch:
         del x, model_comm_group
-        return y.with_data({DATASET_NAME: 2.0 * y[DATASET_NAME].data + time[DATASET_NAME]})
+        return y.with_data({DATASET_NAME: 2.0 * y[DATASET_NAME].values + time[DATASET_NAME]})
 
     sampler = VectorFieldHeunSampler(dtype=torch.float64, euler_final_step=False)
     result = sampler.sample(x=x, y=y, times=times, vector_field_fn=vector_field_fn)
 
     dt = times[1] - times[0]
-    f1 = 2.0 * y[DATASET_NAME].data + times[0]
-    y_predictor = y[DATASET_NAME].data + dt * f1
+    f1 = 2.0 * y[DATASET_NAME].values + times[0]
+    y_predictor = y[DATASET_NAME].values + dt * f1
     f2 = 2.0 * y_predictor + times[1]
-    expected = y[DATASET_NAME].data + dt * (f1 + f2) / 2.0
-    torch.testing.assert_close(result[DATASET_NAME].data, expected)
+    expected = y[DATASET_NAME].values + dt * (f1 + f2) / 2.0
+    torch.testing.assert_close(result[DATASET_NAME].values, expected)
 
 
 def test_scalar_condition_keeps_at_least_float32() -> None:
@@ -334,20 +334,20 @@ def test_edm_samplers_follow_the_exact_flow_of_gaussian_data(sampler_cls: type[E
     """
     sigma_data, sigma_max = 0.5, 80.0
     x, y = make_inputs(dtype=torch.float64)
-    start = y[DATASET_NAME].data
+    start = y[DATASET_NAME].values
 
     def gaussian_denoiser(x: Batch, y: Batch, sigma: dict[str, torch.Tensor], model_comm_group=None) -> Batch:
         del x, model_comm_group
         return y.with_data(
-            {name: source.data * sigma_data**2 / (sigma_data**2 + sigma[name] ** 2) for name, source in y.items()},
+            {name: source.values * sigma_data**2 / (sigma_data**2 + sigma[name] ** 2) for name, source in y.items()},
         )
 
     def relative_error(num_steps: int) -> float:
         sigmas = KarrasSigmaSchedule(sigma_max=sigma_max, sigma_min=0.002, num_steps=num_steps, rho=7.0).get_schedule()
         result = sampler_cls(dtype=torch.float64).sample(x=x, y=y, sigmas=sigmas, denoising_fn=gaussian_denoiser)
         # The flow is linear, so the sample is the start scaled by one factor.
-        factor = (result[DATASET_NAME].data * start).sum() / (start * start).sum()
-        torch.testing.assert_close(result[DATASET_NAME].data, factor * start)
+        factor = (result[DATASET_NAME].values * start).sum() / (start * start).sum()
+        torch.testing.assert_close(result[DATASET_NAME].values, factor * start)
         return (factor / (sigma_data / math.sqrt(sigma_data**2 + sigma_max**2)) - 1).item()
 
     error_40, error_80, error_160 = relative_error(40), relative_error(80), relative_error(160)
@@ -371,17 +371,19 @@ def test_edm_samplers_accept_repeated_noise_levels(sampler_cls: type[EDMDiffusio
     def gaussian_denoiser(x: Batch, y: Batch, sigma: dict[str, torch.Tensor], model_comm_group=None) -> Batch:
         del x, model_comm_group
         return y.with_data(
-            {name: source.data * sigma_data**2 / (sigma_data**2 + sigma[name] ** 2) for name, source in y.items()},
+            {name: source.values * sigma_data**2 / (sigma_data**2 + sigma[name] ** 2) for name, source in y.items()},
         )
 
     sampler = sampler_cls(dtype=torch.float64)
     one_level = KarrasSigmaSchedule(sigma_max=1.0, sigma_min=1.0, num_steps=4, rho=7.0).get_schedule()
     result = sampler.sample(x=x, y=y, sigmas=one_level, denoising_fn=gaussian_denoiser)
-    torch.testing.assert_close(result[DATASET_NAME].data, y[DATASET_NAME].data * sigma_data**2 / (sigma_data**2 + 1.0))
+    torch.testing.assert_close(
+        result[DATASET_NAME].values, y[DATASET_NAME].values * sigma_data**2 / (sigma_data**2 + 1.0)
+    )
 
     repeated_inside = torch.tensor([80.0, 10.0, 10.0, 1.0, 0.1, 0.0], dtype=torch.float64)
     result = sampler.sample(x=x, y=y, sigmas=repeated_inside, denoising_fn=gaussian_denoiser)
-    assert torch.isfinite(result[DATASET_NAME].data).all()
+    assert torch.isfinite(result[DATASET_NAME].values).all()
 
 
 def test_dpmpp_hands_the_denoiser_its_solver_state_rounded_once() -> None:
@@ -399,8 +401,8 @@ def test_dpmpp_hands_the_denoiser_its_solver_state_rounded_once() -> None:
 
     def zero_denoiser(x: Batch, y: Batch, sigma: dict[str, torch.Tensor], model_comm_group=None) -> Batch:
         del x, sigma, model_comm_group
-        received.append(y[DATASET_NAME].data.clone())
-        return y.with_data({name: torch.zeros_like(source.data) for name, source in y.items()})
+        received.append(y[DATASET_NAME].values.clone())
+        return y.with_data({name: torch.zeros_like(source.values) for name, source in y.items()})
 
     DPMpp2MSampler(dtype=torch.float64).sample(x=x, y=y, sigmas=sigmas, denoising_fn=zero_denoiser)
 

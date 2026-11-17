@@ -362,12 +362,12 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
         distribution = transport.training_condition.get("distribution")
         allowed = registries.get(objective, {})
         if distribution not in allowed:
-            # The training configs are named after their objective.
+            # The entry configs set the objective and the training distribution together.
             msg = (
                 f"model.model.transport.objective is {objective!r}, but training.transport.training_condition."
                 f"distribution is {distribution!r}, which is not one of its distributions "
-                f"({', '.join(sorted(allowed))}). Use the training config of the same objective, "
-                f"training={objective} (or multi_{objective} for several datasets)."
+                f"({', '.join(sorted(allowed))}). Set both as the entry configs do: transport.yaml and "
+                "multi_transport.yaml for edm_diffusion, transport_flow_matching.yaml for flow_matching."
             )
             error = "transport_training_condition_mismatch"
             raise PydanticCustomError(error, msg)

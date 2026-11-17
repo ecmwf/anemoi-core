@@ -163,7 +163,7 @@ class EnsembleTraining(BaseTrainingModule):
         """
         new_data = {}
         for dataset_name, source in batch.items():
-            dataset_batch = source.data
+            dataset_batch = source.values
             layout = source.layout
             if layout is None or layout.ensemble is None:
                 msg = f"Dataset {dataset_name!r} has no ensemble axis in its layout ({layout!r})"
@@ -219,9 +219,9 @@ class EnsembleTraining(BaseTrainingModule):
                 mgroup=self.ens_comm_subgroup,
             )
 
-        payload = y_pred.data
+        payload = y_pred.values
         y_pred_ens = y_pred.clone(
-            data=(
+            values=(
                 [gather_members(sample) for sample in payload] if isinstance(payload, list) else gather_members(payload)
             ),
         )
@@ -241,7 +241,7 @@ class EnsembleTraining(BaseTrainingModule):
         # Tensors must be marked as dynamic before being passed to the compiled function
         dynamic_indices = True  # TODO(cathal): set as true only for validation
         if dynamic_indices:
-            full_payload = y_pred_ens_full.data
+            full_payload = y_pred_ens_full.values
             for tensor in full_payload if isinstance(full_payload, list) else [full_payload]:
                 torch._dynamo.mark_dynamic(tensor, y_pred_ens_full.layout.axis(TensorDim.VARIABLE, ndim=tensor.ndim))
 

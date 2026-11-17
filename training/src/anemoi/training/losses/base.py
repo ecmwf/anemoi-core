@@ -66,7 +66,7 @@ def _tabular_valid_counts(
     """
     layout = target.layout
     counts = []
-    for sample in target.data:
+    for sample in target.values:
         valid = ~torch.isnan(sample) if ignore_nans else torch.ones_like(sample, dtype=torch.bool)
         ensemble = layout.axis("ensemble", ndim=sample.ndim) if layout.has_axis("ensemble") else None
         if ensemble is not None:

@@ -232,7 +232,7 @@ class DPMpp2MSampler(EDMDiffusionSampler):
 
             if sigma_next == 0:
                 # The final state is the denoised field, described like the sampled target.
-                return _in_model_dtype(y_solver.with_data({n: s.data for n, s in denoised_solver.items()}), x)
+                return _in_model_dtype(y_solver.with_data({n: s.values for n, s in denoised_solver.items()}), x)
 
             t = -torch.log(sigma)
             t_next = -torch.log(sigma_next)

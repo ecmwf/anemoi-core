@@ -31,7 +31,7 @@ def _view(data: torch.Tensor) -> GriddedSource:
     """Attach metadata for the gridded loss fixtures."""
     return GriddedSource(
         name="data",
-        data=data,
+        values=data,
         variables=[f"v{i}" for i in range(data.shape[-1])],
         statistics={},
         coordinates=torch.zeros(data.shape[-2], 2, device=data.device),
@@ -80,7 +80,7 @@ class FixedLoss(BaseLoss):
         **kwargs: object,
     ) -> torch.Tensor:
         del target, kwargs
-        return pred.data.new_tensor(2.0) if squash else pred.data.new_tensor([2.0, 3.0])
+        return pred.values.new_tensor(2.0) if squash else pred.values.new_tensor([2.0, 3.0])
 
 
 class FakeGroup:
@@ -396,7 +396,7 @@ class RecordingNaNLoss(BaseLoss):
         **kwargs: object,
     ) -> torch.Tensor:
         del pred, squash, kwargs
-        self.targets.append(target.data.clone())
+        self.targets.append(target.values.clone())
         return torch.tensor(0.0)
 
 

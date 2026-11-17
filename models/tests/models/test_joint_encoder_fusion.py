@@ -104,7 +104,7 @@ def test_joint_encoder_joins_the_assembled_inputs_node_by_node() -> None:
         statistics_tendencies=TENDENCY_STATISTICS,
     )
 
-    assert torch.isfinite(out["hres"].data).all()
+    assert torch.isfinite(out["hres"].values).all()
     assert list(assembled) == ["lres", "hres"]
     # One mapper pass per sampling evaluation, each on the lres rows followed by the hres rows.
     assert mapper_inputs
