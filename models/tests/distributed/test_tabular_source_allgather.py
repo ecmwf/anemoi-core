@@ -107,7 +107,7 @@ def _check_tabular_allgather(
     assert not gathered.is_sharded
     # allgather returns each sample's windows as a list, select_time and concat_time as a tuple.
     assert [tuple(windows) for windows in gathered.boundaries] == list(full.boundaries)
-    for field_name in ("data", "coordinates", "timedeltas"):
+    for field_name in ("values", "coordinates", "timedeltas"):
         for sample_idx, (got, want) in enumerate(zip(getattr(gathered, field_name), getattr(full, field_name))):
             assert got.device == want.device
             assert torch.equal(got, want), f"rank {rank}: {field_name} of sample {sample_idx} differs"
