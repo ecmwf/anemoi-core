@@ -94,7 +94,9 @@ class TestSourceMetadata:
 
         assert type(rebuilt) is type(view)
         assert rebuilt.variables == view.variables
-        data, expected = (rebuilt.values, view.values) if isinstance(view.values, list) else ([rebuilt.values], [view.values])
+        data, expected = (
+            (rebuilt.values, view.values) if isinstance(view.values, list) else ([rebuilt.values], [view.values])
+        )
         assert all(torch.equal(a, b) for a, b in zip(data, expected, strict=True))
 
     @pytest.mark.parametrize("payload", [gridded_sample, tabular_sample])
@@ -189,7 +191,9 @@ class TestSourceTransformations:
         selected = view.select(variables=indices)
         index = torch.as_tensor(indices if isinstance(indices, list) else indices.tolist())
         torch.testing.assert_close(selected.values, view.values.index_select(view.layout.variables, index))
-        assert (selected.values.untyped_storage().data_ptr() == view.values.untyped_storage().data_ptr()) is shares_memory
+        assert (
+            selected.values.untyped_storage().data_ptr() == view.values.untyped_storage().data_ptr()
+        ) is shares_memory
 
     @pytest.mark.parametrize("indices", [1, slice(1, 2), [1], torch.tensor([1])])
     def test_select_time_keeps_the_time_axis(self, indices) -> None:

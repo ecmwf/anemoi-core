@@ -326,7 +326,11 @@ class TransportTraining(BaseTrainingModule):
             LOGGER.debug(
                 "SHAPE: y_model_output[%s].shape = %s",
                 dataset_name,
-                (selected.values.shape if isinstance(selected.values, torch.Tensor) else [t.shape for t in selected.values]),
+                (
+                    selected.values.shape
+                    if isinstance(selected.values, torch.Tensor)
+                    else [t.shape for t in selected.values]
+                ),
             )
         return y_reduced
 

@@ -188,4 +188,6 @@ def test_model_objectives_survive_pickling(objective: objectives.TransportModelO
         return noisy_target.map_data(lambda data: 2.0 * data + 1.0)
 
     expected = objective.forward(network, noisy, noisy, condition)
-    torch.testing.assert_close(restored.forward(network, noisy, noisy, condition)["data"].values, expected["data"].values)
+    torch.testing.assert_close(
+        restored.forward(network, noisy, noisy, condition)["data"].values, expected["data"].values
+    )

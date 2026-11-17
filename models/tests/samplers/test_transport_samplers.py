@@ -377,7 +377,9 @@ def test_edm_samplers_accept_repeated_noise_levels(sampler_cls: type[EDMDiffusio
     sampler = sampler_cls(dtype=torch.float64)
     one_level = KarrasSigmaSchedule(sigma_max=1.0, sigma_min=1.0, num_steps=4, rho=7.0).get_schedule()
     result = sampler.sample(x=x, y=y, sigmas=one_level, denoising_fn=gaussian_denoiser)
-    torch.testing.assert_close(result[DATASET_NAME].values, y[DATASET_NAME].values * sigma_data**2 / (sigma_data**2 + 1.0))
+    torch.testing.assert_close(
+        result[DATASET_NAME].values, y[DATASET_NAME].values * sigma_data**2 / (sigma_data**2 + 1.0)
+    )
 
     repeated_inside = torch.tensor([80.0, 10.0, 10.0, 1.0, 0.1, 0.0], dtype=torch.float64)
     result = sampler.sample(x=x, y=y, sigmas=repeated_inside, denoising_fn=gaussian_denoiser)
