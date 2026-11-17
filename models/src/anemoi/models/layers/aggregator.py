@@ -250,9 +250,19 @@ class GatedLatentFusion(nn.Module):
 
     Weights are shared across nodes; the parameter count depends only on
     ``hidden_dim``.
+
+    Parameters
+    ----------
+    hidden_dim : int
+        Channel dimension of both latents.
+    zero_init_value : bool, optional
+        Zero-initialise the output projection of the value MLP so the block is
+        an exact identity at initialisation while gradients still flow (the
+        gate stays open). Closing the sigmoid gate instead would saturate it
+        and stall learning. Default False.
     """
 
-    def __init__(self, hidden_dim: int) -> None:
+    def __init__(self, hidden_dim: int, zero_init_value: bool = False) -> None:
         super().__init__()
         # Separate norms: the running latent and a fresh encoder output have
         # different scales and distributions.
@@ -267,6 +277,9 @@ class GatedLatentFusion(nn.Module):
             nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
+        if zero_init_value:
+            nn.init.zeros_(self.to_value[-1].weight)
+            nn.init.zeros_(self.to_value[-1].bias)
 
     def forward(self, latent: Tensor, encoder_output: Tensor) -> Tensor:
         """Fold ``encoder_output`` into the running ``latent``.
@@ -302,6 +315,11 @@ class GatedFusionAggregator(BaseLatentAggregator):
     All sources must share the same channel dimension, which is also the
     output width.
 
+    With ``zero_init_value=True`` every fusion block starts as an exact
+    identity, so a dataset added to a trained model (e.g. through transfer
+    learning, where its block is missing from the checkpoint) leaves the
+    model's predictions unchanged at the start of fine-tuning.
+
     ```
     latent_aggregator:
       _target_: anemoi.models.layers.aggregator.GatedFusionAggregator
@@ -315,6 +333,7 @@ class GatedFusionAggregator(BaseLatentAggregator):
         input_channels: int,
         source_channels: Mapping[str, int],
         principal_source: str | None = None,
+        zero_init_value: bool = False,
         gradient_checkpointing: bool = False,
     ) -> None:
         super().__init__(
@@ -338,7 +357,7 @@ class GatedFusionAggregator(BaseLatentAggregator):
 
         self.fusion = nn.ModuleDict(
             {
-                name: GatedLatentFusion(hidden_dim=self._hidden_dim)
+                name: GatedLatentFusion(hidden_dim=self._hidden_dim, zero_init_value=zero_init_value)
                 for name in self.source_names
                 if name != self.principal_source
             },

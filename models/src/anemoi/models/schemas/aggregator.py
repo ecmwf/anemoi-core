@@ -47,6 +47,10 @@ class GatedFusionAggregatorSchema(BaseModel):
         default=None,
         description="Source whose latent is the running latent; defaults to the first configured source.",
     )
+    zero_init_value: bool = Field(
+        default=False,
+        description="Zero-initialise each fusion block's value projection so it starts as an exact identity.",
+    )
     gradient_checkpointing: bool = False
 
 

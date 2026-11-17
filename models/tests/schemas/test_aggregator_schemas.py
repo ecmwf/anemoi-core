@@ -34,7 +34,11 @@ from anemoi.models.schemas.aggregator import SumAggregatorSchema
         ),
         ({"_target_": "anemoi.models.layers.aggregator.GatedFusionAggregator"}, GatedFusionAggregatorSchema),
         (
-            {"_target_": "anemoi.models.layers.aggregator.GatedFusionAggregator", "principal_source": "era5"},
+            {
+                "_target_": "anemoi.models.layers.aggregator.GatedFusionAggregator",
+                "principal_source": "era5",
+                "zero_init_value": True,
+            },
             GatedFusionAggregatorSchema,
         ),
     ],

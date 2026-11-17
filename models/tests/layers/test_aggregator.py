@@ -164,6 +164,27 @@ def test_gated_latent_fusion_is_a_no_op_when_gate_is_closed() -> None:
     torch.testing.assert_close(block(latent, encoder_output), latent)
 
 
+def test_gated_latent_fusion_zero_init_is_an_identity_that_still_learns() -> None:
+    block = GatedLatentFusion(hidden_dim=4, zero_init_value=True)
+    latent, encoder_output = torch.randn(6, 4), torch.randn(6, 4, requires_grad=True)
+
+    output = block(latent, encoder_output)
+    torch.testing.assert_close(output, latent)
+
+    # The gate is open, so the zeroed value projection receives gradient and moves away from zero.
+    output.sum().backward()
+    assert torch.count_nonzero(block.to_value[-1].weight.grad) > 0
+    assert torch.count_nonzero(block.to_value[-1].bias.grad) > 0
+
+
+def test_gated_fusion_aggregator_zero_init_returns_principal_latent() -> None:
+    aggregator = _gated_aggregator(principal_source="data", zero_init_value=True)
+    data = torch.randn(6, 4)
+    latents = {"data": data, "waves": torch.randn(6, 4), "ocean": torch.randn(6, 4)}
+
+    torch.testing.assert_close(aggregator(torch.randn(6, 3), latents), data)
+
+
 def test_gated_fusion_aggregator_builds_one_block_per_auxiliary_source() -> None:
     aggregator = _gated_aggregator(principal_source="data")
 
