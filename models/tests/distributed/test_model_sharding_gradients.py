@@ -695,7 +695,9 @@ def _shifted(batches: dict[str, Batch], shift: float) -> dict[str, Batch]:
     return {
         key: Batch(
             {
-                name: source.clone(values=[d + shift for d in source.values] if source.is_tabular else source.values + shift)
+                name: source.clone(
+                    values=[d + shift for d in source.values] if source.is_tabular else source.values + shift
+                )
                 for name, source in batch.items()
             },
         )

@@ -1149,7 +1149,9 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         for step, statistics in enumerate(tendency_statistics):
             step_view = tendency.select(time=[step])
             step_tendency = self._as_tendency(dataset_name, step_view.select_variables(tendency_positions), statistics)
-            prognostic_state = post_processors(step_tendency, in_place=False, skip_imputation=True, tendency=True).values
+            prognostic_state = post_processors(
+                step_tendency, in_place=False, skip_imputation=True, tendency=True
+            ).values
             prognostic_state = prognostic_state + reference_physical.to(prognostic_state.dtype)
             physical = prognostic_state.new_empty(step_view.values.shape)
             physical.index_copy_(-1, prognostic, prognostic_state)

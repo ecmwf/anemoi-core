@@ -549,7 +549,9 @@ def test_tendency_conversion_skips_remapping() -> None:
     )
     physical = model.add_tendency_to_state("data", reference, tendency, per_step, post_processors)
     torch.testing.assert_close(normalised.values, state.values)
-    torch.testing.assert_close(physical.values, post_processors(state, in_place=False, skip_output_constraints=True).values)
+    torch.testing.assert_close(
+        physical.values, post_processors(state, in_place=False, skip_output_constraints=True).values
+    )
 
 
 def test_states_rebuilt_from_tendencies_are_clipped_to_remapping_domains() -> None:

@@ -464,7 +464,9 @@ def test_predict_step_skips_input_only_datasets(monkeypatch):
     model = _make_minimal_model()
 
     # `forcing` feeds an encoder but has no decoder, so forward only returns `data`
-    monkeypatch.setattr(model, "forward", lambda x, **kw: Batch({"data": x["data"].clone(values=x["data"].values + 1.0)}))
+    monkeypatch.setattr(
+        model, "forward", lambda x, **kw: Batch({"data": x["data"].clone(values=x["data"].values + 1.0)})
+    )
 
     class _NotCalled:
         def __call__(self, x, in_place=False):

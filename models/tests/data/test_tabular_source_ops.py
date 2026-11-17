@@ -271,7 +271,9 @@ class TestConcatTime:
             (slice(0, 1), slice(1, 1), slice(1, 3)),
         ]
         for sample_idx in range(2):
-            assert torch.equal(joined.values[sample_idx], torch.cat([first.values[sample_idx], second.values[sample_idx]]))
+            assert torch.equal(
+                joined.values[sample_idx], torch.cat([first.values[sample_idx], second.values[sample_idx]])
+            )
             assert torch.equal(
                 joined.timedeltas[sample_idx],
                 torch.cat([first.timedeltas[sample_idx], second.timedeltas[sample_idx]]),

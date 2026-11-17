@@ -379,7 +379,9 @@ class GriddedSource(Source):
         """
         dims = {getattr(self.layout, name): name for name in self.layout.AXES if getattr(self.layout, name) is not None}
 
-        tree = Tree(prefix + self.name + " | " + self.__class__.__name__ + f"[{self.values.dtype}, {self.values.device}]")
+        tree = Tree(
+            prefix + self.name + " | " + self.__class__.__name__ + f"[{self.values.dtype}, {self.values.device}]"
+        )
         for axis in range(self.values.ndim):
             tree.add(f"Dim {axis} ({dims[axis]}): {self.values.shape[axis]}")
 
