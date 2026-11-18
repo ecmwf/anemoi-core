@@ -925,9 +925,9 @@ class IcosahedralAttentionTriton(torch.autograd.Function):
         assert num_queries == shard.num_queries, f"Expected {shard.num_queries} queries, got {num_queries}."
         assert k.shape[2] == shard.num_keys, f"Expected {shard.num_keys} keys, got {k.shape[2]}."
         assert v.shape == k.shape and k.shape[:2] == q.shape[:2] and k.shape[3] == head_dim
-        assert (
-            head_dim >= 16 and head_dim & (head_dim - 1) == 0
-        ), f"head_dim must be a power of 2 >= 16, got {head_dim}."
+        assert head_dim >= 16 and head_dim & (head_dim - 1) == 0, (
+            f"head_dim must be a power of 2 >= 16, got {head_dim}."
+        )
 
         q, k, v = (_rows_readable(t) for t in (q, k, v))
         tables = _device_tables(shard, q.device)

@@ -678,9 +678,9 @@ class ReducedGridCrossAttentionTriton(torch.autograd.Function):
         batch, heads, q_points, head_dim = q.shape
         assert q_points == query_grid.num_points, f"Expected {query_grid.num_points} queries, got {q_points}."
         assert k.shape == v.shape == (batch, heads, key_grid.num_points, head_dim), "k and v must match the key grid."
-        assert (
-            head_dim >= 16 and head_dim & (head_dim - 1) == 0
-        ), f"head_dim must be a power of 2 >= 16, got {head_dim}."
+        assert head_dim >= 16 and head_dim & (head_dim - 1) == 0, (
+            f"head_dim must be a power of 2 >= 16, got {head_dim}."
+        )
 
         q, k, v = (_rows_readable(t) for t in (q, k, v))
         o = _point_major(batch, heads, q_points, head_dim, q)

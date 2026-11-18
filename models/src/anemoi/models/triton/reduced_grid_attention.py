@@ -787,9 +787,9 @@ class ReducedGridAttentionTriton(torch.autograd.Function):
         batch, heads, num_points, head_dim = q.shape
         assert num_points == sum(row_lengths), f"Expected {sum(row_lengths)} points, got {num_points}."
         assert k.shape == q.shape and v.shape == q.shape, "q, k and v must have the same shape."
-        assert (
-            head_dim >= 16 and head_dim & (head_dim - 1) == 0
-        ), f"head_dim must be a power of 2 >= 16, got {head_dim}."
+        assert head_dim >= 16 and head_dim & (head_dim - 1) == 0, (
+            f"head_dim must be a power of 2 >= 16, got {head_dim}."
+        )
 
         q, k, v = (_rows_readable(t) for t in (q, k, v))
         o = _point_major(batch, heads, num_points, head_dim, q)
