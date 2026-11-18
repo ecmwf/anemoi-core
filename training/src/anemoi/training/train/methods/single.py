@@ -42,6 +42,13 @@ class SingleTraining(BaseTrainingModule):
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for i, task_kwargs in enumerate(task_steps):
             y_pred = self(x)
+            y_pred = self.task.mask_predictions(
+                y_pred,
+                batch,
+                data_indices=self.data_indices,
+                pre_processors=self.model.pre_processors,
+                **task_kwargs,
+            )
 
             y = self.task.get_targets(batch, **task_kwargs)
 

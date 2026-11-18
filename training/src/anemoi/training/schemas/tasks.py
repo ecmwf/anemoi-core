@@ -72,6 +72,15 @@ class AutoencoderTaskSchema(BaseModel):
     "Task class path for the autoencoding task."
 
 
+class NightMaskSchema(BaseModel):
+    """Night mask for accumulated radiation outputs of the temporal downscaler."""
+
+    mask_variable: str = Field(default="insolation")
+    "Instantaneous forcing whose zeros mark night (e.g. 'insolation')."
+    variables: list[str] = Field(example=["ssr", "ssrd", "fdir"])
+    "Output variables set to zero where the mask variable is zero at t and t - output_timestep."
+
+
 class TemporalDownscalerSchema(BaseModel):
     """Configuration for temporal downscaling task."""
 
@@ -85,6 +94,8 @@ class TemporalDownscalerSchema(BaseModel):
     "Whether to include the left boundary in the output."
     output_right_boundary: bool = Field(example=False)
     "Whether to include the right boundary in the output."
+    night_mask: NightMaskSchema | None = Field(default=None)
+    "Optional night mask: zero accumulated radiation outputs where the mask variable is zero at t and t-1 step."
 
 
 TaskSchema = Annotated[
