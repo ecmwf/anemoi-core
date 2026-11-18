@@ -209,7 +209,7 @@ def make_gridded_view(payload: torch.Tensor, indices: list[int]) -> GriddedSourc
     points, num_vars = payload.shape
     return GriddedSource(
         name="gridded",
-        data=payload.reshape(1, 1, points, num_vars).clone(),
+        values=payload.reshape(1, 1, points, num_vars).clone(),
         variables=[CHAINED_VARIABLES[i] for i in indices],
         statistics={key: value[indices] for key, value in CHAINED_STATISTICS.items()},
         coordinates=torch.zeros(points, 2),
@@ -290,7 +290,7 @@ def test_chained_postprocessor_inplace(postprocessor_fixture, data_fixture, requ
     view = make_gridded_view(x_norm, output_indices)
     for postprocessor in postprocessors[::-1]:
         view = postprocessor(view, in_place=False, inverse=True)
-    assert torch.allclose(view.data.reshape(out.shape), out, equal_nan=True)
+    assert torch.allclose(view.values.reshape(out.shape), out, equal_nan=True)
 
 
 def _mean_std_relu_on_q() -> NormalizedReluPostprocessor:
@@ -318,14 +318,14 @@ def test_normalized_relu_thresholds_follow_view_statistics() -> None:
 
     # CHAINED_STATISTICS: q has mean 4.5, stdev 1 -> threshold (0 - 4.5) / 1 = -4.5.
     out = postprocessor(make_gridded_view(payload, list(range(len(CHAINED_VARIABLES)))), inverse=True, in_place=False)
-    assert torch.equal(out.data[0, 0, :, q], torch.tensor([-4.5, -1.0]))
+    assert torch.equal(out.values[0, 0, :, q], torch.tensor([-4.5, -1.0]))
 
     # Same processor, a view whose q has mean 0, stdev 2 -> threshold 0.
     view = make_gridded_view(payload, list(range(len(CHAINED_VARIABLES))))
     statistics = {key: value.copy() for key, value in view.statistics.items()}
     statistics["mean"][q], statistics["stdev"][q] = 0.0, 2.0
     out = postprocessor(view.clone(statistics=statistics), inverse=True, in_place=False)
-    assert torch.equal(out.data[0, 0, :, q], torch.tensor([0.0, 0.0]))
+    assert torch.equal(out.values[0, 0, :, q], torch.tensor([0.0, 0.0]))
 
 
 def test_normalized_relu_requires_matching_statistics() -> None:
@@ -359,7 +359,7 @@ def test_normalized_relu_loads_pickle_with_frozen_thresholds() -> None:
     payload = torch.zeros(2, len(CHAINED_VARIABLES))
     payload[:, q] = torch.tensor([-5.0, -1.0])
     out = loaded(make_gridded_view(payload, list(range(len(CHAINED_VARIABLES)))), inverse=True, in_place=False)
-    assert torch.equal(out.data[0, 0, :, q], torch.tensor([-4.5, -1.0]))
+    assert torch.equal(out.values[0, 0, :, q], torch.tensor([-4.5, -1.0]))
 
 
 class _LegacyProcessor(BasePreprocessor):
@@ -403,4 +403,4 @@ def test_normalized_relu_thresholds_match_the_normalizer(method) -> None:
 
     normalizer = InputNormalizer(config={"default": method})
     norm_mul, norm_add = normalizer.get_norm_parameters(view.statistics, view.name_to_index, torch.device("cpu"))
-    torch.testing.assert_close(out.data[0, 0, 0, q], 2.5 * norm_mul[q] + norm_add[q])
+    torch.testing.assert_close(out.values[0, 0, 0, q], 2.5 * norm_mul[q] + norm_add[q])

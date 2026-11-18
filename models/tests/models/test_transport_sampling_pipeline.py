@@ -33,7 +33,8 @@ from anemoi.models.transport import EDMDiffusionModelObjective
 from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import FlowMatchingModelObjective
 from anemoi.models.transport import schedules
-from anemoi.models.transport.paths import flow_matching_state
+from anemoi.models.transport.objectives import condition_batch_shape
+from anemoi.models.transport.paths import flow_matching_noisy_target
 from tests.batch_builders import build_batch
 from tests.graph_stubs import stub_graph_geometry
 
@@ -102,7 +103,7 @@ def _configure_sampling_model(
     model: AnemoiTransportModelEncProcDec,
     specs: dict[str, tuple[int, int, int]],
 ) -> None:
-    """Attach the metadata needed by ``_sampling_template`` to a lightweight model stub.
+    """Attach the metadata needed by ``_sampling_templates`` to a lightweight model stub.
 
     ``specs`` maps dataset name to ``(num_input_channels, num_output_channels, grid_size)``.
     """
@@ -143,7 +144,7 @@ def _model_batch(
             variables=variables,
             layout=GRIDDED_LAYOUT,
             statistics={key: values[positions] for key, values in model.statistics[name].items()},
-            data=tensor,
+            values=tensor,
             coordinates=model.test_coordinates[name],
         )
     return Batch(sources)
@@ -183,7 +184,7 @@ def _sparse_batch(
     data = [torch.zeros(shape, dtype=torch.float32) for shape in data_shapes]
     coordinates = [torch.full((shape[0], 2), float(index)) for index, shape in enumerate(data_shapes)]
     return build_batch(
-        data={name: data},
+        values={name: data},
         coordinates={name: coordinates},
         timedeltas={name: [torch.zeros(shape[0]) for shape in data_shapes]},
         boundaries={name: [(slice(0, shape[0]),) for shape in data_shapes]},
@@ -220,7 +221,7 @@ def test_transport_conditioning_embedding_uses_compact_condition_width() -> None
     )
 
     x = build_batch(
-        data={"data": torch.empty(2, 2, 3, 4, 1)},
+        values={"data": torch.empty(2, 2, 3, 4, 1)},
         coordinates={"data": torch.zeros(4, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -269,7 +270,7 @@ def test_transport_conditioning_is_split_like_the_nodes_it_conditions(
     monkeypatch.setattr(transport_model_module, "shard_tensor", shard_first)
 
     x = build_batch(
-        data={"data": torch.empty(1, 1, 1, local_grid, 1)},
+        values={"data": torch.empty(1, 1, 1, local_grid, 1)},
         coordinates={"data": torch.zeros(local_grid, 2)},
         metadata={"static_coords": frozenset({"data"})},
         shard_sizes={"data": shard_sizes},
@@ -297,7 +298,7 @@ def _obs_source(node_counts: list[int], n_variables: int, value: float, coordina
     """A one-window tabular source with ``node_counts[s]`` points in sample ``s``, all set to ``value``."""
     return TabularSource(
         name="obs",
-        data=[torch.full((count, n_variables), value) for count in node_counts],
+        values=[torch.full((count, n_variables), value) for count in node_counts],
         coordinates=[
             coordinate_offset + 0.01 * torch.arange(count, dtype=torch.float32)[:, None].expand(count, 2)
             for count in node_counts
@@ -338,10 +339,10 @@ def test_transport_assemble_input_stacks_history_and_noisy_target_rows_of_sparse
     model = _transport_model_stub()
     model.node_attributes = _EmptyNodeAttributes()
     x = _obs_source([2, 1], n_variables=2, value=1.0, coordinate_offset=-1.0)
-    y_noised = _obs_source([3, 2], n_variables=1, value=5.0, coordinate_offset=1.0)
+    noisy_target = _obs_source([3, 2], n_variables=1, value=5.0, coordinate_offset=1.0)
 
     data_coords, x_data_latent, x_skip, shard_sizes, batch_sizes, timedeltas = model._assemble_transport_input(
-        x, y_noised, batch_size=2, dataset_name="obs"
+        x, noisy_target, batch_size=2, dataset_name="obs"
     )
 
     history_row = torch.tensor([1.0, 1.0, 0.0])
@@ -349,7 +350,7 @@ def test_transport_assemble_input_stacks_history_and_noisy_target_rows_of_sparse
     expected_values = torch.stack([history_row] * 2 + [target_row] * 3 + [history_row] + [target_row] * 2)
     expected_flag = torch.tensor([0.0] * 2 + [1.0] * 3 + [0.0] + [1.0] * 2)
     expected_coords = torch.cat(
-        [x.coordinates[0], y_noised.coordinates[0], x.coordinates[1], y_noised.coordinates[1]],
+        [x.coordinates[0], noisy_target.coordinates[0], x.coordinates[1], noisy_target.coordinates[1]],
     )
     assert x_skip is None
     assert shard_sizes is None
@@ -371,9 +372,9 @@ def test_transport_encodes_a_sparse_dataset_without_points_in_the_batch() -> Non
     model.node_attributes = _EmptyNodeAttributes()
     model.encoder_graph_provider = {"obs": _EmptyGraphProvider()}
     x = _obs_source([0], n_variables=2, value=1.0, coordinate_offset=-1.0)
-    y_noised = _obs_source([0], n_variables=1, value=5.0, coordinate_offset=1.0)
+    noisy_target = _obs_source([0], n_variables=1, value=5.0, coordinate_offset=1.0)
 
-    assembled = model._assemble_transport_input(x, y_noised, batch_size=1, dataset_name="obs")
+    assembled = model._assemble_transport_input(x, noisy_target, batch_size=1, dataset_name="obs")
     source = model._encoder_source_from_rows(
         "obs",
         assembled,
@@ -396,9 +397,9 @@ def test_transport_assemble_input_adds_timedelta_features_to_sparse_rows() -> No
     model.node_attributes = _EmptyNodeAttributes()
     model.dynamic_node_attributes = {"obs": {"timedeltas": Timedeltas(scale_seconds=1.0)}}
     x = _obs_source([2], n_variables=1, value=1.0, coordinate_offset=-3.0)
-    y_noised = _obs_source([1], n_variables=1, value=5.0, coordinate_offset=4.0)
+    noisy_target = _obs_source([1], n_variables=1, value=5.0, coordinate_offset=4.0)
 
-    _, x_data_latent, _, _, _, _ = model._assemble_transport_input(x, y_noised, batch_size=1, dataset_name="obs")
+    _, x_data_latent, _, _, _, _ = model._assemble_transport_input(x, noisy_target, batch_size=1, dataset_name="obs")
 
     # [history | noisy target | sin/cos coordinates | scaled timedelta | flag]
     assert x_data_latent.shape == (3, 1 + 1 + 4 + 1 + 1)
@@ -464,15 +465,15 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
     y_noised_data = torch.full((1, 1, 1, 3, 2), 100.0)
     x = GriddedSource(
         name="data",
-        data=x_data,
+        values=x_data,
         coordinates=coordinates,
         variables=["a", "b", "c", "d"],
         statistics={},
         layout=layout,
     )
-    y_noised = GriddedSource(
+    noisy_target = GriddedSource(
         name="data",
-        data=y_noised_data,
+        values=y_noised_data,
         coordinates=coordinates,
         variables=["a", "c"],
         statistics={},
@@ -481,7 +482,7 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
 
     data_coords, x_data_latent, x_skip, shard_sizes, batch_sizes, timedeltas = model._assemble_transport_input(
         x,
-        y_noised,
+        noisy_target,
         batch_size=1,
         dataset_name="data",
     )
@@ -510,7 +511,7 @@ def test_tendency_transport_assemble_input_rejects_sparse_obs() -> None:
     layout = TensorLayout(grid=0, variables=1)
     sparse_view = TabularSource(
         name="obs",
-        data=[torch.ones(2, 1)],
+        values=[torch.ones(2, 1)],
         coordinates=[torch.zeros(2, 2)],
         variables=["a"],
         statistics={},
@@ -611,32 +612,32 @@ def test_tendency_transport_forward_network_uses_dense_source_view_override() ->
 
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
     batch = build_batch(
-        data={"data": torch.randn(1, 2, 1, 3, 2)},
+        values={"data": torch.randn(1, 2, 1, 3, 2)},
         coordinates={"data": torch.zeros(3, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": layout},
         variables={"data": ["a", "b"]},
         statistics={"data": {}},
     )
-    conditioned_target = batch.with_data({"data": torch.randn(1, 1, 1, 3, 2)})
+    noisy_target = batch.with_data({"data": torch.randn(1, 1, 1, 3, 2)})
 
     out = model._forward_transport_network(
         batch,
-        conditioned_target,
+        noisy_target,
         {"data": torch.zeros(1, 1, 1, 1, 1)},
     )
 
     assert residual.called
     assert encoder.source_width == 14
     # Rows: [history (2 steps x 2 variables) | noisy target (2) | coordinates (4) | residual (4)].
-    history = batch["data"].data[0, :, 0].permute(1, 0, 2).reshape(3, 4)
+    history = batch["data"].values[0, :, 0].permute(1, 0, 2).reshape(3, 4)
     torch.testing.assert_close(received["encoder_rows"][:, :4], history)
-    torch.testing.assert_close(received["encoder_rows"][:, 4:6], conditioned_target["data"].data[0, 0, 0])
+    torch.testing.assert_close(received["encoder_rows"][:, 4:6], noisy_target["data"].values[0, 0, 0])
     assert received["encoder"] is encoder_cond
     assert received["processor"] is processor_cond
     assert received["decoder"] is decoder_cond
     assert isinstance(out, Batch)
-    assert out["data"].data.shape == (1, 1, 1, 3, 2)
+    assert out["data"].values.shape == (1, 1, 1, 3, 2)
 
 
 def test_transport_target_dim_combines_corrupted_target_and_decoding_forcings() -> None:
@@ -712,7 +713,7 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
 
     model._assemble_target = _assemble_target_stub
     model._assemble_output = lambda _x_out, _x_skip, target, _dtype, _dataset_name: target.clone(
-        data=[torch.zeros(3, 1)],
+        values=[torch.zeros(3, 1)],
     )
 
     class _Encoder:
@@ -747,7 +748,7 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
 
     layout = TensorLayout(grid=0, variables=1)
     batch = build_batch(
-        data={"obs": [torch.ones(3, 1)]},
+        values={"obs": [torch.ones(3, 1)]},
         coordinates={"obs": [torch.zeros(3, 2)]},
         timedeltas={"obs": [torch.zeros(3)]},
         boundaries={"obs": [(slice(0, 3),)]},
@@ -759,7 +760,7 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
     target_forcing = batch.replace(
         "obs",
         batch["obs"].clone(
-            data=[torch.full((3, 2), 5.0)],
+            values=[torch.full((3, 2), 5.0)],
             variables=["forcing_a", "forcing_b"],
         ),
     )
@@ -767,24 +768,24 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
         batch,
         batch,
         {"obs": torch.zeros(1, 1, 1, 1, 1)},
-        target_forcing=target_forcing,
+        target_forcings=target_forcing,
     )
 
     assert encoder.source_width == (4 if shared_encoder else 22)
     assert decoder.destination_features.shape == (3, 5)
     torch.testing.assert_close(decoder.destination_features[:, 0], torch.ones(3))
-    # Explicit target features receive the forcing view; the corrupted target is prepended separately.
-    assembled_data = assembled_views["obs"].data[0]
+    # Explicit target features receive the forcing view; the noisy target is prepended separately.
+    assembled_data = assembled_views["obs"].values[0]
     assert assembled_data.shape == (3, 2)
     torch.testing.assert_close(assembled_data, torch.full((3, 2), 5.0))
 
 
 def test_transport_conditioning_rejects_expanded_condition_shape() -> None:
-    model = _transport_model_stub()
+    """The condition holds one value per sample and member, not one per output step or grid point."""
     expanded_condition = {"data": torch.zeros(2, 4, 3, 7, 1)}
 
     with pytest.raises(AssertionError, match="Expected condition to have shape"):
-        model._assert_condition_shapes(expanded_condition)
+        condition_batch_shape(expanded_condition)
 
 
 class AddOneProcessor(torch.nn.Module):
@@ -792,7 +793,7 @@ class AddOneProcessor(torch.nn.Module):
 
     def forward(self, view, in_place: bool = True, **_kwargs):
         assert in_place is False
-        return view.clone(data=view.data + 1)
+        return view.clone(values=view.values + 1)
 
 
 def test_predict_step_samples_onto_the_target_and_postprocesses() -> None:
@@ -825,14 +826,14 @@ def test_predict_step_samples_onto_the_target_and_postprocesses() -> None:
     )
 
     # Inputs and target forcings are normalised before sampling.
-    torch.testing.assert_close(captured["x"]["ds_a"].data, torch.ones(1, 2, 1, 4, 2))
-    torch.testing.assert_close(captured["target_forcing"]["ds_a"].data, torch.ones(1, 1, 1, 4, 2))
+    torch.testing.assert_close(captured["x"]["ds_a"].values, torch.ones(1, 2, 1, 4, 2))
+    torch.testing.assert_close(captured["target_forcings"]["ds_a"].values, torch.ones(1, 1, 1, 4, 2))
     # The templates give the nodes to sample onto.
     assert captured["target_template"] is target_template
     assert captured["sampler_params"] == {"sampler": "heun"}
     # The sample is post-processed and returned as a Batch on the target nodes.
     assert isinstance(out, Batch)
-    torch.testing.assert_close(out["ds_a"].data, torch.full((1, 1, 1, 4, 3), 6.0))
+    torch.testing.assert_close(out["ds_a"].values, torch.full((1, 1, 1, 4, 3), 6.0))
     assert out["ds_a"].variables == list(model.data_indices["ds_a"].model.output.ordered_names)
 
 
@@ -885,7 +886,7 @@ def test_predict_step_runs_without_target_forcings() -> None:
         post_processors=torch.nn.ModuleDict({"ds_a": AddOneProcessor()}),
     )
 
-    assert list(captured["target_forcing"].keys()) == []
+    assert list(captured["target_forcings"].keys()) == []
 
 
 def test_transport_models_reject_configured_boundings() -> None:
@@ -950,13 +951,13 @@ def test_sample_passes_zero_terminated_schedule_to_sampler(
             assert isinstance(sigmas, torch.Tensor)
             assert sigmas.shape == (5,)
             assert sigmas[-1] == 0.0
-            for dataset_name, y_data in ((n, s.data) for n, s in y.items()):
+            for dataset_name, y_data in ((n, s.values) for n, s in y.items()):
                 assert y_data.dtype == sigmas.dtype
                 assert y_data.shape[:4] == (
-                    x[dataset_name].data.shape[0],
+                    x[dataset_name].values.shape[0],
                     2,
-                    x[dataset_name].data.shape[2],
-                    x[dataset_name].data.shape[-2],
+                    x[dataset_name].values.shape[2],
+                    x[dataset_name].values.shape[-2],
                 )
             return y
 
@@ -1005,7 +1006,7 @@ def test_edm_sparse_sampling_uses_target_template_shapes(monkeypatch: pytest.Mon
             **kwargs,
         ):
             del x, sigmas, denoising_fn, model_comm_group, kwargs
-            assert [tuple(sample.shape) for sample in y["obs"].data] == [(3, 1), (1, 1)]
+            assert [tuple(sample.shape) for sample in y["obs"].values] == [(3, 1), (1, 1)]
             assert [tuple(coords.shape) for coords in y["obs"].coordinates] == [(3, 2), (1, 2)]
             return y
 
@@ -1027,7 +1028,7 @@ def test_edm_sparse_sampling_uses_target_template_shapes(monkeypatch: pytest.Mon
 
     out = model.sample(x, target_template=target_template)
 
-    assert [tuple(sample.shape) for sample in out["obs"].data] == [(3, 1), (1, 1)]
+    assert [tuple(sample.shape) for sample in out["obs"].values] == [(3, 1), (1, 1)]
 
 
 def test_flow_matching_sparse_sampling_uses_target_template_shapes(
@@ -1048,7 +1049,7 @@ def test_flow_matching_sparse_sampling_uses_target_template_shapes(
             **kwargs,
         ):
             del x, times, vector_field_fn, model_comm_group, kwargs
-            assert [tuple(sample.shape) for sample in y["obs"].data] == [(5, 1), (2, 1)]
+            assert [tuple(sample.shape) for sample in y["obs"].values] == [(5, 1), (2, 1)]
             assert [tuple(coords.shape) for coords in y["obs"].coordinates] == [(5, 2), (2, 2)]
             return y
 
@@ -1069,7 +1070,7 @@ def test_flow_matching_sparse_sampling_uses_target_template_shapes(
 
     out = model.sample(x, target_template=target_template)
 
-    assert [tuple(sample.shape) for sample in out["obs"].data] == [(5, 1), (2, 1)]
+    assert [tuple(sample.shape) for sample in out["obs"].values] == [(5, 1), (2, 1)]
 
 
 def test_transport_sampling_requires_target_template() -> None:
@@ -1185,15 +1186,15 @@ def test_sample_dispatches_flow_matching_to_default_heun_sampler(
     model.num_output_channels = {"ds_a": 3}
     model._forward_transport_network = lambda _x, y, *_args, **_kwargs: y
     _configure_sampling_model(model, {"ds_a": (6, 3, 5)})
-    model.build_sampling_source = lambda x, **_kwargs: {
+    model.draw_sampling_noise = lambda x, **_kwargs: {
         "ds_a": torch.zeros(
-            x["ds_a"].data.shape[0],
+            x["ds_a"].values.shape[0],
             model.n_step_output["ds_a"],
-            x["ds_a"].data.shape[2],
-            x["ds_a"].data.shape[-2],
+            x["ds_a"].values.shape[2],
+            x["ds_a"].values.shape[-2],
             model.num_output_channels["ds_a"],
-            device=x["ds_a"].data.device,
-            dtype=x["ds_a"].data.dtype,
+            device=x["ds_a"].values.device,
+            dtype=x["ds_a"].values.dtype,
         )
     }
 
@@ -1246,15 +1247,15 @@ def test_sample_can_use_vector_field_sampler_for_flow_matching(
     model.num_output_channels = {"ds_a": 3}
     model._forward_transport_network = lambda _x, y, *_args, **_kwargs: y
     _configure_sampling_model(model, {"ds_a": (6, 3, 5)})
-    model.build_sampling_source = lambda x, **_kwargs: {
+    model.draw_sampling_noise = lambda x, **_kwargs: {
         "ds_a": torch.zeros(
-            x["ds_a"].data.shape[0],
+            x["ds_a"].values.shape[0],
             model.n_step_output["ds_a"],
-            x["ds_a"].data.shape[2],
-            x["ds_a"].data.shape[-2],
+            x["ds_a"].values.shape[2],
+            x["ds_a"].values.shape[-2],
             model.num_output_channels["ds_a"],
-            device=x["ds_a"].data.device,
-            dtype=x["ds_a"].data.dtype,
+            device=x["ds_a"].values.device,
+            dtype=x["ds_a"].values.dtype,
         )
     }
 
@@ -1273,37 +1274,41 @@ def test_sample_can_use_vector_field_sampler_for_flow_matching(
 
 
 def test_flow_matching_objective_returns_raw_velocity_prediction() -> None:
-    """The flow-matching model objective leaves velocity predictions in model-output space."""
-    state = build_batch(
-        data={"data": torch.full((1, 1, 1, 2, 1), 2.0)},
+    """The flow-matching model objective leaves velocity predictions in model-output space.
+
+    The model hands the objective its network with the further forward arguments already bound.
+    """
+    given_target = build_batch(
+        values={"data": torch.full((1, 1, 1, 2, 1), 2.0)},
         coordinates={"data": torch.zeros(2, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": ["x"]},
         statistics={"data": {}},
     )
-    time_level = {"data": torch.full_like(state["data"].data, 0.25)}
-    velocity = state.with_data({"data": torch.full_like(state["data"].data, 0.5)})
+    time = {"data": torch.full_like(given_target["data"].values, 0.25)}
+    velocity = given_target.with_data({"data": torch.full_like(given_target["data"].values, 0.5)})
     marker = object()
 
     def _forward_transport_network(
         _x: Batch,
-        conditioned_target: Batch,
+        noisy_target: Batch,
         condition: dict[str, torch.Tensor],
         **_kwargs,
     ) -> Batch:
-        assert conditioned_target is state
-        assert condition is time_level
+        assert noisy_target is given_target
+        assert condition is time
         assert _kwargs["marker"] is marker
         return velocity
 
-    model = SimpleNamespace(_forward_transport_network=_forward_transport_network)
+    model = _transport_model_stub()
+    model._forward_transport_network = _forward_transport_network
+    model.transport_model_objective = FlowMatchingModelObjective()
 
-    out = FlowMatchingModelObjective().forward(
-        model,
-        state.with_data({"data": torch.zeros_like(state["data"].data)}),
-        state,
-        time_level,
+    out = model.forward(
+        given_target.with_data({"data": torch.zeros_like(given_target["data"].values)}),
+        given_target,
+        time,
         marker=marker,
     )
 
@@ -1320,15 +1325,15 @@ def test_flow_matching_samples_differ_because_the_source_is_random() -> None:
     }
     model.n_step_output = {"ds_a": 1}
     model.num_output_channels = {"ds_a": 3}
-    # A velocity that depends only on the state: all randomness comes from the source.
+    # A velocity that depends only on the noisy target: all randomness comes from the starting noise.
     model._forward_transport_network = lambda _x, y, *_args, **_kwargs: y.map_data(torch.zeros_like)
     _configure_sampling_model(model, {"ds_a": (3, 3, 5)})
     x = {"ds_a": torch.randn(1, 2, 1, 5, 3, dtype=torch.float32)}
     batch = _sampling_batch(model, x)
     template = _target_template(model, x)
 
-    first = model.sample(batch, target_template=template)["ds_a"].data
-    second = model.sample(batch, target_template=template)["ds_a"].data
+    first = model.sample(batch, target_template=template)["ds_a"].values
+    second = model.sample(batch, target_template=template)["ds_a"].values
 
     assert first.shape == (1, 1, 1, 5, 3)
     assert not torch.equal(first, second)
@@ -1359,9 +1364,9 @@ def test_flow_matching_sampling_retraces_the_training_path(sampler: str) -> None
     """With the exact velocity, sampling visits the training states and ends on the target.
 
     The network is replaced by the velocity that ``flow_matching_clean`` follows from the current
-    state at time ``t`` to the target at time 1. Every state the sampler passes to the network must
-    then be the training state ``flow_matching_state`` between the starting noise and the target,
-    and the last state must be the target. A reversed time grid, or a network given ``1 - t``,
+    state at time ``t`` to the target at time 1. Every noisy target the sampler passes to the network must
+    then be the training noisy target ``flow_matching_noisy_target`` between the starting noise and the target,
+    and the last noisy target must be the target. A reversed time grid, or a network given ``1 - t``,
     leaves that path.
     """
     model = _transport_model_stub()
@@ -1375,10 +1380,10 @@ def test_flow_matching_sampling_retraces_the_training_path(sampler: str) -> None
     target = torch.randn(1, 1, 1, 5, 3, dtype=torch.float64)
     visited = []
 
-    def _exact_velocity(_x: Batch, state: Batch, time_level: dict[str, torch.Tensor], *_args, **_kwargs) -> Batch:
-        t = time_level["ds_a"].to(torch.float64)
-        visited.append((t, state["ds_a"].data.to(torch.float64)))
-        return state.map_data(lambda data: ((target - data.to(torch.float64)) / (1.0 - t)).to(data.dtype))
+    def _exact_velocity(_x: Batch, noisy_target: Batch, time: dict[str, torch.Tensor], *_args, **_kwargs) -> Batch:
+        t = time["ds_a"].to(torch.float64)
+        visited.append((t, noisy_target["ds_a"].values.to(torch.float64)))
+        return noisy_target.map_data(lambda data: ((target - data.to(torch.float64)) / (1.0 - t)).to(data.dtype))
 
     model._forward_transport_network = _exact_velocity
     _configure_sampling_model(model, {"ds_a": (3, 3, 5)})
@@ -1386,13 +1391,13 @@ def test_flow_matching_sampling_retraces_the_training_path(sampler: str) -> None
     batch = _sampling_batch(model, x)
     template = _target_template(model, x)
 
-    sampled = model.sample(batch, target_template=template)["ds_a"].data
+    sampled = model.sample(batch, target_template=template)["ds_a"].values
 
     first_time, noise = visited[0]
     assert first_time.flatten()[0].item() == 0.0
     assert len(visited) == (4 if sampler == "euler" else 7)
-    for t, state in visited:
-        torch.testing.assert_close(state, flow_matching_state(noise, target, t), atol=1e-5, rtol=1e-5)
+    for t, noisy_target in visited:
+        torch.testing.assert_close(noisy_target, flow_matching_noisy_target(noise, target, t), atol=1e-5, rtol=1e-5)
     torch.testing.assert_close(sampled.to(torch.float64), target, atol=1e-5, rtol=1e-5)
 
 
@@ -1425,14 +1430,14 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
 
     def _network(
         x: Batch,
-        conditioned_target: Batch,
+        noisy_target: Batch,
         condition: dict[str, torch.Tensor],
         model_comm_group=None,
-        target_forcing=None,
+        target_forcings=None,
     ) -> Batch:
-        del model_comm_group, target_forcing
+        del model_comm_group, target_forcings
         out = {}
-        for dataset_name, target_data in ((n, s.data) for n, s in conditioned_target.items()):
+        for dataset_name, target_data in ((n, s.values) for n, s in noisy_target.items()):
             condition_data = condition[dataset_name]
             assert condition_data.shape == (
                 target_data.shape[0],
@@ -1442,10 +1447,10 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
                 1,
             )
             # The noise level keeps at least float32, and the noised target follows it.
-            assert condition_data.dtype == torch.promote_types(x[dataset_name].data.dtype, torch.float32)
+            assert condition_data.dtype == torch.promote_types(x[dataset_name].values.dtype, torch.float32)
             assert target_data.dtype == condition_data.dtype
             out[dataset_name] = 0.8 * target_data + 0.02 * condition_data
-        return conditioned_target.with_data(out)
+        return noisy_target.with_data(out)
 
     model._forward_transport_network = _network
 
@@ -1457,12 +1462,12 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
     out = model.sample(_sampling_batch(model, x), target_template=_target_template(model, x))
 
     assert set(out.keys()) == set(x.keys())
-    assert out["dataset_a"].data.shape == (2, 2, 1, 5, 3)
-    assert out["dataset_b"].data.shape == (2, 2, 1, 7, 2)
-    assert out["dataset_a"].data.dtype == x["dataset_a"].dtype
-    assert out["dataset_b"].data.dtype == x["dataset_b"].dtype
-    assert torch.isfinite(out["dataset_a"].data).all()
-    assert torch.isfinite(out["dataset_b"].data).all()
+    assert out["dataset_a"].values.shape == (2, 2, 1, 5, 3)
+    assert out["dataset_b"].values.shape == (2, 2, 1, 7, 2)
+    assert out["dataset_a"].values.dtype == x["dataset_a"].dtype
+    assert out["dataset_b"].values.dtype == x["dataset_b"].dtype
+    assert torch.isfinite(out["dataset_a"].values).all()
+    assert torch.isfinite(out["dataset_b"].values).all()
 
 
 def test_sampling_statistics_follow_output_variable_order() -> None:
@@ -1476,10 +1481,10 @@ def test_sampling_statistics_follow_output_variable_order() -> None:
         "stdev": torch.tensor([1.0, 2.0, 3.0, 4.0]),
     }
     model.num_output_channels = {"data": 2}
-    batch = model._sampling_template(template, _sampling_batch(model, {"data": torch.zeros(1, 1, 1, 3, 2)}))
-    assert batch["data"].variables == ["out_1", "in_0"]
-    torch.testing.assert_close(batch["data"].statistics["mean"], torch.tensor([40.0, 10.0]))
-    torch.testing.assert_close(batch["data"].statistics["stdev"], torch.tensor([4.0, 1.0]))
+    templates = model._sampling_templates(template, _sampling_batch(model, {"data": torch.zeros(1, 1, 1, 3, 2)}))
+    assert templates["data"].variables == ["out_1", "in_0"]
+    torch.testing.assert_close(templates["data"].statistics["mean"], torch.tensor([40.0, 10.0]))
+    torch.testing.assert_close(templates["data"].statistics["stdev"], torch.tensor([4.0, 1.0]))
 
 
 def test_sampling_allows_empty_statistics_for_unprocessed_data() -> None:
@@ -1489,9 +1494,12 @@ def test_sampling_allows_empty_statistics_for_unprocessed_data() -> None:
     model.statistics["data"] = {}
     template = _target_template(model, {"data": torch.zeros(1, 1, 1, 3, 1)})
     model.num_output_channels = {"data": 1}
-    batch = model._sampling_template(template, _sampling_batch(model, {"data": torch.zeros(1, 1, 1, 3, 1)}))
-    assert batch["data"].statistics == {}
-    assert batch["data"].data.shape == (1, 1, 1, 3, 1)
+    noise = model.draw_sampling_noise(
+        _sampling_batch(model, {"data": torch.zeros(1, 1, 1, 3, 1)}),
+        target_template=template,
+    )
+    assert noise["data"].statistics == {}
+    assert noise["data"].values.shape == (1, 1, 1, 3, 1)
 
 
 def test_sampling_batch_preserves_sparse_ensemble_template_layout() -> None:
@@ -1501,7 +1509,7 @@ def test_sampling_batch_preserves_sparse_ensemble_template_layout() -> None:
     layout = TensorLayout(ensemble=0, grid=1, variables=2)
     coordinates = [torch.zeros(3, 2), torch.ones(2, 2)]
     obs = build_batch(
-        data={"obs": [torch.empty(2, 3, 0), torch.empty(2, 2, 0)]},
+        values={"obs": [torch.empty(2, 3, 0), torch.empty(2, 2, 0)]},
         layouts={"obs": layout},
         coordinates={"obs": coordinates},
         timedeltas={"obs": [torch.zeros(3), torch.zeros(2)]},
@@ -1511,16 +1519,16 @@ def test_sampling_batch_preserves_sparse_ensemble_template_layout() -> None:
     model.num_output_channels = {"obs": 1}
     model.n_step_output = {"obs": 1}
 
-    batch = model._sampling_template(_templates(obs), obs)
+    batch = model.draw_sampling_noise(obs, target_template=_templates(obs))
 
     assert batch["obs"].layout == layout
     assert batch["obs"].ensemble_size == 2
     assert [coords.shape[0] for coords in batch["obs"].coordinates] == [3, 2]
-    assert [sample.shape for sample in batch["obs"].data] == [(2, 3, 1), (2, 2, 1)]
+    assert [sample.shape for sample in batch["obs"].values] == [(2, 3, 1), (2, 2, 1)]
 
 
-def test_sampling_template_describes_interface_templates_in_output_variables() -> None:
-    """Templates as the inference interface builds them become zero-stride sources in output variables."""
+def test_sampling_noise_describes_interface_templates_in_output_variables() -> None:
+    """Templates as the inference interface builds them give noise in the model's output variables."""
     model = _transport_model_stub()
     _configure_sampling_model(model, {"ds": (2, 3, 4)})
     model.n_step_output = {"ds": 2}
@@ -1537,14 +1545,33 @@ def test_sampling_template_describes_interface_templates_in_output_variables() -
     )
     x = _sampling_batch(model, {"ds": torch.zeros(1, 2, 1, 4, 2)})
 
-    batch = model._sampling_template({"ds": template, "input_only": template}, x)
+    batch = model.draw_sampling_noise(x, target_template={"ds": template, "input_only": template})
 
     assert list(batch.keys()) == ["ds"]
-    source = batch["ds"]
-    assert source.variables == ["out_0", "out_1", "out_2"]
-    assert source.layout == TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    assert source.data.shape == (1, 2, 1, 4, 3)
-    assert set(source.data.stride()) == {0}  # zero-stride view
+    noise = batch["ds"]
+    assert noise.variables == ["out_0", "out_1", "out_2"]
+    assert noise.layout == TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+    assert noise.values.shape == (1, 2, 1, 4, 3)
+
+
+def test_sampling_noise_rejects_a_template_with_the_wrong_number_of_steps() -> None:
+    model = _transport_model_stub()
+    _configure_sampling_model(model, {"ds": (2, 3, 4)})
+    model.n_step_output = {"ds": 2}
+    model.num_output_channels = {"ds": 3}
+    template = GriddedTemplate(
+        name="ds",
+        variables=["in_0"],
+        layout=TensorLayout(time=0, ensemble=1, grid=2, variables=3),
+        coordinates=torch.zeros(4, 2),
+        batch_size=1,
+        ensemble_size=1,
+        time_size=1,
+    )
+    x = _sampling_batch(model, {"ds": torch.zeros(1, 2, 1, 4, 2)})
+
+    with pytest.raises(ValueError, match="describes 1 step"):
+        model.draw_sampling_noise(x, target_template={"ds": template})
 
 
 def test_sample_rejects_unknown_keyword_arguments() -> None:
@@ -1561,7 +1588,7 @@ def _residual_case(model: AnemoiTransportModelEncProcDec) -> tuple[torch.Tensor,
     model._internal_output_idx = {"data": [0, 1]}
     model._internal_input_idx = {"data": [0, 1]}
     target = build_batch(
-        data={"data": torch.zeros(1, 1, 1, 4, 3)},
+        values={"data": torch.zeros(1, 1, 1, 4, 3)},
         coordinates={"data": torch.zeros(4, 2)},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": ["prog_a", "prog_b", "diag"]},
@@ -1576,8 +1603,8 @@ def test_state_transport_output_adds_the_residual_to_the_prognostic_variables() 
 
     pred = model._assemble_output(torch.zeros(4, 3), x_skip, target, torch.float32, "data")
 
-    torch.testing.assert_close(pred.data[..., :2], x_skip)
-    torch.testing.assert_close(pred.data[..., 2], torch.zeros(1, 1, 1, 4))
+    torch.testing.assert_close(pred.values[..., :2], x_skip)
+    torch.testing.assert_close(pred.values[..., 2], torch.zeros(1, 1, 1, 4))
 
 
 def test_tendency_transport_output_leaves_the_residual_out() -> None:
@@ -1588,12 +1615,12 @@ def test_tendency_transport_output_leaves_the_residual_out() -> None:
 
     pred = model._assemble_output(torch.zeros(4, 3), x_skip, target, torch.float32, "data")
 
-    torch.testing.assert_close(pred.data, torch.zeros(1, 1, 1, 4, 3))
+    torch.testing.assert_close(pred.values, torch.zeros(1, 1, 1, 4, 3))
 
 
 def _gridded_batch(name: str, batch: int, members: int, grid: int) -> Batch:
     return build_batch(
-        data={name: torch.empty(batch, 1, members, grid, 1)},
+        values={name: torch.empty(batch, 1, members, grid, 1)},
         coordinates={name: torch.zeros(grid, 2)},
         metadata={"static_coords": frozenset({name})},
         layouts={name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},

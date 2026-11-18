@@ -34,7 +34,6 @@ from anemoi.training.losses import PowerSpectrumLoss
 from anemoi.training.losses import RMSELoss
 from anemoi.training.losses import SpectralAMSELoss
 from anemoi.training.losses import SpectralCRPSLoss
-from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
@@ -50,7 +49,7 @@ spectral_loss_kwargs: dict[type[BaseLoss], dict[str, object]] = {
     PowerSpectrumLoss: {"transform": "octahedral_sht", "nlat": 8},
 }
 spectral_losses = list(spectral_loss_kwargs)
-losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss, *spectral_losses]
+losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, *spectral_losses]
 
 
 GRIDDED_LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
@@ -60,7 +59,7 @@ def _gridded_source_view(data: torch.Tensor) -> Source:
     """Wrap a five-dimensional loss tensor in the current public loss input type."""
     return GriddedSource(
         name="data",
-        data=data,
+        values=data,
         variables=[f"variable_{index}" for index in range(data.shape[-1])],
         statistics={},
         coordinates=torch.zeros(data.shape[GRIDDED_LAYOUT.grid], 2, device=data.device),

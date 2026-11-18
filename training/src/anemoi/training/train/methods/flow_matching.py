@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from anemoi.models.transport.paths import flow_matching_clean
-from anemoi.models.transport.paths import flow_matching_state
+from anemoi.models.transport.paths import flow_matching_noisy_target
 from anemoi.models.transport.paths import flow_matching_velocity
 from anemoi.models.transport.schedules import TIME_TRAINING_DISTRIBUTIONS
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
@@ -29,58 +29,37 @@ if TYPE_CHECKING:
 class FlowMatchingTransportObjective(TransportObjective):
     """Flow-matching objective: learn the velocity of the straight path from Gaussian noise to the target."""
 
+    distributions = TIME_TRAINING_DISTRIBUTIONS
+    name = "Flow-matching"
+
     def prepare(
         self,
         prepared: PreparedPredictionTarget,
     ) -> PreparedTransportObjective:
         target = prepared.model_target
-        source = self.build_transport_source(prepared)
-        time_level = self._sample_training_time(
-            {name: clean.condition_shape for name, clean in target.items()},
-            device=target.device,
-        )
+        noise = self.draw_noise(prepared)
+        time = self.draw_condition(target)
 
-        state = target.with_sources(
+        noisy_target = target.with_sources(
             {
-                name: source[name].map_with_condition(flow_matching_state, time_level[name], clean)
+                name: noise[name].map_with_condition(flow_matching_noisy_target, time[name], clean)
                 for name, clean in target.items()
             },
         )
-        velocity = source.zip_map_data(flow_matching_velocity, target)
+        velocity = noise.zip_map_data(flow_matching_velocity, target)
         # The model target is imputed so it can be fed through the network; put the NaNs back into
         # the loss target at missing values so the loss (with ignore_nans) skips them.
-        missing = prepared.aux.get("model_target_missing")
-        if missing is not None:
-            velocity = velocity.zip_map_data(
-                lambda values, target_values: values.masked_fill(target_values.isnan(), float("nan")),
-                missing,
-            )
+        velocity = velocity.zip_map_data(
+            lambda values, target_values: values.masked_fill(target_values.isnan(), float("nan")),
+            prepared.model_target_missing,
+        )
         return PreparedTransportObjective(
-            conditioned_target=state,
-            condition=time_level,
+            noisy_target=noisy_target,
+            condition=time,
             loss_target=velocity,
             loss_target_layout=IndexSpace.MODEL_OUTPUT,
             pred_layout=IndexSpace.MODEL_OUTPUT,
             weights=None,
-            aux={
-                "state": state,
-                "time_level": time_level,
-            },
-        )
-
-    def forward(
-        self,
-        x: Batch,
-        conditioned_target: Batch,
-        condition: dict[str, torch.Tensor],
-        target_forcing: Batch | None = None,
-    ) -> Batch:
-        return self.module.model.model(
-            x,
-            conditioned_target,
-            condition,
-            model_comm_group=self.module.model_comm_group,
-            target_forcing=target_forcing,
         )
 
     def reconstruct_endpoint(
@@ -89,34 +68,15 @@ class FlowMatchingTransportObjective(TransportObjective):
         objective: PreparedTransportObjective,
     ) -> Batch:
         """Estimate the clean target from the predicted velocity, for validation metrics."""
-        state = objective.aux["state"]
-        time_level = objective.aux["time_level"]
+        noisy_target = objective.noisy_target
+        time = objective.condition
 
-        def clean(velocity: torch.Tensor, state_data: torch.Tensor, time: torch.Tensor) -> torch.Tensor:
-            return flow_matching_clean(state_data, velocity, time)
+        def clean(velocity: torch.Tensor, noisy_target_data: torch.Tensor, time_data: torch.Tensor) -> torch.Tensor:
+            return flow_matching_clean(noisy_target_data, velocity, time_data)
 
         return prediction.with_sources(
             {
-                name: velocity.map_with_condition(clean, time_level[name], state[name])
+                name: velocity.map_with_condition(clean, time[name], noisy_target[name])
                 for name, velocity in prediction.items()
             },
         )
-
-    def _sample_training_time(
-        self,
-        shape: dict[str, tuple[int, ...]],
-        device: torch.device,
-    ) -> dict[str, torch.Tensor]:
-        """Draw one time per sample and ensemble member."""
-        training_condition_config = dict(self.module.model.model.training_condition)
-        try:
-            distribution_name = training_condition_config.pop("distribution")
-        except KeyError as exc:
-            msg = "Flow-matching training_condition must define 'distribution'."
-            raise ValueError(msg) from exc
-        if distribution_name not in TIME_TRAINING_DISTRIBUTIONS:
-            msg = f"Unknown flow-matching training condition distribution: {distribution_name}"
-            raise ValueError(msg)
-        distribution_cls = TIME_TRAINING_DISTRIBUTIONS[distribution_name]
-        distribution = distribution_cls(**training_condition_config)
-        return distribution.sample(shape, device=device)

@@ -43,7 +43,7 @@ def _task(**kwargs) -> DAForecaster:
 
 def _gridded(data: torch.Tensor, variables: list[str]) -> Batch:
     return build_batch(
-        data={"data": data},
+        values={"data": data},
         coordinates={"data": torch.zeros(GRID, 2)},
         layouts={"data": GRIDDED},
         variables={"data": variables},
@@ -125,7 +125,7 @@ def _gridded_state() -> tuple[DAForecaster, Batch, Batch, Batch, Batch]:
     """Input (2 steps), prediction, imputed truth and NaN-carrying observations of one gridded step."""
     task = _task(da_cycles=1, rollout={"start": 1, "maximum": 1})
     x = _gridded(torch.zeros(1, 2, 1, GRID, 4), list(NAME_TO_INDEX))
-    x = x.replace("data", x["data"].clone(data=x["data"].data + torch.arange(2.0).view(1, 2, 1, 1, 1)))
+    x = x.replace("data", x["data"].clone(values=x["data"].values + torch.arange(2.0).view(1, 2, 1, 1, 1)))
     y_pred = _gridded(torch.full((1, 1, 1, GRID, 2), 10.0), ["a", "b"])
     observed = torch.full((1, 1, 1, GRID, 4), 20.0)
     observed[..., NAME_TO_INDEX["f"]] = 30.0
@@ -148,7 +148,7 @@ def test_da_blend_uses_observations_where_present_background_where_missing() -> 
         output_mask=MASK,
         observed=observed,
     )
-    new = out["data"].data[0, -1, 0]  # the input window that comes from the output
+    new = out["data"].values[0, -1, 0]  # the input window that comes from the output
     model_index = _indices().model.input.name_to_index
     assert torch.equal(new[:2, model_index["a"]], torch.full((2,), 10.0))  # background where missing
     assert torch.equal(new[2:, model_index["a"]], torch.full((3,), 20.0))  # observation where present
@@ -156,7 +156,7 @@ def test_da_blend_uses_observations_where_present_background_where_missing() -> 
     assert torch.equal(new[:, model_index["f"]], torch.full((GRID,), 30.0))
     assert torch.equal(new[:, model_index["c"]], torch.full((GRID,), 40.0))  # observed metadata
     # the previous last input window moved to the front
-    assert torch.equal(out["data"].data[0, 0], x["data"].data[0, 1])
+    assert torch.equal(out["data"].values[0, 0], x["data"].values[0, 1])
 
 
 def test_forecast_advance_zeroes_the_metadata() -> None:
@@ -170,7 +170,7 @@ def test_forecast_advance_zeroes_the_metadata() -> None:
         data_indices={"data": _indices()},
         output_mask=MASK,
     )
-    new = out["data"].data[0, -1, 0]
+    new = out["data"].values[0, -1, 0]
     model_index = _indices().model.input.name_to_index
     assert torch.equal(new[:, model_index["a"]], torch.full((GRID,), 10.0))  # prediction
     assert torch.equal(new[:, model_index["f"]], torch.full((GRID,), 30.0))  # forcing from the truth
@@ -190,7 +190,7 @@ def _tabular(windows: list[torch.Tensor], variables: list[str], timedeltas: list
         variables=variables,
         layout=TABULAR,
         statistics={"mean": np.zeros(len(variables)), "stdev": np.ones(len(variables))},
-        data=[torch.cat(windows)[None]],
+        values=[torch.cat(windows)[None]],
         coordinates=[torch.zeros(int(starts[-1]), 2)],
         timedeltas=[torch.cat([torch.full((w.shape[0],), t) for w, t in zip(windows, timedeltas, strict=True)])],
         boundaries=[tuple(slice(int(a), int(b)) for a, b in pairwise(starts))],
@@ -216,7 +216,7 @@ def test_tabular_advance(is_da: bool) -> None:
         data_indices=indices,
         **({"observed": observed} if is_da else {}),
     )
-    new = out["obs"].select_time([1]).data[0][0]
+    new = out["obs"].select_time([1]).values[0][0]
     if is_da:
         expected = torch.tensor([[20.0, 21.0, 30.0, 40.0], [10.0, 22.0, 31.0, 41.0]])
     else:
@@ -239,7 +239,7 @@ def test_skip_input_zero_base_then_background_after_a_blend() -> None:
     indices = {"data": _indices()}
 
     first = task.build_skip_input(x, data_indices=indices)
-    assert torch.equal(first["data"].data, torch.zeros_like(x["data"].data))
+    assert torch.equal(first["data"].values, torch.zeros_like(x["data"].values))
 
     advanced = task.advance_input(
         x,
@@ -254,9 +254,9 @@ def test_skip_input_zero_base_then_background_after_a_blend() -> None:
     base = task.build_skip_input(advanced, y_pred, data_indices=indices, rollout_step=0, is_da=True)
     model_index = indices["data"].model.input.name_to_index
     # the prognostics of the new window are the raw background, everything else is the advanced input
-    assert torch.equal(base["data"].data[0, -1, 0, :, model_index["a"]], torch.full((GRID,), 10.0))
-    assert torch.equal(base["data"].data[0, -1, 0, :, model_index["c"]], torch.full((GRID,), 40.0))
-    assert torch.equal(base["data"].data[:, 0], advanced["data"].data[:, 0])
+    assert torch.equal(base["data"].values[0, -1, 0, :, model_index["a"]], torch.full((GRID,), 10.0))
+    assert torch.equal(base["data"].values[0, -1, 0, :, model_index["c"]], torch.full((GRID,), 40.0))
+    assert torch.equal(base["data"].values[:, 0], advanced["data"].values[:, 0])
 
     assert task.build_skip_input(advanced, y_pred, data_indices=indices, rollout_step=1, is_da=False) is None
 

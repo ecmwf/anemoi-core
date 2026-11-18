@@ -45,7 +45,7 @@ class BaseSample(ABC):
 
     Parameters
     ----------
-    data : torch.Tensor or None
+    values : torch.Tensor or None
         The sample's data, laid out per :attr:`layout`. ``None`` for a sample that
         only describes its geometry (e.g. an inference target template); such a sample
         cannot be collated into a :class:`Source`.
@@ -59,7 +59,7 @@ class BaseSample(ABC):
         Per-statistic arrays over the variable axis, as produced by ``anemoi-datasets``.
     """
 
-    data: torch.Tensor | None
+    values: torch.Tensor | None
     variables: list[str]
     layout: TensorLayout
     coordinates: torch.Tensor
@@ -165,7 +165,7 @@ class BaseSample(ABC):
         once; the data and the per-sample fields are combined by the kind's hooks.
         Samples without data are rejected: a :class:`Source` always holds data.
         """
-        n_without_data = sum(s.data is None for s in samples)
+        n_without_data = sum(s.values is None for s in samples)
         if n_without_data:
             if n_without_data < len(samples):
                 msg = (
@@ -185,7 +185,7 @@ class BaseSample(ABC):
         data = cls._collate_data(samples)
         validate_layout_against(name, metadata["layout"], data)
 
-        return cls.source_type(name=name, data=data, **metadata, **attrs)
+        return cls.source_type(name=name, values=data, **metadata, **attrs)
 
 
 def _same_metadata(value: Any, expected: Any) -> bool:

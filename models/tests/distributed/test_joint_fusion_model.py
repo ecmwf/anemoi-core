@@ -178,7 +178,7 @@ def _tabular(name: str, variables: list[str], samples: list[list[tuple[torch.Ten
         variables=variables,
         layout=TABULAR_LAYOUT,
         statistics={key: value[[VARIABLES.index(v) for v in variables]] for key, value in STATISTICS.items()},
-        data=data,
+        values=data,
         coordinates=coordinates,
         timedeltas=timedeltas,
         boundaries=boundaries,
@@ -234,7 +234,7 @@ def _tie_projections(model: AnemoiModelEncProcDec) -> None:
 
 def _outputs(model, batches, group=None) -> dict[str, list[torch.Tensor]]:
     out = model(*batches[:2], batches[2], model_comm_group=group)
-    return {name: [d for d in out[name].data] for name in DATASETS}
+    return {name: [d for d in out[name].values] for name in DATASETS}
 
 
 @pytest.fixture(autouse=True)
@@ -309,17 +309,17 @@ def _check_sharded_joint_model(*, rank, world_size, device, group):
     whole = _batches(history, targets)
 
     reference_out = reference(*whole[:2], whole[2], model_comm_group=None)
-    weights = {name: torch.randn(reference_out[name].flatten().data.shape, dtype=DTYPE) for name in DATASETS}
-    sum((reference_out[n].flatten().data * weights[n]).sum() for n in DATASETS).backward()
+    weights = {name: torch.randn(reference_out[name].flatten().values.shape, dtype=DTYPE) for name in DATASETS}
+    sum((reference_out[n].flatten().values * weights[n]).sum() for n in DATASETS).backward()
 
     x, forcing, template = _batches(history, targets, shard=(rank, world_size))
     sharded_out = sharded(x, forcing, template, model_comm_group=group)
     rows = {name: _local_rows(reference_out[name], rank, world_size) for name in DATASETS}
-    sum((sharded_out[n].flatten().data * weights[n][rows[n]]).sum() for n in DATASETS).backward()
+    sum((sharded_out[n].flatten().values * weights[n][rows[n]]).sum() for n in DATASETS).backward()
 
     for name in DATASETS:
         torch.testing.assert_close(
-            sharded_out[name].flatten().data.detach(), reference_out[name].flatten().data.detach()[rows[name]]
+            sharded_out[name].flatten().values.detach(), reference_out[name].flatten().values.detach()[rows[name]]
         )
     reference_parameters = dict(reference.named_parameters())
     for name, parameter in sharded.named_parameters():

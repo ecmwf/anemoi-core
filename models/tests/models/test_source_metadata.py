@@ -17,7 +17,7 @@ from tests.batch_builders import build_batch
 
 def _batch(variables, coordinates=None):
     return build_batch(
-        data={"grid": torch.zeros(2, 1, 1, 3, 2)},
+        values={"grid": torch.zeros(2, 1, 1, 3, 2)},
         coordinates={"grid": torch.zeros(3, 2)} if coordinates is None else coordinates,
         layouts={"grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables=variables,
@@ -37,7 +37,7 @@ def test_statistics_and_coordinates_are_required_by_the_consuming_operation():
     view = _batch({"grid": ["a", "b"]})["grid"]
     assert view.statistics == {}
     # Metadata-free arithmetic is legitimate; normalization needs statistics.
-    torch.testing.assert_close(view.apply_func(lambda data, **kwargs: data + 1).data, torch.ones_like(view.data))
+    torch.testing.assert_close(view.apply_func(lambda data, **kwargs: data + 1).values, torch.ones_like(view.values))
     normalizer = InputNormalizer({"default": "mean-std"})
     with pytest.raises(ValueError, match="requires statistics"):
         normalizer.get_norm_parameters(view.statistics, view.name_to_index, torch.device("cpu"))
@@ -58,7 +58,7 @@ def test_normalizer_requires_only_statistics_used_by_its_method():
 
 def test_replacing_a_gridded_source_keeps_its_coordinates_static():
     batch = build_batch(
-        data={"grid": torch.zeros(2, 1, 1, 3, 2)},
+        values={"grid": torch.zeros(2, 1, 1, 3, 2)},
         coordinates={"grid": torch.zeros(3, 2)},
         layouts={"grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"grid": ["a", "b"]},
@@ -76,7 +76,7 @@ def test_model_output_cast_and_variable_metadata_agree():
     torch.nn.Module.__init__(model)
     model.boundings = {"grid": torch.nn.Identity()}
     grid = build_batch(
-        data={"grid": torch.zeros(2, 1, 1, 3, 2)},
+        values={"grid": torch.zeros(2, 1, 1, 3, 2)},
         coordinates={"grid": torch.zeros(3, 2)},
         layouts={"grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"grid": ["a", "b"]},
@@ -87,7 +87,7 @@ def test_model_output_cast_and_variable_metadata_agree():
     assert output.dtype == torch.float32
     assert output.variables == ["b"]
     torch.testing.assert_close(output.statistics["mean"], torch.tensor([2.0]))
-    torch.testing.assert_close(output.data, torch.ones(2, 1, 1, 3, 1))
+    torch.testing.assert_close(output.values, torch.ones(2, 1, 1, 3, 1))
 
 
 @pytest.mark.parametrize("shape", [(6,), (1, 2, 3, 2), (1, 3, 2)])

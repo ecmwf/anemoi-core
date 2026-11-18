@@ -30,16 +30,16 @@ def edm_loss_weight(sigma: torch.Tensor, sigma_data: float) -> torch.Tensor:
     return (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
 
 
-def flow_matching_state(source: torch.Tensor, target: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-    """Point at time ``t`` on the straight path from the source field to the target field."""
-    return (1.0 - t) * source + t * target
+def flow_matching_noisy_target(noise: torch.Tensor, target: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    """The noisy target at time ``t``: the point at ``t`` on the straight path from the noise to the target."""
+    return (1.0 - t) * noise + t * target
 
 
-def flow_matching_velocity(source: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    """Constant velocity of the straight path from the source field to the target field."""
-    return target - source
+def flow_matching_velocity(noise: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Constant velocity of the straight path from the noise to the target."""
+    return target - noise
 
 
-def flow_matching_clean(state: torch.Tensor, velocity: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-    """Estimate the target field by following ``velocity`` from ``state`` at time ``t`` to time 1."""
-    return state + (1.0 - t) * velocity
+def flow_matching_clean(noisy_target: torch.Tensor, velocity: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    """Estimate the target by following ``velocity`` from ``noisy_target`` at time ``t`` to time 1."""
+    return noisy_target + (1.0 - t) * velocity

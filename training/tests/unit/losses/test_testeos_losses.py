@@ -29,7 +29,7 @@ SHAPE = (2, 1, 1, 12, 3)  # batch, time, ensemble, grid, variables
 def _gridded(data: torch.Tensor) -> GriddedSource:
     return GriddedSource(
         name="data",
-        data=data,
+        values=data,
         variables=[f"v{i}" for i in range(data.shape[-1])],
         statistics={},
         coordinates=torch.zeros(data.shape[3], 2),

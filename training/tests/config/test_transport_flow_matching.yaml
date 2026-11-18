@@ -429,16 +429,11 @@ model:
       sigma_data: 1.0
       noise_channels: 32
       noise_cond_dim: 16
-      sigma_max: 100.0
-      sigma_min: 0.02
-      rho: 7.0
       noise_embedder:
         _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
         num_channels: ${model.model.transport.noise_channels}
         max_period: 1000
         scale: 1000
-      training_condition:
-        distribution: uniform_time
       inference_defaults:
         sampling_schedule:
           schedule_type: unit_time
@@ -642,9 +637,6 @@ training:
       interval: step
   # fixed, so reruns of this test draw the same batches (replaces the removed ANEMOI_BASE_SEED)
   seed: 12345678
-  update_ds_stats_on_ckpt_load:
-    states: false
-    tendencies: true
   check_variables_compatibility:
     ignore_units: false
     ignore_processing_period: false
@@ -659,8 +651,8 @@ training:
   method:
     _target_: anemoi.training.train.methods.TransportTraining
   transport:
-    prediction_mode: state
-    objective: flow_matching
+    training_condition:
+      distribution: uniform_time
   strategy:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
     num_gpus_per_model: ${system.hardware.num_gpus_per_model}

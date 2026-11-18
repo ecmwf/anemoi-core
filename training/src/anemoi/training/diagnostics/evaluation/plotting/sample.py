@@ -431,7 +431,7 @@ def plot_flat_sample(
     data_crs: object | None = None,
     prediction_label: str = "pred",
     auxiliary: np.ndarray | None = None,
-    auxiliary_label: str = "corrupted targets",
+    auxiliary_label: str = "noisy targets",
     diagnostic_only: bool = False,
 ) -> None:
     """Plot a "flat" 1D sample.
@@ -471,9 +471,9 @@ def plot_flat_sample(
     prediction_label : str, optional
         Label used for the prediction panel titles, by default "pred"
     auxiliary : np.ndarray or None, optional
-        Optional extra field (e.g. corrupted targets) plotted as a 7th panel, by default None
+        Optional extra field (e.g. noisy targets) plotted as a 7th panel, by default None
     auxiliary_label : str, optional
-        Label used for the auxiliary panel title, by default "corrupted targets"
+        Label used for the auxiliary panel title, by default "noisy targets"
     diagnostic_only : bool, optional
         If True, suppress the input/increment/persistence panels, by default False
 
@@ -585,7 +585,7 @@ def _build_flat_sparse_sample_data(
         ax[0].axis("off")
 
     if auxiliary is not None:
-        # Auxiliary (e.g. corrupted targets) lives at the output observation locations,
+        # Auxiliary (e.g. noisy targets) lives at the output observation locations,
         # so it is plotted as-is rather than as a delta against the input.
         data[4] = auxiliary
 
@@ -611,7 +611,7 @@ def plot_flat_sparse_sample(
     data_crs: object | None = None,
     prediction_label: str = "pred",
     auxiliary: np.ndarray | None = None,
-    auxiliary_label: str = "corrupted targets",
+    auxiliary_label: str = "noisy targets",
     diagnostic_only: bool = False,
     marker_size: float = 4,
 ) -> None:
@@ -659,7 +659,7 @@ def plot_flat_sparse_sample(
     auxiliary : np.ndarray or None, optional
         Auxiliary field (at output locations), by default None.
     auxiliary_label : str, optional
-        Label for the auxiliary panel, by default "corrupted targets".
+        Label for the auxiliary panel, by default "noisy targets".
     diagnostic_only : bool, optional
         Whether the variable is diagnostic-only and should omit the input panel.
     marker_size : float, optional
@@ -752,7 +752,7 @@ def plot_predicted_multilevel_flat_sample(
     projection_kind: str = "equirectangular",
     prediction_label: str = "pred",
     auxiliary: np.ndarray | None = None,
-    auxiliary_label: str = "corrupted targets",
+    auxiliary_label: str = "noisy targets",
     *,
     sparse: bool = False,
     output_latlons: np.ndarray | None = None,
@@ -789,10 +789,10 @@ def plot_predicted_multilevel_flat_sample(
     prediction_label : str, optional
         Label used for the prediction panel titles, by default "pred"
     auxiliary : np.ndarray or None, optional
-        Optional extra field (e.g. corrupted targets) of shape (lat*lon, nvar*level),
+        Optional extra field (e.g. noisy targets) of shape (lat*lon, nvar*level),
         plotted as an additional panel per variable, by default None
     auxiliary_label : str, optional
-        Label used for the auxiliary panel title, by default "corrupted targets"
+        Label used for the auxiliary panel title, by default "noisy targets"
 
     Returns
     -------

@@ -44,7 +44,7 @@ def test_make_anemoi_reader(monkeypatch: pytest.MonkeyPatch) -> None:
     sample = reader.get_sample(0, slice(0, 2))
 
     dataset.__getitem__.assert_called_once_with(slice(0, 2))
-    assert sample.data.shape == (1, 5, 5)
+    assert sample.values.shape == (1, 5, 5)
     assert sample.variables == dataset.variables
     assert sample.statistics is dataset.statistics
 
@@ -81,8 +81,8 @@ def test_batch_collate_and_to() -> None:
     moved_batch = batch.to(device)
 
     # Assert that the data is on the correct device.
-    assert moved_batch[_DATASET_NAME].data[0].device.type == device.type
-    assert moved_batch[_DATASET_NAME].data[1].device.type == device.type
+    assert moved_batch[_DATASET_NAME].values[0].device.type == device.type
+    assert moved_batch[_DATASET_NAME].values[1].device.type == device.type
 
 
 # ----------------------------------------------------------------- helpers
@@ -148,7 +148,7 @@ def _make_grid_sample(grid: int = 4, vars_: int = 2, t: int = 1, e: int = 1) -> 
         dim=-1,
     )
     return GriddedSample(
-        data=torch.arange(t * e * grid * vars_, dtype=torch.float32).reshape(t, e, grid, vars_),
+        values=torch.arange(t * e * grid * vars_, dtype=torch.float32).reshape(t, e, grid, vars_),
         coordinates=coords,
         layout=TensorLayout(time=0, ensemble=1, grid=2, variables=3),
         variables=[f"v{i}" for i in range(vars_)],
@@ -168,10 +168,10 @@ def test_get_sample_returns_unified_contract() -> None:
 
     assert isinstance(sample, TabularSample)
     # Each sample has one ensemble member and no explicit time axis.
-    assert sample.data.shape == (1, n, v)
+    assert sample.values.shape == (1, n, v)
     assert sample.layout == TensorLayout(ensemble=0, grid=1, variables=2)
-    assert sample.data.dtype == torch.float32
-    np.testing.assert_allclose(sample.data[0].numpy(), payload.data)
+    assert sample.values.dtype == torch.float32
+    np.testing.assert_allclose(sample.values[0].numpy(), payload.data)
 
     # Coordinates: single (N, 2) tensor stacking lat/lon (in radians).
     assert sample.coordinates.shape == (n, 2)
@@ -222,14 +222,14 @@ def test_collate_mixed_gridded_and_sparse_batch() -> None:
     batch = Batch.collate(samples)
 
     # Gridded path: stacked along a new leading batch dim.
-    assert isinstance(batch["grid"].data, torch.Tensor)
-    assert batch["grid"].data.shape[0] == 2
+    assert isinstance(batch["grid"].values, torch.Tensor)
+    assert batch["grid"].values.shape[0] == 2
 
     # Sparse path: list[Tensor] of length B with varying N_i.
-    assert isinstance(batch["obs"].data, list)
-    assert len(batch["obs"].data) == 2
-    assert batch["obs"].data[0].shape == (1, 5, vars_)
-    assert batch["obs"].data[1].shape == (1, 7, vars_)
+    assert isinstance(batch["obs"].values, list)
+    assert len(batch["obs"].values) == 2
+    assert batch["obs"].values[0].shape == (1, 5, vars_)
+    assert batch["obs"].values[1].shape == (1, 7, vars_)
 
     # Sparse coordinates are list[(N_i, 2)] tensors per sample.
     assert isinstance(batch["obs"].coordinates, list)
@@ -280,13 +280,13 @@ def test_to_mixed_batch_moves_tensors_and_preserves_boundaries() -> None:
     assert moved["grid"].coordinates is batch["grid"].coordinates
 
     # Gridded data is a tensor on cpu.
-    assert isinstance(moved["grid"].data, torch.Tensor)
-    assert moved["grid"].data.device.type == "cpu"
+    assert isinstance(moved["grid"].values, torch.Tensor)
+    assert moved["grid"].values.device.type == "cpu"
 
     # Sparse data: list of cpu tensors, one per batch sample.
-    assert isinstance(moved["obs"].data, list)
-    assert len(moved["obs"].data) == 2
-    assert all(t.device.type == "cpu" for t in moved["obs"].data)
+    assert isinstance(moved["obs"].values, list)
+    assert len(moved["obs"].values) == 2
+    assert all(t.device.type == "cpu" for t in moved["obs"].values)
 
     # Sparse coordinates and timedeltas moved per-list-entry.
     assert isinstance(moved["obs"].coordinates, list)

@@ -35,7 +35,6 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 import torch.nn as nn
-from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.loading import base as loading_base
@@ -110,13 +109,12 @@ def _legacy_transfer_learning_loading(
 
 
 class _Model(nn.Module):
-    """A model with the legacy processor-refresh hook, as a no-op.
+    """A model with the legacy processor-statistics hook, as a no-op.
 
-    The hook is the one legacy step with no counterpart to compare against: the
-    pipeline does that work in ``refresh_checkpoint_processors``, driven by
-    ``training.update_ds_stats_on_ckpt_load``, which the config below leaves off.
-    Neutralising it on both sides keeps the comparison on the migration, filter and
-    metadata algorithm.
+    The hook is the one legacy step with no counterpart in the pipeline: the
+    processors hold no statistics of their own, so there is nothing to refresh.
+    Leaving it a no-op keeps the comparison on the migration, filter and metadata
+    algorithm.
     """
 
     def __init__(self, width: int = 4) -> None:
@@ -144,11 +142,6 @@ def _checkpoint(width: int = 4) -> dict[str, Any]:
             "config": SimpleNamespace(model=SimpleNamespace(processor=SimpleNamespace(num_layers=4, num_chunks=2))),
         },
     }
-
-
-def _run_config() -> Any:
-    """A run config with the processor refresh off, matching the no-op legacy hook."""
-    return OmegaConf.create({"training": {"update_ds_stats_on_ckpt_load": {"states": False, "tendencies": False}}})
 
 
 @pytest.fixture
@@ -182,7 +175,7 @@ def fake_migrations(monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, MagicMo
 
 
 def _new_path(model: nn.Module, checkpoint: dict[str, Any]) -> nn.Module:
-    context = CheckpointContext(model=model, checkpoint_data=checkpoint, config=_run_config())
+    context = CheckpointContext(model=model, checkpoint_data=checkpoint)
     TransferLearningLoader(skip_mismatched=True).process(context)
     return context.model
 

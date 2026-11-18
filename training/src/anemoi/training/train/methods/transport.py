@@ -16,6 +16,8 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
+from anemoi.models.transport.objectives import EDMDiffusionModelObjective
+from anemoi.models.transport.objectives import FlowMatchingModelObjective
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
@@ -37,7 +39,7 @@ LOGGER = logging.getLogger(__name__)
 class PredictionMode:
     """Prepare either state targets or tendency targets for transport training."""
 
-    def __init__(self, module: BaseTransportTraining) -> None:
+    def __init__(self, module: TransportTraining) -> None:
         self.module = module
 
     def prepare_target(
@@ -61,29 +63,17 @@ class PredictionMode:
 class StatePredictionMode(PredictionMode):
     """Prediction mode where the model learns the future state directly."""
 
-    def __init__(self, module: BaseTransportTraining) -> None:
-        super().__init__(module)
-        model = self.module.model.model
-        if isinstance(model, AnemoiTransportTendModelEncProcDec):
-            msg = (
-                "training.transport.prediction_mode='state' needs a state transport model "
-                "(AnemoiTransportModelEncProcDec), got AnemoiTransportTendModelEncProcDec, which reads its sampled "
-                "output as a tendency at inference. Use prediction_mode 'tendency' with this model, or a state "
-                "model config."
-            )
-            raise TypeError(msg)
-
     def prepare_target(
         self,
         batch: Batch,
         x: Batch,
     ) -> PreparedPredictionTarget:
         del x
-        raw_target, target_forcing = self.module.predicted_targets(batch)
+        raw_target, target_forcings = self.module.predicted_targets(batch)
         # Loss and metric targets keep their NaNs so missing observations are
         # masked in the loss (imputation skipped).
         target_full = self.module.preprocess_targets(raw_target)
-        # The model target is corrupted and fed through the network, so it must
+        # The model target is made noisy and fed through the network, so it must
         # be imputed like the model inputs: NaNs would spread through message
         # passing and poison the whole prediction.
         model_state = self.module.preprocess_inputs(raw_target)
@@ -101,11 +91,8 @@ class StatePredictionMode(PredictionMode):
             loss_target=target_full,
             loss_target_layout=IndexSpace.DATA_FULL,
             metric_target=target_full,
-            aux={
-                # Output-time decoding forcings, normalized like the model inputs.
-                "target_forcing": self.module.preprocess_inputs(target_forcing),
-                "model_target_missing": model_target_missing,
-            },
+            model_target_missing=model_target_missing,
+            target_forcings=self.module.preprocess_inputs(target_forcings),
         )
 
     def reconstruct_prediction(
@@ -125,7 +112,7 @@ class TendencyPredictionMode(PredictionMode):
     ``AnemoiTransportTendModelEncProcDec.compute_tendency``.
     """
 
-    def __init__(self, module: BaseTransportTraining) -> None:
+    def __init__(self, module: TransportTraining) -> None:
         super().__init__(module)
         self._tendency_statistics = self._resolve_tendency_statistics()
 
@@ -137,7 +124,7 @@ class TendencyPredictionMode(PredictionMode):
         """Return the tendency statistics of each output step, per dataset."""
         if not isinstance(self._tendency_model, AnemoiTransportTendModelEncProcDec):
             msg = (
-                "training.transport.prediction_mode='tendency' requires a tendency transport model "
+                "The tendency prediction mode needs a tendency transport model "
                 f"(AnemoiTransportTendModelEncProcDec), got {type(self._tendency_model).__name__}."
             )
             raise TypeError(msg)
@@ -159,7 +146,7 @@ class TendencyPredictionMode(PredictionMode):
 
         Only the predicted datasets get targets; the datasets the model only reads stay inputs.
         """
-        raw_state_target, target_forcing = self.module.predicted_targets(batch)
+        raw_state_target, target_forcings = self.module.predicted_targets(batch)
         if any(source.is_tabular for source in raw_state_target.values()):
             msg = "Tendency prediction mode is not implemented for predicting sparse observation datasets."
             raise NotImplementedError(msg)
@@ -187,7 +174,7 @@ class TendencyPredictionMode(PredictionMode):
                 },
             )
 
-        # The tendency fed through the network (as the corrupted target) is built from states
+        # The tendency fed through the network (as the noisy target) is built from states
         # imputed like the model inputs, since NaNs would spread through message passing. The
         # loss and metric targets keep their NaNs, so the loss (with ignore_nans) and the
         # validation metrics skip missing values instead of fitting imputed ones.
@@ -201,14 +188,9 @@ class TendencyPredictionMode(PredictionMode):
             loss_target=tendency_target_full,
             loss_target_layout=IndexSpace.DATA_OUTPUT,
             metric_target=state_target_full,
-            aux={
-                "reference": reference,
-                # NaN-keeping counterpart of model_target, used by objectives that derive their
-                # loss target from model_target (e.g. the flow-matching velocity) to re-mask missing values.
-                "model_target_missing": self.module.reduce_data_output_target_to_model_output(tendency_target_full),
-                # Output-time decoding forcings, normalized like the model inputs.
-                "target_forcing": self.module.preprocess_inputs(target_forcing),
-            },
+            model_target_missing=self.module.reduce_data_output_target_to_model_output(tendency_target_full),
+            target_forcings=self.module.preprocess_inputs(target_forcings),
+            reference=reference,
         )
 
     def reconstruct_prediction(
@@ -221,7 +203,7 @@ class TendencyPredictionMode(PredictionMode):
             {
                 dataset_name: self._tendency_model.add_tendency_to_state(
                     dataset_name,
-                    prepared.aux["reference"][dataset_name],
+                    prepared.reference[dataset_name],
                     tendency,
                     self._tendency_statistics[dataset_name],
                     self.module.model.post_processors[dataset_name],
@@ -238,19 +220,28 @@ PREDICTION_MODE_CLASSES = {
 }
 
 
+# The training-side objective that goes with each model-side objective.
 TRANSPORT_OBJECTIVE_CLASSES = {
-    "edm_diffusion": EDMDiffusionTransportObjective,
-    "flow_matching": FlowMatchingTransportObjective,
+    EDMDiffusionModelObjective: EDMDiffusionTransportObjective,
+    FlowMatchingModelObjective: FlowMatchingTransportObjective,
 }
 
 
-class BaseTransportTraining(BaseTrainingModule):
-    """Shared training code for transport methods that corrupt targets before prediction."""
+class TransportTraining(BaseTrainingModule):
+    """Training module for EDM diffusion and flow-matching transport models.
+
+    The prediction mode turns the batch into state or tendency targets; the transport objective corrupts
+    them and says what the model learns from the noisy target.
+    """
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._validate_single_step_task()
+        # The model decides both: its class says whether it predicts states or tendencies, and its
+        # objective says how the target is made noisy.
         self._prediction_mode = self._get_prediction_mode_cls()(self)
+        self._transport_objective = self._get_transport_objective_cls()(self)
+        self._transport_objective.check_losses(self.loss)
 
     def _validate_single_step_task(self) -> None:
         """Reject rollout configs: transport steps train and validate on the first rollout step only."""
@@ -266,11 +257,15 @@ class BaseTransportTraining(BaseTrainingModule):
             raise ValueError(msg)
 
     def _get_prediction_mode_cls(self) -> type[PredictionMode]:
-        prediction_mode = self.config.training.transport.prediction_mode
+        model = self.model.model
+        prediction_mode = getattr(model, "prediction_mode", None)
         try:
             return PREDICTION_MODE_CLASSES[prediction_mode]
         except KeyError as exc:
-            msg = f"Unknown training.transport.prediction_mode '{prediction_mode}'."
+            msg = (
+                f"{type(model).__name__} declares the prediction mode {prediction_mode!r}; transport training "
+                f"supports {', '.join(PREDICTION_MODE_CLASSES)}."
+            )
             raise ValueError(msg) from exc
 
     @property
@@ -295,11 +290,11 @@ class BaseTransportTraining(BaseTrainingModule):
 
         Datasets the model only reads need no output-time window, so the task never sees them here.
         """
-        target, _, target_forcing = self.task.get_targets(
+        target, _, target_forcings = self.task.get_targets(
             self.predicted_datasets(batch),
             data_indices=self.data_indices,
         )
-        return target, target_forcing
+        return target, target_forcings
 
     def get_data_output_target(self, target_full: Batch) -> Batch:
         """Select the target variables that are present in the dataset output."""
@@ -312,7 +307,7 @@ class BaseTransportTraining(BaseTrainingModule):
             LOGGER.debug(
                 "SHAPE: y_data_output[%s].shape = %s",
                 dataset_name,
-                selected.data.shape if hasattr(selected.data, "shape") else [t.shape for t in selected.data],
+                selected.values.shape if hasattr(selected.values, "shape") else [t.shape for t in selected.values],
             )
         return y
 
@@ -323,22 +318,19 @@ class BaseTransportTraining(BaseTrainingModule):
         """Select only the variables that the model predicts."""
         y_reduced = y_data_output
         for dataset_name, y_dataset in y_data_output.items():
-            dataset_indices = self.data_indices[dataset_name]
-            if dataset_indices.model_output_in_data_output_is_identity:
-                continue
-            if dataset_indices.model_output_in_data_output_is_contiguous:
-                start = dataset_indices.model_output_in_data_output_contiguous_start
-                length = dataset_indices.model_output_in_data_output_contiguous_length
-                selected = y_dataset.select(variables=slice(start, start + length))
-            else:
-                selected = y_dataset.select(
-                    variables=dataset_indices.model_output_positions_in_data_output,
-                )
+            # select() only copies when the kept variables are not a run of neighbours, such as 3, 4, 5.
+            selected = y_dataset.select(
+                variables=self.data_indices[dataset_name].model_output_positions_in_data_output,
+            )
             y_reduced = y_reduced.replace(dataset_name, selected)
             LOGGER.debug(
                 "SHAPE: y_model_output[%s].shape = %s",
                 dataset_name,
-                (selected.data.shape if isinstance(selected.data, torch.Tensor) else [t.shape for t in selected.data]),
+                (
+                    selected.values.shape
+                    if isinstance(selected.values, torch.Tensor)
+                    else [t.shape for t in selected.values]
+                ),
             )
         return y_reduced
 
@@ -398,34 +390,12 @@ class BaseTransportTraining(BaseTrainingModule):
 
         return loss, metrics_next, y_pred
 
-
-class TransportTraining(BaseTransportTraining):
-    """Training module for EDM diffusion and flow-matching transport models."""
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._validate_model_transport_objective()
-        self._transport_objective = self._get_transport_objective_cls()(self)
-
-    def _validate_model_transport_objective(self) -> None:
-        """Check that training and inference use the same transport objective."""
-        training_objective = self.config.training.transport.objective
-        model_config = getattr(getattr(self.config, "model", None), "model", None)
-        model_transport_config = getattr(model_config, "transport", None)
-        model_objective = getattr(model_transport_config, "objective", None)
-        if model_objective is not None and model_objective != training_objective:
-            msg = (
-                "training.transport.objective must match model.model.transport.objective "
-                f"({training_objective!r} != {model_objective!r})."
-            )
-            raise ValueError(msg)
-
     def _get_transport_objective_cls(self) -> type[TransportObjective]:
-        transport_objective = self.config.training.transport.objective
+        model_objective = self.model.model.transport_model_objective
         try:
-            return TRANSPORT_OBJECTIVE_CLASSES[transport_objective]
+            return TRANSPORT_OBJECTIVE_CLASSES[type(model_objective)]
         except KeyError as exc:
-            msg = f"Unknown training.transport.objective '{transport_objective}'."
+            msg = f"No transport training objective for the model objective {type(model_objective).__name__}."
             raise ValueError(msg) from exc
 
     @property
@@ -436,11 +406,17 @@ class TransportTraining(BaseTransportTraining):
     def forward(
         self,
         x: Batch,
-        conditioned_target: Batch,
+        noisy_target: Batch,
         condition: dict[str, torch.Tensor],
-        target_forcing: Batch | None = None,
+        target_forcings: Batch | None = None,
     ) -> Batch:
-        return self.transport_objective.forward(x, conditioned_target, condition, target_forcing=target_forcing)
+        return self.model.model(
+            x,
+            noisy_target,
+            condition,
+            model_comm_group=self.model_comm_group,
+            target_forcings=target_forcings,
+        )
 
     def _compute_loss(
         self,
@@ -450,22 +426,25 @@ class TransportTraining(BaseTransportTraining):
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
+        weights: dict[str, torch.Tensor | list[torch.Tensor]] | None = None,
         **kwargs,
     ) -> torch.Tensor:
-        return self.transport_objective.compute_loss(
-            y_pred=y_pred,
-            y=y,
+        """Compute the training loss, with any further arguments the transport objective adds (EDM: weights)."""
+        return super()._compute_loss(
+            y_pred,
+            y,
             grid_shard_slice=grid_shard_slice,
             dataset_name=dataset_name,
             pred_layout=pred_layout,
             target_layout=target_layout,
+            extra_loss_kwargs=self.transport_objective.loss_kwargs(y_pred, dataset_name, weights),
             **kwargs,
         )
 
     def _check_nan_network_target(self, model_target: Batch) -> None:
         """Fail loudly when the target passed through the network still contains NaNs.
 
-        The corrupted target goes through the network together with the inputs, diagnostics
+        The noisy target goes through the network together with the inputs, diagnostics
         included, so it is imputed like the inputs. A variable the imputer does not cover keeps
         its NaNs, and one NaN spreads through the graph and makes the whole prediction NaN.
         """
@@ -495,9 +474,9 @@ class TransportTraining(BaseTransportTraining):
 
         prediction = self(
             x,
-            prepared_objective.conditioned_target,
+            prepared_objective.noisy_target,
             prepared_objective.condition,
-            target_forcing=prepared_target.aux.get("target_forcing"),
+            target_forcings=prepared_target.target_forcings,
         )
         loss_prediction = self.transport_objective.prepare_loss_prediction(prediction, prepared_objective)
 
@@ -506,7 +485,7 @@ class TransportTraining(BaseTransportTraining):
         plot_kwargs: dict[str, dict[str, Source]] = {}
         if validation_mode:
             conditioned_endpoint = self.prediction_mode.reconstruct_prediction(
-                prepared_objective.conditioned_target,
+                prepared_objective.noisy_target,
                 prepared_target,
             )
             plot_kwargs["auxiliary_output"] = {

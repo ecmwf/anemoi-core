@@ -312,14 +312,14 @@ class BaseForecaster(BaseTask):
             return self._advance_tabular_input(x, prediction, truth, data_indices)
 
         new_data = self._advance_gridded_input(
-            x.data,
-            None if prediction is None else prediction.data.to(x.dtype),
-            truth.data,
+            x.values,
+            None if prediction is None else prediction.values.to(x.dtype),
+            truth.values,
             data_indices=data_indices,
             output_mask=output_mask,
             grid_shard_slice=grid_shard_slice,
         )
-        return x.clone(data=new_data)
+        return x.clone(values=new_data)
 
     def _advance_tabular_input(
         self,
@@ -629,7 +629,7 @@ def _with_predicted_prognostics(
     input_prognostic = data_indices.model.input.prognostic
     output_prognostic = data_indices.model.output.prognostic
     new_data = []
-    for sample_idx, (observed, predicted) in enumerate(zip(window.data, prediction.data, strict=True)):
+    for sample_idx, (observed, predicted) in enumerate(zip(window.values, prediction.values, strict=True)):
         if observed.shape[:-1] != predicted.shape[:-1]:
             msg = (
                 f"Source {window.name!r}, sample {sample_idx}: the prediction has shape {tuple(predicted.shape)} "
@@ -640,4 +640,4 @@ def _with_predicted_prognostics(
         sample = observed.clone()
         sample[..., input_prognostic] = predicted[..., output_prognostic].to(sample.dtype)
         new_data.append(sample)
-    return window.clone(data=new_data)
+    return window.clone(values=new_data)

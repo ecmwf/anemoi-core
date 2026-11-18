@@ -16,7 +16,6 @@ from .schedules import UniformTimeTrainingDistribution
 from .schedules import UnitTimeSchedule
 from .settings import EdmSettings
 from .settings import NoiseConditioningSettings
-from .sources import gaussian_source
 
 __all__ = [
     "EDMDiffusionModelObjective",
@@ -32,6 +31,5 @@ __all__ = [
     "TransportModelObjective",
     "UnitTimeSchedule",
     "UniformTimeTrainingDistribution",
-    "gaussian_source",
     "get_transport_model_objective",
 ]

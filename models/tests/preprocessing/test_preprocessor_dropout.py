@@ -212,13 +212,13 @@ def test_through_processors_on_a_source(data_indices) -> None:
         variables=NAMES,
         layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
         statistics={},
-        data=_batch(),
+        values=_batch(),
         coordinates=torch.zeros(200, 2),
     )
     out = processors(source, in_place=False)
-    assert torch.isnan(out.data[:, :2, ..., MWT]).all()
-    assert not torch.isnan(source.data).any()  # in_place=False leaves the input alone
-    assert not torch.isnan(processors(source, in_place=False, skip_imputation=True).data).any()
+    assert torch.isnan(out.values[:, :2, ..., MWT]).all()
+    assert not torch.isnan(source.values).any()  # in_place=False leaves the input alone
+    assert not torch.isnan(processors(source, in_place=False, skip_imputation=True).values).any()
 
 
 def test_dropout_prob_scales_probabilities(data_indices) -> None:

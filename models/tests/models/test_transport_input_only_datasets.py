@@ -145,9 +145,6 @@ def _model_config() -> DictConfig:
                     "sigma_data": 1.0,
                     "noise_channels": 8,
                     "noise_cond_dim": 4,
-                    "sigma_max": 100.0,
-                    "sigma_min": 0.02,
-                    "rho": 7.0,
                     "noise_embedder": {
                         "_target_": "anemoi.models.layers.diffusion.SinusoidalEmbeddings",
                         "num_channels": 8,
@@ -241,7 +238,7 @@ def _gridded(variables: list[str], data: torch.Tensor, coordinates: torch.Tensor
         variables=variables,
         layout=GRIDDED_LAYOUT,
         statistics={key: value[positions] for key, value in STATISTICS["grid"].items()},
-        data=data,
+        values=data,
         coordinates=coordinates,
     )
 
@@ -255,7 +252,7 @@ def _tabular(variables: list[str], windows: list[torch.Tensor], coordinates: lis
         variables=variables,
         layout=TABULAR_LAYOUT,
         statistics={key: value[positions] for key, value in STATISTICS["obs"].items()},
-        data=[torch.cat(windows)[None]],
+        values=[torch.cat(windows)[None]],
         coordinates=[torch.cat(coordinates)],
         timedeltas=[torch.cat([torch.full((window.shape[0],), float(step)) for step, window in enumerate(windows)])],
         boundaries=[tuple(slice(int(start), int(stop)) for start, stop in zip(starts[:-1], starts[1:]))],
@@ -322,14 +319,14 @@ def test_input_only_observations_shape_the_grid_prediction(kind: str) -> None:
     batches = _synthetic_batches(model)
     sigma = torch.full((1, 1, 1, 1, 1), 0.7)
 
-    out = model(batches["x"], batches["noisy_target"], {"grid": sigma}, target_forcing=batches["target_forcing"])
+    out = model(batches["x"], batches["noisy_target"], {"grid": sigma}, target_forcings=batches["target_forcing"])
 
     assert list(out.keys()) == ["grid"]
-    assert out["grid"].data.shape == batches["noisy_target"]["grid"].data.shape
-    assert torch.isfinite(out["grid"].data).all()
+    assert out["grid"].values.shape == batches["noisy_target"]["grid"].values.shape
+    assert torch.isfinite(out["grid"].values).all()
 
-    weights = torch.randn(out["grid"].data.shape, generator=torch.Generator().manual_seed(3))
-    (out["grid"].data * weights).sum().backward()
+    weights = torch.randn(out["grid"].values.shape, generator=torch.Generator().manual_seed(3))
+    (out["grid"].values * weights).sum().backward()
     obs_gradients = [parameter.grad for parameter in model.encoder["obs"].parameters()]
     assert all(gradient is not None for gradient in obs_gradients)
     assert sum(gradient.abs().sum() for gradient in obs_gradients) > 0
@@ -355,5 +352,5 @@ def test_tendency_model_samples_grid_states_with_input_only_observations() -> No
 
     assert list(out.keys()) == ["grid"]
     assert out["grid"].variables == list(_data_indices()["grid"].model.output.ordered_names)
-    assert out["grid"].data.shape == (1, 1, 1, NUM_GRID_POINTS, 3)
-    assert torch.isfinite(out["grid"].data).all()
+    assert out["grid"].values.shape == (1, 1, 1, NUM_GRID_POINTS, 3)
+    assert torch.isfinite(out["grid"].values).all()

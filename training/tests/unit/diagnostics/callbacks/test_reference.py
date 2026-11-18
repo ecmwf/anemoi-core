@@ -109,7 +109,7 @@ def _setup(
         anchors=SimpleNamespace(times=START + SIX_HOURS * np.arange(1, 31)),
         get_sample=lambda _index: {
             "data": GriddedSample(
-                data=torch.zeros(len(task.get_offsets("validation")), 1, grid, len(name_to_index)),
+                values=torch.zeros(len(task.get_offsets("validation")), 1, grid, len(name_to_index)),
                 layout=SAMPLE_LAYOUT,
                 variables=list(name_to_index),
                 coordinates=_coordinates(),
@@ -126,7 +126,7 @@ def _setup(
         pred = np.stack([fields[name] + offset.get(name, 0.0) for name in outputs], axis=-1)
         pred = GriddedSource(
             name="data",
-            data=torch.tensor(pred, dtype=torch.float64).view(1, 1, 1, grid, len(outputs)),
+            values=torch.tensor(pred, dtype=torch.float64).view(1, 1, 1, grid, len(outputs)),
             layout=OUTPUT_LAYOUT,
             variables=outputs,
             coordinates=_coordinates(),
@@ -503,7 +503,7 @@ def _check_epoch_end_with_member_gather(rank: int, store_path: str) -> None:
             output = local_step(batch, validation_mode)
             output.predictions = [
                 {
-                    name: pred.clone(data=gather_tensor(pred.data, dim=2, sizes=[1, 1], mgroup=dist.group.WORLD))
+                    name: pred.clone(values=gather_tensor(pred.values, dim=2, sizes=[1, 1], mgroup=dist.group.WORLD))
                     for name, pred in step.items()
                 }
                 for step in output.predictions

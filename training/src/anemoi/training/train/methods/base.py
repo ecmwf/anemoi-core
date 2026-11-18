@@ -543,7 +543,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # holds a reference to this dict, so a replacement (a migration may return a
         # new object) is written back in place rather than rebound.
         trainer = getattr(self, "_trainer", None)
-        corrected = apply_checkpoint_corrections(checkpoint, self, self.config)
+        corrected = apply_checkpoint_corrections(checkpoint, self)
         if corrected is not checkpoint:
             checkpoint.clear()
             checkpoint.update(corrected)
@@ -810,7 +810,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         indices = [i for i, name in enumerate(source.variables) if name in variables]
         if not indices:
             return None
-        samples = source.data if source.is_tabular else [source.data]
+        samples = source.values if source.is_tabular else [source.values]
         nan_per_variable = torch.zeros(len(indices), dtype=torch.bool, device=samples[0].device)
         for sample in samples:
             variables_axis = source.layout.axis("variables", ndim=sample.ndim)

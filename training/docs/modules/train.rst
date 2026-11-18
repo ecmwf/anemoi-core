@@ -92,9 +92,8 @@ All methods inherit from
 
 :class:`~anemoi.training.train.methods.transport.TransportTraining`
    Configurable transport training for EDM diffusion and flow-matching
-   objectives. Selects state or tendency targets with
-   ``training.transport.prediction_mode`` and the objective with
-   ``training.transport.objective``.
+   objectives. Takes the objective from the model config and state or
+   tendency targets from the model class.
 
 .. automodule:: anemoi.training.train.methods.single
    :members:

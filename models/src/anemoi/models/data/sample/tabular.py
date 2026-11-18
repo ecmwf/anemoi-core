@@ -30,7 +30,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 class TabularSample(BaseSample):
     """A sample of points that change from sample to sample (e.g. observations).
 
-    ``data`` is ``(ensemble, grid, variables)``. The time windows are stacked along
+    ``values`` is ``(ensemble, grid, variables)``. The time windows are stacked along
     the grid axis and described by :attr:`boundaries`.
 
     Parameters
@@ -85,7 +85,7 @@ class TabularSample(BaseSample):
     @classmethod
     def _collate_data(cls, samples: Sequence[Self]) -> list[torch.Tensor]:
         """Collate the per-sample data tensors into a list of tensors."""
-        return [s.data for s in samples]
+        return [s.values for s in samples]
 
     @classmethod
     def _collate_dynamic_attrs(cls, samples: Sequence[Self]) -> dict[str, Any]:

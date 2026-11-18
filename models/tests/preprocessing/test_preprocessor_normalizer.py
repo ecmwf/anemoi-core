@@ -39,7 +39,7 @@ def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
     layout = TensorLayout(batch=0, time=1, grid=2, variables=3)
     return GriddedSource(
         name="gridded",
-        data=data,
+        values=data,
         variables=list(variables),
         statistics=statistics,
         coordinates=torch.zeros(points, 2),
@@ -52,7 +52,7 @@ def make_tabular_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
     layout = TensorLayout(grid=0, variables=1)
     return TabularSource(
         name="tabular",
-        data=[payload.clone()],
+        values=[payload.clone()],
         variables=list(variables),
         statistics=statistics,
         coordinates=[torch.zeros(t.shape[0], 2) for t in [payload]],
@@ -64,11 +64,11 @@ def make_tabular_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
 
 def view_data_2d(view) -> torch.Tensor:
     """Extract the (points, variables) payload back out of either view kind."""
-    if isinstance(view.data, list):
-        return view.data[0]
-    points = view.data.shape[view.layout.grid]
-    num_vars = view.data.shape[view.layout.variables]
-    return view.data.reshape(points, num_vars)
+    if isinstance(view.values, list):
+        return view.values[0]
+    points = view.values.shape[view.layout.grid]
+    num_vars = view.values.shape[view.layout.variables]
+    return view.values.reshape(points, num_vars)
 
 
 @pytest.fixture(params=["gridded", "tabular"])
@@ -279,7 +279,7 @@ def test_tabular_multiple_tensors(input_normalizer, normalized_payload) -> None:
     payload_b = payload_a.clone()
     view = TabularSource(
         name="tabular",
-        data=[payload_a, payload_b],
+        values=[payload_a, payload_b],
         variables=list(VARIABLES),
         statistics=STATISTICS,
         coordinates=[torch.zeros(t.shape[0], 2) for t in [payload_a, payload_b]],
@@ -288,8 +288,8 @@ def test_tabular_multiple_tensors(input_normalizer, normalized_payload) -> None:
         boundaries=[(slice(0, t.shape[0]),) for t in [payload_a, payload_b]],
     )
     out = input_normalizer(view, in_place=False)
-    assert len(out.data) == 2
-    for tensor in out.data:
+    assert len(out.values) == 2
+    for tensor in out.values:
         assert torch.allclose(tensor, normalized_payload)
 
 

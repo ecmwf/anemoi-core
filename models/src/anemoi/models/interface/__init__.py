@@ -256,7 +256,7 @@ class AnemoiModelInterface(torch.nn.Module):
         """
         unwrapped = {}
         for dataset_name, sample in batch.items():
-            data, coordinates, layout = sample.data, sample.coordinates, sample.layout
+            data, coordinates, layout = sample.values, sample.coordinates, sample.layout
             tabular_payload = {}
             if isinstance(sample, TabularSource):
                 # Tabular payloads keep the batch as the outer list; unwrap the one sample.
@@ -278,7 +278,7 @@ class AnemoiModelInterface(torch.nn.Module):
             coords_deg = torch.rad2deg(coordinates)
 
             payload = {
-                "data": data,
+                "values": data,
                 "latitudes": coords_deg[:, 0],
                 "longitudes": coords_deg[:, 1],
                 "variables": sample.variables,
@@ -305,14 +305,14 @@ class AnemoiModelInterface(torch.nn.Module):
         ----------
         x : dict[str, dict]
             Input data in physical units, one payload per input dataset, as taken by
-            :func:`~anemoi.models.data.sample.create_batched_struct`: the ``data`` (with
+            :func:`~anemoi.models.data.sample.create_batched_struct`: the ``values`` (with
             the model's input variables, in model-input order), its ``data_type``,
             ``variables`` and ``layout``, and the ``latitudes`` and ``longitudes`` in
             degrees (required; there is no fallback to the graph). Tabular payloads also
             carry ``timedeltas`` and ``boundaries``.
         target_template : Optional[dict[str, dict]]
             Output geometry, one payload per dataset to decode; required despite the
-            default. Like an input payload without ``data``, naming the variables to decode.
+            default. Like an input payload without ``values``, naming the variables to decode.
             Only the datasets given here are decoded.
         target_forcing : Optional[dict[str, dict]]
             Decoder conditioning, one payload per decoded dataset, holding the forcing

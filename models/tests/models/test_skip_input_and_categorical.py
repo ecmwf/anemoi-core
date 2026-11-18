@@ -100,7 +100,7 @@ def _forward(model: torch.nn.Module, batches: dict, **kwargs):
 
 
 def _with_grid_data(batch, data: torch.Tensor):
-    return batch.replace("grid", batch["grid"].clone(data=data))
+    return batch.replace("grid", batch["grid"].clone(values=data))
 
 
 @pytest.mark.parametrize("model_class", [AnemoiModelEncProcDec, AnemoiEnsModelEncProcDec])
@@ -108,7 +108,7 @@ def test_skip_input_redirects_residual_but_not_encoder(model_class: type) -> Non
     model = _build(model_class)
     batches = _synthetic_batches(model)
     x = batches["x"]
-    background = x["grid"].data + torch.randn_like(x["grid"].data)
+    background = x["grid"].values + torch.randn_like(x["grid"].values)
     skip_input = _with_grid_data(x, background)
 
     with torch.no_grad():
@@ -117,23 +117,23 @@ def test_skip_input_redirects_residual_but_not_encoder(model_class: type) -> Non
         redirected = _forward(model, batches, skip_input=skip_input)
 
     # Handing the input itself as the residual base changes nothing.
-    assert torch.equal(same["grid"].data, default["grid"].data)
+    assert torch.equal(same["grid"].values, default["grid"].values)
     # The SkipConnection adds the last input step to the prognostic outputs: with another base,
     # the output moves by exactly the difference of the bases there, and nowhere else.
     indices = _data_indices()["grid"]
-    delta = redirected["grid"].data - default["grid"].data
-    expected = (background - x["grid"].data)[:, -1:, ..., indices.model.input.prognostic]
+    delta = redirected["grid"].values - default["grid"].values
+    expected = (background - x["grid"].values)[:, -1:, ..., indices.model.input.prognostic]
     torch.testing.assert_close(delta[..., indices.model.output.prognostic], expected)
     assert torch.all(delta[..., indices.model.output.diagnostic] == 0)
     # The observation dataset has no residual, so its output is untouched.
-    assert torch.equal(redirected["obs"].flatten().data, default["obs"].flatten().data)
+    assert torch.equal(redirected["obs"].flatten().values, default["obs"].flatten().values)
 
 
 def test_skip_input_shape_mismatch_raises() -> None:
     model = _build()
     batches = _synthetic_batches(model)
     x = batches["x"]
-    skip_input = _with_grid_data(x, x["grid"].data[:, -1:])
+    skip_input = _with_grid_data(x, x["grid"].values[:, -1:])
 
     with pytest.raises(ValueError, match="skip_input"):
         _forward(model, batches, skip_input=skip_input)
@@ -191,7 +191,7 @@ def _categorical(embedding_dim: int = 4) -> dict:
 def _with_codes(batches: dict, codes: list[float]) -> dict:
     """Put integer codes into the forcing ``f`` of the grid input."""
     x = batches["x"]
-    data = x["grid"].data.clone()
+    data = x["grid"].values.clone()
     f = x["grid"].variables.index("f")
     data[..., f] = torch.tensor(codes, dtype=data.dtype).repeat(NUM_GRID_POINTS // len(codes) + 1)[:NUM_GRID_POINTS]
     return {**batches, "x": _with_grid_data(x, data)}
@@ -208,11 +208,11 @@ def test_input_dim_and_forward_with_embedding(model_class: type) -> None:
 
     batches = _with_codes(_synthetic_batches(model), [0.0, *CODES, 99.0])
     out = _forward(model, batches)
-    out["grid"].data.sum().backward()
+    out["grid"].values.sum().backward()
 
     weight = model.categorical_embeddings["grid"]["f"].embedding.weight
     assert weight.grad is not None
-    assert torch.isfinite(out["grid"].data).all()
+    assert torch.isfinite(out["grid"].values).all()
 
 
 def test_non_integer_codes_raise() -> None:
@@ -296,7 +296,7 @@ def _prepared(batch):
 def test_predict_step_normalises_the_raw_residual_base() -> None:
     model = _build()
     batches = _synthetic_batches(model)
-    raw_background = _with_grid_data(batches["x"], batches["x"]["grid"].data + 1.0)
+    raw_background = _with_grid_data(batches["x"], batches["x"]["grid"].values + 1.0)
     out = _predict(model, batches, skip_input=Batch({"grid": raw_background["grid"]}))
     with torch.no_grad():
         expected = _forward(
@@ -304,7 +304,7 @@ def test_predict_step_normalises_the_raw_residual_base() -> None:
             {**batches, "x": _prepared(batches["x"]), "target_forcing": _prepared(batches["target_forcing"])},
             skip_input=_prepared(raw_background),
         )
-    torch.testing.assert_close(out["grid"].data, expected["grid"].data)
+    torch.testing.assert_close(out["grid"].values, expected["grid"].values)
 
 
 def test_predict_step_cold_start_base_is_zero_after_normalisation() -> None:
@@ -319,8 +319,8 @@ def test_predict_step_cold_start_base_is_zero_after_normalisation() -> None:
             skip_input=x.map_data(torch.zeros_like),
         )
         default = _forward(model, {**batches, "x": x, "target_forcing": _prepared(batches["target_forcing"])})
-    torch.testing.assert_close(out["grid"].data, expected["grid"].data)
-    assert not torch.allclose(out["grid"].data, default["grid"].data)
+    torch.testing.assert_close(out["grid"].values, expected["grid"].values)
+    assert not torch.allclose(out["grid"].values, default["grid"].values)
 
 
 # ── decoder forcings ─────────────────────────────────────────────────────
@@ -350,7 +350,7 @@ def test_decoder_forcings_widen_the_target_forcings(monkeypatch: pytest.MonkeyPa
     batches["target_forcing"] = batches["target_forcing"].replace("grid", forcings)
     with torch.no_grad():
         out = _forward(model, batches)
-    assert torch.isfinite(out["grid"].data).all()
+    assert torch.isfinite(out["grid"].values).all()
 
 
 def test_decoder_forcings_need_the_target_forcings_feature() -> None:

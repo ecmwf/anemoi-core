@@ -68,6 +68,43 @@ def test_tabular_converts_boundaries_and_timedeltas():
     assert sample.timedeltas.dtype == torch.float32
 
 
+def test_with_time_offsets_moves_each_window_onto_the_reference_time():
+    # Windows 6 h before and at the reference date, as the tabular reader measures them.
+    sample = _tabular(timedeltas=[-600.0, 0.0, 1200.0])
+
+    shifted = sample.with_time_offsets([-21600.0, 0.0])
+
+    assert torch.equal(shifted.timedeltas, torch.tensor([-22200.0, -21600.0, 1200.0]))
+    assert shifted.timedeltas.dtype == torch.float32
+    assert torch.equal(sample.timedeltas, torch.tensor([-600.0, 0.0, 1200.0]))  # not modified in place
+    assert shifted.values is sample.values
+    assert shifted.coordinates is sample.coordinates
+    assert shifted.boundaries == sample.boundaries
+
+
+def test_with_time_offsets_skips_empty_windows():
+    sample = _tabular(boundaries=[(0, 0), (0, 3)], timedeltas=[0.0, 60.0, 120.0])
+
+    shifted = sample.with_time_offsets([-3600.0, 3600.0])
+
+    assert torch.equal(shifted.timedeltas, torch.tensor([3600.0, 3660.0, 3720.0]))
+
+
+def test_with_time_offsets_uses_the_rank_local_windows_of_a_sharded_sample():
+    # This rank holds 1 point of the first window and 2 of the second; the boundaries are local.
+    sample = _tabular(boundaries=[(0, 1), (1, 3)], timedeltas=[10.0, 20.0, 30.0], shard_sizes=[[1, 1], [2, 0]])
+
+    shifted = sample.with_time_offsets([-21600.0, 0.0])
+
+    assert torch.equal(shifted.timedeltas, torch.tensor([-21590.0, 20.0, 30.0]))
+    assert shifted.shard_sizes == [[1, 1], [2, 0]]
+
+
+def test_with_time_offsets_needs_one_offset_per_window():
+    with pytest.raises(ValueError, match="has 2 time windows, but 3 window offsets"):
+        _tabular().with_time_offsets([0.0, 0.0, 0.0])
+
+
 def test_layout_object_and_slices_are_accepted():
     sample = _tabular(layout=TensorLayout(ensemble=0, grid=1, variables=2), boundaries=(slice(0, 3),))
     assert sample.boundaries == (slice(0, 3),)
@@ -83,14 +120,14 @@ def test_layout_object_and_slices_are_accepted():
 def test_any_axis_order_is_stored_canonically(build, names, permutation):
     """A payload in any axis order is permuted to the canonical one, data and layout alike."""
     reference = build()
-    data = reference.data.permute(permutation)
+    data = reference.values.permute(permutation)
     assert not TensorLayout.from_tuple(*names).is_canonical
 
-    sample = build(data=data, layout=names)
+    sample = build(values=data, layout=names)
 
     assert sample.layout == reference.layout
     assert sample.layout.is_canonical
-    assert torch.equal(sample.data, reference.data)
+    assert torch.equal(sample.values, reference.values)
 
 
 #: What the interface passes, besides the payload, to build a template.
@@ -98,7 +135,7 @@ TEMPLATE_SIZES = {"name": "ds", "ensemble_size": 1, "batch_size": 1, "time_size"
 
 
 def test_gridded_payload_without_data_builds_a_template():
-    template = _gridded(data=None, **TEMPLATE_SIZES)
+    template = _gridded(values=None, **TEMPLATE_SIZES)
     assert isinstance(template, GriddedTemplate)
     assert template.name == "ds"
     assert (template.batch_size, template.ensemble_size, template.time_size) == (1, 1, 2)
@@ -106,7 +143,7 @@ def test_gridded_payload_without_data_builds_a_template():
 
 
 def test_tabular_payload_without_data_builds_a_template():
-    template = _tabular(data=None, **(TEMPLATE_SIZES | {"batch_size": 2, "ensemble_size": 3}))
+    template = _tabular(values=None, **(TEMPLATE_SIZES | {"batch_size": 2, "ensemble_size": 3}))
     assert isinstance(template, TabularTemplate)
     assert template.name == "ds"
     # one entry per sample, each holding the payload's geometry
@@ -123,8 +160,8 @@ def test_template_geometry_reaches_the_device_as_float32():
     # Templates have no data to take a device from. Numpy float64 geometry (inference payloads) must reach
     # the device as float32 only: MPS has no float64. The meta device stands in for an accelerator.
     geometry = {"latitudes": np.asarray(LATS), "longitudes": np.asarray(LONS), "device": torch.device("meta")}
-    gridded = _gridded(data=None, **geometry, **TEMPLATE_SIZES)
-    tabular = _tabular(data=None, **geometry, **TEMPLATE_SIZES)
+    gridded = _gridded(values=None, **geometry, **TEMPLATE_SIZES)
+    tabular = _tabular(values=None, **geometry, **TEMPLATE_SIZES)
     for tensor in [gridded.coordinates, *tabular.coordinates, *tabular.timedeltas]:
         assert (tensor.device.type, tensor.dtype) == ("meta", torch.float32)
 
@@ -132,13 +169,13 @@ def test_template_geometry_reaches_the_device_as_float32():
 @pytest.mark.parametrize("build", [_gridded, _tabular])
 def test_template_layout_is_stored_canonically(build):
     names = tuple(reversed(build().layout.axis_names))
-    template = build(data=None, layout=names, **TEMPLATE_SIZES)
-    assert template.layout == build(data=None, **TEMPLATE_SIZES).layout
+    template = build(values=None, layout=names, **TEMPLATE_SIZES)
+    assert template.layout == build(values=None, **TEMPLATE_SIZES).layout
 
 
 def test_tabular_template_checks_its_time_windows():
     with pytest.raises(ValueError, match="extend past the 3 points"):
-        _tabular(data=None, boundaries=[(0, 4)], **TEMPLATE_SIZES)
+        _tabular(values=None, boundaries=[(0, 4)], **TEMPLATE_SIZES)
 
 
 @pytest.mark.parametrize(
@@ -146,9 +183,9 @@ def test_tabular_template_checks_its_time_windows():
     [
         ({"data_type": "unknown"}, "Cannot find 'unknown'"),
         ({"longitudes": [0.0, 1.0]}, "same points"),
-        ({"data": torch.zeros(1, 3, 2)}, "does not match the layout"),
+        ({"values": torch.zeros(1, 3, 2)}, "does not match the layout"),
         ({"variables": ["a"]}, "2 variables but 1 names"),
-        ({"data": torch.zeros(2, 1, 4, 2)}, "4 points but 3 coordinates"),
+        ({"values": torch.zeros(2, 1, 4, 2)}, "4 points but 3 coordinates"),
     ],
 )
 def test_gridded_validation(overrides, match):
@@ -204,13 +241,13 @@ def test_grid_size_is_checked_against_sharding(overrides, match):
 
 def test_collate_matches_direct_construction():
     batch = Batch.collate([{"ds": _gridded()}, {"ds": _gridded()}])
-    assert batch["ds"].data.shape == (2, 2, 1, 3, 2)
+    assert batch["ds"].values.shape == (2, 2, 1, 3, 2)
     torch.testing.assert_close(batch["ds"].coordinates[:, 0], torch.deg2rad(torch.tensor(LATS)))
 
 
 def test_tabular_collate_keeps_one_entry_per_sample():
     source = Batch.collate([{"obs": _tabular()}, {"obs": _tabular(shard_sizes=None)}])["obs"]
-    assert len(source.data) == len(source.coordinates) == len(source.timedeltas) == 2
+    assert len(source.values) == len(source.coordinates) == len(source.timedeltas) == 2
     assert source.boundaries[0] == (slice(0, 2), slice(2, 3))
     assert source.shard_sizes is None
 
@@ -223,7 +260,7 @@ def test_tabular_collate_rejects_mixed_sharding():
 
 def test_collate_rejects_mixing_samples_and_templates():
     with pytest.raises(TypeError, match="single BaseSample subclass"):
-        Batch.collate([{"ds": _gridded()}, {"ds": _gridded(data=None, **TEMPLATE_SIZES)}])
+        Batch.collate([{"ds": _gridded()}, {"ds": _gridded(values=None, **TEMPLATE_SIZES)}])
 
 
 def test_collate_accepts_samples_sharing_statistics():
@@ -264,7 +301,7 @@ def _assert_same_template(actual, expected):
 
 
 # A template is derived from a collated source in training (Source.template) and built
-# from a payload without data in inference (create_batched_struct(data=None)). Both must
+# from a payload without data in inference (create_batched_struct(values=None)). Both must
 # describe the same batch when given the same geometry.
 @pytest.mark.parametrize("batch_size", [1, 2])
 @pytest.mark.parametrize(
@@ -282,7 +319,7 @@ def test_template_from_source_matches_template_from_payload(build, sharding, siz
 
     source = Batch.collate([{"ds": build(**payload)} for _ in range(batch_size)])["ds"]
     from_source = source.template()
-    from_payload = build(data=None, name="ds", batch_size=batch_size, **sizes, **payload)
+    from_payload = build(values=None, name="ds", batch_size=batch_size, **sizes, **payload)
 
     _assert_same_template(from_payload, from_source)
 
@@ -291,7 +328,7 @@ def test_template_from_source_matches_template_from_payload(build, sharding, siz
 def _direct_gridded(data: torch.Tensor) -> GriddedSample:
     n_points = data.shape[2]
     return GriddedSample(
-        data=data,
+        values=data,
         variables=["a", "b"],
         layout=TensorLayout(time=0, ensemble=1, grid=2, variables=3),
         coordinates=torch.zeros(n_points, 2),
@@ -302,7 +339,7 @@ def _direct_gridded(data: torch.Tensor) -> GriddedSample:
 def _direct_tabular(data: torch.Tensor) -> TabularSample:
     n_points = data.shape[1]
     return TabularSample(
-        data=data,
+        values=data,
         variables=["a", "b"],
         layout=TensorLayout(ensemble=0, grid=1, variables=2),
         coordinates=torch.zeros(n_points, 2),

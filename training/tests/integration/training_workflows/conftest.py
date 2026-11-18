@@ -604,7 +604,7 @@ def imerg_target_config(
 
 
 @pytest.fixture(
-    params=["transport_edm_diffusion", "transport_edm_diffusion_tendency"],
+    params=[[], ["model=graphtransformer_transport_tendency"]],
     ids=["transport_edm_diffusion", "transport_edm_diffusion_tendency"],
 )
 def edm_transport_config(
@@ -612,12 +612,13 @@ def edm_transport_config(
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_path: GetTmpPath,
 ) -> tuple[OmegaConf, str]:
+    """The EDM entry config with the state model or, through an override, the tendency model."""
     with initialize_config_module(
         version_base=None,
         config_module="anemoi.training.config",
         job_name="test_edm_transport",
     ):
-        template = compose(config_name=request.param)
+        template = compose(config_name="transport", overrides=request.param)
 
     use_case_modifications = OmegaConf.load(CONFIG_DIR / "test_transport.yaml")
     tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
@@ -628,57 +629,18 @@ def edm_transport_config(
     return cfg, url_dataset
 
 
-@pytest.fixture(
-    params=[
-        ("transport_edm_diffusion", "graphtransformer_transport_edm"),
-        ("transport_edm_diffusion", "transformer_transport_edm"),
-        ("transport_edm_diffusion_tendency", "graphtransformer_transport_tendency_edm"),
-        ("transport_edm_diffusion_tendency", "transformer_transport_tendency_edm"),
-        ("transport_flow_matching", "graphtransformer_transport_fm"),
-        ("transport_flow_matching", "transformer_transport_fm"),
-        ("transport_flow_matching_tendency", "graphtransformer_transport_tendency_fm"),
-        ("transport_flow_matching_tendency", "transformer_transport_tendency_fm"),
-    ],
-    ids=lambda param: param[1],
-)
-def transport_model_config(
-    request: pytest.FixtureRequest,
-    testing_modifications_with_temp_dir: OmegaConf,
-    get_tmp_path: GetTmpPath,
-) -> tuple[OmegaConf, str]:
-    """Each transport model config, composed with the entry config of its objective and mode."""
-    entry_config, model_config = request.param
-    with initialize_config_module(
-        version_base=None,
-        config_module="anemoi.training.config",
-        job_name="test_transport_model_configs",
-    ):
-        template = compose(config_name=entry_config, overrides=[f"model={model_config}"])
-
-    use_case_modifications = OmegaConf.load(CONFIG_DIR / "test_transport.yaml")
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
-
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    OmegaConf.resolve(cfg)
-    return cfg, url_dataset
-
-
-@pytest.fixture(
-    params=["transport_flow_matching", "transport_flow_matching_tendency"],
-    ids=["transport_flow_matching", "transport_flow_matching_tendency"],
-)
+@pytest.fixture
 def flow_matching_config(
-    request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_path: GetTmpPath,
 ) -> tuple[OmegaConf, str]:
+    """The flow-matching entry config: one dataset, state model."""
     with initialize_config_module(
         version_base=None,
         config_module="anemoi.training.config",
         job_name="test_flow_matching",
     ):
-        template = compose(config_name=request.param)
+        template = compose(config_name="transport_flow_matching")
 
     use_case_modifications = OmegaConf.load(CONFIG_DIR / "test_transport.yaml")
     tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
@@ -690,26 +652,24 @@ def flow_matching_config(
 
 
 @pytest.fixture(
-    params=[
-        "multi_transport_edm_diffusion",
-        "multi_transport_edm_diffusion_tendency",
-        "multi_transport_flow_matching",
-        "multi_transport_flow_matching_tendency",
-    ],
+    params=[False, True],
+    ids=["multi_transport_edm_diffusion", "multi_transport_edm_diffusion_tendency"],
 )
 def multidatasets_transport_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, list[str]]:
-    is_tendency = request.param.endswith("_tendency")
+    """The two-dataset EDM entry config with the state model or, through an override, the tendency model."""
+    is_tendency = request.param
+    overrides = ["model=graphtransformer_multi_transport_tendency"] if is_tendency else []
 
     with initialize_config_module(
         version_base=None,
         config_module="anemoi.training.config",
         job_name="test_multi_transport",
     ):
-        template = compose(config_name=request.param)
+        template = compose(config_name="multi_transport", overrides=overrides)
 
     use_case_modifications = OmegaConf.load(CONFIG_DIR / "test_multidatasets.yaml")
     assert isinstance(use_case_modifications, DictConfig)
@@ -720,7 +680,6 @@ def multidatasets_transport_config(
     use_case_modifications.system.input.dataset_b = str(tmp_dir_dataset_b)
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    cfg.model.compile = []  # TODO(cathal): debug compile + checkpoint error
     if is_tendency:
         cfg.task.multistep_input = 3
         cfg.task.multistep_output = 2
@@ -809,7 +768,7 @@ def offset_forecaster_tendency_transport_config(
         config_module="anemoi.training.config",
         job_name="test_offset_forecaster_tendency_transport",
     ):
-        template = compose(config_name="transport_edm_diffusion_tendency")
+        template = compose(config_name="transport", overrides=["model=graphtransformer_transport_tendency"])
 
     use_case_modifications = OmegaConf.load(CONFIG_DIR / "test_transport.yaml")
     assert isinstance(use_case_modifications, DictConfig)

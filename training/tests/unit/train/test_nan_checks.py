@@ -47,7 +47,7 @@ def _batch_with_nan_in(variable: str | None) -> object:
     if variable is not None:
         data[..., 0, VARIABLES.index(variable)] = float("nan")  # one missing value
     return build_batch(
-        data={"data": data},
+        values={"data": data},
         coordinates={"data": torch.zeros(4, 2)},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": VARIABLES},

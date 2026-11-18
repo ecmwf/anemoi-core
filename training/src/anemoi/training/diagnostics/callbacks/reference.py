@@ -403,7 +403,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         """``(grid, variables)`` array of the first sample, last output step and first member."""
         pick = {"batch": 0, "time": -1, "ensemble": 0}
         index = tuple(pick.get(axis, slice(None)) for axis in source.layout.axis_names)
-        return source.data[index].float().cpu().numpy()
+        return source.values[index].float().cpu().numpy()
 
     def compute(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> dict | None:
         """Run the model on the fixed dates and collect prediction/reference pairs.

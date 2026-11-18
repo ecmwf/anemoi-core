@@ -35,7 +35,7 @@ def _indices() -> IndexCollection:
 
 def _gridded(data: torch.Tensor, variables: list[str]) -> Batch:
     return build_batch(
-        data={"data": data},
+        values={"data": data},
         coordinates={"data": torch.zeros(GRID, 2)},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": variables},
@@ -82,9 +82,9 @@ def test_forecast_predictions_are_corrected() -> None:
     batch = _gridded(torch.ones(1, 4, 1, GRID, 4), list(NAME_TO_INDEX))
     adjusted = PlotLossCorrected(parameter_groups={})._adjust_predictions(module, _predictions(), batch)
     # the DA cycle is untouched; the forecast step is corrected on "a" only
-    assert torch.equal(adjusted[0]["data"].data, torch.zeros(1, 1, 1, GRID, 2))
-    assert torch.allclose(adjusted[1]["data"].data[..., 0], torch.full((1, 1, 1, GRID), 0.5))
-    assert torch.equal(adjusted[1]["data"].data[..., 1], torch.zeros(1, 1, 1, GRID))
+    assert torch.equal(adjusted[0]["data"].values, torch.zeros(1, 1, 1, GRID, 2))
+    assert torch.allclose(adjusted[1]["data"].values[..., 0], torch.full((1, 1, 1, GRID), 0.5))
+    assert torch.equal(adjusted[1]["data"].values[..., 1], torch.zeros(1, 1, 1, GRID))
 
 
 def test_without_corrector_it_is_the_loss_curve_plot() -> None:

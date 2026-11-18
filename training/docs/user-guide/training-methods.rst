@@ -34,10 +34,9 @@ The three built-in methods are:
 
 ``TransportTraining`` (``anemoi.training.train.methods.transport``)
    Configurable transport training for EDM diffusion and flow-matching
-   probabilistic forecasters. Use ``training.transport.prediction_mode``
-   to select state or tendency targets, and
-   ``training.transport.objective`` to select ``edm_diffusion`` or
-   ``flow_matching``.
+   probabilistic forecasters. The model config sets the objective
+   (``model.model.transport.objective``: ``edm_diffusion`` or
+   ``flow_matching``), and the model class sets state or tendency targets.
 
 .. note::
 
@@ -316,10 +315,10 @@ transport vector field. The supported objectives are ``edm_diffusion`` and
 ``flow_matching``.
 
 Use :class:`~anemoi.training.train.methods.transport.TransportTraining`
-with ``prediction_mode: state`` for state-space targets or
-``prediction_mode: tendency`` for tendency-space targets. The model must
-use :class:`AnemoiTransportModelEncProcDec` or
-:class:`AnemoiTransportTendModelEncProcDec`.
+with :class:`AnemoiTransportModelEncProcDec`, which learns future states, or
+:class:`AnemoiTransportTendModelEncProcDec`, which learns tendencies from the
+latest input state. Each model class declares this as its
+``prediction_mode``, and training prepares its targets to match.
 
 .. warning::
 
@@ -330,132 +329,118 @@ Top-level configs
 
 The transport entry points are:
 
--  ``transport_edm_diffusion.yaml``
--  ``transport_edm_diffusion_tendency.yaml``
--  ``transport_flow_matching.yaml``
--  ``transport_flow_matching_tendency.yaml``
+-  ``transport.yaml``: one dataset, EDM diffusion;
+-  ``multi_transport.yaml``: two datasets (``era5`` and ``cerra``) trained
+   together, EDM diffusion;
+-  ``transport_flow_matching.yaml``: one dataset, flow matching.
 
-and, for two datasets (``era5`` and ``cerra``) trained together:
+They select the state model, ``graphtransformer_transport`` (or
+``graphtransformer_multi_transport``). The tendency model is chosen with an
+override:
 
--  ``multi_transport_edm_diffusion.yaml``
--  ``multi_transport_edm_diffusion_tendency.yaml``
--  ``multi_transport_flow_matching.yaml``
--  ``multi_transport_flow_matching_tendency.yaml``
+.. code:: bash
 
-These configs select ``training: edm_diffusion`` or
-``training: flow_matching`` (``multi_edm_diffusion`` or
-``multi_flow_matching`` for two datasets), which set the corresponding
-``training.transport.objective``. Tendency variants additionally select
-``training.transport.prediction_mode: tendency`` and a tendency model
-config.
+   anemoi-training train --config-name=transport model=graphtransformer_transport_tendency
+   anemoi-training train --config-name=multi_transport model=graphtransformer_multi_transport_tendency
 
-The entry points select objective-specific model configs such as
-``graphtransformer_transport_edm``, ``graphtransformer_transport_fm``,
-``graphtransformer_transport_tendency_edm``, and
-``graphtransformer_transport_tendency_fm``. Transformer variants use the
-same ``_edm`` and ``_fm`` suffixes.
+Each entry config sets everything that depends on the objective, in the
+model config and in the training config:
+
+.. code:: yaml
+
+   # transport.yaml (after its defaults list)
+   model:
+     model:
+       transport:
+         objective: edm_diffusion
+         inference_defaults:
+           sampling_schedule:
+             schedule_type: karras
+             sigma_max: 100.0
+             sigma_min: 0.02
+             rho: 7.0
+             num_steps: 50
+           sampler:
+             sampler: heun
+
+   training:
+     transport:
+       training_condition:
+         distribution: karras
+         sigma_max: 100.0
+         sigma_min: 0.02
+         rho: 7.0
+
+The flow-matching entry config sets ``objective: flow_matching``, a
+``unit_time`` sampling schedule and ``training_condition.distribution:
+uniform_time``. Flow-matching time runs from 0 to 1, so it also sets the
+noise embedder's ``scale: 1000``: the embedding frequencies then run from
+1000 down to about 1.5 radians per unit of time. Config validation rejects
+a ``training_condition`` that does not suit the model's objective.
 
 Model configuration
 ===================
 
-Objective-specific model configs put transport settings under
-``model.model.transport``:
+The model configs are the same for both objectives and put the transport
+settings under ``model.model.transport``:
 
 .. code:: yaml
 
    model:
      _target_: anemoi.models.models.AnemoiTransportModelEncProcDec
      transport:
-       objective: edm_diffusion
        sigma_data: 1.0
-       sigma_max: 100.0
-       sigma_min: 0.02
-       rho: 7.0
-       training_condition:
-         distribution: karras
-         sigma_max: ${model.model.transport.sigma_max}
-         sigma_min: ${model.model.transport.sigma_min}
-         rho: ${model.model.transport.rho}
+       noise_channels: 32
+       noise_cond_dim: 16
        noise_embedder:
          _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
          num_channels: ${model.model.transport.noise_channels}
          max_period: 1000
 
-Both objectives start from Gaussian noise.
-
-For flow matching, set ``objective: flow_matching``:
-
-.. code:: yaml
-
-   model:
-     model:
-       transport:
-         objective: flow_matching
-         noise_embedder:
-           scale: 1000
-         training_condition:
-           distribution: uniform_time
-
-Flow-matching time runs from 0 to 1, so the ``*_fm`` configs set
-``scale: 1000``: the embedding frequencies then run from 1000 down to about
-1.5 radians per unit of time.
+``graphtransformer_transport_tendency`` loads ``graphtransformer_transport``
+and switches to :class:`AnemoiTransportTendModelEncProcDec`, with a skip
+connection from the latest input state. Both objectives start from Gaussian
+noise.
 
 Flow matching
 =============
 
-Flow matching follows a straight path from the Gaussian source to the
-training target:
+Flow matching follows a straight path from Gaussian noise to the training
+target. The noisy target the model sees at time ``t`` is
 
 .. math::
 
-   x_s = (1 - s) x_0 + s x_1
+   x_t = (1 - t) x_0 + t x_1
 
-where ``x_0`` is the source, ``x_1`` is the training target and ``s`` is
+where ``x_0`` is the noise, ``x_1`` is the training target and ``t`` is
 drawn uniformly between 0 and 1. The model learns the velocity
 ``x_1 - x_0``.
 
-Sampling integrates that velocity from ``s = 0`` to ``s = 1`` with an ODE
+Sampling integrates that velocity from ``t = 0`` to ``t = 1`` with an ODE
 sampler such as ``euler`` or ``heun``. The sampler itself adds no noise:
 ensemble members differ because each one starts from its own Gaussian
-source.
+noise.
 
 Validation metrics estimate the target in one step from the predicted
-velocity, ``x_s + (1 - s) v``, at the time drawn for that batch.
+velocity, ``x_t + (1 - t) v``, at the time drawn for that batch.
 
 Training configuration
 ======================
 
-The shared training base is ``training/transport.yaml``. Objective
-configs specialize it:
+The settings shared by all transport training (precision, gradient
+clipping, optimiser, training method) are in
+``training/transport_settings.yaml``. ``training/transport.yaml`` puts them
+on top of ``single.yaml`` for one dataset and ``training/multi_transport.yaml``
+on top of ``multi.yaml`` for several. The entry config adds
+``training.transport.training_condition``, the distribution of the noise
+level or time drawn during training (see above).
 
-.. code:: yaml
-
-   # training/edm_diffusion.yaml
-   defaults:
-     - transport
-     - _self_
-
-   transport:
-     objective: edm_diffusion
-
-   training_loss:
-     datasets:
-       data:
-         _target_: anemoi.training.losses.WeightedMSELoss
-
-.. code:: yaml
-
-   # training/flow_matching.yaml
-   defaults:
-     - transport
-     - _self_
-
-   transport:
-     objective: flow_matching
-
-EDM diffusion uses a weighted clean-endpoint objective. Flow matching
-trains the velocity between the source field and the target with the
-``MSELoss`` that ``training/transport.yaml`` selects by default.
+Both objectives train with the ``MSELoss`` of ``single.yaml`` and
+``multi.yaml``. EDM diffusion weights each sample's loss by its noise level,
+so its training loss must apply these weights; ``MSELoss`` and the other
+pointwise losses do, and a loss that would leave them unused is rejected when
+training starts. Flow matching trains the velocity between the noise and the
+target.
 
 Sampling defaults
 =================
@@ -477,6 +462,11 @@ Default sampler settings live under
 
 These defaults can be overridden at inference time with
 ``schedule_params`` and ``sampler_params`` passed to ``predict_step``.
+An override of the same ``schedule_type`` or ``sampler`` (or one that names
+none) changes only the settings it gives. An override that names another
+type replaces the defaults and must give that type's own settings, for
+example ``{"schedule_type": "linear", "sigma_max": 100.0, "sigma_min": 0.02,
+"num_steps": 20}``; a setting the new type does not take is an error.
 For flow matching, use the same structure with
 ``sampling_schedule.schedule_type: unit_time`` and a vector-field sampler
 such as ``heun`` or ``euler``.

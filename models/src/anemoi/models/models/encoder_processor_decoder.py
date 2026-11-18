@@ -502,7 +502,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             # The encoder always sees ``x``. ``skip_input``, when given, replaces it as the
             # source of the additive skip connection only.
             x_skip = self.residual[dataset_name](
-                x.data if skip_input is None else skip_input.data,
+                x.values if skip_input is None else skip_input.values,
                 grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
                 n_step_output=self.n_step_output[dataset_name],
@@ -511,10 +511,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_skip = None
 
         # After the residual, which reads the raw columns: swap raw categorical codes for embeddings.
-        inputs = [self._embed_categorical_inputs(x_flat.data, dataset_name), latlons_to_sincos(x_flat.coordinates)]
+        inputs = [self._embed_categorical_inputs(x_flat.values, dataset_name), latlons_to_sincos(x_flat.coordinates)]
         dynamic_node_attributes = self._encode_dynamic_node_attributes(dataset_name, x_flat)
         if dynamic_node_attributes is not None:
-            inputs.append(dynamic_node_attributes.to(device=x_flat.data.device, dtype=x_flat.data.dtype))
+            inputs.append(dynamic_node_attributes.to(device=x_flat.values.device, dtype=x_flat.values.dtype))
 
         if dataset_name in self.node_attributes:
             trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size)
@@ -655,12 +655,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         assert x_skip.ndim == 5, (
             f"Residual must be (batch, time, ensemble, grid, variables), but got shape {x_skip.shape}"
         )
-        assert x_skip.shape[1] == pred.data.shape[1], (
-            f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({pred.data.shape[1]})."
+        assert x_skip.shape[1] == pred.values.shape[1], (
+            f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({pred.values.shape[1]})."
         )
-        new_data = pred.data.clone()
+        new_data = pred.values.clone()
         new_data[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
-        return pred.clone(data=new_data)
+        return pred.clone(values=new_data)
 
     def _assert_valid_sharding(
         self,
@@ -857,10 +857,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if skip_input is None or dataset_name not in self.residual:
             return None
         source = skip_input[dataset_name]
-        expected = batch[dataset_name].data.shape
-        if source.data.shape != expected:
+        expected = batch[dataset_name].values.shape
+        if source.values.shape != expected:
             msg = (
-                f"skip_input[{dataset_name!r}] shape {tuple(source.data.shape)} must match the input {tuple(expected)}."
+                f"skip_input[{dataset_name!r}] shape {tuple(source.values.shape)} must match the input {tuple(expected)}."
             )
             raise ValueError(msg)
         return source
@@ -1050,8 +1050,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         Parameters
         ----------
         batch : Batch
-            Typed batch envelope. ``batch.data`` carries the per-dataset input
-            tensors; ``batch.coordinates`` carries the per-dataset coordinate
+            Typed batch envelope. Each source's ``values`` carries the per-dataset input
+            tensors; its ``coordinates`` carry the per-dataset coordinate
             tensors used by dynamic graph providers / node attributes. Per-dataset
             grid sharding is carried by the batch and read through the source
             views (``view.flatten().shard_sizes``).

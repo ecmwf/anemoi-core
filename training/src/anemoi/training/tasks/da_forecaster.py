@@ -269,11 +269,11 @@ class DAForecaster(Forecaster):
             return advanced
 
         # The gridded advance only writes prognostics and forcings into the new input windows.
-        new_data = advanced.data.clone()
+        new_data = advanced.values.clone()
         model_corrector = data_indices.model.input.corrector
         for out_idx, new_idx in self._advance_map["outin"]:
-            new_data[:, new_idx, ..., model_corrector] = truth.data[:, out_idx, ..., corrector].to(new_data.dtype)
-        return advanced.clone(data=new_data)
+            new_data[:, new_idx, ..., model_corrector] = truth.values[:, out_idx, ..., corrector].to(new_data.dtype)
+        return advanced.clone(values=new_data)
 
     # -- residual base -----------------------------------------------------------------------
 
@@ -326,12 +326,12 @@ class DAForecaster(Forecaster):
             if view.is_tabular or prediction is None:
                 sources[dataset_name] = view
                 continue
-            background = view.data.clone()
+            background = view.values.clone()
             prog_in = data_indices[dataset_name].model.input.prognostic
             prog_out = data_indices[dataset_name].model.output.prognostic
             for out_idx, new_idx in self._advance_map["outin"]:
-                background[:, new_idx, ..., prog_in] = prediction.data[:, out_idx, ..., prog_out].to(background.dtype)
-            sources[dataset_name] = view.clone(data=background)
+                background[:, new_idx, ..., prog_in] = prediction.values[:, out_idx, ..., prog_out].to(background.dtype)
+            sources[dataset_name] = view.clone(values=background)
         return x.with_sources(sources)
 
 
@@ -363,6 +363,6 @@ def _blend_observations(prediction: "Source", observed: "Source", data_indices: 
 
     if prediction.is_tabular:
         return prediction.clone(
-            data=[blend(p, o) for p, o in zip(prediction.data, observed.data, strict=True)],
+            values=[blend(p, o) for p, o in zip(prediction.values, observed.values, strict=True)],
         )
-    return prediction.clone(data=blend(prediction.data, observed.data))
+    return prediction.clone(values=blend(prediction.values, observed.values))

@@ -429,18 +429,10 @@ model:
       sigma_data: 1.0
       noise_channels: 32
       noise_cond_dim: 16
-      sigma_max: 100.0
-      sigma_min: 0.02
-      rho: 7.0
       noise_embedder:
         _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
         num_channels: ${model.model.transport.noise_channels}
         max_period: 1000
-      training_condition:
-        distribution: karras
-        sigma_max: ${model.model.transport.sigma_max}
-        sigma_min: ${model.model.transport.sigma_min}
-        rho: ${model.model.transport.rho}
       inference_defaults:
         sampling_schedule:
           schedule_type: karras
@@ -647,9 +639,6 @@ training:
       interval: step
   # fixed, so reruns of this test draw the same batches (replaces the removed ANEMOI_BASE_SEED)
   seed: 12345678
-  update_ds_stats_on_ckpt_load:
-    states: false
-    tendencies: true
   check_variables_compatibility:
     ignore_units: false
     ignore_processing_period: false
@@ -664,8 +653,11 @@ training:
   method:
     _target_: anemoi.training.train.methods.TransportTraining
   transport:
-    prediction_mode: state
-    objective: edm_diffusion
+    training_condition:
+      distribution: karras
+      sigma_max: 100.0
+      sigma_min: 0.02
+      rho: 7.0
   strategy:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
     num_gpus_per_model: ${system.hardware.num_gpus_per_model}
@@ -681,11 +673,11 @@ training:
   training_loss:
     datasets:
       era:
-        _target_: anemoi.training.losses.WeightedMSELoss
+        _target_: anemoi.training.losses.MSELoss
         scalers: ["general_variable", "pressure_level", "node_weights"]
         ignore_nans: true
       combined_surface:
-        _target_: anemoi.training.losses.WeightedMSELoss
+        _target_: anemoi.training.losses.MSELoss
         scalers: ["general_variable"]
         ignore_nans: true
   validation_metrics:

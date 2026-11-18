@@ -55,7 +55,7 @@ def _record_training_batches(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int,
 
     def seed_and_record(self: BaseTrainingModule, batch: Batch, batch_idx: int) -> None:
         seed_batch(self, batch, batch_idx)
-        data = next(iter(batch.values())).data
+        data = next(iter(batch.values())).values
         records.append((self.current_epoch, batch_idx, _digest(data), _digest(torch.get_rng_state())))
 
     monkeypatch.setattr(BaseTrainingModule, "on_train_batch_start", seed_and_record)
@@ -326,11 +326,11 @@ def _predict_from_inference_checkpoint(path: Path) -> None:
             "layout": ("time", "ensemble", "grid", "variables"),
         }
         grid = geometry["latitudes"].size
-        inputs[name] = {**geometry, "data": torch.randn(n_input, 1, grid, len(input_names)), "variables": input_names}
+        inputs[name] = {**geometry, "values": torch.randn(n_input, 1, grid, len(input_names)), "variables": input_names}
         templates[name] = {**geometry, "variables": output_names}
         forcings[name] = {
             **geometry,
-            "data": torch.randn(n_output, 1, grid, len(forcing_names)),
+            "values": torch.randn(n_output, 1, grid, len(forcing_names)),
             "variables": forcing_names,
         }
         expected_shapes[name] = (n_output, 1, grid, len(output_names))
@@ -341,8 +341,8 @@ def _predict_from_inference_checkpoint(path: Path) -> None:
         prediction = model.predict_step(inputs, target_template=templates, target_forcing=forcings, **kwargs)
 
     for name, shape in expected_shapes.items():
-        assert tuple(prediction[name]["data"].shape) == shape, f"{name}: {tuple(prediction[name]['data'].shape)}"
-        assert torch.isfinite(prediction[name]["data"]).all(), f"{name}: non-finite prediction"
+        assert tuple(prediction[name]["values"].shape) == shape, f"{name}: {tuple(prediction[name]['values'].shape)}"
+        assert torch.isfinite(prediction[name]["values"]).all(), f"{name}: non-finite prediction"
 
 
 def _check_inference_checkpoint(
@@ -424,7 +424,7 @@ def test_flow_matching_inference_checkpoint_round_trips(
     get_test_archive: GetTestArchive,
     partial_metadata_schema: dict[str, Any],
 ) -> None:
-    """As ``test_inference_checkpoint_round_trips``, for the flow-matching transport models (state and tendency)."""
+    """As ``test_inference_checkpoint_round_trips``, for the flow-matching transport model."""
     cfg, url = flow_matching_config
     _check_inference_checkpoint(cfg, url, get_test_archive, partial_metadata_schema)
 
@@ -461,12 +461,10 @@ def test_loading_strategy_loads_real_checkpoint(
 ) -> None:
     """weights-only / cold-start / transfer-learning load a real checkpoint into a real model.
 
-    Only warm start was integration-tested. The processor-refresh bug hit every loader:
-    warm start crashed loudly, but these three (strict=False) would *silently* drop the
-    re-injected ``model_output_idx`` buffers on a real model. This loads a real GNN
-    checkpoint via each strategy through the pipeline and trains, asserting the model is
-    marked initialised and the run completes — the synthetic unit tests cannot catch a
-    real-model load regression like that.
+    These three load with strict=False, so a real-model load that leaves entries behind
+    would pass unnoticed. This loads a real GNN checkpoint via each strategy through the
+    pipeline and trains, asserting the model is marked initialised and the run completes,
+    which the synthetic unit tests cannot show for a real model.
     """
     cfg, url = global_config_with_checkpoint
     get_test_archive(url)

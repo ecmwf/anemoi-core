@@ -16,7 +16,6 @@ from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
-from anemoi.models.transport.sources import gaussian_source
 
 OBS_LAYOUT = TensorLayout.from_tuple("grid", "variables")
 
@@ -30,7 +29,7 @@ def _obs_batch(samples: list[torch.Tensor], variables: list[str]) -> Batch:
                 name="obs",
                 variables=variables,
                 layout=OBS_LAYOUT,
-                data=samples,
+                values=samples,
                 coordinates=[torch.zeros(n, 2) for n in nodes],
                 timedeltas=[torch.zeros(n) for n in nodes],
                 boundaries=[(slice(0, n),) for n in nodes],
@@ -39,7 +38,7 @@ def _obs_batch(samples: list[torch.Tensor], variables: list[str]) -> Batch:
     )
 
 
-def test_sampling_template_supports_sparse_obs_shapes() -> None:
+def test_sampling_noise_supports_sparse_obs_shapes() -> None:
     output_names = ("o0", "o1", "o2", "o3")
     model = AnemoiTransportModelEncProcDec.__new__(AnemoiTransportModelEncProcDec)
     torch.nn.Module.__init__(model)
@@ -56,14 +55,14 @@ def test_sampling_template_supports_sparse_obs_shapes() -> None:
     model.is_dataset_static = {"obs": False}
     obs = _obs_batch([torch.zeros(2, 0), torch.zeros(5, 0)], variables=[])
 
-    template = model._sampling_template({"obs": obs["obs"].template()}, obs)
+    noise = model.draw_sampling_noise(obs, target_template={"obs": obs["obs"].template()})
 
-    assert template["obs"].is_tabular
-    assert [tuple(sample.shape) for sample in template["obs"].data] == [(2, 4), (5, 4)]
-    assert template["obs"].variables == list(output_names)
+    assert noise["obs"].is_tabular
+    assert [tuple(sample.shape) for sample in noise["obs"].values] == [(2, 4), (5, 4)]
+    assert noise["obs"].variables == list(output_names)
 
 
-def test_gaussian_source_creates_sparse_gaussian(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_randn_like_creates_sparse_gaussian_noise(monkeypatch: pytest.MonkeyPatch) -> None:
     target = _obs_batch([torch.zeros(2, 3), torch.zeros(5, 3)], variables=["a", "b", "c"])
 
     def fake_randn(shape: tuple[int, ...], device=None, dtype=None) -> torch.Tensor:
@@ -71,9 +70,9 @@ def test_gaussian_source_creates_sparse_gaussian(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(torch, "randn", fake_randn)
 
-    source = gaussian_source(target)["obs"]
+    noise = target["obs"].randn_like()
 
-    assert source.is_tabular
-    assert [sample.shape for sample in source.data] == [torch.Size([2, 3]), torch.Size([5, 3])]
-    torch.testing.assert_close(source.data[0], torch.full((2, 3), 4.0))
-    torch.testing.assert_close(source.data[1], torch.full((5, 3), 4.0))
+    assert noise.is_tabular
+    assert [sample.shape for sample in noise.values] == [torch.Size([2, 3]), torch.Size([5, 3])]
+    torch.testing.assert_close(noise.values[0], torch.full((2, 3), 4.0))
+    torch.testing.assert_close(noise.values[1], torch.full((5, 3), 4.0))

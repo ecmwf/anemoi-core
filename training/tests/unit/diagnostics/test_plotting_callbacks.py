@@ -369,7 +369,7 @@ def _make_gridded_batch(tensor: torch.Tensor, *, dataset_name: str = "data") -> 
     num_vars = tensor.shape[4]
     coordinates = torch.zeros(grid, 2)
     return build_batch(
-        data={dataset_name: tensor},
+        values={dataset_name: tensor},
         coordinates={dataset_name: coordinates},
         layouts={dataset_name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={dataset_name: [f"v{i}" for i in range(num_vars)]},
@@ -395,7 +395,7 @@ def _make_sparse_batch(
     )
     boundaries = [(slice(0, input_nodes), slice(input_nodes, input_nodes + output_nodes))]
     return build_batch(
-        data={dataset_name: [data]},
+        values={dataset_name: [data]},
         coordinates={dataset_name: [coordinates]},
         boundaries={dataset_name: boundaries},
         timedeltas={dataset_name: [torch.arange(input_nodes + output_nodes, dtype=torch.float32)]},
@@ -469,12 +469,12 @@ def test_batch_output_plot_forwards_auxiliary_from_validation_output():
     pl_module = _make_pl_module_forecaster(validation_rollout=1, nlatlon=nlatlon)
     pl_module.allgather_batch = lambda tensor, _grid_shard_sizes: tensor
     pl_module.model.post_processors = {"data": _IdentityProcessor()}
-    conditioned_target = {"data": _pred_view(torch.full((batch_size, 1, n_ens, nlatlon, nvar), 3.0))}
+    noisy_target = {"data": _pred_view(torch.full((batch_size, 1, n_ens, nlatlon, nvar), 3.0))}
 
     batch = _make_gridded_batch(torch.randn(batch_size, 3, n_ens, nlatlon, nvar))
     output = _step_output(
         [{"data": torch.zeros(batch_size, 1, n_ens, nlatlon, nvar)}],
-        plot_kwargs={"auxiliary_output": conditioned_target},
+        plot_kwargs={"auxiliary_output": noisy_target},
     )
     trainer = MagicMock()
     trainer.current_epoch = 0
@@ -485,8 +485,8 @@ def test_batch_output_plot_forwards_auxiliary_from_validation_output():
     plotted_output = callback.plot.call_args.args[3]
     plotted_auxiliary = callback.plot.call_args.kwargs["auxiliary_output"]
     # predictions / auxiliary are per-dataset Sources (single-process allgather is a no-op).
-    torch.testing.assert_close(plotted_output.predictions[0]["data"].data, output.predictions[0]["data"].data)
-    torch.testing.assert_close(plotted_auxiliary["data"].data, conditioned_target["data"].data)
+    torch.testing.assert_close(plotted_output.predictions[0]["data"].values, output.predictions[0]["data"].values)
+    torch.testing.assert_close(plotted_auxiliary["data"].values, noisy_target["data"].values)
     assert plotted_output.plot_kwargs == {}
 
 
@@ -511,8 +511,8 @@ def test_batch_output_plot_sparse_forwards_auxiliary_output() -> None:
 
     batch = _make_sparse_batch()
     output_view = batch["obs"].select_time(1)
-    prediction = output_view.clone(data=[torch.full_like(output_view.data[0], 2.0)])
-    auxiliary = output_view.clone(data=[torch.full_like(output_view.data[0], 3.0)])
+    prediction = output_view.clone(values=[torch.full_like(output_view.values[0], 2.0)])
+    auxiliary = output_view.clone(values=[torch.full_like(output_view.values[0], 3.0)])
     output = _step_output([{"obs": prediction}])
     trainer = MagicMock()
     trainer.logger = MagicMock()
@@ -1165,14 +1165,14 @@ def test_plots_plot_predicted_multilevel_flat_sample_accepts_auxiliary_panel():
         y_true,
         y_pred,
         auxiliary=auxiliary,
-        auxiliary_label="corrupted targets",
+        auxiliary_label="noisy targets",
         datashader=False,
     )
 
     assert fig is not None
     plot_titles = [ax.get_title() for ax in fig.axes]
-    assert any(title == "t2m corrupted targets" for title in plot_titles)
-    assert any(title == "tp corrupted targets" for title in plot_titles)
+    assert any(title == "t2m noisy targets" for title in plot_titles)
+    assert any(title == "tp noisy targets" for title in plot_titles)
     assert "tp increment [pred - input]" not in plot_titles
     assert "tp persist err" not in plot_titles
     fig.clear()

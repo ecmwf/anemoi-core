@@ -130,7 +130,7 @@ class Source(ABC):
     operation maps onto the payload.
 
     This base class only holds the metadata. The payload fields are declared by each
-    subclass with its own types: every subclass has ``data``, ``coordinates``,
+    subclass with its own types: every subclass has ``values``, ``coordinates``,
     ``shard_sizes`` and ``coordinates_are_static``, and may add more (e.g. the
     ``timedeltas`` and ``boundaries`` of :class:`TabularSource`).
 
@@ -162,7 +162,7 @@ class Source(ABC):
     _name_to_index: dict[str, int] = field(init=False, repr=False, compare=False)
 
     # Tensor fields, besides ``coordinates``, that :meth:`to` moves and :meth:`pin_memory` pins.
-    _PAYLOAD_FIELDS = ("data",)
+    _PAYLOAD_FIELDS = ("values",)
 
     def __post_init__(self) -> None:
         """Validate the metadata and the payload it describes."""
@@ -170,7 +170,7 @@ class Source(ABC):
             msg = f"Source {self.name!r} requires unique variable names."
             raise ValueError(msg)
 
-        if self.data is None:
+        if self.values is None:
             msg = (
                 f"{self.__class__.__name__} {self.name!r} requires data; "
                 "use a template (see Source.template) to describe a source without data."
@@ -338,7 +338,7 @@ class Source(ABC):
     def flatten(self) -> "FlatSource":
         """Return a flat source (nodes, features).
 
-        The inverse is ``self.template().unflatten(flat.data)``.
+        The inverse is ``self.template().unflatten(flat.values)``.
         """
         pass
 
@@ -430,13 +430,12 @@ class Source(ABC):
         """Return ``condition`` (see :meth:`map_with_condition`) laid out like this source's payload."""
         ...
 
-    @abstractmethod
     def randn_like(self, model_comm_group: ProcessGroup | None = None) -> "Source":
-        """Return a new view whose payload is standard-normal noise of the same structure.
+        """Return standard Gaussian noise shaped and described like this source, in its dtype.
 
-        Grid-sharded payloads draw noise consistently across ``model_comm_group``.
+        See :meth:`BaseTemplate.randn` for how noise is drawn when the nodes are split across ranks.
         """
-        ...
+        return self.template().randn(self.dtype, model_comm_group)
 
     @abstractmethod
     def pairwise(self, other: "Source", func: Callable[..., torch.Tensor], *args: Any, **kwargs) -> torch.Tensor:
@@ -625,7 +624,22 @@ class BaseTemplate(ABC):
 
     @abstractmethod
     def flatten(self) -> "FlatSource":
-        """Return the flat nodes (``data=None``): the decoder's target coordinates, timedeltas and sizes."""
+        """Return the flat nodes (``values=None``): the decoder's target coordinates, timedeltas and sizes."""
+        ...
+
+    @abstractmethod
+    def randn(self, dtype: torch.dtype, model_comm_group: ProcessGroup | None = None) -> Source:
+        """Return a source described by this template, filled with standard Gaussian noise.
+
+        The noise is on the device of the template's nodes. When the nodes are split across
+        ``model_comm_group``, each rank draws the noise for all nodes of the group and keeps its own part
+        (see :func:`anemoi.models.distributed.noise.draw_noise`).
+        """
+        ...
+
+    @abstractmethod
+    def flat_sizes(self) -> tuple[ShardSizes, tuple[int, ...] | None]:
+        """Return the ``shard_sizes`` and ``batch_sizes`` that :meth:`flatten` gives, without building its nodes."""
         ...
 
     @abstractmethod

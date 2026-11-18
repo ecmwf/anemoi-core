@@ -259,7 +259,6 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     crps = "anemoi.training.losses.CRPS"
     rmse = "anemoi.training.losses.RMSELoss"
     mse = "anemoi.training.losses.MSELoss"
-    weighted_mse = "anemoi.training.losses.WeightedMSELoss"
     mae = "anemoi.training.losses.MAELoss"
     nan_aware_mse = "anemoi.training.losses.NaNAwareMSELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
@@ -870,15 +869,6 @@ StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema | Si
 VariableGroupType = dict[str, bool | str | list[str] | dict[str, str | bool | list[str | int]]] | None
 
 
-class UpdateDsStatsOnCkptLoadSchema(BaseModel):
-    """Configuration for updating processor statistics on checkpoint load."""
-
-    states: bool = Field(default=False, example=False)
-    "Rebuild state pre/post-processing statistics from the current dataset."
-    tendencies: bool = Field(default=True, example=True)
-    "Rebuild tendency pre/post-processing statistics from the current dataset."
-
-
 class CheckpointPipelineSchema(BaseModel):
     """Declarative checkpoint pipeline consumed by ``build_checkpoint_pipeline``.
 
@@ -975,8 +965,6 @@ class BaseTrainingSchema(BaseModel):
     " whose variable set is a superset of the current dataset's is accepted instead of raising,"
     " provided the shared variables keep the same relative order; the variable-dependent layers"
     " are re-initialised for the reduced set. Default False keeps the strict variable-order check."
-    update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
-    "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
     checkpoint: CheckpointPipelineSchema | None = Field(default=None)
     "Checkpoint pipeline configuration consumed by build_checkpoint_pipeline: an"
     " acquisition source under `source`, a loading strategy under `loading`, and/or an"
@@ -1061,16 +1049,16 @@ class EnsembleTrainingSchema(BaseTrainingSchema):
 
 
 class TransportTrainingConfigSchema(BaseModel):
-    prediction_mode: Literal["state", "tendency"] = "state"
-    "Endpoint semantics for the transport objective."
-    objective: Literal["edm_diffusion", "flow_matching"] = "edm_diffusion"
-    "Transport objective used to perturb targets and train the model."
+    training_condition: dict = Field(..., examples=[{"distribution": "karras", "sigma_max": 100.0}])
+    """Distribution of the noise level (EDM) or time (flow matching) drawn once per sample and member during
+    training: ``distribution`` names a registered distribution, the other keys are its settings. The objective
+    and the prediction mode come from the model."""
 
 
 class TransportTrainingSchema(BaseTrainingSchema):
     method: TransportTrainingMethodSchema
     "Training method."
-    transport: TransportTrainingConfigSchema = Field(default_factory=TransportTrainingConfigSchema)
+    transport: TransportTrainingConfigSchema
     "Transport training configuration."
 
 

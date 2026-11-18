@@ -462,7 +462,7 @@ class ObsSourceWeightedMSELoss(MSELoss):
         group: ProcessGroup | None,
     ) -> torch.Tensor | list[torch.Tensor]:
         """Element weights of a gridded target, or one tensor per sample of a tabular one."""
-        samples = target.data if target.is_tabular else [target.data]
+        samples = target.values if target.is_tabular else [target.values]
         parts, total = [], None
         for sample in samples:
             var_axis = target.layout.axis("variables", ndim=sample.ndim)

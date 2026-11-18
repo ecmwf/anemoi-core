@@ -398,7 +398,7 @@ def _availability(source: "Source", names: list[str]) -> dict[str, float]:
     sample is one with any finite value.
     """
     positions = [source.name_to_index[name] for name in names if name in source.name_to_index]
-    tensors = source.data if isinstance(source.data, list) else [source.data]
+    tensors = source.values if isinstance(source.values, list) else [source.values]
     n_values = n_finite = n_points = n_finite_points = 0
     samples = []
     for tensor in tensors:

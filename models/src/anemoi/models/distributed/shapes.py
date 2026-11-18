@@ -115,12 +115,16 @@ class BipartiteGraphShardInfo:
         return self.edges is not None
 
 
+def balanced_shard_sizes(size: int, model_comm_group: Optional[ProcessGroup] = None) -> ShardSizes:
+    """Per-rank shard sizes for ``size`` elements split as evenly as possible across ``model_comm_group``."""
+    comm_size = 1 if not model_comm_group else dist.get_world_size(group=model_comm_group)
+    return get_balanced_partition_sizes(size, comm_size)
+
+
 def get_shard_sizes(tensor: Tensor, dim: int, model_comm_group: Optional[ProcessGroup] = None) -> ShardSizes:
     """Get per-rank shard sizes for a tensor split along a specific dimension."""
     validate_dim(tensor, dim)
-
-    comm_size = 1 if not model_comm_group else dist.get_world_size(group=model_comm_group)
-    return get_balanced_partition_sizes(tensor.shape[dim], comm_size)
+    return balanced_shard_sizes(tensor.shape[dim], model_comm_group)
 
 
 def group_world_size(group: Optional[ProcessGroup] = None) -> int:

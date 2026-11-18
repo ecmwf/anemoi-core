@@ -66,7 +66,7 @@ def _tabular_valid_counts(
     """
     layout = target.layout
     counts = []
-    for sample in target.data:
+    for sample in target.values:
         valid = ~torch.isnan(sample) if ignore_nans else torch.ones_like(sample, dtype=torch.bool)
         ensemble = layout.axis("ensemble", ndim=sample.ndim) if layout.has_axis("ensemble") else None
         if ensemble is not None:
@@ -488,7 +488,9 @@ class FunctionalLoss(BaseLoss):
     """Loss which a user can subclass and provide ``calculate_difference``.
 
     ``calculate_difference`` should calculate the difference between the prediction and target.
-    All scaling and weighting is handled by the parent class.
+    All scaling and weighting is handled by the parent class, including ``weights`` passed to the
+    loss (for example the per-sample noise-level weights of EDM diffusion), which multiply the
+    elementwise differences before the scalers.
 
     Example
     -------
@@ -499,6 +501,8 @@ class FunctionalLoss(BaseLoss):
                 return pred - target
     """
 
+    applies_weights: bool = True
+
     @abstractmethod
     def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Calculate difference between prediction and target."""
@@ -508,6 +512,7 @@ class FunctionalLoss(BaseLoss):
         pred: torch.Tensor,
         target: torch.Tensor,
         layout: TensorLayout,
+        weights: torch.Tensor | None = None,
         squash: bool = True,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
@@ -522,6 +527,9 @@ class FunctionalLoss(BaseLoss):
         pred, target = self.mask_nans(pred, target)
 
         out = self.calculate_difference(pred, target)
+
+        if weights is not None:
+            out = out * weights
 
         out = self.scale(
             out,

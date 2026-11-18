@@ -32,7 +32,6 @@ from .spectral import PowerSpectrumLoss
 from .spectral import SpectralAMSELoss
 from .spectral import SpectralCRPSLoss
 from .variable_mapper import LossVariableMapper
-from .weighted_mse import WeightedMSELoss
 
 __all__ = [
     "CRPS",
@@ -59,6 +58,5 @@ __all__ = [
     "SpectralAMSELoss",
     "SpectralCRPSLoss",
     "TimeAggregateLossWrapper",
-    "WeightedMSELoss",
     "get_loss_function",
 ]

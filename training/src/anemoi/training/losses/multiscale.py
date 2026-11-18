@@ -353,12 +353,12 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         # smoothed from the same points. The NaNs are restored in the target for each loss scale.
         # The mask is taken in the grid-sharded layout. This needs the prediction and target to hold
         # the same variables in the same order, which the variable mapper around this wrapper ensures.
-        target_nan_mask = torch.isnan(y.data) if self.ignore_nans else None
+        target_nan_mask = torch.isnan(y.values) if self.ignore_nans else None
         if target_nan_mask is None:
-            pred_data, y_data = y_pred_ens.data, y.data
+            pred_data, y_data = y_pred_ens.values, y.values
         else:
-            pred_data = y_pred_ens.data.masked_fill(target_nan_mask, 0.0)
-            y_data = y.data.masked_fill(target_nan_mask, 0.0)
+            pred_data = y_pred_ens.values.masked_fill(target_nan_mask, 0.0)
+            y_data = y.values.masked_fill(target_nan_mask, 0.0)
         is_model_sharded = grid_shard_sizes is not None
         if is_model_sharded:
             # go to full sequence dimension for smoothing
@@ -437,8 +437,8 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             weighted_losses.append(
                 weight
                 * self.loss(
-                    y_pred_ens.clone(data=y_pred_ens_tmp),
-                    y.clone(data=y_tmp),
+                    y_pred_ens.clone(values=y_pred_ens_tmp),
+                    y.clone(values=y_tmp),
                     squash=squash,
                     scaler_indices=scaler_indices,
                     without_scalers=without_scalers,

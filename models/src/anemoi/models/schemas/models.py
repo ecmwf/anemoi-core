@@ -86,11 +86,12 @@ class SparseProjectorSchema(BaseModel):
 
 
 class TransportConfig(BaseModel):
-    """Configuration of the transport objective, path, conditioning and inference.
+    """Configuration of the transport objective, conditioning and inference.
 
-    The defaults map 1:1 to :class:`EdmSettings` and :class:`NoiseConditioningSettings`
-    in ``anemoi.models.transport.settings`` and are restated here so that importing the
-    schemas does not pull in the model code.
+    The defaults of ``sigma_data`` and of the noise conditioning map 1:1 to :class:`EdmSettings`
+    and :class:`NoiseConditioningSettings` in ``anemoi.models.transport.settings`` and are restated
+    here so that importing the schemas does not pull in the model code. The distribution of the noise
+    level or time drawn during training is a training setting, ``training.transport.training_condition``.
     """
 
     objective: Literal["edm_diffusion", "flow_matching"] = "edm_diffusion"
@@ -101,14 +102,6 @@ class TransportConfig(BaseModel):
     "Number of channels in the noise-level or time embedding."
     noise_cond_dim: PositiveInt = Field(default=16, examples=[16])
     "Size of the conditioning vector passed to conditional layers."
-    sigma_max: PositiveFloat = Field(default=100.0, examples=[100.0])
-    "Maximum EDM diffusion noise level used during training."
-    sigma_min: PositiveFloat = Field(default=0.02, examples=[0.02])
-    "Minimum EDM diffusion noise level used during training."
-    rho: PositiveFloat = Field(default=7.0, examples=[7.0])
-    "Shape parameter for the Karras EDM noise schedule."
-    training_condition: dict = Field(default_factory=dict)
-    "Distribution used to sample one training noise level or time per sample."
     noise_embedder: dict = Field(default_factory=dict)
     "Hydra configuration for embedding the current noise level or time."
     inference_defaults: dict = Field(default_factory=dict)
@@ -407,28 +400,12 @@ class TransportModelSchema(BaseModelSchema):
                     f"Please remove all bounding configurations for transport models."
                 )
                 raise ValueError(msg)
-            if "datasets" in self.bounding:
-                for dataset_name, bounding_list in self.bounding["datasets"].items():
-                    if (bounding_list is not None) and len(bounding_list) > 0:
-                        msg = (
-                            "Transport models do not support bounding layers. "
-                            f"Found {len(bounding_list)} bounding configuration(s) for dataset '{dataset_name}'. "
-                            f"Please remove all bounding configurations for transport models."
-                        )
-                        raise ValueError(msg)
-            elif len(self.bounding) > 0:
-                msg = (
-                    "Transport models do not support bounding layers. "
-                    f"Found {len(self.bounding)} bounding configuration(s). "
-                    f"Please remove all bounding configurations for transport models."
-                )
-                raise ValueError(msg)
         return self
 
 
 class TransportTendModelSchema(TransportModelSchema):
     condition_on_residual: bool = Field(default=False)
-    "Whether to condition the noise injection on the residual connection."
+    "Whether the encoder also reads the residual connection's reference state next to the noisy tendency."
 
 
 class HierarchicalModelSchema(BaseModelSchema):

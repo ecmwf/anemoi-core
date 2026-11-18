@@ -397,7 +397,7 @@ def _corrector_module(n_members_in_target: int = 1) -> tuple[SimpleNamespace, to
 def _gridded(data: torch.Tensor) -> Batch:
     variables = [f"v{i}" for i in range(data.shape[-1])]
     return build_batch(
-        data={"data": data},
+        values={"data": data},
         coordinates={"data": torch.zeros(data.shape[-2], 2)},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": variables},
@@ -406,7 +406,7 @@ def _gridded(data: torch.Tensor) -> Batch:
 
 def _apply(module: SimpleNamespace, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     """apply_correctors on gridded sources, returning the corrected tensor."""
-    return apply_correctors(module.corrector, _gridded(pred), _gridded(target), module.data_indices)["data"].data
+    return apply_correctors(module.corrector, _gridded(pred), _gridded(target), module.data_indices)["data"].values
 
 
 def test_corrector_broadcasts_metadata_across_members() -> None:

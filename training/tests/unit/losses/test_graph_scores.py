@@ -46,7 +46,7 @@ def _view(data: torch.Tensor) -> GriddedSource:
     """Attach the layout and coordinates used by the score fixtures."""
     return GriddedSource(
         name="data",
-        data=data,
+        values=data,
         variables=[f"v{i}" for i in range(data.shape[-1])],
         statistics={},
         coordinates=torch.zeros(data.shape[-2], 2, device=data.device),

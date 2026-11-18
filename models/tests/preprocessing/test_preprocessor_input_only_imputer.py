@@ -34,7 +34,7 @@ def _source(data: torch.Tensor) -> GriddedSource:
         variables=VARIABLES,
         layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
         statistics=STATISTICS,
-        data=data,
+        values=data,
         coordinates=torch.zeros(data.shape[3], 2),
     )
 
@@ -51,7 +51,7 @@ def _nan_input() -> torch.Tensor:
 
 
 def test_statistics_and_constants_in_one_configuration() -> None:
-    out = _imputer()(_source(_nan_input()), in_place=False).data
+    out = _imputer()(_source(_nan_input()), in_place=False).values
     missing = out[:, :, :, :2]
     assert torch.all(missing[..., 0] == 1.0)  # mean of x
     assert torch.all(missing[..., 1] == 20.0)  # maximum of y
@@ -61,12 +61,12 @@ def test_statistics_and_constants_in_one_configuration() -> None:
 
 
 def test_targets_keep_their_missing_values() -> None:
-    out = _imputer()(_source(_nan_input()), in_place=False, skip_imputation=True).data
+    out = _imputer()(_source(_nan_input()), in_place=False, skip_imputation=True).values
     assert torch.isnan(out[:, :, :, :2]).all()
 
 
 def test_multi_step_is_accepted_and_every_step_imputed() -> None:
-    out = _imputer(multi_step=1)(_source(_nan_input()), in_place=False).data
+    out = _imputer(multi_step=1)(_source(_nan_input()), in_place=False).values
     assert not torch.isnan(out[..., :3]).any()
 
 

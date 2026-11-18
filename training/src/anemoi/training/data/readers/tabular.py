@@ -107,7 +107,7 @@ class TabularDataReader(BaseAnemoiReader):
 
         return create_batched_struct(
             data_type=self.data_type,
-            data=data.unsqueeze(0),  # add a leading, size-1 ensemble axis
+            values=data.unsqueeze(0),  # add a leading, size-1 ensemble axis
             variables=self.variables,
             layout=self.layout,
             statistics=self.statistics,

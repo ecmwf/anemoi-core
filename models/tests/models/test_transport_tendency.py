@@ -94,7 +94,7 @@ def _make_model() -> AnemoiTransportTendModelEncProcDec:
 
 def _gridded_batch(data: torch.Tensor, variables: list[str]):
     return build_batch(
-        data={"data": data},
+        values={"data": data},
         coordinates={"data": torch.zeros(data.shape[-2], 2)},
         layouts={"data": GRIDDED_LAYOUT},
         variables={"data": variables},
@@ -118,7 +118,7 @@ def _source(data: torch.Tensor, variables: list[str], statistics: dict = STATE_S
         name="data",
         variables=variables,
         layout=GRIDDED_LAYOUT,
-        data=data,
+        values=data,
         coordinates=torch.zeros(data.shape[GRIDDED_LAYOUT.grid], 2),
         statistics={key: value[positions] for key, value in statistics.items()},
     )
@@ -172,16 +172,16 @@ def test_compute_tendency_normalises_each_step_with_its_tendency_statistics() ->
         return torch.as_tensor(statistics[key][:2], dtype=torch.float32)
 
     mean, stdev = _prognostic(STATE_STATISTICS, "mean"), _prognostic(STATE_STATISTICS, "stdev")
-    physical_state = state.data[..., :2] * stdev + mean
-    physical_reference = reference.data * stdev + mean
+    physical_state = state.values[..., :2] * stdev + mean
+    physical_reference = reference.values * stdev + mean
     for step, lead_time in enumerate(["6h", "12h"]):
         statistics = TENDENCY_STATISTICS[lead_time]
         expected = (physical_state[:, step] - physical_reference[:, 0] - _prognostic(statistics, "mean")) / _prognostic(
             statistics, "stdev"
         )
-        torch.testing.assert_close(tendency.data[:, step, ..., :2], expected)
+        torch.testing.assert_close(tendency.values[:, step, ..., :2], expected)
     # Diagnostics are predicted as states and keep their normalisation.
-    torch.testing.assert_close(tendency.data[..., 2], state.data[..., 2])
+    torch.testing.assert_close(tendency.values[..., 2], state.values[..., 2])
     # The payload is normalised per lead time; the source keeps the state statistics of its variables.
     assert tendency.variables == state.variables
     assert all(np.array_equal(tendency.statistics[key], state.statistics[key]) for key in state.statistics)
@@ -201,8 +201,8 @@ def test_add_tendency_to_state_inverts_compute_tendency() -> None:
     )
     physical = model.add_tendency_to_state("data", reference, tendency, per_step, post_processors)
 
-    torch.testing.assert_close(normalised.data, state.data)
-    torch.testing.assert_close(physical.data, post_processors(state, in_place=False).data)
+    torch.testing.assert_close(normalised.values, state.values)
+    torch.testing.assert_close(physical.values, post_processors(state, in_place=False).values)
     assert normalised.variables == state.variables
 
 
@@ -228,7 +228,7 @@ def test_tendency_roundtrip_skips_imputation() -> None:
         name="data",
         variables=output_names,
         layout=GRIDDED_LAYOUT,
-        data=data,
+        values=data,
         coordinates=torch.zeros(2, 2),
         statistics={key: value[full_positions] for key, value in statistics.items()},
     )
@@ -236,19 +236,19 @@ def test_tendency_roundtrip_skips_imputation() -> None:
         name="data",
         variables=list(data_indices.prognostic),
         layout=GRIDDED_LAYOUT,
-        data=torch.randn(1, 1, 1, 2, len(input_prognostic)),
+        values=torch.randn(1, 1, 1, 2, len(input_prognostic)),
         coordinates=torch.zeros(2, 2),
         statistics={key: value[input_prognostic] for key, value in statistics.items()},
     )
     tendency_statistics = [{key: value * 0.5 for key, value in statistics.items()}]
 
     tendency = model.compute_tendency("data", state, reference, tendency_statistics, pre_processors, post_processors)
-    assert torch.isnan(tendency.data[0, 0, 0, 0, 0]), "Missing values must not be imputed."
+    assert torch.isnan(tendency.values[0, 0, 0, 0, 0]), "Missing values must not be imputed."
 
     roundtrip = model.add_tendency_to_state(
         "data", reference, tendency, tendency_statistics, post_processors, pre_processors=pre_processors
     )
-    torch.testing.assert_close(roundtrip.data, state.data, equal_nan=True)
+    torch.testing.assert_close(roundtrip.values, state.values, equal_nan=True)
 
 
 def test_tendencies_of_imputed_and_missing_states_agree_where_data_exists() -> None:
@@ -276,7 +276,7 @@ def test_tendencies_of_imputed_and_missing_states_agree_where_data_exists() -> N
         name="data",
         variables=output_names,
         layout=GRIDDED_LAYOUT,
-        data=raw,
+        values=raw,
         coordinates=torch.zeros(4, 2),
         statistics={key: value[full_positions] for key, value in IMPUTER_STATISTICS.items()},
     )
@@ -287,7 +287,7 @@ def test_tendencies_of_imputed_and_missing_states_agree_where_data_exists() -> N
         name="data",
         variables=list(data_indices.prognostic),
         layout=GRIDDED_LAYOUT,
-        data=torch.randn(1, 1, 1, 4, len(input_prognostic)),
+        values=torch.randn(1, 1, 1, 4, len(input_prognostic)),
         coordinates=torch.zeros(4, 2),
         statistics={key: value[input_prognostic] for key, value in IMPUTER_STATISTICS.items()},
     )
@@ -298,10 +298,10 @@ def test_tendencies_of_imputed_and_missing_states_agree_where_data_exists() -> N
 
     imputed = model.compute_tendency(
         "data", imputed_state, reference, tendency_statistics, pre_processors, post_processors
-    ).data
+    ).values
     with_missing = model.compute_tendency(
         "data", missing_state, reference, tendency_statistics, pre_processors, post_processors
-    ).data
+    ).values
 
     assert not torch.isnan(imputed).any()
     torch.testing.assert_close(torch.isnan(with_missing), missing)
@@ -316,7 +316,7 @@ def test_reference_state_is_latest_prognostic_input_with_its_statistics() -> Non
     reference = model.reference_state(Batch({"data": inputs}), grid_shard_sizes=None, model_comm_group=None)["data"]
 
     assert reference.variables == ["prog0", "prog1"]
-    torch.testing.assert_close(reference.data, inputs.data[:, -1:, ..., :2])
+    torch.testing.assert_close(reference.values, inputs.values[:, -1:, ..., :2])
     assert all(np.array_equal(reference.statistics[key], STATE_STATISTICS[key][:2]) for key in STATE_STATISTICS)
 
 
@@ -327,7 +327,7 @@ def test_apply_reference_state_truncation_without_shards() -> None:
     model.residual = torch.nn.ModuleDict({"data": DummyResidual()})
 
     x = {"data": torch.arange(1 * 1 * 1 * 2 * 4, dtype=torch.float32).reshape(1, 1, 1, 2, 4)}
-    out = model.apply_reference_state_truncation(x, grid_shard_sizes=None, model_comm_group=None)
+    out = model.apply_residual_connections(x, grid_shard_sizes=None, model_comm_group=None)
 
     indices = model.data_indices["data"].model.input.prognostic
     expected = x["data"][..., indices]
@@ -341,12 +341,12 @@ def test_sampled_to_physical_uses_latest_reference_and_per_step_statistics() -> 
     ref = torch.zeros((1, 2, 1, 2, 2), dtype=torch.float32)
     ref[:, 0] = 1.0
     ref[:, 1] = 2.0
-    model.apply_reference_state_truncation = lambda *_args, **_kwargs: {"data": ref}
+    model.apply_residual_connections = lambda *_args, **_kwargs: {"data": ref}
 
     captured = []
 
     def _spy_add_tendency(dataset_name, reference, tendency, tendency_statistics, *_args, **_kwargs):
-        captured.append((dataset_name, reference.data.clone(), tendency_statistics))
+        captured.append((dataset_name, reference.values.clone(), tendency_statistics))
         return tendency
 
     model.add_tendency_to_state = _spy_add_tendency
@@ -412,8 +412,8 @@ def test_processors_skip_output_constraints() -> None:
 
     assert post_processors.has_state_only_processors
     assert not _normalizer_processors()[1].has_state_only_processors
-    clipped = post_processors(state, in_place=False).data[..., 0]
-    unclipped = post_processors(state, in_place=False, skip_output_constraints=True).data[..., 0]
+    clipped = post_processors(state, in_place=False).values[..., 0]
+    unclipped = post_processors(state, in_place=False, skip_output_constraints=True).values[..., 0]
     torch.testing.assert_close(clipped, torch.zeros_like(clipped))
     torch.testing.assert_close(unclipped, torch.full_like(unclipped, -3.0 * 2.0 + 1.0))
 
@@ -430,11 +430,11 @@ def test_add_tendency_to_state_does_not_constrain_the_tendency() -> None:
     )
 
     # Clipping the tendency at 0 would give 5 and 1. The state is rebuilt unconstrained ...
-    torch.testing.assert_close(physical.data[0, 0, 0, :, 0], torch.tensor([3.0, -2.0]))
-    torch.testing.assert_close(normalised.data[0, 0, 0, :, 0], torch.tensor([1.0, -1.5]))
+    torch.testing.assert_close(physical.values[0, 0, 0, :, 0], torch.tensor([3.0, -2.0]))
+    torch.testing.assert_close(normalised.values[0, 0, 0, :, 0], torch.tensor([1.0, -1.5]))
     # ... and the constraint applies when the state is post-processed, like a state prediction.
     torch.testing.assert_close(
-        post_processors(normalised, in_place=False).data[0, 0, 0, :, 0], torch.tensor([3.0, 0.0])
+        post_processors(normalised, in_place=False).values[0, 0, 0, :, 0], torch.tensor([3.0, 0.0])
     )
 
 
@@ -453,14 +453,14 @@ def test_compute_tendency_does_not_constrain_target_states() -> None:
         "data", reference, tendency, per_step, post_processors, pre_processors=pre_processors
     )
 
-    torch.testing.assert_close(tendency.data[0, 0, 0, :, 0], torch.tensor([(-2.0 - 0.1) / 0.5, (-3.0 - 0.1) / 0.5]))
-    torch.testing.assert_close(rebuilt.data, state.data)
+    torch.testing.assert_close(tendency.values[0, 0, 0, :, 0], torch.tensor([(-2.0 - 0.1) / 0.5, (-3.0 - 0.1) / 0.5]))
+    torch.testing.assert_close(rebuilt.values, state.values)
 
 
 def _bounded_sampling_model() -> tuple[AnemoiTransportTendModelEncProcDec, Batch, Batch]:
     model = _tendency_model(n_step_output=1)
     reference, tendency = _bounded_case()
-    model.apply_reference_state_truncation = lambda *_args, **_kwargs: {"data": reference.data}
+    model.apply_residual_connections = lambda *_args, **_kwargs: {"data": reference.values}
     x = Batch({"data": _source(torch.zeros(1, 1, 1, 2, 3), ["prog0", "prog1", "force"])})
     return model, x, Batch({"data": tendency})
 
@@ -477,7 +477,7 @@ def test_sampled_to_physical_constrains_states_not_tendencies() -> None:
         pre_processors=torch.nn.ModuleDict({"data": pre_processors}),
     )
 
-    torch.testing.assert_close(out["data"].data[0, 0, 0, :, 0], torch.tensor([3.0, 0.0]))
+    torch.testing.assert_close(out["data"].values[0, 0, 0, :, 0], torch.tensor([3.0, 0.0]))
 
 
 def test_sampled_to_physical_needs_pre_processors_for_output_constraints() -> None:
@@ -510,12 +510,12 @@ def test_processors_skip_state_only_processors_on_tendencies() -> None:
     pre_processors, post_processors = _remapped_processors(model)
     tendency = _source(torch.full((1, 1, 1, 1, 3), -3.0), ["prog0", "prog1", "diag"])
 
-    physical = post_processors(tendency, in_place=False, tendency=True).data[0, 0, 0, 0]
+    physical = post_processors(tendency, in_place=False, tendency=True).values[0, 0, 0, 0]
     # Only denormalised: no ReLU on prog0, no squaring of prog1 and diag.
     torch.testing.assert_close(physical, torch.tensor([-3.0 * 2.0 + 1.0, -3.0 * 4.0 + 2.0, -3.0 * 0.5 + 4.0]))
     # sqrt would reject the negative values.
-    normalised = pre_processors(tendency.clone(data=physical.reshape(1, 1, 1, 1, 3)), in_place=False, tendency=True)
-    torch.testing.assert_close(normalised.data, tendency.data)
+    normalised = pre_processors(tendency.clone(values=physical.reshape(1, 1, 1, 1, 3)), in_place=False, tendency=True)
+    torch.testing.assert_close(normalised.values, tendency.values)
 
 
 def test_tendency_conversion_skips_remapping() -> None:
@@ -530,8 +530,8 @@ def test_tendency_conversion_skips_remapping() -> None:
 
     tendency = model.compute_tendency("data", state, reference, per_step, pre_processors, post_processors)
 
-    physical_state = post_processors(state, in_place=False, skip_output_constraints=True).data[..., :2]
-    physical_reference = post_processors(reference, in_place=False, skip_output_constraints=True).data
+    physical_state = post_processors(state, in_place=False, skip_output_constraints=True).values[..., :2]
+    physical_reference = post_processors(reference, in_place=False, skip_output_constraints=True).values
     difference = physical_state - physical_reference
     assert (difference[..., 1] < 0).any(), "the test needs negative tendencies of the remapped variable"
     for step, lead_time in enumerate(["6h", "12h"]):
@@ -540,16 +540,18 @@ def test_tendency_conversion_skips_remapping() -> None:
             for key, value in TENDENCY_STATISTICS[lead_time].items()
         }
         expected = (difference[:, step] - statistics["mean"]) / statistics["stdev"]
-        torch.testing.assert_close(tendency.data[:, step, ..., :2], expected)
+        torch.testing.assert_close(tendency.values[:, step, ..., :2], expected)
     # The diagnostic is predicted as a state and keeps its normalised, remapped value.
-    torch.testing.assert_close(tendency.data[..., 2], state.data[..., 2], rtol=0, atol=0)
+    torch.testing.assert_close(tendency.values[..., 2], state.values[..., 2], rtol=0, atol=0)
 
     normalised = model.add_tendency_to_state(
         "data", reference, tendency, per_step, post_processors, pre_processors=pre_processors
     )
     physical = model.add_tendency_to_state("data", reference, tendency, per_step, post_processors)
-    torch.testing.assert_close(normalised.data, state.data)
-    torch.testing.assert_close(physical.data, post_processors(state, in_place=False, skip_output_constraints=True).data)
+    torch.testing.assert_close(normalised.values, state.values)
+    torch.testing.assert_close(
+        physical.values, post_processors(state, in_place=False, skip_output_constraints=True).values
+    )
 
 
 def test_states_rebuilt_from_tendencies_are_clipped_to_remapping_domains() -> None:
@@ -571,11 +573,11 @@ def test_states_rebuilt_from_tendencies_are_clipped_to_remapping_domains() -> No
         "data", reference, tendency, per_step, post_processors, pre_processors=pre_processors
     )
 
-    torch.testing.assert_close(physical.data[0, 0, 0, :, 1], torch.tensor([8.0, -2.0]))
-    torch.testing.assert_close(normalised.data[0, 0, 0, :, 1], torch.tensor([1.5**0.5, 0.0]))
+    torch.testing.assert_close(physical.values[0, 0, 0, :, 1], torch.tensor([8.0, -2.0]))
+    torch.testing.assert_close(normalised.values[0, 0, 0, :, 1], torch.tensor([1.5**0.5, 0.0]))
 
     # Inference post-processes the clipped state, as a state predicted in remapped space would be.
-    model.apply_reference_state_truncation = lambda *_args, **_kwargs: {"data": reference.data}
+    model.apply_residual_connections = lambda *_args, **_kwargs: {"data": reference.values}
     x = Batch({"data": _source(torch.zeros(1, 1, 1, 2, 3), ["prog0", "prog1", "force"])})
     out = model._sampled_to_physical(
         Batch({"data": tendency}),
@@ -584,4 +586,4 @@ def test_states_rebuilt_from_tendencies_are_clipped_to_remapping_domains() -> No
         statistics_tendencies={"data": ONE_STEP_TENDENCY_STATISTICS},
         pre_processors=torch.nn.ModuleDict({"data": pre_processors}),
     )
-    torch.testing.assert_close(out["data"].data[0, 0, 0, :, 1], torch.tensor([8.0, 2.0]))
+    torch.testing.assert_close(out["data"].values[0, 0, 0, :, 1], torch.tensor([8.0, 2.0]))

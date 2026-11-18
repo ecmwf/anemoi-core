@@ -17,9 +17,6 @@ import torch
 
 from anemoi.models.transport.paths import karras_sigma_from_unit_time
 
-# Small tolerance used when a sigma schedule provides an explicit final noise value.
-DEFAULT_FINAL_SIGMA_EPS = 1e-10
-
 
 class SamplingSchedule(ABC):
     """Base class for inference schedules passed to transport samplers."""
@@ -92,24 +89,13 @@ class SigmaSchedule(SamplingSchedule):
 
     def _validate_schedule(self, values: torch.Tensor) -> None:
         super()._validate_schedule(values)
-        if values.numel() == self.num_steps + 1:
-            last = values[-1].item()
-            if last < 0 or last > DEFAULT_FINAL_SIGMA_EPS:
-                raise ValueError("Sigma schedule with an explicit final value must end at zero.")
-
-    def _finalize_schedule(self, values: torch.Tensor) -> torch.Tensor:
-        if values.numel() == self.num_steps + 1:
-            if values[-1].item() != 0.0:
-                values = values.clone()
-                values[-1] = 0.0
-            return values
-
         if values.numel() != self.num_steps:
             raise ValueError(
-                f"Sigma schedule must contain {self.num_steps} values before the final zero, "
-                f"or {self.num_steps + 1} including it; got {values.numel()}.",
+                f"Sigma schedule must contain {self.num_steps} values before the final zero; got {values.numel()}.",
             )
 
+    def _finalize_schedule(self, values: torch.Tensor) -> torch.Tensor:
+        """Append the final zero noise level, where the sampler returns its clean estimate."""
         return torch.cat((values, values.new_zeros(1)))
 
 
@@ -164,16 +150,6 @@ class LinearSigmaSchedule(SigmaSchedule):
 class CosineSigmaSchedule(SigmaSchedule):
     """Cosine EDM sigma schedule."""
 
-    def __init__(
-        self,
-        sigma_max: float,
-        sigma_min: float,
-        num_steps: int,
-        s: float = 0.008,
-    ) -> None:
-        super().__init__(sigma_max=sigma_max, sigma_min=sigma_min, num_steps=num_steps)
-        self.s = float(s)
-
     def _build_schedule(
         self,
         device: torch.device = None,
@@ -183,7 +159,6 @@ class CosineSigmaSchedule(SigmaSchedule):
             torch.linspace(0.0, 1.0, self.num_steps, device=device, dtype=dtype_compute),
             sigma_max=self.sigma_max,
             sigma_min=self.sigma_min,
-            s=self.s,
         )
 
 
@@ -322,16 +297,11 @@ class ExponentialSigmaTrainingDistribution(SigmaTrainingDistribution):
 class CosineSigmaTrainingDistribution(SigmaTrainingDistribution):
     """Continuous cosine sigma distribution."""
 
-    def __init__(self, sigma_max: float, sigma_min: float, s: float = 0.008) -> None:
-        super().__init__(sigma_max=sigma_max, sigma_min=sigma_min)
-        self.s = float(s)
-
     def _sigma_from_unit_time(self, unit_time: torch.Tensor) -> torch.Tensor:
         return cosine_sigma_from_unit_time(
             unit_time,
             sigma_max=self.sigma_max,
             sigma_min=self.sigma_min,
-            s=self.s,
         )
 
 
@@ -366,16 +336,16 @@ def cosine_sigma_from_unit_time(
     *,
     sigma_max: float,
     sigma_min: float,
-    s: float = 0.008,
 ) -> torch.Tensor:
-    """Map unit time to the cosine EDM sigma path."""
-    theta_max = math.atan(sigma_max)
-    theta_min = math.atan(sigma_min)
-    t_max = (2 * theta_max / math.pi) * (1 + s) - s
-    t_min = (2 * theta_min / math.pi) * (1 + s) - s
-    t = t_max + unit_time * (t_min - t_max)
-    alpha_bar = torch.cos((t + s) / (1 + s) * torch.pi / 2) ** 2
-    return torch.sqrt((1 - alpha_bar) / alpha_bar)
+    """Map unit time to the cosine EDM sigma path.
+
+    The cosine noise schedule of Nichol and Dhariwal (2021), written as a noise level: sigma = tan(angle), with
+    the angle running linearly from atan(sigma_max) to atan(sigma_min). Its offset ``s`` cancels out once the
+    path is pinned to sigma_max and sigma_min.
+    """
+    angle_max = math.atan(sigma_max)
+    angle_min = math.atan(sigma_min)
+    return torch.tan(angle_max + unit_time * (angle_min - angle_max))
 
 
 def _validate_condition_shape(shape: dict[str, tuple[int, ...]]) -> tuple[int, int]:

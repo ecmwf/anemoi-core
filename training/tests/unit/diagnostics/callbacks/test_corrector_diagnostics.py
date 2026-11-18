@@ -71,7 +71,7 @@ def _batch() -> object:
     data = torch.randn(1, 4, 1, GRID, len(NAME_TO_INDEX))
     data[:, 3, :, : GRID // 2, NAME_TO_INDEX["hirs_1"]] = torch.nan  # half the points miss hirs_1 in the forecast
     return build_batch(
-        data={"data": data},
+        values={"data": data},
         coordinates={"data": torch.zeros(GRID, 2)},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": list(NAME_TO_INDEX)},
@@ -128,7 +128,7 @@ def test_availability_of_tabular_targets() -> None:
         variables=list(NAME_TO_INDEX),
         layout=TensorLayout(ensemble=0, grid=1, variables=2),
         statistics={},
-        data=[
+        values=[
             torch.tensor([[[1.0, torch.nan, 0.0, 0.0], [torch.nan, torch.nan, 0.0, 0.0]]]),
             torch.full((1, 1, 4), torch.nan),
         ],

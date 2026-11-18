@@ -48,7 +48,7 @@ def _batch(num_times: int) -> Batch:
     data = torch.randn(1, num_times, 1, GRID, len(NAME_TO_INDEX), generator=generator)
     data[0, 2:, 0, :2, NAME_TO_INDEX["a"]] = torch.nan  # missing observations after the inputs
     return build_batch(
-        data={"data": data},
+        values={"data": data},
         coordinates={"data": torch.zeros(GRID, 2)},
         layouts={"data": LAYOUT},
         variables={"data": list(NAME_TO_INDEX)},
@@ -87,10 +87,10 @@ def _module(task: BaseTask) -> SingleTraining:
 
     def fake_compute_loss_metrics(y_pred: Batch, y: Batch, **kwargs) -> tuple:
         module.loss_calls.append(kwargs)
-        target = y["data"].data[..., _indices().data.output.prognostic]
+        target = y["data"].values[..., _indices().data.output.prognostic]
         # mask before the difference: a NaN target would otherwise make the gradient NaN
-        valid = ~torch.isnan(target).expand_as(y_pred["data"].data)
-        loss = (y_pred["data"].data - target.nan_to_num())[valid].pow(2).mean()
+        valid = ~torch.isnan(target).expand_as(y_pred["data"].values)
+        loss = (y_pred["data"].values - target.nan_to_num())[valid].pow(2).mean()
         return loss, {}, y_pred
 
     advance = task.advance_input
@@ -166,7 +166,7 @@ def test_da_cycles_advance_with_the_observations_and_forecasts_without() -> None
     assert ["observed" in kwargs for kwargs in module.advance_kwargs] == [True, True, False]
     observed = module.advance_kwargs[0]["observed"]
     # the observations keep their missing values (no imputation)
-    assert torch.isnan(observed["data"].data[0, 0, 0, :2, NAME_TO_INDEX["a"]]).all()
+    assert torch.isnan(observed["data"].values[0, 0, 0, :2, NAME_TO_INDEX["a"]]).all()
 
 
 def test_flow_dependent_skip_reaches_the_model() -> None:
@@ -178,8 +178,8 @@ def test_flow_dependent_skip_reaches_the_model() -> None:
     # zero base for the first cycle, background after each blend, none after a forecast step
     assert has_skip == [True, True, True, False]
     assert torch.equal(
-        module.forward_kwargs[0]["skip_input"]["data"].data,
-        torch.zeros_like(module.forward_kwargs[0]["skip_input"]["data"].data),
+        module.forward_kwargs[0]["skip_input"]["data"].values,
+        torch.zeros_like(module.forward_kwargs[0]["skip_input"]["data"].values),
     )
 
 
@@ -268,10 +268,10 @@ def test_ensemble_da_tiles_members_and_conditions_on_the_continuous_step() -> No
     assert [call["fcstep"] for call in module.model.calls] == [0, 1, 2, 3]
     assert len(output.predictions) == 4
     # every model call sees the three members, and so does the zero residual base of the first cycle
-    first_skip = module.model.calls[0]["skip_input"]["data"].data
+    first_skip = module.model.calls[0]["skip_input"]["data"].values
     assert first_skip.shape[2] == 3
     assert torch.equal(first_skip, torch.zeros_like(first_skip))
-    assert all(p["data"].data.shape[2] == 3 for p in output.predictions)
+    assert all(p["data"].values.shape[2] == 3 for p in output.predictions)
 
 
 # -- correctors ---------------------------------------------------------------------------------
@@ -296,7 +296,7 @@ def test_corrector_changes_the_loss_but_not_the_state() -> None:
     assert not torch.allclose(corrected_output.loss, plain_output.loss)
     # the predictions returned and advanced are the raw ones: identical to the run without corrector
     for raw, plain_pred in zip(corrected_output.predictions, plain_output.predictions, strict=True):
-        torch.testing.assert_close(raw["data"].data, plain_pred["data"].data)
+        torch.testing.assert_close(raw["data"].values, plain_pred["data"].values)
     # and the corrector trains
     (grad,) = torch.autograd.grad(corrected_output.loss, corrector.correctors["obs"].out.bias)
     assert grad.abs().sum() > 0

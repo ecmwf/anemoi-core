@@ -568,8 +568,8 @@ def apply_correctors(
             if corrector.corrector_type == "processor":
                 msg = f"Processor correctors need a gridded dataset; '{dataset_name}' is tabular. Use type 'mlp'."
                 raise ValueError(msg)
-            data = [correct(p, t) for p, t in zip(prediction.data, target.data, strict=True)]
+            data = [correct(p, t) for p, t in zip(prediction.values, target.values, strict=True)]
         else:
-            data = correct(prediction.data, target.data, prediction.shard_sizes)
-        corrected = corrected.replace(dataset_name, prediction.clone(data=data))
+            data = correct(prediction.values, target.values, prediction.shard_sizes)
+        corrected = corrected.replace(dataset_name, prediction.clone(values=data))
     return corrected

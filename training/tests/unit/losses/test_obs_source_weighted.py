@@ -42,7 +42,7 @@ def _indices() -> IndexCollection:
 def _gridded(data: torch.Tensor, variables: list[str]) -> GriddedSource:
     return GriddedSource(
         name="data",
-        data=data,
+        values=data,
         variables=list(variables),
         statistics={},
         coordinates=torch.zeros(data.shape[3], 2),
@@ -134,7 +134,7 @@ def test_share_preservation_keeps_variable_total_and_shifts_mix() -> None:
     pos = di.model.output.name_to_position["u_850"]
     # Uniform error: the renormalised weights average to one, so the variable total is unchanged.
     assert weighted[pos].item() == pytest.approx(plain[pos].item())
-    weights = loss.element_weights(target.data)[0, 0, 0, :, loss.weighted_names.index("u_850")]
+    weights = loss.element_weights(target.values)[0, 0, 0, :, loss.weighted_names.index("u_850")]
     mean = (3.0 + 1.0 + 0.25 + 0.25) / 4
     torch.testing.assert_close(weights, torch.tensor([3.0, 1.0, 0.25, 0.25]) / mean)
 
@@ -267,7 +267,7 @@ def test_column_scope_reads_any_level_of_the_column() -> None:
 def _tabular(samples: list[torch.Tensor], variables: list[str]) -> TabularSource:
     return TabularSource(
         name="obs",
-        data=samples,
+        values=samples,
         variables=list(variables),
         statistics={},
         coordinates=[torch.zeros(sample.shape[0], 2) for sample in samples],
@@ -321,7 +321,7 @@ def _rpt_target(di: IndexCollection, codes: list[float]) -> GriddedSource:
 def test_reportype_codes_override_pattern_and_fall_back() -> None:
     di = _rpt_indices()
     loss = ObsSourceWeightedMSELoss(data_indices=di, reportype_variable="sonde_reportype", normalizer=_normalizer())
-    masks = loss.source_masks(_rpt_target(di, [3.0, 3.0, 1.5, NAN]).data)
+    masks = loss.source_masks(_rpt_target(di, [3.0, 3.0, 1.5, NAN]).values)
     col = loss.weighted_names.index("u_850")
     # The wind-only sonde (cell 1) stays a sonde; cell 3 has no code and falls back to the pattern.
     assert masks["sonde"][0, 0, 0, :, col].tolist() == [True, True, False, False]
@@ -375,7 +375,7 @@ def test_reportype_target_in_data_output_layout() -> None:
     expected = loss(pred, full, squash=False, target_layout="data_full")
     got = loss(pred, data_output, squash=False, target_layout="data_output")
     torch.testing.assert_close(got, expected)
-    masks = loss.source_masks(data_output.data, "data_output")
+    masks = loss.source_masks(data_output.values, "data_output")
     assert masks["sonde"][0, 0, 0, :, loss.weighted_names.index("u_850")].tolist() == [True, True, False, False]
 
 

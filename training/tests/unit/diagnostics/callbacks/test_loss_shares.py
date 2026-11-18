@@ -90,7 +90,7 @@ def _gridded_pair() -> tuple[Source, Source]:
     generator = torch.Generator().manual_seed(0)
     pred = torch.randn(2, 1, 1, 7, len(VARIABLES), generator=generator)
     batch = build_batch(
-        data={"d": pred},
+        values={"d": pred},
         coordinates={"d": torch.zeros(7, 2)},
         layouts={"d": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"d": VARIABLES},
@@ -107,7 +107,7 @@ def _tabular_pair() -> tuple[Source, Source]:
             variables=VARIABLES,
             layout=TensorLayout(ensemble=0, grid=1, variables=2),
             statistics={},
-            data=data,
+            values=data,
             coordinates=[torch.zeros(d.shape[1], 2) for d in data],
             timedeltas=[torch.zeros(d.shape[1]) for d in data],
             boundaries=[(slice(0, d.shape[1]),) for d in data],

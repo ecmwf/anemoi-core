@@ -131,7 +131,7 @@ def _make_mock_reader(mocker: MockFixture, grid: int) -> MockFixture:
     # Gridded samples carry no point times, so measuring them from the reference changes nothing.
     reader.measure_from_reference.side_effect = lambda sample, *_args: sample
     reader.get_sample.return_value = GriddedSample(
-        data=torch.zeros(2, 1, grid, 2),
+        values=torch.zeros(2, 1, grid, 2),
         variables=["x", "y"],
         layout=TensorLayout(time=0, ensemble=1, grid=2, variables=3),
         coordinates=torch.stack([torch.linspace(-1.0, 1.0, grid), torch.linspace(0.0, 6.0, grid)], dim=-1),
@@ -168,7 +168,7 @@ def test_multidataset_collates_to_batch(mocker: MockFixture) -> None:
     assert isinstance(batch, Batch)
     assert set(batch.dataset_names) == {"a", "b"}
     # Data is stacked along the batch dim.
-    assert batch["a"].data.shape[0] == 2
+    assert batch["a"].values.shape[0] == 2
     # Gridded coords are static -> shared by reference, no batch dim.
     assert batch["a"].coordinates.shape == (6, 2)
     assert batch.static_coord_datasets == frozenset({"a", "b"})

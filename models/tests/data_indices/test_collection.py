@@ -215,10 +215,6 @@ def test_data_indices_cross_space_positions(data_indices) -> None:
     assert data_indices.data_output_positions_in_data_full == [1, 2, 3, 5, 6]
     assert data_indices.model_output_positions_in_data_full == [1, 2, 3, 5, 6]
     assert data_indices.model_output_positions_in_data_output == [0, 1, 2, 3, 4]
-    assert data_indices.model_output_in_data_output_is_identity is True
-    assert data_indices.model_output_in_data_output_is_contiguous is True
-    assert data_indices.model_output_in_data_output_contiguous_start == 0
-    assert data_indices.model_output_in_data_output_contiguous_length == 5
 
 
 def test_data_indices_cross_space_positions_with_target(
@@ -233,10 +229,6 @@ def test_data_indices_cross_space_positions_with_target(
     assert data_indices_with_target.data_output_positions_in_data_full == [0, 1, 2]
     assert data_indices_with_target.model_output_positions_in_data_full == [2]
     assert data_indices_with_target.model_output_positions_in_data_output == [2]
-    assert data_indices_with_target.model_output_in_data_output_is_identity is False
-    assert data_indices_with_target.model_output_in_data_output_is_contiguous is True
-    assert data_indices_with_target.model_output_in_data_output_contiguous_start == 2
-    assert data_indices_with_target.model_output_in_data_output_contiguous_length == 1
 
 
 # ── compare_variables: fine-tuning into a model with FEWER variables (issue #838) ──
@@ -314,7 +306,6 @@ def test_data_indices_with_corrector(data_indices_with_corrector) -> None:
     assert len(di.model.input) == 6
     # output-side cross-space maps are unaffected by input-only correctors
     assert di.model_output_positions_in_data_output == list(range(len(di.model.output.ordered_names)))
-    assert di.model_output_in_data_output_is_identity is True
 
 
 @pytest.mark.parametrize("category", ["forcing", "diagnostic", "target"])
