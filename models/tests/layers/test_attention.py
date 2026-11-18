@@ -381,11 +381,11 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels, de
     print(f"Peak memory allocated during global attention: {peak_alloc_memory_after_global_mb:.2f} MB")
 
     # With a small window on a 16-token sequence, outputs should differ
-    assert not torch.allclose(
-        output, output_global, atol=1e-5
-    ), "Sliding window output should differ from global attention output"
+    assert not torch.allclose(output, output_global, atol=1e-5), (
+        "Sliding window output should differ from global attention output"
+    )
 
     # Memory usage using sliding window should not be greater then using global attention
-    assert (
-        peak_alloc_memory_after_sliding_window_mb <= peak_alloc_memory_after_global_mb
-    ), "Sliding window attention should not use more memory than global attention"
+    assert peak_alloc_memory_after_sliding_window_mb <= peak_alloc_memory_after_global_mb, (
+        "Sliding window attention should not use more memory than global attention"
+    )

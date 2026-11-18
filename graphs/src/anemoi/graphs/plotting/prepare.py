@@ -255,9 +255,9 @@ def get_node_attribute_dims(graph: HeteroData) -> dict[str, int]:
             elif attr not in attr_dims:
                 attr_dims[attr] = nodes[attr].shape[1]
             else:
-                assert (
-                    nodes[attr].shape[1] == attr_dims[attr]
-                ), f"Attribute {attr} has different dimensions in different nodes."
+                assert nodes[attr].shape[1] == attr_dims[attr], (
+                    f"Attribute {attr} has different dimensions in different nodes."
+                )
     return attr_dims
 
 
@@ -282,7 +282,7 @@ def get_edge_attribute_dims(graph: HeteroData) -> dict[str, int]:
             elif attr not in attr_dims:
                 attr_dims[attr] = edges[attr].shape[1]
             else:
-                assert (
-                    edges[attr].shape[1] == attr_dims[attr]
-                ), f"Attribute {attr} has different dimensions in different edges."
+                assert edges[attr].shape[1] == attr_dims[attr], (
+                    f"Attribute {attr} has different dimensions in different edges."
+                )
     return attr_dims

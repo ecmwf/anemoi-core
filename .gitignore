@@ -43,6 +43,7 @@ cover/
 # Documentation
 docs/_build/
 docs/_api/
+docs/using/trees/
 /site
 *.mo
 *.pot
@@ -151,3 +152,10 @@ trace.txt
 *.prof
 prof/
 *.gz
+
+# Azure tests
+__blobstorage__/
+
+# anemoi-datasets docs/build_trees.py inputs, tracked despite *.json
+!docs/using/code/*.json
+!docs/using/yaml/*.json
