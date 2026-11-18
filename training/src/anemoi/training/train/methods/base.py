@@ -502,7 +502,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # holds a reference to this dict, so a replacement (a migration may return a
         # new object) is written back in place rather than rebound.
         trainer = getattr(self, "_trainer", None)
-        corrected = apply_checkpoint_corrections(checkpoint, self, self.config)
+        corrected = apply_checkpoint_corrections(checkpoint, self)
         if corrected is not checkpoint:
             checkpoint.clear()
             checkpoint.update(corrected)

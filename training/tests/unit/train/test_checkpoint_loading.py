@@ -83,30 +83,13 @@ class DummyProcessor(torch.nn.Module):
         return x
 
 
-class LegacyStepwiseProcessors(torch.nn.Module):
-    """State-dict layout of the removed ``StepwiseProcessors``, as stored in older checkpoints."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._processors = torch.nn.ModuleDict()
-
-
 class DummyModel(torch.nn.Module):
-    def __init__(self, lead_times: list[str], offset: float) -> None:
+    def __init__(self, offset: float) -> None:
         super().__init__()
         self.pre_processors = torch.nn.ModuleDict({"data": Processors([["dummy", DummyProcessor(offset)]])})
         self.post_processors = torch.nn.ModuleDict(
             {"data": Processors([["dummy", DummyProcessor(offset + 100)]], inverse=True)},
         )
-
-        pre_tend = LegacyStepwiseProcessors()
-        post_tend = LegacyStepwiseProcessors()
-        for idx, lead_time in enumerate(lead_times):
-            pre_tend._processors[lead_time] = Processors([["dummy", DummyProcessor(offset + idx)]])
-            post_tend._processors[lead_time] = Processors([["dummy", DummyProcessor(offset + idx + 50)]], inverse=True)
-
-        self.pre_processors_tendencies = torch.nn.ModuleDict({"data": pre_tend})
-        self.post_processors_tendencies = torch.nn.ModuleDict({"data": post_tend})
 
 
 class DummyTrainingModule(BaseTrainingModule):
@@ -117,115 +100,47 @@ class DummyTrainingModule(BaseTrainingModule):
         raise NotImplementedError
 
 
-def _make_update_cfg(states: bool, tendencies: bool) -> SimpleNamespace:
-    return SimpleNamespace(states=states, tendencies=tendencies)
-
-
-def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tendencies: bool) -> DummyTrainingModule:
+def _make_dummy_module(model: torch.nn.Module) -> DummyTrainingModule:
     module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
     module.task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     module.model = model
     module._device = torch.device("cpu")
     module.config = SimpleNamespace(
-        training=SimpleNamespace(
-            seed=None,
-            update_ds_stats_on_ckpt_load=_make_update_cfg(update_states, update_tendencies),
-        ),
+        training=SimpleNamespace(seed=None),
     )
     module._set_hparams({"metadata": _run_metadata()})
     return module
 
 
-def test_on_load_checkpoint_rebuilds_tendency_processors_for_fewer_steps() -> None:
-    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
-    new_model = DummyModel(["6h", "12h"], offset=1.0)
-
-    checkpoint = {
-        "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
-        "hyper_parameters": _resume_hyper_parameters(),
-    }
-
-    module = _make_dummy_module(new_model, update_states=False, update_tendencies=True)
-
-    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
-
-    state_dict = checkpoint["state_dict"]
-    assert not any("18h" in key for key in state_dict if key.startswith("model.pre_processors_tendencies.")), (
-        "Extra tendency processors from the checkpoint should be dropped."
-    )
-
-    new_state = new_model.state_dict()
-    old_state = old_model.state_dict()
-    for key, value in new_state.items():
-        full_key = f"model.{key}"
-        if full_key.startswith(("model.pre_processors_tendencies.", "model.post_processors_tendencies.")):
-            assert torch.equal(state_dict[full_key], value)
-        elif full_key.startswith(("model.pre_processors.", "model.post_processors.")):
-            assert torch.equal(state_dict[full_key], old_state[key])
-
-
-def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
-    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
-    new_model = DummyModel(["6h", "12h"], offset=1.0)
-
-    checkpoint = {
-        "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
-        "hyper_parameters": _resume_hyper_parameters(),
-    }
-
-    module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
-
-    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
-
-    state_dict = checkpoint["state_dict"]
-    assert any("18h" in key for key in state_dict if key.startswith("model.pre_processors_tendencies.")), (
-        "Checkpoint tendency processors should be preserved when rebuilding is disabled."
-    )
-
-    old_state = old_model.state_dict()
-    for key, value in old_state.items():
-        full_key = f"model.{key}"
-        if full_key.startswith(
-            (
-                "model.pre_processors.",
-                "model.post_processors.",
-                "model.pre_processors_tendencies.",
-                "model.post_processors_tendencies.",
-            ),
-        ):
-            assert torch.equal(state_dict[full_key], value)
-
-
-def test_on_load_checkpoint_applies_corrections_regardless_of_weights_initialized() -> None:
+def test_on_load_checkpoint_applies_corrections_regardless_of_weights_initialized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The Lightning hook corrects the dict it is handed, whatever ``weights_initialized`` says.
 
     A resume is loaded once, by ``Trainer.fit(ckpt_path=)``, which re-reads the file and
-    hands this hook the fresh dict it is about to load. Skipping the corrections on a flag
-    set by some earlier load applied them to a copy Lightning discarded, so a resume of a
-    tendency model silently reloaded the checkpoint's stale statistics. The flag must not
-    matter here: tendency processors come from the live model, metadata is restored.
+    hands this hook the fresh dict it is about to load, so the corrections must run on it
+    even when an earlier load already set the flag. Metadata is restored as well.
     """
-    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
-    new_model = DummyModel(["6h", "12h"], offset=1.0)
+    import anemoi.training.train.methods.base as methods_base
 
+    corrected: list[dict] = []
+
+    def _recording_corrections(checkpoint: dict, _model: torch.nn.Module) -> dict:
+        corrected.append(checkpoint)
+        return checkpoint
+
+    monkeypatch.setattr(methods_base, "apply_checkpoint_corrections", _recording_corrections)
     checkpoint = {
-        "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
+        "state_dict": {f"model.{key}": value.clone() for key, value in DummyModel(offset=10.0).state_dict().items()},
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
-
-    module = _make_dummy_module(new_model, update_states=False, update_tendencies=True)
+    module = _make_dummy_module(DummyModel(offset=1.0))
     module.weights_initialized = True
 
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
-    state_dict = checkpoint["state_dict"]
-    assert not any("18h" in key for key in state_dict if key.startswith("model.pre_processors_tendencies.")), (
-        "Stale tendency processors from the checkpoint must be dropped, not preserved by the flag."
-    )
-    for key, value in new_model.state_dict().items():
-        if key.startswith(("pre_processors_tendencies.", "post_processors_tendencies.")):
-            assert torch.equal(state_dict[f"model.{key}"], value)
+    assert corrected == [checkpoint]
     assert module._ckpt_model_name_to_index == {"data": DummyIndex().name_to_index}
 
 
@@ -386,10 +301,7 @@ def _make_module_with_forecaster_task(
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout=rollout_cfg)
     module.task = task
     module.config = SimpleNamespace(  # type: ignore[assignment]
-        training=SimpleNamespace(
-            seed=seed,
-            update_ds_stats_on_ckpt_load=_make_update_cfg(False, False),
-        ),
+        training=SimpleNamespace(seed=seed),
     )
     module._set_hparams({"metadata": _run_metadata()})
     return module, task
@@ -1245,7 +1157,7 @@ def test_on_load_checkpoint_writes_a_replaced_dict_back_in_place(monkeypatch: py
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
     monkeypatch.setattr(methods_base, "apply_checkpoint_corrections", lambda *_args, **_kwargs: replacement)
-    module = _make_dummy_module(DummyModel(["6h"], offset=1.0), update_states=False, update_tendencies=False)
+    module = _make_dummy_module(DummyModel(offset=1.0))
     checkpoint = {"state_dict": {"stale": torch.zeros(1)}, "hyper_parameters": {"data_indices": {"data": DummyIndex()}}}
 
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
@@ -1267,7 +1179,7 @@ def test_on_load_checkpoint_honours_a_migration_that_returns_a_new_dict(monkeypa
         return {**ckpt, "state_dict": {"migrated": torch.ones(1)}}
 
     monkeypatch.setattr(loading_base, "_trainable_edge_perm_fix", rebuilding_migrate)
-    module = _make_dummy_module(DummyModel(["6h"], offset=1.0), update_states=False, update_tendencies=False)
+    module = _make_dummy_module(DummyModel(offset=1.0))
     checkpoint = {"state_dict": {"stale": torch.zeros(1)}, "hyper_parameters": {"data_indices": {"data": DummyIndex()}}}
     held_by_lightning = checkpoint
 
@@ -1289,10 +1201,9 @@ def _index_with(name_to_index: dict[str, int]) -> DummyIndex:
 def _legacy_on_load_checkpoint(module: DummyTrainingModule, checkpoint: dict) -> None:
     """The steps ``BaseTrainingModule.on_load_checkpoint`` ran before the checkpoint pipeline existed.
 
-    Edge-perm migration, then the processor refresh, then ``_ckpt_model_name_to_index``,
-    then ``_ckpt_variables_metadata``, without the task-state and datamodule steps that
-    need a trainer. The edge-perm migration is a no-op for a model without a
-    ``StaticGraphProvider``, so this pins the processor refresh and the metadata.
+    Edge-perm migration, then ``_ckpt_model_name_to_index``, then ``_ckpt_variables_metadata``,
+    without the task-state and datamodule steps that need a trainer. The edge-perm migration
+    is a no-op for a model without a ``StaticGraphProvider``, so this pins the metadata.
     """
     import importlib
 
@@ -1300,24 +1211,6 @@ def _legacy_on_load_checkpoint(module: DummyTrainingModule, checkpoint: dict) ->
 
     edge_perm = importlib.import_module("anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix").migrate
     edge_perm(checkpoint, model=module)
-
-    update_cfg = module.config.training.update_ds_stats_on_ckpt_load
-    state_dict = checkpoint.get("state_dict")
-    if isinstance(state_dict, dict) and (update_cfg.states or update_cfg.tendencies):
-        processor_prefixes: tuple[str, ...] = ()
-        if update_cfg.states:
-            processor_prefixes += ("model.pre_processors.", "model.post_processors.")
-        if update_cfg.tendencies:
-            processor_prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
-        for key in list(state_dict.keys()):
-            if key.startswith(processor_prefixes):
-                del state_dict[key]
-        model_state_dict = module.model.state_dict()
-        processor_prefixes += tuple(f"model.{k}" for k in model_state_dict if "model_output_idx" in k)
-        for key, value in model_state_dict.items():
-            full_key = f"model.{key}"
-            if full_key.startswith(processor_prefixes):
-                state_dict[full_key] = value
 
     module._ckpt_model_name_to_index = {
         dataset_name: data_indices.name_to_index
@@ -1335,13 +1228,11 @@ def test_resume_is_one_lightning_load_and_matches_the_legacy_hook(
 ) -> None:
     """A resume performs no pipeline load; the hook corrects the dict Lightning loads.
 
-    With ``update_ds_stats_on_ckpt_load.tendencies=True`` the tendency processors must
-    come from the live model, not the checkpoint. The pipeline only resolves the file
-    (``torch.load`` is never called), the model keeps its own weights until ``fit()``,
-    and the hook applies ``apply_checkpoint_corrections`` to Lightning's dict. The
-    result must match the legacy hook steps bit for bit.
+    The pipeline only resolves the file (``torch.load`` is never called), the model keeps
+    its own weights until ``fit()``, and the hook applies ``apply_checkpoint_corrections``
+    to Lightning's dict. The result must match the legacy hook steps bit for bit.
     """
-    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
+    old_model = DummyModel(offset=10.0)
     checkpoint = {
         "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
         "hyper_parameters": {"data_indices": {"data": _index_with({"t2m": 0})}},
@@ -1359,7 +1250,7 @@ def test_resume_is_one_lightning_load_and_matches_the_legacy_hook(
 
     monkeypatch.setattr(torch, "load", _spy_load)
 
-    module = _make_dummy_module(DummyModel(["6h", "12h"], offset=1.0), update_states=False, update_tendencies=True)
+    module = _make_dummy_module(DummyModel(offset=1.0))
     before = {key: value.clone() for key, value in module.state_dict().items()}
     cfg = OmegaConf.create(
         {
@@ -1371,7 +1262,6 @@ def test_resume_is_one_lightning_load_and_matches_the_legacy_hook(
                     },
                     "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
                 },
-                "update_ds_stats_on_ckpt_load": {"states": False, "tendencies": True},
             },
         },
     )
@@ -1391,7 +1281,7 @@ def test_resume_is_one_lightning_load_and_matches_the_legacy_hook(
     module.load_state_dict(lightning_dict["state_dict"], strict=True)
 
     # The legacy steps, on an identical module and a fresh read of the same file.
-    reference = _make_dummy_module(DummyModel(["6h", "12h"], offset=1.0), update_states=False, update_tendencies=True)
+    reference = _make_dummy_module(DummyModel(offset=1.0))
     legacy_dict = real_load(ckpt_path, weights_only=False, map_location="cpu")
     _legacy_on_load_checkpoint(reference, legacy_dict)
     reference.load_state_dict(legacy_dict["state_dict"], strict=True)
@@ -1399,11 +1289,8 @@ def test_resume_is_one_lightning_load_and_matches_the_legacy_hook(
     resumed = module.state_dict()
     for key, value in reference.state_dict().items():
         assert torch.equal(resumed[key], value), f"{key} differs from the legacy hook path"
-    # The tendency processors are the live model's, not the checkpoint's stale 10.x.
-    assert torch.equal(
-        resumed["model.pre_processors_tendencies.data._processors.6h.processors.dummy.value"],
-        torch.tensor([1.0]),
-    )
+    # The weights are the checkpoint's.
+    assert torch.equal(resumed["model.pre_processors.data.processors.dummy.value"], torch.tensor([10.0]))
     assert module._ckpt_model_name_to_index == {"data": {"t2m": 0}}
     assert module._ckpt_variables_metadata == reference._ckpt_variables_metadata
 
@@ -1423,7 +1310,7 @@ def test_resume_hook_does_not_migrate_an_autoencoder_checkpoint(spy_chunking_mig
     ``NoOpProcessor`` config. The hook never calls the migration and hands Lightning
     the state dict exactly as saved.
     """
-    module = _make_dummy_module(DummyModel(["6h"], offset=1.0), update_states=False, update_tendencies=False)
+    module = _make_dummy_module(DummyModel(offset=1.0))
     checkpoint = {
         "state_dict": {f"model.{key}": value.clone() for key, value in module.model.state_dict().items()},
         "pytorch-lightning_version": "2.6.5",
