@@ -787,15 +787,6 @@ StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema | Si
 VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]] | None
 
 
-class UpdateDsStatsOnCkptLoadSchema(BaseModel):
-    """Configuration for updating processor statistics on checkpoint load."""
-
-    states: bool = Field(default=False, example=False)
-    "Rebuild state pre/post-processing statistics from the current dataset."
-    tendencies: bool = Field(default=True, example=True)
-    "Rebuild tendency pre/post-processing statistics from the current dataset."
-
-
 class CheckpointPipelineSchema(BaseModel):
     """Declarative checkpoint pipeline consumed by ``build_checkpoint_pipeline``.
 
@@ -828,8 +819,6 @@ class BaseTrainingSchema(BaseModel):
     " whose variable set is a superset of the current dataset's is accepted instead of raising,"
     " provided the shared variables keep the same relative order; the variable-dependent layers"
     " are re-initialised for the reduced set. Default False keeps the strict variable-order check."
-    update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
-    "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
     checkpoint: CheckpointPipelineSchema | None = Field(default=None)
     "Checkpoint pipeline configuration consumed by build_checkpoint_pipeline: an"
     " acquisition source under `source`, a loading strategy under `loading`, and/or an"

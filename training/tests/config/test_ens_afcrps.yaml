@@ -657,9 +657,6 @@ training:
       interval: step
   # fixed, so reruns of this test draw the same batches (replaces the removed ANEMOI_BASE_SEED)
   seed: 12345678
-  update_ds_stats_on_ckpt_load:
-    states: false
-    tendencies: true
   check_variables_compatibility:
     ignore_units: false
     ignore_processing_period: false
