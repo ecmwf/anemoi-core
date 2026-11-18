@@ -98,7 +98,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         n_step_input: dict[str, int],
         n_step_output: dict[str, int],
     ) -> None:
-
         model_config = DotDict(model_config)
 
         transport_params = model_config.model.transport

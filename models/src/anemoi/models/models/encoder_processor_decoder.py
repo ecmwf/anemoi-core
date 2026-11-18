@@ -745,7 +745,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         target_forcing_values = flattened_target_forcings.values
         if target_shard_sizes is not None:
             target_forcing_values = gather_tensor(
-                target_forcing_values, dim=0, sizes=target_shard_sizes, mgroup=model_comm_group,
+                target_forcing_values,
+                dim=0,
+                sizes=target_shard_sizes,
+                mgroup=model_comm_group,
             )
         return target_forcing_values
 
