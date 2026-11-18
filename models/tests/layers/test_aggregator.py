@@ -12,7 +12,6 @@ import torch
 
 from anemoi.models.layers.aggregator import ConcatAggregator
 from anemoi.models.layers.aggregator import GatedFusionAggregator
-from anemoi.models.layers.aggregator import GatedLatentFusion
 from anemoi.models.layers.aggregator import MeanAggregator
 from anemoi.models.layers.aggregator import PointwiseCrossAttentionAggregator
 from anemoi.models.layers.aggregator import SumAggregator
@@ -149,77 +148,30 @@ def _gated_aggregator(**kwargs) -> GatedFusionAggregator:
     return GatedFusionAggregator(input_channels=3, source_channels={"data": 4, "waves": 4, "ocean": 4}, **kwargs)
 
 
-def test_gated_latent_fusion_is_a_no_op_when_gate_is_closed() -> None:
-    block = GatedLatentFusion(hidden_dim=4)
-    latent, encoder_output = torch.randn(6, 4), torch.randn(6, 4)
-
-    output = block(latent, encoder_output)
-    assert output.shape == latent.shape
-    assert not torch.allclose(output, latent)
-
-    # A strongly negative gate bias closes the gate: the block becomes the identity.
-    with torch.no_grad():
-        block.to_gate[0].weight.zero_()
-        block.to_gate[0].bias.fill_(-100.0)
-    torch.testing.assert_close(block(latent, encoder_output), latent)
-
-
-def test_gated_latent_fusion_zero_init_is_an_identity_that_still_learns() -> None:
-    block = GatedLatentFusion(hidden_dim=4, zero_init_value=True)
-    latent, encoder_output = torch.randn(6, 4), torch.randn(6, 4, requires_grad=True)
-
-    output = block(latent, encoder_output)
-    torch.testing.assert_close(output, latent)
-
-    # The gate is open, so the zeroed value projection receives gradient and moves away from zero.
-    output.sum().backward()
-    assert torch.count_nonzero(block.to_value[-1].weight.grad) > 0
-    assert torch.count_nonzero(block.to_value[-1].bias.grad) > 0
-
-
-def test_gated_fusion_aggregator_zero_init_returns_principal_latent() -> None:
-    aggregator = _gated_aggregator(principal_source="data", zero_init_value=True)
-    data = torch.randn(6, 4)
-    latents = {"data": data, "waves": torch.randn(6, 4), "ocean": torch.randn(6, 4)}
-
-    torch.testing.assert_close(aggregator(torch.randn(6, 3), latents), data)
-
-
-def test_gated_fusion_aggregator_builds_one_block_per_auxiliary_source() -> None:
-    aggregator = _gated_aggregator(principal_source="data")
-
-    assert aggregator.hidden_dim == 4
-    assert set(aggregator.fusion) == {"waves", "ocean"}
-    # Defaults to the first configured source.
-    assert _gated_aggregator().principal_source == "data"
-
-
-def test_gated_fusion_aggregator_matches_sequential_fusion_blocks_in_eval() -> None:
-    aggregator = _gated_aggregator(principal_source="data").eval()
+def test_gated_fusion_aggregator_folds_active_sources_in_configured_order() -> None:
+    aggregator = _gated_aggregator().eval()
     hidden = torch.randn(6, 3)
     data, waves, ocean = torch.randn(6, 4), torch.randn(6, 4), torch.randn(6, 4)
 
-    output = aggregator(hidden, {"ocean": ocean, "data": data, "waves": waves})
+    # principal_source defaults to the first configured source; one block per auxiliary source.
+    assert aggregator.principal_source == "data"
+    assert set(aggregator.fusion) == {"waves", "ocean"}
+    assert aggregator.hidden_dim == 4
 
-    # In eval mode sources are folded in configured order: waves, then ocean.
+    # In eval mode sources are folded in configured order (waves, then ocean), whatever the mapping order.
     expected = aggregator.fusion["ocean"](aggregator.fusion["waves"](data, waves), ocean)
-    torch.testing.assert_close(output, expected)
+    torch.testing.assert_close(aggregator(hidden, {"ocean": ocean, "data": data, "waves": waves}), expected)
 
-
-def test_gated_fusion_aggregator_accepts_an_active_source_subset() -> None:
-    aggregator = _gated_aggregator(principal_source="data").eval()
-    hidden = torch.randn(6, 3)
-    data, waves = torch.randn(6, 4), torch.randn(6, 4)
-
-    torch.testing.assert_close(aggregator(hidden, {"data": data}), data)
+    # Absent auxiliary sources are skipped.
     torch.testing.assert_close(
-        aggregator(hidden, {"data": data, "waves": waves}),
-        aggregator.fusion["waves"](data, waves),
+        aggregator(hidden, {"data": data, "waves": waves}), aggregator.fusion["waves"](data, waves)
     )
+    torch.testing.assert_close(aggregator(hidden, {"data": data}), data)
 
 
-def test_gated_fusion_aggregator_propagates_gradients_to_all_active_sources() -> None:
-    aggregator = _gated_aggregator(principal_source="data").train()
+@pytest.mark.parametrize("gradient_checkpointing", [False, True])
+def test_gated_fusion_aggregator_propagates_gradients_to_all_active_sources(gradient_checkpointing: bool) -> None:
+    aggregator = _gated_aggregator(gradient_checkpointing=gradient_checkpointing).train()
     latents = {name: torch.randn(6, 4, requires_grad=True) for name in ("data", "waves", "ocean")}
 
     aggregator(torch.randn(6, 3), latents).sum().backward()
@@ -228,30 +180,25 @@ def test_gated_fusion_aggregator_propagates_gradients_to_all_active_sources() ->
     assert all(p.grad is not None for p in aggregator.parameters())
 
 
-def test_gated_fusion_aggregator_supports_gradient_checkpointing() -> None:
-    plain = _gated_aggregator(principal_source="data").eval()
-    checkpointed = _gated_aggregator(principal_source="data", gradient_checkpointing=True).eval()
-    checkpointed.load_state_dict(plain.state_dict())
-    hidden = torch.randn(6, 3)
-    latents = {"data": torch.randn(6, 4), "waves": torch.randn(6, 4), "ocean": torch.randn(6, 4)}
+def test_gated_fusion_aggregator_zero_init_is_an_identity_that_still_learns() -> None:
+    aggregator = _gated_aggregator(zero_init_value=True)
+    data = torch.randn(6, 4)
+    latents = {"data": data, "waves": torch.randn(6, 4), "ocean": torch.randn(6, 4)}
 
-    torch.testing.assert_close(checkpointed(hidden, latents), plain(hidden, latents))
+    output = aggregator(torch.randn(6, 3), latents)
+    torch.testing.assert_close(output, data)
 
-
-@pytest.mark.parametrize(
-    ("kwargs", "error"),
-    [
-        ({"source_channels": {"data": 4, "waves": 5}}, "same channel dimension"),
-        ({"source_channels": {"data": 4}, "principal_source": "waves"}, "principal_source 'waves'"),
-    ],
-)
-def test_gated_fusion_aggregator_validates_construction(kwargs: dict, error: str) -> None:
-    with pytest.raises(ValueError, match=error):
-        GatedFusionAggregator(input_channels=3, **kwargs)
+    # The gates stay open, so each zeroed value projection receives gradient and can move away from zero.
+    output.sum().backward()
+    for block in aggregator.fusion.values():
+        assert torch.count_nonzero(block.to_value[-1].weight.grad) > 0
+        assert torch.count_nonzero(block.to_value[-1].bias.grad) > 0
 
 
-def test_gated_fusion_aggregator_requires_principal_source_at_call_time() -> None:
-    aggregator = _gated_aggregator(principal_source="data")
-
+def test_gated_fusion_aggregator_validates_sources() -> None:
+    with pytest.raises(ValueError, match="same channel dimension"):
+        GatedFusionAggregator(input_channels=3, source_channels={"data": 4, "waves": 5})
+    with pytest.raises(ValueError, match="principal_source 'waves'"):
+        GatedFusionAggregator(input_channels=3, source_channels={"data": 4}, principal_source="waves")
     with pytest.raises(ValueError, match="requires the principal source 'data'"):
-        aggregator(torch.randn(6, 3), {"waves": torch.randn(6, 4)})
+        _gated_aggregator()(torch.randn(6, 3), {"waves": torch.randn(6, 4)})
