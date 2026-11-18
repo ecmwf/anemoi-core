@@ -30,7 +30,8 @@ git ls-files -z --cached --others --exclude-standard |
     while IFS= read -r -d '' f; do if [ -e "${f}" ]; then printf '%s\0' "${f}"; fi; done |
     tar --null -T - -cf - | tar -xf - -C "${lint}"
 set -x
-(cd "${lint}" && git init -q && git add -A && SKIP=no-commit-to-branch uvx pre-commit run --all-files --show-diff-on-failure)
+# In the fresh repo every file counts as added, so check-added-large-files would flag files already on main.
+(cd "${lint}" && git init -q && git add -A && SKIP=no-commit-to-branch,check-added-large-files uvx pre-commit run --all-files --show-diff-on-failure)
 rm -rf "${lint}"
 
 export UV_TORCH_BACKEND=auto
