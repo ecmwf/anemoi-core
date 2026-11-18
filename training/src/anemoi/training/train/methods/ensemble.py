@@ -338,10 +338,13 @@ class EnsembleTraining(BaseTrainingModule):
 
             # Advance input state for each dataset, except at the final step
             if step_index < len(task_steps) - 1:
+                advance_values = raw_targets
+                if getattr(self.task, "dataset_time_maps", None):
+                    advance_values = self.task.get_input_times(batch, rollout_step=step_index + 1)
                 x = self.task.advance_input(
                     x,
                     y_pred,
-                    self.preprocess_inputs(raw_targets),
+                    self.preprocess_inputs(advance_values),
                     **task_step_kwargs,
                     data_indices=self.data_indices,
                     output_mask=self.output_mask,
