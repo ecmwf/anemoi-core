@@ -232,8 +232,14 @@ class EnsembleTraining(BaseTrainingModule):
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
         x = self._expand_ens_dim(x)
 
-        task_steps = self.task.steps("training" if not validation_mode else "validation")
-        for task_step_kwargs in task_steps:
+        mode = "training" if not validation_mode else "validation"
+        task_steps = self.task.steps(mode, seed=self.global_step)
+        step_weights = self.task.step_loss_weights(task_steps, mode)
+        for step_weight, task_step_kwargs in zip(step_weights, task_steps, strict=True):
+            if step_weight == 0:  # pushforward step: no gradients and no loss
+                x = self._pushforward_step(x, batch, task_step_kwargs)
+                continue
+
             y_pred = self(x, **task_step_kwargs)
 
             y = self.task.get_targets(batch, **task_step_kwargs)
@@ -260,9 +266,40 @@ class EnsembleTraining(BaseTrainingModule):
                 grid_shard_slice=self.grid_shard_slice,
             )
 
-            loss = loss + loss_next
+            loss = loss + step_weight * loss_next
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
+            if not validation_mode and getattr(self.task, "log_rollout_step_losses", False):
+                metrics[f"loss_rstep{task_step_kwargs['rollout_step'] + 1}"] = loss_next.detach()
 
         loss *= 1.0 / len(task_steps)
         return TrainingStepOutput(loss=loss, metrics=metrics, predictions=y_preds)
+
+    def _pushforward_step(
+        self,
+        x: dict[str, torch.Tensor],
+        batch: dict[str, torch.Tensor],
+        task_step_kwargs: dict,
+    ) -> dict[str, torch.Tensor]:
+        """Advance the rollout by one step without gradients (pushforward training).
+
+        Autocast's weight cache is disabled here: bf16 weight copies made without autograd history
+        would otherwise be reused by the following steps, which would then get no weight gradients.
+        """
+        device_type = self.device.type
+        with torch.no_grad(), torch.autocast(
+            device_type,
+            dtype=torch.get_autocast_dtype(device_type),
+            enabled=torch.is_autocast_enabled(device_type),
+            cache_enabled=False,
+        ):
+            y_pred = self(x, **task_step_kwargs)
+            return self.task.advance_input(
+                x,
+                y_pred,
+                batch,
+                **task_step_kwargs,
+                data_indices=self.data_indices,
+                output_mask=self.output_mask,
+                grid_shard_slice=self.grid_shard_slice,
+            )

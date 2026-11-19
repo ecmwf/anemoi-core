@@ -9,6 +9,7 @@
 
 import datetime
 import logging
+import random
 from collections.abc import Callable
 
 import torch
@@ -63,6 +64,9 @@ class Forecaster(BaseTask):
         timestep: str,
         rollout: dict | None = None,
         validation_rollout: int | None = None,
+        rollout_loss_weights: list[float] | None = None,
+        log_rollout_step_losses: bool = False,
+        pushforward: dict | None = None,
         **kwargs,
     ) -> None:
 
@@ -71,6 +75,18 @@ class Forecaster(BaseTask):
         self.num_output_steps = multistep_output
         self.rollout = RolloutConfig(**(rollout or {}))
         self.validation_rollout = validation_rollout
+        self.rollout_loss_weights = None if rollout_loss_weights is None else [float(w) for w in rollout_loss_weights]
+        self.log_rollout_step_losses = log_rollout_step_losses
+        self.pushforward = pushforward
+        if self.pushforward is not None:
+            LOGGER.info("Pushforward rollouts (training only): %s", self.pushforward)
+        if self.rollout_loss_weights is not None:
+            assert all(w > 0 for w in self.rollout_loss_weights), "rollout_loss_weights must be positive"
+            assert len(self.rollout_loss_weights) >= self.max_training_rollout, (
+                f"rollout_loss_weights has {len(self.rollout_loss_weights)} entries "
+                f"but the longest training rollout is {self.max_training_rollout}"
+            )
+            LOGGER.info("Rollout loss weights (training only, per step): %s", self.rollout_loss_weights)
 
         if len(kwargs) > 0:
             LOGGER.warning(
@@ -86,16 +102,52 @@ class Forecaster(BaseTask):
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
         self._plot_adapter = ForecasterPlotAdapter(self)
 
-    def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
-        """Return the current steps configuration based on the rollout step."""
+    @property
+    def max_training_rollout(self) -> int:
+        """Longest training rollout: the largest pushforward length, else ``rollout.maximum``."""
+        return max(self.pushforward["lengths"]) if self.pushforward is not None else self.rollout.maximum
+
+    def steps(self, mode: str = "training", seed: int | None = None) -> tuple[dict[str, int], ...]:
+        """Return the current steps configuration based on the rollout step.
+
+        With ``pushforward``, each training rollout has a length drawn from ``pushforward.lengths``
+        with ``seed`` (the global step, so that all ranks draw the same length). Without a seed the
+        longest length is returned.
+        """
         max_rollout = self.rollout.step
         if mode == "validation" and self.validation_rollout is not None:
             max_rollout = self.validation_rollout
+        if mode == "training" and self.pushforward is not None:
+            lengths = self.pushforward["lengths"]
+            # a seeded, reproducible draw (not cryptographic)
+            max_rollout = max(lengths) if seed is None else random.Random(seed).choice(lengths)  # noqa: S311
         return tuple({"rollout_step": i} for i in range(max_rollout))
 
     def get_metric_name(self, rollout_step: int = 0, **_kwargs) -> str:
         """Get the metric name for the current step."""
         return f"_rstep{rollout_step}"
+
+    def step_loss_weights(self, task_steps: tuple[dict, ...], mode: str = "training") -> list[float]:
+        """Per-step loss weights from ``rollout_loss_weights`` and ``pushforward``, in training only.
+
+        With ``pushforward``, only the first ``anchor_steps`` and the last ``grad_steps`` steps get a
+        loss; the steps in between get weight 0 and run without gradients. Weights are renormalised
+        to sum to the number of steps, so they set relative contributions without changing the
+        overall loss scale. Validation always uses the plain average so validation losses stay
+        comparable between runs.
+        """
+        if mode != "training" or (self.rollout_loss_weights is None and self.pushforward is None):
+            return [1.0] * len(task_steps)
+        n_steps = len(task_steps)
+        weights = [
+            1.0 if self.rollout_loss_weights is None else self.rollout_loss_weights[kwargs["rollout_step"]]
+            for kwargs in task_steps
+        ]
+        if self.pushforward is not None:
+            first, last = self.pushforward.get("anchor_steps", 0), self.pushforward.get("grad_steps", 1)
+            weights = [w if (i < first or i >= n_steps - last) else 0.0 for i, w in enumerate(weights)]
+        scale = n_steps / sum(weights)
+        return [w * scale for w in weights]
 
     @property
     def _step_shift(self) -> datetime.timedelta:
@@ -113,7 +165,7 @@ class Forecaster(BaseTask):
 
     def get_offsets(self, mode: str | None = None) -> list[datetime.timedelta]:
         if mode == "training":
-            rollout_step = self.rollout.step
+            rollout_step = self.rollout.step if self.pushforward is None else self.max_training_rollout
         elif mode == "validation":
             rollout_step = self.rollout.step if self.validation_rollout is None else self.validation_rollout
         else:
@@ -123,7 +175,7 @@ class Forecaster(BaseTask):
                 self.__class__.__name__,
             )
             validation_rollout = self.rollout.maximum if self.validation_rollout is None else self.validation_rollout
-            rollout_step = max(self.rollout.maximum, validation_rollout)
+            rollout_step = max(self.max_training_rollout, validation_rollout)
 
         return self._compute_rollout_offsets(rollout_step)
 

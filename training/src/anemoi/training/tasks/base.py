@@ -62,7 +62,7 @@ class BaseTask(ABC):
         self._output_offsets = sorted(output_offsets)
         self._offsets = sorted(set(self._input_offsets + self._output_offsets))
 
-    def steps(self, mode: str = "training") -> Iterable[dict]:  # noqa: ARG002
+    def steps(self, mode: str = "training", **_kwargs) -> Iterable[dict]:  # noqa: ARG002
         """Get the steps for the task."""
         return ({},)  # default is a single step with no kwargs
 
@@ -84,6 +84,14 @@ class BaseTask(ABC):
     def get_metric_name(self, **_step_kwargs) -> str:
         """Get the metric name for the current step (if any)."""
         return ""
+
+    def step_loss_weights(self, task_steps: tuple[dict, ...], mode: str = "training") -> list[float]:  # noqa: ARG002
+        """Relative weight of each step's loss, normalised to mean 1 over ``task_steps``.
+
+        The step loss is ``sum_i w_i * loss_i / len(task_steps)``, so the default
+        (all ones) is the plain average over steps.
+        """
+        return [1.0] * len(task_steps)
 
     def get_input_offsets(self, **_kwargs) -> list[datetime.timedelta]:
         """Get the list of input time offsets."""

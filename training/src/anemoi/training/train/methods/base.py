@@ -1031,6 +1031,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             sync_dist=True,
         )
 
+        # per-step training losses, if the method put any in the metrics (epoch means)
+        for name, value in step_output.metrics.items():
+            self.log(
+                "train_" + name,
+                value.sum(),
+                on_epoch=True,
+                on_step=False,
+                logger=self.logger_enabled,
+                batch_size=batch_size,
+                sync_dist=True,
+            )
+
         self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled)
 
         return train_loss
