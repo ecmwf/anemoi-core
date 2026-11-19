@@ -60,6 +60,8 @@ class GriddedSample(BaseSample):
 
     source_type: ClassVar[type[GriddedSource]] = GriddedSource
     template_type: ClassVar[type[GriddedTemplate]] = GriddedTemplate
+    REQUIRED_AXES: ClassVar[tuple[str, ...]] = ("time", "grid", "variables")
+    OPTIONAL_AXES: ClassVar[tuple[str, ...]] = ("ensemble",)
     _METADATA_ATTRS: ClassVar[tuple[str, ...]] = ("variables", "statistics", "coordinates", "shard_sizes")
     _DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ()
 

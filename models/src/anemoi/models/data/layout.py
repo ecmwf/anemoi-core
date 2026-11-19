@@ -8,6 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import torch
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,7 +97,20 @@ class TensorLayout:
         -------
         TensorLayout
             Layout with each named axis at its supplied position.
+
+        Raises
+        ------
+        ValueError
+            If a name is not one of :attr:`AXES`, or appears more than once.
         """
+        unknown = [name for name in args if name not in cls.AXES]
+        if unknown:
+            msg = f"Unknown axis names {unknown} in the layout {args}; the axes are {cls.AXES}."
+            raise ValueError(msg)
+        repeated = sorted({name for name in args if args.count(name) > 1})
+        if repeated:
+            msg = f"The layout {args} names the axes {repeated} more than once."
+            raise ValueError(msg)
         axis_positions = {name: i for i, name in enumerate(args)}
         return cls(
             batch=axis_positions.get("batch"),
@@ -189,6 +206,58 @@ class TensorLayout:
     def has_axis(self, name: str) -> bool:
         """Return whether the layout defines a position for logical axis ``name``."""
         return getattr(self, name, None) is not None
+
+    def conform_to(self, values: "torch.Tensor", target: "TensorLayout") -> "torch.Tensor":
+        """Return ``values``, laid out per this layout, laid out per ``target``.
+
+        Axes that only ``target`` has are inserted with size 1, axes that only this layout
+        has are dropped, which they must be of size 1 for, and the axes are put in
+        ``target``'s order. This is how an optional axis (e.g. a single-member ensemble)
+        that a caller leaves out of its tensor is added on the way in, and how it and the
+        batch axis of a single sample are removed on the way out.
+
+        Parameters
+        ----------
+        values : torch.Tensor
+            Tensor with one dimension per axis of this layout.
+        target : TensorLayout
+            The layout to return ``values`` in.
+
+        Returns
+        -------
+        torch.Tensor
+            ``values`` laid out per ``target``; a view where possible.
+
+        Raises
+        ------
+        ValueError
+            If ``values`` does not have this layout's rank, or an axis to drop holds more than
+            one entry.
+        """
+        if values.ndim != self.ndim:
+            msg = f"values of shape {tuple(values.shape)} does not match the layout {self!r}."
+            raise ValueError(msg)
+
+        dropped = [name for name in self.axis_names if not target.has_axis(name)]
+        for name in dropped:
+            size = values.shape[self.axis(name)]
+            if size != 1:
+                msg = f"Cannot drop the {name!r} axis of size {size}: the layout {target!r} has no {name!r} axis."
+                raise ValueError(msg)
+        if dropped:
+            values = values.squeeze(tuple(self.axis(name) for name in dropped))
+
+        # The kept axes in their current order, then the inserted ones appended as size-1 axes.
+        current = [name for name in self.axis_names if target.has_axis(name)]
+        added = [name for name in target.axis_names if not self.has_axis(name)]
+        if added:
+            values = values.reshape(*values.shape, *(1 for _ in added))
+            current += added
+
+        permutation = [current.index(name) for name in target.axis_names]
+        if permutation != sorted(permutation):
+            values = values.permute(permutation)
+        return values
 
     def normalized(self, ndim: int) -> "TensorLayout":
         """Return a layout with physical axes resolved against the tensor rank."""

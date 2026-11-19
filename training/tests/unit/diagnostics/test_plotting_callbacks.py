@@ -9,6 +9,7 @@
 
 # ruff: noqa: ANN001, ANN201
 
+import itertools
 from collections.abc import Callable
 from functools import partial
 from types import MethodType
@@ -534,6 +535,72 @@ def test_batch_output_plot_sparse_forwards_auxiliary_output() -> None:
     torch.testing.assert_close(torch.as_tensor(kwargs["auxiliary"]), torch.full((3, 2), 3.0))
     assert kwargs["sparse"] is True
     assert kwargs["output_latlons"].shape == (3, 2)
+
+
+def _make_sparse_window_batch(window_sizes: list[int], *, dataset_name: str = "obs", num_vars: int = 2) -> Batch:
+    """Wrap one sparse sample whose observations hold the position of their time window."""
+    data = torch.cat(
+        [torch.full((size, num_vars), float(window)) for window, size in enumerate(window_sizes)],
+    )
+    num_points = sum(window_sizes)
+    coordinates = torch.stack([torch.linspace(0.0, 0.4, num_points), torch.linspace(1.0, 1.4, num_points)], dim=-1)
+    starts = np.cumsum([0, *window_sizes]).tolist()
+    boundaries = [tuple(slice(start, stop) for start, stop in itertools.pairwise(starts))]
+    return build_batch(
+        values={dataset_name: [data]},
+        coordinates={dataset_name: [coordinates]},
+        boundaries={dataset_name: boundaries},
+        timedeltas={dataset_name: [torch.zeros(num_points)]},
+        layouts={dataset_name: TensorLayout(grid=0, variables=1)},
+        variables={dataset_name: [chr(ord("a") + i) for i in range(num_vars)]},
+        statistics={dataset_name: {}},
+    )
+
+
+def test_batch_output_plot_sparse_temporal_downscaler_one_figure_per_output_time() -> None:
+    """Temporal downscaler obs figures each show one output time, next to the first input window."""
+    callback = _sample_plot(
+        sample_idx=0,
+        parameters=["a", "b"],
+        accumulation_levels_plot=[0.5],
+        dataset_names=["obs"],
+    )
+    callback.post_processors = {"obs": _IdentityProcessor()}
+    callback.plot_fn = MagicMock(return_value=MagicMock())
+    callback._output_figure = MagicMock()
+
+    pl_module = _make_pl_module_temporal_downscaler()
+    # Batch times 0H, 2H, 4H, 6H: inputs at 0H and 6H, outputs at 2H and 4H.
+    pl_module.task = TemporalDownscaler(input_timestep="6H", output_timestep="2H")
+    pl_module.plot_adapter = pl_module.task._plot_adapter
+    data_indices = MagicMock()
+    data_indices.data.output.full = slice(None)
+    data_indices.data.input.todict.return_value = {"name_to_index": {"a": 0, "b": 1}, "diagnostic": []}
+    data_indices.model.output.name_to_index = {"a": 0, "b": 1}
+    pl_module.data_indices = {"obs": data_indices}
+
+    window_sizes = [2, 3, 4, 5]
+    batch = _make_sparse_window_batch(window_sizes)
+    # The prediction sits at the target observations; each output time holds 100 plus its output step.
+    target_view = batch["obs"].select_time([1, 2])
+    pred_values = torch.cat([torch.full((3, 2), 100.0), torch.full((4, 2), 101.0)])
+    prediction = target_view.clone(values=[pred_values])
+    output = _step_output([{"obs": prediction}])
+    trainer = MagicMock()
+    trainer.logger = MagicMock()
+
+    callback._plot(trainer, pl_module, ["obs"], output, batch, batch_idx=0, epoch=0)
+
+    assert callback.plot_fn.call_count == 2
+    for output_step, call in enumerate(callback.plot_fn.call_args_list):
+        kwargs = call.kwargs
+        target_window = output_step + 1
+        np.testing.assert_array_equal(kwargs["x"], np.zeros((window_sizes[0], 2)))
+        np.testing.assert_array_equal(kwargs["y_true"], np.full((window_sizes[target_window], 2), target_window))
+        np.testing.assert_array_equal(kwargs["y_pred"], np.full((window_sizes[target_window], 2), 100 + output_step))
+        assert kwargs["output_latlons"].shape == (window_sizes[target_window], 2)
+    tags = [call.kwargs["tag"] for call in callback._output_figure.call_args_list]
+    assert tags == ["pred_val_sample_obs_istep01_batch0000_rank0", "pred_val_sample_obs_istep02_batch0000_rank0"]
 
 
 def test_per_batch_plot_skips_datasets_missing_from_batch():

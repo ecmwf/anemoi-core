@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from abc import ABC
 from abc import abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -31,8 +32,33 @@ if TYPE_CHECKING:
     from anemoi.training.tasks.base import BaseTask
 
 
+@dataclass(frozen=True)
+class PlotStep:
+    """The times shown in one sample figure.
+
+    Attributes
+    ----------
+    input_index : int
+        Position of the input time on the batch time axis.
+    target_index : int
+        Position of the target time on the batch time axis.
+    prediction_step : int
+        Which entry of the step outputs holds the prediction (the rollout step for forecasters).
+    output_step : int
+        Which output time within that entry is the prediction.
+    tag : str
+        Suffix naming the figure, e.g. ``rstep00_out00`` or ``istep01``.
+    """
+
+    input_index: int
+    target_index: int
+    prediction_step: int
+    output_step: int
+    tag: str
+
+
 class BasePlotAdapter(ABC):
-    """Abstract plotting contract. Subclasses define output_times, get_init_step, iter_plot_samples."""
+    """Abstract plotting contract. Subclasses define plot_steps and iter_plot_samples."""
 
     def __init__(self, task: BaseTask) -> None:
         self._task = task
@@ -81,6 +107,15 @@ class BasePlotAdapter(ABC):
         return batch
 
     @abstractmethod
+    def plot_steps(self) -> list[PlotStep]:
+        """Return the times shown in each sample figure, one entry per figure.
+
+        Gridded and tabular (observation) plots both follow this list, so a task
+        shows the same input and target times for every dataset.
+        """
+        ...
+
+    @abstractmethod
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         """Yield (x, y_true, y_pred, tag_suffix) or (sample, recon, tag) per plot sample."""
         ...
@@ -92,31 +127,37 @@ class ForecasterPlotAdapter(BasePlotAdapter):
     Handles multiple loss plots, n_step_output targets per step, multi-step iter.
     """
 
-    def get_init_step(self) -> int:
-        return -1
-
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         return self._task.num_input_timesteps + rollout_step * self._task.num_output_timesteps
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
-        input_time_indices = self._task.get_batch_input_indices()
-
-        input_data = self.select_time(data, input_time_indices)
-
-        x = input_data[self.get_init_step(), ...].squeeze()
-
+    def plot_steps(self) -> list[PlotStep]:
+        """Show the latest input next to every output of every validation rollout step."""
+        input_index = self._task.get_batch_input_indices()[-1]
+        steps = []
         for validation_step_kwargs in self._task.steps("validation"):
             rollout_step = validation_step_kwargs["rollout_step"]
-            output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
+            output_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
+            step_label = self._task.get_step_label(**validation_step_kwargs)  # dacycleNN / rstepNN for DA
+            steps.extend(
+                PlotStep(
+                    input_index=input_index,
+                    target_index=output_indices[out_step],
+                    prediction_step=rollout_step,
+                    output_step=out_step,
+                    tag=f"{step_label}_out{out_step:02d}",
+                )
+                for out_step in range(self._task.num_output_timesteps)
+            )
+        return steps
 
-            output_data = self.select_time(data, output_time_indices)
-
-            step_label = self._task.get_step_label(**validation_step_kwargs)
-            for out_step in range(self._task.num_output_timesteps):
-                y_true = output_data[out_step, ...].squeeze()
-                y_pred = output_tensor[rollout_step, out_step, ...]
-                y_pred = y_pred.squeeze() if hasattr(y_pred, "squeeze") else y_pred
-                yield x, y_true, y_pred, f"{step_label}_out{out_step:02d}"
+    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+        steps = self.plot_steps()
+        x = self.select_time(data, [steps[0].input_index])[0].squeeze()
+        for step in steps:
+            y_true = self.select_time(data, [step.target_index])[0].squeeze()
+            y_pred = output_tensor[step.prediction_step, step.output_step, ...]
+            y_pred = y_pred.squeeze() if hasattr(y_pred, "squeeze") else y_pred
+            yield x, y_true, y_pred, step.tag
 
 
 class TemporalDownscalerPlotAdapter(BasePlotAdapter):
@@ -125,24 +166,33 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
     Handles squeezing (1, n_step_output, ...) -> (n_step_output, ...).
     """
 
-    def get_init_step(self) -> int:
-        return 0
+    def plot_steps(self) -> list[PlotStep]:
+        """Show the first input next to each output time between the inputs."""
+        input_index = self._task.get_batch_input_indices()[0]
+        output_indices = self._task.get_batch_output_indices()
+        return [
+            PlotStep(
+                input_index=input_index,
+                target_index=output_indices[output_step],
+                prediction_step=0,
+                output_step=output_step,
+                tag=f"istep{output_step + 1:02d}",
+            )
+            for output_step in range(self._task.num_output_timesteps)
+        ]
 
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
-        input_time_indices = self._task.get_batch_input_indices()
-        output_time_indices = self._task.get_batch_output_indices()
-
-        input_data = data[input_time_indices, ...]
-        output_data = data[output_time_indices, ...]
-
-        x = input_data[self.get_init_step(), ...].squeeze()
-        for output_step in range(self._task.num_output_timesteps):
-            y_true = output_data[output_step].squeeze()
+        steps = self.plot_steps()
+        x = data[steps[0].input_index, ...].squeeze()
+        for step in steps:
+            y_true = data[step.target_index, ...].squeeze()
             pred = (
-                output_tensor[output_step, 0] if getattr(output_tensor, "ndim", 0) >= 4 else output_tensor[output_step]
+                output_tensor[step.output_step, 0]
+                if getattr(output_tensor, "ndim", 0) >= 4
+                else output_tensor[step.output_step]
             )
             y_pred = pred.squeeze() if hasattr(pred, "squeeze") else pred
-            yield x, y_true, y_pred, f"istep{output_step + 1:02d}"
+            yield x, y_true, y_pred, step.tag
 
     def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
         if getattr(output_tensor, "ndim", 0) == 5 and getattr(output_tensor, "shape", (0,))[0] == 1:
@@ -153,10 +203,15 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
 class AutoencoderPlotAdapter(BasePlotAdapter):
     """Plot Adapter for Autoencoder Task: single (sample, recon, tag) yield."""
 
+    def plot_steps(self) -> list[PlotStep]:
+        """Show the one sample next to its reconstruction."""
+        return [PlotStep(input_index=0, target_index=0, prediction_step=0, output_step=0, tag="recon")]
+
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
-        sample = data[0, ...].squeeze()
-        recon = output_tensor[0, ...].squeeze()
-        yield sample, sample, recon, "recon"
+        (step,) = self.plot_steps()
+        sample = data[step.input_index, ...].squeeze()
+        recon = output_tensor[step.output_step, ...].squeeze()
+        yield sample, sample, recon, step.tag
 
 
 class EnsemblePlotAdapterWrapper(BasePlotAdapter):
@@ -221,6 +276,9 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
     def prepare_loss_batch(self, batch: dict) -> dict:
         """Return the batch for loss plotting."""
         return batch
+
+    def plot_steps(self) -> list[PlotStep]:
+        return self._inner.plot_steps()
 
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         yield from self._inner.iter_plot_samples(data, output_tensor)

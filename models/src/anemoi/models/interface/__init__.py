@@ -18,6 +18,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data.batch import Batch
+from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import create_batched_struct
 from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data.sources import TabularSource
@@ -216,14 +217,30 @@ class AnemoiModelInterface(torch.nn.Module):
         positions = [name_to_index[name] for name in variables]
         return {name: values[positions] for name, values in self.statistics[dataset_name].items()}
 
-    def _get_batch(self, payloads: dict[str, dict]) -> Batch:
-        """Utility function to build a :class:`Batch` from raw per-dataset payload dicts."""
-        return Batch.collate(
-            {
-                name: create_batched_struct(statistics=self._statistics_for(name, payload["variables"]), **payload)
-                for name, payload in payloads.items()
-            }
-        )
+    def _get_batch(self, payloads: dict[str, dict], n_steps: Optional[dict[str, int]] = None, role: str = "") -> Batch:
+        """Build a :class:`Batch` from raw per-dataset payload dicts.
+
+        The ``time`` axis of a payload must hold its dataset's entry in ``n_steps``, so that a
+        layout that does not describe its values fails here, naming the layout, rather than
+        inside the model.
+        """
+        n_steps = n_steps or {}
+        samples = {
+            name: create_batched_struct(statistics=self._statistics_for(name, payload["variables"]), **payload)
+            for name, payload in payloads.items()
+        }
+        for name, sample in samples.items():
+            if name not in n_steps or not sample.layout.has_axis("time"):
+                continue
+            steps = sample.values.shape[sample.layout.axis("time")]
+            if steps != n_steps[name]:
+                msg = (
+                    f"Dataset {name!r}: the {role} payload holds {steps} steps along its 'time' axis, but the model "
+                    f"takes {n_steps[name]}. Check that its layout {payloads[name]['layout']} names the axes of its "
+                    "values in order."
+                )
+                raise ValueError(msg)
+        return Batch.collate(samples)
 
     def _get_template(
         self,
@@ -250,9 +267,17 @@ class AnemoiModelInterface(torch.nn.Module):
             for name, payload in target_template.items()
         }
 
-    def unwrap_batch(self, batch: Batch) -> dict[str, dict]:
+    def unwrap_batch(
+        self,
+        batch: Batch,
+        layouts: Optional[dict[str, TensorLayout | tuple[str, ...]]] = None,
+    ) -> dict[str, dict]:
         """Convert a model output Batch back to plain per-dataset payload dicts.
+
         The coordinates are converted from radians to degrees, and the batch axis of one is dropped.
+        A dataset with an entry in ``layouts`` is returned in that layout: its axes in that order, and
+        without the axes it leaves out, which must then be of size 1. Other datasets keep the
+        canonical layout.
         """
         unwrapped = {}
         for dataset_name, sample in batch.items():
@@ -266,14 +291,17 @@ class AnemoiModelInterface(torch.nn.Module):
                     "timedeltas": sample.timedeltas[0],
                     "boundaries": [(int(s.start), int(s.stop)) for s in sample.boundaries[0]],
                 }
-            else:
-                batch_axis = sample.layout.axis("batch", ndim=data.ndim) if sample.layout.batch is not None else None
-                if batch_axis is not None:
-                    assert data.shape[batch_axis] == 1, (
-                        f"Dataset {dataset_name!r}: expected a single sample to unwrap, got {data.shape[batch_axis]}."
-                    )
-                    data = data.squeeze(batch_axis)
-                layout = layout.without_batch_dim()
+
+            # Drops the batch axis of the single sample, and lays the rest out as requested.
+            target = (layouts or {}).get(dataset_name, layout.without_batch_dim())
+            if not isinstance(target, TensorLayout):
+                target = TensorLayout.from_tuple(*target)
+            try:
+                data = layout.conform_to(data, target)
+            except ValueError as err:
+                msg = f"Dataset {dataset_name!r}: the prediction cannot be returned in the layout {target!r}: {err}"
+                raise ValueError(msg) from err
+            layout = target
 
             coords_deg = torch.rad2deg(coordinates)
 
@@ -309,11 +337,14 @@ class AnemoiModelInterface(torch.nn.Module):
             the model's input variables, in model-input order), its ``data_type``,
             ``variables`` and ``layout``, and the ``latitudes`` and ``longitudes`` in
             degrees (required; there is no fallback to the graph). Tabular payloads also
-            carry ``timedeltas`` and ``boundaries``.
+            carry ``timedeltas`` and ``boundaries``. The ``layout`` names exactly the axes
+            of ``values``, in any order; it may leave out the ``ensemble`` axis, which then
+            has one member. A gridded ``time`` axis must hold the model's input steps.
         target_template : Optional[dict[str, dict]]
             Output geometry, one payload per dataset to decode; required despite the
             default. Like an input payload without ``values``, naming the variables to decode.
-            Only the datasets given here are decoded.
+            Only the datasets given here are decoded. Its ``layout`` is the layout the
+            prediction is returned in.
         target_forcing : Optional[dict[str, dict]]
             Decoder conditioning, one payload per decoded dataset, holding the forcing
             variables at the output valid times. ``None`` for decoders that take no forcings.
@@ -331,15 +362,17 @@ class AnemoiModelInterface(torch.nn.Module):
         Returns
         -------
         dict[str, dict]
-            The prediction, one payload per decoded dataset.
+            The prediction, one payload per decoded dataset, laid out per the ``layout`` of its
+            ``target_template`` entry (which the returned ``layout`` repeats). A template that
+            leaves out the ``ensemble`` axis needs a single-member prediction.
         """
         assert target_template is not None, "target_template must be provided for prediction."
         if target_forcing is None:
             target_forcing = {}
 
         # Convert input data to batch
-        x = self._get_batch(x)
-        target_forcing = self._get_batch(target_forcing)
+        x = self._get_batch(x, self.n_step_input, "input")
+        target_forcing = self._get_batch(target_forcing, self.n_step_output, "target forcing")
 
         target = self._get_template(
             target_template, ensemble_size=x.ensemble_size, batch_size=x.batch_size, device=x.device
@@ -367,7 +400,9 @@ class AnemoiModelInterface(torch.nn.Module):
             predict_kwargs["skip_input"] = self._get_batch(payloads) if payloads else Batch({})
 
         pred_batch = self.model.predict_step(**predict_kwargs, **kwargs)
-        return self.unwrap_batch(pred_batch)
+        return self.unwrap_batch(
+            pred_batch, layouts={name: payload["layout"] for name, payload in target_template.items()}
+        )
 
     def _update_metadata(self) -> None:
         self.model.fill_metadata(self.metadata)
