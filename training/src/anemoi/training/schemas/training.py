@@ -21,6 +21,7 @@ from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import RootModel
 from pydantic import Tag
 from pydantic import field_validator
 from pydantic import model_validator
@@ -791,6 +792,61 @@ class CheckpointPipelineSchema(BaseModel):
     "Ordered model-modifier stages applied after loading (e.g. FreezingModifierStage)."
 
 
+class ForcingMaskSchema(RootModel[dict[Any, Any]]):
+    """Set predicted variables to fixed values where a condition on a forcing holds.
+
+    Laid out like the imputer configuration: the fill values (physical units) are the keys and the variables
+    set to them the entries, next to the options of the condition::
+
+        mask_variable: insolation   # forcing the condition is on (required)
+        operator: le                # lt | le | gt | ge (default le)
+        threshold: 0                # physical units (default 0)
+        offsets: [0h, -1h]          # times relative to each output (default [0h])
+        combine: all                # all | any of the offsets (default all)
+        default: "none"             # optional, there is no default fill value
+        0.0: [ssr, ssrd, fdir]      # fill value: variables
+    """
+
+    @model_validator(mode="after")
+    def check_layout(self) -> "ForcingMaskSchema":
+        config = dict(self.root)
+        errors = []
+        if not isinstance(config.get("mask_variable"), str):
+            errors.append("`mask_variable` is required and must be a string")
+        if config.get("operator", "le") not in ("lt", "le", "gt", "ge"):
+            errors.append("`operator` must be one of lt, le, gt, ge")
+        if config.get("combine", "all") not in ("all", "any"):
+            errors.append("`combine` must be 'all' or 'any'")
+        if config.get("default", "none") not in ("none", None):
+            errors.append("`default` must be 'none'")
+        offsets = config.get("offsets", ["0h"])
+        if isinstance(offsets, str) or not all(isinstance(o, str) for o in offsets):
+            errors.append("`offsets` must be a list of duration strings such as '-1h'")
+
+        options = {"mask_variable", "operator", "threshold", "offsets", "combine", "default"}
+        n_variables = 0
+        for key, names in config.items():
+            if key in options:
+                continue
+            try:
+                if isinstance(key, bool):
+                    raise TypeError
+                float(key)
+            except (TypeError, ValueError):
+                errors.append(f"unknown key {key!r}: expected an option or a numeric fill value")
+                continue
+            if not (names is None or (isinstance(names, (list, tuple)) and all(isinstance(n, str) for n in names))):
+                errors.append(f"fill value {key!r} must list variable names")
+            else:
+                n_variables += len(names or [])
+        if n_variables == 0:
+            errors.append("at least one fill value must list at least one variable")
+        if errors:
+            msg = "Invalid forcing_mask: " + "; ".join(errors) + "."
+            raise ValueError(msg)
+        return self
+
+
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
@@ -850,6 +906,8 @@ class BaseTrainingSchema(BaseModel):
     "Optimizer and LR scheduler configuration."
     metrics: DatasetDict[list[str]]
     "List of metrics"
+    forcing_mask: DatasetDict[ForcingMaskSchema] | None = Field(default=None)
+    "Optional mask, depending on a forcing, applied to predictions before the loss. Not for transport methods."
     ensemble_size_per_device: PositiveInt = 1
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
 
