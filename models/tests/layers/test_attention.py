@@ -308,15 +308,6 @@ def test_flash_attention_rejects_unsupported_head_sizes_when_built(layer_kernels
         )
 
 
-@requires_flash_attn
-def test_flash_attention_rejects_float32_inputs(layer_kernels):
-    attention = MultiHeadSelfAttention(
-        num_heads=2, embed_dim=32, layer_kernels=layer_kernels, attention_implementation="flash_attention"
-    ).cuda()
-    with pytest.raises(ValueError, match="float16 or bfloat16"):
-        attention(torch.randn(8, 32, device="cuda"), GraphShardInfo(nodes=[8]), batch_size=1)
-
-
 def test_sdpa_sliding_window_mask_marks_the_keys_within_the_window():
     mask = SDPAAttentionWrapper.create_sliding_window_mask(6, 6, window_size=2)
     expected = torch.tensor([[abs(i - j) <= 2 for j in range(6)] for i in range(6)])

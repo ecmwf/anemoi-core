@@ -18,7 +18,6 @@ from typing import Optional
 from typing import Union
 
 import einops
-import torch
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -60,8 +59,8 @@ class MultiHeadSelfAttention(nn.Module):
         Flash attention in Triton, for GPUs. Self and cross attention, sliding windows, no dropout.
 
     "flash_attention"
-        The flash-attn package, for GPUs and 16-bit inputs, using the newest of versions 4, 3 and 2
-        that is installed. Self and cross attention, sliding windows, no dropout.
+        The flash-attn package for GPUs, using the newest of versions 4, 3 and 2 that is installed.
+        Self and cross attention, sliding windows, no dropout.
 
     For all three, a sliding window needs queries and keys of the same length.
 
@@ -455,7 +454,7 @@ class TritonAttentionWrapper(AttentionWrapper):
 
 
 class FlashAttentionWrapper(AttentionWrapper):
-    """flash-attn, for GPUs and 16-bit inputs, using the newest of versions 4, 3 and 2 that is installed.
+    """flash-attn for GPUs, using the newest of versions 4, 3 and 2 that is installed.
 
     Self and cross attention, sliding windows, no dropout.
     """
@@ -506,8 +505,6 @@ class FlashAttentionWrapper(AttentionWrapper):
         dropout_p: float = 0.0,
     ):
         check_window_lengths(query, key, window_size)
-        if query.dtype not in (torch.float16, torch.bfloat16):
-            raise ValueError(f"{self.describe()} needs float16 or bfloat16 inputs, got {query.dtype}.")
         window = (-1, -1) if window_size is None else (window_size, window_size)
         # flash-attn takes (batch, points, heads, channels).
         query, key, value = (t.transpose(1, 2) for t in (query, key, value))
