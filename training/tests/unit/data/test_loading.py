@@ -161,6 +161,52 @@ def test_grouped_policy_check_dataset_compatibility_accepts_datasets_with_same_v
     policy.check_dataset_compatibility(dataset)
 
 
+def build_grouped_dataset(
+    mocker: MockFixture,
+    sizes: tuple[int, ...],
+) -> tuple[GroupedDatasetLoadingPolicy, ConcatDataset]:
+    policy = GroupedDatasetLoadingPolicy(OmegaConf.create([["dataset_a", "dataset_b"], ["dataset_c", "dataset_d"]]))
+    sizes_by_combination = dict(zip(policy.combinations, sizes, strict=True))
+    data_readers = {name: mocker.MagicMock() for group in policy.dataset_groups for name in group}
+    relative_date_indices = {name: [0] for name in data_readers}
+
+    def make_domain(readers: dict, _indices: dict, **_kwargs: object) -> TensorDataset:
+        domain = TensorDataset(torch.arange(sizes_by_combination[tuple(readers)]))
+        domain.data_readers = readers
+        return domain
+
+    mocker.patch("anemoi.training.data.loading.MultiDataset", side_effect=make_domain)
+    return policy, policy.build_dataset(data_readers, relative_date_indices)
+
+
+def test_grouped_policy_batch_sampler_batches_each_combination_in_order(mocker: MockFixture) -> None:
+    policy, dataset = build_grouped_dataset(mocker, (8, 4, 6, 2))
+
+    sampler = policy.build_batch_sampler(
+        dataset,
+        num_replicas=1,
+        rank=0,
+        shuffle=False,
+        seed=0,
+        batch_size=2,
+        drop_last=False,
+    )
+
+    assert isinstance(sampler, MultiDomainBatchSampler)
+    assert list(sampler) == [
+        [0, 1],
+        [2, 3],
+        [4, 5],
+        [6, 7],
+        [8, 9],
+        [10, 11],
+        [12, 13],
+        [14, 15],
+        [16, 17],
+        [18, 19],
+    ]
+
+
 def test_multi_domain_sampler_preserves_domain_order_across_sample_groups() -> None:
     group_0 = list(make_sampler((8, 4), num_replicas=2, rank=0))
     group_1 = list(make_sampler((8, 4), num_replicas=2, rank=1))
