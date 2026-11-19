@@ -98,7 +98,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         n_step_input: dict[str, int],
         n_step_output: dict[str, int],
     ) -> None:
-
         model_config = DotDict(model_config)
 
         transport_params = model_config.model.transport
@@ -635,6 +634,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 keep_x_dst_sharded=in_out_sharded[dataset_name],
                 model_comm_group=model_comm_group,
                 mapper_kwargs=bwd_mapper_kwargs[dataset_name],
+                target_forcings=target_forcings.get(dataset_name) if target_forcings is not None else None,
             )
 
             target_view = noisy_target[dataset_name]

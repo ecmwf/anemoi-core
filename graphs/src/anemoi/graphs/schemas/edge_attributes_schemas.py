@@ -72,10 +72,22 @@ class TimedeltasSchema(BaseModel):
     "Torch floating-point output dtype."
 
 
+class NodeFeaturesSchema(BaseModel):
+    target_: Literal["anemoi.graphs.edges.attributes.NodeFeatures"] = Field(..., alias="_target_")
+    "Runtime node feature edge attribute."
+    node_axis: Literal["source", "target"]
+    "Endpoint from which node features are propagated."
+    num_features: int = Field(gt=0)
+    "Number of node feature columns propagated to each edge."
+    dtype: str = Field(default="float32")
+    "Torch floating-point output dtype."
+
+
 EdgeAttributeSchema = (
     BaseEdgeAttributeSchema
     | EdgeAttributeFromNodeSchema
     | DirectionalHarmonicsSchema
     | RadialBasisFeaturesSchema
     | TimedeltasSchema
+    | NodeFeaturesSchema
 )

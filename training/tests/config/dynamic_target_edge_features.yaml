@@ -1,0 +1,115 @@
+# (C) Copyright 2026- Anemoi contributors.
+# Licensed under the Apache Licence Version 2.0.
+# Synthetic model fixture; static nodes and edges are supplied by the test.
+data:
+  format: zarr
+  frequency: 3h
+  datasets:
+    data:
+      forcing: [u]
+      diagnostic: []
+      processors: {}
+    obs:
+      forcing: [level]
+      diagnostic: [TURBIND]
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            max: [TURBIND]
+
+graph:
+  overwrite: false
+  nodes: {}
+  edges:
+    - source_name: hidden
+      target_name: obs
+      edge_builders:
+        - _target_: anemoi.graphs.edges.CutOffEdges
+          cutoff_distance_km: 35
+          max_num_neighbours: 5
+      attributes:
+        edge_length:
+          _target_: anemoi.graphs.edges.attributes.EdgeLength
+          norm: unit-std
+        edge_dirs:
+          _target_: anemoi.graphs.edges.attributes.EdgeDirection
+          norm: unit-std
+        level_from_obs:
+          _target_: anemoi.graphs.edges.attributes.NodeFeatures
+          node_axis: target
+          num_features: 1
+        time_from_obs:
+          _target_: anemoi.graphs.edges.attributes.Timedeltas
+          node_axis: target
+          scale_seconds: 3600.0
+
+model:
+  model:
+    _target_: anemoi.models.models.AnemoiModelEncProcDec
+    hidden_nodes_name: hidden
+    latent_skip: true
+  layer_kernels:
+    LayerNorm:
+      _target_: torch.nn.LayerNorm
+    Linear:
+      _target_: torch.nn.Linear
+    Activation:
+      _target_: torch.nn.GELU
+    QueryNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      bias: false
+    KeyNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      bias: false
+  encoders:
+    inputs:
+      source_datasets: [data]
+      dataset_fusing_strategy: none
+      mapper: &mapper
+        _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+        num_channels: 8
+        trainable_size: 0
+        sub_graph_edge_attributes: [edge_length, edge_dirs]
+        num_chunks: 1
+        mlp_hidden_ratio: 4
+        num_heads: 2
+        qk_norm: false
+        cpu_offload: false
+        gradient_checkpointing: true
+        layer_kernels: ${model.layer_kernels}
+        shard_strategy: edges
+        graph_attention_backend: pyg
+        edge_pre_mlp: false
+  processor:
+    <<: *mapper
+    _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+    num_layers: 1
+  latent_aggregator:
+    _target_: anemoi.models.layers.aggregator.SumAggregator
+  decoders:
+    observations:
+      target_datasets: [obs]
+      target_node_features: [coordinates, target_forcings]
+      target_edge_features: [level]
+      mapper:
+        <<: *mapper
+        _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+        sub_graph_edge_attributes: [edge_length, edge_dirs, level_from_obs, time_from_obs]
+        initialise_data_extractor_zero: false
+  node_trainable_parameters:
+    data: 0
+    obs: 0
+    hidden: 0
+  residual:
+    datasets: {}
+  bounding:
+    datasets:
+      obs: []
+  output_mask:
+    datasets:
+      data:
+        _target_: anemoi.training.utils.masks.NoOutputMask
+      obs:
+        _target_: anemoi.training.utils.masks.NoOutputMask

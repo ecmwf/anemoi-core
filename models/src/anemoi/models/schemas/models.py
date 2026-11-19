@@ -213,6 +213,8 @@ class DecodersSchema(BaseModel):
         default_factory=lambda: ["encoded_data"]
     )
     "Whether to use the encoded latents from the encoder."
+    target_edge_features: list[str] = Field(default_factory=list)
+    "Output-time forcing variables copied to runtime target-node edge attributes, in this order."
     mapper: Union[
         GNNDecoderSchema,
         GraphTransformerDecoderSchema,
