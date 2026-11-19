@@ -252,13 +252,7 @@ class EnsembleTraining(BaseTrainingModule):
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for i, task_step_kwargs in enumerate(task_steps):
             y_pred = self(x, **task_step_kwargs)
-            y_pred = self.task.mask_predictions(
-                y_pred,
-                batch,
-                data_indices=self.data_indices,
-                pre_processors=self.model.pre_processors,
-                **task_step_kwargs,
-            )
+            y_pred = self._apply_night_mask(y_pred, batch, **task_step_kwargs)
 
             y = self.task.get_targets(batch, **task_step_kwargs)
 

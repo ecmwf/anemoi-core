@@ -768,6 +768,17 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
     "Rebuild tendency pre/post-processing statistics from the current dataset."
 
 
+class NightMaskSchema(BaseModel):
+    """Zero accumulated fields in the predictions where the sun was down for the whole accumulation window."""
+
+    variables: list[str] = Field(example=["ssr", "ssrd", "fdir"])
+    "Model output variables set to zero at night."
+    accumulation_period: str = Field(example="1h")
+    "Period over which the variables are accumulated: zeroed where the mask variable is <= 0 at t and at t - period."
+    mask_variable: str = Field(default="insolation", example="insolation")
+    "Forcing in the dataset whose non-positive values mark night."
+
+
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
@@ -823,6 +834,8 @@ class BaseTrainingSchema(BaseModel):
     "Optimizer and LR scheduler configuration."
     metrics: DatasetDict[list[str]]
     "List of metrics"
+    night_mask: DatasetDict[NightMaskSchema] | None = Field(default=None)
+    "Optional night mask applied to the predictions before the loss. Not supported by transport methods."
     ensemble_size_per_device: PositiveInt = 1
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
 

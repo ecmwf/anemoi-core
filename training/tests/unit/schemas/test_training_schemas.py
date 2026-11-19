@@ -242,3 +242,26 @@ def test_combined_loss_with_multiscale_mixed_mode_rejected() -> None:
                 ],
             },
         )
+
+
+def test_night_mask_schema() -> None:
+    from pydantic import TypeAdapter
+
+    from anemoi.models.schemas.schema_utils import DatasetDict
+    from anemoi.training.schemas.training import BaseTrainingSchema
+    from anemoi.training.schemas.training import NightMaskSchema
+
+    cfg = {"variables": ["ssr", "ssrd"], "accumulation_period": "1h"}
+    assert NightMaskSchema(**cfg).mask_variable == "insolation"  # default
+
+    adapter = TypeAdapter(DatasetDict[NightMaskSchema] | None)
+    assert adapter.validate_python(None) is None
+    assert adapter.validate_python(cfg).variables == ["ssr", "ssrd"]  # single dataset form
+    assert adapter.validate_python({"datasets": {"data": cfg}})["datasets"]["data"].accumulation_period == "1h"
+
+    with pytest.raises(ValidationError):  # unknown keys and missing required keys are rejected
+        NightMaskSchema(**cfg, unknown=1)
+    with pytest.raises(ValidationError):
+        NightMaskSchema(variables=["ssr"])
+
+    assert BaseTrainingSchema.model_fields["night_mask"].default is None  # off by default

@@ -47,6 +47,7 @@ from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import build_output_masks
+from anemoi.training.utils.night_mask import NightMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 
@@ -218,6 +219,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.config = config
 
         self.data_indices = data_indices
+
+        self.night_masks = self._build_night_masks(config, data_indices)
 
         self.save_hyperparameters()
 
@@ -435,6 +438,58 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 for metric_name, val_metric_config in validation_metrics_configs.items()
             },
         )
+
+    supports_night_mask: bool = True
+
+    def _build_night_masks(self, config: BaseSchema, data_indices: dict[str, IndexCollection]) -> dict[str, NightMask]:
+        """Build the optional ``training.night_mask`` of each dataset, validated against the data indices."""
+        night_mask_config = config.training.get("night_mask", None)
+        if night_mask_config is None:
+            return {}
+        if not self.supports_night_mask:
+            msg = f"training.night_mask is not supported by {type(self).__name__}."
+            raise ValueError(msg)
+
+        night_masks = {}
+        for dataset_name, dataset_config in get_multiple_datasets_config(night_mask_config).items():
+            if dataset_config is None:
+                continue
+            if dataset_name not in data_indices:
+                msg = f"training.night_mask: unknown dataset '{dataset_name}' (datasets: {list(data_indices)})."
+                raise ValueError(msg)
+            night_mask = NightMask(
+                variables=list(dataset_config.variables),
+                accumulation_period=dataset_config.accumulation_period,
+                mask_variable=dataset_config.get("mask_variable", "insolation"),
+            )
+            night_mask.validate(data_indices[dataset_name], dataset_name)
+            LOGGER.info("Dataset %s: %s", dataset_name, night_mask)
+            night_masks[dataset_name] = night_mask
+        return night_masks
+
+    def _apply_night_mask(
+        self,
+        y_pred: dict[str, torch.Tensor],
+        batch: dict[str, torch.Tensor],
+        **task_kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Apply ``training.night_mask`` (if any) to the predictions of the current task step."""
+        # getattr: some tests (and subclasses) build the module without running ``__init__``
+        night_masks = getattr(self, "night_masks", None)
+        if not night_masks:
+            return y_pred
+
+        y_pred = dict(y_pred)
+        for dataset_name, night_mask in night_masks.items():
+            if dataset_name in y_pred:
+                y_pred[dataset_name] = night_mask.apply(
+                    y_pred[dataset_name],
+                    batch[dataset_name],
+                    data_indices=self.data_indices[dataset_name],
+                    pre_processors=self.model.pre_processors[dataset_name],
+                    time_indices=night_mask.time_indices(self.task, **task_kwargs),
+                )
+        return y_pred
 
     def forward(self, x: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
         """Forward method.

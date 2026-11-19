@@ -407,6 +407,47 @@ normalisation. Another option is to impute with a given constant.
                _target_: anemoi.models.preprocessing.imputer.InputImputer
                config: ${data.datasets.your_dataset_name.imputer}
 
+*************
+ Night mask
+*************
+
+Accumulated radiation fields such as ``ssr``, ``ssrd`` or ``fdir`` are
+exactly zero where the sun was down for the whole accumulation window.
+The ``night_mask`` option sets the predictions of the listed variables to
+zero at those points before the loss is computed, so the model does not
+have to learn the zeros and the loss and validation scores see them.
+
+.. code:: yaml
+
+   training:
+      night_mask:
+         variables: [ssr, ssrd, fdir] # model outputs to mask
+         accumulation_period: 1h # period over which they are accumulated
+         mask_variable: insolation # default; a forcing of the dataset
+
+A field valued at time :math:`t` accumulated over
+:math:`(t - \text{accumulation\_period}, t]` is zeroed where the mask
+variable is :math:`\le 0` both at :math:`t` and at :math:`t -
+\text{accumulation\_period}`. Testing :math:`t` alone would also zero the
+hour that follows sunset, when the sun was still up for part of the
+window.
+
+-  The mask variable is read from the batch, so the batch must contain
+   the times :math:`t` and :math:`t - \text{accumulation\_period}`. This
+   is the case for the temporal downscaler with hourly outputs, and for a
+   forecaster whose accumulation period equals its timestep. If
+   :math:`t - \text{accumulation\_period}` is not in the batch for an
+   output (for example an output at the left boundary of a temporal
+   downscaler), only :math:`t` is used for it and a warning is logged.
+-  It works with any task and with the ``SingleTraining`` and
+   ``EnsembleTraining`` methods. It is not supported by the transport
+   (diffusion and flow) methods, and requires predictions and batch on the
+   same grid.
+-  For multiple datasets, use ``night_mask: {datasets: {name: {...}}}``.
+-  It is applied in training and validation only. At inference time use the
+   ``night_mask`` post-processor of anemoi-inference, which gives the
+   same result.
+
 ****************
  Loss Functions
 ****************

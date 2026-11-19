@@ -272,6 +272,7 @@ def _wire_training_module(
     obj.grid_shard_sizes = {"data": None}
     obj.grid_shard_slice = {"data": None}
     obj.output_mask = {name: NoOutputMask() for name in data_indices}
+    obj.night_masks = {}
     if task is not None:
         obj.task = task
 

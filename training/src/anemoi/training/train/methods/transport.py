@@ -309,6 +309,8 @@ TRANSPORT_OBJECTIVE_CLASSES = {
 class BaseTransportTraining(BaseTrainingModule):
     """Shared training code for transport methods that corrupt targets before prediction."""
 
+    supports_night_mask = False  # the prediction is a noised-target objective, not the accumulated fields
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._prediction_mode = self._get_prediction_mode_cls()(self)
