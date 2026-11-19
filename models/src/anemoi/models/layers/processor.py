@@ -101,9 +101,9 @@ class BaseProcessor(nn.Module, ABC):
 
         self.layer_factory = load_layer_kernels(layer_kernels)
 
-        assert (
-            num_layers % num_chunks == 0
-        ), f"Number of processor layers ({num_layers}) has to be divisible by the number of processor chunks ({num_chunks})."
+        assert num_layers % num_chunks == 0, (
+            f"Number of processor layers ({num_layers}) has to be divisible by the number of processor chunks ({num_chunks})."
+        )
 
     def offload_layers(self, cpu_offload):
         if cpu_offload:
@@ -195,9 +195,9 @@ class PointWiseMLPProcessor(BaseProcessor):
     ) -> Tensor:
         refuse_dropout_when_sharded(self, model_comm_group)
         if model_comm_group:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), f"Only batch size of 1 is supported when model is sharded accross {model_comm_group.size()} GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                f"Only batch size of 1 is supported when model is sharded accross {model_comm_group.size()} GPUs"
+            )
 
         (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group, **kwargs)
 
@@ -311,9 +311,9 @@ class TransformerProcessor(BaseProcessor):
     ) -> Tensor:
         refuse_dropout_when_sharded(self, model_comm_group)
         if model_comm_group:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded accross GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                "Only batch size of 1 is supported when model is sharded accross GPUs"
+            )
 
         (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
 

@@ -140,7 +140,6 @@ class AnemoiCheckpoint(ModelCheckpoint):
                 }
 
         if self._tracker_name == "mlflow":
-
             run_id = trainer.logger.run_id
             run = trainer.logger._mlflow_client.get_run(run_id)
 
@@ -225,6 +224,10 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             self._last_global_step_saved = trainer.global_step
 
+            # Add a new uuid for the training Lightning checkpoint
+            checkpoint_uuid = str(uuid.uuid4())
+            trainer.lightning_module._hparams["metadata"]["uuid"] = checkpoint_uuid
+
         trainer.strategy.barrier()
 
         # saving checkpoint used for pytorch-lightning based training
@@ -240,10 +243,6 @@ class AnemoiCheckpoint(ModelCheckpoint):
             from packaging.version import Version
 
             if Version(version("torch")) >= Version("2.6"):
-                # Add a new uuid
-                checkpoint_uuid = str(uuid.uuid4())
-                trainer.lightning_module._hparams["metadata"]["uuid"] = checkpoint_uuid
-
                 # Extract and save metadata for lightning checkpoint
                 model = self._torch_drop_down(trainer)
                 metadata = model.metadata.copy()

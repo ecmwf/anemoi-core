@@ -228,9 +228,9 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
 
         if reversed_num_nearest_neighbours is None:
             reversed_num_nearest_neighbours = num_nearest_neighbours
-        assert isinstance(
-            reversed_num_nearest_neighbours, int
-        ), "Reversed number of nearest neighbours must be an integer."
+        assert isinstance(reversed_num_nearest_neighbours, int), (
+            "Reversed number of nearest neighbours must be an integer."
+        )
         assert reversed_num_nearest_neighbours > 0, "Reversed number of nearest neighbours must be positive."
 
         self.num_nearest_neighbours = num_nearest_neighbours

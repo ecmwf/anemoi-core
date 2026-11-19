@@ -102,9 +102,9 @@ def test_transformer_processor_forward(transformer_processor, transformer_proces
     # Check gradients
     for param in transformer_processor.parameters():
         assert param.grad is not None, f"param.grad is None for {param}"
-        assert (
-            param.grad.shape == param.shape
-        ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+        assert param.grad.shape == param.shape, (
+            f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+        )
 
 
 def test_transformer_processor_accepts_fractional_mlp_hidden_ratio(transformer_processor_init):
