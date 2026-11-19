@@ -50,6 +50,8 @@ class TabularSample(BaseSample):
 
     source_type: ClassVar[type[TabularSource]] = TabularSource
     template_type: ClassVar[type[TabularTemplate]] = TabularTemplate
+    REQUIRED_AXES: ClassVar[tuple[str, ...]] = ("grid", "variables")
+    OPTIONAL_AXES: ClassVar[tuple[str, ...]] = ("ensemble",)
     _METADATA_ATTRS: ClassVar[tuple[str, ...]] = ("variables", "statistics")
     _DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ("coordinates", "timedeltas", "boundaries", "shard_sizes")
 

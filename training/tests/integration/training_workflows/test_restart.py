@@ -323,17 +323,18 @@ def _predict_from_inference_checkpoint(path: Path) -> None:
             "data_type": "gridded",
             "latitudes": supporting_arrays[name]["latitudes"],
             "longitudes": supporting_arrays[name]["longitudes"],
-            "layout": ("time", "ensemble", "grid", "variables"),
+            # as anemoi-inference sends it: one member per run, so no ensemble axis
+            "layout": ("time", "grid", "variables"),
         }
         grid = geometry["latitudes"].size
-        inputs[name] = {**geometry, "values": torch.randn(n_input, 1, grid, len(input_names)), "variables": input_names}
+        inputs[name] = {**geometry, "values": torch.randn(n_input, grid, len(input_names)), "variables": input_names}
         templates[name] = {**geometry, "variables": output_names}
         forcings[name] = {
             **geometry,
-            "values": torch.randn(n_output, 1, grid, len(forcing_names)),
+            "values": torch.randn(n_output, grid, len(forcing_names)),
             "variables": forcing_names,
         }
-        expected_shapes[name] = (n_output, 1, grid, len(output_names))
+        expected_shapes[name] = (n_output, grid, len(output_names))
 
     # Few sampling steps: the test checks that the model runs, not what it predicts.
     kwargs = {"schedule_params": {"num_steps": 2}} if isinstance(model.model, AnemoiTransportModelEncProcDec) else {}
@@ -341,6 +342,7 @@ def _predict_from_inference_checkpoint(path: Path) -> None:
         prediction = model.predict_step(inputs, target_template=templates, target_forcing=forcings, **kwargs)
 
     for name, shape in expected_shapes.items():
+        assert tuple(prediction[name]["layout"]) == templates[name]["layout"], f"{name}: {prediction[name]['layout']}"
         assert tuple(prediction[name]["values"].shape) == shape, f"{name}: {tuple(prediction[name]['values'].shape)}"
         assert torch.isfinite(prediction[name]["values"]).all(), f"{name}: non-finite prediction"
 

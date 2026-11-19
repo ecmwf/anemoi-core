@@ -48,6 +48,27 @@ __all__ = [
 ]
 
 
+def _layout_with_axes(
+    layout: TensorLayout | Sequence[str],
+    sample_cls: type[BaseSample],
+    data_type: str,
+) -> TensorLayout:
+    """Return ``layout`` as a :class:`TensorLayout`, checking that it names the kind's required axes.
+
+    The required axes are checked against the names given: :meth:`TensorLayout.from_tuple`
+    places ``grid`` and ``variables`` even when they are not named.
+    """
+    names = layout.axis_names if isinstance(layout, TensorLayout) else tuple(layout)
+    missing = [name for name in sample_cls.REQUIRED_AXES if name not in names]
+    if missing:
+        msg = (
+            f"A {data_type!r} layout must name the axes {list(sample_cls.REQUIRED_AXES)}; {names} lacks {missing}. "
+            f"It may leave out {list(sample_cls.OPTIONAL_AXES)}, which then have size 1."
+        )
+        raise ValueError(msg)
+    return layout if isinstance(layout, TensorLayout) else TensorLayout.from_tuple(*names)
+
+
 def create_batched_struct(
     *,
     data_type: str,
@@ -75,9 +96,13 @@ def create_batched_struct(
     variables : Sequence[str]
         Variable names along the layout's ``variables`` axis, in order.
     layout : TensorLayout or Sequence[str]
-        The per-sample layout (no batch axis), or its axis names in order. Any axis
-        order is accepted: ``values`` is permuted to the canonical order of
-        :attr:`TensorLayout.AXES`, and the sample or template carries the canonical layout.
+        The per-sample layout (no batch axis), or its axis names in order. It names
+        exactly the axes of ``values``. It must name the kind's
+        :attr:`~BaseSample.REQUIRED_AXES` and may leave out its
+        :attr:`~BaseSample.OPTIONAL_AXES` (e.g. ``ensemble``), which are then inserted
+        with size 1. Any axis order is accepted: ``values`` is put in the canonical order
+        of :attr:`TensorLayout.AXES`, and the sample or template carries the canonical
+        layout, optional axes included.
     latitudes, longitudes : array-like
         ``(N,)`` coordinates in **degrees**; converted to radians here.
     values : torch.Tensor, optional
@@ -118,18 +143,19 @@ def create_batched_struct(
     coordinates = torch.from_numpy(np.stack((latitudes, longitudes), axis=-1)).to(device)
     num_points = coordinates.shape[0]
 
-    if not isinstance(layout, TensorLayout):
-        layout = TensorLayout.from_tuple(*layout)
+    layout = _layout_with_axes(layout, sample_cls, data_type)
     variables = list(variables)
 
-    # Callers may order the axes freely; everything downstream sees the canonical order.
+    # Callers may order the axes freely and leave out the optional ones; everything downstream
+    # sees the canonical order with every optional axis present.
+    internal = TensorLayout.from_tuple(
+        *(name for name in TensorLayout.AXES if layout.has_axis(name) or name in sample_cls.OPTIONAL_AXES),
+    )
     if values is not None:
-        if values.ndim != layout.ndim:
-            msg = f"values of shape {tuple(values.shape)} does not match the layout {layout!r}."
-            raise ValueError(msg)
-        if not layout.is_canonical:
-            values = values.permute(layout.canonical_permutation).contiguous()
-    layout = layout.canonical()
+        conformed = layout.conform_to(values, internal)
+        # Only a reordered tensor is copied; a reader's tensor already in this layout is kept as is.
+        values = values if conformed is values else conformed.contiguous()
+    layout = internal
 
     if values is None:
         return sample_cls.template_from_validated(

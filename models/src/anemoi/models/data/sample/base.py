@@ -111,6 +111,14 @@ class BaseSample(ABC):
     # The :class:`BaseTemplate` subclass this kind uses for inference target templates.
     template_type: ClassVar[type[BaseTemplate]]
 
+    # Axes a caller's layout must name (see :func:`~anemoi.models.data.sample.create_batched_struct`).
+    REQUIRED_AXES: ClassVar[tuple[str, ...]] = ("grid", "variables")
+
+    # Axes a caller may leave out of its tensor and layout: they are inserted with size 1, so every
+    # sample of a kind carries them (as the training readers emit them), and a prediction is returned
+    # without them when the target template leaves them out.
+    OPTIONAL_AXES: ClassVar[tuple[str, ...]] = ()
+
     # Fields that describe the dataset rather than the sample: identical across the batch.
     _METADATA_ATTRS: ClassVar[tuple[str, ...]] = ("variables", "statistics")
 
