@@ -35,40 +35,24 @@ COMBINE = ("all", "any")
 class ForcingMask:
     """Set predicted variables to fixed values where a condition on a forcing holds.
 
-    The condition is ``forcing <operator> threshold`` (e.g. ``insolation <= 0``). It is evaluated on the forcing at
-    the time of each output plus each of the ``offsets`` (relative to the output time) and combined over the offsets
-    with ``all`` or ``any``. Where the combined condition holds, the predictions of the variables of each entry of
-    ``fill_values`` are set to its value. The forcing is read from the batch, so any task whose batch holds the
-    required times works, and the mask is applied before the loss, so the loss and the validation metrics see the
-    masked predictions.
-
-    The forcing must be a forcing variable of the dataset: it is known at inference time too, unlike a prognostic or
-    diagnostic variable, whose true value must not decide the prediction. The mask is not applied at inference by
-    anemoi-training.
-
-    The configuration has the same layout as the imputer and the conditional post-processors: the fill value is
-    the key and the variables the list, next to the other options (see :meth:`from_config`).
-
-    Example: zero hourly accumulated radiation where the sun was down for the whole accumulation window, that is
-    where ``insolation <= 0`` both at ``t`` and at ``t - 1h``::
-
-        ForcingMask(mask_variable="insolation", fill_values={0.0: ["ssr"]}, offsets=["0h", "-1h"])
+    The condition ``forcing <operator> threshold`` is evaluated at each output time plus each offset and combined
+    over the offsets with ``all`` or ``any``. The forcing is read from the batch and the mask is applied to the
+    predictions before the loss. It is not applied at inference.
 
     Parameters
     ----------
     mask_variable : str
         Forcing the condition is evaluated on.
     fill_values : Mapping[float, list[str]]
-        For each fill value, in physical units, the model output variables set to it where the condition holds.
+        Model output variables to set to each value (physical units) where the condition holds.
     operator : str, optional
-        Comparison with the threshold: ``lt``, ``le``, ``gt`` or ``ge``, by default ``le``.
+        ``lt``, ``le``, ``gt`` or ``ge``, by default ``le``.
     threshold : float, optional
-        Threshold, in physical (not normalised) units, by default 0.
+        Threshold in physical units, by default 0.
     offsets : list[str], optional
-        Times, relative to each output time, at which the forcing is evaluated, e.g. ``["0h", "-1h"]``. Strings only
-        (a bare number is not a valid duration). By default ``["0h"]``: the output time only.
+        Times relative to each output at which the forcing is evaluated, as duration strings (e.g. ``["0h", "-1h"]``).
     combine : str, optional
-        ``all`` (default): the condition must hold at every offset; ``any``: at one offset at least.
+        ``all`` (default) or ``any`` of the offsets must satisfy the condition.
     """
 
     OPTIONS = ("mask_variable", "operator", "threshold", "offsets", "combine")
@@ -106,7 +90,7 @@ class ForcingMask:
 
         offsets = [offsets] if isinstance(offsets, str) else list(offsets)
         if not offsets or not all(isinstance(o, str) for o in offsets):
-            msg = f"forcing_mask: `offsets` must be a non-empty list of durations as strings, got {offsets!r}."
+            msg = f"forcing_mask: `offsets` must be a non-empty list of duration strings, got {offsets!r}."
             raise ValueError(msg)
 
         self.mask_variable = mask_variable
@@ -121,24 +105,11 @@ class ForcingMask:
 
     @classmethod
     def from_config(cls, config: Mapping) -> ForcingMask:
-        """Build from a dictionary laid out like the imputer configuration.
-
-        Besides ``mask_variable`` (required), ``operator``, ``threshold``, ``offsets`` and ``combine`` (optional,
-        see the class), the keys are the fill values and the entries the variables set to them. ``default`` may
-        be given as ``"none"`` for consistency with the imputer: there is no default fill value::
-
-            mask_variable: insolation
-            operator: le
-            threshold: 0
-            offsets: [0h, -1h]
-            default: "none"
-            0.0: [ssr, ssrd, fdir]
-            273.15: [t2m]
-        """
+        """Build from a config laid out like the imputer: numeric keys are fill values, entries their variables."""
         config = dict(config)
         default = config.pop("default", "none")
         if default not in ("none", None):
-            msg = f"forcing_mask: `default` must be 'none' (there is no default fill value), got {default!r}."
+            msg = f"forcing_mask: `default` must be 'none', got {default!r}."
             raise ValueError(msg)
         if "mask_variable" not in config:
             msg = "forcing_mask: `mask_variable` is required."
@@ -152,10 +123,7 @@ class ForcingMask:
                     raise TypeError
                 value = float(key)
             except (TypeError, ValueError):
-                msg = (
-                    f"forcing_mask: unknown key {key!r}: expected one of {[*cls.OPTIONS, 'default']} or a numeric "
-                    "fill value listing the variables to set to it."
-                )
+                msg = f"forcing_mask: unknown key {key!r}: expected an option or a numeric fill value."
                 raise ValueError(msg) from None
             if value in fill_values:
                 msg = f"forcing_mask: the fill value {value} is given more than once."
@@ -171,19 +139,13 @@ class ForcingMask:
         )
 
     def validate(self, data_indices: IndexCollection, dataset_name: str = "") -> None:
-        """Raise if the mask variable is not a forcing or a masked variable is not a model output."""
+        """Raise if the mask variable is not a forcing of the data or a masked variable is not a model output."""
         where = f" of dataset '{dataset_name}'" if dataset_name else ""
         if self.mask_variable not in data_indices.name_to_index:
-            msg = (
-                f"forcing_mask: mask variable '{self.mask_variable}' is not in the data{where}. "
-                "It must be a variable of the dataset (and not be removed from the data config)."
-            )
+            msg = f"forcing_mask: mask variable '{self.mask_variable}' is not in the data{where}."
             raise ValueError(msg)
         if self.mask_variable not in data_indices.forcing:
-            msg = (
-                f"forcing_mask: mask variable '{self.mask_variable}' is not a forcing{where}. "
-                "Only forcings can be used: they are known at inference time."
-            )
+            msg = f"forcing_mask: mask variable '{self.mask_variable}' is not a forcing{where}."
             raise ValueError(msg)
 
         not_outputs = [v for v in self.variables if v not in data_indices.model.output.name_to_index]
@@ -192,43 +154,27 @@ class ForcingMask:
             raise ValueError(msg)
 
     def time_indices(self, task: BaseTask, **step_kwargs: object) -> torch.Tensor:
-        """Batch positions of the forcing for each output and offset.
+        """Batch positions of the forcing, shape ``(n_outputs, n_offsets)``.
 
-        Positions refer to the time axis of the batch, as for the targets (``task.get_batch_output_indices``).
-        An offset whose time is not in the batch for an output (e.g. ``-1h`` for an output at the left boundary of a
-        temporal downscaler) is ignored for that output, and a warning is logged once. If none of the offsets is
-        in the batch for an output, an error is raised.
-
-        Returns
-        -------
-        torch.Tensor
-            Integer tensor of shape ``(n_outputs, n_offsets)``. Missing offsets repeat an available one, which
-            leaves ``all`` and ``any`` unchanged.
+        An offset whose time is not in the batch is ignored for that output (a warning is logged once) and an error
+        is raised if none is available.
         """
         batch_offsets = task.get_offsets()
         indices = []
         for output in task.get_output_offsets(**step_kwargs):
             available = [batch_offsets.index(output + o) for o in self.offsets if output + o in batch_offsets]
             if not available:
-                msg = (
-                    f"forcing_mask: for the output at {output}, none of the times {[str(o) for o in self.offsets]} "
-                    "relative to it is in the batch."
-                )
+                msg = f"forcing_mask: no offset {[str(o) for o in self.offsets]} is in the batch for {output}."
                 raise ValueError(msg)
             if len(available) < len(self.offsets) and not self._warned_missing_times:
-                LOGGER.warning(
-                    "forcing_mask: some of the offsets %s are not in the batch for the output at %s: they are ignored "
-                    "for such outputs.",
-                    [str(o) for o in self.offsets],
-                    output,
-                )
+                LOGGER.warning("forcing_mask: some offsets are not in the batch for the output at %s: ignored.", output)
                 self._warned_missing_times = True
-            indices.append(available + [available[0]] * (len(self.offsets) - len(available)))
+            indices.append(available + [available[0]] * (len(self.offsets) - len(available)))  # pad: all/any unchanged
         return torch.tensor(indices, dtype=torch.long)
 
     @staticmethod
     def _normaliser(pre_processors: nn.Module | None, n_variables: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """``(add, mul)`` of the normaliser: ``x_normalised = x * mul + add``. Identity if there is none."""
+        """``(add, mul)`` such that ``x_normalised = x * mul + add``; identity without a normaliser."""
         if pre_processors is not None:
             for processor in getattr(pre_processors, "processors", {}).values():
                 if hasattr(processor, "_norm_add") and hasattr(processor, "_norm_mul"):
@@ -244,28 +190,10 @@ class ForcingMask:
         pre_processors: nn.Module | None,
         time_indices: torch.Tensor,
     ) -> torch.Tensor:
-        """Mask the predictions of one dataset.
+        """Return a copy of the normalised predictions with the masked variables overwritten.
 
-        The threshold and the fill value are given in physical units and converted with the normaliser, which
-        increases with the physical value, so the comparison can be done on the normalised forcing.
-
-        Parameters
-        ----------
-        y_pred : torch.Tensor
-            Normalised predictions ``(batch, n_output_times, ensemble, grid, n_model_output)``.
-        batch : torch.Tensor
-            Normalised batch ``(batch, time, ensemble, grid, n_data)`` holding the forcing.
-        data_indices : IndexCollection
-            Data indices of the dataset.
-        pre_processors : nn.Module | None
-            Pre-processors of the dataset, to convert physical values to normalised ones.
-        time_indices : torch.Tensor
-            ``(n_outputs, n_offsets)`` batch positions from :meth:`time_indices`.
-
-        Returns
-        -------
-        torch.Tensor
-            Predictions with the variables overwritten where the condition holds; a new tensor.
+        ``y_pred`` is ``(batch, n_outputs, ensemble, grid, n_model_output)`` and ``batch`` is
+        ``(batch, time, ensemble, grid, n_data)``. The threshold and fill values are converted to normalised units.
         """
         name_to_index = data_indices.name_to_index
         model_output = data_indices.model.output.name_to_index
@@ -274,18 +202,14 @@ class ForcingMask:
         add, mul = add.to(device=y_pred.device, dtype=y_pred.dtype), mul.to(device=y_pred.device, dtype=y_pred.dtype)
 
         forcing_index = name_to_index[self.mask_variable]
-        threshold = self.threshold * mul[forcing_index] + add[forcing_index]
+        threshold = self.threshold * mul[forcing_index] + add[forcing_index]  # the normaliser is increasing
         holds = OPERATORS[self.operator](batch[..., forcing_index], threshold)  # (batch, time, ensemble or 1, grid)
 
-        time_indices = time_indices.to(holds.device)
-        per_offset = holds[:, time_indices]  # (batch, n_outputs, n_offsets, ensemble or 1, grid)
+        per_offset = holds[:, time_indices.to(holds.device)]  # (batch, n_outputs, n_offsets, ensemble or 1, grid)
         mask = per_offset.all(dim=2) if self.combine == "all" else per_offset.any(dim=2)
 
         if mask.shape[-1] != y_pred.shape[-2]:
-            msg = (
-                f"forcing_mask: the predictions have {y_pred.shape[-2]} grid points but the batch has "
-                f"{mask.shape[-1]}. The mask needs predictions and batch on the same grid."
-            )
+            msg = f"forcing_mask: {y_pred.shape[-2]} prediction grid points but {mask.shape[-1]} in the batch."
             raise ValueError(msg)
 
         output_index = torch.tensor([model_output[v] for v in self.variables], device=y_pred.device)

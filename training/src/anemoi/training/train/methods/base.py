@@ -476,7 +476,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         config: BaseSchema,
         data_indices: dict[str, IndexCollection],
     ) -> dict[str, ForcingMask]:
-        """Build the optional ``training.forcing_mask`` of each dataset, validated against the data indices."""
+        """Build and validate the optional ``training.forcing_mask`` of each dataset."""
         forcing_mask_config = config.training.get("forcing_mask", None)
         if forcing_mask_config is None:
             return {}
@@ -503,8 +503,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         batch: dict[str, torch.Tensor],
         **task_kwargs,
     ) -> dict[str, torch.Tensor]:
-        """Apply ``training.forcing_mask`` (if any) to the predictions of the current task step."""
-        # getattr: some tests (and subclasses) build the module without running ``__init__``
+        """Apply ``training.forcing_mask`` (if any) to the predictions."""
+        # getattr: some tests build the module without running ``__init__``
         forcing_masks = getattr(self, "forcing_masks", None)
         if not forcing_masks:
             return y_pred

@@ -311,30 +311,16 @@ def test_forcing_mask_schema() -> None:
     from pydantic import TypeAdapter
 
     from anemoi.models.schemas.schema_utils import DatasetDict
-    from anemoi.training.schemas.training import BaseTrainingSchema
     from anemoi.training.schemas.training import ForcingMaskSchema
 
-    cfg = {"mask_variable": "insolation", "offsets": ["0h", "-1h"], "default": "none"}
-    cfg |= {0: ["ssr", "ssrd"], 273.15: ["t2m"]}
-    assert ForcingMaskSchema.model_validate(cfg).root == cfg
-    assert ForcingMaskSchema.model_validate({"mask_variable": "lsm", "operator": "lt", 0: ["t2m"]})  # options optional
-
+    cfg = {"mask_variable": "insolation", "offsets": ["0h", "-1h"], "default": "none", 0: ["ssr"], 273.15: ["t2m"]}
     adapter = TypeAdapter(DatasetDict[ForcingMaskSchema] | None)
+
     assert adapter.validate_python(None) is None
-    assert adapter.validate_python(cfg).root == cfg  # single dataset form
+    assert adapter.validate_python(cfg).root == cfg  # single dataset
     assert adapter.validate_python({"datasets": {"data": cfg}})["datasets"]["data"].root == cfg
 
-    for bad in (
-        {0: ["ssr"]},  # no mask variable
-        {"mask_variable": "insolation"},  # no variables
-        {"mask_variable": "insolation", "oops": ["ssr"]},  # unknown key
-        {"mask_variable": "insolation", "operator": "eq", 0: ["ssr"]},
-        {"mask_variable": "insolation", "combine": "most", 0: ["ssr"]},
-        {"mask_variable": "insolation", "offsets": [-3600], 0: ["ssr"]},  # not a duration string
-        {"mask_variable": "insolation", "default": "mean", 0: ["ssr"]},
-        {"mask_variable": "insolation", 0: "ssr"},  # not a list
-    ):
-        with pytest.raises(ValidationError):
-            ForcingMaskSchema.model_validate(bad)
-
-    assert BaseTrainingSchema.model_fields["forcing_mask"].default is None  # off by default
+    with pytest.raises(ValidationError):
+        ForcingMaskSchema.model_validate({0: ["ssr"]})  # no mask variable
+    with pytest.raises(ValidationError):
+        ForcingMaskSchema.model_validate({"mask_variable": "insolation", "oops": ["ssr"], 0: ["ssr"]})

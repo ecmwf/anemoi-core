@@ -427,65 +427,33 @@ normalisation. Another option is to impute with a given constant.
  Forcing mask
 *************
 
-``forcing_mask`` overwrites the predictions of chosen variables with
-fixed values where a condition on a **forcing** holds, before the loss is
-computed. The model then does not have to learn those values, and the
-loss and the validation scores see them. A typical use is accumulated
-surface radiation (``ssr``, ``ssrd``, ``fdir``), which is exactly zero
-where the sun was down for the whole accumulation window.
-
-It is configured like the imputer and the conditional post-processors:
-the fill values are the keys and the variables set to them the lists.
+``forcing_mask`` sets the predictions of chosen variables to fixed values
+where a condition on a **forcing** holds, before the loss is computed. For
+example, accumulated radiation is exactly zero where the sun was down for
+the whole accumulation window. It is configured like the imputer: the fill
+values are the keys and the variables set to them the lists.
 
 .. code:: yaml
 
    training:
       forcing_mask:
-         mask_variable: insolation # the forcing the condition is on
+         mask_variable: insolation # a forcing of the dataset
          operator: le # lt, le, gt or ge (default le)
          threshold: 0 # physical units (default 0)
          offsets: [0h, -1h] # times relative to each output (default [0h])
          combine: all # all (default) or any of the offsets
-         default: "none" # optional; there is no default fill value
          0.0: [ssr, ssrd, fdir] # fill value (physical units): variables
-         273.15: [t2m] # other variables can get other values
 
-The condition ``mask_variable <operator> threshold`` is evaluated at the
-time of each output plus each offset and combined over the offsets with
-``combine``. The example above sets ``ssr``, ``ssrd`` and ``fdir`` to
-zero (and ``t2m`` to 273.15) where ``insolation <= 0`` both at :math:`t`
-and at :math:`t - 1\text{h}`. For a field accumulated over :math:`(t -
-1\text{h}, t]` this keeps the hour after sunset, when the sun was still
-up for part of the window, which testing :math:`t` alone would zero. Any
-other forcing works the same way, for example ``mask_variable: lsm``,
-``operator: lt``, ``threshold: 0.5`` to set a variable over the sea.
+Here ``ssr``, ``ssrd`` and ``fdir`` are set to zero where ``insolation <=
+0`` at both :math:`t` and :math:`t - 1\text{h}`. Testing :math:`t` alone
+would also zero the hour after sunset.
 
--  The mask variable must be a **forcing** of the dataset. Forcings are
-   known at inference time, whereas the true value of a prognostic or
-   diagnostic variable must not decide the prediction. A configuration
-   error is raised at start-up if it is not a forcing, is missing from the
-   data, or if a listed variable is not a model output or is listed under
-   two fill values.
 -  The forcing is read from the batch, so the batch must contain the
-   times :math:`t + \text{offset}`. This is the case for the temporal
-   downscaler with hourly outputs, and for a forecaster whose timestep
-   equals the offset. An offset whose time is not in the batch for an
-   output (for example :math:`-1\text{h}` for an output at the left
-   boundary of a temporal downscaler) is ignored for that output, and a
-   warning is logged. If none of the offsets is in the batch for an
-   output, an error is raised.
--  Offsets are duration strings such as ``0h``, ``-1h`` or ``30m``; a
-   bare number is not accepted.
--  It works with any task and with the ``SingleTraining`` and
-   ``EnsembleTraining`` methods. It is not supported by the transport
-   (diffusion and flow) methods, and requires predictions and batch on the
-   same grid.
--  For multiple datasets, use
-   ``forcing_mask: {datasets: {name: {...}}}``.
--  It is applied in training and validation only. For the radiation
-   example above, the ``night_mask`` filter of anemoi-transform gives the
-   same result at inference time, through the
-   ``forward_transform_filter`` post-processor of anemoi-inference.
+   times :math:`t + \text{offset}`. An offset that is not in the batch for
+   an output is ignored for it, with a warning.
+-  It works with the ``SingleTraining`` and ``EnsembleTraining`` methods,
+   not the transport methods, and applies in training and validation only.
+-  For multiple datasets, use ``forcing_mask: {datasets: {name: {...}}}``.
 
 ****************
  Loss Functions
