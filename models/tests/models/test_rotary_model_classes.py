@@ -23,16 +23,16 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.attention import MultiHeadSelfAttention
+from anemoi.models.layers.reduced_grid import ReducedGrid
 from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
 from anemoi.models.models import AnemoiEnsModelEncProcDec
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.models.models import AnemoiModelEncProcDecHierarchical
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
-from tests.layers.octahedral_points import octahedral
 
-DATA = octahedral(8)
-HIDDEN = [octahedral(4), octahedral(2), octahedral(1)]
+DATA = ReducedGrid.octahedral(8)
+HIDDEN = [ReducedGrid.octahedral(4), ReducedGrid.octahedral(2), ReducedGrid.octahedral(1)]
 NUM_CHANNELS = 32
 ROTARY = {"max_frequency": 30.0, "backend": "torch"}
 TRANSFORMER = {

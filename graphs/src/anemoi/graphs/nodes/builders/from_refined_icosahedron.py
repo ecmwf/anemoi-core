@@ -98,14 +98,27 @@ class TriNodes(IcosahedralNodes):
     """Nodes based on iterative refinements of an icosahedron.
 
     It depends on the trimesh Python library.
+
+    Attributes
+    ----------
+    ordering : str
+        "latlon" (by latitude, then longitude) or "diamonds" (the order the icosahedral
+        neighbourhood attention needs, see :mod:`anemoi.graphs.generate.icosahedral_diamonds`).
     """
 
     multi_scale_edge_cls: str = "anemoi.graphs.generate.multi_scale_edges.TriNodesEdgeBuilder"
 
+    def __init__(self, resolution: int | list[int], name: str, ordering: str = "latlon") -> None:
+        if ordering not in ("latlon", "diamonds"):
+            raise ValueError(f"Unknown node ordering '{ordering}'; use 'latlon' or 'diamonds'.")
+        self.ordering = ordering
+        super().__init__(resolution, name)
+        self.hidden_attributes = self.hidden_attributes | {"ordering"}
+
     def create_nodes(self) -> tuple[nx.Graph, np.ndarray, list[int]]:
         from anemoi.graphs.generate.tri_icosahedron import create_tri_nodes
 
-        return create_tri_nodes(resolution=max(self.resolutions))
+        return create_tri_nodes(resolution=max(self.resolutions), ordering=self.ordering)
 
 
 class HexNodes(IcosahedralNodes):

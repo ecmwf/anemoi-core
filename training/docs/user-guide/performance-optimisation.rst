@@ -307,10 +307,11 @@ processor:
 
    model.processor.attention_implementation: 'triton_attention'
 
-The Triton backend needs queries and keys of the same length, so the
-transformer mappers, between the data and the hidden grid, use PyTorch's
-scaled dot product attention by default. It runs on CPUs and GPUs and
-can also be selected for the processor:
+The Triton backend also does the cross attention of the transformer
+mappers, between the data and the hidden grid, and is their default.
+
+PyTorch's scaled dot product attention runs on CPUs and GPUs. It can be
+selected for the processor and the mappers:
 
 .. code::
 

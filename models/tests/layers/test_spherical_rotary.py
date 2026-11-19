@@ -19,6 +19,8 @@ from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.mapper import TransformerForwardMapper
 from anemoi.models.layers.processor import TransformerProcessor
+from anemoi.models.layers.reduced_grid import ReducedGrid
+from anemoi.models.layers.reduced_grid_neighbourhood import ReducedGridNeighbourhood
 from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
 from anemoi.models.layers.spherical_rotary import apply_rotary
 from anemoi.models.layers.spherical_rotary import build_spherical_rotary
@@ -27,15 +29,11 @@ from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.schemas.decoder import TransformerDecoderSchema
 from anemoi.models.schemas.encoder import TransformerEncoderSchema
 from anemoi.models.schemas.processor import TransformerProcessorSchema
-from tests.layers.octahedral_points import OctahedralPoints
-from tests.layers.octahedral_points import octahedral
-from tests.layers.window_neighbourhood import WindowNeighbourhood
-from tests.layers.window_neighbourhood import register_window_family
 
 ROTARY = {"max_frequency": 30.0, "backend": "torch"}
 
 
-def coords_of(grid: OctahedralPoints) -> torch.Tensor:
+def coords_of(grid: ReducedGrid) -> torch.Tensor:
     return grid.coords.float()
 
 
@@ -57,7 +55,7 @@ def turn(x: torch.Tensor, angles: torch.Tensor) -> torch.Tensor:
 
 
 def test_angles_turn_by_every_frequency_along_each_axis():
-    coords = coords_of(octahedral(4))
+    coords = coords_of(ReducedGrid.octahedral(4))
     angles = rotary_angles(coords, head_dim=16, max_frequency=30.0)
     xyz = unit_vectors(coords)
     frequencies = torch.tensor([1.0, 30.0], dtype=torch.float64)
@@ -75,12 +73,12 @@ def test_frequencies_are_spread_evenly_on_a_log_scale():
 @pytest.mark.parametrize(("head_dim", "max_frequency", "message"), [(4, 10.0, "at least 6"), (16, 0.5, "at least 1")])
 def test_angles_need_six_channels_and_a_frequency_of_at_least_one(head_dim, max_frequency, message):
     with pytest.raises(ValueError, match=message):
-        rotary_angles(coords_of(octahedral(4)), head_dim=head_dim, max_frequency=max_frequency)
+        rotary_angles(coords_of(ReducedGrid.octahedral(4)), head_dim=head_dim, max_frequency=max_frequency)
 
 
 def test_rotated_scores_depend_on_the_straight_line_from_query_to_key():
     """Turning the query by a and the key by b scores like turning the query alone by a - b."""
-    query_coords, key_coords = coords_of(octahedral(4)), coords_of(octahedral(8))
+    query_coords, key_coords = coords_of(ReducedGrid.octahedral(4)), coords_of(ReducedGrid.octahedral(8))
     q_angles = rotary_angles(query_coords, 16, 30.0)[:1]
     k_angles = rotary_angles(key_coords, 16, 30.0)[:5]
     # The difference of the angles is the frequency times the straight line between the points.
@@ -118,7 +116,7 @@ def test_turn_works_in_float32_for_low_precision_and_keeps_float64():
 
 def test_turn_in_bfloat16_is_as_close_as_rounding_the_input():
     """Angles of up to 100 radians become cosines and sines before anything is rounded to bfloat16."""
-    grid = octahedral(16)
+    grid = ReducedGrid.octahedral(16)
     module = SphericalRotaryEmbedding(coords_of(grid), None, 32, 100.0, backend="torch")
     x = torch.randn(2, 4, grid.num_points, 32, dtype=torch.float64, generator=torch.Generator().manual_seed(0))
     low, _ = module(x.bfloat16(), x.bfloat16())
@@ -132,14 +130,14 @@ def test_turn_in_bfloat16_is_as_close_as_rounding_the_input():
 
 
 def test_self_attention_shares_one_table_and_saves_none():
-    module = SphericalRotaryEmbedding(coords_of(octahedral(4)), None, 16, 30.0, backend="torch")
+    module = SphericalRotaryEmbedding(coords_of(ReducedGrid.octahedral(4)), None, 16, 30.0, backend="torch")
     assert module.shared and not hasattr(module, "key_cos")
     assert module.query_cos.dtype == torch.float32 and module.query_cos.is_contiguous()
     assert module.state_dict() == {}
 
 
 def test_cross_attention_turns_queries_and_keys_by_their_own_points():
-    query_grid, key_grid = octahedral(4), octahedral(8)
+    query_grid, key_grid = ReducedGrid.octahedral(4), ReducedGrid.octahedral(8)
     module = SphericalRotaryEmbedding(coords_of(query_grid), coords_of(key_grid), 16, 30.0, backend="torch")
     q = torch.randn(2, 3, query_grid.num_points, 16)
     k = torch.randn(2, 3, key_grid.num_points, 16)
@@ -149,7 +147,7 @@ def test_cross_attention_turns_queries_and_keys_by_their_own_points():
 
 
 def test_module_follows_the_node_order():
-    grid = octahedral(8)
+    grid = ReducedGrid.octahedral(8)
     coords, perm = shuffled(coords_of(grid))
     in_order = SphericalRotaryEmbedding(coords_of(grid), None, 16, 30.0, backend="torch")
     out_of_order = SphericalRotaryEmbedding(coords, None, 16, 30.0, backend="torch")
@@ -160,8 +158,8 @@ def test_module_follows_the_node_order():
 
 
 def test_module_keeps_the_dtype_and_checks_shapes():
-    module = SphericalRotaryEmbedding(coords_of(octahedral(4)), None, 16, 30.0, backend="torch")
-    n = octahedral(4).num_points
+    module = SphericalRotaryEmbedding(coords_of(ReducedGrid.octahedral(4)), None, 16, 30.0, backend="torch")
+    n = ReducedGrid.octahedral(4).num_points
     q, k = module(torch.randn(1, 2, n, 16, dtype=torch.bfloat16), torch.randn(1, 2, n, 16, dtype=torch.float16))
     assert (q.dtype, k.dtype) == (torch.bfloat16, torch.float16)
     with pytest.raises(ValueError, match="query points"):
@@ -170,10 +168,18 @@ def test_module_keeps_the_dtype_and_checks_shapes():
         module(torch.randn(1, 2, n, 32), torch.randn(1, 2, n, 32))
 
 
+def test_triton_backend_needs_a_gpu_tensor():
+    pytest.importorskip("triton")
+    module = SphericalRotaryEmbedding(coords_of(ReducedGrid.octahedral(4)), None, 16, 30.0, backend="triton")
+    x = torch.randn(1, 2, ReducedGrid.octahedral(4).num_points, 16)
+    with pytest.raises(ValueError, match="GPU"):
+        module(x, x)
+
+
 def test_module_can_be_listed_for_compilation():
     from anemoi.models.utils.compile import _get_compile_entry
 
-    module = SphericalRotaryEmbedding(coords_of(octahedral(4)), None, 16, 30.0, backend="torch")
+    module = SphericalRotaryEmbedding(coords_of(ReducedGrid.octahedral(4)), None, 16, 30.0, backend="torch")
     entry = {"module": "anemoi.models.layers.spherical_rotary.SphericalRotaryEmbedding"}
     assert _get_compile_entry(module, [entry]) is entry
 
@@ -190,14 +196,14 @@ def test_module_can_be_listed_for_compilation():
 )
 def test_invalid_settings_are_rejected(config, coords, message):
     with pytest.raises(ValueError, match=message):
-        build_spherical_rotary(config, 16, coords_of(octahedral(4)) if coords else None)
+        build_spherical_rotary(config, 16, coords_of(ReducedGrid.octahedral(4)) if coords else None)
 
 
 def test_settings_build_the_module():
-    coords = coords_of(octahedral(4))
+    coords = coords_of(ReducedGrid.octahedral(4))
     assert build_spherical_rotary(None, 16, coords) is None
     module = build_spherical_rotary({"max_frequency": 50}, 16, coords)
-    assert (module.backend, module.max_frequency, module.head_dim, module.shared) == ("torch", 50.0, 16, True)
+    assert (module.backend, module.max_frequency, module.head_dim, module.shared) == ("triton", 50.0, 16, True)
 
 
 # ------------------------------------------------------------------------------------ attention layers
@@ -215,15 +221,14 @@ def _capture_attention_inputs(layer):
 
 
 @pytest.mark.parametrize("attention_implementation", ["scaled_dot_product_attention", "neighbourhood"])
-def test_attention_layer_turns_queries_and_keys_after_their_norms(attention_implementation, monkeypatch):
-    register_window_family(monkeypatch)
-    grid = octahedral(4)
+def test_attention_layer_turns_queries_and_keys_after_their_norms(attention_implementation):
+    grid = ReducedGrid.octahedral(4)
     coords, _ = shuffled(coords_of(grid))
     settings = dict(num_heads=2, embed_dim=16, layer_kernels=load_layer_kernels(), qk_norm=True)
     settings["attention_implementation"] = attention_implementation
     if attention_implementation == "neighbourhood":
-        settings["neighbourhood"] = WindowNeighbourhood.from_config(
-            {"grid": "window", "radius": 7, "backend": "sdpa"}, coords
+        settings["neighbourhood"] = ReducedGridNeighbourhood.from_config(
+            {"grid": "octahedral", "kernel_size": [3, 5], "backend": "sdpa"}, coords
         )
     torch.manual_seed(0)
     plain = MultiHeadSelfAttention(**settings)
@@ -241,7 +246,7 @@ def test_attention_layer_turns_queries_and_keys_after_their_norms(attention_impl
 
 
 def test_cross_attention_layer_turns_queries_and_keys_by_their_own_nodes():
-    query_grid, key_grid = octahedral(4), octahedral(8)
+    query_grid, key_grid = ReducedGrid.octahedral(4), ReducedGrid.octahedral(8)
     settings = dict(
         num_heads=2,
         embed_dim=16,
@@ -270,7 +275,7 @@ def test_cross_attention_layer_turns_queries_and_keys_by_their_own_nodes():
 
 
 def test_processor_layers_share_one_module():
-    grid = octahedral(4)
+    grid = ReducedGrid.octahedral(4)
     processor = TransformerProcessor(
         num_layers=2,
         num_channels=16,
@@ -290,7 +295,7 @@ def test_processor_layers_share_one_module():
 
 
 def test_mapper_turns_destination_queries_and_source_keys():
-    data, hidden = octahedral(8), octahedral(4)
+    data, hidden = ReducedGrid.octahedral(8), ReducedGrid.octahedral(4)
     encoder = TransformerForwardMapper(
         in_channels_src=5,
         in_channels_dst=6,
@@ -358,7 +363,7 @@ def test_schemas_accept_rotary_settings(schema, target, extra):
     settings = {**COMMON, **extra, "_target_": target}
     assert schema(**settings).rotary_embeddings is None
     component = schema(**settings, rotary_embeddings={"max_frequency": 100})
-    assert (component.rotary_embeddings.max_frequency, component.rotary_embeddings.backend) == (100.0, "torch")
+    assert (component.rotary_embeddings.max_frequency, component.rotary_embeddings.backend) == (100.0, "triton")
     with pytest.raises(ValidationError):
         schema(**settings, rotary_embeddings={"max_frequency": 0.5})
     with pytest.raises(ValidationError):

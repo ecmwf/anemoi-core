@@ -47,6 +47,13 @@ class HEALPixMultiScaleEdges(BaseEdgeBuilder):
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Compute the edge index for HEALPix multi scale edges."""
         assert source_nodes.node_type == "HEALPixNodes", f"{self.__class__.__name__} only supports HEALPixNodes."
+        # The edges are built from NEST pixel numbers (multiplying by 4 gives the next finer
+        # level), so the nodes must be in NEST ordering.
+        if not source_nodes["_nest_ordering"]:
+            raise ValueError(
+                f"{self.__class__.__name__} needs HEALPixNodes in NEST ordering; "
+                f"'{self.source_name}' was built with nest_ordering=False."
+            )
 
         from anemoi.graphs.generate.healpix import get_healpix_edgeindex
 

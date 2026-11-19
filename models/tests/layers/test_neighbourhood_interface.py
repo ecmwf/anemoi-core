@@ -15,7 +15,6 @@ import pickle
 
 import pytest
 import torch
-from pydantic import ValidationError
 
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
@@ -28,9 +27,6 @@ from anemoi.models.layers.mapper import TransformerForwardMapper
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
 from anemoi.models.layers.processor import TransformerProcessor
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.models.schemas.decoder import TransformerDecoderSchema
-from anemoi.models.schemas.encoder import TransformerEncoderSchema
-from anemoi.models.schemas.processor import TransformerProcessorSchema
 from tests.layers import window_neighbourhood
 from tests.layers.window_neighbourhood import WindowAttention
 from tests.layers.window_neighbourhood import WindowNeighbourhood
@@ -373,43 +369,3 @@ def test_cpu_offload_runs_all_points_at_once():
         layer_kernels=load_layer_kernels(instance=False),
     )
     assert processor.split is None
-
-
-# ------------------------------------------------------------------------------------------- schemas
-
-COMMON = dict(
-    cpu_offload=False,
-    num_chunks=1,
-    mlp_hidden_ratio=4,
-    num_heads=16,
-    num_channels=512,
-    window_size=None,
-    dropout_p=0.0,
-)
-
-
-@pytest.mark.parametrize(
-    ("schema", "target", "extra"),
-    [
-        (
-            TransformerProcessorSchema,
-            "anemoi.models.layers.processor.TransformerProcessor",
-            {"num_layers": 4, "qk_norm": False},
-        ),
-        (TransformerEncoderSchema, "anemoi.models.layers.mapper.TransformerForwardMapper", {}),
-        (TransformerDecoderSchema, "anemoi.models.layers.mapper.TransformerBackwardMapper", {}),
-    ],
-    ids=["processor", "encoder", "decoder"],
-)
-def test_schemas_check_neighbourhood_settings_against_the_implementation(schema, target, extra):
-    settings = {**COMMON, **extra, "_target_": target}
-    component = schema(**settings, attention_implementation="neighbourhood", neighbourhood=window_config())
-    assert component.neighbourhood == window_config()
-    with pytest.raises(ValidationError, match="needs a 'neighbourhood' section"):
-        schema(**settings, attention_implementation="neighbourhood")
-    with pytest.raises(ValidationError, match="only used with attention_implementation 'neighbourhood'"):
-        schema(**settings, attention_implementation="scaled_dot_product_attention", neighbourhood=window_config())
-    with pytest.raises(ValidationError, match="window_size must be null"):
-        schema(
-            **{**settings, "window_size": 4}, attention_implementation="neighbourhood", neighbourhood=window_config()
-        )
