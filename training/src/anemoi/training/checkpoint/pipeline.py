@@ -13,7 +13,6 @@ This module provides the CheckpointPipeline class that orchestrates
 the execution of multiple pipeline stages in sequence. It handles:
 - Stage execution order
 - Error propagation and recovery
-- Async/sync execution modes
 - Metadata tracking through stages
 - Hydra-based configuration and instantiation
 
@@ -33,62 +32,37 @@ Example
 ...     WeightsOnlyLoader(strict=False),
 ... ])
 >>>
->>> # Or build from Hydra config
->>> from omegaconf import OmegaConf
->>> config = OmegaConf.create({
-...     'stages': [
-...         {'_target_': 'anemoi.training.checkpoint.sources.LocalSource',
-...          'path': '/tmp/checkpoint.pt'},
-...         {'_target_': 'anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader',
-...          'strict': False}
-...     ]
-... })
->>> pipeline = CheckpointPipeline.from_config(config)
+>>> # Or, in a training run, build it from the declarative config. The trainer
+>>> # reads ``training.checkpoint.{source,loading,modifiers}`` and assembles the
+>>> # stages in that fixed order:
+>>> from anemoi.training.checkpoint import build_checkpoint_pipeline
+>>> pipeline = build_checkpoint_pipeline(cfg)  # cfg.training.checkpoint.*
 >>>
 >>> # Execute pipeline
 >>> context = CheckpointContext(model=my_model)
->>> result = await pipeline.execute(context)
+>>> result = pipeline.execute(context)
 
-Execution Patterns
-------------------
-The pipeline supports two execution patterns:
+Execution
+---------
+The pipeline runs once during model construction, before ``trainer.fit()``:
+``AnemoiTrainer.model`` calls :func:`~anemoi.training.checkpoint.runner.run_checkpoint_pipeline`,
+which builds the pipeline from ``training.checkpoint.*`` with
+:func:`build_checkpoint_pipeline` and then runs :meth:`CheckpointPipeline.execute`,
+so checkpoint loading happens exactly once at startup and never inside the
+training loop. On a resume the built pipeline has no source stage; the runner
+resolves the file through ``build_resume_source``, so drive a resume config
+through ``run_checkpoint_pipeline``. Any other config can be driven directly::
 
-**Pattern 1: Standalone Execution (Recommended)**
-
-Execute during model initialization, before ``trainer.fit()``. This is the
-recommended approach as checkpoint loading happens once at startup::
-
-    # In your training script or AnemoiTrainer.model property
-    pipeline = CheckpointPipeline.from_config(config.checkpoint_pipeline)
+    pipeline = build_checkpoint_pipeline(config)  # reads training.checkpoint.*
     context = CheckpointContext(model=model)
 
-    # Async execution (recommended for remote sources)
-    result = await pipeline.execute(context)
-    # Or sync execution
-    result = asyncio.run(pipeline.execute(context))
+    result = pipeline.execute(context)
 
     model = result.model
-
-**Pattern 2: PyTorch Lightning Callback Integration**
-
-For use cases requiring Lightning callback lifecycle integration, the
-pipeline can be wrapped in a callback. This is useful when checkpoint
-loading needs to coordinate with other Lightning callbacks::
-
-    # See anemoi.training.diagnostics.callbacks.checkpoint for examples
-    # of integrating checkpoint operations with the Lightning lifecycle
-
-The standalone pattern is preferred because:
-
-- Checkpoint loading happens once at initialization
-- No async complexity during training loop
-- Clear separation of concerns between loading and training
-- Easier to debug and test
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING
 from typing import Any
@@ -116,7 +90,6 @@ class CheckpointPipeline:
     The pipeline supports:
     - Sequential execution of stages
     - Error handling with optional continuation
-    - Async and sync execution modes
     - Dynamic stage management (add/remove)
     - Metadata tracking for debugging
 
@@ -126,21 +99,14 @@ class CheckpointPipeline:
         List of pipeline stages to execute in order. Each item can be:
         - An instantiated PipelineStage object
         - A dict/DictConfig with '_target_' for Hydra instantiation
-    async_execution : bool, optional
-        Whether to use async execution (default: True). Set to False
-        for synchronous execution in non-async contexts.
     continue_on_error : bool, optional
         Whether to continue pipeline on stage errors (default: False).
         If True, failed stages will be logged but won't stop the pipeline.
-    config : DictConfig, optional
-        If provided, overrides other parameters with config values
 
     Attributes
     ----------
     stages : list
         Current list of pipeline stages
-    async_execution : bool
-        Whether async execution is enabled
     continue_on_error : bool
         Whether to continue on stage errors
 
@@ -163,9 +129,7 @@ class CheckpointPipeline:
     def __init__(
         self,
         stages: list[Union[PipelineStage, DictConfig, dict]] | None = None,
-        async_execution: bool = True,
         continue_on_error: bool = False,
-        config: DictConfig | None = None,
     ):
         """Initialize the checkpoint pipeline.
 
@@ -175,21 +139,10 @@ class CheckpointPipeline:
             List of pipeline stages to execute in order. Each item can be:
             - An instantiated PipelineStage object
             - A dict/DictConfig with '_target_' for Hydra instantiation
-        async_execution : bool, optional
-            Whether to use async execution (default: True)
         continue_on_error : bool, optional
             Whether to continue pipeline on stage errors (default: False)
-        config : DictConfig, optional
-            If provided, overrides other parameters with config values
         """
-        # Extract settings from config if provided
-        if config is not None:
-            self.async_execution = config.get("async_execution", async_execution)
-            self.continue_on_error = config.get("continue_on_error", continue_on_error)
-            stages = config.get("stages", stages)
-        else:
-            self.async_execution = async_execution
-            self.continue_on_error = continue_on_error
+        self.continue_on_error = continue_on_error
 
         # Instantiate stages
         self.stages = self._instantiate_stages(stages or [])
@@ -198,8 +151,7 @@ class CheckpointPipeline:
         for i, stage in enumerate(self.stages):
             LOGGER.debug("  Stage %d: %s", i, stage)
 
-        # Smart warnings about pipeline configuration
-        self._validate_pipeline_composition()
+        self._check_stage_order()
 
     def _instantiate_stages(self, stages: list[Any]) -> list[PipelineStage]:
         """Instantiate stages from configs or pass through existing instances.
@@ -242,151 +194,57 @@ class CheckpointPipeline:
                 instantiated.append(stage)
         return instantiated
 
-    def _validate_pipeline_composition(self) -> None:
-        """Validate pipeline composition and provide smart warnings."""
-        if not self.stages:
-            LOGGER.warning(
-                "Pipeline has no stages configured. "
-                "Consider adding stages for source acquisition, loading, or model modification.",
-            )
-            return
+    @staticmethod
+    def _stage_role(stage: Any) -> str | None:
+        """Classify a stage by its checkpoint-pipeline layer.
 
-        stage_types = [stage.__class__.__name__ for stage in self.stages]
-
-        # Check for common composition issues
-        self._check_source_loading_order(stage_types)
-        self._check_modifier_placement(stage_types)
-        self._check_duplicate_stages(stage_types)
-        self._suggest_missing_stages(stage_types)
-
-    def _check_source_loading_order(self, stage_types: list[str]) -> None:
-        """Check that source stages come before loading stages."""
-        source_indices = [i for i, name in enumerate(stage_types) if "Source" in name]
-        loader_indices = [i for i, name in enumerate(stage_types) if "Loader" in name or "Loading" in name]
-
-        if source_indices and loader_indices:
-            last_source = max(source_indices)
-            first_loader = min(loader_indices)
-
-            if last_source > first_loader:
-                LOGGER.warning(
-                    "Source stage at position %d comes after loader stage at position %d. "
-                    "This may cause issues as loaders typically expect checkpoints to be already acquired. "
-                    "Consider reordering: sources first, then loaders, then modifiers.",
-                    last_source,
-                    first_loader,
-                )
-
-    def _check_modifier_placement(self, stage_types: list[str]) -> None:
-        """Check that modifier stages come after loading stages."""
-        loader_indices = [i for i, name in enumerate(stage_types) if "Loader" in name or "Loading" in name]
-        modifier_indices = [i for i, name in enumerate(stage_types) if "Modifier" in name]
-
-        if loader_indices and modifier_indices:
-            last_loader = max(loader_indices)
-            first_modifier = min(modifier_indices)
-
-            if first_modifier < last_loader:
-                LOGGER.warning(
-                    "Modifier stage at position %d comes before loader stage at position %d. "
-                    "Model modifications typically work best after checkpoint loading. "
-                    "Consider reordering: sources, loaders, then modifiers.",
-                    first_modifier,
-                    last_loader,
-                )
-
-    def _check_duplicate_stages(self, stage_types: list[str]) -> None:
-        """Check for potentially conflicting duplicate stages."""
-        from collections import Counter
-
-        type_counts = Counter(stage_types)
-        duplicates = {stage_type: count for stage_type, count in type_counts.items() if count > 1}
-
-        if duplicates:
-            for stage_type, count in duplicates.items():
-                if "Loader" in stage_type or "Loading" in stage_type:
-                    LOGGER.warning(
-                        "Found %d instances of %s. Multiple loading strategies may conflict. "
-                        "Consider using a single loading strategy appropriate for your use case.",
-                        count,
-                        stage_type,
-                    )
-                elif "Source" in stage_type and stage_type.endswith("Source"):
-                    LOGGER.warning(
-                        "Found %d instances of %s. Multiple checkpoint sources may be redundant. "
-                        "The pipeline will process them in sequence.",
-                        count,
-                        stage_type,
-                    )
-
-    def _suggest_missing_stages(self, stage_types: list[str]) -> None:
-        """Suggest potentially missing stages based on common patterns."""
-        has_source = any("Source" in name for name in stage_types)
-        has_loader = any("Loader" in name or "Loading" in name for name in stage_types)
-        has_modifier = any("Modifier" in name for name in stage_types)
-
-        suggestions = []
-
-        if has_loader and not has_source:
-            suggestions.append(
-                "You have a loading stage but no source stage. "
-                "Consider adding a source stage (LocalSource, S3Source, etc.) to specify where to load from.",
-            )
-
-        if has_source and not has_loader:
-            suggestions.append(
-                "You have a source stage but no loading strategy. "
-                "Consider adding a loading stage (WeightsOnlyLoader, TransferLearningLoader, etc.) "
-                "to specify how to apply the checkpoint.",
-            )
-
-        if has_modifier and not (has_source or has_loader):
-            suggestions.append(
-                "You have model modifiers but no checkpoint loading. "
-                "Modifiers work best when applied after loading a checkpoint. "
-                "Consider adding source and loading stages.",
-            )
-
-        if suggestions:
-            LOGGER.info("Pipeline composition suggestions:\n  • %s", "\n  • ".join(suggestions))
-
-    @classmethod
-    def from_config(cls, config: DictConfig) -> CheckpointPipeline:
-        """Create a pipeline from Hydra configuration.
-
-        This is a convenience method that creates a pipeline entirely
-        from a Hydra configuration, using instantiate for all stages.
-
-        Parameters
-        ----------
-        config : DictConfig
-            Hydra configuration with pipeline settings. Should contain:
-            - stages: List of stage configs with '_target_'
-            - async_execution: Optional bool for async mode
-            - continue_on_error: Optional bool for error handling
-
-        Returns
-        -------
-        CheckpointPipeline
-            Configured pipeline instance
-
-        Examples
-        --------
-        >>> from omegaconf import OmegaConf
-        >>> config = OmegaConf.create({
-        ...     'stages': [
-        ...         {'_target_': 'path.to.SourceStage', 'param': 'value'},
-        ...         {'_target_': 'path.to.LoaderStage', 'strict': False}
-        ...     ],
-        ...     'async_execution': True,
-        ...     'continue_on_error': False
-        ... })
-        >>> pipeline = CheckpointPipeline.from_config(config)
+        Returns ``"source"``, ``"loader"``, ``"modifier"``, or ``None`` for a
+        stage that belongs to no known layer. Classification is by ``isinstance``
+        against the layer base classes — the robust contract — rather than by
+        class-name substring, so a correctly-subclassed stage is recognised
+        regardless of what it is named (e.g. a ``Restorer(LoadingStrategy)``).
+        The base-class imports are local so importing this module does not pull
+        in the layer subpackages.
         """
-        return cls(config=config)
+        from anemoi.training.checkpoint.loading.base import LoadingStrategy
+        from anemoi.training.checkpoint.modifiers.base import ModelModifier
+        from anemoi.training.checkpoint.sources.base import CheckpointSource
 
-    async def execute_async(self, initial_context: CheckpointContext) -> CheckpointContext:
-        """Execute pipeline stages asynchronously.
+        if isinstance(stage, CheckpointSource):
+            return "source"
+        if isinstance(stage, LoadingStrategy):
+            return "loader"
+        if isinstance(stage, ModelModifier):
+            return "modifier"
+        return None
+
+    def _check_stage_order(self) -> None:
+        """Raise if the stages are not ordered source -> one loader -> modifiers.
+
+        Stage ordering (source before loader and modifiers, modifier after loader)
+        and a single loading strategy are structural invariants: a violation is a hard
+        ``CheckpointConfigError`` at construction. More than one source, or a
+        missing layer, is allowed. Stages that belong to no known layer are not
+        placed. The builder always emits stages in the canonical order, so only
+        hand-built pipelines are bitten.
+
+        Raises
+        ------
+        CheckpointConfigError
+            If a source follows a loader or a modifier, a modifier precedes a
+            loader, or there is more than one loading strategy.
+        """
+        rank = {"source": 0, "loader": 1, "modifier": 2}
+        ranks = [rank[role] for role in map(self._stage_role, self.stages) if role is not None]
+        if ranks != sorted(ranks) or ranks.count(rank["loader"]) > 1:
+            from .exceptions import CheckpointConfigError
+
+            names = [type(stage).__name__ for stage in self.stages]
+            msg = f"Invalid checkpoint pipeline {names}: use the order source -> one loader -> modifiers."
+            raise CheckpointConfigError(msg, config_path="training.checkpoint")
+
+    def execute(self, initial_context: CheckpointContext) -> CheckpointContext:
+        """Execute the pipeline stages in sequence.
 
         Executes each stage in sequence, passing the context from one
         stage to the next. Each stage's execution is tracked in metadata
@@ -420,15 +278,12 @@ class CheckpointPipeline:
         """
         context = initial_context
 
-        # Perform environment health check before pipeline execution
-        self._perform_pre_execution_validation(context)
-
         for i, stage in enumerate(self.stages):
             stage_name = stage.__class__.__name__
             LOGGER.debug("Executing stage %d/%d: %s", i, len(self.stages), stage_name)
 
             try:
-                context = await stage.process(context)
+                context = stage.process(context)
                 LOGGER.debug("Stage %s completed successfully", stage_name)
 
                 # Update metadata with stage execution
@@ -489,8 +344,15 @@ class CheckpointPipeline:
 
         This prevents silently proceeding with a randomly-initialised model
         when ``continue_on_error=True`` swallowed the loading failure.
+        ``weights_initialized`` is advisory for other readers, but the pipeline
+        treats it as a gate here: a configured source with no applied weights is
+        a hard error, not a warning.
+
+        A resume is the exception: the pipeline has no source stage then (the
+        runner resolves the file for ``Trainer.fit(ckpt_path=)``), so the weights
+        arrive at ``fit()`` and are not missing.
         """
-        has_source = any("Source" in s.__class__.__name__ for s in self.stages)
+        has_source = any(self._stage_role(stage) == "source" for stage in self.stages)
         if not has_source:
             return
 
@@ -508,78 +370,7 @@ class CheckpointPipeline:
                 "missing. Refusing to proceed with random weights."
             )
             LOGGER.error(msg)
-            raise CheckpointLoadError(None, RuntimeError(msg))
-
-    def execute_sync(self, initial_context: CheckpointContext) -> CheckpointContext:
-        """Execute pipeline stages synchronously.
-
-        This is a convenience method for synchronous execution,
-        wrapping the async execution in asyncio.run(). If an event
-        loop is already running (e.g. in Jupyter), uses a thread pool.
-
-        Parameters
-        ----------
-        initial_context : CheckpointContext
-            Initial context to process
-
-        Returns
-        -------
-        CheckpointContext
-            Final processed context
-        """
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            # Inside existing event loop (e.g. Jupyter) — run in a thread
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, self.execute_async(initial_context))
-                return future.result()
-        return asyncio.run(self.execute_async(initial_context))
-
-    async def execute(self, initial_context: CheckpointContext) -> CheckpointContext:
-        """Execute the pipeline.
-
-        Main entry point for pipeline execution. This method is always
-        asynchronous and delegates to :meth:`execute_async`; await it from
-        an async context, or wrap it with ``asyncio.run`` from a sync one.
-        Use :meth:`execute_sync` if you need a blocking call that manages
-        the event loop for you.
-
-        Parameters
-        ----------
-        initial_context : CheckpointContext
-            Initial context to process. Should contain:
-            - model: The PyTorch model to load checkpoint into
-            - config: Optional configuration for stages
-            - Any other initial state needed by stages
-
-        Returns
-        -------
-        CheckpointContext
-            Final processed context containing:
-            - checkpoint_path: Path to downloaded checkpoint (if applicable)
-            - checkpoint_data: Loaded checkpoint data
-            - model: Modified model with loaded weights
-            - metadata: Execution tracking and stage results
-
-        Examples
-        --------
-        >>> import asyncio
-        >>> context = CheckpointContext(model=my_model)
-        >>>
-        >>> # In async context:
-        >>> result = await pipeline.execute(context)
-        >>>
-        >>> # In sync context:
-        >>> result = asyncio.run(pipeline.execute(context))
-        """
-        # execute() is already async, so always use execute_async
-        return await self.execute_async(initial_context)
+            raise CheckpointLoadError(context.checkpoint_path or "<unresolved checkpoint>", RuntimeError(msg))
 
     def add_stage(self, stage: Union[PipelineStage, DictConfig, dict]) -> None:
         """Add a stage to the pipeline.
@@ -678,66 +469,7 @@ class CheckpointPipeline:
         --------
         >>> pipeline = CheckpointPipeline([Stage1(), Stage2()])
         >>> print(pipeline)
-        CheckpointPipeline(stages=['Stage1', 'Stage2'], async=True)
+        CheckpointPipeline(stages=['Stage1', 'Stage2'], continue_on_error=False)
         """
         stage_names = [s.__class__.__name__ for s in self.stages]
-        return f"CheckpointPipeline(stages={stage_names}, async={self.async_execution})"
-
-    def _perform_pre_execution_validation(self, context: CheckpointContext) -> None:
-        """Perform pre-execution health checks and validations.
-
-        This method runs lightweight validations before pipeline execution
-        to catch common configuration and environment issues early.
-
-        Parameters
-        ----------
-        context : CheckpointContext
-            The context about to be processed
-        """
-        try:
-            from .validation import CheckpointPipelineValidator
-
-            # Perform environment validation
-            env_results = CheckpointPipelineValidator.validate_environment_setup()
-
-            # Log any issues found
-            for issue in env_results.get("issues", []):
-                LOGGER.error("Environment issue: %s", issue)
-
-            for warning in env_results.get("warnings", []):
-                LOGGER.warning("Environment warning: %s", warning)
-
-            for info in env_results.get("info", []):
-                LOGGER.debug("Environment info: %s", info)
-
-            # Validate configuration if provided
-            if context.config and hasattr(context.config, "training"):
-                config_results = CheckpointPipelineValidator.validate_configuration(context.config)
-
-                # Log configuration issues
-                for issue in config_results.get("issues", []):
-                    LOGGER.error("Configuration issue: %s", issue)
-
-                for warning in config_results.get("warnings", []):
-                    LOGGER.warning("Configuration warning: %s", warning)
-
-                # Add validation results to context metadata
-                context.update_metadata(
-                    validation_environment_status=env_results.get("status", "unknown"),
-                    validation_config_status=config_results.get("status", "unknown"),
-                    validation_performed=True,
-                )
-            else:
-                context.update_metadata(
-                    validation_environment_status=env_results.get("status", "unknown"),
-                    validation_performed=True,
-                )
-
-        except ImportError:
-            # Validation module not available - this is ok, validation is optional
-            LOGGER.debug("Validation module not available, skipping pre-execution validation")
-            context.update_metadata(validation_performed=False, validation_skipped="module_unavailable")
-        except (ValueError, TypeError, AttributeError) as e:
-            # Don't fail pipeline execution due to validation errors
-            LOGGER.warning("Pre-execution validation failed: %s", e)
-            context.update_metadata(validation_performed=False, validation_error=str(e))
+        return f"CheckpointPipeline(stages={stage_names}, continue_on_error={self.continue_on_error})"

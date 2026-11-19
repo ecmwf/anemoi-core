@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from enum import IntEnum
+from typing import Literal
 
 
 class TensorDim(IntEnum):
@@ -16,3 +17,7 @@ class TensorDim(IntEnum):
     ENSEMBLE_DIM = 2
     GRID = 3
     VARIABLE = 4
+
+
+# Dimension names allowed in the norm_over setting of an energy score.
+EnergyScoreDimension = Literal["time", "grid", "variables"]

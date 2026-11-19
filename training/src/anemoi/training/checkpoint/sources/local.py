@@ -9,27 +9,22 @@
 
 """Local filesystem checkpoint source.
 
-Loads checkpoint data from a local file path and populates the pipeline
-context with the loaded data and detected format.
-
 Example
 -------
 >>> source = LocalSource()
 >>> context = CheckpointContext(checkpoint_path=Path("/models/epoch_50.ckpt"))
->>> result = await source.process(context)
+>>> result = source.process(context)
 >>> assert result.checkpoint_data is not None
 """
 
 from __future__ import annotations
 
-import asyncio
+import errno
 import logging
-import pickle
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
-
-import torch
 
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 
@@ -53,13 +48,75 @@ class LocalSource(CheckpointSource):
     --------
     >>> source = LocalSource()
     >>> context = CheckpointContext(checkpoint_path=Path("/models/model.ckpt"))
-    >>> result = await source.process(context)
+    >>> result = source.process(context)
     >>> result.checkpoint_format
     'lightning'
+
+    An explicit ``path`` may be configured directly (the canonical way to load a
+    specific checkpoint file); when set it is used instead of
+    ``context.checkpoint_path``:
+
+    >>> source = LocalSource(path="/models/epoch_50.ckpt")
     """
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Load checkpoint data from a local file.
+    def __init__(self, path: str | Path | None = None) -> None:
+        self.path = path
+
+    def resolve(self, context: CheckpointContext) -> Path:
+        """Resolve the configured or context path to an existing, canonical file.
+
+        Applies ``expanduser().resolve()`` and publishes the result on
+        ``context.checkpoint_path``, so what the trainer later hands to
+        ``Trainer.fit(ckpt_path=)`` is the file that was checked. A relative path
+        resolves against the process working directory, which is where the
+        training command was launched (the shipped config leaves
+        ``hydra.job.chdir`` unset); prefer an absolute path.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Pipeline context; ``checkpoint_path`` is used when no explicit
+            ``path`` was configured.
+
+        Returns
+        -------
+        Path
+            The canonical checkpoint file.
+
+        Raises
+        ------
+        CheckpointConfigError
+            If neither ``path`` nor ``context.checkpoint_path`` is set
+        CheckpointNotFoundError
+            If the checkpoint file does not exist
+        CheckpointLoadError
+            If the checkpoint file exists but is not readable by this process
+        """
+        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+        from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+        from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
+
+        raw_path = self.path if self.path is not None else context.checkpoint_path
+
+        if raw_path is None:
+            msg = "LocalSource requires an explicit 'path' or checkpoint_path to be set on the context"
+            raise CheckpointConfigError(msg)
+
+        path = Path(raw_path).expanduser().resolve()
+
+        if not path.exists():
+            raise CheckpointNotFoundError(path)
+
+        # Checked here rather than left to torch.load so an unreadable file (e.g. wrong
+        # permissions) is reported as such, and RunIdSource can defer it to rank 0.
+        if not os.access(path, os.R_OK):
+            raise CheckpointLoadError(path, PermissionError(errno.EACCES, "Checkpoint file is not readable", str(path)))
+
+        context.checkpoint_path = path
+        return path
+
+    def process(self, context: CheckpointContext) -> CheckpointContext:
+        """Resolve and load checkpoint data from a local file.
 
         Parameters
         ----------
@@ -70,37 +127,20 @@ class LocalSource(CheckpointSource):
         Returns
         -------
         CheckpointContext
-            Context with ``checkpoint_data``, ``checkpoint_format``,
-            and source metadata populated.
+            Context with ``checkpoint_path``, ``checkpoint_data``,
+            ``checkpoint_format``, and source metadata populated.
 
         Raises
         ------
         CheckpointNotFoundError
             If the checkpoint file does not exist
         CheckpointLoadError
-            If the file cannot be loaded by PyTorch
+            If the file is not readable or cannot be loaded by PyTorch
         """
-        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-        from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-        from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
-
-        if context.checkpoint_path is None:
-            msg = "LocalSource requires checkpoint_path to be set on context"
-            raise CheckpointConfigError(msg)
-
-        path = Path(context.checkpoint_path).expanduser().resolve()
-
-        if not path.exists():
-            raise CheckpointNotFoundError(path)
+        path = self.resolve(context)
 
         LOGGER.info("Loading checkpoint from local path: %s", path)
-
-        try:
-            raw_data = await asyncio.to_thread(torch.load, path, weights_only=False, map_location="cpu")
-        except (OSError, RuntimeError, EOFError, ValueError, pickle.UnpicklingError) as e:
-            raise CheckpointLoadError(path, e) from e
-
-        self._load_and_populate(context, raw_data)
+        self._load_from_path(context, path)
 
         context.update_metadata(
             source_type="local",

@@ -425,7 +425,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if batch_idx % self.every_n_batches == 0:
-
             batch = self._prepare_batch(pl_module, batch)
             # Lightning hands us the batch returned by `on_after_batch_transfer`, so it sits on the
             # projected grid like the predictions do — `grid_shard_sizes`, not the reader `shard_sizes`.
@@ -435,7 +434,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             }
             preds = output.predictions
             if not isinstance(preds, list):
-
                 raise TypeError(preds)
             gathered_predictions = [
                 {
@@ -448,7 +446,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
             # but internal ones would be on the cpu), The lines below allow to address this problem
             self.post_processors = copy.deepcopy(pl_module.model.post_processors)
-            for dataset_name in self.post_processors:
+            for dataset_name in batch:
                 for post_processor in self.post_processors[dataset_name].processors.values():
                     if isinstance(getattr(post_processor, "nan_locations", None), torch.Tensor):
                         post_processor.nan_locations = pl_module.allgather_batch(
@@ -463,10 +461,11 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 metrics=output.metrics,
                 predictions=gathered_predictions,
             )
+            # A batch may hold only some datasets (e.g. one domain with MultiDomainLoadingPolicy).
             self.plot(
                 trainer,
                 pl_module,
-                self.dataset_names,
+                [dataset_name for dataset_name in self.dataset_names if dataset_name in batch],
                 output,
                 batch,
                 batch_idx,
@@ -510,7 +509,6 @@ class BasePerEpochPlotCallback(BasePlotCallback):
         **kwargs,
     ) -> None:
         if trainer.current_epoch % self.every_n_epochs == 0:
-
             self.plot(
                 trainer,
                 pl_module,
@@ -735,6 +733,8 @@ class LossCurvePlot(BasePerBatchPlotCallback):
 
         # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
         for dataset in self.loss:
+            if dataset not in batch:
+                continue
             for leaf_loss in self.loss[dataset].iter_leaf_losses():
                 scaler = getattr(leaf_loss, "scaler", None)
                 if scaler is not None and "nan_mask_weights" in scaler:

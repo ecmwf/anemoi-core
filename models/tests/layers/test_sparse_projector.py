@@ -60,3 +60,29 @@ def test_forward_uses_configured_num_chunks(csr_matrix: torch.Tensor) -> None:
     chunked = SparseProjector(autocast=False, num_chunks=3)(x, csr_matrix)
     unchunked = SparseProjector(autocast=False, num_chunks=1)(x, csr_matrix)
     assert chunked.shape == unchunked.shape
+
+
+@pytest.mark.parametrize("num_chunks", [1, 4])
+@pytest.mark.parametrize(
+    "shape",
+    [(16, 0), (2, 3, 16, 0), (0, 16, 4), (16, 1), (3, 16, 1)],
+    ids=["no_leading_axes_no_channels", "no_channels", "empty_leading_axis", "one_channel", "fewer_rows_than_chunks"],
+)
+def test_forward_and_gradient_match_dense_for_awkward_shapes(
+    csr_matrix: torch.Tensor,
+    shape: tuple[int, ...],
+    num_chunks: int,
+) -> None:
+    """Empty and size-one axes give the dense projection and its gradient."""
+    x = torch.rand(shape, requires_grad=True)
+    reference_x = x.detach().clone().requires_grad_()
+
+    out = SparseProjector(autocast=False, num_chunks=num_chunks)(x, csr_matrix)
+    expected = torch.einsum("mn,...nc->...mc", csr_matrix.to_dense(), reference_x)
+    upstream = torch.rand(expected.shape)
+    (out * upstream).sum().backward()
+    (expected * upstream).sum().backward()
+
+    assert out.shape == expected.shape
+    torch.testing.assert_close(out, expected)
+    torch.testing.assert_close(x.grad, reference_x.grad)

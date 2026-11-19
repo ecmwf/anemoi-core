@@ -117,9 +117,9 @@ def stochastic_interpolant_clean_mean(
     reconstruction_eps: float = 1e-8,
 ) -> torch.Tensor:
     """Recover the clean target from the current bridge state and model prediction."""
-    assert all(
-        x.dtype in (torch.float32, torch.float64) for x in (drift, interpolant, anchor, t)
-    ), "SI clean reconstruction requires at least float32 precision."
+    assert all(x.dtype in (torch.float32, torch.float64) for x in (drift, interpolant, anchor, t)), (
+        "SI clean reconstruction requires at least float32 precision."
+    )
     alpha = stochastic_interpolant_alpha(t, alpha_schedule)
     beta = stochastic_interpolant_beta(t, beta_schedule)
     alpha_dot = stochastic_interpolant_alpha_dot(t, alpha_schedule)

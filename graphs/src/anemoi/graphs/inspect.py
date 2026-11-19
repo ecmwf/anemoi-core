@@ -49,7 +49,7 @@ class GraphInspector:
         **kwargs,
     ):
         self.path = path
-        self.graph = load_graph_from_file(path)
+        self.graph = load_graph_from_file(path, map_location="cpu")
         self.area = area
         self.output_path = output_path
         self.show_attribute_distributions = show_attribute_distributions

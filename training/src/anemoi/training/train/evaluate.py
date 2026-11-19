@@ -30,9 +30,10 @@ class AnemoiEvaluator(AnemoiTrainer):
     callbacks, logger, strategy).  The key differences from training are:
 
     - :meth:`pl.Trainer.validate` is called instead of :meth:`pl.Trainer.fit`.
-    - A checkpoint **must** be specified via ``training.run_id`` or
-      ``system.input.warm_start``; omitting both raises a :exc:`RuntimeError`
-      immediately rather than silently evaluating a randomly-initialised model.
+    - A checkpoint **must** be specified via ``training.checkpoint.source`` (a
+      ``RunIdSource`` for resume/fork, or a ``LocalSource`` for an explicit file);
+      omitting it raises a :exc:`RuntimeError` immediately rather than silently
+      evaluating a randomly-initialised model.
     - Checkpointing and weight-averaging callbacks are disabled regardless of
       the diagnostics config — evaluation is a read-only operation on a trained
       model and should never write new checkpoint files.
@@ -56,9 +57,8 @@ class AnemoiEvaluator(AnemoiTrainer):
         """Evaluation entry point — runs one full validation pass."""
         if not self.start_from_checkpoint:
             msg = (
-                "No checkpoint specified for evaluation. "
-                "Set 'training.run_id', 'training.fork_run_id', or "
-                "'system.input.warm_start' to point to a trained checkpoint."
+                "No checkpoint specified for evaluation. Set 'training.checkpoint.source' to a "
+                "RunIdSource (run_id) or LocalSource (path) pointing to a trained checkpoint."
             )
             raise RuntimeError(msg)
 
@@ -82,15 +82,14 @@ class AnemoiEvaluator(AnemoiTrainer):
 
         LOGGER.debug("Starting evaluation..")
 
-        # When weights-only loading is used the model is already fully initialised
-        # with the checkpoint weights; pass ckpt_path=None to avoid a second load.
-        # Otherwise let PL restore the full training state from the checkpoint.
-        ckpt_path = None if self.load_weights_only else self.last_checkpoint
-
+        # When the model is already initialised with the checkpoint weights — via a
+        # training.checkpoint loading strategy other than warm start — last_checkpoint
+        # is None, so there is no second load. Otherwise let PL restore the full
+        # training state from the checkpoint.
         trainer.validate(
             model=self.model,
             datamodule=self.datamodule,
-            ckpt_path=ckpt_path,
+            ckpt_path=self.last_checkpoint,
         )
 
         if self.config.diagnostics.print_memory_summary:

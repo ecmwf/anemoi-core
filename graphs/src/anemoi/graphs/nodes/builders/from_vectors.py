@@ -50,15 +50,15 @@ class LatLonNodes(BaseNodeBuilder):
         self.latitudes = latitudes if isinstance(latitudes, torch.Tensor) else torch.tensor(latitudes)
         self.longitudes = longitudes if isinstance(longitudes, torch.Tensor) else torch.tensor(longitudes)
 
-        assert len(self.latitudes) == len(
-            self.longitudes
-        ), f"Lenght of latitudes and longitudes must match but {len(self.latitudes)}!={len(self.longitudes)}."
-        assert self.latitudes.ndim == 1 or (
-            self.latitudes.ndim == 2 and self.latitudes.shape[1] == 1
-        ), "latitudes must have shape (N, ) or (N, 1)."
-        assert self.longitudes.ndim == 1 or (
-            self.longitudes.ndim == 2 and self.longitudes.shape[1] == 1
-        ), "longitudes must have shape (N, ) or (N, 1)."
+        assert len(self.latitudes) == len(self.longitudes), (
+            f"Lenght of latitudes and longitudes must match but {len(self.latitudes)}!={len(self.longitudes)}."
+        )
+        assert self.latitudes.ndim == 1 or (self.latitudes.ndim == 2 and self.latitudes.shape[1] == 1), (
+            "latitudes must have shape (N, ) or (N, 1)."
+        )
+        assert self.longitudes.ndim == 1 or (self.longitudes.ndim == 2 and self.longitudes.shape[1] == 1), (
+            "longitudes must have shape (N, ) or (N, 1)."
+        )
 
     def get_coordinates(self) -> torch.Tensor:
         """Get the coordinates of the nodes.

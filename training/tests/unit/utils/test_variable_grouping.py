@@ -202,6 +202,6 @@ def test_failover_to_crack_in_malformed_data(
     level = extractor.get_level(variable)
     assert level == expected_level, f"Expected level {expected_level} for variable {variable}, but got {level}"
     variable_name = extractor.get_param(variable)
-    assert (
-        variable_name == expected_variable
-    ), f"Expected variable name {expected_variable} for {variable}, but got {variable_name}"
+    assert variable_name == expected_variable, (
+        f"Expected variable name {expected_variable} for {variable}, but got {variable_name}"
+    )

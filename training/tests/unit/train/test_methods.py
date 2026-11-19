@@ -78,6 +78,12 @@ class ShardingAwareCaptureLoss(CaptureLoss):
         return True
 
 
+class AcrossTimeCaptureLoss(CaptureLoss):
+    @property
+    def scores_across_time(self) -> bool:
+        return True
+
+
 def assert_metric_kwargs(
     kwargs: dict[str, Any],
     *,
@@ -973,6 +979,32 @@ def test_calculate_val_metrics_forwards_dataset_shard_sizes_when_requested() -> 
         grid_dim=-2,
         grid_shard_sizes=shard_sizes,
     )
+
+
+@pytest.mark.parametrize("skip_metrics_across_time", [False, True])
+def test_calculate_val_metrics_can_skip_metrics_across_time(skip_metrics_across_time: bool) -> None:
+    """Metrics that span output steps are left out when the caller passes one step at a time."""
+    module = MagicMock(spec=BaseTrainingModule)
+    pointwise = CaptureLoss()
+    across_time = AcrossTimeCaptureLoss()
+
+    module.model = MagicMock()
+    module.model.post_processors = {"data": MagicMock(side_effect=lambda x, **_: x)}
+    module.metrics = {"data": {"pointwise": pointwise, "across_time": CombinedLoss(losses=[across_time])}}
+    module.val_metric_ranges = {"data": {"z_500": [1]}}
+    module.model_comm_group = None
+
+    metrics = BaseTrainingModule.calculate_val_metrics(
+        module,
+        y_pred=torch.randn(1, 1, 1, 2, 3),
+        y=torch.randn(1, 1, 2, 3),
+        dataset_name="data",
+        skip_metrics_across_time=skip_metrics_across_time,
+    )
+
+    assert "pointwise_metric/data/z_500" in metrics
+    assert ("across_time_metric/data/z_500" in metrics) is not skip_metrics_across_time
+    assert len(across_time.calls) == (0 if skip_metrics_across_time else 1)
 
 
 def test_calculate_val_metrics_passes_none_shard_sizes_when_gathered() -> None:
@@ -1904,9 +1936,9 @@ def test_ensemble_training_uses_data_full_target_layout(
     forecaster._step(batch=batch, validation_mode=False)
 
     assert captured["target_layout"] == IndexSpace.DATA_FULL
-    assert (
-        captured["target_vars"] == full_v
-    ), f"Expected target to have {full_v} (DATA_FULL) vars, got {captured['target_vars']}."
+    assert captured["target_vars"] == full_v, (
+        f"Expected target to have {full_v} (DATA_FULL) vars, got {captured['target_vars']}."
+    )
 
 
 def test_edm_transport_training_uses_data_full_target_layout(
@@ -1963,9 +1995,9 @@ def test_edm_transport_training_uses_data_full_target_layout(
     assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
     assert captured["target_layout"] == IndexSpace.DATA_FULL
     assert captured["pred_vars"] == len(data_indices["data"].model.output.full)
-    assert (
-        captured["target_vars"] == full_v
-    ), f"Expected target to have {full_v} (DATA_FULL) vars, got {captured['target_vars']}."
+    assert captured["target_vars"] == full_v, (
+        f"Expected target to have {full_v} (DATA_FULL) vars, got {captured['target_vars']}."
+    )
 
 
 def test_transport_training_target_reduction_fast_paths() -> None:

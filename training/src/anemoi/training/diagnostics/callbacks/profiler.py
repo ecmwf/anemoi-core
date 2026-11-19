@@ -8,17 +8,25 @@
 # nor does it submit to any jurisdiction.
 
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
 
 import pytorch_lightning as pl
 import torch
+from packaging import version
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 from pytorch_lightning.utilities.types import STEP_OUTPUT
+from torch.utils.checkpoint import set_checkpoint_early_stop
 
 LOGGER = logging.getLogger(__name__)
+
+# With torch 2.11, memory history recording causes a failure in the checkpoint early stop.
+# To prevent the failure, disable early stop while the recording is on.
+# Once the recording ends, checkpoint early stopping is resumed
+_DISABLE_CHECKPOINT_EARLY_STOP = version.parse(torch.__version__).release[:2] == (2, 11)
 
 
 class MemorySnapshotRecorder(Callback):
@@ -41,13 +49,14 @@ class MemorySnapshotRecorder(Callback):
         self.warmup = warmup or 0
         self.num_steps = steps + self.warmup
         self.status = False
+        self._early_stop_ctx = contextlib.ExitStack()
 
     def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         del pl_module
         train_dataloader = trainer.train_dataloader
         if isinstance(train_dataloader, list):
             train_dataloader = train_dataloader[0]
-        batch_size = train_dataloader.batch_size
+        batch_size = train_dataloader.batch_sampler.batch_size
         assert self.num_steps % batch_size == 0, "Snapshot steps is not a multiple of batch size"
         assert self.warmup % batch_size == 0, "Snapshot warmup steps is not a multiple of batch size"
 
@@ -80,6 +89,8 @@ class MemorySnapshotRecorder(Callback):
     ) -> None:
         del pl_module, batch, batch_idx
         if trainer.global_step == self.warmup:
+            if _DISABLE_CHECKPOINT_EARLY_STOP:  # on all ranks, so recomputation stays in sync
+                self._early_stop_ctx.enter_context(set_checkpoint_early_stop(False))
             self._start_snapshot_recording()
 
     def on_train_batch_end(
@@ -97,3 +108,4 @@ class MemorySnapshotRecorder(Callback):
                 self.stop_record_memory_history()
             else:
                 LOGGER.info("Snapshot recording was not started so no snapshot was saved")
+            self._early_stop_ctx.close()

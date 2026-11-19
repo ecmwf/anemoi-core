@@ -21,18 +21,18 @@ specified in two mutually exclusive ways:
 
 .. math::
 
-   \text{cutoff_radius} = \text{cutoff_factor} \times \text{nodes_reference_dist}
+   \texttt{cutoff\_radius} = \texttt{cutoff\_factor} \times \texttt{nodes\_reference\_dist}
 
-where :math:`\text{nodes_reference_dist}` is the maximum distance
+where :math:`\texttt{nodes\_reference\_dist}` is the maximum distance
 between a target node and its nearest source node.
 
 .. math::
 
-   \text{nodes_reference_dist} = \max_{x \in V_{target}} \left\{  \min_{y \in V_{source}, y \neq x} \left\{ d(x, y) \right\} \right\}
+   \texttt{nodes\_reference\_dist} = \max_{x \in V_{target}} \left\{  \min_{y \in V_{source}, y \neq x} \left\{ d(x, y) \right\} \right\}
 
 where :math:`d(x, y)` is the `Haversine distance
 <https://en.wikipedia.org/wiki/Haversine_formula>`_ between nodes
-:math:`x` and :math:`y`. The :math:`\text{cutoff_factor}` is a parameter
+:math:`x` and :math:`y`. The :math:`\texttt{cutoff\_factor}` is a parameter
 that can be adjusted to increase or decrease the size of the
 neighbourhood, and consequently the number of connections in the graph.
 
@@ -80,9 +80,9 @@ limit the maximum number of neighbours each node can connect to.
 The reversed cut-off method (``ReversedCutOffEdges``) is similar to the
 standard cut-off method, but instead establishes connections based on
 the neighbourhood of each source node. The role of source and target
-nodes is similarly reversed in :math:`\text{nodes_reference_dist}`.
+nodes is similarly reversed in :math:`\texttt{nodes\_reference\_dist}`.
 Given two sets of nodes, (`source`, `target`), the
-``ReversedCutOffEdges`` method connects all sources nodes to all target
+``ReversedCutOffEdges`` method connects all source nodes to all target
 nodes within a cut-off radius.
 
 To use this method to create your connections, you can use the following

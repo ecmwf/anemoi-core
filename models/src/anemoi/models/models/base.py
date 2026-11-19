@@ -15,7 +15,6 @@ from typing import Optional
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-from omegaconf import ListConfig
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -70,40 +69,59 @@ class BaseGraphModel(nn.Module):
         self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
-        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        self._build_hidden_node_routing(model_config.model.hidden_nodes_name)
 
-        self.latent_skip = model_config.model.model.latent_skip
+        self.latent_skip = model_config.model.latent_skip
 
         self.node_attributes = NamedNodesAttributes(
-            model_config.model.node_trainable_parameters, self._build_named_node_attributes_graph()
+            model_config.node_trainable_parameters, self._build_named_node_attributes_graph()
         )
 
-        self._build_encoder_routing(model_config.model.encoders)
-        self._build_decoder_routing(model_config.model.decoders)
+        self._build_encoder_routing(model_config.encoders)
+        self._build_decoder_routing(model_config.decoders)
 
         self._calculate_shapes_and_indices(data_indices)
 
         self._assert_model_routing()
         self._assert_matching_indices(data_indices)
-        self._assert_hidden_nodes_name(self._graph_name_hidden)
+        self._assert_hidden_nodes_name()
 
         # build networks
-        self._build_networks(model_config.model)
+        self._build_networks(model_config)
 
         # build residual connection
         self._build_residual(
-            get_multiple_datasets_config(model_config.model.residual),
-            sparse_projector_config=model_config.model.get("sparse_projector", {}),
+            get_multiple_datasets_config(model_config.residual),
+            sparse_projector_config=model_config.get("sparse_projector", {}),
         )
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         # Multi-dataset: create ModuleDict with ModuleList per dataset
         self.boundings = build_boundings(
-            get_multiple_datasets_config(model_config.model.get("bounding", [])),
+            get_multiple_datasets_config(model_config.get("bounding", [])),
             data_indices=self.data_indices,
             statistics=self.statistics,
         )
+
+    def _build_hidden_node_routing(self, hidden_nodes_name: str | dict[str, str] | DictConfig) -> None:
+        """Determine which hidden mesh each dataset is encoded into."""
+        if isinstance(hidden_nodes_name, str):
+            hidden_nodes_name = dict.fromkeys(self.dataset_names, hidden_nodes_name)
+
+        if not isinstance(hidden_nodes_name, (dict, DictConfig)):
+            raise TypeError(
+                f"Hidden nodes name must be a string or a dataset mapping, got {type(hidden_nodes_name)}",
+            )
+
+        self.dataset2hidden = dict(hidden_nodes_name)
+        missing_datasets = set(self.dataset_names) - set(self.dataset2hidden)
+        unknown_datasets = set(self.dataset2hidden) - set(self.dataset_names)
+        assert not missing_datasets, f"Hidden node names are missing for datasets {sorted(missing_datasets)}."
+        assert not unknown_datasets, (
+            f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
+        )
+        self.hidden_names = list(dict.fromkeys(self.dataset2hidden.values()))
 
     def _build_encoder_routing(self, encoders_config: DotDict) -> None:
         """Builds the dataset routing for encoders."""
@@ -127,7 +145,6 @@ class BaseGraphModel(nn.Module):
         for decoder_name, decoder_config in decoders_config.items():
             datasets_to_decode = decoder_config["target_datasets"]
             self.decoder2datasets[decoder_name] = datasets_to_decode
-            assert len(datasets_to_decode) == 1, "Each decoder must be associated with exactly one dataset for now."
             for d in datasets_to_decode:
                 self.dataset2decoder[d] = decoder_name
 
@@ -140,20 +157,14 @@ class BaseGraphModel(nn.Module):
     def _assert_model_routing(self) -> None:
         """Asserts that the model routing is valid."""
         not_input_datasets = set(self.input_datasets) - set(self.input_dim.keys())
-        assert all(
-            d in self.input_datasets for d in self.dataset2encoder.keys()
-        ), f"Datasets {not_input_datasets} are in input_datasets but not in data_indices provided to the model. "
+        assert all(d in self.input_datasets for d in self.dataset2encoder.keys()), (
+            f"Datasets {not_input_datasets} are in input_datasets but not in data_indices provided to the model. "
+        )
 
         not_target_datasets = set(self.target_datasets) - set(self.output_dim.keys())
-        assert all(
-            d in self.target_datasets for d in self.dataset2decoder.keys()
-        ), f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
-
-        # Only one dataset is currently supported per encoder. Work in progress.
-        for encoder_name, datasets in self.encoder2datasets.items():
-            assert (
-                len(datasets) == 1
-            ), f"Encoder '{encoder_name}' must be associated with exactly one dataset for now. New dataset fusing strategies will be implemented soon."
+        assert all(d in self.target_datasets for d in self.dataset2decoder.keys()), (
+            f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
+        )
 
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
             if fusing_strategy not in ("not_supported"):
@@ -207,25 +218,11 @@ class BaseGraphModel(nn.Module):
             self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 
-    @staticmethod
-    def _as_hidden_node_names(
-        hidden_nodes_name: str | list[str] | ListConfig,
-    ) -> list[str]:
-        if isinstance(hidden_nodes_name, str):
-            return [hidden_nodes_name]
-
-        if isinstance(hidden_nodes_name, (list, ListConfig)):
-            return list(hidden_nodes_name)
-
-        raise TypeError(
-            f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}",
-        )
-
-    def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
-        for hidden_name in self._as_hidden_node_names(hidden_nodes_name):
-            assert (
-                hidden_name in self._graph_data.node_types
-            ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
+    def _assert_hidden_nodes_name(self) -> None:
+        for hidden_name in self.hidden_names:
+            assert hidden_name in self._graph_data.node_types, (
+                f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
+            )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         """Calculate the encoder input dimension for a given dataset."""
@@ -233,8 +230,14 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
-        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return self.node_attributes.attr_ndims[nodes_name]
+        hidden_dims = {
+            hidden_name: self.node_attributes.attr_ndims[hidden_name]
+            for hidden_name in dict.fromkeys(self.dataset2hidden.values())
+        }
+        assert len(set(hidden_dims.values())) == 1, (
+            f"All hidden meshes must have the same node attribute dimension, got {hidden_dims}."
+        )
+        return next(iter(hidden_dims.values()))
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         """Calculate the decoder target input dimension for a given dataset.
@@ -271,7 +274,9 @@ class BaseGraphModel(nn.Module):
             )
             assert len(dataset_internal_input_idx) == len(
                 dataset_internal_output_idx,
-            ), f"Dataset '{dataset_name}': Model indices must match {dataset_internal_input_idx} != {dataset_internal_output_idx}"
+            ), (
+                f"Dataset '{dataset_name}': Model indices must match {dataset_internal_input_idx} != {dataset_internal_output_idx}"
+            )
 
     def _assert_valid_sharding(
         self,
@@ -280,18 +285,18 @@ class BaseGraphModel(nn.Module):
         in_out_sharded: bool,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> None:
-        assert not (
-            in_out_sharded and model_comm_group is None
-        ), "If input is sharded, model_comm_group must be provided."
+        assert not (in_out_sharded and model_comm_group is None), (
+            "If input is sharded, model_comm_group must be provided."
+        )
 
         if model_comm_group is not None:
-            assert (
-                model_comm_group.size() == 1 or batch_size == 1
-            ), "Only batch size of 1 is supported when model is sharded across GPUs"
+            assert model_comm_group.size() == 1 or batch_size == 1, (
+                "Only batch size of 1 is supported when model is sharded across GPUs"
+            )
 
-            assert (
-                model_comm_group.size() == 1 or ensemble_size == 1
-            ), "Ensemble size per device must be 1 when model is sharded across GPUs"
+            assert model_comm_group.size() == 1 or ensemble_size == 1, (
+                "Ensemble size per device must be 1 when model is sharded across GPUs"
+            )
 
     def _resolve_in_out_sharded(
         self,
@@ -313,6 +318,13 @@ class BaseGraphModel(nn.Module):
         assert all(bs == dim_sizes[0] for bs in dim_sizes), f"Dimensions must be the same across datasets: {dim_sizes}"
 
         return dim_sizes[0]
+
+    def _get_active_hidden_name(self, dataset_names: list[str]) -> str:
+        """Return the single hidden mesh used by the datasets in the batch."""
+        active_hidden_names = list(dict.fromkeys(self.dataset2hidden[dataset_name] for dataset_name in dataset_names))
+        if len(active_hidden_names) != 1:
+            raise ValueError(f"All datasets in a batch must use the same hidden mesh, got {active_hidden_names}.")
+        return active_hidden_names[0]
 
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:
@@ -355,7 +367,7 @@ class BaseGraphModel(nn.Module):
             node_attributes_graph[dataset_name].x = self._graph_data[dataset_name].x
             node_attributes_graph[dataset_name].num_nodes = self._graph_data[dataset_name].num_nodes
 
-        for hidden_name in self._as_hidden_node_names(self._graph_name_hidden):
+        for hidden_name in self.hidden_names:
             node_attributes_graph[hidden_name].x = self._graph_data[hidden_name].x
             node_attributes_graph[hidden_name].num_nodes = self._graph_data[hidden_name].num_nodes
 
@@ -470,9 +482,9 @@ class BaseGraphModel(nn.Module):
             dataset_names = list(batch.keys())
 
             for dataset_name in dataset_names:
-                assert (
-                    len(batch[dataset_name].shape) == 4
-                ), f"The {dataset_name} input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch[dataset_name].shape}!"
+                assert len(batch[dataset_name].shape) == 4, (
+                    f"The {dataset_name} input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch[dataset_name].shape}!"
+                )
                 # Dimensions are: batch, timesteps, grid, variables
 
             x = {}
@@ -513,14 +525,14 @@ class BaseGraphModel(nn.Module):
                 **kwargs,
             )
 
-            # Apply post-processing
-            for dataset_name in dataset_names:
+            # Apply post-processing (input-only datasets, i.e. without a decoder, have no output)
+            for dataset_name in y_hat:
                 y_hat[dataset_name] = post_processors[dataset_name](y_hat[dataset_name], in_place=False)
 
             # Gather output if needed
             if gather_out and model_comm_group is not None:
                 assert grid_shard_sizes is not None
-                for dataset_name in dataset_names:
+                for dataset_name in y_hat:
                     y_hat[dataset_name] = gather_tensor(
                         y_hat[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
                     )

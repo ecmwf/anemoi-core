@@ -9,6 +9,8 @@
 
 """Shared helpers for graph-edge scores."""
 
+import math
+
 import torch
 
 from anemoi.training.losses.graph_score_base import safe_sqrt
@@ -104,7 +106,7 @@ def weighted_row_l2_norm(
 ) -> torch.Tensor:
     """Return a numerically stable weighted L2 norm for every graph row."""
     input_shape = edge_values.shape
-    flat_edge_values = edge_values.reshape(-1, *input_shape[-2:])
+    flat_edge_values = edge_values.reshape(math.prod(input_shape[:-2]), *input_shape[-2:])
     flat_batch_size, _, num_variables = flat_edge_values.shape
     row_indices = destination_index.view(1, -1, 1).expand(flat_batch_size, -1, num_variables)
     weight_view = edge_weights.to(dtype=edge_values.dtype).view(1, -1, 1)

@@ -80,9 +80,10 @@ choose stable, descriptive names.
    group share the same mapper weights.
 
 ``dataset_fusing_strategy``
-   How multiple datasets within a single group are combined if passed during the
-   same forward pass. Currently only ``"not_supported"`` is available; it is a
-   placeholder for future fusing strategies.
+   Placeholder for future strategies that fuse the datasets of a group
+   before encoding. Currently only ``"not_supported"`` is available. It
+   does not prevent a group from holding several datasets (see
+   :ref:`usage-multi-dataset-shared-groups`).
 
 ``num_channels``
    Note that ``num_channels`` is configured **per mapper** (and on the
@@ -93,16 +94,65 @@ choose stable, descriptive names.
    All datasets encoded by the same encoder group must produce latents
    with consistent shapes (see the target-feature validation below).
 
-***************************************************
- Encoding multiple datasets with the same encoder
-***************************************************
+.. _usage-multi-dataset-shared-groups:
 
-The support for encoding multiple datasets with the same encoder is currently limited to one dataset per encoder.
-Future updates may introduce more flexible dataset fusing strategies. A different strategy can be chosen for each encoder
-by setting the ``dataset_fusing_strategy`` field, which supports the following values:
+*************************************************************
+ Sharing an encoder or decoder between datasets
+*************************************************************
 
-``not_supported``
-   Indicates that multiple datasets per encoder are not currently supported.
+Several datasets can be listed in the same encoder (``source_datasets``) or
+decoder (``target_datasets``) group. They then share the mapper weights, while
+each dataset keeps its own graph edges. Datasets that share a group must be
+fused through a single hidden node set, i.e. ``hidden_nodes_name`` must be a
+string or a dataset mapping (see below), not a list of hierarchical levels.
+
+When several datasets of a group are present in the same batch, each is encoded
+separately with the shared weights and the latents are merged by the
+:ref:`latent aggregator <usage-multi-dataset-aggregator>`. Together with
+``MultiDomainLoadingPolicy`` (one domain per batch) this lets domains with
+different grids be trained with one set of weights.
+
+.. _usage-multi-dataset-hidden-nodes:
+
+********************
+ Hidden node names
+********************
+
+``model.hidden_nodes_name`` defines the hidden mesh(es) of the model and
+accepts three forms:
+
+``str``
+   One hidden mesh used by all datasets.
+
+``dict[str, str]``
+   A hidden mesh per dataset. Several datasets may point to the same mesh.
+
+   .. code:: yaml
+
+      model:
+        model:
+          hidden_nodes_name:
+            era5_o96: hidden
+            cerra: hidden_cerra
+
+``list[str]``
+   The hidden meshes of the levels of a hierarchical model.
+
+The following rules apply to the mapping form:
+
+- Every dataset of the model must be listed, and no other names may appear.
+- All datasets present in one batch must resolve to the same hidden mesh, so a
+  batch may not mix datasets with different meshes (use
+  ``MultiDomainLoadingPolicy``, which keeps every batch to one domain).
+- All hidden meshes must have the same node attribute dimension, because the
+  processor weights are shared.
+- Hierarchical models do not support the mapping.
+
+The processor graph provider of flat models holds one entry per hidden mesh, so the hidden
+mesh names appear in the model ``state_dict`` (and therefore in checkpoints), in
+the same way as the encoder and decoder group names.
+
+.. _usage-multi-dataset-aggregator:
 
 *******************
  Latent aggregator
@@ -134,6 +184,27 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
    concatenated in the configured dataset order, independently of
    the order of the mapping passed to the model. Every configured dataset
    must be active because omitting one would change the output width.
+
+``PointwiseCrossAttentionAggregator``
+   Pointwise cross-attention over the active dataset latents. The
+   initial hidden-node attributes provide the query and residual, while
+   each dataset latent is projected to ``num_channels`` and used as a
+   named key/value source. Encoder widths may differ and active dataset
+   subsets are supported. The output width is ``num_channels`` and must
+   match the processor width.
+
+   .. code:: yaml
+
+      latent_aggregator:
+        _target_: anemoi.models.layers.aggregator.PointwiseCrossAttentionAggregator
+        num_channels: ${model.num_channels}
+        num_heads: 16
+        attn_channels: null
+        dropout_p: 0.0
+        qkv_bias: false
+        qk_norm: false
+        gradient_checkpointing: true
+        layer_kernels: ${model.layer_kernels}
 
 *********************************
   Decoder target node features

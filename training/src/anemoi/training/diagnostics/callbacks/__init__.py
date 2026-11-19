@@ -108,6 +108,8 @@ def _get_checkpoint_callback(diagnostics_cfg: DictConfig, checkpoint_paths_cfg: 
     ckpt_frequency_save_dict = {}
 
     for key, frequency_dict in diagnostics_cfg.checkpoint.items():
+        if key == "exclude_hyperparameters" or frequency_dict is None:
+            continue
         frequency = frequency_dict.save_frequency
         n_saved = frequency_dict.num_models_saved
         if key == "every_n_minutes" and frequency_dict.save_frequency is not None:
@@ -307,7 +309,9 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
     # Progress bar callback
     trainer_callbacks.extend(_get_progress_bar_callback(diagnostics_cfg))
 
-    # Parent UUID callback
+    # ParentUUIDCallback only fires when Lightning loads the checkpoint (a warm start via
+    # ckpt_path since that's the only case where Lightning loads the file).
+    # For other scenarios, the checkpoint pipeline records lineage for its own loads in `runner.py`.
     # Check variable order callback
     # Register Migrations callback
     trainer_callbacks.extend(

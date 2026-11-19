@@ -12,6 +12,7 @@ from pytorch_lightning.strategies import SingleDeviceStrategy as SingleDeviceStr
 
 DROPPED_EXTRA_KEYS = [
     "static_graph",
+    "find_unused_parameters",
     "use_local_synchronization",
     "broadcast_buffers",
 ]

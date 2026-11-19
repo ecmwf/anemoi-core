@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""FreezingModifierStage — native PipelineStage for freezing model submodules."""
+"""Pipeline stage that freezes named submodules of the model."""
 
 from __future__ import annotations
 
@@ -23,47 +23,49 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+_CONFIG_PATH = "training.checkpoint.modifiers"
+
 
 class FreezingModifierStage(ModelModifier):
-    """Freezes specified submodules. Native PipelineStage — full feature port.
+    """Freeze the parameters of the named submodules.
 
-    Submodules are addressed by their full path within the model: an exact
-    child name or a dot-separated path (e.g., "processor.0",
-    "encoder.layers.2"). A bare name does not match nested submodules —
-    the same path semantics as the legacy
-    ``anemoi.training.utils.checkpoint.freeze_submodule_by_name`` (#1159).
+    Submodules are addressed by their full path from ``context.model``: an
+    exact child name or a dot-separated path (e.g., "model.model.processor",
+    "model.model.encoder.global"). A bare name does not match nested
+    submodules — the full dot-path resolution introduced in #1159.
+
+    ``context.model`` is the LightningModule, and the graph model that owns
+    ``encoder`` / ``processor`` / ``decoder`` is two attribute hops below it
+    (LightningModule -> AnemoiModelInterface -> the graph model). Prefix those
+    names with ``model.model.`` to address them, which is where the legacy
+    ``training.submodules_to_freeze`` path resolved names.
 
     Parameters
     ----------
     submodules_to_freeze : list[str]
-        Full paths of the submodules to freeze, relative to the model.
+        Paths of the submodules to freeze, from ``context.model``.
     strict : bool, default False
         If True, raise an error when a specified module is not found.
-        If False, log a warning and continue.
-    validate_gradients : bool, default True
-        If True, validate that frozen parameters do not accumulate gradients
-        after a forward/backward pass.
+        If False, log a warning and continue. Either way, a config where *no*
+        listed path resolves is an error — see :meth:`process`.
     """
 
     def __init__(
         self,
         submodules_to_freeze: list[str],
         strict: bool = False,
-        validate_gradients: bool = True,
     ) -> None:
         self.submodules_to_freeze = list(submodules_to_freeze)
 
         self.strict = strict
-        self.validate_gradients = validate_gradients
 
         LOGGER.debug(
-            "Initialized FreezingModifierStage with modules: %s (strict=%s, validate=%s)",
+            "Initialized FreezingModifierStage with modules: %s (strict=%s)",
             self.submodules_to_freeze,
             self.strict,
-            self.validate_gradients,
         )
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
+    def process(self, context: CheckpointContext) -> CheckpointContext:
         """Freeze specified submodules on context.model.
 
         Parameters
@@ -75,12 +77,23 @@ class FreezingModifierStage(ModelModifier):
         -------
         CheckpointContext
             Updated context with frozen parameters and metadata.
-        """
-        model = context.model
 
+        Raises
+        ------
+        CheckpointConfigError
+            If there is no model on the context, or if not one of the listed
+            submodules resolves on it. A freezing config that freezes
+            nothing is never what the user meant, so it is an error regardless
+            of ``strict`` — ``strict`` governs tolerance of *one* missing name,
+            not of an entirely inert config.
+        ValueError
+            If ``strict`` and a listed submodule is not found.
+        """
         if not self.submodules_to_freeze:
             LOGGER.info("No submodules specified for freezing")
             return context
+
+        model = self._require_model(context.model)
 
         LOGGER.info("Freezing the following submodules: %s", self.submodules_to_freeze)
 
@@ -99,8 +112,8 @@ class FreezingModifierStage(ModelModifier):
             frozen_modules.append({"name": module_name, "frozen_params": frozen_count})
             total_frozen += frozen_count
 
-        if self.validate_gradients:
-            self._validate_gradient_flow(model)
+        if not frozen_modules:
+            self._raise_nothing_resolved()
 
         context.metadata.setdefault("modifiers_applied", []).append(
             {
@@ -113,21 +126,71 @@ class FreezingModifierStage(ModelModifier):
 
         return context
 
-    def _freeze_submodule_by_name(self, module: torch.nn.Module, target_name: str) -> int | None:
+    @staticmethod
+    def _require_model(model: torch.nn.Module | None) -> torch.nn.Module:
+        """Return the context's model, refusing a context without one.
+
+        Parameters
+        ----------
+        model : torch.nn.Module or None
+            The context's model, i.e. the LightningModule in a training run.
+
+        Returns
+        -------
+        torch.nn.Module
+            The module that ``submodules_to_freeze`` is resolved against.
+
+        Raises
+        ------
+        CheckpointConfigError
+            If there is no model.
+        """
+        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+        if model is None:
+            msg = "FreezingModifierStage needs a model on the context, but context.model is None."
+            LOGGER.error(msg)
+            raise CheckpointConfigError(msg, config_path=_CONFIG_PATH)
+        return model
+
+    def _raise_nothing_resolved(self) -> None:
+        """Refuse a freezing config where not one listed submodule resolved.
+
+        Raises
+        ------
+        CheckpointConfigError
+            Always. Mirrors ``CheckpointPipeline._verify_weights_loaded``:
+            configured-but-did-nothing is a hard error, because the alternative
+            is a fine-tune that silently trains every parameter.
+        """
+        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+        msg = (
+            f"FreezingModifierStage was configured with {self.submodules_to_freeze} but not one path "
+            "resolved. Nothing was frozen. Paths are resolved with torch.nn.Module.get_submodule from "
+            "the LightningModule; for a standard training run the graph model is at model.model, so name "
+            "its children with that prefix (e.g. model.model.encoder.<dataset>, model.model.processor, "
+            "model.model.decoder.<dataset>). Refusing to proceed with a freezing config that freezes nothing."
+        )
+        LOGGER.error(msg)
+        raise CheckpointConfigError(msg, config_path=_CONFIG_PATH)
+
+    @staticmethod
+    def _freeze_submodule_by_name(module: torch.nn.Module, target_name: str) -> int | None:
         """Freeze the parameters of the submodule at ``target_name``.
 
         ``target_name`` is resolved with :meth:`torch.nn.Module.get_submodule`,
         i.e. as a full path relative to ``module``. There is no name-match
         search at arbitrary depth — a bare name only resolves a direct child,
-        matching the legacy ``freeze_submodule_by_name`` semantics (#1159).
+        the dot-path semantics introduced in #1159.
 
         Parameters
         ----------
         module : torch.nn.Module
             The parent module to resolve the path within.
         target_name : str
-            Full path of the submodule to freeze (e.g., "processor.0",
-            "encoder.attention").
+            Full path of the submodule to freeze (e.g., "model.model.processor",
+            "model.model.encoder.0").
 
         Returns
         -------
@@ -144,25 +207,3 @@ class FreezingModifierStage(ModelModifier):
         frozen_count = sum(p.requires_grad for p in target_module.parameters())
         target_module.requires_grad_(False)
         return frozen_count
-
-    def _validate_gradient_flow(self, model: torch.nn.Module) -> None:
-        """Validate that the frozen submodules' parameters are non-trainable.
-
-        A parameter with ``requires_grad=False`` cannot accumulate gradients, so
-        checking the flag is sufficient and needs no forward/backward pass (which
-        would also require model-specific input). A submodule name that does not
-        resolve was never frozen and is skipped.
-        """
-        for module_name in self.submodules_to_freeze:
-            try:
-                target_module = model.get_submodule(module_name)
-            except AttributeError:
-                continue
-
-            trainable = [name for name, p in target_module.named_parameters() if p.requires_grad]
-            if trainable:
-                LOGGER.warning(
-                    "Frozen submodule '%s' still has trainable parameters: %s",
-                    module_name,
-                    trainable,
-                )

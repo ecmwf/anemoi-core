@@ -9,6 +9,7 @@
 
 """Halo metadata unit tests with mocked process groups and communication."""
 
+from dataclasses import dataclass
 from dataclasses import replace
 from unittest.mock import Mock
 
@@ -18,6 +19,8 @@ import torch.distributed as dist
 
 from anemoi.models.distributed import halo
 from anemoi.models.distributed.khop_edges import GraphPartition
+
+from ._distributed_runner import _run_distributed_test
 
 # (src_splits, dst_splits, edges as (src, dst) pairs with global node IDs)
 GRAPH_CASES = {
@@ -50,6 +53,121 @@ GRAPH_CASES = {
     "empty-edges": ([2, 3, 1], [2, 3, 1], []),
     "single-rank": ([3], [3], [(0, 2), (1, 1)]),
     "single-rank-bipartite": ([2], [3], [(0, 2), (1, 1)]),
+    # Rank 0 needs source nodes from ranks 1 and 2; node 7 is isolated.
+    "symmetric-multi-peer": (
+        [3, 2, 3],
+        [3, 2, 3],
+        [
+            # Edges ending on rank 0: destination nodes 0–2.
+            (3, 0),
+            (1, 0),
+            (3, 0),
+            (5, 1),
+            (0, 1),
+            (6, 2),
+            (4, 2),
+            # Edges ending on rank 1: destination nodes 3–4.
+            (4, 3),
+            (0, 3),
+            (0, 3),
+            (5, 4),
+            (2, 4),
+            (3, 4),
+            # Edges ending on rank 2: destination nodes 5–7.
+            (4, 5),
+            (1, 5),
+            (2, 6),
+        ],
+    ),
+    # Source and destination ownership differ; repeated edges make requests deduplicate.
+    "directed-bipartite": (
+        [3, 2],
+        [2, 4],
+        [(4, 0), (1, 0), (4, 0), (3, 1), (2, 2), (3, 2), (0, 3)],
+    ),
+    # Rank 1 owns sources but no destinations or edges and must answer rank 0's requests.
+    "source-only-and-destination-only": ([0, 3], [2, 0], [(2, 0), (0, 0), (2, 1)]),
+    # Rank 1 has nonzero node offsets; node 4 is isolated.
+    "local-only-two-rank": ([2, 3], [2, 3], [(1, 0), (0, 1), (3, 2), (2, 3)]),
+    "empty-edges-bipartite": ([2, 3], [3, 1], []),
+    "empty-world": ([0, 0], [0, 0], []),
+}
+
+
+EdgeRows = tuple[tuple[int, ...], tuple[int, ...]]
+SendIndicesByRank = tuple[tuple[tuple[int, ...], ...], ...]
+RecvCountsByRank = tuple[tuple[int, ...], ...]
+
+
+@dataclass(frozen=True)
+class _GraphHaloReference:
+    """Hand-written halo metadata for comparing one graph's results."""
+
+    edge_splits: tuple[int, ...]
+    send_indices_by_rank: SendIndicesByRank
+    recv_counts_by_rank: RecvCountsByRank
+    local_edge_rows_by_rank: tuple[EdgeRows, ...]
+
+
+# Keys select graph inputs from GRAPH_CASES; values are hand-written reference data.
+# edge_splits[rank] is the expected number of edges assigned to that rank.
+# send_indices_by_rank[src_rank][dst_rank] contains source-local indices.
+# recv_counts_by_rank[dst_rank][src_rank] counts received source nodes.
+# local_edge_rows_by_rank[rank] contains relabeled (source, destination) edge rows.
+GRAPH_HALO_REFERENCES = {
+    "symmetric-multi-peer": _GraphHaloReference(
+        edge_splits=(7, 6, 3),
+        send_indices_by_rank=(
+            ((), (0, 2), (1, 2)),
+            ((0, 1), (), (1,)),
+            ((0, 1), (0,), ()),
+        ),
+        recv_counts_by_rank=((0, 2, 2), (2, 0, 1), (2, 1, 0)),
+        local_edge_rows_by_rank=(
+            ((3, 1, 3, 5, 0, 6, 4), (0, 0, 0, 1, 1, 2, 2)),
+            ((1, 2, 2, 4, 3, 0), (0, 0, 0, 1, 1, 1)),
+            ((5, 3, 4), (0, 0, 1)),
+        ),
+    ),
+    "directed-bipartite": _GraphHaloReference(
+        edge_splits=(4, 3),
+        send_indices_by_rank=(((), (0, 2)), ((0, 1), ())),
+        recv_counts_by_rank=((0, 2), (2, 0)),
+        local_edge_rows_by_rank=(
+            ((4, 1, 4, 3), (0, 0, 0, 1)),
+            ((3, 0, 2), (0, 0, 1)),
+        ),
+    ),
+    "source-only-and-destination-only": _GraphHaloReference(
+        edge_splits=(3, 0),
+        send_indices_by_rank=(((), ()), ((0, 2), ())),
+        recv_counts_by_rank=((0, 2), (0, 0)),
+        local_edge_rows_by_rank=(
+            ((1, 0, 1), (0, 0, 1)),
+            ((), ()),
+        ),
+    ),
+    "local-only-two-rank": _GraphHaloReference(
+        edge_splits=(2, 2),
+        send_indices_by_rank=(((), ()), ((), ())),
+        recv_counts_by_rank=((0, 0), (0, 0)),
+        local_edge_rows_by_rank=(
+            ((1, 0), (0, 1)),
+            ((1, 0), (0, 1)),
+        ),
+    ),
+    "empty-edges-bipartite": _GraphHaloReference(
+        edge_splits=(0, 0),
+        send_indices_by_rank=(((), ()), ((), ())),
+        recv_counts_by_rank=((0, 0), (0, 0)),
+        local_edge_rows_by_rank=(((), ()), ((), ())),
+    ),
+    "empty-world": _GraphHaloReference(
+        edge_splits=(0, 0),
+        send_indices_by_rank=(((), ()), ((), ())),
+        recv_counts_by_rank=((0, 0), (0, 0)),
+        local_edge_rows_by_rank=(((), ()), ((), ())),
+    ),
 }
 
 
@@ -68,6 +186,13 @@ def _make_graph(case: str) -> tuple[GraphPartition, torch.Tensor]:
         src_splits=src_splits,
     )
     return partition, edge_index
+
+
+@pytest.fixture(params=GRAPH_HALO_REFERENCES)
+def collective_halo_case(request: pytest.FixtureRequest) -> tuple[GraphPartition, torch.Tensor, _GraphHaloReference]:
+    """Prepare a graph's partition, full CPU edges, and reference metadata."""
+    partition, edge_index = _make_graph(request.param)
+    return partition, edge_index, GRAPH_HALO_REFERENCES[request.param]
 
 
 def _owners(splits: list[int]) -> list[int]:
@@ -169,14 +294,14 @@ def test_build_halo_info(case: str, sharded: bool, debug: bool, monkeypatch: pyt
 def test_partition_must_match_group_size(monkeypatch: pytest.MonkeyPatch) -> None:
     partition, edge_index = _make_graph("directed")
     group = _mock_group(monkeypatch, partition.num_parts + 1, 0)
-    with pytest.raises(AssertionError, match="Partition num_parts"):
+    with pytest.raises(ValueError, match=r"Partition num_parts \(3\) != comm group size \(4\)"):
         halo.build_halo_info(partition, edge_index, group)
 
 
 def test_requires_sharded_source_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     partition, edge_index = _make_graph("directed")
     group = _mock_group(monkeypatch, partition.num_parts, 0)
-    with pytest.raises(AssertionError, match="sharded source nodes"):
+    with pytest.raises(ValueError, match=r"sharded source nodes \(partition.src_splits is None\)"):
         halo.build_halo_info(replace(partition, src_splits=None), edge_index, group)
 
 
@@ -200,3 +325,105 @@ def test_debug_rejects_requests_for_nodes_owned_elsewhere(monkeypatch: pytest.Mo
     local_edges = edge_index.split(partition.edge_splits, dim=1)[0]
     with pytest.raises(AssertionError, match="does not own"):
         halo.build_halo_info(partition, local_edges, group, edge_shard_sizes=partition.edge_splits, debug=True)
+
+
+def _test_build_halo_info_collective_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    partition: GraphPartition,
+    edge_index: torch.Tensor,
+    expected: _GraphHaloReference,
+    pre_sharded: bool,
+    debug: bool,
+) -> None:
+    """Build and check exact halo metadata while all ranks exchange real requests."""
+    case_world_size = partition.num_parts
+    assert tuple(partition.edge_splits) == expected.edge_splits
+    padding = (0,) * (world_size - case_world_size)
+    src_splits = tuple(partition.src_splits) + padding
+    dst_splits = tuple(partition.dst_splits) + padding
+    edge_splits = expected.edge_splits + padding
+    # Spawned workers receive CPU tensors; each rank owns its working copy.
+    edge_index = edge_index.to(device).clone()
+    original_edges = edge_index.clone()
+    partition = replace(
+        partition,
+        num_parts=world_size,
+        dst_splits=list(dst_splits),
+        edge_splits=list(edge_splits),
+        src_splits=list(src_splits),
+    )
+
+    if pre_sharded:
+        edge_start = sum(edge_splits[:rank])
+        input_edges = edge_index[:, edge_start : edge_start + edge_splits[rank]].contiguous()
+        edge_shard_sizes = partition.edge_splits
+    else:
+        input_edges = edge_index
+        edge_shard_sizes = None
+    original_input_edges = input_edges.clone()
+
+    info = halo.build_halo_info(
+        partition,
+        input_edges,
+        group,
+        edge_shard_sizes=edge_shard_sizes,
+        debug=debug,
+    )
+
+    base_send_indices = expected.send_indices_by_rank[rank] if rank < case_world_size else ()
+    expected_send_indices = base_send_indices + ((),) * (world_size - len(base_send_indices))
+    base_recv_counts = expected.recv_counts_by_rank[rank] if rank < case_world_size else ()
+    expected_recv_counts = base_recv_counts + (0,) * (world_size - len(base_recv_counts))
+    expected_edge_rows = expected.local_edge_rows_by_rank[rank] if rank < case_world_size else ((), ())
+    expected_edges = torch.tensor(expected_edge_rows, dtype=torch.long, device=device)
+
+    assert info.num_local_src_nodes == src_splits[rank]
+    assert info.num_local_dst_nodes == dst_splits[rank]
+    assert info.num_halo_nodes == sum(expected_recv_counts)
+    assert info.total_src_nodes == src_splits[rank] + sum(expected_recv_counts)
+    assert info.recv_counts == expected_recv_counts
+    assert info.send_counts == tuple(len(indices) for indices in expected_send_indices)
+    assert len(info.send_indices) == world_size
+    for actual, indices in zip(info.send_indices, expected_send_indices):
+        expected_tensor = torch.tensor(indices, dtype=torch.long, device=device)
+        assert actual.dtype == torch.long
+        assert actual.device == device
+        torch.testing.assert_close(actual, expected_tensor)
+
+    assert info.edge_index_local.shape == (2, edge_splits[rank])
+    assert info.edge_index_local.dtype == torch.long
+    assert info.edge_index_local.device == device
+    torch.testing.assert_close(info.edge_index_local, expected_edges)
+    torch.testing.assert_close(edge_index, original_edges)
+    torch.testing.assert_close(input_edges, original_input_edges)
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize("pre_sharded", [False, True])
+@pytest.mark.parametrize("debug", [False, True])
+def test_build_halo_info_collective(
+    distributed_backend: str,
+    distributed_world_size: int,
+    collective_halo_case: tuple[GraphPartition, torch.Tensor, _GraphHaloReference],
+    pre_sharded: bool,
+    debug: bool,
+) -> None:
+    """Compare real request exchange with literal per-rank metadata and relabeled edge rows."""
+    partition, edge_index, expected = collective_halo_case
+    required_world_size = partition.num_parts
+    if distributed_world_size < required_world_size:
+        pytest.skip(f"Schedule requires at least {required_world_size} ranks.")
+    _run_distributed_test(
+        _test_build_halo_info_collective_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        partition=partition,
+        edge_index=edge_index,
+        expected=expected,
+        pre_sharded=pre_sharded,
+        debug=debug,
+    )
