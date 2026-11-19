@@ -7,15 +7,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 import pytest
 import torch
+from hydra.utils import instantiate
+from omegaconf import OmegaConf
 from pytest_mock import MockFixture
 from torch.utils.data import ConcatDataset
 from torch.utils.data import TensorDataset
 
 from anemoi.training.data.loading import GroupedDatasetLoadingPolicy
 from anemoi.training.data.loading import MultiDomainBatchSampler
+from anemoi.training.data.loading import MultiDomainLoadingPolicy
+from anemoi.training.data.loading import SynchronizedLoadingPolicy
+from anemoi.training.schemas.dataloader import DataLoadingPolicySchema
 
 
 def make_sampler(
@@ -37,6 +41,33 @@ def make_sampler(
         batch_size=batch_size,
         drop_last=True,
     )
+
+
+@pytest.mark.parametrize(
+    ("target", "extra_fields", "expected_type"),
+    [
+        (SynchronizedLoadingPolicy, {}, SynchronizedLoadingPolicy),
+        (MultiDomainLoadingPolicy, {}, MultiDomainLoadingPolicy),
+        (
+            GroupedDatasetLoadingPolicy,
+            {"dataset_groups": [["dataset_a", "dataset_b"], ["dataset_c"]]},
+            GroupedDatasetLoadingPolicy,
+        ),
+    ],
+)
+def test_loading_policy_schema_instantiates_each_policy_target(
+    target: type,
+    extra_fields: dict,
+    expected_type: type,
+) -> None:
+    schema = DataLoadingPolicySchema(target_=f"{target.__module__}.{target.__name__}", **extra_fields)
+
+    config = OmegaConf.create(schema.model_dump(by_alias=True))
+    policy = instantiate(config)
+
+    assert isinstance(policy, expected_type)
+    for key, value in extra_fields.items():
+        assert getattr(policy, key) == value
 
 
 def test_grouped_policy_stores_groups_and_combinations() -> None:
@@ -110,6 +141,24 @@ def test_grouped_policy_check_dataset_compatibility_rejects_datasets_with_differ
 
     with pytest.raises(ValueError, match="must have the same variables in the same order"):
         policy.check_dataset_compatibility(dataset)
+
+
+def test_grouped_policy_check_dataset_compatibility_accepts_datasets_with_same_variable_order(
+    mocker: MockFixture,
+) -> None:
+    policy = GroupedDatasetLoadingPolicy([["dataset_a", "dataset_b"]])
+    dataset = mocker.MagicMock(
+        name_to_index={
+            "dataset_a": {"temperature": 0, "pressure": 1},
+            "dataset_b": {"temperature": 0, "pressure": 1},
+        },
+        data={
+            "dataset_a": mocker.MagicMock(typed_variables={}),
+            "dataset_b": mocker.MagicMock(typed_variables={}),
+        },
+    )
+
+    policy.check_dataset_compatibility(dataset)
 
 
 def test_multi_domain_sampler_preserves_domain_order_across_sample_groups() -> None:

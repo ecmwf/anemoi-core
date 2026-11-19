@@ -142,8 +142,9 @@ Combining Multi-Domain and Multi-Dataset
 The multi-domain and multi-dataset features can be combined.
 The ``GroupedDatasetLoadingPolicy`` builds one ``MultiDomainDataset`` per
 combination of datasets, so each ``MultiDataset`` can contain multiple datasets.
-This policy takes as input ``dataset_groups``, a list of lists, describing which
-of the datasets will be combined into a multi-domain dataset.
+This policy takes as input ``dataset_groups``, a list of lists grouping
+interchangable datasets from which samples are drawn combining one dataset from
+every group.
 
 Select it in the dataloader configuration::
 
@@ -155,14 +156,16 @@ Select it in the dataloader configuration::
          - [data_3]
 
 For each combination of datasets ``([data, data_3], [data_2, data_3])``,
-a ``MultiDataset`` dataset is created. Each ``MultiDataset`` has its own valid
-date indices, which are the intersection of the valid dates of the datasets in
-the combination. Similarly, datasets in within a combination share variables
-and variable order, while datasets in different groups may have different
-variables and variable orders.
+a ``MultiDataset`` dataset is created, based on the cartesian product of the
+``dataset_groups``. Each ``MultiDataset`` has its own valid date indices,
+which are the intersection of the valid dates of the datasets in the combination.
+Similarly, datasets within a combination share variables and variable order,
+while datasets in different groups may have different variables and variable
+orders. The epoch length is the sum of the lengths of all combinations, and the
+batch sampler visits each combination in a random (seeded) order.
 
 Just like with ``MultiDomainLoadingPolicy``, the model routing must be
-configured to handle the multiple domains and their corresponding datasets:
+configured to handle the multiple domains and their corresponding datasets::
 
    model:
      model:
