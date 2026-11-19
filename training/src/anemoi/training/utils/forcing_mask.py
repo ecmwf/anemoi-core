@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import datetime
 import logging
 import operator
 from collections.abc import Mapping
@@ -61,7 +60,7 @@ class ForcingMask:
         self,
         mask_variable: str,
         fill_values: Mapping[float, Sequence[str]],
-        operator: str = "le",  # noqa: A002
+        operator: str = "le",
         threshold: float = 0.0,
         offsets: Sequence[str] = ("0h",),
         combine: str = "all",
@@ -178,7 +177,7 @@ class ForcingMask:
         if pre_processors is not None:
             for processor in getattr(pre_processors, "processors", {}).values():
                 if hasattr(processor, "_norm_add") and hasattr(processor, "_norm_mul"):
-                    return processor._norm_add, processor._norm_mul  # noqa: SLF001
+                    return processor._norm_add, processor._norm_mul
         return torch.zeros(n_variables), torch.ones(n_variables)
 
     def apply(
