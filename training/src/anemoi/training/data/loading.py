@@ -14,6 +14,7 @@ from collections import Counter
 from collections.abc import Iterator
 
 import numpy as np
+from omegaconf import ListConfig
 from torch.utils.data import ConcatDataset
 from torch.utils.data import Dataset
 from torch.utils.data import Sampler
@@ -359,7 +360,7 @@ class GroupedDatasetLoadingPolicy(MultiDomainLoadingPolicy):
     :class:`MultiDomainLoadingPolicy`.
     """
 
-    def __init__(self, dataset_groups: list[list[str]]) -> None:
+    def __init__(self, dataset_groups: ListConfig) -> None:
         self.dataset_groups = [list(group) for group in dataset_groups]
         if not all(self.dataset_groups):
             msg = f"dataset_groups must not contain an empty group, got {self.dataset_groups}."

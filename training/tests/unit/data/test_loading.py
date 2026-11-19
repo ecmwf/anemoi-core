@@ -73,7 +73,7 @@ def test_loading_policy_schema_instantiates_each_policy_target(
 def test_grouped_policy_stores_groups_and_combinations() -> None:
     dataset_groups = [["dataset_a", "dataset_b"], ["dataset_c", "dataset_d"]]
 
-    policy = GroupedDatasetLoadingPolicy(dataset_groups)
+    policy = GroupedDatasetLoadingPolicy(OmegaConf.create(dataset_groups))
     assert policy.dataset_groups == dataset_groups
     assert policy.combinations == [
         ("dataset_a", "dataset_c"),
@@ -86,17 +86,17 @@ def test_grouped_policy_stores_groups_and_combinations() -> None:
 @pytest.mark.parametrize("dataset_groups", [[[]], [["dataset_a"], []]])
 def test_grouped_policy_rejects_empty_groups(dataset_groups: list[list[str]]) -> None:
     with pytest.raises(ValueError, match="must not contain an empty group"):
-        GroupedDatasetLoadingPolicy(dataset_groups)
+        GroupedDatasetLoadingPolicy(OmegaConf.create(dataset_groups))
 
 
 def test_grouped_policy_rejects_datasets_in_multiple_groups() -> None:
     with pytest.raises(ValueError, match="must belong to a single group"):
-        GroupedDatasetLoadingPolicy([["dataset_a", "dataset_b"], ["dataset_b"]])
+        GroupedDatasetLoadingPolicy(OmegaConf.create([["dataset_a", "dataset_b"], ["dataset_b"]]))
 
 
 def test_grouped_policy_builds_one_dataset_per_group_combination(mocker: MockFixture) -> None:
     dataset_groups = [["dataset_a", "dataset_b"], ["dataset_c", "dataset_d"]]
-    policy = GroupedDatasetLoadingPolicy(dataset_groups)
+    policy = GroupedDatasetLoadingPolicy(OmegaConf.create(dataset_groups))
     data_readers = {name: mocker.MagicMock() for group in dataset_groups for name in group}
     relative_date_indices = {name: [0, 2, 6] for name in data_readers}
     mock_multi_dataset = mocker.patch(
@@ -121,7 +121,7 @@ def test_grouped_policy_builds_one_dataset_per_group_combination(mocker: MockFix
 
 
 def test_grouped_policy_requires_exactly_the_configured_datasets(mocker: MockFixture) -> None:
-    policy = GroupedDatasetLoadingPolicy([["dataset_a"], ["dataset_b"]])
+    policy = GroupedDatasetLoadingPolicy(OmegaConf.create([["dataset_a"], ["dataset_b"]]))
     data_readers = {"dataset_a": mocker.MagicMock()}
 
     with pytest.raises(ValueError, match="must contain exactly the configured datasets"):
@@ -131,7 +131,7 @@ def test_grouped_policy_requires_exactly_the_configured_datasets(mocker: MockFix
 def test_grouped_policy_check_dataset_compatibility_rejects_datasets_with_different_variable_orders(
     mocker: MockFixture,
 ) -> None:
-    policy = GroupedDatasetLoadingPolicy([["dataset_a", "dataset_b"]])
+    policy = GroupedDatasetLoadingPolicy(OmegaConf.create([["dataset_a", "dataset_b"]]))
     dataset = mocker.MagicMock(
         name_to_index={
             "dataset_a": {"temperature": 0, "pressure": 1},
@@ -146,7 +146,7 @@ def test_grouped_policy_check_dataset_compatibility_rejects_datasets_with_differ
 def test_grouped_policy_check_dataset_compatibility_accepts_datasets_with_same_variable_order(
     mocker: MockFixture,
 ) -> None:
-    policy = GroupedDatasetLoadingPolicy([["dataset_a", "dataset_b"]])
+    policy = GroupedDatasetLoadingPolicy(OmegaConf.create([["dataset_a", "dataset_b"]]))
     dataset = mocker.MagicMock(
         name_to_index={
             "dataset_a": {"temperature": 0, "pressure": 1},

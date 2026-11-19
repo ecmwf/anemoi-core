@@ -128,8 +128,6 @@ class DataLoadingPolicySchema(GenericSchema):
 
     target_: str = Field(default="anemoi.training.data.loading.SynchronizedLoadingPolicy", alias="_target_")
     """Hydra target class of the policy."""
-    dataset_groups: list[list[str]] | None = Field(default=None)
-    "Groups of interchangeable datasets for GroupedDatasetLoadingPolicy; each sample takes one dataset per group."
 
 
 class DataLoaderSchema(PydanticBaseModel):
