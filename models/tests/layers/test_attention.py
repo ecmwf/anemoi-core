@@ -9,6 +9,8 @@
 
 
 import math
+import sys
+import types
 
 import hypothesis.strategies as st
 import psutil
@@ -20,9 +22,11 @@ from hypothesis import settings
 
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.layers.attention import FlashAttentionWrapper
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.attention import PointwiseMultiHeadCrossAttention
+from anemoi.models.layers.attention import SDPAAttentionWrapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.triton.utils import is_triton_available
 
@@ -290,6 +294,75 @@ def test_flash_attention_rejects_float32_inputs(layer_kernels):
     ).cuda()
     with pytest.raises(ValueError, match="float16 or bfloat16"):
         attention(torch.randn(8, 32, device="cuda"), GraphShardInfo(nodes=[8]), batch_size=1)
+
+
+def test_sdpa_sliding_window_mask_marks_the_keys_within_the_window():
+    mask = SDPAAttentionWrapper.create_sliding_window_mask(6, 6, window_size=2)
+    expected = torch.tensor([[abs(i - j) <= 2 for j in range(6)] for i in range(6)])
+    assert torch.equal(mask, expected)
+
+
+def _fake_flash_attn(version: int) -> types.ModuleType:
+    """A stand-in flash-attn module whose function remembers the options it was called with."""
+    module = types.ModuleType(f"fake_flash_attn_{version}")
+
+    def flash_attn_func(query, key, value, **options):
+        module.options = options
+        out = torch.zeros_like(query)
+        return (out, None) if version == 4 else out
+
+    module.flash_attn_func = flash_attn_func
+    return module
+
+
+@pytest.fixture
+def install_flash_attn(monkeypatch):
+    """Makes fake flash-attn modules of the given versions importable and hides the other versions."""
+
+    def install(*versions: int) -> dict[int, types.ModuleType]:
+        modules = {}
+        for version, name in FlashAttentionWrapper.VERSIONS:
+            modules[version] = _fake_flash_attn(version) if version in versions else None
+            monkeypatch.setitem(sys.modules, name, modules[version])
+        return modules
+
+    return install
+
+
+@pytest.mark.parametrize(("installed", "expected"), [((2, 3, 4), 4), ((2, 3), 3), ((2,), 2)])
+def test_flash_attention_uses_the_newest_installed_version(install_flash_attn, installed, expected):
+    install_flash_attn(*installed)
+    assert FlashAttentionWrapper().version == expected
+
+
+def test_flash_attention_names_every_version_when_none_is_installed(install_flash_attn):
+    install_flash_attn()
+    with pytest.raises(ImportError, match="needs flash-attn 4, 3 or 2") as error:
+        FlashAttentionWrapper()
+    for name in ("flash_attn.cute", "flash_attn_interface", "flash_attn"):
+        assert f"({name})" in str(error.value)
+
+
+@pytest.mark.parametrize("version", [2, 3, 4])
+def test_flash_attention_rejects_dropout_when_built(install_flash_attn, version, layer_kernels):
+    install_flash_attn(version)
+    with pytest.raises(NotImplementedError, match=f"flash-attn {version} does not support: dropout_p"):
+        MultiHeadSelfAttention(
+            num_heads=2,
+            embed_dim=32,
+            layer_kernels=layer_kernels,
+            dropout_p=0.1,
+            attention_implementation="flash_attention",
+        )
+
+
+@pytest.mark.parametrize("version", [2, 3, 4])
+def test_flash_attention_passes_the_window_to_every_version(install_flash_attn, version):
+    module = install_flash_attn(version)[version]
+    query = torch.randn(1, 2, 8, 16, dtype=torch.bfloat16)
+    out = FlashAttentionWrapper()(query, query, query, batch_size=1, window_size=4)
+    assert out.shape == query.shape
+    assert module.options == {"causal": False, "window_size": (4, 4)}
 
 
 @pytest.mark.gpu

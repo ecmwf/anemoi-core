@@ -322,9 +322,9 @@ window needs queries and keys of the same length, so the mappers attend
 to every key.
 
 If the `flash-attn <https://github.com/Dao-AILab/flash-attention>`__
-package (version 2) is installed, it can be selected instead. It needs
-float16 or bfloat16 inputs, as in mixed-precision training, and is about
-twice as fast as the Triton backend for sliding windows on A100 GPUs:
+package is installed, it can be selected instead. The newest installed
+of versions 4, 3 and 2 is used. We don’t support dropout. It needs
+float16 or bfloat16 inputs, as in mixed-precision training:
 
 .. code::
 

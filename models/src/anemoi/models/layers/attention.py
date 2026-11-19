@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 import math
 import os
@@ -21,6 +22,7 @@ import torch
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch.nn.attention.flex_attention import create_mask
 from torch_geometric.typing import PairTensor
 
 from anemoi.models.distributed.graph import all_to_all_transpose
@@ -46,7 +48,7 @@ class MultiHeadSelfAttention(nn.Module):
     allows for four different attention implementations:
     - scaled dot product attention, see https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
     - Triton attention, the flash attention algorithm written in Triton, see :mod:`anemoi.models.triton.attention`
-    - flash-attn 2, see https://github.com/Dao-AILab/flash-attention
+    - flash-attn 4, 3 or 2, see https://github.com/Dao-AILab/flash-attention
     - neighbourhood attention on a global grid, see :mod:`anemoi.models.layers.neighbourhood_attention`
 
     The config parameter "model.processor.attention_implementation" is used to control which attention implementation is used.
@@ -58,8 +60,8 @@ class MultiHeadSelfAttention(nn.Module):
         Flash attention in Triton, for GPUs. Queries and keys of the same length, sliding windows, no dropout.
 
     "flash_attention"
-        The flash-attn package, for GPUs and 16-bit inputs. Self and cross attention, sliding windows,
-        dropout. Faster than the Triton kernel for sliding windows.
+        The flash-attn package, for GPUs and 16-bit inputs, using the newest of versions 4, 3 and 2
+        that is installed. Self and cross attention, sliding windows, no dropout.
 
     For all three, a sliding window needs queries and keys of the same length.
 
@@ -373,9 +375,11 @@ class SDPAAttentionWrapper(AttentionWrapper):
         Tensor
             Boolean ``(num_queries, num_keys)``, True where the query attends to the key.
         """
-        query_idx = torch.arange(num_queries, device=device)[:, None]
-        key_idx = torch.arange(num_keys, device=device)[None, :]
-        return (query_idx - key_idx).abs() <= window_size
+
+        def within_window(batch, head, query_idx, key_idx):
+            return (query_idx - key_idx).abs() <= window_size
+
+        return create_mask(within_window, 1, 1, num_queries, num_keys, device=device)[0, 0]
 
     def forward(
         self,
@@ -455,19 +459,45 @@ class TritonAttentionWrapper(AttentionWrapper):
 
 
 class FlashAttentionWrapper(AttentionWrapper):
-    """flash-attn 2, for GPUs and 16-bit inputs. Self and cross attention, sliding windows, dropout."""
+    """flash-attn, for GPUs and 16-bit inputs, using the newest of versions 4, 3 and 2 that is installed.
+
+    Self and cross attention, sliding windows, no dropout.
+    """
+
+    unsupported = frozenset({"dropout_p"})
+
+    # Newest first
+    VERSIONS = (
+        (4, "flash_attn.cute"),
+        (3, "flash_attn_interface"),
+        (2, "flash_attn"),
+    )
 
     def __init__(self):
         super().__init__()
-        try:
-            from flash_attn import flash_attn_func
-        except ImportError as error:
-            raise ImportError("attention_implementation 'flash_attention' needs the flash-attn package.") from error
-        self.attention = flash_attn_func
+        errors = []
+        for version, module in self.VERSIONS:
+            try:
+                self.attention = importlib.import_module(module).flash_attn_func
+            except ImportError as error:
+                errors.append(f"version {version} ({module}): {error}")
+                continue
+            self.version = version
+            LOGGER.info("Using flash-attn %d.", version)
+            return
+        raise ImportError("attention_implementation 'flash_attention' needs flash-attn 4, 3 or 2. " + "; ".join(errors))
+
+    def describe(self) -> str:
+        return f"flash-attn {self.version}"
 
     def check_head_dim(self, head_dim: int) -> None:
-        if head_dim > 256 or head_dim % 8:
-            raise ValueError(f"{self.describe()} needs heads of at most 256 channels, a multiple of 8, got {head_dim}.")
+        if self.version == 4:
+            # flash-attn 4 on Blackwell GPUs takes heads of up to 128 channels, or exactly 256.
+            fits, sizes = head_dim <= 128 or head_dim == 256, "at most 128 channels or exactly 256"
+        else:
+            fits, sizes = head_dim <= 256, "at most 256 channels"
+        if not fits or head_dim % 8:
+            raise ValueError(f"{self.describe()} needs heads of {sizes}, a multiple of 8, got {head_dim}.")
 
     def forward(
         self,
@@ -485,7 +515,10 @@ class FlashAttentionWrapper(AttentionWrapper):
         window = (-1, -1) if window_size is None else (window_size, window_size)
         # flash-attn takes (batch, points, heads, channels).
         query, key, value = (t.transpose(1, 2) for t in (query, key, value))
-        out = self.attention(query, key, value, dropout_p=dropout_p, causal=causal, window_size=window)
+        out = self.attention(query, key, value, causal=causal, window_size=window)
+        # flash-attn 4, and some builds of flash-attn 3, also return the log-sum-exp of the scores.
+        if isinstance(out, tuple):
+            out = out[0]
         return out.transpose(1, 2)
 
 
