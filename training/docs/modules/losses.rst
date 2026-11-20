@@ -32,6 +32,11 @@ The following loss functions are available by default:
 -  ``LogCoshLoss``: log-cosh loss.
 -  ``CombinedLoss``: Combined component weighted loss.
 
+``MSELoss``, ``MAELoss``, ``HuberLoss`` and ``LogCoshLoss`` also apply
+per-sample ``weights`` passed to them by the training method, such as the
+noise-level weights of EDM diffusion. ``RMSELoss`` does not take them, so
+EDM diffusion rejects it as its training loss.
+
 All the above losses by default are averaged across the grid nodes,
 ensemble dimension and batch size. Losses can also consider specific
 weighting either spatial, vertical or specific to the variables used.
@@ -95,8 +100,6 @@ The following probabilistic loss functions are available by default:
    inside it. With step weights that sum to one, an error that is the same
    at every step gives the same score as scoring each step separately and
    averaging.
--  ``WeightedMSELoss``: MSE with noise-level weights for EDM diffusion
-   transport models.
 
 The config for these loss functions is the same as for the
 deterministic:
@@ -879,7 +882,7 @@ Spectral losses can be combined with standard grid-point losses through
        your_dataset_name:
          _target_: anemoi.training.losses.combined.CombinedLoss
          losses:
-           - _target_: anemoi.training.losses.WeightedMSELoss
+           - _target_: anemoi.training.losses.MSELoss
            - _target_: anemoi.training.losses.spectral.SpectralCRPSLoss
              transform: fft2d
              x_dim: 256
@@ -903,7 +906,7 @@ define whether to include them in the loss function by setting
       datasets:
          your_dataset_name:
             # loss class to initialise
-            _target_: anemoi.training.losses.WeightedMSELoss
+            _target_: anemoi.training.losses.MSELoss
             scalers: ['scaler1', 'scaler2']
 
 Scalers can be added as options for the loss functions using the
@@ -1134,10 +1137,9 @@ values to be changed at the specified point. If ``None`` is returned by
 these methods, it indicates that the scaler values should not be updated
 at that time.
 
-An example of this updating scaler is the
-``anemoi.training.losses.scalers.loss_weights_mask.NaNMaskScaler``,
-which updates the loss weights based on the presence of NaN values in
-the input.
+Updating scalers are an extension point for application-specific loss
+weights. Missing targets use the loss-level ``ignore_nans`` option and
+do not require an updating scaler.
 
 ********************
  Validation Metrics
@@ -1192,7 +1194,7 @@ losses above.
          your_dataset_name:
             _target_: anemoi.training.losses.combined.CombinedLoss
             losses:
-               - _target_: anemoi.training.losses.WeightedMSELoss
+               - _target_: anemoi.training.losses.MSELoss
                - _target_: anemoi.training.losses.MAELoss
             scalers: ['variable']
             loss_weights: [1.0,0.5]
@@ -1216,7 +1218,7 @@ individual loss config.
          your_dataset_name:
             _target_: anemoi.training.losses.combined.CombinedLoss
             losses:
-               - _target_: anemoi.training.losses.WeightedMSELoss
+               - _target_: anemoi.training.losses.MSELoss
                  scalers: ['variable']
                - _target_: anemoi.training.losses.MAELoss
                  scalers: ['loss_weights_mask']
@@ -1235,10 +1237,9 @@ individual loss config.
 There is also generic functions that are useful for losses in
 ``anemoi/training/losses/utils.py``.
 
-``grad_scaler`` is used to automatically scale the loss gradients in the
-loss function using the formula in https://arxiv.org/pdf/2306.06079.pdf,
-section 4.3.2. This can be switched on in the config by setting the
-option ``config.training.loss_gradient_scaling=True``.
+Loss gradient scaling (https://arxiv.org/pdf/2306.06079.pdf, section
+4.3.2) is temporarily unavailable: ``config.training.loss_gradient_scaling``
+must be ``False``. We expect it to be reintroduced in a future PR.
 
 ``ScaleTensor`` is a class that can record and apply arbitrary scaling
 factors to tensors. It supports relative indexing, combining multiple

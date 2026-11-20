@@ -188,3 +188,42 @@ the decoder:
         comes_from_cutout: # Assigned name to the edge attribute, can be different than node_attr_name
           _target_: anemoi.graphs.edges.attributes.AttributeFromTargetNode
           node_attr_name: cutout
+
+************
+ Timedeltas
+************
+
+Dynamic mapper edges can carry the signed observation offset directly
+as one scaled scalar. Input values are seconds relative to the sample
+reference date; the default ``scale_seconds: 3600`` exposes signed
+hours.
+
+The endpoint must be explicit. Encoder edges read observation
+timedeltas from their source nodes:
+
+.. code:: yaml
+
+   - source_name: observations
+     target_name: hidden
+     edge_builders: ...
+     attributes:
+       timedeltas:
+         _target_: anemoi.graphs.edges.attributes.Timedeltas
+         node_axis: source
+         scale_seconds: 3600
+
+Decoder edges read them from their target nodes:
+
+.. code:: yaml
+
+   - source_name: hidden
+     target_name: observations
+     edge_builders: ...
+     attributes:
+       timedeltas:
+         _target_: anemoi.graphs.edges.attributes.Timedeltas
+         node_axis: target
+         scale_seconds: 3600
+
+Do not configure this attribute on hidden-to-hidden processor edges or
+other static edges.

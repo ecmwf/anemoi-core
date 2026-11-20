@@ -131,7 +131,7 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
         ("dataset", dataset_name, "shape"),
     )
 
-    assert torch.is_tensor(trainer.graph_data[dataset_name].x), "data coordinates not present"
+    assert torch.is_tensor(trainer.model.model.graph_data[dataset_name].x), "data coordinates not present"
 
     # Assert heterogeneity of num_chunks setting.
     assert (

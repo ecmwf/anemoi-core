@@ -21,9 +21,9 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.noise import draw_noise
 from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.shapes import balanced_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.sparse_projector import SparseProjector
@@ -184,23 +184,25 @@ class NoiseConditioning(BaseNoiseInjector):
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[Tensor, Tensor]:
 
-        noise_shape = (
-            batch_size,
-            ensemble_size,
-            grid_size if self.noise_graph_provider is None else self.noise_graph_provider.projection_matrix.shape[1],
-            self.noise_channels,
-        )
-
-        noise = torch.randn(size=noise_shape, dtype=noise_dtype, device=x.device) * self.noise_std
-        noise.requires_grad = False
-
+        # Every rank draws the noise for the whole group and keeps its own part (see draw_noise), so the noise
+        # does not depend on how the model is split across ranks.
         if self.noise_graph_provider is not None:
-            channel_shard_sizes = get_shard_sizes(noise, -1, model_comm_group)
-            noise = shard_tensor(noise, -1, channel_shard_sizes, model_comm_group)  # split across channels
-
-            noise = einops.rearrange(
-                noise, "batch ensemble grid vars -> (batch ensemble) grid vars"
-            )  # batch and ensemble always 1 when sharded
+            # Drawn on the noise grid and split across channels for the projection; batch and ensemble are 1
+            # when the model is sharded.
+            channel_shard_sizes = balanced_shard_sizes(self.noise_channels, model_comm_group)
+            noise = draw_noise(
+                (
+                    batch_size * ensemble_size,
+                    self.noise_graph_provider.projection_matrix.shape[1],
+                    self.noise_channels,
+                ),
+                device=x.device,
+                dtype=noise_dtype,
+                model_comm_group=model_comm_group,
+                shard_sizes=channel_shard_sizes,
+                shard_dim=-1,
+            )
+            noise = noise * self.noise_std
 
             projection_matrix = self.noise_graph_provider.get_edges(device=noise.device)
             noise = self._sparse_projector(noise, projection_matrix)  # to shape of hidden grid
@@ -210,9 +212,17 @@ class NoiseConditioning(BaseNoiseInjector):
                 noise, 0, grid_shard_sizes, -1, channel_shard_sizes, model_comm_group
             )  # sharded grid dim, full channels
         else:
-            noise = einops.rearrange(noise, "batch ensemble grid vars -> (batch ensemble grid) vars")  # shape of x
-            noise_shard_sizes = get_shard_sizes(noise, 0, model_comm_group)
-            noise = shard_tensor(noise, 0, noise_shard_sizes, model_comm_group)  # sharded grid dim, full channels
+            # Drawn in the row layout of x, split across the grid rows.
+            rows = batch_size * ensemble_size * grid_size
+            noise = draw_noise(
+                (rows, self.noise_channels),
+                device=x.device,
+                dtype=noise_dtype,
+                model_comm_group=model_comm_group,
+                shard_sizes=balanced_shard_sizes(rows, model_comm_group),
+                shard_dim=0,
+            )
+            noise = noise * self.noise_std
 
         noise = checkpoint(self.noise_mlp, noise, use_reentrant=False)
 

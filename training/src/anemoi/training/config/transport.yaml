@@ -1,0 +1,38 @@
+# Transport training on one dataset with EDM diffusion.
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- system: example
+- graph: multi_scale
+- model: graphtransformer_transport
+- task: forecaster
+- training: transport
+- _self_
+
+# set to true to switch on config validation
+config_validation: True
+
+# EDM diffusion. The tendency model is graphtransformer_transport_tendency (model=...).
+model:
+  model:
+    transport:
+      objective: edm_diffusion
+      inference_defaults:
+        sampling_schedule:
+          schedule_type: karras
+          sigma_max: 100.0
+          sigma_min: 0.02
+          rho: 7.0
+          num_steps: 50
+        sampler:
+          sampler: heun
+
+training:
+  transport:
+    # Noise level drawn once per sample and ensemble member during training.
+    training_condition:
+      distribution: karras
+      sigma_max: 100.0
+      sigma_min: 0.02
+      rho: 7.0

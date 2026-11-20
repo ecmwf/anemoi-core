@@ -133,8 +133,8 @@ def prepare_compilation(
     if gradient_checkpointing_enabled:
         LOGGER.warning(
             "Gradient checkpointing is enabled. Be aware that using torch.compile() with gradient checkpointing "
-            "can lead to non-deterministic errors stemming from micro-benchmarks leading to different compilation"
-            "decisions for checkpointed code, which can lead to 'checkpoint metadata does not match' errors."
+            "can lead to non-deterministic errors stemming from micro-benchmarks leading to different compilation "
+            "decisions for checkpointed code, which can lead to 'checkpoint metadata does not match' errors. "
             "\"mode='max-autotune'\" in particular can error due to different block sizes based on micro-benchmarks.",
         )
         # non-deterministic shape padding can error when using torch compile inside checkpointed regions
@@ -147,12 +147,15 @@ def prepare_compilation(
         torch._C._dynamo.eval_frame._set_lru_cache(False)
         LOGGER.info("disabling torch compile LRU cache")
     else:
+        # A single pre-formatted message: %-style logging args would be applied to the
+        # format string, and there are no placeholders in it to consume them.
         LOGGER.warning(
-            "Could not disable torch compile LRU cache because torch version is < 2.10.0. This may"
-            "result in runtime errors when using torch.compile() alongside activation checkpointing. If you encounter"
-            "errors, consider either upgrading to torch >= 2.10.0, or disabling torch.compile() (model.compile=[])"
-            " or disabling activation checkpointing (e.g. model.processor.gradient_checkpointing=False)."
-            "For more information, see 'https://github.com/pytorch/pytorch/issues/166926'",
+            "Could not disable torch compile LRU cache because torch version is < 2.10.0. This may "
+            "result in runtime errors when using torch.compile() alongside activation checkpointing. If you "
+            "encounter errors, consider either upgrading to torch >= 2.10.0, or disabling torch.compile() "
+            "(model.compile=[]) or disabling activation checkpointing "
+            "(e.g. model.processor.gradient_checkpointing=False). "
+            "For more information, see 'https://github.com/pytorch/pytorch/issues/166926'.",
         )
 
     if hasattr(model_config, "compile"):
