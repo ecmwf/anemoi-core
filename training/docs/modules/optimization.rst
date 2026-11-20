@@ -36,7 +36,7 @@ integration options:
      - lr_scheduler: cosine_scheduler
      - _self_
 
-   lr: 0.625e-4  # local_lr — scaled by hardware config at runtime
+   lr: 1.0e-3  # peak learning rate
 
    # Lightning scheduler integration settings.
    # See https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.core.LightningModule.html#lightning.pytorch.core.LightningModule.configure_optimizers
@@ -62,10 +62,8 @@ config group. The default is AdamW:
    betas: [0.9, 0.95]
 
 The learning rate is set separately via ``config.training.optimization.lr``
-and is not part of the optimizer config. At runtime, ``BaseGraphModule``
-computes an effective LR by scaling ``optimization.lr`` by the total
-number of GPUs divided by the number of GPUs per model, and passes
-that as the ``lr`` argument when instantiating the optimizer.
+and is not part of the optimizer config. ``BaseGraphModule`` passes it
+as the ``lr`` argument when instantiating the optimizer.
 
 To override the optimizer at the command line:
 

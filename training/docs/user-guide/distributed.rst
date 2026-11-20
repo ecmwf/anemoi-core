@@ -147,20 +147,9 @@ PyTorch Lightning's ``DDPStrategy``:
 
 Because each replica processes ``batch_size.training`` samples per
 step, adding more data-parallel replicas increases the *effective*
-batch size linearly. The default configs assume ``B_eff = 16``; if you
-change either ``batch_size.training`` or the number of replicas the
-per-step learning-rate scale changes with it. Anemoi rescales the base
-learning rate as
-
-.. math::
-
-   \texttt{global\_lr} = \texttt{local\_lr} \times
-       \frac{\texttt{num\_nodes} \times \texttt{num\_gpus\_per\_node}}
-            {\texttt{num\_gpus\_per\_model}}
-
-so if you want to keep the *global* learning rate fixed while changing
-the number of GPUs, adjust ``local_lr`` accordingly. See
-``config/training/single.yaml`` for the reference values.
+batch size linearly. The default configs assume ``B_eff = 16``. If
+you change the effective batch size, you may want to adjust the
+learning rate ``training.optimization.lr``.
 
 Trade-offs and tips
 ===================

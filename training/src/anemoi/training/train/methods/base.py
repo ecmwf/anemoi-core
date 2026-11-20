@@ -345,12 +345,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.is_first_step = True
 
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
-        self.effective_lr = (
-            config.system.hardware.num_nodes
-            * config.system.hardware.num_gpus_per_node
-            * config.training.optimization.lr
-            / config.system.hardware.num_gpus_per_model
-        )
         self.model_comm_group = None
         self.reader_groups = None
 
@@ -1365,7 +1359,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """Create optimizer and LR scheduler based on Hydra config."""
         optimization_config = self.config.training.optimization
         params = filter(lambda p: p.requires_grad, self.parameters())
-        optimizer = instantiate(optimization_config.optimizer, params=params, lr=self.effective_lr)
+        optimizer = instantiate(optimization_config.optimizer, params=params, lr=optimization_config.lr)
         self.log_optimizer(optimizer)
 
         if not getattr(optimization_config, "lr_scheduler", None):

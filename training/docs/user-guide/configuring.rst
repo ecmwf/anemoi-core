@@ -65,14 +65,14 @@ the config groups.:
 This will override the default model config with the transformer model.
 
 You can also override individual settings. For example, to change the
-learning rate from the default value of 0.625e-4 to 1e-3, you can add
+learning rate from the default value of 1e-3 to 5e-4, you can add
 the following to the config you're using:
 
 .. code:: yaml
 
    training:
-      lr:
-         rate: 1e-3
+      optimization:
+         lr: 5e-4
 
 You can also change the GPU count to whatever you have available:
 
@@ -115,7 +115,7 @@ Example Config File
 ===================
 
 Here is an example of a config file that changes the model to a
-transformer, the learning rate to 1e-3, and the number of GPUs to 1. We
+transformer and the number of GPUs to 1. We
 also need to specify the paths to the data, output, and graph data and
 give the names of the files to use. You can get a dataset from the
 `Anemoi Datasets catalogue <https://anemoi.ecmwf.int/>`_ or create one
