@@ -128,4 +128,3 @@ submodules_to_freeze: []
 
 encoder_dropout_p:
   principle_encoder: data
-

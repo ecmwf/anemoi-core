@@ -277,9 +277,7 @@ def test_normalized_leaky_relu_bounding(config, name_to_index, name_to_index_sta
     assert torch.allclose(output, expected_output, atol=1e-4)
 
 
-def test_normalized_relu_bounding_skips_missing_variables(
-    name_to_index, name_to_index_stats, input_tensor, statistics
-):
+def test_normalized_relu_bounding_skips_missing_variables(name_to_index, name_to_index_stats, input_tensor, statistics):
     # Same bounding config applied to a dataset that only contains 'var1'.
     # 'missing_var' must be silently skipped (consistent with BaseBounding),
     # otherwise the same config can't be shared across multi-dataset setups.
@@ -304,9 +302,7 @@ def test_normalized_relu_bounding_skips_missing_variables(
     assert torch.allclose(output, expected, atol=1e-4)
 
 
-def test_normalized_relu_bounding_all_missing_is_noop(
-    name_to_index_stats, input_tensor, statistics
-):
+def test_normalized_relu_bounding_all_missing_is_noop(name_to_index_stats, input_tensor, statistics):
     # If none of the configured variables are present, the bounding must
     # construct without error and act as a no-op.
     bounding = NormalizedReluBounding(
@@ -320,6 +316,7 @@ def test_normalized_relu_bounding_all_missing_is_noop(
     assert bounding.data_index.numel() == 0
     output = bounding(input_tensor.clone())
     assert torch.equal(output, input_tensor)
+
 
 @pytest.mark.parametrize(
     "cls, extra_kwargs",
