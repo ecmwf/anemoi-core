@@ -41,7 +41,24 @@ class PointwiseCrossAttentionAggregatorSchema(BaseModel):
     gradient_checkpointing: bool = True
 
 
+class GatedFusionAggregatorSchema(BaseModel):
+    target_: Literal["anemoi.models.layers.aggregator.GatedFusionAggregator"] = Field(..., alias="_target_")
+    principal_source: str | None = Field(
+        default=None,
+        description="Source whose latent is the running latent; defaults to the first configured source.",
+    )
+    zero_init_value: bool = Field(
+        default=False,
+        description="Zero-initialise each fusion block's value projection so it starts as an exact identity.",
+    )
+    gradient_checkpointing: bool = False
+
+
 AggregatorSchema = Annotated[
-    SumAggregatorSchema | MeanAggregatorSchema | ConcatAggregatorSchema | PointwiseCrossAttentionAggregatorSchema,
+    SumAggregatorSchema
+    | MeanAggregatorSchema
+    | ConcatAggregatorSchema
+    | PointwiseCrossAttentionAggregatorSchema
+    | GatedFusionAggregatorSchema,
     Field(discriminator="target_"),
 ]

@@ -11,6 +11,7 @@ import pytest
 import torch
 
 from anemoi.models.layers.aggregator import ConcatAggregator
+from anemoi.models.layers.aggregator import GatedFusionAggregator
 from anemoi.models.layers.aggregator import MeanAggregator
 from anemoi.models.layers.aggregator import PointwiseCrossAttentionAggregator
 from anemoi.models.layers.aggregator import SumAggregator
@@ -140,3 +141,64 @@ def test_pointwise_cross_attention_aggregator_validates_attention_width() -> Non
             attn_channels=8,
             layer_kernels={},
         )
+
+
+def _gated_aggregator(**kwargs) -> GatedFusionAggregator:
+    torch.manual_seed(0)
+    return GatedFusionAggregator(input_channels=3, source_channels={"data": 4, "waves": 4, "ocean": 4}, **kwargs)
+
+
+def test_gated_fusion_aggregator_folds_active_sources_in_configured_order() -> None:
+    aggregator = _gated_aggregator().eval()
+    hidden = torch.randn(6, 3)
+    data, waves, ocean = torch.randn(6, 4), torch.randn(6, 4), torch.randn(6, 4)
+
+    # principal_source defaults to the first configured source; one block per auxiliary source.
+    assert aggregator.principal_source == "data"
+    assert set(aggregator.fusion) == {"waves", "ocean"}
+    assert aggregator.hidden_dim == 4
+
+    # In eval mode sources are folded in configured order (waves, then ocean), whatever the mapping order.
+    expected = aggregator.fusion["ocean"](aggregator.fusion["waves"](data, waves), ocean)
+    torch.testing.assert_close(aggregator(hidden, {"ocean": ocean, "data": data, "waves": waves}), expected)
+
+    # Absent auxiliary sources are skipped.
+    torch.testing.assert_close(
+        aggregator(hidden, {"data": data, "waves": waves}), aggregator.fusion["waves"](data, waves)
+    )
+    torch.testing.assert_close(aggregator(hidden, {"data": data}), data)
+
+
+@pytest.mark.parametrize("gradient_checkpointing", [False, True])
+def test_gated_fusion_aggregator_propagates_gradients_to_all_active_sources(gradient_checkpointing: bool) -> None:
+    aggregator = _gated_aggregator(gradient_checkpointing=gradient_checkpointing).train()
+    latents = {name: torch.randn(6, 4, requires_grad=True) for name in ("data", "waves", "ocean")}
+
+    aggregator(torch.randn(6, 3), latents).sum().backward()
+
+    assert all(latent.grad is not None and torch.count_nonzero(latent.grad) > 0 for latent in latents.values())
+    assert all(p.grad is not None for p in aggregator.parameters())
+
+
+def test_gated_fusion_aggregator_zero_init_is_an_identity_that_still_learns() -> None:
+    aggregator = _gated_aggregator(zero_init_value=True)
+    data = torch.randn(6, 4)
+    latents = {"data": data, "waves": torch.randn(6, 4), "ocean": torch.randn(6, 4)}
+
+    output = aggregator(torch.randn(6, 3), latents)
+    torch.testing.assert_close(output, data)
+
+    # The gates stay open, so each zeroed value projection receives gradient and can move away from zero.
+    output.sum().backward()
+    for block in aggregator.fusion.values():
+        assert torch.count_nonzero(block.to_value[-1].weight.grad) > 0
+        assert torch.count_nonzero(block.to_value[-1].bias.grad) > 0
+
+
+def test_gated_fusion_aggregator_validates_sources() -> None:
+    with pytest.raises(ValueError, match="same channel dimension"):
+        GatedFusionAggregator(input_channels=3, source_channels={"data": 4, "waves": 5})
+    with pytest.raises(ValueError, match="principal_source 'waves'"):
+        GatedFusionAggregator(input_channels=3, source_channels={"data": 4}, principal_source="waves")
+    with pytest.raises(ValueError, match="requires the principal source 'data'"):
+        _gated_aggregator()(torch.randn(6, 3), {"waves": torch.randn(6, 4)})
