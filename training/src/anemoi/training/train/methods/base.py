@@ -35,6 +35,7 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
 from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
 from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
+from anemoi.training.checkpoint.modifiers.peft import write_adapter_record
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
@@ -481,6 +482,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def on_save_checkpoint(self, checkpoint: dict) -> None:
         checkpoint["task_state"] = self.task.training_runtime_state_dict()
+        # Every Lightning save records the PEFT adapters the model holds, so any later
+        # load or resume can rebuild them (restore_checkpoint_adapters).
+        write_adapter_record(checkpoint, self)
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
         # The task's training runtime state (e.g. rollout step) is resume state the

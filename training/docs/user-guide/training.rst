@@ -899,6 +899,60 @@ decoder.
    ``training.checkpoint.modifiers`` to a list with a ``FreezingModifierStage``,
    as shown above.
 
+**********************************
+ Fine-Tuning with PEFT Adapters
+**********************************
+
+Instead of freezing whole parts of a pre-trained model, you can train small
+adapters next to its layers and leave the loaded weights as they are. The
+adapters come from the
+parameter-efficient fine-tuning (PEFT) library, `Hugging Face PEFT
+<https://huggingface.co/docs/peft>`_, and you can use LoRA or another PEFT
+method. This needs the optional ``peft``
+extra:
+
+.. code:: bash
+
+   pip install anemoi-training[peft]
+
+Select the ``peft`` modifier group, or list a ``PeftModifierStage`` under
+``training.checkpoint.modifiers`` yourself:
+
+.. code:: bash
+
+   anemoi-training train training/checkpoint/modifiers=peft
+
+.. code:: yaml
+
+   training:
+      checkpoint:
+        source:
+          _target_: anemoi.training.checkpoint.sources.local.LocalSource
+          path: /path/to/pretrained.ckpt
+        loading:
+          _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+        modifiers:
+          - _target_: anemoi.training.checkpoint.modifiers.peft.PeftModifierStage
+            peft_config:
+              _target_: peft.LoraConfig
+              r: 8
+              lora_alpha: 16
+              target_modules: all-linear
+              exclude_modules: (?!processor\.).*
+
+The ``_target_`` of ``peft_config`` chooses the method, for example
+``peft.LoraConfig`` or ``peft.MissConfig``, and the other keys are the options
+of that class. PEFT matches ``target_modules`` against names relative to the
+graph model, such as ``processor.proc.0.lin_query``. This differs from
+``submodules_to_freeze`` in the preceding section, which takes full paths. In
+this example, PEFT adds adapters to every ``Linear`` layer of the processor.
+
+The checkpoints of such a run record their adapters, so you can resume or load
+them like any other checkpoint. The inference checkpoints hold merged weights
+that load without ``peft``. The :ref:`checkpoint pipeline reference
+<cp_peft>` describes how to name the layers and which options log a warning.
+It also covers adding adapters to a model that already has some.
+
 Freezing can be particularly beneficial in scenarios such as fine-tuning
 when only specific components (e.g., the encoder, the decoder) need to
 adapt to a new task while keeping others (e.g., the processor) fixed.
