@@ -86,6 +86,18 @@ class DAForecasterSchema(BaseModel):
         "Score only the final forecast step in validation: the validation loss and metrics come from that "
         "step alone instead of averaging / logging every rollout step."
     )
+    # TODO: da_initial_only_datasets is redundant with da_observation_cycles ({name: 0} is equivalent);
+    # remove it once no checkpoint in use relies on it (e.g. gd-ctrl-updates-multi-era5-init, run 86ef12fb).
+    da_initial_only_datasets: list[str] = Field(default_factory=list, example=[[], ["era5"]])
+    (
+        "Datasets taken from the batch for the initial input only: during the DA cycles they advance on "
+        "their own prediction, as in the forecast rollout, instead of being blended with the batch."
+    )
+    da_observation_cycles: dict[str, NonNegativeInt] = Field(default_factory=dict, example=[{}, {"era5": 3}])
+    (
+        "Per dataset, the number of leading DA cycles whose output is blended with the batch; after later DA "
+        "cycles the dataset advances on its own prediction. da_initial_only_datasets is the case 0."
+    )
 
 
 class OffsetForecasterSchema(BaseModel):

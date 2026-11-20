@@ -13,7 +13,10 @@ Extends the standard :class:`Forecaster` with ``da_cycles`` assimilation steps
 before the autoregressive forecast rollout. In each DA cycle the model runs a
 forward pass and the prediction is blended with observations (observation where
 present, model background where NaN), and the blended analysis state is used as
-the input for the next cycle. After the DA cycles, the standard forecast rollout
+the input for the next cycle. Datasets listed in ``da_initial_only_datasets`` are taken
+from the batch for the initial input only and autoregress on their own prediction
+during the DA cycles, like in the forecast rollout; ``da_observation_cycles`` limits
+the blend of a dataset to its first N DA cycles in the same way. After the DA cycles, the standard forecast rollout
 runs with the corrector input slots zeroed (no observations available).
 
 DA and forecast targets are contiguous in time, so a single continuous
@@ -52,6 +55,8 @@ class DAForecaster(Forecaster):
         da_grad_cycles: int | None = None,
         checkpoint_steps: int = 0,
         validation_last_step_only: bool = False,
+        da_initial_only_datasets: list[str] | None = None,
+        da_observation_cycles: dict[str, int] | None = None,
         **kwargs,
     ) -> None:
         self.da_cycles = da_cycles
@@ -72,6 +77,23 @@ class DAForecaster(Forecaster):
         # Validation scores only the final forecast step (loss and metrics), so a long
         # validation rollout reports the lead time of interest rather than an average.
         self.validation_last_step_only = validation_last_step_only
+        # Datasets read from the batch for the initial input only: during the DA cycles they
+        # advance on their own prediction (as in the forecast rollout) instead of being
+        # blended with the batch, e.g. a gridded analysis that only initialises the state.
+        # TODO: da_initial_only_datasets is redundant with da_observation_cycles ({name: 0} is equivalent);
+        # remove it once no checkpoint in use relies on it (e.g. gd-ctrl-updates-multi-era5-init, run 86ef12fb).
+        self.da_initial_only_datasets = list(da_initial_only_datasets or [])
+        # Per dataset, the number of leading DA cycles that blend its batch values into the
+        # state; later DA cycles advance it on its own prediction. A dataset in
+        # da_initial_only_datasets is the special case 0.
+        self.da_observation_cycles = {str(k): int(v) for k, v in dict(da_observation_cycles or {}).items()}
+        if any(n < 0 for n in self.da_observation_cycles.values()):
+            msg = f"da_observation_cycles must be >= 0, got {self.da_observation_cycles}."
+            raise ValueError(msg)
+        both = sorted(set(self.da_initial_only_datasets) & set(self.da_observation_cycles))
+        if both:
+            msg = f"Datasets {both} are in both da_initial_only_datasets and da_observation_cycles."
+            raise ValueError(msg)
         super().__init__(
             multistep_input,
             multistep_output,
@@ -90,12 +112,14 @@ class DAForecaster(Forecaster):
         if da_cycles > 0:
             LOGGER.info(
                 "DAForecaster: da_cycles=%d, da_grad_cycles=%d, checkpoint_steps=%d, da_loss_weight=%.3f, "
-                "da_flow_dependent_skip=%s",
+                "da_flow_dependent_skip=%s, da_initial_only_datasets=%s, da_observation_cycles=%s",
                 da_cycles,
                 self.da_grad_cycles,
                 checkpoint_steps,
                 da_loss_weight,
                 da_flow_dependent_skip,
+                self.da_initial_only_datasets,
+                self.da_observation_cycles,
             )
             if da_loss_weight > 0 and self.da_grad_cycles < da_cycles:
                 LOGGER.warning(
@@ -105,10 +129,18 @@ class DAForecaster(Forecaster):
                     self.da_grad_cycles,
                     da_cycles,
                 )
-        elif da_flow_dependent_skip:
-            LOGGER.warning(
-                "DAForecaster: da_flow_dependent_skip=True has no effect with da_cycles=0.",
-            )
+        else:
+            if da_flow_dependent_skip:
+                LOGGER.warning(
+                    "DAForecaster: da_flow_dependent_skip=True has no effect with da_cycles=0.",
+                )
+            if self.da_initial_only_datasets or self.da_observation_cycles:
+                LOGGER.warning(
+                    "DAForecaster: da_initial_only_datasets=%s / da_observation_cycles=%s have no effect "
+                    "with da_cycles=0.",
+                    self.da_initial_only_datasets,
+                    self.da_observation_cycles,
+                )
 
     def steps(self, mode: str = "training") -> tuple[dict[str, int | bool], ...]:
         """Return the DA cycles followed by the forecast rollout steps.
@@ -295,7 +327,11 @@ class DAForecaster(Forecaster):
         """Advance the input state for the next step.
 
         DA cycles blend observations into the state; forecast steps autoregress
-        using the parent logic (with corrector input slots zeroed).
+        using the parent logic (with corrector input slots zeroed). Datasets in
+        ``da_initial_only_datasets`` autoregress in the DA cycles too, so the batch
+        only provides their initial input (and their forcings). A dataset with
+        ``da_observation_cycles`` N is blended after the first N DA cycles only and
+        autoregresses after the later ones.
 
         ``dropped_datasets`` (multi-encoder dataset dropout) emit an all-NaN
         forecast; their background is replaced by zeros before the blend so the
@@ -315,7 +351,33 @@ class DAForecaster(Forecaster):
                 dropped_datasets=dropped_datasets,
             )
 
+        limits = {name: 0 for name in self.da_initial_only_datasets} | self.da_observation_cycles
+        missing = sorted(set(limits) - set(x))
+        if missing:
+            msg = (
+                f"da_initial_only_datasets / da_observation_cycles {missing} are not datasets of the "
+                f"model input {sorted(x)}."
+            )
+            raise ValueError(msg)
+        # Datasets past their blend limit at this DA cycle advance like a forecast step.
+        initial_only = [name for name, n in limits.items() if rollout_step >= n]
+        if initial_only:
+            x.update(
+                super().advance_input(
+                    {name: x[name] for name in initial_only},
+                    y_pred,
+                    batch,
+                    rollout_step=rollout_step,
+                    data_indices=data_indices,
+                    output_mask=output_mask,
+                    grid_shard_slice=grid_shard_slice,
+                    dropped_datasets=dropped_datasets,
+                ),
+            )
+
         for dataset_name in x:
+            if dataset_name in initial_only:
+                continue
             dataset_y_pred = y_pred.get(dataset_name)
             if dataset_y_pred is None:
                 x[dataset_name] = self._advance_dataset_input(

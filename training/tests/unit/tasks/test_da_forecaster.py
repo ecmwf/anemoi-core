@@ -320,3 +320,109 @@ def test_da_forecaster_advance_dispatch_by_is_da() -> None:
     # is_da=True -> blend path fills last step from obs/pred (obs all zero here, not NaN)
     out = task.advance_input(x, y_pred, batch, rollout_step=0, is_da=True, data_indices=data_indices)
     assert out["data"].shape == (b, 2, e, g, 1)
+
+
+# ── initial-only datasets ─────────────────────────────────────────────────
+
+
+def test_da_initial_only_dataset_autoregresses_during_da_cycles() -> None:
+    # "data" is blended with its observations; "era5" is taken from the batch for the
+    # initial input only and advances on its own prediction during the DA cycles.
+    name_to_index = {"prog": 0, "force": 1}
+    data_indices = {
+        "data": _make_index_collection(name_to_index, forcing=["force"]),
+        "era5": _make_index_collection(name_to_index, forcing=["force"]),
+    }
+    task = DAForecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="6h",
+        da_cycles=2,
+        da_initial_only_datasets=["era5"],
+    )
+
+    b, e, g = 1, 1, 2
+    x = {name: torch.zeros((b, 2, e, g, 2)) for name in data_indices}
+    y_pred = {name: torch.full((b, 1, e, g, 1), 42.0) for name in data_indices}
+    # time dim = offsets [-6h, 0, +6h, +12h, +18h] (da_cycles=2 + rollout=1); output of step 0 at index 2
+    batch = {name: torch.full((b, 5, e, g, 2), 5.0) for name in data_indices}
+    batch["era5"][:, 2, ..., 1] = 7.0  # forcing at the target time
+
+    out = task.advance_input(
+        x,
+        y_pred,
+        batch,
+        rollout_step=0,
+        is_da=True,
+        data_indices=data_indices,
+        output_mask={name: NoOutputMask() for name in data_indices},
+    )
+
+    # observations are blended into "data" ...
+    assert torch.all(out["data"][:, -1, ..., 0] == 5.0)
+    # ... but "era5" keeps the model prediction, with its forcing refreshed from the batch
+    assert torch.all(out["era5"][:, -1, ..., 0] == 42.0)
+    assert torch.all(out["era5"][:, -1, ..., 1] == 7.0)
+
+
+def test_da_initial_only_unknown_dataset_raises() -> None:
+    data_indices = {"data": _make_index_collection({"prog": 0})}
+    task = DAForecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="6h",
+        da_cycles=1,
+        da_initial_only_datasets=["era5"],
+    )
+    x = {"data": torch.zeros((1, 2, 1, 2, 1))}
+    y_pred = {"data": torch.zeros((1, 1, 1, 2, 1))}
+    batch = {"data": torch.zeros((1, 4, 1, 2, 1))}
+    with pytest.raises(ValueError, match="da_initial_only_datasets"):
+        task.advance_input(x, y_pred, batch, rollout_step=0, is_da=True, data_indices=data_indices)
+
+
+@pytest.mark.parametrize(("rollout_step", "blended"), [(0, True), (1, True), (2, True), (3, False)])
+def test_da_observation_cycles_limit_blend_to_leading_cycles(rollout_step: int, blended: bool) -> None:
+    # era5 is blended after DA cycles 0..2 and advances on its own prediction after cycle 3.
+    name_to_index = {"prog": 0, "force": 1}
+    data_indices = {
+        "data": _make_index_collection(name_to_index, forcing=["force"]),
+        "era5": _make_index_collection(name_to_index, forcing=["force"]),
+    }
+    task = DAForecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="6h",
+        da_cycles=4,
+        da_observation_cycles={"era5": 3},
+    )
+
+    b, e, g = 1, 1, 2
+    x = {name: torch.zeros((b, 2, e, g, 2)) for name in data_indices}
+    y_pred = {name: torch.full((b, 1, e, g, 1), 42.0) for name in data_indices}
+    batch = {name: torch.full((b, 7, e, g, 2), 5.0) for name in data_indices}  # 2 inputs + 4 DA + 1 forecast
+
+    out = task.advance_input(
+        x,
+        y_pred,
+        batch,
+        rollout_step=rollout_step,
+        is_da=True,
+        data_indices=data_indices,
+        output_mask={name: NoOutputMask() for name in data_indices},
+    )
+
+    assert torch.all(out["data"][:, -1, ..., 0] == 5.0)
+    assert torch.all(out["era5"][:, -1, ..., 0] == (5.0 if blended else 42.0))
+
+
+def test_da_observation_cycles_rejects_overlap_with_initial_only() -> None:
+    with pytest.raises(ValueError, match="both"):
+        DAForecaster(
+            multistep_input=2,
+            multistep_output=1,
+            timestep="6h",
+            da_cycles=4,
+            da_initial_only_datasets=["era5"],
+            da_observation_cycles={"era5": 3},
+        )
