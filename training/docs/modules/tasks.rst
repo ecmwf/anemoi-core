@@ -264,7 +264,7 @@ onto its grid. It is constructed with:
 No output is fed back into the inputs. The metadata records the offsets
 and an empty advance map for inference. See ``spatial_downscaler.yaml``
 for a complete configuration, and :ref:`the tendency model
-<tendencies-against-another-dataset>` for the residuals against the
+<tendencies-against-another-dataset>` for the tendencies against the
 low-resolution dataset.
 
 .. automodule:: anemoi.training.tasks.spatial_downscaler

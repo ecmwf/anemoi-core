@@ -387,11 +387,11 @@ class TransportModelSchema(BaseModelSchema):
 class TransportTendModelSchema(TransportModelSchema):
     condition_on_residual: bool = Field(default=False)
     "Whether the encoder also reads the residual connection's reference state next to the noisy tendency."
-    residual_reference: dict[str, str] = Field(default_factory=dict)
+    tendency_reference: dict[str, str] = Field(default_factory=dict)
     (
         "Reference dataset of each predicted dataset, {predicted: reference}; by default a dataset is its own "
         "reference. Outputs that the reference dataset has as inputs under the same name are learned as "
-        "residuals against its latest input, built by the reference dataset's residual connection."
+        "tendencies against its latest input, built by the reference dataset's residual connection."
     )
 
 

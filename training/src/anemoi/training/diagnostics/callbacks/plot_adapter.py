@@ -94,7 +94,7 @@ class BasePlotAdapter(ABC):
     ) -> Iterator[tuple[Any, Any, Any, str]]:
         """Yield (x, y_true, y_pred, tag_suffix) or (sample, recon, tag) per plot sample.
 
-        ``input_data`` is the state the model adds its predicted residuals to, laid out like the
+        ``input_data`` is the state the model adds its predicted tendencies to, laid out like the
         outputs with one time step per output step or one for all of them, when the model has one
         from another dataset to show; adapters that plot the dataset's own inputs ignore it.
         """
@@ -181,7 +181,7 @@ class SpatialDownscalerPlotAdapter(BasePlotAdapter):
 
     Output step i is valid at the time of input step i, so it is plotted against the truth and the
     input at that time. The input is the model's reference (``input_data``) when it predicts
-    residuals against another dataset, for example the low-resolution dataset projected onto the
+    tendencies against another dataset, for example the low-resolution dataset projected onto the
     plotted grid; otherwise it is the plotted dataset's own data at that time, of which the plots
     show only the variables that are inputs.
     """

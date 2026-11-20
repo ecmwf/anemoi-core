@@ -1,6 +1,6 @@
 # Spatial downscaling with EDM diffusion: the model predicts the high-resolution dataset hres from the
 # low-resolution dataset lres, projected onto the hres grid, and the hres forcings. The fields lres
-# also has are learned as residuals against it (model.residual_reference).
+# also has are learned as tendencies against it (model.tendency_reference).
 defaults:
 - data: downscaling
 - dataloader: downscaling
@@ -22,13 +22,13 @@ system:
     dataset_lres: ???
     # Sparse projection matrix (.npz) from the lres grid onto the hres grid, used by lres's spatial processor.
     truncation: ???
-    # Normalisation statistics of the residuals hres - lres (.npz), see data.datasets.hres.residual_statistics.
-    residual_statistics: ???
+    # Normalisation statistics of the tendencies hres - lres (.npz), see data.datasets.hres.tendency_statistics_file.
+    tendency_statistics_file: ???
 
 diagnostics:
   plot:
     # Only hres is predicted; lres is shown as the input of its plots, projected onto the hres grid,
-    # with the predicted and true residuals against it.
+    # with the predicted and true tendencies against it.
     datasets_to_plot: [hres]
     parameters: [2t, 10u, 10v, tp]
     callbacks:

@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import numpy as np
 
-RESIDUAL_STATISTICS_KEYS = ("mean", "minimum", "maximum", "stdev")
+TENDENCY_STATISTICS_KEYS = ("mean", "minimum", "maximum", "stdev")
 
 
-def load_residual_statistics(path: str, variables: list[str]) -> dict[str, np.ndarray]:
-    """Load the normalisation statistics of a dataset's residuals from an ``.npz`` file.
+def load_tendency_statistics(path: str, variables: list[str]) -> dict[str, np.ndarray]:
+    """Load the normalisation statistics of a dataset's tendencies from an ``.npz`` file.
 
-    A residual is a predicted variable minus its reference from another dataset (for example a
+    A tendency is a predicted variable minus its reference from another dataset (for example a
     high-resolution field minus the projected low-resolution one). The model normalises it with these
     statistics, the same for every output step.
 
@@ -34,16 +34,16 @@ def load_residual_statistics(path: str, variables: list[str]) -> dict[str, np.nd
     dict[str, np.ndarray]
         ``{"mean": ..., "minimum": ..., "maximum": ..., "stdev": ...}``, each of shape
         ``(len(variables),)`` and ordered like ``variables``. A variable without an entry in the file
-        gets NaN: the model checks that the variables it learns as residuals have finite values.
+        gets NaN: the model checks that the variables it learns as tendencies have finite values.
     """
     with np.load(path, allow_pickle=True) as npz:
-        missing_keys = [key for key in RESIDUAL_STATISTICS_KEYS if key not in npz.files]
+        missing_keys = [key for key in TENDENCY_STATISTICS_KEYS if key not in npz.files]
         if missing_keys:
-            msg = f"Residual statistics in {path} lack the entries {missing_keys}."
+            msg = f"Tendency statistics in {path} lack the entries {missing_keys}."
             raise KeyError(msg)
-        stats_by_name = {key: npz[key].item() for key in RESIDUAL_STATISTICS_KEYS}
+        stats_by_name = {key: npz[key].item() for key in TENDENCY_STATISTICS_KEYS}
 
     return {
         key: np.array([stats_by_name[key].get(variable, np.nan) for variable in variables], dtype=np.float64)
-        for key in RESIDUAL_STATISTICS_KEYS
+        for key in TENDENCY_STATISTICS_KEYS
     }

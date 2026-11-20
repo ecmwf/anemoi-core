@@ -375,7 +375,7 @@ Tendencies against another dataset
 ----------------------------------
 
 By default the tendency model learns each predicted dataset's change
-against its own latest input. ``model.residual_reference`` takes the
+against its own latest input. ``model.tendency_reference`` takes the
 reference from another dataset instead, for example a low-resolution
 dataset projected onto the high-resolution grid by its
 ``spatial_processor``:
@@ -383,7 +383,7 @@ dataset projected onto the high-resolution grid by its
 .. code:: yaml
 
    model:
-     residual_reference:
+     tendency_reference:
        hres: lres
      residual:
        datasets:
@@ -394,10 +394,10 @@ dataset projected onto the high-resolution grid by its
    data:
      datasets:
        hres:
-         residual_statistics: /path/to/residual_statistics.npz
+         tendency_statistics_file: /path/to/tendency_statistics.npz
 
 -  The outputs of ``hres`` that ``lres`` has as inputs under the same name
-   are learned as residuals: the ``hres`` value minus the ``lres`` input.
+   are learned as tendencies: the ``hres`` value minus the ``lres`` input.
    The other outputs of ``hres`` are learned as states.
 -  With ``step: matching``, output step i is taken against ``lres`` input
    step i, so several snapshots (``SpatialDownscaler`` with several
@@ -410,13 +410,13 @@ dataset projected onto the high-resolution grid by its
    units with that dataset's processors, so the two datasets can be
    normalised differently. A residual connection for ``hres`` would not be
    used and is rejected.
--  The residuals are normalised with the statistics in
-   ``residual_statistics``: an ``.npz`` file with ``mean``, ``minimum``,
+-  The tendencies are normalised with the statistics in
+   ``tendency_statistics_file``: an ``.npz`` file with ``mean``, ``minimum``,
    ``maximum`` and ``stdev`` entries, each a ``{variable: value}`` mapping.
    They are used for every output step. A dataset with a reference from
    another dataset needs this file.
 -  Remappings such as ``sqrt`` and output constraints act on states only,
-   so they do not act on residuals, and a residual is not kept positive.
+   so they do not act on tendencies, and a tendency is not kept positive.
 -  ``condition_on_residual`` cannot be combined with a reference from
    another dataset.
 
@@ -425,8 +425,8 @@ is read only and projected onto the ``hres`` grid by its
 ``spatial_processor``, ``hres`` has the forcings as inputs and the fields
 to downscale as outputs only, and one ``joint`` encoder joins ``lres`` and
 ``hres`` node by node. Its plots show each snapshot of ``hres`` with the
-reference as input, so the increment panel shows the predicted residual
-and the persistence error panel the true residual.
+reference as input, so the increment panel shows the predicted tendency
+and the persistence error panel the true tendency.
 
 Flow matching
 =============

@@ -107,8 +107,8 @@ decoders:
 
 condition_on_residual: False
 
-# The hres outputs that lres has under the same name are learned as residuals against lres: hres - lres.
-residual_reference:
+# The hres outputs that lres has under the same name are learned as tendencies against lres: hres - lres.
+tendency_reference:
   hres: lres
 
 # The reference is built by lres's own residual connection. With several snapshots (task.offsets),

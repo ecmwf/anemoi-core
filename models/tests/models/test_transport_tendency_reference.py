@@ -11,7 +11,7 @@
 
 A small model predicts ``hres`` and reads ``lres`` as input only, on the same grid (as after a
 spatial preprocessor has projected ``lres`` onto the ``hres`` grid). ``hres`` learns its outputs
-``a`` and ``b`` as residuals against the ``lres`` input of the same name, and ``s``, which ``lres``
+``a`` and ``b`` as tendencies against the ``lres`` input of the same name, and ``s``, which ``lres``
 does not have, as a state. With several snapshots, each output step is taken against the ``lres``
 input at the same time.
 """
@@ -42,8 +42,8 @@ STATISTICS = {
     "hres": {"mean": np.array([1.0, -1.0, 0.5, 2.0]), "stdev": np.array([2.0, 0.25, 1.0, 3.0])},
 }
 # The values of "s" (learned as a state) and "f" (a forcing) are never read, so they can be missing.
-RESIDUAL_STATISTICS = {"mean": np.array([0.1, -0.2, np.nan, np.nan]), "stdev": np.array([0.3, 0.2, np.nan, np.nan])}
-TENDENCY_STATISTICS = {"hres": {"lead_times": ["0h"], "0h": RESIDUAL_STATISTICS}}
+FIRST_STEP_STATISTICS = {"mean": np.array([0.1, -0.2, np.nan, np.nan]), "stdev": np.array([0.3, 0.2, np.nan, np.nan])}
+TENDENCY_STATISTICS = {"hres": {"lead_times": ["0h"], "0h": FIRST_STEP_STATISTICS}}
 
 
 @pytest.fixture(autouse=True)
@@ -103,7 +103,7 @@ def _model_config(**overrides) -> DictConfig:
     }
     config.decoders = {"hres": {**decoder, "target_datasets": ["hres"]}}
     config.residual = {"datasets": {"lres": {"_target_": "anemoi.models.layers.residual.SkipConnection", "step": -1}}}
-    config.residual_reference = {"hres": "lres"}
+    config.tendency_reference = {"hres": "lres"}
     config.node_trainable_parameters = {"lres": 0, "hres": 0, "hidden": 0}
     config.bounding = {"datasets": {"hres": []}}
     for key, value in overrides.items():
@@ -193,11 +193,11 @@ def _processors() -> tuple[torch.nn.ModuleDict, torch.nn.ModuleDict]:
     return pre, post
 
 
-def test_outputs_shared_with_the_reference_dataset_are_residuals() -> None:
+def test_outputs_shared_with_the_reference_dataset_are_tendencies() -> None:
     model = _build_model()
 
-    assert model.residual_reference == {"hres": "lres"}
-    assert model.residual_variables("hres") == ["a", "b"]
+    assert model.tendency_reference == {"hres": "lres"}
+    assert model.tendency_variables("hres") == ["a", "b"]
 
 
 def test_reference_is_the_latest_reference_input_in_its_own_physical_units() -> None:
@@ -215,7 +215,7 @@ def test_reference_is_the_latest_reference_input_in_its_own_physical_units() -> 
     torch.testing.assert_close(reference["hres"].values[..., 1], lres[:, -1:, ..., 1] * 0.5 - 3.0)
 
 
-def test_residuals_are_taken_against_the_reference_dataset() -> None:
+def test_tendencies_are_taken_against_the_reference_dataset() -> None:
     model = _build_model()
     batches = _synthetic_batches(model)
     pre_processors, post_processors = _processors()
@@ -231,8 +231,8 @@ def test_residuals_are_taken_against_the_reference_dataset() -> None:
     for position, name in enumerate(["a", "b"]):
         index = state.name_to_index[name]
         expected = (
-            physical_state[..., index] - reference.values[..., position] - RESIDUAL_STATISTICS["mean"][position]
-        ) / (RESIDUAL_STATISTICS["stdev"][position])
+            physical_state[..., index] - reference.values[..., position] - FIRST_STEP_STATISTICS["mean"][position]
+        ) / (FIRST_STEP_STATISTICS["stdev"][position])
         torch.testing.assert_close(tendency.values[..., index], expected.float())
     # "s" has no reference and stays a normalised state.
     index = state.name_to_index["s"]
@@ -244,7 +244,7 @@ def test_residuals_are_taken_against_the_reference_dataset() -> None:
     torch.testing.assert_close(rebuilt.values, state.values)
 
 
-def test_predict_step_adds_the_sampled_residual_to_the_reference_dataset() -> None:
+def test_predict_step_adds_the_sampled_tendency_to_the_reference_dataset() -> None:
     model = _build_model()
     batches = _synthetic_batches(model)
     pre_processors, post_processors = _processors()
@@ -288,7 +288,7 @@ def _build_matching_model(n_step_input_lres: int = 2) -> AnemoiTransportTendMode
 
 # The second snapshot gets other statistics, so pairing it with the wrong statistics would show.
 SECOND_STEP_STATISTICS = {"mean": np.array([-0.4, 0.3, np.nan, np.nan]), "stdev": np.array([0.7, 0.1, np.nan, np.nan])}
-TWO_STEP_STATISTICS = {"lead_times": ["0h", "6h"], "0h": RESIDUAL_STATISTICS, "6h": SECOND_STEP_STATISTICS}
+TWO_STEP_STATISTICS = {"lead_times": ["0h", "6h"], "0h": FIRST_STEP_STATISTICS, "6h": SECOND_STEP_STATISTICS}
 
 
 def test_matching_reference_keeps_one_reference_step_per_output_step() -> None:
@@ -309,7 +309,7 @@ def test_matching_reference_keeps_one_reference_step_per_output_step() -> None:
     )
 
     physical_state = post_processors["hres"](state, in_place=False).values
-    for step, statistics in enumerate((RESIDUAL_STATISTICS, SECOND_STEP_STATISTICS)):
+    for step, statistics in enumerate((FIRST_STEP_STATISTICS, SECOND_STEP_STATISTICS)):
         for position, name in enumerate(["a", "b"]):
             index = state.name_to_index[name]
             expected = (
@@ -325,7 +325,7 @@ def test_matching_reference_keeps_one_reference_step_per_output_step() -> None:
     torch.testing.assert_close(rebuilt.values, state.values)
 
 
-def test_predict_step_with_a_matching_reference_adds_each_residual_to_its_snapshot() -> None:
+def test_predict_step_with_a_matching_reference_adds_each_tendency_to_its_snapshot() -> None:
     model = _build_matching_model()
     batches = _synthetic_batches(model, n_step=2)
     pre_processors, post_processors = _processors()
@@ -362,9 +362,9 @@ def test_matching_reference_needs_one_reference_input_step_per_output_step() -> 
         _build_matching_model(n_step_input_lres=1)
 
 
-def test_missing_residual_statistics_are_rejected() -> None:
+def test_missing_tendency_statistics_are_rejected() -> None:
     model = _build_model()
-    statistics = {"lead_times": ["0h"], "0h": {**RESIDUAL_STATISTICS, "stdev": np.array([0.3, np.nan, 1.0, 1.0])}}
+    statistics = {"lead_times": ["0h"], "0h": {**FIRST_STEP_STATISTICS, "stdev": np.array([0.3, np.nan, 1.0, 1.0])}}
 
     with pytest.raises(ValueError, match=r"'stdev'.*not finite for variables \['b'\]"):
         model.tendency_statistics("hres", statistics)
@@ -386,8 +386,8 @@ def test_missing_residual_statistics_are_rejected() -> None:
         ),
         ({"residual": {"datasets": {}}}, "needs a residual connection: add model.residual.datasets.lres"),
         ({"condition_on_residual": True}, "cannot be combined with tendency references from other datasets"),
-        ({"residual_reference": {"lres": "hres"}}, r"datasets the model does not predict: \['lres'\]"),
-        ({"residual_reference": {"hres": "other"}}, "'other', which is not a dataset of the model"),
+        ({"tendency_reference": {"lres": "hres"}}, r"datasets the model does not predict: \['lres'\]"),
+        ({"tendency_reference": {"hres": "other"}}, "'other', which is not a dataset of the model"),
     ],
 )
 def test_invalid_references_are_rejected(overrides: dict, message: str) -> None:

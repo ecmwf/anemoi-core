@@ -719,7 +719,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
     ) -> tuple[np.ndarray, set[str]]:
         """Lay out the reference of a predicted dataset like its outputs, for the input panels.
 
-        ``reference`` is the state the model adds its predicted residuals to, in physical units, as
+        ``reference`` is the state the model adds its predicted tendencies to, in physical units, as
         ``(batch, time, ensemble, grid, variables)`` with one time step per output step or one for
         all of them. It is taken from the same sample as the plotted data and from its first
         ensemble member, since every member starts from the same inputs.
@@ -1084,7 +1084,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
     ) -> dict[str, Any]:
         """Return the fields of the step output that the plots use besides the predictions.
 
-        These are the reference the model adds its residuals to (``plot_input``) when the plot
+        These are the reference the model adds its tendencies to (``plot_input``) when the plot
         adapter shows it, and for sample plots with ``with_auxiliary`` the corrupted target
         (``auxiliary_output``), each gathered over the model's GPUs. The others are left out, so
         they are not gathered to the full grid and kept until the plot is made.
@@ -1192,7 +1192,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                     dataset_name,
                     plot_input[dataset_name],
                 )
-                # The outputs with a reference get the input and residual panels, also when they are not
+                # The outputs with a reference get the input and tendency panels, also when they are not
                 # inputs of their own dataset.
                 spatial_inputs["parameters"] = {
                     index: (name, diagnostic_only and name not in with_reference)

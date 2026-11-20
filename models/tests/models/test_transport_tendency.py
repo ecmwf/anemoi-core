@@ -107,7 +107,7 @@ def _make_model() -> AnemoiTransportTendModelEncProcDec:
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     model.data_indices = {"data": _make_index_collection()}
     model.target_datasets = ["data"]
-    model.residual_reference = {"data": "data"}
+    model.tendency_reference = {"data": "data"}
     return model
 
 
@@ -231,7 +231,7 @@ def test_tendency_roundtrip_skips_imputation() -> None:
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     torch.nn.Module.__init__(model)
     model.data_indices = {"data": data_indices}
-    model.residual_reference = {"data": "data"}
+    model.tendency_reference = {"data": "data"}
     model.n_step_output = {"data": 1}
 
     statistics = IMPUTER_STATISTICS
@@ -278,7 +278,7 @@ def test_tendencies_of_imputed_and_missing_states_agree_where_data_exists() -> N
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     torch.nn.Module.__init__(model)
     model.data_indices = {"data": data_indices}
-    model.residual_reference = {"data": "data"}
+    model.tendency_reference = {"data": "data"}
     model.n_step_output = {"data": 2}
 
     normalizer = InputNormalizer(config=DictConfig({"default": "mean-std"}))

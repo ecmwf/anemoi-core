@@ -644,7 +644,7 @@ def multidatasets_transport_config(
     return cfg, [url_dataset, url_dataset_b]
 
 
-SPATIAL_DOWNSCALER_RESIDUAL_STATISTICS = {
+SPATIAL_DOWNSCALER_TENDENCY_STATISTICS = {
     "mean": {"10u": 0.00436932, "10v": 0.00327185, "2t": 0.0562636, "tp": 0.0},
     "minimum": {"10u": -65.4177, "10v": -80.4492, "2t": -25.248, "tp": -0.05},
     "maximum": {"10u": 69.6479, "10v": 72.633, "2t": 28.5995, "tp": 0.05},
@@ -659,7 +659,7 @@ def spatial_downscaler_config(
     temporary_directory_for_test_data: TemporaryDirectoryForTestData,
     tmp_path: Path,
 ) -> tuple[DictConfig, list[str], list[str]]:
-    """The spatial downscaler (O48 to O96) with its residual statistics written to a temporary file.
+    """The spatial downscaler (O48 to O96) with its tendency statistics written to a temporary file.
 
     Returns the config, the dataset archives to fetch with ``get_test_archive`` and the test-data
     files (the O48 to O96 projection matrix) to fetch with ``get_test_data``. Nothing is downloaded
@@ -682,12 +682,12 @@ def spatial_downscaler_config(
     path_truncation = use_case_modifications.system.input.truncation
     use_case_modifications.system.input.truncation = temporary_directory_for_test_data(path_truncation)
 
-    residual_statistics_path = tmp_path / "residual_statistics.npz"
+    tendency_statistics_path = tmp_path / "tendency_statistics.npz"
     np.savez(
-        residual_statistics_path,
-        **{key: np.array(values, dtype=object) for key, values in SPATIAL_DOWNSCALER_RESIDUAL_STATISTICS.items()},
+        tendency_statistics_path,
+        **{key: np.array(values, dtype=object) for key, values in SPATIAL_DOWNSCALER_TENDENCY_STATISTICS.items()},
     )
-    use_case_modifications.system.input.residual_statistics = str(residual_statistics_path)
+    use_case_modifications.system.input.tendency_statistics_file = str(tendency_statistics_path)
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)

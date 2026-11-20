@@ -39,10 +39,10 @@ class DatasetDataSchema(PydanticBaseModel):
         "Spatial preprocessor applied to this dataset before normalization "
         "(e.g. CrossGridProjector for downscaling). May change the grid dimension."
     )
-    residual_statistics: str | None = Field(default=None)
+    tendency_statistics_file: str | None = Field(default=None)
     (
         "Path to an .npz file with the normalisation statistics (mean, minimum, maximum, stdev per variable) "
-        "of this dataset's residuals against another dataset (model.residual_reference), used for every output "
+        "of this dataset's tendencies against another dataset (model.tendency_reference), used for every output "
         "step in place of the dataset's tendency statistics."
     )
 

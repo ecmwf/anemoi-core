@@ -497,7 +497,7 @@ class TransportTraining(BaseTrainingModule):
                 for dataset_name, target in conditioned_endpoint.items()
             }
             if prepared_target.reference is not None:
-                # The state the residuals are added to, shown as the input of the predicted datasets.
+                # The state the tendencies are added to, shown as the input of the predicted datasets.
                 plot_kwargs["plot_input"] = {
                     dataset_name: reference.map_data(torch.Tensor.detach)
                     for dataset_name, reference in prepared_target.reference.items()

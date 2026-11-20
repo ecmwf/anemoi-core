@@ -7,7 +7,7 @@ frequency: 6h
 datasets:
   lres:
     # The model only reads lres. The hres outputs that lres has under the same name are learned
-    # as residuals against it (model.residual_reference).
+    # as tendencies against it (model.tendency_reference).
     forcing: []
     diagnostic: []
     spatial_processor:
@@ -34,9 +34,9 @@ datasets:
     - "sin_local_time"
     - "lsm"
     diagnostic: [2t, 10u, 10v, tp]
-    # Normalisation statistics of the residuals hres - lres, one .npz file with mean, minimum,
+    # Normalisation statistics of the tendencies hres - lres, one .npz file with mean, minimum,
     # maximum and stdev entries, each a {variable: value} mapping.
-    residual_statistics: ${system.input.residual_statistics}
+    tendency_statistics_file: ${system.input.tendency_statistics_file}
     processors:
       normalizer:
         _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
