@@ -62,6 +62,7 @@ class LossVariableMapper(BaseLossWrapper):
         self.data_indices: IndexCollection | None = None
         self.predicted_indices_by_layout: dict[IndexSpace, list[int]] = {}
         self.target_indices_by_layout: dict[IndexSpace, list[int]] = {}
+        self._send_variable_names()
         if data_indices is not None:
             self.set_data_indices(data_indices)
 
@@ -233,7 +234,23 @@ class LossVariableMapper(BaseLossWrapper):
                 layout=IndexSpace.MODEL_OUTPUT,
                 role="target",
             )
+        self._send_variable_names()
         return self
+
+    def set_variable_names(self, names: list[str]) -> None:
+        """Ignore names from an enclosing loss: this mapper selects its own variables."""
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Send the variable names to a new inner loss, so wrapping after the setup is not forgotten."""
+        super().__setattr__(name, value)
+        if name == "loss" and isinstance(value, BaseLoss):
+            self._send_variable_names()
+
+    def _send_variable_names(self) -> None:
+        """Tell the inner loss the variables, in order, that it receives (once the selection is known)."""
+        predicted_variables = getattr(self, "predicted_variables", None)
+        if predicted_variables is not None:
+            self.loss.set_variable_names(predicted_variables)
 
     @staticmethod
     def _maybe_to_index_list(indexer: Any) -> list[int] | None:

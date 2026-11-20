@@ -38,7 +38,7 @@ class LogCoshLoss(FunctionalLoss):
 
     name: str = "logcosh"
 
-    def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    def pointwise_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Calculate the Log-cosh loss.
 
         Parameters

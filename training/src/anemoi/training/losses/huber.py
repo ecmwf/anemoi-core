@@ -42,7 +42,7 @@ class HuberLoss(FunctionalLoss):
         super().__init__(ignore_nans=ignore_nans, **kwargs)
         self.delta = delta
 
-    def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    def pointwise_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Calculate the Huber loss.
 
         Parameters

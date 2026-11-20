@@ -10,6 +10,7 @@
 
 import functools
 import logging
+import warnings
 from abc import ABC
 from abc import abstractmethod
 from collections.abc import Iterator
@@ -48,6 +49,7 @@ class BaseLoss(nn.Module, ABC):
     scaler: ScaleTensor
     needs_graph_data: bool = False
     needs_data_node_name: bool = False
+    variable_names: list[str] | None = None
 
     def __init__(
         self,
@@ -78,6 +80,22 @@ class BaseLoss(nn.Module, ABC):
 
         self.supports_sharding = True
         self.num_scales = 1
+
+    def set_variable_names(self, names: list[str]) -> None:
+        """Set the names of the variables the loss receives.
+
+        Called by ``LossVariableMapper`` once it knows its variable selection, and again if its inner
+        loss is replaced. ``names`` are the names of the entries of the variable dimension of the
+        prediction and target tensors given to ``forward``, in order. Losses which treat variables
+        differently (e.g. ``TargetWeightedLoss``) use it to find their columns. The default stores the
+        names in ``variable_names``; wrappers and containers forward them to the losses they call.
+
+        Parameters
+        ----------
+        names : list[str]
+            Variable names, in the order of the variable dimension.
+        """
+        self.variable_names = list(names)
 
     @functools.wraps(ScaleTensor.add_scaler)
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
@@ -343,6 +361,11 @@ class BaseLossWrapper(BaseLoss):
         self.scaler = self.loss.scaler
         self.supports_sharding = getattr(self.loss, "supports_sharding", True)
 
+    def set_variable_names(self, names: list[str]) -> None:
+        """Store the variable names and forward them to the wrapped loss."""
+        super().set_variable_names(names)
+        self.loss.set_variable_names(names)
+
     # -- scaler delegation --------------------------------------------------
 
     @functools.wraps(ScaleTensor.add_scaler)
@@ -375,23 +398,90 @@ class BaseLossWrapper(BaseLoss):
 
 
 class FunctionalLoss(BaseLoss):
-    """Loss which a user can subclass and provide ``calculate_difference``.
+    """Loss which a user can subclass and provide ``pointwise_loss``.
 
-    ``calculate_difference`` should calculate the difference between the prediction and target.
-    All scaling and weighting is handled by the parent class.
+    ``pointwise_loss`` calculates the loss at every point: for the same sample, output step, grid
+    point and variable (the ensemble dimension may be reduced by the loss). All scaling, weighting
+    and reduction is handled by the parent class: ``forward`` is ``reduce(scale(pointwise_loss(...)))``
+    after NaN masking. This hook is also what wrappers such as ``TargetWeightedLoss`` modify.
 
     Example
     -------
     .. code-block:: python
 
         class MyLoss(FunctionalLoss):
-            def calculate_difference(self, pred, target):
-                return pred - target
+            def pointwise_loss(self, pred, target):
+                return torch.abs(pred - target)
     """
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Keep the former ``calculate_difference`` hook working, class by class.
+
+        Every class gets the pair ``pointwise_loss`` / ``calculate_difference`` bound to its own
+        implementation, so that ``super().calculate_difference(...)`` and ``super().pointwise_loss(...)``
+        reach the parent's implementation whichever of the two names the parent was written with:
+
+        - a class that only implements ``calculate_difference`` (legacy) gets a ``pointwise_loss`` that
+          calls that function, and a ``DeprecationWarning`` at class creation;
+        - a class that only implements ``pointwise_loss`` gets a deprecated ``calculate_difference`` that
+          calls that function.
+        """
+        super().__init_subclass__(**kwargs)
+        own = cls.__dict__
+        legacy_hook = own.get("calculate_difference")
+        hook = own.get("pointwise_loss")
+
+        if legacy_hook is not None and hook is None:
+            warnings.warn(
+                f"{cls.__name__} implements `calculate_difference`, which is deprecated: implement "
+                "`pointwise_loss` instead (same signature).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+            def pointwise_loss(self: "FunctionalLoss", pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+                return legacy_hook(self, pred, target)
+
+            pointwise_loss.__doc__ = legacy_hook.__doc__
+            cls.pointwise_loss = pointwise_loss
+        elif hook is not None and legacy_hook is None:
+
+            def calculate_difference(self: "FunctionalLoss", pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+                """Deprecated alias of ``pointwise_loss``."""
+                warnings.warn(
+                    "`calculate_difference` is deprecated, use `pointwise_loss`.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                return hook(self, pred, target)
+
+            cls.calculate_difference = calculate_difference
+
     @abstractmethod
+    def pointwise_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Calculate the loss at every point, before scaling and reduction.
+
+        Parameters
+        ----------
+        pred : torch.Tensor
+            Prediction tensor, shape (bs, time, ensemble, lat*lon, n_outputs).
+        target : torch.Tensor
+            Target tensor, shape (bs, time, ensemble or 1, lat*lon, n_outputs).
+
+        Returns
+        -------
+        torch.Tensor
+            The loss per point, with the grid and variable dimensions of ``pred``.
+        """
+
     def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """Calculate difference between prediction and target."""
+        """Deprecated alias of ``pointwise_loss`` (each subclass gets one bound to its own implementation)."""
+        warnings.warn(
+            "`calculate_difference` is deprecated, use `pointwise_loss`.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.pointwise_loss(pred, target)
 
     def forward(
         self,
@@ -438,6 +528,6 @@ class FunctionalLoss(BaseLoss):
         is_sharded = grid_shard_slice is not None
         pred, target = self.mask_nans(pred, target)
 
-        out = self.calculate_difference(pred, target)
+        out = self.pointwise_loss(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
         return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)

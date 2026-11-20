@@ -139,6 +139,12 @@ class CombinedLoss(BaseLoss):
         self.loss_weights = loss_weights
         del self.scaler  # Remove scaler property from parent class, as it is not used here
 
+    def set_variable_names(self, names: list[str]) -> None:
+        """Store the variable names and forward them to the child losses."""
+        super().set_variable_names(names)
+        for loss in self.losses:
+            loss.set_variable_names(names)
+
     @property
     def needs_shard_layout_info(self) -> bool:
         """Whether any wrapped loss requires explicit shard-layout metadata."""

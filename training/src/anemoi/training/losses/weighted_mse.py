@@ -73,7 +73,7 @@ class WeightedMSELoss(MSELoss):
 
         pred, target = self.mask_nans(pred, target)
 
-        out = self.calculate_difference(pred, target)
+        out = self.pointwise_loss(pred, target)
 
         if weights is not None:
             out = out * weights

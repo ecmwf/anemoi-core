@@ -14,10 +14,8 @@ from typing import Literal
 
 import einops
 import torch
-from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.base import Squash_mode
+from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
@@ -26,7 +24,7 @@ LOGGER = logging.getLogger(__name__)
 CRPSBackend = Literal["naive", "stable"]
 
 
-class CRPS(BaseLoss):
+class CRPS(FunctionalLoss):
     """Kernel CRPS loss for ensemble predictions."""
 
     def __init__(
@@ -76,6 +74,8 @@ class CRPS(BaseLoss):
 
     def mask_nans(self, pred: torch.Tensor, target: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Mask CRPS inputs while preserving each tensor's ensemble size."""
+        if not self.ignore_nans:
+            return pred, target
         target_nan_mask = torch.isnan(target).any(dim=TensorDim.ENSEMBLE_DIM, keepdim=True)
         pred_nan_mask = torch.isnan(pred).any(dim=TensorDim.ENSEMBLE_DIM, keepdim=True)
         nan_mask = target_nan_mask | pred_nan_mask
@@ -159,36 +159,32 @@ class CRPS(BaseLoss):
         coef = 1.0 / (2.0 * ens_size * (ens_size - 1))
         return coef * torch.sum(mem_err + mem_err_transpose - (1 - epsilon) * var, dim=(-1, -2))
 
-    def forward(
-        self,
-        y_pred: torch.Tensor,
-        y_target: torch.Tensor,
-        squash: bool = True,
-        *,
-        scaler_indices: tuple[int, ...] | None = None,
-        without_scalers: list[str] | list[int] | None = None,
-        grid_shard_slice: slice | None = None,
-        group: ProcessGroup | None = None,
-        squash_mode: Squash_mode = "avg",
-    ) -> torch.Tensor:
-        is_sharded = grid_shard_slice is not None
+    def pointwise_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Point-wise kernel CRPS, before scaling and reduction.
 
-        if self.ignore_nans:
-            y_pred, y_target = self.mask_nans(y_pred, y_target)
+        The ensemble dimension is reduced, every other dimension is kept, so that the scalers and the
+        reduction of ``FunctionalLoss.forward`` apply as for the other point-wise losses.
 
-        y_target = einops.rearrange(y_target, "bs t 1 latlon v -> bs t v latlon 1")
-        y_pred = einops.rearrange(y_pred, "bs t e latlon v -> bs t v latlon e")
+        Parameters
+        ----------
+        pred : torch.Tensor
+            Predicted ensemble, shape (bs, time, ensemble, latlon, n_vars).
+        target : torch.Tensor
+            Target, shape (bs, time, 1, latlon, n_vars).
 
-        context = (
-            torch.amp.autocast(device_type=y_pred.device.type, enabled=False) if self.no_autocast else nullcontext()
-        )
+        Returns
+        -------
+        torch.Tensor
+            CRPS per point, shape (bs, time, 1, latlon, n_vars).
+        """
+        target = einops.rearrange(target, "bs t 1 latlon v -> bs t v latlon 1")
+        pred = einops.rearrange(pred, "bs t e latlon v -> bs t v latlon e")
+
+        context = torch.amp.autocast(device_type=pred.device.type, enabled=False) if self.no_autocast else nullcontext()
         with context:
-            crps = self._kernel_crps(y_pred, y_target)
+            crps = self._kernel_crps(pred, target)
 
-        crps = einops.rearrange(crps, "bs t v latlon -> bs t 1 latlon v")
-        crps = self.scale(crps, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-
-        return self.reduce(crps, squash=squash, squash_mode=squash_mode, group=group if is_sharded else None)
+        return einops.rearrange(crps, "bs t v latlon -> bs t 1 latlon v")
 
     @property
     def name(self) -> str:

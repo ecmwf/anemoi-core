@@ -9,6 +9,7 @@
 
 
 import logging
+import warnings
 from types import SimpleNamespace
 
 import einops
@@ -183,6 +184,128 @@ def test_crps_with_singleton_target_ensemble_dim() -> None:
     torch.testing.assert_close(out, torch.zeros(2))
 
 
+def _reference_crps_forward(loss: CRPS, pred: torch.Tensor, target: torch.Tensor, **kwargs: object) -> torch.Tensor:
+    """The forward of CRPS before it became a FunctionalLoss, kept here to prove it is unchanged."""
+    if loss.ignore_nans:
+        pred, target = loss.mask_nans(pred, target)
+    target = einops.rearrange(target, "bs t 1 latlon v -> bs t v latlon 1")
+    pred = einops.rearrange(pred, "bs t e latlon v -> bs t v latlon e")
+    crps = loss._kernel_crps(pred, target)
+    crps = einops.rearrange(crps, "bs t v latlon -> bs t 1 latlon v")
+    crps = loss.scale(crps)
+    return loss.reduce(crps, **kwargs)
+
+
+@pytest.mark.parametrize("ignore_nans", [False, True])
+@pytest.mark.parametrize("backend", ["stable", "naive"])
+@pytest.mark.parametrize("reduction", [{"squash": True}, {"squash": False}, {"squash": True, "squash_mode": "sum"}])
+def test_crps_forward_is_unchanged(ignore_nans: bool, backend: str, reduction: dict) -> None:
+    torch.manual_seed(0)
+    pred = torch.rand(2, 1, 4, 5, 3)
+    target = torch.rand(2, 1, 1, 5, 3)
+    if ignore_nans:
+        target[0, 0, 0, 2, 1] = float("nan")
+        pred[1, 0, 2, 3, 0] = float("nan")
+    loss = CRPS(alpha=0.7, backend=backend, ignore_nans=ignore_nans)
+    loss.add_scaler(3, torch.rand(5) + 0.5, name="grid")
+
+    result = loss(pred, target, **reduction)
+
+    torch.testing.assert_close(result, _reference_crps_forward(loss, pred, target, **reduction), rtol=0, atol=0)
+
+
+def test_crps_pointwise_loss_keeps_all_but_the_ensemble_dimension() -> None:
+    pred = torch.rand(2, 3, 4, 5, 6)
+    target = torch.rand(2, 3, 1, 5, 6)
+
+    assert CRPS().pointwise_loss(pred, target).shape == (2, 3, 1, 5, 6)
+
+
+def test_crps_mask_nans_only_masks_when_ignoring_nans() -> None:
+    pred = torch.ones(1, 1, 3, 2, 1)
+    target = torch.ones(1, 1, 1, 2, 1)
+    target[:, :, :, 1, 0] = torch.nan
+
+    _, kept_target = CRPS().mask_nans(pred, target)
+    _, masked_target = CRPS(ignore_nans=True).mask_nans(pred, target)
+
+    assert torch.isnan(kept_target).any()
+    assert torch.isfinite(masked_target).all()
+
+
+POINTWISE_REFERENCES = {
+    MSELoss: lambda d: d**2,
+    MAELoss: torch.abs,
+    HuberLoss: lambda d: torch.where(d.abs() < 1.0, 0.5 * d**2, d.abs() - 0.5),
+    LogCoshLoss: lambda d: torch.log(torch.cosh(d)),
+}
+
+
+@pytest.mark.parametrize("loss_cls", list(POINTWISE_REFERENCES))
+@pytest.mark.parametrize("squash", [True, False])
+def test_functional_losses_are_reduced_scaled_pointwise_loss(loss_cls: type[FunctionalLoss], squash: bool) -> None:
+    torch.manual_seed(0)
+    pred = 2 * torch.rand(2, 1, 1, 5, 3)
+    target = torch.rand(2, 1, 1, 5, 3)
+    grid_weights = torch.rand(5) + 0.5
+    loss = loss_cls()
+    loss.add_scaler(3, grid_weights, name="grid")
+
+    pointwise = loss.pointwise_loss(pred, target)
+
+    torch.testing.assert_close(pointwise, POINTWISE_REFERENCES[loss_cls](pred - target))
+    expected = loss.reduce(loss.scale(pointwise), squash=squash)
+    torch.testing.assert_close(loss(pred, target, squash=squash), expected, rtol=0, atol=0)
+    manual = (pointwise * grid_weights[:, None]).sum(dim=-2).mean(dim=(0, 1, 2))
+    torch.testing.assert_close(loss(pred, target, squash=False), manual)
+
+
+def test_calculate_difference_is_a_deprecated_alias_of_pointwise_loss() -> None:
+    pred, target = torch.rand(1, 1, 1, 3, 2), torch.rand(1, 1, 1, 3, 2)
+
+    with pytest.warns(DeprecationWarning, match="calculate_difference.*pointwise_loss"):
+        result = MSELoss().calculate_difference(pred, target)
+
+    torch.testing.assert_close(result, MSELoss().pointwise_loss(pred, target))
+
+
+def test_subclass_with_legacy_calculate_difference_still_works() -> None:
+    with pytest.warns(DeprecationWarning, match="LegacyLoss implements `calculate_difference`"):
+
+        class LegacyLoss(FunctionalLoss):
+            def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+                return torch.abs(pred - target)
+
+    pred, target = torch.rand(1, 1, 1, 3, 2), torch.rand(1, 1, 1, 3, 2)
+    loss = LegacyLoss()
+    loss.add_scaler(3, torch.ones(3), name="grid")
+
+    torch.testing.assert_close(loss.pointwise_loss(pred, target), torch.abs(pred - target))
+    mae = MAELoss()
+    mae.add_scaler(3, torch.ones(3), name="grid")
+    torch.testing.assert_close(loss(pred, target), mae(pred, target))
+
+
+def test_subclass_of_a_loss_overriding_legacy_hook_is_used_by_forward() -> None:
+    with pytest.warns(DeprecationWarning, match="ShiftedMSE implements"):
+
+        class ShiftedMSE(MSELoss):
+            def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+                return torch.square(pred - target) + 1.0
+
+    pred, target = torch.rand(1, 1, 1, 3, 2), torch.rand(1, 1, 1, 3, 2)
+
+    torch.testing.assert_close(ShiftedMSE().pointwise_loss(pred, target), MSELoss().pointwise_loss(pred, target) + 1.0)
+
+
+def test_functional_loss_without_a_hook_cannot_be_instantiated() -> None:
+    class NoHook(FunctionalLoss):
+        pass
+
+    with pytest.raises(TypeError, match="pointwise_loss"):
+        NoHook()
+
+
 def test_crps_mask_nans_preserves_ensemble_sizes() -> None:
     pred = torch.ones(1, 1, 3, 2, 1)
     target = torch.ones(1, 1, 2, 2, 1)
@@ -200,7 +323,7 @@ def test_crps_mask_nans_preserves_ensemble_sizes() -> None:
 @pytest.fixture
 def functionalloss() -> type[FunctionalLoss]:
     class ReturnDifference(FunctionalLoss):
-        def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        def pointwise_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
             return pred - target
 
     return ReturnDifference
@@ -1330,3 +1453,134 @@ def test_regular_sht_loss_schema_and_subgrid(subgrid: tuple[int, int] | None) ->
             SpectralLossSchema.model_validate(config)
         with pytest.raises(ValueError, match="require the full grid"):
             SpectralCRPSLoss(transform="regular_sht", nlat=8, nlon=12, subgrid=subgrid)
+
+
+# Legacy `calculate_difference` hook: subclasses written for it, with or without `super()` calls, must behave
+# as before the hook was renamed to `pointwise_loss`.
+
+
+@pytest.fixture
+def hook_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    torch.manual_seed(0)
+    pred, target = torch.rand(2, 1, 1, 4, 3), torch.rand(2, 1, 1, 4, 3)
+    return pred, target, (pred - target) ** 2
+
+
+def _scaled_reduce(pointwise: torch.Tensor, grid_weights: torch.Tensor) -> torch.Tensor:
+    """What the forward of a FunctionalLoss makes of a point-wise loss: scale, then reduce."""
+    reference = MSELoss()
+    reference.add_scaler(3, grid_weights, name="grid")
+    return reference.reduce(reference.scale(pointwise))
+
+
+def _check_loss(loss: FunctionalLoss, pred: torch.Tensor, target: torch.Tensor, expected: torch.Tensor) -> None:
+    grid_weights = torch.rand(4) + 0.5
+    loss.add_scaler(3, grid_weights, name="grid")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        torch.testing.assert_close(loss.pointwise_loss(pred, target), expected)
+        torch.testing.assert_close(loss.calculate_difference(pred, target), expected)
+    torch.testing.assert_close(loss(pred, target), _scaled_reduce(expected, grid_weights))
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_legacy_override_calling_super_does_not_recurse(hook_inputs: tuple) -> None:
+    pred, target, mse = hook_inputs
+
+    class ShiftedMSE(MSELoss):
+        def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            return super().calculate_difference(pred, target) + 1.0
+
+    _check_loss(ShiftedMSE(), pred, target, mse + 1.0)
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_two_levels_of_legacy_subclasses(hook_inputs: tuple) -> None:
+    pred, target, mse = hook_inputs
+
+    class Plus(MSELoss):
+        def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            return super().calculate_difference(pred, target) + 1.0
+
+    class PlusTimes(Plus):
+        def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            return super().calculate_difference(pred, target) * 2.0
+
+    _check_loss(PlusTimes(), pred, target, (mse + 1.0) * 2.0)
+    _check_loss(Plus(), pred, target, mse + 1.0)
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_legacy_subclass_of_a_new_style_subclass(hook_inputs: tuple) -> None:
+    pred, target, mse = hook_inputs
+
+    class NewStyle(MSELoss):
+        def pointwise_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            return super().pointwise_loss(pred, target) + 1.0
+
+    class LegacyChild(NewStyle):
+        def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            return super().calculate_difference(pred, target) * 3.0
+
+    _check_loss(LegacyChild(), pred, target, (mse + 1.0) * 3.0)
+    _check_loss(NewStyle(), pred, target, mse + 1.0)
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_new_style_subclass_of_a_legacy_subclass(hook_inputs: tuple) -> None:
+    pred, target, mse = hook_inputs
+
+    class Legacy(MSELoss):
+        def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            return super().calculate_difference(pred, target) + 1.0
+
+    class NewStyleChild(Legacy):
+        def pointwise_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            return super().pointwise_loss(pred, target) * 2.0
+
+    _check_loss(NewStyleChild(), pred, target, (mse + 1.0) * 2.0)
+    _check_loss(Legacy(), pred, target, mse + 1.0)
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_legacy_subclass_of_functional_loss_and_of_crps(hook_inputs: tuple) -> None:
+    pred, target, _ = hook_inputs
+
+    class LegacyL1(FunctionalLoss):
+        def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            return torch.abs(pred - target)
+
+    class LegacyL1Scaled(LegacyL1):
+        def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            return 2 * super().calculate_difference(pred, target)
+
+    _check_loss(LegacyL1Scaled(), pred, target, 2 * torch.abs(pred - target))
+
+    class ShiftedCRPS(CRPS):
+        def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            return super().calculate_difference(pred, target) + 1.0
+
+    ens_pred, ens_target = torch.rand(2, 1, 4, 5, 3), torch.rand(2, 1, 1, 5, 3)
+    expected = CRPS().pointwise_loss(ens_pred, ens_target) + 1.0
+    torch.testing.assert_close(ShiftedCRPS().pointwise_loss(ens_pred, ens_target), expected)
+
+
+def test_legacy_hook_deprecation_warnings() -> None:
+    with pytest.warns(DeprecationWarning, match="Legacy implements `calculate_difference`"):
+
+        class Legacy(MSELoss):
+            def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+                return super().calculate_difference(pred, target)
+
+    pred, target = torch.rand(1, 1, 1, 2, 2), torch.rand(1, 1, 1, 2, 2)
+    # Calling a parent's deprecated alias warns as well
+    with pytest.warns(DeprecationWarning, match="calculate_difference.*deprecated"):
+        Legacy().pointwise_loss(pred, target)
+    with pytest.warns(DeprecationWarning, match="calculate_difference.*deprecated"):
+        MSELoss().calculate_difference(pred, target)
+    # The new hook does not warn
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        MSELoss().pointwise_loss(pred, target)
+        MSELoss()(pred, target)

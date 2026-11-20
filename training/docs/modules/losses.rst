@@ -57,6 +57,62 @@ reference it in the config as follows:
             scalers: [pressure_level, general_variable, node_weights, time_steps]
 
 ******************************
+ Target-weighted Loss Wrapper
+******************************
+
+``TargetWeightedLoss`` wraps a point-wise loss (``MSELoss``,
+``MAELoss``, ``HuberLoss``, ``LogCoshLoss`` or the ensemble ``CRPS``) and
+down-weights the grid points of selected variables whose target is zero. It is meant for
+sparse, non-negative targets, such as a mask that is one in a single
+grid cell around an event and zero elsewhere, where the few positive
+points contribute little to an unweighted loss and the model is pulled
+towards small values.
+
+For each variable in ``zero_target_weights`` the point-wise error is
+multiplied by ``1`` where the target is positive and by the given weight
+where the target is zero (or negative). This happens before the scalers
+and the reduction of the inner loss, so it composes multiplicatively
+with all scalers (node weights, ``general_variable``, ...), and other
+variables and the result without ``zero_target_weights`` are identical
+to the inner loss. NaN targets are handled by the inner loss
+(``ignore_nans``) and contribute no error.
+
+.. code:: yaml
+
+   training_loss:
+      datasets:
+         your_dataset_name:
+            _target_: anemoi.training.losses.TargetWeightedLoss
+            zero_target_weights:
+               tc_mask: 1.0e-3 # weight of zero targets, positive targets have weight 1
+            loss_fn:
+               _target_: anemoi.training.losses.MSELoss
+               scalers: [general_variable, node_weights]
+               ignore_nans: true
+               # predicted_variables / target_variables belong to loss_fn
+
+The weights must be finite and strictly positive and the variables must
+be among the variables of ``loss_fn`` (all model outputs unless
+``predicted_variables`` is set there). The inner loss must be a ``FunctionalLoss`` with the standard ``forward``
+(``MSELoss``, ``MAELoss``, ``HuberLoss``, ``LogCoshLoss`` and the ensemble
+``CRPS``): its ``pointwise_loss(pred, target)`` hook gives the loss per
+sample, time step, grid point and variable (``CRPS`` reduces only the
+ensemble dimension there), and ``forward`` is the scaled and reduced
+result. Losses that are not point-wise (spectral losses, the energy and
+variogram scores, ``RMSELoss``, ``WeightedMSELoss``, other wrappers) are
+rejected with an error.
+
+For a binary (0 or 1) target that is 1 with conditional probability
+``p``, the plain squared error is minimised by ``p`` itself (not by
+zero), and with the weight ``w`` of zero targets the minimiser of the
+weighted squared error is ``q = p / (p + w (1 - p))``. Small ``w`` thus
+raises the output wherever ``p`` is not negligible compared with ``w``:
+the output is a cost-sensitive score, not a calibrated probability. This
+holds for binary targets only. For general positive targets the weight
+just changes the relative cost of the zero-target points. The loss value
+is not comparable with the unweighted loss.
+
+******************************
  Probabilistic Loss Functions
 ******************************
 
@@ -1158,16 +1214,17 @@ the variable dimension, but can be by all other scalers.
 
 Additionally, you can define your own loss function by subclassing
 ``BaseLoss`` and implementing the ``forward`` method, or by subclassing
-``FunctionalLoss`` and implementing the ``calculate_difference``
+``FunctionalLoss`` and implementing the ``pointwise_loss``
 function. The latter abstracts the scaling, and node weighting, and
-allows you to just specify the difference calculation.
+allows you to just specify the point-wise loss. (The former name of the
+hook, ``calculate_difference``, still works but is deprecated.)
 
 .. code:: python
 
    from anemoi.training.losses.weightedloss import BaseLoss
 
    class MyLossFunction(FunctionalLoss):
-      def calculate_difference(self, pred, target):
+      def pointwise_loss(self, pred, target):
          return (pred - target) ** 2
 
 Then in the config, set ``_target_`` to the class name, and any
