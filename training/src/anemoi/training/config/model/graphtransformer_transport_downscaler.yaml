@@ -111,6 +111,10 @@ condition_on_residual: False
 tendency_reference:
   hres: lres
 
+# Outputs learned directly as states instead of tendencies against lres.
+state_variables:
+  hres: [tp]
+
 # The reference is built by lres's own residual connection. With several snapshots (task.offsets),
 # output step i is taken against lres input step i.
 residual:

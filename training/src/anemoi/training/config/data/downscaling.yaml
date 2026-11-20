@@ -6,9 +6,10 @@ frequency: 6h
 
 datasets:
   lres:
-    # The model only reads lres. The hres outputs that lres has under the same name are learned
-    # as tendencies against it (model.tendency_reference).
-    forcing: []
+    # The model only reads lres, so all its variables are forcings (input only). The hres outputs that
+    # lres has under the same name are learned as tendencies against it (model.tendency_reference),
+    # except those listed in model.state_variables.
+    forcing: [2t, 10u, 10v, tp]
     diagnostic: []
     spatial_processor:
       _target_: anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector
@@ -52,3 +53,15 @@ datasets:
           - "sin_julian_day"
           - "sin_local_time"
           - "lsm"
+          # As in the forecaster: "std" keeps zero precipitation at zero in normalised space, so the
+          # ReLU below bounds tp at 0 in physical units.
+          std:
+          - "tp"
+      # Bounds tp to [0, infinity), as the forecaster's ReluBounding does (transport models take no
+      # bounding layers). Listed after the normaliser, so it acts on the normalised states.
+      postprocessor:
+        _target_: anemoi.models.preprocessing.postprocessor.Postprocessor
+        config:
+          default: "none"
+          relu:
+          - "tp"

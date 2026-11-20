@@ -173,6 +173,12 @@ def test_config_validation_spatial_downscaler(
     cfg, _, _ = spatial_downscaler_config
     BaseSchema(**cfg)
 
+    # tp is predicted as a state and bounded at 0, as in the forecaster.
+    assert list(cfg.model.state_variables.hres) == ["tp"]
+    hres_processors = cfg.data.datasets.hres.processors
+    assert list(hres_processors.postprocessor.config.relu) == ["tp"]
+    assert "tp" in hres_processors.normalizer.config.std
+
 
 def test_config_validation_temporal_downscaler_ensemble(
     temporal_downscaler_ensemble_config: tuple[DictConfig, str],

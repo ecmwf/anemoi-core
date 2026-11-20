@@ -23,7 +23,7 @@ class SpatialDownscaler(BaseSingleStepTask):
     set by the model's encoders and decoders, as for every task. A low-resolution dataset is
     typically an input only, projected onto the grid of the predicted high-resolution dataset by its
     spatial preprocessor, and the tendency model learns the high-resolution fields as tendencies
-    against it (``model.tendency_reference``).
+    against it (``model.tendency_reference``), or as states (``model.state_variables``).
 
     Parameters
     ----------

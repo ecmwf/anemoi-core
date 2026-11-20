@@ -369,6 +369,17 @@ and switches to :class:`AnemoiTransportTendModelEncProcDec`, with a skip
 connection from the latest input state. Both objectives start from Gaussian
 noise.
 
+``model.state_variables`` lists outputs of a predicted dataset that the
+tendency model learns as states instead of tendencies. For a dataset that
+is its own reference, only prognostic variables can be listed (its
+diagnostics are learned as states anyway):
+
+.. code:: yaml
+
+   model:
+     state_variables:
+       data: [swvl1]
+
 .. _tendencies-against-another-dataset:
 
 Tendencies against another dataset
@@ -385,6 +396,8 @@ dataset projected onto the high-resolution grid by its
    model:
      tendency_reference:
        hres: lres
+     state_variables:
+       hres: [tp]
      residual:
        datasets:
          lres:
@@ -398,7 +411,14 @@ dataset projected onto the high-resolution grid by its
 
 -  The outputs of ``hres`` that ``lres`` has as inputs under the same name
    are learned as tendencies: the ``hres`` value minus the ``lres`` input.
-   The other outputs of ``hres`` are learned as states.
+   The outputs listed in ``model.state_variables`` are learned as states
+   instead. Every output of ``hres`` must be one or the other, otherwise
+   the model raises.
+-  ``hres`` cannot have prognostic variables: its inputs are valid at the
+   output times, so a prognostic variable would give the model the target.
+   Declare its inputs as ``forcing`` and its outputs as ``diagnostic``
+   (a variable in neither list is prognostic). Declare every variable of
+   ``lres`` as ``forcing``, so that it is read only.
 -  With ``step: matching``, output step i is taken against ``lres`` input
    step i, so several snapshots (``SpatialDownscaler`` with several
    ``offsets``) are each taken against the ``lres`` snapshot at the same
@@ -414,19 +434,25 @@ dataset projected onto the high-resolution grid by its
    ``tendency_statistics_file``: an ``.npz`` file with ``mean``, ``minimum``,
    ``maximum`` and ``stdev`` entries, each a ``{variable: value}`` mapping.
    They are used for every output step. A dataset with a reference from
-   another dataset needs this file.
+   another dataset needs this file. Only the variables learned as
+   tendencies need entries.
 -  Remappings such as ``sqrt`` and output constraints act on states only,
    so they do not act on tendencies, and a tendency is not kept positive.
+   To bound a field such as precipitation at 0, learn it as a state and
+   add a ``relu`` post-processor.
 -  ``condition_on_residual`` cannot be combined with a reference from
    another dataset.
 
 ``spatial_downscaler.yaml`` sets up a spatial downscaler this way: ``lres``
-is read only and projected onto the ``hres`` grid by its
+is read only (all forcings) and projected onto the ``hres`` grid by its
 ``spatial_processor``, ``hres`` has the forcings as inputs and the fields
 to downscale as outputs only, and one ``joint`` encoder joins ``lres`` and
-``hres`` node by node. Its plots show each snapshot of ``hres`` with the
-reference as input, so the increment panel shows the predicted tendency
-and the persistence error panel the true tendency.
+``hres`` node by node. ``2t``, ``10u`` and ``10v`` are learned as
+tendencies; ``tp`` is learned as a state, normalised with ``std`` and
+bounded at 0 by a ``relu`` post-processor, as in the forecaster. Its plots
+show each snapshot of ``hres`` with the reference as input, so the
+increment panel shows the predicted tendency and the persistence error
+panel the true tendency.
 
 Flow matching
 =============

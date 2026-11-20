@@ -1,7 +1,7 @@
 # Modifications for the spatial downscaler template "spatial_downscaler.yaml"
 #
 # lres: O48 ERA5 (2t, 10u, 10v, tp), projected onto O96
-# hres: O96 forcings and targets from the ERA5 testing dataset (2t, 10u, 10v, tp, all learned as tendencies)
+# hres: O96 forcings and targets from the ERA5 testing dataset (2t, 10u, 10v as tendencies, tp as a state)
 system:
   input:
     dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr

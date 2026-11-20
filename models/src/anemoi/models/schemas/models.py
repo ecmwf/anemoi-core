@@ -393,6 +393,12 @@ class TransportTendModelSchema(TransportModelSchema):
         "reference. Outputs that the reference dataset has as inputs under the same name are learned as "
         "tendencies against its latest input, built by the reference dataset's residual connection."
     )
+    state_variables: dict[str, list[str]] = Field(default_factory=dict)
+    (
+        "Outputs of each predicted dataset learned as states instead of tendencies, {predicted: [variables]}. "
+        "A dataset that is its own reference may list only prognostic variables. Every output of a dataset with a "
+        "reference from another dataset must be an input of the reference dataset or listed here."
+    )
 
 
 class HierarchicalModelSchema(BaseModelSchema):

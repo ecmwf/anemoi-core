@@ -644,11 +644,12 @@ def multidatasets_transport_config(
     return cfg, [url_dataset, url_dataset_b]
 
 
+# tp is learned as a state (model.state_variables), so it needs no tendency statistics.
 SPATIAL_DOWNSCALER_TENDENCY_STATISTICS = {
-    "mean": {"10u": 0.00436932, "10v": 0.00327185, "2t": 0.0562636, "tp": 0.0},
-    "minimum": {"10u": -65.4177, "10v": -80.4492, "2t": -25.248, "tp": -0.05},
-    "maximum": {"10u": 69.6479, "10v": 72.633, "2t": 28.5995, "tp": 0.05},
-    "stdev": {"10u": 1.3768, "10v": 1.38414, "2t": 1.45, "tp": 0.001},
+    "mean": {"10u": 0.00436932, "10v": 0.00327185, "2t": 0.0562636},
+    "minimum": {"10u": -65.4177, "10v": -80.4492, "2t": -25.248},
+    "maximum": {"10u": 69.6479, "10v": 72.633, "2t": 28.5995},
+    "stdev": {"10u": 1.3768, "10v": 1.38414, "2t": 1.45},
 }
 
 

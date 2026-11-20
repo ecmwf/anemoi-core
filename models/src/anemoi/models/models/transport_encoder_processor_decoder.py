@@ -856,6 +856,12 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     is built from that dataset's input by its own residual connection (``model.residual``), and
     the predicted dataset's outputs that the reference dataset has as inputs under the same name
     are learned as tendencies (:meth:`tendency_variables`). The other outputs are learned as states.
+
+    ``model.state_variables`` (``{<predicted dataset>: [<variable>, ...]}``) lists outputs that would
+    otherwise be tendencies but are learned as states, such as precipitation. A dataset that is its
+    own reference may only list prognostic variables (its diagnostics are states anyway). A dataset
+    with a reference from another dataset has no prognostic variables, and each of its outputs is
+    either an input of the reference dataset or listed in ``model.state_variables``.
     """
 
     prediction_mode: ClassVar[str] = "tendency"
@@ -876,6 +882,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         self.condition_on_residual = model_config.condition_on_residual
         configured_references = dict(model_config.get("tendency_reference") or {})
         other_references = {target: ref for target, ref in configured_references.items() if ref != target}
+        configured_states = dict(model_config.get("state_variables") or {})
         if self.condition_on_residual and other_references:
             msg = (
                 "condition_on_residual reads a dataset's own residual connection, so it cannot be combined with "
@@ -893,16 +900,64 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             n_step_output=n_step_output,
         )
 
+        self._check_predicted_datasets("model.tendency_reference", configured_references)
+        self.state_variables = self._resolve_state_variables(configured_states, configured_references)
         self.tendency_reference = self._resolve_tendency_reference(configured_references)
+        for target, reference in self.tendency_reference.items():
+            tendencies = self.tendency_variables(target)
+            states = [name for name in self.data_indices[target].model.output.ordered_names if name not in tendencies]
+            LOGGER.info(
+                "Dataset '%s' learns %s as tendencies against '%s' and %s as states.",
+                target,
+                tendencies,
+                reference,
+                states,
+            )
 
-    def _resolve_tendency_reference(self, configured_references: Mapping[str, str]) -> dict[str, str]:
-        """Return the reference dataset of every predicted dataset, checking the configured ones."""
-        unknown_targets = sorted(set(configured_references) - set(self.target_datasets))
+    def _check_predicted_datasets(self, option: str, configured: Mapping) -> None:
+        """Check that the keys of the per-dataset ``option`` are datasets the model predicts."""
+        unknown_targets = sorted(set(configured) - set(self.target_datasets))
         if unknown_targets:
             raise ValueError(
-                f"model.tendency_reference names datasets the model does not predict: {unknown_targets}. "
+                f"{option} names datasets the model does not predict: {unknown_targets}. "
                 f"Predicted datasets: {self.target_datasets}."
             )
+
+    def _resolve_state_variables(
+        self, configured_states: Mapping[str, list[str]], configured_references: Mapping[str, str]
+    ) -> dict[str, list[str]]:
+        """Outputs of every predicted dataset learned as states instead of tendencies.
+
+        A dataset that is its own reference may only list prognostic variables: those are the ones it
+        would otherwise learn as tendencies.
+        """
+        self._check_predicted_datasets("model.state_variables", configured_states)
+        states = {}
+        for target in self.target_datasets:
+            listed = list(configured_states.get(target) or [])
+            outputs = list(self.data_indices[target].model.output.ordered_names)
+            not_outputs = [name for name in listed if name not in outputs]
+            if not_outputs:
+                raise ValueError(
+                    f"model.state_variables.{target} lists {not_outputs}, which are not outputs of '{target}' "
+                    f"({outputs})."
+                )
+            if configured_references.get(target, target) == target:
+                not_prognostic = [name for name in listed if name not in self.data_indices[target].prognostic]
+                if not_prognostic:
+                    raise ValueError(
+                        f"model.state_variables.{target} lists {not_prognostic}, which '{target}' does not learn as "
+                        "tendencies: a dataset that is its own reference learns only its prognostic variables as "
+                        "tendencies, and its other outputs as states anyway."
+                    )
+            states[target] = [name for name in outputs if name in listed]
+        return states
+
+    def _resolve_tendency_reference(self, configured_references: Mapping[str, str]) -> dict[str, str]:
+        """Return the reference dataset of every predicted dataset, checking the configured ones.
+
+        Needs :attr:`state_variables`. The keys of ``configured_references`` are checked in ``__init__``.
+        """
         references = {target: configured_references.get(target, target) for target in self.target_datasets}
         for target, reference in references.items():
             if reference not in self.data_indices:
@@ -922,10 +977,30 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                     f"Dataset '{target}' takes its tendency reference from '{reference}', built by the residual "
                     f"connection of '{reference}', so nothing uses model.residual.datasets.{target}; remove it."
                 )
+            prognostic = list(self.data_indices[target].prognostic)
+            if prognostic:
+                raise ValueError(
+                    f"Dataset '{target}' takes its tendency reference from '{reference}', so it cannot have "
+                    f"prognostic variables {prognostic}: they would feed the target into the model as an input. "
+                    f"Declare the inputs of '{target}' as forcings and its outputs as diagnostics (a variable that "
+                    "is in neither list is prognostic by default)."
+                )
+            reference_inputs = set(self.data_indices[reference].model.input.ordered_names)
+            unassigned = [
+                name
+                for name in self.data_indices[target].model.output.ordered_names
+                if name not in reference_inputs and name not in self.state_variables[target]
+            ]
+            if unassigned:
+                raise ValueError(
+                    f"Dataset '{target}' takes its tendency reference from '{reference}', but the outputs "
+                    f"{unassigned} of '{target}' are not inputs of '{reference}', so they cannot be learned as "
+                    f"tendencies: list them in model.state_variables.{target} to learn them as states."
+                )
             if not self.tendency_variables(target, reference):
                 raise ValueError(
-                    f"Dataset '{target}' takes its tendency reference from '{reference}', but none of its output "
-                    f"variables is an input of '{reference}'."
+                    f"Dataset '{target}' takes its tendency reference from '{reference}', but none of its outputs "
+                    f"is learned as a tendency against '{reference}'."
                 )
             self._check_reference_steps(target, reference)
         return references
@@ -955,8 +1030,9 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     def tendency_variables(self, dataset_name: str, reference_name: str | None = None) -> list[str]:
         """Output variables of ``dataset_name`` learned as tendencies, in model output order.
 
-        These are the outputs that the reference dataset has as model inputs under the same name.
-        For a dataset that is its own reference, they are its prognostic variables.
+        These are the outputs that the reference dataset has as model inputs under the same name,
+        except those listed in :attr:`state_variables`. For a dataset that is its own reference, they
+        are its prognostic variables, except those listed in :attr:`state_variables`.
 
         Parameters
         ----------
@@ -968,7 +1044,12 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         if reference_name is None:
             reference_name = self.tendency_reference[dataset_name]
         reference_inputs = set(self.data_indices[reference_name].model.input.ordered_names)
-        return [name for name in self.data_indices[dataset_name].model.output.ordered_names if name in reference_inputs]
+        states = set(self.state_variables.get(dataset_name, ()))
+        return [
+            name
+            for name in self.data_indices[dataset_name].model.output.ordered_names
+            if name in reference_inputs and name not in states
+        ]
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         input_dim = super()._calculate_input_dim(dataset_name)

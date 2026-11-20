@@ -1,6 +1,7 @@
 # Spatial downscaling with EDM diffusion: the model predicts the high-resolution dataset hres from the
 # low-resolution dataset lres, projected onto the hres grid, and the hres forcings. The fields lres
-# also has are learned as tendencies against it (model.tendency_reference).
+# also has are learned as tendencies against it (model.tendency_reference), except those in
+# model.state_variables, which are learned as states.
 defaults:
 - data: downscaling
 - dataloader: downscaling

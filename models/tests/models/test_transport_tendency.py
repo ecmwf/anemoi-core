@@ -108,6 +108,7 @@ def _make_model() -> AnemoiTransportTendModelEncProcDec:
     model.data_indices = {"data": _make_index_collection()}
     model.target_datasets = ["data"]
     model.tendency_reference = {"data": "data"}
+    model.state_variables = {"data": []}
     return model
 
 
@@ -226,12 +227,49 @@ def test_add_tendency_to_state_inverts_compute_tendency() -> None:
     assert normalised.variables == state.variables
 
 
+def test_prognostic_listed_as_state_variable_is_learned_as_a_state() -> None:
+    model = _tendency_model()
+    model.state_variables = {"data": ["prog1"]}
+    pre_processors, post_processors = _normalizer_processors()
+    per_step = model.tendency_statistics("data", TENDENCY_STATISTICS)
+
+    state = _source(torch.randn(2, 2, 1, 3, 3), ["prog0", "prog1", "diag"])
+    reference = _physical(_source(torch.randn(2, 1, 1, 3, 1), ["prog0"]), post_processors)
+    tendency = model.compute_tendency("data", state, reference, per_step, pre_processors, post_processors)
+
+    assert model.tendency_variables("data") == ["prog0"]
+    torch.testing.assert_close(tendency.values[..., 1:], state.values[..., 1:], rtol=0, atol=0)
+    rebuilt = model.add_tendency_to_state(
+        "data", reference, tendency, per_step, post_processors, pre_processors=pre_processors
+    )
+    torch.testing.assert_close(rebuilt.values, state.values)
+
+
+@pytest.mark.parametrize(
+    ("configured", "message"),
+    [
+        ({"data": ["diag"]}, r"lists \['diag'\], which 'data' does not learn as tendencies"),
+        ({"data": ["force"]}, r"lists \['force'\], which are not outputs of 'data'"),
+        ({"other": ["prog0"]}, r"names datasets the model does not predict: \['other'\]"),
+    ],
+)
+def test_state_variables_of_a_dataset_that_is_its_own_reference_must_be_prognostic(
+    configured: dict, message: str
+) -> None:
+    model = _make_model()
+
+    assert model._resolve_state_variables({"data": ["prog1"]}, {}) == {"data": ["prog1"]}
+    with pytest.raises(ValueError, match=message):
+        model._resolve_state_variables(configured, {})
+
+
 def test_tendency_roundtrip_skips_imputation() -> None:
     imputer, data_indices = _make_imputer_settings()
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     torch.nn.Module.__init__(model)
     model.data_indices = {"data": data_indices}
     model.tendency_reference = {"data": "data"}
+    model.state_variables = {"data": []}
     model.n_step_output = {"data": 1}
 
     statistics = IMPUTER_STATISTICS
@@ -279,6 +317,7 @@ def test_tendencies_of_imputed_and_missing_states_agree_where_data_exists() -> N
     torch.nn.Module.__init__(model)
     model.data_indices = {"data": data_indices}
     model.tendency_reference = {"data": "data"}
+    model.state_variables = {"data": []}
     model.n_step_output = {"data": 2}
 
     normalizer = InputNormalizer(config=DictConfig({"default": "mean-std"}))

@@ -9,11 +9,11 @@
 
 """Tendency transport models that take their reference from another dataset.
 
-A small model predicts ``hres`` and reads ``lres`` as input only, on the same grid (as after a
-spatial preprocessor has projected ``lres`` onto the ``hres`` grid). ``hres`` learns its outputs
-``a`` and ``b`` as tendencies against the ``lres`` input of the same name, and ``s``, which ``lres``
-does not have, as a state. With several snapshots, each output step is taken against the ``lres``
-input at the same time.
+A small model predicts ``hres`` and reads ``lres`` as input only (all its variables are forcings), on
+the same grid (as after a spatial preprocessor has projected ``lres`` onto the ``hres`` grid). ``hres``
+learns its outputs ``a`` and ``b`` as tendencies against the ``lres`` input of the same name, and ``s``,
+which ``lres`` does not have, as a state (``model.state_variables``). With several snapshots, each
+output step is taken against the ``lres`` input at the same time.
 """
 
 import numpy as np
@@ -37,6 +37,7 @@ from tests.models.test_transport_input_only_datasets import _points_on_sphere
 NUM_GRID_POINTS = 40
 GRIDDED_LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
 VARIABLES = {"lres": ["a", "b", "c"], "hres": ["a", "b", "s", "f"]}
+HRES_ROLES = {"forcing": ["f"], "diagnostic": ["a", "b", "s"]}
 STATISTICS = {
     "lres": {"mean": np.array([10.0, -3.0, 1.0]), "stdev": np.array([4.0, 0.5, 2.0])},
     "hres": {"mean": np.array([1.0, -1.0, 0.5, 2.0]), "stdev": np.array([2.0, 0.25, 1.0, 3.0])},
@@ -104,6 +105,7 @@ def _model_config(**overrides) -> DictConfig:
     config.decoders = {"hres": {**decoder, "target_datasets": ["hres"]}}
     config.residual = {"datasets": {"lres": {"_target_": "anemoi.models.layers.residual.SkipConnection", "step": -1}}}
     config.tendency_reference = {"hres": "lres"}
+    config.state_variables = {"hres": ["s"]}
     config.node_trainable_parameters = {"lres": 0, "hres": 0, "hidden": 0}
     config.bounding = {"datasets": {"hres": []}}
     for key, value in overrides.items():
@@ -114,11 +116,11 @@ def _model_config(**overrides) -> DictConfig:
 def _data_indices() -> dict[str, IndexCollection]:
     return {
         "lres": IndexCollection(
-            DictConfig({"forcing": [], "diagnostic": [], "target": []}),
+            DictConfig({"forcing": VARIABLES["lres"], "diagnostic": [], "target": []}),
             {name: index for index, name in enumerate(VARIABLES["lres"])},
         ),
         "hres": IndexCollection(
-            DictConfig({"forcing": ["f"], "diagnostic": ["a", "b", "s"], "target": []}),
+            DictConfig({**HRES_ROLES, "target": []}),
             {name: index for index, name in enumerate(VARIABLES["hres"])},
         ),
     }
@@ -177,7 +179,9 @@ def _synthetic_batches(model: AnemoiTransportTendModelEncProcDec, n_step: int = 
                 "hres": random_source("hres", list(indices["hres"].model.input.ordered_names), n_step),
             },
         ),
-        "target_forcing": Batch({"hres": random_source("hres", ["f"], n_step)}),
+        "target_forcing": (
+            Batch({"hres": random_source("hres", HRES_ROLES["forcing"], n_step)}) if HRES_ROLES["forcing"] else None
+        ),
         "state": Batch({"hres": random_source("hres", hres_outputs, n_step)}),
     }
 
@@ -197,7 +201,36 @@ def test_outputs_shared_with_the_reference_dataset_are_tendencies() -> None:
     model = _build_model()
 
     assert model.tendency_reference == {"hres": "lres"}
+    assert model.state_variables == {"hres": ["s"]}
     assert model.tendency_variables("hres") == ["a", "b"]
+
+
+def test_outputs_listed_as_state_variables_are_learned_as_states() -> None:
+    model = _build_model(state_variables={"hres": ["b", "s"]})
+    batches = _synthetic_batches(model)
+    pre_processors, post_processors = _processors()
+    # Only the statistics of "a", the one tendency, are read.
+    statistics = {
+        "lead_times": ["0h"],
+        "0h": {"mean": np.array([0.1, np.nan, np.nan, np.nan]), "stdev": np.array([0.3, np.nan, np.nan, np.nan])},
+    }
+    per_step = model.tendency_statistics("hres", statistics)
+    reference = model.reference_state(batches["x"], None, None, post_processors)["hres"]
+    state = batches["state"]["hres"]
+
+    tendency = model.compute_tendency(
+        "hres", state, reference, per_step, pre_processors["hres"], post_processors["hres"]
+    )
+
+    assert model.tendency_variables("hres") == ["a"]
+    assert reference.variables == ["a"]
+    for name in ("b", "s"):
+        index = state.name_to_index[name]
+        torch.testing.assert_close(tendency.values[..., index], state.values[..., index], rtol=0, atol=0)
+    rebuilt = model.add_tendency_to_state(
+        "hres", reference, tendency, per_step, post_processors["hres"], pre_processors=pre_processors["hres"]
+    )
+    torch.testing.assert_close(rebuilt.values, state.values)
 
 
 def test_reference_is_the_latest_reference_input_in_its_own_physical_units() -> None:
@@ -273,6 +306,30 @@ def test_predict_step_adds_the_sampled_tendency_to_the_reference_dataset() -> No
     # predict_step takes inputs in physical units, so the reference is the latest lres input of a and b.
     assert [(name, variables) for name, variables, _ in seen] == [("hres", ["a", "b"])]
     torch.testing.assert_close(seen[0][2], batches["x"]["lres"].values[:, -1:, ..., :2])
+
+
+def test_predict_step_without_inputs_of_the_predicted_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``hres`` without forcings is output only: ``x["hres"]`` has no variables, only its grid."""
+    monkeypatch.setitem(VARIABLES, "hres", ["a", "b", "s"])
+    monkeypatch.setitem(HRES_ROLES, "forcing", [])
+    monkeypatch.setitem(STATISTICS, "hres", {key: value[:3] for key, value in STATISTICS["hres"].items()})
+    model_config = _model_config()
+    model_config.decoders.hres.target_node_features = ["encoded_data"]
+    model = _build_model(decoders=model_config.decoders)
+    batches = _synthetic_batches(model)
+    pre_processors, post_processors = _processors()
+
+    assert batches["x"]["hres"].n_variables == 0
+    out = model.predict_step(
+        batches["x"],
+        target_template={"hres": batches["state"]["hres"].template()},
+        pre_processors=pre_processors,
+        post_processors=post_processors,
+        statistics_tendencies=TENDENCY_STATISTICS,
+    )
+
+    assert out["hres"].variables == ["a", "b", "s"]
+    assert torch.isfinite(out["hres"].values).all()
 
 
 def _build_matching_model(n_step_input_lres: int = 2) -> AnemoiTransportTendModelEncProcDec:
@@ -388,6 +445,15 @@ def test_missing_tendency_statistics_are_rejected() -> None:
         ({"condition_on_residual": True}, "cannot be combined with tendency references from other datasets"),
         ({"tendency_reference": {"lres": "hres"}}, r"datasets the model does not predict: \['lres'\]"),
         ({"tendency_reference": {"hres": "other"}}, "'other', which is not a dataset of the model"),
+        (
+            {"state_variables": {}},
+            r"outputs \['s'\] of 'hres' are not inputs of 'lres'.*model.state_variables.hres",
+        ),
+        (
+            {"state_variables": {"hres": ["s"], "lres": ["a"]}},
+            r"model.state_variables names datasets the model does not predict: \['lres'\]",
+        ),
+        ({"state_variables": {"hres": ["s", "f"]}}, r"model.state_variables.hres lists \['f'\], which are not outputs"),
     ],
 )
 def test_invalid_references_are_rejected(overrides: dict, message: str) -> None:
@@ -395,8 +461,17 @@ def test_invalid_references_are_rejected(overrides: dict, message: str) -> None:
         _build_model(**overrides)
 
 
+def test_dataset_with_a_reference_from_another_dataset_has_no_prognostics(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(HRES_ROLES, "diagnostic", ["b", "s"])
+
+    with pytest.raises(
+        ValueError, match=r"'hres' takes its tendency reference from 'lres'.*prognostic variables \['a'\]"
+    ):
+        _build_model()
+
+
 def test_reference_dataset_without_shared_variables_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(VARIABLES, "lres", ["x", "y", "z"])
 
-    with pytest.raises(ValueError, match="none of its output variables is an input of 'lres'"):
-        _build_model()
+    with pytest.raises(ValueError, match="none of its outputs is learned as a tendency against 'lres'"):
+        _build_model(state_variables={"hres": ["a", "b", "s"]})
