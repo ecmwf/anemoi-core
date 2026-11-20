@@ -7,6 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import pytest
+from omegaconf import OmegaConf
+from pydantic import ValidationError
+
 from anemoi.models.schemas.data_processor import ImputerSchema
 from anemoi.models.schemas.data_processor import NormalizerSchema
 from anemoi.models.schemas.data_processor import PostprocessorSchema
@@ -88,3 +92,42 @@ def test_preprocessor_with_remapper_instance():
     schema = PreprocessorSchema(_target_=PreprocessorTarget.remapper, config=instance)
     assert isinstance(schema.config, RemapperSchema)
     assert "d" in schema.config.none
+
+
+VALID_REMAPPER_CONFIGS = {
+    "one method, default none": {"default": "none", "log1p": ["x"]},
+    "default omitted": {"log1p": ["x"]},
+    "default method, exceptions under none": {"default": "log1p", "none": ["y", "z"]},
+    "several methods with kwargs": {
+        "power": ["x"],
+        "atanh": ["y"],
+        "method_kwargs": {"power": {"lambd": 0.1}, "atanh": {"rho": 3.0}},
+    },
+}
+
+INVALID_REMAPPER_CONFIGS = {
+    "unknown method": ({"lop1p": ["x"]}, "Unknown remapper method"),
+    "unknown default": ({"default": "log"}, "Unknown remapper method"),
+    "kwargs for unknown method": ({"method_kwargs": {"powr": {"lambd": 0.1}}}, "Unknown remapper method"),
+    "unknown kwarg": ({"power": ["x"], "method_kwargs": {"power": {"lamda": 0.1}}}, "Unknown argument"),
+    "variables not a list": ({"log1p": "x"}, "must map to a list of variable names"),
+    "variables not names": ({"log1p": [1, 2]}, "must map to a list of variable names"),
+}
+
+
+@pytest.mark.parametrize("config", VALID_REMAPPER_CONFIGS.values(), ids=VALID_REMAPPER_CONFIGS.keys())
+def test_remapper_schema_accepts_valid_config(config: dict) -> None:
+    RemapperSchema.model_validate(config)
+
+
+@pytest.mark.parametrize(("config", "error"), INVALID_REMAPPER_CONFIGS.values(), ids=INVALID_REMAPPER_CONFIGS.keys())
+def test_remapper_schema_rejects_invalid_config(config: dict, error: str) -> None:
+    with pytest.raises(ValidationError, match=error):
+        RemapperSchema.model_validate(config)
+
+
+def test_remapper_schema_accepts_omegaconf_lists() -> None:
+    # Configs loaded by Hydra hold ListConfig, not list.
+    config = OmegaConf.create({"default": "none", "log1p": ["x"]})
+    schema = PreprocessorSchema(_target_=PreprocessorTarget.remapper, config=config)
+    assert list(schema.config["log1p"]) == ["x"]
