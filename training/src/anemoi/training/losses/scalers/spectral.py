@@ -28,9 +28,14 @@ class SpectralDimensionScaler(BaseScaler):
     Different losses have different output shape: some losses use the flattened
     output (L*M) and others collapse over one dimension.
 
-    n_spectral refers to the length of the spectral dimension,
-    and n_spectral_modes the number of total wavenumbers/frequencies.
-    The default implementation scales uniformly by ``1 / n_spectral_modes``.
+    spectral_dims is the length of the spectral dimension seen by the loss and
+    n_spectral_modes the number of modes to average over. The scaler is uniform,
+    ``1 / n_spectral_modes``. For spherical harmonic transforms, set both to:
+
+    - ``truncation + 1`` for losses that sum over the zonal wavenumber
+      (PowerSpectrumLoss, SpectralAMSELoss).
+    - ``(truncation + 1)**2`` for losses that score each coefficient
+      (SpectralCRPSLoss, LogSpectralDistance, FourierCorrelationLoss).
     """
 
     scale_dims: TensorDim = TensorDim.GRID
@@ -47,7 +52,9 @@ class SpectralDimensionScaler(BaseScaler):
         Parameters
         ----------
         n_spectral_modes : int
-            Number of total wavenumbers (L dimension) for SHT and total frequencies for 2D spectral transforms.
+            Number of modes to average over. For SHT-based losses this is ``truncation + 1`` or
+            ``(truncation + 1)**2`` (see the class docstring), and for 2D spectral transforms the
+            number of frequencies.
         spectral_dims : int, optional
             Length of the spectral dimension. Defaults to n_spectral_modes.
             In case of flattened spectral representation, the spectral dimension is higher than n_spectral_modes.
