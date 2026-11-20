@@ -8,8 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import types
-from typing import Any
-from typing import Never
+from typing import Any, Never
 from unittest.mock import MagicMock
 
 import pytest

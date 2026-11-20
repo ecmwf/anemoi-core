@@ -23,12 +23,14 @@ from anemoi.models.triton.utils import is_triton_available
 if is_triton_available():
     import triton
 
-    from anemoi.models.triton.attention import TritonAttention
-    from anemoi.models.triton.attention import _attn_bwd_dkdv
-    from anemoi.models.triton.attention import _attn_bwd_dq
-    from anemoi.models.triton.attention import _attn_fwd
-    from anemoi.models.triton.attention import _host_descriptor_pre_hook
-    from anemoi.models.triton.attention import is_hip
+    from anemoi.models.triton.attention import (
+        TritonAttention,
+        _attn_bwd_dkdv,
+        _attn_bwd_dq,
+        _attn_fwd,
+        _host_descriptor_pre_hook,
+        is_hip,
+    )
 
 try:
     from flash_attn import flash_attn_func

@@ -14,11 +14,9 @@ import pytest
 import torch
 from pydantic import ValidationError
 
-from anemoi.training.data.data_reader import NativeGridDataset
-from anemoi.training.data.data_reader import create_dataset
+from anemoi.training.data.data_reader import NativeGridDataset, create_dataset
 from anemoi.training.schemas.dataloader import NativeDatasetSchema
-from anemoi.utils.testing import GetTestArchive
-from anemoi.utils.testing import skip_if_offline
+from anemoi.utils.testing import GetTestArchive, skip_if_offline
 
 
 @pytest.fixture

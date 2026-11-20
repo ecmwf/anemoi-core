@@ -12,10 +12,8 @@ from functools import partial
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import AfterValidator
+from pydantic import AfterValidator, Field, NonNegativeInt
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Field
-from pydantic import NonNegativeInt
 
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values

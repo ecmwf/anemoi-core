@@ -14,8 +14,7 @@ import mlflow
 import pytest
 from mlflow import MlflowClient
 
-from anemoi.training.diagnostics.mlflow.azureml import AnemoiAzureMLflowLogger
-from anemoi.training.diagnostics.mlflow.azureml import AzureIdentity
+from anemoi.training.diagnostics.mlflow.azureml import AnemoiAzureMLflowLogger, AzureIdentity
 from anemoi.training.schemas.diagnostics import AzureMlflowSchema
 
 

@@ -7,12 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.schemas.models import TransportConfig
-from anemoi.models.schemas.models import TransportSourceConfig
-from anemoi.models.transport.settings import EdmSettings
-from anemoi.models.transport.settings import NoiseConditioningSettings
-from anemoi.models.transport.settings import StochasticInterpolantSettings
-from anemoi.models.transport.settings import TransportSourceSettings
+from anemoi.models.schemas.models import TransportConfig, TransportSourceConfig
+from anemoi.models.transport.settings import (
+    EdmSettings,
+    NoiseConditioningSettings,
+    StochasticInterpolantSettings,
+    TransportSourceSettings,
+)
 
 
 def test_schema_defaults_match_transport_settings() -> None:

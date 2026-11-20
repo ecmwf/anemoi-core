@@ -20,8 +20,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 
 from anemoi.training.losses import EnergyScoreLoss
-from anemoi.training.utils.enums import EnergyScoreDimension
-from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.enums import EnergyScoreDimension, TensorDim
 
 GRID_SHARD_SIZES = [3, 2]
 

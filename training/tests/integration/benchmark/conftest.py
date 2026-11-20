@@ -11,8 +11,7 @@
 from pathlib import Path
 
 import pytest
-from hydra import compose
-from hydra import initialize_config_module
+from hydra import compose, initialize_config_module
 from omegaconf import OmegaConf
 
 from anemoi.utils.testing import GetTestData

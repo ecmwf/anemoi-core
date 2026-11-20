@@ -10,13 +10,9 @@
 
 import logging
 from pathlib import Path  # noqa: TC003
-from typing import Annotated
-from typing import Literal
-from typing import Optional
+from typing import Annotated, Literal, Optional
 
-from pydantic import Field
-from pydantic import PositiveFloat
-from pydantic import PositiveInt
+from pydantic import Field, PositiveFloat, PositiveInt
 
 from anemoi.utils.schemas import BaseModel
 

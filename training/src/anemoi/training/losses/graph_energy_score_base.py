@@ -13,10 +13,8 @@ from abc import abstractmethod
 
 import torch
 
-from anemoi.training.losses.graph_edge_operations import compute_edge_validity
-from anemoi.training.losses.graph_edge_operations import compute_node_validity
-from anemoi.training.losses.graph_score_base import BaseGraphScoreLoss
-from anemoi.training.losses.graph_score_base import csr_matmul
+from anemoi.training.losses.graph_edge_operations import compute_edge_validity, compute_node_validity
+from anemoi.training.losses.graph_score_base import BaseGraphScoreLoss, csr_matmul
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 

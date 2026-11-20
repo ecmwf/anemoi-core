@@ -10,9 +10,11 @@
 import pytest
 from pydantic import ValidationError
 
-from anemoi.models.schemas.residual import TruncatedConnectionSchema
-from anemoi.models.schemas.residual import TruncationConfigDiskSchema
-from anemoi.models.schemas.residual import TruncationConfigOnTheFlySchema
+from anemoi.models.schemas.residual import (
+    TruncatedConnectionSchema,
+    TruncationConfigDiskSchema,
+    TruncationConfigOnTheFlySchema,
+)
 
 
 def test_truncation_config_disk_valid() -> None:

@@ -20,19 +20,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 import yaml
-from mlflow.entities import FileInfo
-from mlflow.entities import Metric
-from mlflow.entities import Param
-from mlflow.entities import Run
-from mlflow.entities import RunData
-from mlflow.entities import RunInfo
-from mlflow.entities import RunStatus
-from mlflow.entities import RunTag
+from mlflow.entities import FileInfo, Metric, Param, Run, RunData, RunInfo, RunStatus, RunTag
 from mlflow.exceptions import MlflowException
 
 from anemoi.training.diagnostics.mlflow.utils import MAX_PARAMS_LENGTH_PARAM
-from anemoi.training.utils.mlflow_incremental_sync import SYNC_TAG
-from anemoi.training.utils.mlflow_incremental_sync import MlFlowIncrementalSync
+from anemoi.training.utils.mlflow_incremental_sync import SYNC_TAG, MlFlowIncrementalSync
 
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture

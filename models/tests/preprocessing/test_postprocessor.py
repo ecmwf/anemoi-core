@@ -15,10 +15,12 @@ from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing.normalizer import InputNormalizer
-from anemoi.models.preprocessing.postprocessor import ConditionalNaNPostprocessor
-from anemoi.models.preprocessing.postprocessor import ConditionalZeroPostprocessor
-from anemoi.models.preprocessing.postprocessor import NormalizedReluPostprocessor
-from anemoi.models.preprocessing.postprocessor import Postprocessor
+from anemoi.models.preprocessing.postprocessor import (
+    ConditionalNaNPostprocessor,
+    ConditionalZeroPostprocessor,
+    NormalizedReluPostprocessor,
+    Postprocessor,
+)
 
 
 @pytest.fixture()

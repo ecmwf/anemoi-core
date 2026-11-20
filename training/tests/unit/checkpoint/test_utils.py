@@ -15,24 +15,26 @@ import hashlib
 import time
 import urllib.error
 from pathlib import Path
-from unittest.mock import MagicMock
-from unittest.mock import Mock
-from unittest.mock import patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 import torch
 
-from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-from anemoi.training.checkpoint.exceptions import CheckpointSourceError
-from anemoi.training.checkpoint.exceptions import CheckpointTimeoutError
-from anemoi.training.checkpoint.exceptions import CheckpointValidationError
-from anemoi.training.checkpoint.utils import calculate_checksum
-from anemoi.training.checkpoint.utils import compare_state_dicts
-from anemoi.training.checkpoint.utils import download_with_retry
-from anemoi.training.checkpoint.utils import estimate_checkpoint_memory
-from anemoi.training.checkpoint.utils import format_size
-from anemoi.training.checkpoint.utils import get_checkpoint_metadata
-from anemoi.training.checkpoint.utils import validate_checkpoint
+from anemoi.training.checkpoint.exceptions import (
+    CheckpointLoadError,
+    CheckpointSourceError,
+    CheckpointTimeoutError,
+    CheckpointValidationError,
+)
+from anemoi.training.checkpoint.utils import (
+    calculate_checksum,
+    compare_state_dicts,
+    download_with_retry,
+    estimate_checkpoint_memory,
+    format_size,
+    get_checkpoint_metadata,
+    validate_checkpoint,
+)
 
 TIMEOUT = 60
 

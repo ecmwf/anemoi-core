@@ -11,9 +11,7 @@ from __future__ import annotations
 
 from typing import Union
 
-from torch import Size
-from torch import Tensor
-from torch import nn
+from torch import Size, Tensor, nn
 
 
 class AutocastLayerNorm(nn.LayerNorm):

@@ -12,32 +12,35 @@ import logging
 from abc import ABC
 from typing import Optional
 
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.halo import HaloInfo
-from anemoi.models.distributed.halo import build_halo_info
+from anemoi.models.distributed.halo import HaloInfo, build_halo_info
 from anemoi.models.distributed.halo import cache_specs as halo_cache_specs
-from anemoi.models.distributed.khop_edges import ANEMOI_DEBUG_SHARDING
-from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
-from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
-from anemoi.models.distributed.khop_edges import shard_edges_1hop
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.distributed.khop_edges import (
+    ANEMOI_DEBUG_SHARDING,
+    build_graph_partition_from_shard_info,
+    ensure_edges_are_dst_sorted,
+    shard_edges_1hop,
+)
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, GraphShardInfo
 from anemoi.models.distributed.utils import model_is_distributed
-from anemoi.models.layers.block import GraphConvProcessorBlock
-from anemoi.models.layers.block import GraphTransformerProcessorBlock
-from anemoi.models.layers.block import PointWiseMLPProcessorBlock
-from anemoi.models.layers.block import TransformerProcessorBlock
+from anemoi.models.layers.block import (
+    GraphConvProcessorBlock,
+    GraphTransformerProcessorBlock,
+    PointWiseMLPProcessorBlock,
+    TransformerProcessorBlock,
+)
 from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.models.layers.utils import compute_mlp_hidden_dim
-from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.models.layers.utils import maybe_checkpoint
-from anemoi.models.layers.utils import refuse_dropout_when_sharded
+from anemoi.models.layers.utils import (
+    compute_mlp_hidden_dim,
+    load_layer_kernels,
+    maybe_checkpoint,
+    refuse_dropout_when_sharded,
+)
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)

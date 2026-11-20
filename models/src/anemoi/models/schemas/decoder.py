@@ -7,18 +7,11 @@
 # nor does it submit to any jurisdiction.
 #
 
-from typing import Any
-from typing import Literal
-from typing import Union
+from typing import Any, Literal, Union
 
-from pydantic import Field
-from pydantic import NonNegativeFloat
-from pydantic import NonNegativeInt
-from pydantic import model_validator
+from pydantic import Field, NonNegativeFloat, NonNegativeInt, model_validator
 
-from .common_components import GNNModelComponent
-from .common_components import PointWiseMapperComponent
-from .common_components import TransformerModelComponent
+from .common_components import GNNModelComponent, PointWiseMapperComponent, TransformerModelComponent
 
 
 class GNNDecoderSchema(GNNModelComponent):

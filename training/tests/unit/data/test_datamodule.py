@@ -20,12 +20,10 @@ from pytest_mock import MockFixture
 from torch.utils.data import Dataset
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-from anemoi.training.tasks import Forecaster
-from anemoi.training.tasks import TemporalDownscaler
+from anemoi.training.tasks import Forecaster, TemporalDownscaler
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils import seeding
-from anemoi.training.utils.seeding import SeedContext
-from anemoi.training.utils.seeding import derive_seed
+from anemoi.training.utils.seeding import SeedContext, derive_seed
 
 
 class SampleIndexDataset(Dataset):

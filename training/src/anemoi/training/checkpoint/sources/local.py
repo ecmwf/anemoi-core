@@ -92,9 +92,11 @@ class LocalSource(CheckpointSource):
         CheckpointLoadError
             If the checkpoint file exists but is not readable by this process
         """
-        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-        from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-        from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
+        from anemoi.training.checkpoint.exceptions import (
+            CheckpointConfigError,
+            CheckpointLoadError,
+            CheckpointNotFoundError,
+        )
 
         raw_path = self.path if self.path is not None else context.checkpoint_path
 

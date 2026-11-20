@@ -14,11 +14,13 @@ from omegaconf import OmegaConf
 from pydantic import ValidationError
 
 from anemoi.training.diagnostics.callbacks.plot import PlottingSettings
-from anemoi.training.schemas.diagnostics import BatchOutputPlotFnSchema
-from anemoi.training.schemas.diagnostics import GraphPlotFnSchema
-from anemoi.training.schemas.diagnostics import LossPlotFnSchema
-from anemoi.training.schemas.diagnostics import PlotSchema
-from anemoi.training.schemas.diagnostics import PlotSettingsSchema
+from anemoi.training.schemas.diagnostics import (
+    BatchOutputPlotFnSchema,
+    GraphPlotFnSchema,
+    LossPlotFnSchema,
+    PlotSchema,
+    PlotSettingsSchema,
+)
 
 # Fields that exist in PlottingSettings but are runtime-only (not config-facing)
 # and intentionally absent from PlotSettingsSchema.
@@ -221,8 +223,7 @@ def test_graph_feature_plot_schema_accepts_custom_plot_fn() -> None:
 
 
 def test_validate_plot_fn_accepts_valid_function() -> None:
-    from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn
-    from anemoi.training.diagnostics.evaluation.plotting.protocols import validate_plot_fn
+    from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn, validate_plot_fn
 
     def good_fn(
         parameters: object,
@@ -239,8 +240,7 @@ def test_validate_plot_fn_accepts_valid_function() -> None:
 
 
 def test_validate_plot_fn_rejects_missing_params() -> None:
-    from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn
-    from anemoi.training.diagnostics.evaluation.plotting.protocols import validate_plot_fn
+    from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn, validate_plot_fn
 
     def bad_fn(parameters: object, *, x: object, y_true: object) -> None:  # missing y_pred, latlons
         pass
@@ -250,8 +250,7 @@ def test_validate_plot_fn_rejects_missing_params() -> None:
 
 
 def test_validate_plot_fn_accepts_var_keyword() -> None:
-    from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn
-    from anemoi.training.diagnostics.evaluation.plotting.protocols import validate_plot_fn
+    from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn, validate_plot_fn
 
     def flexible_fn(**kwargs: object) -> None:  # **kwargs covers all requirements
         pass
@@ -260,8 +259,7 @@ def test_validate_plot_fn_accepts_var_keyword() -> None:
 
 
 def test_validate_plot_fn_unwraps_partial() -> None:
-    from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn
-    from anemoi.training.diagnostics.evaluation.plotting.protocols import validate_plot_fn
+    from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn, validate_plot_fn
 
     def good_fn(
         parameters: object,
@@ -280,8 +278,7 @@ def test_validate_plot_fn_unwraps_partial() -> None:
 
 
 def test_validate_plot_fn_unwraps_partial_catches_missing() -> None:
-    from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn
-    from anemoi.training.diagnostics.evaluation.plotting.protocols import validate_plot_fn
+    from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn, validate_plot_fn
 
     def bad_fn(  # missing y_pred, latlons
         parameters: object,

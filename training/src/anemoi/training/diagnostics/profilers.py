@@ -13,17 +13,14 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.distributed as dist
 from pytorch_lightning.callbacks import TQDMProgressBar
-from pytorch_lightning.profilers import Profiler
-from pytorch_lightning.profilers import PyTorchProfiler
-from pytorch_lightning.profilers import SimpleProfiler
+from pytorch_lightning.profilers import Profiler, PyTorchProfiler, SimpleProfiler
 from pytorch_lightning.utilities import rank_zero_only
 
 if TYPE_CHECKING:

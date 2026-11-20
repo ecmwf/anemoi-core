@@ -11,24 +11,19 @@
 import logging
 import sys
 from pathlib import Path
-from typing import Any
-from typing import Self
-from typing import Union
+from typing import Any, Self, Union
 
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import model_validator
-from pydantic_core import PydanticCustomError
-from pydantic_core import ValidationError
+from pydantic_core import PydanticCustomError, ValidationError
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
 from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
 from anemoi.models.schemas.models import ModelSchema
 from anemoi.utils.schemas import BaseModel
-from anemoi.utils.schemas.errors import CUSTOM_MESSAGES
-from anemoi.utils.schemas.errors import convert_errors
+from anemoi.utils.schemas.errors import CUSTOM_MESSAGES, convert_errors
 
 # to make these available at runtime for pydantic, bug should be resolved in
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)

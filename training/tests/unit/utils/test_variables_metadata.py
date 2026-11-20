@@ -9,8 +9,10 @@
 
 import pytest
 
-from anemoi.training.utils.variables_metadata import check_loss_variable_units_compatibility
-from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
+from anemoi.training.utils.variables_metadata import (
+    check_loss_variable_units_compatibility,
+    check_variables_metadata_compatibility,
+)
 
 # --- Tests for check_loss_variable_units_compatibility ---
 

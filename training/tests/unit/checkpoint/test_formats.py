@@ -17,17 +17,21 @@ from typing import TYPE_CHECKING
 import pytest
 import torch
 
-from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
-from anemoi.training.checkpoint.exceptions import CheckpointValidationError
-from anemoi.training.checkpoint.formats import convert_lightning_to_pytorch
-from anemoi.training.checkpoint.formats import detect_checkpoint_format
-from anemoi.training.checkpoint.formats import detect_format_from_data
-from anemoi.training.checkpoint.formats import extract_state_dict
-from anemoi.training.checkpoint.formats import is_format_available
-from anemoi.training.checkpoint.formats import load_checkpoint
-from anemoi.training.checkpoint.formats import save_checkpoint
+from anemoi.training.checkpoint.exceptions import (
+    CheckpointConfigError,
+    CheckpointLoadError,
+    CheckpointNotFoundError,
+    CheckpointValidationError,
+)
+from anemoi.training.checkpoint.formats import (
+    convert_lightning_to_pytorch,
+    detect_checkpoint_format,
+    detect_format_from_data,
+    extract_state_dict,
+    is_format_available,
+    load_checkpoint,
+    save_checkpoint,
+)
 
 if TYPE_CHECKING:
     from tests.unit.checkpoint.conftest import SimpleModel

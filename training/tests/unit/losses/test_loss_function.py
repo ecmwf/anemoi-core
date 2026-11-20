@@ -15,28 +15,27 @@ import einops
 import numpy as np
 import pytest
 import torch
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from pytest_mock import MockerFixture
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.losses import CRPS
-from anemoi.training.losses import FourierCorrelationLoss
-from anemoi.training.losses import HuberLoss
-from anemoi.training.losses import LogCoshLoss
-from anemoi.training.losses import LogSpectralDistance
-from anemoi.training.losses import MAELoss
-from anemoi.training.losses import MSELoss
-from anemoi.training.losses import PowerSpectrumLoss
-from anemoi.training.losses import RMSELoss
-from anemoi.training.losses import SpectralAMSELoss
-from anemoi.training.losses import SpectralCRPSLoss
-from anemoi.training.losses import WeightedMSELoss
-from anemoi.training.losses import get_loss_function
-from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.base import FunctionalLoss
-from anemoi.training.train.methods.base import BaseTrainingModule
-from anemoi.training.train.methods.base import resolve_subgrid
+from anemoi.training.losses import (
+    CRPS,
+    FourierCorrelationLoss,
+    HuberLoss,
+    LogCoshLoss,
+    LogSpectralDistance,
+    MAELoss,
+    MSELoss,
+    PowerSpectrumLoss,
+    RMSELoss,
+    SpectralAMSELoss,
+    SpectralCRPSLoss,
+    WeightedMSELoss,
+    get_loss_function,
+)
+from anemoi.training.losses.base import BaseLoss, FunctionalLoss
+from anemoi.training.train.methods.base import BaseTrainingModule, resolve_subgrid
 from anemoi.training.utils.enums import TensorDim
 
 spectral_loss_kwargs: dict[type[BaseLoss], dict[str, object]] = {

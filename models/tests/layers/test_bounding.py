@@ -12,14 +12,16 @@ import pytest
 import torch
 from hydra.utils import instantiate
 
-from anemoi.models.layers.bounding import FractionBounding
-from anemoi.models.layers.bounding import HardtanhBounding
-from anemoi.models.layers.bounding import LeakyFractionBounding
-from anemoi.models.layers.bounding import LeakyHardtanhBounding
-from anemoi.models.layers.bounding import LeakyReluBounding
-from anemoi.models.layers.bounding import NormalizedLeakyReluBounding
-from anemoi.models.layers.bounding import NormalizedReluBounding
-from anemoi.models.layers.bounding import ReluBounding
+from anemoi.models.layers.bounding import (
+    FractionBounding,
+    HardtanhBounding,
+    LeakyFractionBounding,
+    LeakyHardtanhBounding,
+    LeakyReluBounding,
+    NormalizedLeakyReluBounding,
+    NormalizedReluBounding,
+    ReluBounding,
+)
 from anemoi.utils.config import DotDict
 
 

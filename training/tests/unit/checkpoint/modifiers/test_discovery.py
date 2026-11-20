@@ -13,8 +13,7 @@ import pytest
 
 from anemoi.training.checkpoint.base import PipelineStage
 from anemoi.training.checkpoint.catalog import ComponentCatalog
-from anemoi.training.checkpoint.modifiers import FreezingModifierStage
-from anemoi.training.checkpoint.modifiers import ModelModifier
+from anemoi.training.checkpoint.modifiers import FreezingModifierStage, ModelModifier
 
 
 @pytest.fixture(autouse=True)

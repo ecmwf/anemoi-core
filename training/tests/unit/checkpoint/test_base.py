@@ -16,9 +16,7 @@ import torch
 import torch.nn as nn
 from omegaconf import DictConfig
 
-from anemoi.training.checkpoint import CheckpointContext
-from anemoi.training.checkpoint import CheckpointError
-from anemoi.training.checkpoint import PipelineStage
+from anemoi.training.checkpoint import CheckpointContext, CheckpointError, PipelineStage
 
 
 class SimpleModel(nn.Module):

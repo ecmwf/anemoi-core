@@ -18,9 +18,7 @@ from omegaconf import OmegaConf
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.training.checkpoint.base import CheckpointContext
-from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError, CheckpointLoadError, CheckpointNotFoundError
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.checkpoint.sources.local import LocalSource
 from anemoi.training.checkpoint.sources.run import RunIdSource

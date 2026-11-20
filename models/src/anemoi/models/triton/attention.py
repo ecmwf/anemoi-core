@@ -22,10 +22,7 @@ import os
 import torch
 from packaging import version
 
-from anemoi.models.triton.utils import is_blackwell
-from anemoi.models.triton.utils import is_hip
-from anemoi.models.triton.utils import supports_host_descriptor
-from anemoi.models.triton.utils import torch_dtype_to_triton
+from anemoi.models.triton.utils import is_blackwell, is_hip, supports_host_descriptor, torch_dtype_to_triton
 
 try:
     import triton

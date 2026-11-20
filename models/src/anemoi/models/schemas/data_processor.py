@@ -9,15 +9,9 @@
 
 from collections.abc import Iterable
 from enum import Enum
-from typing import Any
-from typing import Union
+from typing import Any, Union
 
-from pydantic import Field
-from pydantic import RootModel
-from pydantic import TypeAdapter
-from pydantic import ValidationError
-from pydantic import field_validator
-from pydantic import model_validator
+from pydantic import Field, RootModel, TypeAdapter, ValidationError, field_validator, model_validator
 
 from anemoi.utils.schemas import BaseModel
 

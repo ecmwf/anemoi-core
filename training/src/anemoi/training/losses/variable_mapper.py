@@ -16,9 +16,7 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.base import BaseLossWrapper
-from anemoi.training.losses.base import Squash_mode
+from anemoi.training.losses.base import BaseLoss, BaseLossWrapper, Squash_mode
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace

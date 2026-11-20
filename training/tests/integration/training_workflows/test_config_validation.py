@@ -11,11 +11,9 @@ import logging
 from pathlib import Path
 
 import pytest
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
-from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.schemas.base_schema import BaseSchema, UnvalidatedBaseSchema
 from anemoi.utils.testing import skip_if_offline
 
 LOGGER = logging.getLogger(__name__)

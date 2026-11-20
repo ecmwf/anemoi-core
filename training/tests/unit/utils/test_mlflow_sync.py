@@ -19,10 +19,8 @@ import importlib
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from types import ModuleType
-from types import SimpleNamespace
-from unittest.mock import MagicMock
-from unittest.mock import patch
+from types import ModuleType, SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pytest_mock import MockerFixture

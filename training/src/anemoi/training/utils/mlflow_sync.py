@@ -20,11 +20,13 @@ from urllib.parse import urlparse
 
 import mlflow.entities
 
-from anemoi.training.diagnostics.mlflow.utils import check_params_length
-from anemoi.training.diagnostics.mlflow.utils import clean_config_params
-from anemoi.training.diagnostics.mlflow.utils import get_max_params_length
-from anemoi.training.diagnostics.mlflow.utils import rewrite_lineage
-from anemoi.training.diagnostics.mlflow.utils import update_run_id
+from anemoi.training.diagnostics.mlflow.utils import (
+    check_params_length,
+    clean_config_params,
+    get_max_params_length,
+    rewrite_lineage,
+    update_run_id,
+)
 
 
 def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
@@ -58,22 +60,24 @@ temp = export_log_output_file_path()
 
 
 import mlflow  # noqa: E402
-from mlflow.entities import RunStatus  # noqa: E402
-from mlflow.entities import RunTag  # noqa: E402
+from mlflow.entities import (  # noqa: E402
+    RunStatus,
+    RunTag,
+)
 from mlflow.tracking.context.default_context import _get_user  # noqa: E402
 from mlflow.utils.mlflow_tags import MLFLOW_USER  # noqa: E402
-from mlflow.utils.validation import MAX_METRICS_PER_BATCH  # noqa: E402
-from mlflow.utils.validation import MAX_PARAMS_TAGS_PER_BATCH  # noqa: E402
+from mlflow.utils.validation import (  # noqa: E402
+    MAX_METRICS_PER_BATCH,
+    MAX_PARAMS_TAGS_PER_BATCH,
+)
 
 try:
     import mlflow_export_import.common.utils as mlflow_utils
     from mlflow_export_import.client.client_utils import create_http_client
     from mlflow_export_import.common import utils
-    from mlflow_export_import.run.export_run import _get_metrics_with_steps
-    from mlflow_export_import.run.export_run import _inputs_to_dict
+    from mlflow_export_import.run.export_run import _get_metrics_with_steps, _inputs_to_dict
     from mlflow_export_import.run.import_run import _import_inputs
-    from mlflow_export_import.run.run_data_importer import _log_data
-    from mlflow_export_import.run.run_data_importer import _log_metrics
+    from mlflow_export_import.run.run_data_importer import _log_data, _log_metrics
 
 except ImportError:
     msg = (

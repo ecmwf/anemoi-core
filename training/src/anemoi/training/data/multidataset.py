@@ -20,9 +20,7 @@ from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.usable_indices import compute_valid_anchors
-from anemoi.training.utils.time_indices import TimeIndices
-from anemoi.training.utils.time_indices import normalize_time_indices
-from anemoi.training.utils.time_indices import offset_time_indices
+from anemoi.training.utils.time_indices import TimeIndices, normalize_time_indices, offset_time_indices
 
 LOGGER = logging.getLogger(__name__)
 

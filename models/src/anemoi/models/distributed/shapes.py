@@ -9,8 +9,7 @@
 
 
 from dataclasses import dataclass
-from typing import Optional
-from typing import Union
+from typing import Optional, Union
 
 import torch.distributed as dist
 from torch import Tensor

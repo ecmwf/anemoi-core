@@ -59,8 +59,7 @@ from __future__ import annotations
 import logging
 import pickle
 from abc import abstractmethod
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 

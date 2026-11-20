@@ -10,13 +10,10 @@
 
 import functools
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from enum import StrEnum
-from typing import Any
-from typing import ClassVar
-from typing import Literal
+from typing import Any, ClassVar, Literal
 
 import torch
 from torch import nn

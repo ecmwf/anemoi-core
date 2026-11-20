@@ -10,8 +10,7 @@
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.training.utils.masks import Boolean1DMask
-from anemoi.training.utils.masks import NoOutputMask
+from anemoi.training.utils.masks import Boolean1DMask, NoOutputMask
 
 
 def test_boolean1d_apply() -> None:

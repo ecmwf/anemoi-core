@@ -7,9 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from dataclasses import asdict
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import asdict, dataclass, field
 from unittest.mock import Mock
 
 import pytest
@@ -22,8 +20,7 @@ from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.processor import GraphTransformerProcessor
-from anemoi.models.layers.utils import compute_mlp_hidden_dim
-from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.models.layers.utils import compute_mlp_hidden_dim, load_layer_kernels
 from anemoi.utils.config import DotDict
 
 

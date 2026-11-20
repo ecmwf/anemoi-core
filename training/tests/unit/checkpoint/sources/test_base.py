@@ -11,8 +11,7 @@
 
 import pytest
 
-from anemoi.training.checkpoint.base import CheckpointContext
-from anemoi.training.checkpoint.base import PipelineStage
+from anemoi.training.checkpoint.base import CheckpointContext, PipelineStage
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 
 

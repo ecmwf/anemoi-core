@@ -10,8 +10,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,8 +18,7 @@ from matplotlib.collections import LineCollection
 
 from anemoi.training.diagnostics.evaluation.geospatial.maps import map_features
 from anemoi.training.diagnostics.evaluation.plotting.sample import single_plot
-from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
-from anemoi.training.diagnostics.evaluation.plotting.settings import _hide_axes_ticks
+from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT, _hide_axes_ticks
 
 if TYPE_CHECKING:
     from collections.abc import Generator

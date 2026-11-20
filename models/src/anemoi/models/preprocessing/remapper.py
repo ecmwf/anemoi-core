@@ -15,23 +15,25 @@ import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
-from anemoi.models.preprocessing.mappings import affine_transform
-from anemoi.models.preprocessing.mappings import asinh_converter
-from anemoi.models.preprocessing.mappings import atanh_converter
-from anemoi.models.preprocessing.mappings import boxcox_converter
-from anemoi.models.preprocessing.mappings import displace_boundary_atoms
-from anemoi.models.preprocessing.mappings import expm1_converter
-from anemoi.models.preprocessing.mappings import inverse_affine_transform
-from anemoi.models.preprocessing.mappings import inverse_asinh_converter
-from anemoi.models.preprocessing.mappings import inverse_atanh_converter
-from anemoi.models.preprocessing.mappings import inverse_boxcox_converter
-from anemoi.models.preprocessing.mappings import inverse_displace_boundary_atoms
-from anemoi.models.preprocessing.mappings import inverse_power_transform
-from anemoi.models.preprocessing.mappings import inverse_sqrt_converter
-from anemoi.models.preprocessing.mappings import log1p_converter
-from anemoi.models.preprocessing.mappings import noop
-from anemoi.models.preprocessing.mappings import power_transform
-from anemoi.models.preprocessing.mappings import sqrt_converter
+from anemoi.models.preprocessing.mappings import (
+    affine_transform,
+    asinh_converter,
+    atanh_converter,
+    boxcox_converter,
+    displace_boundary_atoms,
+    expm1_converter,
+    inverse_affine_transform,
+    inverse_asinh_converter,
+    inverse_atanh_converter,
+    inverse_boxcox_converter,
+    inverse_displace_boundary_atoms,
+    inverse_power_transform,
+    inverse_sqrt_converter,
+    log1p_converter,
+    noop,
+    power_transform,
+    sqrt_converter,
+)
 
 LOGGER = logging.getLogger(__name__)
 

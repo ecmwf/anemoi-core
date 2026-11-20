@@ -127,8 +127,7 @@ class HTTPSource(CheckpointSource):
         CheckpointLoadError
             If the downloaded file cannot be loaded by PyTorch
         """
-        from anemoi.training.checkpoint.utils import calculate_checksum
-        from anemoi.training.checkpoint.utils import download_with_retry
+        from anemoi.training.checkpoint.utils import calculate_checksum, download_with_retry
 
         LOGGER.info("Downloading checkpoint from %s", self.url)
 

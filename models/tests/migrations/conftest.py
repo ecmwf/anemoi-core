@@ -12,8 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from anemoi.models.migrations import Migrator
-from anemoi.models.migrations import SaveCkpt
+from anemoi.models.migrations import Migrator, SaveCkpt
 
 
 @pytest.fixture(scope="module")

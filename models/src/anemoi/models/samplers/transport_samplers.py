@@ -6,10 +6,8 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-from abc import ABC
-from abc import abstractmethod
-from typing import Callable
-from typing import Optional
+from abc import ABC, abstractmethod
+from typing import Callable, Optional
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup

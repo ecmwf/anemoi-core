@@ -11,14 +11,11 @@
 
 import threading
 import time
-from unittest.mock import MagicMock
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from anemoi.training.diagnostics.callbacks.plot import AsyncPlotExecutor
-from anemoi.training.diagnostics.callbacks.plot import BasePlotExecutor
-from anemoi.training.diagnostics.callbacks.plot import SyncPlotExecutor
+from anemoi.training.diagnostics.callbacks.plot import AsyncPlotExecutor, BasePlotExecutor, SyncPlotExecutor
 
 
 def test_base_plot_executor_is_abstract():

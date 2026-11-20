@@ -12,8 +12,7 @@
 
 from pathlib import Path
 
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.testing import GetTestData

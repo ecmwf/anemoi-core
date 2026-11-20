@@ -8,12 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 from matplotlib import colormaps as mpl_colormaps
-from matplotlib.colors import Colormap
-from matplotlib.colors import ListedColormap
+from matplotlib.colors import Colormap, ListedColormap
 
 
 class CustomColormap(ABC):

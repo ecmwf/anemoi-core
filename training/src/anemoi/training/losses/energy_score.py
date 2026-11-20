@@ -15,16 +15,11 @@ import torch
 import torch.distributed as dist
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import reduce_tensor
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.base import Squash_mode
+from anemoi.models.distributed.graph import all_to_all_transpose, gather_tensor, reduce_tensor
+from anemoi.models.distributed.shapes import ShardSizes, get_shard_sizes
+from anemoi.training.losses.base import BaseLoss, Squash_mode
 from anemoi.training.losses.scaler_tensor import ScaleTensor
-from anemoi.training.utils.enums import EnergyScoreDimension
-from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.enums import EnergyScoreDimension, TensorDim
 
 _TENSOR_DIMENSIONS = {
     "time": int(TensorDim.TIME),

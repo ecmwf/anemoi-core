@@ -27,8 +27,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from anemoi.training.checkpoint.pipeline import CheckpointPipeline
 

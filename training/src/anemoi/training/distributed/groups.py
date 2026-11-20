@@ -7,8 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from typing import Any
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import numpy as np
 import torch

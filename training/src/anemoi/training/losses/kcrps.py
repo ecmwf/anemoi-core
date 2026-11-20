@@ -16,8 +16,7 @@ import einops
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.base import Squash_mode
+from anemoi.training.losses.base import BaseLoss, Squash_mode
 from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)

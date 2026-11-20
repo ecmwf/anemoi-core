@@ -15,9 +15,11 @@ import torch
 import yaml
 
 from anemoi.training.diagnostics.callbacks import _get_weight_averaging_callback
-from anemoi.training.diagnostics.callbacks.weight_averaging import EMAWeightAveraging
-from anemoi.training.diagnostics.callbacks.weight_averaging import SWAWeightAveraging
-from anemoi.training.diagnostics.callbacks.weight_averaging import WeightAveraging
+from anemoi.training.diagnostics.callbacks.weight_averaging import (
+    EMAWeightAveraging,
+    SWAWeightAveraging,
+    WeightAveraging,
+)
 
 default_config = """
 training:

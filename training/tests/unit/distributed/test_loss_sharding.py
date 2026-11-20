@@ -21,12 +21,14 @@ import torch.multiprocessing as mp
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.training.losses import CRPS
-from anemoi.training.losses import GraphEdgeCRPSLoss
-from anemoi.training.losses import GraphEdgeEnergyScoreLoss
-from anemoi.training.losses import GraphEnergyScoreLoss
-from anemoi.training.losses import GraphVariogramScoreLoss
-from anemoi.training.losses import MultiscaleLossWrapper
+from anemoi.training.losses import (
+    CRPS,
+    GraphEdgeCRPSLoss,
+    GraphEdgeEnergyScoreLoss,
+    GraphEnergyScoreLoss,
+    GraphVariogramScoreLoss,
+    MultiscaleLossWrapper,
+)
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.utils.enums import TensorDim
 

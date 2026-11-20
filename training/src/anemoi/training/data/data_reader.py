@@ -20,8 +20,7 @@ from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
-from anemoi.training.utils.time_indices import TimeIndices
-from anemoi.training.utils.time_indices import normalize_time_indices
+from anemoi.training.utils.time_indices import TimeIndices, normalize_time_indices
 
 LOGGER = logging.getLogger(__name__)
 

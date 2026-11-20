@@ -13,8 +13,7 @@ import copy
 import logging
 import threading
 import traceback
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -24,8 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
@@ -33,13 +31,17 @@ from pytorch_lightning.utilities import rank_zero_only
 from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.evaluation.plotting.graph import graph_plot_fn as _default_graph_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as _default_loss_plot_fn
-from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_graph_inputs
-from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_loss_inputs
-from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_spatial_inputs
-from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn
-from anemoi.training.diagnostics.evaluation.plotting.protocols import GraphPlotFn
-from anemoi.training.diagnostics.evaluation.plotting.protocols import LossPlotFn
-from anemoi.training.diagnostics.evaluation.plotting.protocols import validate_plot_fn
+from anemoi.training.diagnostics.evaluation.plotting.model_introspection import (
+    extract_graph_inputs,
+    extract_loss_inputs,
+    extract_spatial_inputs,
+)
+from anemoi.training.diagnostics.evaluation.plotting.protocols import (
+    BatchOutputPlotFn,
+    GraphPlotFn,
+    LossPlotFn,
+    validate_plot_fn,
+)
 from anemoi.training.diagnostics.evaluation.plotting.settings import init_plot_settings
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim

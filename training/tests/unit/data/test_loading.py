@@ -9,8 +9,7 @@
 
 import pytest
 import torch
-from torch.utils.data import ConcatDataset
-from torch.utils.data import TensorDataset
+from torch.utils.data import ConcatDataset, TensorDataset
 
 from anemoi.training.data.loading import MultiDomainBatchSampler
 

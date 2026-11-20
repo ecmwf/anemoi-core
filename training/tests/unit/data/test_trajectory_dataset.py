@@ -329,8 +329,7 @@ class TestCreateDatasetWithTrajectory:
                 return {}
 
         with patch("anemoi.training.data.data_reader.open_dataset", return_value=FakeAnalysis()):
-            from anemoi.training.data.data_reader import NativeGridDataset
-            from anemoi.training.data.data_reader import create_dataset
+            from anemoi.training.data.data_reader import NativeGridDataset, create_dataset
 
             config = {"dataset_config": {"dataset": "fake.zarr"}}
             ds = create_dataset(config)

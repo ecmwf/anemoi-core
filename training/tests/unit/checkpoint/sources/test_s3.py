@@ -25,14 +25,15 @@ import torch
 from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.base import CheckpointContext
-from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
-from anemoi.training.checkpoint.exceptions import CheckpointSourceError
+from anemoi.training.checkpoint.exceptions import (
+    CheckpointConfigError,
+    CheckpointLoadError,
+    CheckpointNotFoundError,
+    CheckpointSourceError,
+)
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.checkpoint.sources.s3 import S3Source
-from anemoi.utils.settings_schema.object_storage import ObjectStorageBucketConfig
-from anemoi.utils.settings_schema.object_storage import ObjectStorageConfig
+from anemoi.utils.settings_schema.object_storage import ObjectStorageBucketConfig, ObjectStorageConfig
 
 
 def _fake_anemoi_utils_s3(download_impl: object) -> ModuleType:

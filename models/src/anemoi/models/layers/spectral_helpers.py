@@ -17,8 +17,7 @@ import numpy as np
 import torch
 from torch import Tensor
 from torch.cuda.graphs import make_graphed_callables
-from torch.nn import Module
-from torch.nn import ModuleList
+from torch.nn import Module, ModuleList
 from torch.nn import functional as F
 
 from anemoi.models.layers.ring_fft import RingFFT

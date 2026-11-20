@@ -9,16 +9,13 @@
 
 
 import logging
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
-from pytorch_lightning.callbacks import Callback
-from pytorch_lightning.callbacks import TQDMProgressBar
+from omegaconf import DictConfig, OmegaConf
+from pytorch_lightning.callbacks import Callback, TQDMProgressBar
 
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor

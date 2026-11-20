@@ -25,8 +25,7 @@
 """
 
 import math
-from collections.abc import Callable
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import torch

@@ -22,12 +22,14 @@ from .mae import MAELoss
 from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
 from .rmse import RMSELoss
-from .spectral import FourierCorrelationLoss
-from .spectral import LogFFT2Distance
-from .spectral import LogSpectralDistance
-from .spectral import PowerSpectrumLoss
-from .spectral import SpectralAMSELoss
-from .spectral import SpectralCRPSLoss
+from .spectral import (
+    FourierCorrelationLoss,
+    LogFFT2Distance,
+    LogSpectralDistance,
+    PowerSpectrumLoss,
+    SpectralAMSELoss,
+    SpectralCRPSLoss,
+)
 from .variable_mapper import LossVariableMapper
 from .weighted_mse import WeightedMSELoss
 

@@ -15,11 +15,8 @@ import einops
 from torch import Tensor
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.graph import all_to_all_transpose, gather_tensor, shard_tensor
+from anemoi.models.distributed.shapes import ShardSizes, get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor

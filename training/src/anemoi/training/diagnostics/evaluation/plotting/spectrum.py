@@ -93,8 +93,7 @@ def compute_spectra(field: np.ndarray) -> np.ndarray:
 
     """
     try:
-        from pyshtools.expand import SHGLQ
-        from pyshtools.expand import SHExpandGLQ
+        from pyshtools.expand import SHGLQ, SHExpandGLQ
     except ImportError as e:
         error_msg = (
             "pyshtools is required to compute spherical harmonic power spectra. "
