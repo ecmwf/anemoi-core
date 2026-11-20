@@ -25,6 +25,8 @@ LOGGER = logging.getLogger(__name__)
 class TimeLimit(pl.callbacks.Callback):
     """Callback to stop the training process after a given time limit."""
 
+    _TRAIN_BATCH_CHECK_INTERVAL = 50
+
     def __init__(self, limit: int | str, record_file: str | None = None) -> None:
         """Initialise the TimeLimit callback.
 
@@ -59,6 +61,12 @@ class TimeLimit(pl.callbacks.Callback):
         _ = pl_module
         self._run_stopping_check(trainer)
 
+    def on_train_batch_end(self, trainer: pl.Trainer, *args: object, **kwargs: object) -> None:
+        """Check long epochs periodically instead of waiting for an epoch boundary."""
+        _ = (args, kwargs)
+        if trainer.global_step % self._TRAIN_BATCH_CHECK_INTERVAL == 0:
+            self._run_stopping_check(trainer)
+
     def on_validation_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         _ = pl_module
         self._run_stopping_check(trainer)
@@ -71,7 +79,9 @@ class TimeLimit(pl.callbacks.Callback):
         trainer : pl.Trainer
             Pytorch Lightning trainer
         """
-        if timedelta(seconds=time.time() - self._start_time) < self.limit:
+        should_stop = timedelta(seconds=time.time() - self._start_time) >= self.limit
+        should_stop = trainer.strategy.broadcast(should_stop)
+        if not should_stop:
             return
 
         LOGGER.info("Time limit of %s reached. Stopping training.", frequency_to_string(self.limit))
