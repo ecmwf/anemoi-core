@@ -136,6 +136,76 @@ With the current distributed strategy, domain-specific trainable node and edge
 features must be disabled because the active domain, and therefore the active
 graph-specific parameters, changes between batches.
 
+Combining Multi-Domain and Multi-Dataset
+----------------------------------------
+
+The multi-domain and multi-dataset features can be combined.
+The ``GroupedDatasetLoadingPolicy`` builds one ``MultiDomainDataset`` per
+combination of datasets, so each ``MultiDataset`` can contain multiple datasets.
+This policy takes as input ``dataset_groups``, a list of lists grouping
+interchangable datasets from which samples are drawn combining one dataset from
+every group.
+
+Select it in the dataloader configuration::
+
+   dataloader:
+     loading_policy:
+       _target_: anemoi.training.data.loading.GroupedDatasetLoadingPolicy
+       dataset_groups:
+         - [data, data_2]
+         - [data_3]
+
+For each combination of datasets ``([data, data_3], [data_2, data_3])``,
+a ``MultiDataset`` dataset is created, based on the cartesian product of the
+``dataset_groups``. Each ``MultiDataset`` has its own valid date indices,
+which are the intersection of the valid dates of the datasets in the combination.
+Similarly, datasets within a combination share variables and variable order,
+while datasets in different groups may have different variables and variable
+orders. The epoch length is the sum of the lengths of all combinations, and the
+batch sampler visits each combination in a random (seeded) order.
+
+Just like with ``MultiDomainLoadingPolicy``, the model routing must be
+configured to handle the multiple domains and their corresponding datasets::
+
+   model:
+     model:
+       hidden_nodes_name: hidden
+     encoders:
+       shared:
+         source_datasets: [data, data_2]
+         dataset_fusing_strategy: not_supported
+         mapper:
+           _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+           # ... mapper configuration
+       separate:
+         source_datasets: [data_3]
+         dataset_fusing_strategy: not_supported
+         mapper:
+           _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+           # ... mapper configuration
+     decoders:
+       shared:
+         target_datasets: [data, data_2]
+         target_node_features: [encoded_data]
+         mapper:
+           _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+           # ... mapper configuration
+       separate:
+         target_datasets: [data_3]
+         target_node_features: [encoded_data]
+         mapper:
+           _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+           # ... mapper configuration
+
+In this example configuration, the first group of datasets ``data`` and
+``data_2`` is treated as a multi-domain with shared encoder and decoder weights,
+while the second group (``data_3``) is treated as a separate domain with its own
+encoder and decoder weights. The model routing must be configured accordingly to
+handle the multiple domains and their corresponding datasets.
+
+The ``GroupedDatasetLoadingPolicy`` is designed for multiple encoders, and
+thus only supports all datasets having the same hidden mesh.
+
 API Reference
 =============
 
