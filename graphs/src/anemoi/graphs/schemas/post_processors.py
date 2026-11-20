@@ -14,6 +14,7 @@ from typing import Iterable
 from typing import Literal
 
 from pydantic import Field
+from pydantic import PositiveInt
 
 from anemoi.utils.schemas import BaseModel
 
@@ -66,6 +67,28 @@ class RemoveSelfEdgesSchema(BaseModel):
     "Target nodes of edges to be post-processed."
 
 
+class RemoveEdgesByAreaSchema(BaseModel):
+    target_: Literal[
+        "anemoi.graphs.processors.RemoveEdgesCrossingArea",
+        "anemoi.graphs.processors.RemoveEdgesOutsideArea",
+    ] = Field(..., alias="_target_")
+    "Post processor to remove the edges crossing, or leaving, an area of interest."
+    source_name: str
+    "Source nodes of edges to be post-processed."
+    target_name: str
+    "Target nodes of edges to be post-processed."
+    reference_nodes_name: str
+    "Name of the nodes holding the attribute that defines the area."
+    reference_attribute_name: str
+    "Boolean attribute of the reference nodes. True marks the nodes inside the area."
+    num_middle_points: PositiveInt = Field(default=1, example=1)
+    "Number of points sampled along each edge to test it. Default to 1, the midpoint test."
+    source_mask_attr_name: str | None = Field(default=None, example=None)
+    "Boolean mask attribute on source nodes. Only edges whose source is True under this mask will be post-processed. Default to None"
+    target_mask_attr_name: str | None = Field(default=None, example=None)
+    "Boolean mask attribute on target nodes. Only edges whose target is True under this mask will be post-processed. Default to None"
+
+
 class SortEdgeIndexSchema(BaseModel):
     target_: Literal[
         "anemoi.graphs.processors.SortEdgeIndexBySourceNodes",
@@ -81,6 +104,7 @@ ProcessorSchemas = Annotated[
     | SubsetNodesInAreaSchema
     | RestrictEdgeLengthSchema
     | RemoveSelfEdgesSchema
+    | RemoveEdgesByAreaSchema
     | SortEdgeIndexSchema,
     Field(discriminator="target_"),
 ]
