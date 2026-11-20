@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import io
 import math
 
 import numpy as np
@@ -14,9 +15,13 @@ import pytest
 import torch
 from torch.nn import functional as F
 
+from anemoi.models.layers import spectral_helpers
+from anemoi.models.layers.spectral_helpers import LEGENDRE_TABLES
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
+from anemoi.models.layers.spectral_helpers import first_orders_of_blocks
 from anemoi.models.layers.spectral_helpers import latitude_quadrature
+from anemoi.models.layers.spectral_helpers import legendre_by_degree
 from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
 from anemoi.models.layers.spectral_transforms import InverseReducedSHT
 from anemoi.models.layers.spectral_transforms import InverseRegularSHT
@@ -69,6 +74,293 @@ def _lons_per_lat(nlat: int, grid_kind: str) -> list[int]:
         return lons + list(reversed(lons))
 
     raise ValueError(f"Unknown grid_kind={grid_kind!r}")
+
+
+def _transforms(lons_per_lat: list[int], truncation: int, latitude_grid: str = "legendre-gauss"):
+    """Create forward and inverse transforms for one grid and truncation."""
+    return SphericalHarmonicTransform(
+        lons_per_lat, truncation, latitude_grid=latitude_grid
+    ), InverseSphericalHarmonicTransform(lons_per_lat, truncation, latitude_grid=latitude_grid)
+
+
+# Latitude layouts for the table tests: an even and an odd number of Gaussian rows, and equally spaced
+# rows with the poles, with an equator row (odd) and without one (even).
+LATITUDE_LAYOUTS = [
+    pytest.param("legendre-gauss", 32, id="gauss-32"),
+    pytest.param("legendre-gauss", 33, id="gauss-33"),
+    pytest.param("equiangular-poles", 65, id="equiangular-65"),
+    pytest.param("equiangular-poles", 64, id="equiangular-64"),
+]
+
+
+def _assert_matches_legendre_sums(
+    direct: SphericalHarmonicTransform, inverse: InverseSphericalHarmonicTransform, truncation: int
+) -> None:
+    """Compare both transforms with Legendre sums over all latitudes."""
+    theta, weight = latitude_quadrature(direct.nlat, direct.latitude_grid)
+    table = torch.stack(list(legendre_by_degree(truncation, np.cos(theta))), dim=1).to(torch.complex128)  # [m, l, lat]
+    weight = torch.from_numpy(weight).to(torch.complex128)
+
+    x = torch.randn(3, direct.n_grid_points, dtype=torch.float64)
+    fourier = 2 * torch.pi * direct.rfft_rings(x)[..., : truncation + 1]
+    expected = 4 * torch.pi * torch.einsum("...km, mlk, k -> ...lm", fourier, table, weight)
+    torch.testing.assert_close(direct(x), expected)
+
+    coefficients = random_spectral_array(truncation, torch.float64)
+    expected = inverse.irfft_rings(torch.einsum("...lm, mlk -> ...km", coefficients, table))
+    torch.testing.assert_close(inverse(coefficients), expected)
+
+
+def _dense_hemisphere_table(theta: np.ndarray, truncation: int) -> torch.Tensor:
+    """Build a dense reference table with axes (m, r, j, northern latitude)."""
+    table = torch.zeros(truncation + 1, 2, (truncation + 2) // 2, len(theta), dtype=torch.float64)
+    for degree, values in enumerate(legendre_by_degree(truncation, np.cos(theta))):
+        table[: degree + 1, degree % 2, degree // 2] = values[: degree + 1]
+    return table
+
+
+def _dense_reference(
+    direct: SphericalHarmonicTransform,
+    inverse: InverseSphericalHarmonicTransform,
+    x: torch.Tensor,
+    coefficients: torch.Tensor,
+):
+    """Compute forward and inverse transforms with a dense float64 table."""
+    truncation, nlat = direct.truncation, direct.nlat
+    n_north, n_south = (nlat + 1) // 2, nlat // 2
+    theta, weight = latitude_quadrature(nlat, direct.latitude_grid)
+    table = _dense_hemisphere_table(theta[:n_north], truncation)
+    weight = torch.from_numpy(8 * np.pi**2 * weight[:n_north])
+    if nlat % 2:
+        weight[-1] /= 2  # the equator row is paired with itself
+    sign = (-1.0) ** torch.arange(truncation + 1, dtype=torch.float64)
+
+    fourier = torch.view_as_real(direct.rfft_rings(x)[..., : truncation + 1])
+    north, south = fourier[..., :n_north, :, :], fourier[..., n_south:, :, :].flip(-3) * sign[:, None]
+    folded = torch.stack((north + south, north - south), dim=-2) * weight[:, None, None, None]
+    forward = torch.einsum("...kmrc, mrjk -> ...mrjc", folded, table)
+    forward = forward.permute(*range(forward.dim() - 4), -2, -3, -4, -1).flatten(-4, -3)[..., : truncation + 1, :, :]
+
+    n_j = table.shape[2]
+    spectral = torch.view_as_real(coefficients)
+    spectral = torch.nn.functional.pad(spectral, (0, 0, 0, 0, 0, 2 * n_j - (truncation + 1))).unflatten(-3, (n_j, 2))
+    rings = torch.einsum("...jrmc, mrjk -> ...kmrc", spectral, table)
+    north = rings[..., 0, :] + rings[..., 1, :]
+    south = (rings[..., 0, :] - rings[..., 1, :]) * sign[:, None]
+    south = south[..., :n_south, :, :]
+    grid = inverse.irfft_rings(torch.view_as_complex(torch.cat((north, south.flip(-3)), dim=-3)))
+    return torch.view_as_complex(forward.contiguous()), grid
+
+
+@pytest.fixture(params=[(1, 4), (3, 2), (16, 8)], ids=lambda layout: f"first_width={layout[0]}-widen_after={layout[1]}")
+def order_blocks(request, monkeypatch):
+    """Set the width of the first Legendre blocks and how many there are before the width doubles.
+
+    The small layouts make the blocks widen within the truncations these tests use.
+    """
+    width, before_widening = request.param
+    monkeypatch.setattr(spectral_helpers, "FIRST_BLOCK_WIDTH", width)
+    monkeypatch.setattr(spectral_helpers, "BLOCKS_BEFORE_WIDENING", before_widening)
+    LEGENDRE_TABLES.clear()  # tables built with other blocks must not be reused
+    yield request.param
+    LEGENDRE_TABLES.clear()
+
+
+@pytest.mark.parametrize("layout", [(1, 4), (3, 2), (16, 8)])
+def test_block_boundaries_do_not_depend_on_the_truncation(layout, monkeypatch):
+    """A lower truncation uses the leading blocks of a higher one, so cut tables match tables built for it."""
+    monkeypatch.setattr(spectral_helpers, "FIRST_BLOCK_WIDTH", layout[0])
+    monkeypatch.setattr(spectral_helpers, "BLOCKS_BEFORE_WIDENING", layout[1])
+    largest = first_orders_of_blocks(1279)
+    for truncation in range(1280):
+        assert first_orders_of_blocks(truncation) == [m for m in largest if m <= truncation]
+
+
+def test_default_blocks_widen_from_order_128():
+    assert first_orders_of_blocks(639) == [*range(0, 128, 16), 128, 160, 192, 224, 256, 320, 384, 448, 512]
+
+
+def test_transforms_of_different_truncations_can_be_recomputed_for_gradients(order_blocks):
+    """Two truncations on one grid inside a checkpoint, from an empty cache.
+
+    The higher truncation replaces the tables the lower one built during the forward pass, and the pass is run
+    again for the gradients. Both runs must save the same tensors, and the gradients must match the uncheckpointed
+    ones.
+    """
+    # Above T127 blocks laid out by truncation would differ between the two; T255 needs 256 latitudes.
+    lons = _lons_per_lat(256, "octahedral")
+    low, high = SphericalHarmonicTransform(lons, 31), SphericalHarmonicTransform(lons, 255)
+    x = torch.randn(2, sum(lons), dtype=torch.float64, requires_grad=True)
+
+    def loss(x):
+        return low(x).abs().square().sum() + high(x).abs().square().sum()
+
+    (expected,) = torch.autograd.grad(loss(x), x)
+    LEGENDRE_TABLES.clear()
+    torch.utils.checkpoint.checkpoint(loss, x, use_reentrant=False).backward()
+    torch.testing.assert_close(x.grad, expected)
+
+
+@pytest.mark.parametrize("truncation", [0, 5, 6, 14, 15, 31])
+@pytest.mark.parametrize("grid_kind", ["regular", "octahedral"])
+def test_matches_legendre_sums_over_all_latitudes(grid_kind, truncation, order_blocks):
+    torch.manual_seed(0)
+    direct, inverse = _transforms(_lons_per_lat(32, grid_kind), truncation)
+    _assert_matches_legendre_sums(direct, inverse, truncation)
+
+
+@pytest.mark.parametrize("truncation", [0, 5, 6, 15, 31])
+@pytest.mark.parametrize("latitude_grid,nlat", LATITUDE_LAYOUTS)
+def test_regular_grids_match_legendre_sums_over_all_latitudes(latitude_grid, nlat, truncation, order_blocks):
+    """Check Gaussian and equally spaced rows, with and without an equator row."""
+    torch.manual_seed(0)
+    direct, inverse = _transforms([2 * nlat] * nlat, truncation, latitude_grid)
+    _assert_matches_legendre_sums(direct, inverse, truncation)
+
+
+@pytest.mark.parametrize("truncation", [5, 6, 14, 15, 31])
+@pytest.mark.parametrize("grid_kind", ["regular", "octahedral"])
+def test_matches_dense_reference(grid_kind, truncation, order_blocks):
+    """Compare transforms using Legendre blocks with the dense reference."""
+    torch.manual_seed(0)
+    direct, inverse = _transforms(_lons_per_lat(32, grid_kind), truncation)
+    x = torch.randn(3, direct.n_grid_points, dtype=torch.float64)
+    coefficients = random_spectral_array(truncation, torch.float64)
+    expected_forward, expected_inverse = _dense_reference(direct, inverse, x, coefficients)
+    torch.testing.assert_close(direct(x), expected_forward, rtol=1e-13, atol=1e-14)
+    torch.testing.assert_close(inverse(coefficients), expected_inverse, rtol=1e-13, atol=1e-14)
+
+
+@pytest.mark.parametrize("truncation", [5, 6, 31])
+@pytest.mark.parametrize("latitude_grid,nlat", LATITUDE_LAYOUTS)
+def test_regular_grids_match_dense_reference(latitude_grid, nlat, truncation, order_blocks):
+    """Compare Legendre blocks with the dense reference on rows with and without an equator row."""
+    torch.manual_seed(0)
+    direct, inverse = _transforms([2 * nlat] * nlat, truncation, latitude_grid)
+    x = torch.randn(3, direct.n_grid_points, dtype=torch.float64)
+    coefficients = random_spectral_array(truncation, torch.float64)
+    expected_forward, expected_inverse = _dense_reference(direct, inverse, x, coefficients)
+    torch.testing.assert_close(direct(x), expected_forward, rtol=1e-13, atol=1e-14)
+    torch.testing.assert_close(inverse(coefficients), expected_inverse, rtol=1e-13, atol=1e-14)
+
+
+@pytest.mark.parametrize("direction", ["forward", "inverse"])
+def test_gradients_through_blocks(direction, order_blocks):
+    """Check gradients through Legendre blocks and zero padding in both directions."""
+    torch.manual_seed(0)
+    direct, inverse = _transforms(_lons_per_lat(16, "octahedral"), 12)
+    if direction == "forward":
+        inputs = torch.randn(2, direct.n_grid_points, dtype=torch.float64, requires_grad=True)
+        function = direct
+    else:
+        inputs = random_spectral_array(12, torch.float64).requires_grad_()
+        function = inverse
+    assert torch.autograd.gradcheck(function, (inputs,), fast_mode=True)
+
+
+@pytest.mark.parametrize("truncation", [5, 6, 9, 10, 13])
+def test_smaller_truncation_uses_part_of_a_larger_table(truncation, order_blocks):
+    """Check that slicing a cached table for a lower truncation preserves the transform results."""
+    torch.manual_seed(0)
+    larger = SphericalHarmonicTransform(_lons_per_lat(32, "octahedral"), 31)
+    larger(torch.randn(1, larger.n_grid_points, dtype=torch.float64))
+    direct, inverse = _transforms(_lons_per_lat(32, "regular"), truncation)
+    _assert_matches_legendre_sums(direct, inverse, truncation)
+    x = torch.randn(3, direct.n_grid_points, dtype=torch.float64)
+    coefficients = random_spectral_array(truncation, torch.float64)
+    expected_forward, expected_inverse = _dense_reference(direct, inverse, x, coefficients)
+    torch.testing.assert_close(direct(x), expected_forward, rtol=1e-13, atol=1e-14)
+    torch.testing.assert_close(inverse(coefficients), expected_inverse, rtol=1e-13, atol=1e-14)
+    assert LEGENDRE_TABLES.get(32, "legendre-gauss", truncation, torch.float64, torch.device("cpu")).truncation == 31
+
+
+def _block_bytes(nlat: int, truncation: int, element_size: int = 4) -> int:
+    """Calculate table storage in bytes for one grid and truncation."""
+    first_orders = first_orders_of_blocks(truncation)
+    n_j = (truncation + 2) // 2
+    legendre = sum(
+        (m1 - m0) * 2 * (n_j - m0 // 2) * ((nlat + 1) // 2)
+        for m0, m1 in zip(first_orders, first_orders[1:] + [truncation + 1])
+    )
+    return element_size * (legendre + (nlat + 1) // 2 + truncation + 1)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_transforms_on_one_grid_share_one_set_of_tables(device, order_blocks):
+    """Check table sharing, replacement at higher truncation and cache clearing."""
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    nlat = 18
+    smaller = SphericalHarmonicTransform(_lons_per_lat(nlat, "regular"), 4).to(device)
+    larger = SphericalHarmonicTransform(_lons_per_lat(nlat, "octahedral"), 8).to(device)
+    smaller(torch.randn(2, smaller.n_grid_points, device=device))
+    assert LEGENDRE_TABLES.stored_bytes() == _block_bytes(nlat, 4)
+    for sht in (larger, smaller):
+        sht(torch.randn(2, sht.n_grid_points, device=device))
+    assert LEGENDRE_TABLES.stored_bytes() == _block_bytes(nlat, 8)
+
+    # An inverse transform on the same latitudes uses the same tables.
+    inverse = InverseSphericalHarmonicTransform(_lons_per_lat(nlat, "regular"), 8).to(device)
+    inverse(torch.zeros(2, 9, 9, dtype=torch.complex64, device=device))
+    assert LEGENDRE_TABLES.stored_bytes() == _block_bytes(nlat, 8)
+
+    # Equally spaced rows with the same count need tables of their own.
+    equiangular = SphericalHarmonicTransform(_lons_per_lat(nlat, "regular"), 8, latitude_grid="equiangular-poles")
+    equiangular.to(device)(torch.randn(2, equiangular.n_grid_points, device=device))
+    assert LEGENDRE_TABLES.stored_bytes() == 2 * _block_bytes(nlat, 8)
+
+    LEGENDRE_TABLES.clear()
+    assert LEGENDRE_TABLES.stored_bytes() == 0
+
+
+def test_blocks_leave_out_most_zeros():
+    """Check the storage reduction from omitting zero entries at T319 on 640 latitudes."""
+    dense = 320 * 2 * 160 * 320 * 4
+    assert _block_bytes(640, 319) < 0.6 * dense
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+@pytest.mark.parametrize("first_direction", ["forward", "inverse"])
+def test_tables_first_built_in_inference_mode_serve_training(device, first_direction):
+    """Check gradient computation when a shared table was first built in inference mode."""
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    LEGENDRE_TABLES.clear()
+    lons_per_lat = _lons_per_lat(16, "octahedral")
+    metric = [transform.to(device) for transform in _transforms(lons_per_lat, 7)]
+    loss = [transform.to(device) for transform in _transforms(lons_per_lat, 7)]
+    with torch.inference_mode():
+        if first_direction == "forward":
+            metric[0](torch.randn(2, metric[0].n_grid_points, device=device))
+        else:
+            metric[1](torch.zeros(2, 8, 8, dtype=torch.complex64, device=device))
+
+    for direct, inverse in (metric, loss):
+        x = torch.randn(2, direct.n_grid_points, device=device, requires_grad=True)
+        inverse(direct(x)).square().sum().backward()
+        assert torch.isfinite(x.grad).all()
+
+
+def test_pickled_transform_leaves_the_tables_out():
+    """Check that pickling excludes cached tables and loading preserves transform results."""
+    sht = SphericalHarmonicTransform(_lons_per_lat(128, "octahedral"), 127)
+    x = torch.randn(2, sht.n_grid_points)
+    expected = sht(x)
+    table_bytes = sum(
+        table.nbytes
+        for _, table in LEGENDRE_TABLES.get(
+            128, "legendre-gauss", 127, torch.float32, torch.device("cpu")
+        ).legendre_blocks
+    )
+
+    saved = io.BytesIO()
+    torch.save(sht, saved)
+    assert saved.tell() < table_bytes
+    LEGENDRE_TABLES.clear()
+
+    saved.seek(0)
+    loaded = torch.load(saved, weights_only=False)
+    torch.testing.assert_close(loaded(x), expected, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
@@ -194,40 +486,6 @@ def test_idempotency_inverse_direct(sht_setup):
         maxdiff = max(maxdiff, torch.abs((ref - got) / ref).max().item())
 
     assert maxdiff < tolerance
-
-
-@pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
-@pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
-def test_multiple_direct_calls(sht_setup):
-    """Test direct transform can be called multiple times, to verify the CUDA graph functionality works correctly.
-    Reduced grids only.
-    """
-    dtype = sht_setup["dtype"]
-    direct = sht_setup["direct"]
-
-    before = torch.randn((1, 1, direct.n_grid_points), dtype=dtype)
-
-    once = direct(before)
-
-    twice = direct(before)
-
-    assert torch.all(once == twice)
-
-
-@pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
-@pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
-def test_direct_with_graphed_reduced_fft(sht_setup):
-    """Check gradients still work for reduced-grid FFT with CUDA graphs on."""
-    dtype = sht_setup["dtype"]
-    direct = sht_setup["direct"]
-
-    x = torch.randn((2, 1, direct.n_grid_points), dtype=dtype, requires_grad=True)
-    y = direct(x)
-    loss = torch.square(torch.abs(y)).mean()
-    loss.backward()
-
-    assert x.grad is not None
-    assert torch.isfinite(x.grad).all()
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
@@ -398,3 +656,37 @@ def test_equiangular_poles_360_by_181_roundtrip_and_gradient(device, dtype):
 def test_regular_sht_grid_validation(cls, kwargs, match):
     with pytest.raises(ValueError, match=match):
         cls(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "grid_kind,latitude_grid,nlat",
+    [("regular", "legendre-gauss", 48), ("octahedral", "legendre-gauss", 48), ("regular", "equiangular-poles", 49)],
+)
+@pytest.mark.parametrize("shape", [(3, 3), (9, 5), (24, 24)])
+def test_inverse_accepts_smaller_coefficient_arrays(grid_kind, latitude_grid, nlat, shape):
+    """A smaller [l, m] array gives the same field and gradients as an inverse built for that size."""
+    truncation = 23
+    lons_per_lat = _lons_per_lat(nlat=nlat, grid_kind=grid_kind)
+    n_l, n_m = shape
+    large = InverseSphericalHarmonicTransform(lons_per_lat, truncation, latitude_grid=latitude_grid)
+    small = InverseSphericalHarmonicTransform(lons_per_lat, max(n_l, n_m) - 1, latitude_grid=latitude_grid)
+
+    torch.manual_seed(0)
+    coefficients = torch.randn(2, n_l, n_m, dtype=torch.complex128).tril()
+    coefficients[..., 0].imag = 0
+    coefficients.requires_grad_()
+    padded = torch.nn.functional.pad(coefficients, (0, max(n_l, n_m) - n_m, 0, max(n_l, n_m) - n_l))
+    weights = torch.randn(2, sum(lons_per_lat), dtype=torch.float64)
+
+    actual = large(coefficients)
+    expected = small(padded)
+    torch.testing.assert_close(actual, expected, rtol=1e-12, atol=1e-12)
+    actual_grad = torch.autograd.grad((weights * actual).sum(), coefficients)[0]
+    expected_grad = torch.autograd.grad((weights * expected).sum(), coefficients)[0]
+    torch.testing.assert_close(actual_grad, expected_grad, rtol=1e-12, atol=1e-12)
+
+
+def test_inverse_rejects_coefficient_arrays_beyond_its_truncation():
+    inverse = InverseSphericalHarmonicTransform(_lons_per_lat(nlat=16, grid_kind="octahedral"), 7)
+    with pytest.raises(ValueError):
+        inverse(torch.zeros(1, 9, 8, dtype=torch.complex128))
