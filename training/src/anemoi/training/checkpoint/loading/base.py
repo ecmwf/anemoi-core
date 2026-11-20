@@ -54,6 +54,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 from anemoi.training.checkpoint.base import PipelineStage
+from anemoi.training.utils.ckpt_stats import stats_refresh_prefixes
 
 if TYPE_CHECKING:
     import torch.nn as nn
@@ -261,15 +262,7 @@ class LoadingStrategy(PipelineStage):
             "update_ds_stats_on_ckpt_load",
             None,
         )
-        if update_cfg is None:
-            return ()
-
-        prefixes: tuple[str, ...] = ()
-        if bool(getattr(update_cfg, "states", False)):
-            prefixes += ("model.pre_processors.", "model.post_processors.")
-        if bool(getattr(update_cfg, "tendencies", False)):
-            prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
-        return prefixes
+        return stats_refresh_prefixes(update_cfg)
 
     def _refresh_checkpoint_processors(self, context: CheckpointContext) -> None:
         """Replace pre/post processor weights in the checkpoint with the current model's.

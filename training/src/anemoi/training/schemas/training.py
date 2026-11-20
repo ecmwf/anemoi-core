@@ -808,10 +808,10 @@ VariableGroupType = dict[str, bool | str | list[str] | dict[str, str | bool | li
 class UpdateDsStatsOnCkptLoadSchema(BaseModel):
     """Configuration for updating processor statistics on checkpoint load."""
 
-    states: bool = Field(default=False, example=False)
-    "Rebuild state pre/post-processing statistics from the current dataset."
-    tendencies: bool = Field(default=True, example=True)
-    "Rebuild tendency pre/post-processing statistics from the current dataset."
+    states: bool | list[str] = Field(default=False, example=False)
+    "Rebuild state pre/post-processing statistics from the current dataset: true (all datasets) or a list of dataset names."
+    tendencies: bool | list[str] = Field(default=True, example=True)
+    "Rebuild tendency pre/post-processing statistics from the current dataset: true (all datasets) or a list of dataset names."
 
 
 class BaseTrainingSchema(BaseModel):

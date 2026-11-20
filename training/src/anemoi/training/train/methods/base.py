@@ -44,6 +44,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
+from anemoi.training.utils.ckpt_stats import stats_refresh_prefixes
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import build_output_masks
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -449,24 +450,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         )
 
     def _update_checkpoint_state_dict_for_load(self, checkpoint: dict[str, Any]) -> None:
-        update_cfg = self.config.training.update_ds_stats_on_ckpt_load
-        update_states = update_cfg.states
-        update_tendencies = update_cfg.tendencies
+        processor_prefixes = stats_refresh_prefixes(self.config.training.update_ds_stats_on_ckpt_load)
         state_dict = checkpoint.get("state_dict")
-        if not isinstance(state_dict, dict) or not (update_states or update_tendencies):
+        if not isinstance(state_dict, dict) or not processor_prefixes:
             return
 
-        processor_prefixes: tuple[str, ...] = ()
-        if update_states:
-            processor_prefixes += ("model.pre_processors.", "model.post_processors.")
-        if update_tendencies:
-            processor_prefixes += (
-                "model.pre_processors_tendencies.",
-                "model.post_processors_tendencies.",
-            )
-
-        if not processor_prefixes:
-            return
         for key in list(state_dict.keys()):
             if key.startswith(processor_prefixes):
                 del state_dict[key]
