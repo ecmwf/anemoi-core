@@ -8,11 +8,13 @@
 # nor does it submit to any jurisdiction.
 
 from .ensemble import EnsembleTraining
+from .latent_rollout import LatentRolloutTraining
 from .single import SingleTraining
 from .transport import TransportTraining
 
 __all__ = [
     "EnsembleTraining",
+    "LatentRolloutTraining",
     "SingleTraining",
     "TransportTraining",
 ]
