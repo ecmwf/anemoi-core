@@ -29,7 +29,10 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 
 NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
-WRAPPED_LOSSES = ["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"]
+WRAPPED_LOSSES = [
+    "anemoi.training.losses.aggregate.TimeAggregateLossWrapper",
+    "anemoi.training.losses.TargetWeightedLoss",
+]
 LOGGER = logging.getLogger(__name__)
 
 

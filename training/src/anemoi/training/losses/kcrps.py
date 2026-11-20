@@ -32,7 +32,14 @@ CRPSBackend = Literal["naive", "stable"]
 
 
 class CRPS(BaseLoss):
-    """Kernel CRPS loss for ensemble predictions."""
+    """Kernel CRPS loss for ensemble predictions.
+
+    ``weights`` passed to the loss multiply the point-wise CRPS (one value per sample, time step, grid point
+    and variable) before the scalers. They must broadcast against the CRPS, whose ensemble axis has size 1,
+    so weights shaped like the target are valid and apply to every ensemble member alike.
+    """
+
+    applies_weights: bool = True
 
     def __init__(
         self,
@@ -201,6 +208,7 @@ class CRPS(BaseLoss):
         y_pred: torch.Tensor,
         y_target: torch.Tensor,
         layout: "TensorLayout",
+        weights: torch.Tensor | None = None,
         squash: bool = True,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
@@ -224,6 +232,9 @@ class CRPS(BaseLoss):
             crps = self._kernel_crps(y_pred.movedim(ensemble_axis, -1), y_target.movedim(ensemble_axis, -1))
 
         crps = crps.unsqueeze(ensemble_axis)
+        if weights is not None:
+            # The CRPS has a singleton ensemble axis, so weights of the target broadcast over it
+            crps = crps * weights
         crps = self.scale(
             crps,
             scaler_indices,
