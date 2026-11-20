@@ -91,6 +91,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 in_channels_src=encoder_in_channels_src[0],
                 in_channels_dst=self.input_dim_latent,
                 edge_dim=self.encoder_graph_provider[encoder_config.source_datasets[0]].edge_dim,
+                **self._node_coords(
+                    encoder_config.mapper,
+                    src_node_coords=encoder_config.source_datasets,
+                    dst_node_coords=[self.hidden_levels[0]],
+                ),
             )
 
         # Latent aggregator: combines encoder outputs before the processor
@@ -127,6 +132,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.down_level_processor_graph_providers[nodes_names].edge_dim,
                     num_layers=model_config.level_process_num_layers,
+                    **self._node_coords(model_config.processor, node_coords=[nodes_names]),
                 )
 
                 # Create graph providers for up level processor
@@ -144,6 +150,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.up_level_processor_graph_providers[nodes_names].edge_dim,
                     num_layers=model_config.level_process_num_layers,
+                    **self._node_coords(model_config.processor, node_coords=[nodes_names]),
                 )
 
         # Main processor at deepest level
@@ -162,6 +169,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.hidden_dims[self.hidden_levels[self.num_hidden - 1]],
             edge_dim=self.processor_graph_provider.edge_dim,
+            **self._node_coords(model_config.processor, node_coords=[self.hidden_levels[self.num_hidden - 1]]),
         )
 
         # Upscale
@@ -186,6 +194,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 in_channels_dst=self.node_attributes.attr_ndims[dst_nodes_name],
                 num_channels=self.hidden_dims[dst_nodes_name],
                 edge_dim=self.upscale_graph_providers[src_nodes_name].edge_dim,
+                **self._node_coords(
+                    model_config.upscale_mapper, src_node_coords=[src_nodes_name], dst_node_coords=[dst_nodes_name]
+                ),
             )
 
         # Downscale
@@ -211,6 +222,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 num_channels=self.hidden_dims[src_nodes_name],
                 out_channels_dst=self.hidden_dims[dst_nodes_name],
                 edge_dim=self.downscale_graph_providers[dst_nodes_name].edge_dim,
+                **self._node_coords(
+                    model_config.downscale_mapper, src_node_coords=[src_nodes_name], dst_node_coords=[dst_nodes_name]
+                ),
             )
 
         # Decoder hidden -> data
@@ -251,6 +265,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 in_channels_dst=decoder_in_channels_dst[0],
                 out_channels_dst=decoder_output_channels_dst[0],
                 edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
+                **self._node_coords(
+                    decoder_config.mapper,
+                    src_node_coords=[self.hidden_levels[0]],
+                    dst_node_coords=decoder_config.target_datasets,
+                ),
             )
 
     def forward(

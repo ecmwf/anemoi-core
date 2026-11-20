@@ -9,6 +9,8 @@
 
 
 import math
+import sys
+import types
 
 import hypothesis.strategies as st
 import psutil
@@ -20,9 +22,11 @@ from hypothesis import settings
 
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.layers.attention import FlashAttentionWrapper
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.attention import PointwiseMultiHeadCrossAttention
+from anemoi.models.layers.attention import SDPAAttentionWrapper
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.triton.utils import is_triton_available
 
@@ -97,13 +101,7 @@ requires_triton = pytest.mark.skipif(not is_triton_available(), reason="Triton a
 @pytest.mark.parametrize(
     "attention_implementation,option",
     [
-        ("scaled_dot_product_attention", {"softcap": 0.5}),
-        ("scaled_dot_product_attention", {"use_alibi_slopes": True}),
-        ("scaled_dot_product_attention", {"use_rotary_embeddings": True}),
         pytest.param("triton_attention", {"dropout_p": 0.1}, marks=requires_triton),
-        pytest.param("triton_attention", {"softcap": 0.5}, marks=requires_triton),
-        pytest.param("triton_attention", {"use_alibi_slopes": True}, marks=requires_triton),
-        pytest.param("triton_attention", {"use_rotary_embeddings": True}, marks=requires_triton),
     ],
 )
 @pytest.mark.parametrize("attention_module", [MultiHeadSelfAttention, MultiHeadCrossAttention])
@@ -205,6 +203,159 @@ def test_multi_head_cross_attention_forward_sdpa(batch_size, num_heads, embed_di
     assert output.shape == x.shape
 
 
+def test_sdpa_cross_attention_refuses_a_window_between_sequences_of_different_lengths(layer_kernels):
+    attention = MultiHeadCrossAttention(
+        num_heads=2,
+        embed_dim=8,
+        layer_kernels=layer_kernels,
+        window_size=4,
+        attention_implementation="scaled_dot_product_attention",
+    )
+    keys, queries = torch.randn(12, 8), torch.randn(6, 8)
+    shard_info = BipartiteGraphShardInfo(src_nodes=[12], dst_nodes=[6])
+    with pytest.raises(ValueError, match="needs queries and keys of the same length"):
+        attention((keys, queries), shard_info, batch_size=1)
+
+
+@requires_triton
+def test_triton_attention_refuses_sequences_of_different_lengths(layer_kernels):
+    attention = MultiHeadCrossAttention(
+        num_heads=2, embed_dim=32, layer_kernels=layer_kernels, attention_implementation="triton_attention"
+    ).cuda()
+    keys, queries = torch.randn(12, 32, device="cuda"), torch.randn(6, 32, device="cuda")
+    shard_info = BipartiteGraphShardInfo(src_nodes=[12], dst_nodes=[6])
+    with pytest.raises(NotImplementedError, match="needs queries and keys of the same length"):
+        attention((keys, queries), shard_info, batch_size=1)
+
+
+def _flash_attn_available() -> bool:
+    try:
+        import flash_attn  # noqa: F401
+    except ImportError:
+        return False
+    return torch.cuda.is_available()
+
+
+requires_flash_attn = pytest.mark.skipif(not _flash_attn_available(), reason="flash-attn and a GPU are needed")
+
+
+@requires_flash_attn
+@pytest.mark.parametrize("window_size", [None, 8])
+def test_flash_attention_matches_sdpa(window_size, layer_kernels):
+    torch.manual_seed(0)
+    layers = [
+        MultiHeadSelfAttention(
+            num_heads=4,
+            embed_dim=256,
+            layer_kernels=layer_kernels,
+            window_size=window_size,
+            attention_implementation=implementation,
+        ).cuda()
+        for implementation in ("scaled_dot_product_attention", "flash_attention")
+    ]
+    layers[1].load_state_dict(layers[0].state_dict())
+    x = torch.randn(2 * 100, 256, device="cuda")
+    shard_info = GraphShardInfo(nodes=[2 * 100])
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        expected, got = (layer(x, shard_info, batch_size=2).float() for layer in layers)
+    torch.testing.assert_close(got, expected, rtol=2e-2, atol=2e-2)
+
+
+@requires_flash_attn
+def test_flash_cross_attention_between_sequences_of_different_lengths_matches_sdpa(layer_kernels):
+    torch.manual_seed(0)
+    layers = [
+        MultiHeadCrossAttention(
+            num_heads=4, embed_dim=128, layer_kernels=layer_kernels, attention_implementation=implementation
+        ).cuda()
+        for implementation in ("scaled_dot_product_attention", "flash_attention")
+    ]
+    layers[1].load_state_dict(layers[0].state_dict())
+    keys, queries = torch.randn(2 * 500, 128, device="cuda"), torch.randn(2 * 130, 128, device="cuda")
+    shard_info = BipartiteGraphShardInfo(src_nodes=[2 * 500], dst_nodes=[2 * 130])
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        expected, got = (layer((keys, queries), shard_info, batch_size=2).float() for layer in layers)
+    assert got.shape == (2 * 130, 128)
+    torch.testing.assert_close(got, expected, rtol=2e-2, atol=2e-2)
+
+
+@requires_flash_attn
+def test_flash_attention_rejects_unsupported_head_sizes_when_built(layer_kernels):
+    with pytest.raises(ValueError, match="multiple of 8"):
+        MultiHeadSelfAttention(
+            num_heads=2, embed_dim=24, layer_kernels=layer_kernels, attention_implementation="flash_attention"
+        )
+
+
+def test_sdpa_sliding_window_mask_marks_the_keys_within_the_window():
+    mask = SDPAAttentionWrapper.create_sliding_window_mask(6, 6, window_size=2)
+    expected = torch.tensor([[abs(i - j) <= 2 for j in range(6)] for i in range(6)])
+    assert torch.equal(mask, expected)
+
+
+def _fake_flash_attn(version: int) -> types.ModuleType:
+    """A stand-in flash-attn module whose function remembers the options it was called with."""
+    module = types.ModuleType(f"fake_flash_attn_{version}")
+
+    def flash_attn_func(query, key, value, **options):
+        module.options = options
+        out = torch.zeros_like(query)
+        return (out, None) if version == 4 else out
+
+    module.flash_attn_func = flash_attn_func
+    return module
+
+
+@pytest.fixture
+def install_flash_attn(monkeypatch):
+    """Makes fake flash-attn modules of the given versions importable and hides the other versions."""
+
+    def install(*versions: int) -> dict[int, types.ModuleType]:
+        modules = {}
+        for version, name in FlashAttentionWrapper.VERSIONS:
+            modules[version] = _fake_flash_attn(version) if version in versions else None
+            monkeypatch.setitem(sys.modules, name, modules[version])
+        return modules
+
+    return install
+
+
+@pytest.mark.parametrize(("installed", "expected"), [((2, 3, 4), 4), ((2, 3), 3), ((2,), 2)])
+def test_flash_attention_uses_the_newest_installed_version(install_flash_attn, installed, expected):
+    install_flash_attn(*installed)
+    assert FlashAttentionWrapper().version == expected
+
+
+def test_flash_attention_names_every_version_when_none_is_installed(install_flash_attn):
+    install_flash_attn()
+    with pytest.raises(ImportError, match="needs flash-attn 4, 3 or 2") as error:
+        FlashAttentionWrapper()
+    for name in ("flash_attn.cute", "flash_attn_interface", "flash_attn"):
+        assert f"({name})" in str(error.value)
+
+
+@pytest.mark.parametrize("version", [2, 3, 4])
+def test_flash_attention_rejects_dropout_when_built(install_flash_attn, version, layer_kernels):
+    install_flash_attn(version)
+    with pytest.raises(NotImplementedError, match=f"flash-attn {version} does not support: dropout_p"):
+        MultiHeadSelfAttention(
+            num_heads=2,
+            embed_dim=32,
+            layer_kernels=layer_kernels,
+            dropout_p=0.1,
+            attention_implementation="flash_attention",
+        )
+
+
+@pytest.mark.parametrize("version", [2, 3, 4])
+def test_flash_attention_passes_the_window_to_every_version(install_flash_attn, version):
+    module = install_flash_attn(version)[version]
+    query = torch.randn(1, 2, 8, 16, dtype=torch.bfloat16)
+    out = FlashAttentionWrapper()(query, query, query, batch_size=1, window_size=4)
+    assert out.shape == query.shape
+    assert module.options == {"causal": False, "window_size": (4, 4)}
+
+
 @pytest.mark.gpu
 @given(
     batch_size=st.integers(min_value=1, max_value=64),
@@ -237,7 +388,15 @@ def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_d
     assert x.grad.shape == x.shape
 
 
-def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels, request):
+@pytest.fixture
+def default_device():
+    """The GPU if there is one, as torch's default device while the test runs."""
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    with torch.device(device):
+        yield device
+
+
+def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels, default_device):
     """Test that SDPA with window_size produces valid output and attends only within the window."""
     num_heads = 4
     embed_dim = 32
@@ -245,10 +404,7 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels, re
     grid = 16
     window_size = 4
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    torch.set_default_device(device)
-    # Put the default device back afterwards, so later tests create their tensors on the CPU again.
-    request.addfinalizer(lambda: torch.set_default_device(None))
+    device = default_device
 
     mhsa = MultiHeadSelfAttention(
         num_heads,
@@ -294,8 +450,6 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels, re
     )
 
     # Memory usage using sliding window should not be greater then using global attention
-    # Since flex_attentions block mask funciton is used to handle the sliding window,
-    # masking naively with a seq_len^2 array
     assert peak_alloc_memory_after_sliding_window_mb <= peak_alloc_memory_after_global_mb, (
         "Sliding window attention should not use more memory than global attention"
     )
