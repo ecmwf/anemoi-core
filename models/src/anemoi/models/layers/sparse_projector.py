@@ -64,6 +64,13 @@ class SparseProjector(torch.nn.Module):
         # rank that holds no variables after the variables are shared out across ranks.
         x = x.reshape(math.prod(input_shape[:-2]), *input_shape[-2:])
 
+        if torch.are_deterministic_algorithms_enabled() and projection_matrix.layout != torch.strided:
+            # The sparse matmul in torch has no deterministic implementation.
+            # When determinism is necessary, use a dense matmul. Make the matrix dense
+            # one time here, not one time for each chunk.
+            # See https://github.com/pytorch/pytorch/issues/202030
+            projection_matrix = projection_matrix.to_dense()
+
         try:
             if num_chunks == 1:
                 out = self._project_flattened(x, projection_matrix)
@@ -98,9 +105,14 @@ class SparseProjector(torch.nn.Module):
         x_rhs = x_flat.permute(1, 0, 2).reshape(input_nodes, batch_size * channels)
 
         with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
-            # One sparse matmul instead of B sparse matmuls:
-            # [M, N] @ [N, B*C] -> [M, B*C]
-            out = torch.sparse.mm(projection_matrix, x_rhs)
+            if projection_matrix.layout == torch.strided:
+                # Dense matrix (deterministic mode, see forward):
+                # [M, N] @ [N, B*C] -> [M, B*C]
+                out = torch.mm(projection_matrix, x_rhs)
+            else:
+                # One sparse matmul instead of B sparse matmuls:
+                # [M, N] @ [N, B*C] -> [M, B*C]
+                out = torch.sparse.mm(projection_matrix, x_rhs)
 
         output_nodes = out.shape[0]
 
