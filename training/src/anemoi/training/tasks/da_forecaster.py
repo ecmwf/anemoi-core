@@ -351,7 +351,7 @@ class DAForecaster(Forecaster):
                 dropped_datasets=dropped_datasets,
             )
 
-        limits = {name: 0 for name in self.da_initial_only_datasets} | self.da_observation_cycles
+        limits = dict.fromkeys(self.da_initial_only_datasets, 0) | self.da_observation_cycles
         missing = sorted(set(limits) - set(x))
         if missing:
             msg = (
