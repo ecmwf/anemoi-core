@@ -344,7 +344,13 @@ class NativeGridDataset(BaseAnemoiReader):
         sampling: dict | None = None,
     ) -> None:
         """Initialize NativeGridDataset."""
-        super().__init__(dataset=dataset, dataset_config=dataset_config, start=start, end=end, optional=optional,)
+        super().__init__(
+            dataset=dataset,
+            dataset_config=dataset_config,
+            start=start,
+            end=end,
+            optional=optional,
+        )
         if sampling is not None:
             self.default_sampling = sampling
 

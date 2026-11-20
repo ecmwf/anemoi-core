@@ -364,6 +364,7 @@ class Forecaster(BaseForecaster):
             )
         return x
 
+
 class OffsetForecaster(BaseForecaster):
     """Alternative Forecasting task implementation.
 

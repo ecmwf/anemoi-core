@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import Optional
@@ -31,8 +32,6 @@ from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransf
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
 from anemoi.models.layers.spectral_transforms import InverseRegularSHT
-
-import logging
 
 LOGGER = logging.getLogger(__name__)
 
