@@ -772,3 +772,39 @@ def test_validate_transfer_learning_units_ignore_units_option() -> None:
 
     # Should not raise because ignore_units=True
     AnemoiTrainer._validate_transfer_learning_units(trainer, model)
+
+
+class _CategoricalModule(torch.nn.Module):
+    """Minimal stand-in for a training module holding a categorical embedding."""
+
+    def __init__(self, codes: list[int]) -> None:
+        super().__init__()
+        from anemoi.models.layers.categorical import CategoricalEmbedding
+
+        self.model = torch.nn.ModuleDict({"rt": CategoricalEmbedding(codes, embedding_dim=3)})
+
+    def _update_checkpoint_state_dict_for_load(self, checkpoint: dict) -> None:
+        del checkpoint
+
+
+def test_transfer_learning_loading_extends_categorical_vocabulary(tmp_path: Path) -> None:
+    old_module = _CategoricalModule([10, 20])
+    new_module = _CategoricalModule([10, 20, 30])
+    checkpoint = {
+        "state_dict": old_module.state_dict(),
+        "hyper_parameters": {
+            "config": _make_minimal_ckpt_config(),
+            "data_indices": {"data": SimpleNamespace(name_to_index={})},
+        },
+    }
+    ckpt_path = tmp_path / "checkpoint.pt"
+    torch.save(checkpoint, ckpt_path)
+
+    transfer_learning_loading(new_module, ckpt_path)
+
+    old_weight = old_module.model["rt"].embedding.weight
+    new_weight = new_module.model["rt"].embedding.weight
+    # MISSING, UNKNOWN and both old codes keep their trained rows; the new code starts from UNKNOWN.
+    torch.testing.assert_close(new_weight[:4], old_weight)
+    torch.testing.assert_close(new_weight[4], old_weight[1])
+    assert new_module.model["rt"].codes.tolist() == [10, 20, 30]

@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .da_forecaster import DAForecaster
 from .forecaster import Forecaster
 from .forecaster import OffsetForecaster
 from .temporal_downscaler import TemporalDownscaler
@@ -14,6 +15,7 @@ from .timeless import Autoencoder
 
 __all__ = [
     "Autoencoder",
+    "DAForecaster",
     "Forecaster",
     "OffsetForecaster",
     "TemporalDownscaler",

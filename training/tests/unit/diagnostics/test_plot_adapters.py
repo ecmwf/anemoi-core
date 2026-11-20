@@ -11,6 +11,7 @@ import pytest
 import torch
 
 from anemoi.training.tasks import Autoencoder
+from anemoi.training.tasks import DAForecaster
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 
@@ -34,6 +35,30 @@ def test_forecaster_adapter(rollout_steps: int) -> None:
     assert isinstance(y_true, torch.Tensor) and y_true.shape == (grid_size, num_vars)
     assert isinstance(y_pred, torch.Tensor) and y_pred.shape == (grid_size, num_vars)
     assert isinstance(suffix, str) and suffix.startswith("rstep")
+
+
+# The adapter's tag counts DA cycles, so with da_cycles=2 forecast step rstep{k} is tagged rstep{k + 2:02d}.
+@pytest.mark.parametrize(
+    ("steps", "expected"),
+    [(None, ["rstep02_out00", "rstep03_out00", "rstep04_out00"]), (["rstep2"], ["rstep04_out00"])],
+)
+def test_forecaster_adapter_steps_filter(steps: list[str] | None, expected: list[str]) -> None:
+    """``steps`` keeps only the listed forecast steps; DA cycles are never plotted."""
+    rollout = {"start": 1, "epoch_increment": 1, "maximum": 3}
+    task = DAForecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="6H",
+        rollout=rollout,
+        validation_rollout=3,
+        da_cycles=2,
+    )
+    n_steps = len(task.steps("validation"))
+    batch = torch.randn(2 + n_steps, 1, 10, 4)  # (time, ens, grid, vars)
+    pred = torch.randn(n_steps, 1, 10, 4)  # (step, out_step, grid, vars)
+
+    suffixes = [suffix for *_, suffix in task._plot_adapter.iter_plot_samples(batch, pred, steps=steps)]
+    assert suffixes == expected
 
 
 def test_temporal_downscaler_adapter() -> None:

@@ -54,7 +54,26 @@ class IndexCollection:
         self.target = (
             [] if data_config.get("target", None) is None else OmegaConf.to_container(data_config.target, resolve=True)
         )
-        defined_variables = set.union(set(self.forcing), set(self.diagnostic), set(self.target))
+        self.corrector = (
+            []
+            if data_config.get("corrector", None) is None
+            else OmegaConf.to_container(data_config.corrector, resolve=True)
+        )
+        self.decoder_forcing = (
+            []
+            if data_config.get("decoder_forcing", None) is None
+            else OmegaConf.to_container(data_config.decoder_forcing, resolve=True)
+        )
+        # decoder_forcing may overlap with forcing (same variable read at different time steps).
+        # Decoder-forcing-only variables (not also in forcing) are excluded here so they are
+        # not classified as prognostic.
+        defined_variables = set.union(
+            set(self.forcing),
+            set(self.diagnostic),
+            set(self.target),
+            set(self.corrector),
+            set(self.decoder_forcing),
+        )
         self.prognostic = [v for v in self.name_to_index.keys() if v not in defined_variables]
 
         assert set(self.diagnostic).isdisjoint(self.forcing), (
@@ -65,9 +84,35 @@ class IndexCollection:
             f"Diagnostic and target variables overlap: {set(self.diagnostic).intersection(self.target)}. ",
             "Please drop them at a dataset-level to exclude them from the training data.",
         )
+        assert set(self.corrector).isdisjoint(self.forcing), (
+            f"Corrector and forcing variables overlap: {set(self.corrector).intersection(self.forcing)}. ",
+            "Please drop them at a dataset-level to exclude them from the training data.",
+        )
+        assert set(self.corrector).isdisjoint(self.diagnostic), (
+            f"Corrector and diagnostic variables overlap: {set(self.corrector).intersection(self.diagnostic)}. ",
+            "Please drop them at a dataset-level to exclude them from the training data.",
+        )
+        # decoder_forcing is deliberately allowed to overlap with forcing: the same variable
+        # can be used as a regular forcing at time t (encoder input) AND as a decoder-forcing
+        # at time t+1 (injected pre-decoder). It must not overlap with other categories.
+        assert set(self.decoder_forcing).isdisjoint(self.diagnostic), (
+            f"Decoder-forcing and diagnostic variables overlap: "
+            f"{set(self.decoder_forcing).intersection(self.diagnostic)}.",
+        )
+        assert set(self.decoder_forcing).isdisjoint(self.corrector), (
+            f"Decoder-forcing and corrector variables overlap: "
+            f"{set(self.decoder_forcing).intersection(self.corrector)}.",
+        )
+        assert set(self.decoder_forcing).isdisjoint(self.target), (
+            f"Decoder-forcing and target variables overlap: {set(self.decoder_forcing).intersection(self.target)}.",
+        )
         name_to_index_model_input = {
             name: i
-            for i, name in enumerate(key for key in self.name_to_index if key in self.forcing or key in self.prognostic)
+            for i, name in enumerate(
+                key
+                for key in self.name_to_index
+                if key in self.forcing or key in self.prognostic or key in self.corrector
+            )
         }
         name_to_index_model_output = {
             name: i
@@ -76,12 +121,19 @@ class IndexCollection:
             )
         }
         self.data = DataIndex(
-            diagnostic=self.diagnostic, forcing=self.forcing, target=self.target, name_to_index=self.name_to_index
+            diagnostic=self.diagnostic,
+            forcing=self.forcing,
+            target=self.target,
+            corrector=self.corrector,
+            decoder_forcing=self.decoder_forcing,
+            name_to_index=self.name_to_index,
         )
         self.model = ModelIndex(
             diagnostic=self.diagnostic,
             forcing=self.forcing,
             target=self.target,
+            corrector=self.corrector,
+            decoder_forcing=self.decoder_forcing,
             name_to_index_model_input=name_to_index_model_input,
             name_to_index_model_output=name_to_index_model_output,
         )
@@ -136,6 +188,8 @@ class IndexCollection:
 
         Parameters
         ----------
+        ckpt_name_to_index : dict[str, int]
+            The dictionary mapping variable names to their indices in the checkpoint.
         data_name_to_index : dict[str, int]
             The dictionary mapping variable names to their indices in the data.
 

@@ -75,6 +75,8 @@ def test_output_tensor_index_todict(output_tensor_index) -> None:
     expected_output = {
         "full": torch.Tensor([2, 3, 4]).to(torch.int),
         "target": torch.Tensor([]).to(torch.int),
+        "corrector": torch.Tensor([]).to(torch.int),
+        "decoder_forcing": torch.Tensor([]).to(torch.int),
         "diagnostic": torch.Tensor([2]).to(torch.int),
         "forcing": torch.Tensor([0, 1]).to(torch.int),
         "prognostic": torch.Tensor([3, 4]).to(torch.int),
@@ -119,6 +121,8 @@ def test_input_tensor_index_todict(input_tensor_index) -> None:
     expected_output = {
         "full": torch.Tensor([0, 1, 3, 4]).to(torch.int),
         "target": torch.Tensor([]).to(torch.int),
+        "corrector": torch.Tensor([]).to(torch.int),
+        "decoder_forcing": torch.Tensor([]).to(torch.int),
         "diagnostic": torch.Tensor([2]).to(torch.int),
         "forcing": torch.Tensor([0, 1]).to(torch.int),
         "prognostic": torch.Tensor([3, 4]).to(torch.int),

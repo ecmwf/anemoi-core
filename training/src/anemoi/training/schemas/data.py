@@ -29,6 +29,18 @@ class DatasetDataSchema(PydanticBaseModel):
         "Cannot be prognostic or diagnostic, can have the same name as forcing variables "
         "but have a different role. Such that: prognostic = diagnostic - forcing.union(target)."
     )
+    corrector: list[str] = Field(default_factory=list)
+    (
+        "Features used as model inputs (like forcings) that additionally feed a training-time "
+        "corrector network applied to predictions for the loss. Never part of the model output. "
+        "Must be disjoint from forcing and diagnostic variables."
+    )
+    decoder_forcing: list[str] = Field(default_factory=list)
+    (
+        "Features injected into the decoder only (not through the encoder), read at target time. "
+        "May overlap with forcing (the same variable used at input time as encoder forcing and at "
+        "target time as decoder forcing). Must be disjoint from diagnostic, corrector and target."
+    )
 
     processors: dict[str, PreprocessorSchema]
     "Layers of model performing computation on latent space. \

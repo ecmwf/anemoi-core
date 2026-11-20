@@ -34,6 +34,11 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     """Message passing graph neural network with ensemble functionality."""
 
+    # ``forward`` is overridden below, which would otherwise make
+    # ``AnemoiModelEncProcDec.__init_subclass__`` clear this flag. The override does
+    # honour ``skip_input``, so opt back in explicitly.
+    supports_skip_input: bool = True
+
     def __init__(
         self,
         *,
@@ -79,13 +84,16 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
+        skip_input: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_ens_size)
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
+        # The encoder always sees ``x``. ``skip_input``, when given, replaces it as
+        # the source of the additive skip connection only.
         x_skip = self.residual[dataset_name](
-            x,
+            x if skip_input is None else skip_input,
             grid_shard_sizes=grid_shard_sizes,
             model_comm_group=model_comm_group,
             n_step_output=self.n_step_output,
@@ -161,6 +169,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         grid_shard_sizes: DatasetShardSizes | None = None,
         dropped_dataset_names: list[str] | set[str] | None = None,
         decoder_dropped_dataset_names: list[str] | set[str] | None = None,
+        skip_input: Optional[dict[str, Tensor]] = None,
         **kwargs,
     ) -> dict[str, Tensor]:
         """Forward operator.
@@ -183,6 +192,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         decoder_dropped_dataset_names : list[str] | set[str], optional
             Datasets that still feed the encoder but whose decoder output is
             replaced by NaN.
+        skip_input : Optional[dict[str, Tensor]], optional
+            Per-dataset source of the additive skip connection, in place of ``x``.
+            Must match ``x`` in shape. The encoder still sees ``x``.
         **kwargs
             Additional keyword arguments
 
@@ -225,6 +237,14 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             if dataset_name not in self.input_datasets:
                 continue
 
+            # Indexed strictly: a missing skip_input key means the caller believes it
+            # supplied a residual base and silently training against the wrong one is
+            # worse than a KeyError.
+            dataset_skip_input = None if skip_input is None else skip_input[dataset_name]
+            assert dataset_skip_input is None or dataset_skip_input.shape == x[dataset_name].shape, (
+                f"skip_input['{dataset_name}'] shape {tuple(dataset_skip_input.shape)} must match "
+                f"x['{dataset_name}'] shape {tuple(x[dataset_name].shape)}."
+            )
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
                 x[dataset_name],
                 fcstep=fcstep,
@@ -232,6 +252,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
+                skip_input=dataset_skip_input,
             )
             x_skip_dict[dataset_name] = x_skip
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
