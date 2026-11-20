@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+import pickle
+
 import pytest
 import torch
 from omegaconf import DictConfig
@@ -273,3 +275,36 @@ def test_compare_variables_exact_match_passes(data_indices) -> None:
     """An exact match never raises, regardless of allow_subset."""
     data_indices.compare_variables(_CKPT, _CKPT, allow_subset=False)
     data_indices.compare_variables(_CKPT, _CKPT, allow_subset=True)
+
+
+def test_allow_nans_defaults_to_empty(data_indices: IndexCollection) -> None:
+    assert data_indices.allow_nans == []
+
+
+def test_allow_nans_diagnostic_variable() -> None:
+    config = DictConfig({"forcing": ["z"], "diagnostic": ["tc_msl", "tc_ws"], "allow_nans": ["tc_msl", "tc_ws"]})
+    indices = IndexCollection(config, name_to_index={"x": 0, "z": 1, "tc_msl": 2, "tc_ws": 3})
+    assert indices.allow_nans == ["tc_msl", "tc_ws"]
+
+
+def test_allow_nans_unknown_variable_raises() -> None:
+    config = DictConfig({"forcing": [], "diagnostic": ["tc_msl"], "allow_nans": ["tc_msl", "missing"]})
+    with pytest.raises(ValueError, match=r"\['missing'\] are not in the dataset"):
+        IndexCollection(config, name_to_index={"x": 0, "tc_msl": 1})
+
+
+@pytest.mark.parametrize("name", ["x", "z"])
+def test_allow_nans_model_input_variable_raises(name: str) -> None:
+    # "x" is prognostic and "z" is forcing, neither may contain NaNs
+    config = DictConfig({"forcing": ["z"], "diagnostic": ["tc_msl"], "allow_nans": [name]})
+    with pytest.raises(ValueError, match=rf"\['{name}'\] are not diagnostic variables"):
+        IndexCollection(config, name_to_index={"x": 0, "z": 1, "tc_msl": 2})
+
+
+def test_allow_nans_defaults_to_empty_for_legacy_pickles(data_indices: IndexCollection) -> None:
+    # Index collections unpickled from checkpoints created before `allow_nans` existed lack the instance attribute
+    del data_indices.__dict__["allow_nans"]
+    legacy = pickle.loads(pickle.dumps(data_indices))  # noqa: S301
+
+    assert "allow_nans" not in legacy.__dict__
+    assert list(legacy.allow_nans) == []
