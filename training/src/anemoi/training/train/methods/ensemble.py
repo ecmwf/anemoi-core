@@ -252,6 +252,7 @@ class EnsembleTraining(BaseTrainingModule):
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for i, task_step_kwargs in enumerate(task_steps):
             y_pred = self(x, **task_step_kwargs)
+            y_pred = self._apply_forcing_mask(y_pred, batch, **task_step_kwargs)
 
             y = self.task.get_targets(batch, **task_step_kwargs)
 

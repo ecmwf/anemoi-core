@@ -42,6 +42,7 @@ class SingleTraining(BaseTrainingModule):
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for i, task_kwargs in enumerate(task_steps):
             y_pred = self(x)
+            y_pred = self._apply_forcing_mask(y_pred, batch, **task_kwargs)
 
             y = self.task.get_targets(batch, **task_kwargs)
 

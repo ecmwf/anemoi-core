@@ -305,3 +305,22 @@ def test_checkpoint_pipeline_schema_loading_requires_target() -> None:
     """A loading block without _target_ is rejected."""
     with pytest.raises(ValidationError):
         CheckpointPipelineSchema(loading={"strict": True})
+
+
+def test_forcing_mask_schema() -> None:
+    from pydantic import TypeAdapter
+
+    from anemoi.models.schemas.schema_utils import DatasetDict
+    from anemoi.training.schemas.training import ForcingMaskSchema
+
+    cfg = {"mask_variable": "insolation", "offsets": ["0h", "-1h"], "default": "none", 0: ["ssr"], 273.15: ["t2m"]}
+    adapter = TypeAdapter(DatasetDict[ForcingMaskSchema] | None)
+
+    assert adapter.validate_python(None) is None
+    assert adapter.validate_python(cfg).root == cfg  # single dataset
+    assert adapter.validate_python({"datasets": {"data": cfg}})["datasets"]["data"].root == cfg
+
+    with pytest.raises(ValidationError):
+        ForcingMaskSchema.model_validate({0: ["ssr"]})  # no mask variable
+    with pytest.raises(ValidationError):
+        ForcingMaskSchema.model_validate({"mask_variable": "insolation", "oops": ["ssr"], 0: ["ssr"]})

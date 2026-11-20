@@ -423,6 +423,38 @@ normalisation. Another option is to impute with a given constant.
                _target_: anemoi.models.preprocessing.imputer.InputImputer
                config: ${data.datasets.your_dataset_name.imputer}
 
+*************
+ Forcing mask
+*************
+
+``forcing_mask`` sets the predictions of chosen variables to fixed values
+where a condition on a **forcing** holds, before the loss is computed. For
+example, accumulated radiation is exactly zero where the sun was down for
+the whole accumulation window. It is configured like the imputer: the fill
+values are the keys and the variables set to them the lists.
+
+.. code:: yaml
+
+   training:
+      forcing_mask:
+         mask_variable: insolation # a forcing of the dataset
+         operator: le # lt, le, gt or ge (default le)
+         threshold: 0 # physical units (default 0)
+         offsets: [0h, -1h] # times relative to each output (default [0h])
+         combine: all # all (default) or any of the offsets
+         0.0: [ssr, ssrd, fdir] # fill value (physical units): variables
+
+Here ``ssr``, ``ssrd`` and ``fdir`` are set to zero where ``insolation <=
+0`` at both :math:`t` and :math:`t - 1\text{h}`. Testing :math:`t` alone
+would also zero the hour after sunset.
+
+-  The forcing is read from the batch, so the batch must contain the
+   times :math:`t + \text{offset}`. An offset that is not in the batch for
+   an output is ignored for it, with a warning.
+-  It works with the ``SingleTraining`` and ``EnsembleTraining`` methods,
+   not the transport methods, and applies in training and validation only.
+-  For multiple datasets, use ``forcing_mask: {datasets: {name: {...}}}``.
+
 ****************
  Loss Functions
 ****************
