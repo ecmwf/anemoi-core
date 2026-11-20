@@ -205,6 +205,14 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
             LOGGER.info("Using multiprocessing context '%s' for dataloader workers.", ctx)
 
+        persistent_workers = self._use_persistent_workers
+        # Validation workers kept alive sit idle for a whole epoch between validations. Starting them afresh changes
+        # nothing they load (validation is not shuffled) and leaves the training workers as they are.
+        if stage != "training" and not self.config.dataloader.get("persistent_validation_workers", True):
+            if persistent_workers:
+                LOGGER.info("Starting the %s dataloader workers afresh for every pass.", stage)
+            persistent_workers = False
+
         return DataLoader(
             ds,
             batch_size=self.config.dataloader.batch_size[stage],
@@ -212,7 +220,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             pin_memory=self.config.dataloader.pin_memory,
             worker_init_fn=worker_init_func,
             prefetch_factor=self.config.dataloader.prefetch_factor,
-            persistent_workers=self._use_persistent_workers,
+            persistent_workers=persistent_workers,
             **extra,
         )
 

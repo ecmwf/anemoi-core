@@ -132,6 +132,10 @@ class DataLoaderSchema(PydanticBaseModel):
     "If True, the data loader will copy Tensors into device/CUDA pinned memory before returning them."
     persistent_workers: bool = Field(default=True)
     "Keep dataloader workers alive between epochs. Automatically disabled when the rollout changes between epochs."
+    persistent_validation_workers: bool = Field(default=True)
+    """Keep the validation and test workers alive between validations too (with ``persistent_workers``). False starts
+    them afresh for every validation, so workers never sit idle for a whole epoch; the training workers, and so the
+    training data order, are unaffected."""
     fake_dataloading: bool = Field(default=False)
     "Load one real sample per worker and reuse it for subsequent accesses."
     num_workers: LoaderSet

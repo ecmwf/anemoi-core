@@ -127,6 +127,36 @@ def test_persistent_workers_default_to_true_when_config_is_unvalidated() -> None
 
 
 @pytest.mark.parametrize(
+    ("persistent_workers", "persistent_validation_workers", "expected"),
+    [
+        pytest.param(True, None, [True, True, True], id="absent: all persistent"),
+        pytest.param(True, True, [True, True, True], id="on: all persistent"),
+        pytest.param(True, False, [True, False, False], id="off: training only"),
+        pytest.param(False, True, [False, False, False], id="never turns persistence on"),
+    ],
+)
+def test_validation_workers_can_be_started_afresh(
+    persistent_workers: bool,
+    persistent_validation_workers: bool | None,
+    expected: list[bool],
+) -> None:
+    """persistent_validation_workers: False restarts the validation and test workers only, never the training ones."""
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 0, "maximum": 1},
+    )
+    datamodule = _make_datamodule(task, persistent_workers=persistent_workers)
+    if persistent_validation_workers is not None:
+        datamodule.config.dataloader.persistent_validation_workers = persistent_validation_workers
+
+    loaders = [datamodule._get_dataloader(TinyIterableDataset(), stage) for stage in ("training", "validation", "test")]
+
+    assert [loader.persistent_workers for loader in loaders] == expected
+
+
+@pytest.mark.parametrize(
     "rollout",
     [
         pytest.param({"start": 1, "epoch_increment": 1, "maximum": 3}, id="progressing"),
