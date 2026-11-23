@@ -27,7 +27,7 @@ Use these settings in ``system.hardware``:
        cache_max_fraction: 0.9
        # Text to add to each hostname for connections between nodes.
        # Use the hostname of the high-speed network interface,
-       # for example "-ab-gpil-ib". Null uses the hostname.
+       # for example "-ib". Null uses the hostname.
        hostname_suffix: null
 
 **************
@@ -67,6 +67,7 @@ local cache or from the filesystem.
    high load. On a node with no other load, a read from the cache can
    take the same time as a read from the filesystem.
 
--  If ``hostname_suffix`` is not correct for your system, the nodes
-   cannot connect to the cache servers of other nodes. Then the workers
-   read these records from the filesystem.
+-  At the start of the run, each rank makes sure that it can find the
+   address of each other node (the hostname and ``hostname_suffix``).
+   If it cannot find an address, the run stops with an error. Then make
+   ``hostname_suffix`` correct for your system, or set it to null.

@@ -11,6 +11,7 @@
 
 import errno
 import multiprocessing
+import socket
 import threading
 from pathlib import Path
 
@@ -381,6 +382,49 @@ class TestDatasetIdentity:
         monkeypatch.setattr("anemoi.training.utils.dataset_cache.dist.all_gather_object", all_gather_object)
         with pytest.raises(RuntimeError, match="do not agree"):
             cache._check_dataset_ids()
+
+
+class TestHostnameCheck:
+    @staticmethod
+    def all_gather_same(output: list, value: list, **_kwargs: object) -> None:
+        output[:] = [value] * len(output)
+
+    def cache(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, known_hosts: set[str]) -> DatasetCache:
+        cache = DatasetCache(object(), tmp_path, hostname_suffix="-ib")
+        cache.world_size, cache.proc_group, cache.node_id = 2, None, 0
+        cache._leaders = {0: 0, 1: 1}
+        cache.hostnames = ["node-a-ib", "node-b-ib"]
+
+        def getaddrinfo(host: str, *_args: object) -> list:
+            if host not in known_hosts:
+                raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+            return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.0.0.1", 0))]
+
+        monkeypatch.setattr("anemoi.training.utils.dataset_cache.socket.getaddrinfo", getaddrinfo)
+        monkeypatch.setattr("anemoi.training.utils.dataset_cache.dist.all_gather_object", self.all_gather_same)
+        return cache
+
+    def test_known_hostnames_pass(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.cache(tmp_path, monkeypatch, {"node-a-ib", "node-b-ib"})._check_hostnames()
+
+    def test_own_hostname_is_not_checked(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # node-a-ib is the hostname of this node, so it is not in known_hosts
+        self.cache(tmp_path, monkeypatch, {"node-b-ib"})._check_hostnames()
+
+    def test_unknown_hostname_stops_the_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        cache = self.cache(tmp_path, monkeypatch, set())
+        with pytest.raises(RuntimeError, match=r"node-b-ib.*hostname_suffix \('-ib'\)"):
+            cache._check_hostnames()
+
+    def test_all_ranks_stop_when_one_rank_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        cache = self.cache(tmp_path, monkeypatch, {"node-b-ib"})
+
+        def all_gather_object(output: list, value: list, **_kwargs: object) -> None:
+            output[:] = [value, ["node-a-ib (Name or service not known)"]]
+
+        monkeypatch.setattr("anemoi.training.utils.dataset_cache.dist.all_gather_object", all_gather_object)
+        with pytest.raises(RuntimeError, match="node-a-ib"):
+            cache._check_hostnames()
 
 
 def test_check_cache_prefers_local(tmp_path, sample_data, monkeypatch):

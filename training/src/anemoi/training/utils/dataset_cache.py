@@ -247,7 +247,13 @@ class DatasetCache(pl.LightningDataModule):
     """Datamodule proxy coordinating one SSD cache per node."""
 
     def __init__(
-        self, ds, cache_root, hostname_suffix=None, proc_group=None, async_writes=False, max_fraction: float = 0.9
+        self,
+        ds,
+        cache_root,
+        hostname_suffix=None,
+        proc_group=None,
+        async_writes=False,
+        max_fraction: float = 0.9,
     ):
         super().__init__()
         self.ds = ds  # must be set before any attribute access can reach __getattr__
@@ -340,6 +346,7 @@ class DatasetCache(pl.LightningDataModule):
         self._leaders = {node: hosts.index(name) for node, name in enumerate(unique_hosts)}
         self.is_node_leader = self.global_rank == self._leaders[self.node_id]
         self.hostnames = [name + self.hostname_suffix for name in hosts]
+        self._check_hostnames()
         self.cache_path = self.cache_root / f"cache-{hashlib.sha256(host.encode()).hexdigest()[:12]}"
         self.cache_root.mkdir(parents=True, exist_ok=True)
         disk_bytes = shutil.disk_usage(self.cache_root).total
@@ -368,6 +375,34 @@ class DatasetCache(pl.LightningDataModule):
         ports = [None] * self.world_size
         dist.all_gather_object(ports, self.server.port if self.is_node_leader else None, group=self.proc_group)
         self._ports = {node: ports[rank] for node, rank in self._leaders.items()}
+
+    def _check_hostnames(self) -> None:
+        """Make sure that each rank can find the address of the cache server on each other node.
+
+        ZeroMQ does not show an error when it cannot find the address of a host. It tries to
+        connect again and again, and each remote read waits until the timeout. Thus, an incorrect
+        hostname_suffix makes the training slow, but shows only a timeout. This check stops
+        the run at the start and shows the hostname that is not correct.
+        """
+        unresolved = []
+        for node, rank in self._leaders.items():
+            if node == self.node_id:
+                continue
+            try:
+                socket.getaddrinfo(self.hostnames[rank], None)
+            except socket.gaierror as error:
+                unresolved.append(f"{self.hostnames[rank]} ({error})")
+        # all ranks must stop together, else the other ranks wait in a collective
+        gathered = [None] * self.world_size
+        dist.all_gather_object(gathered, unresolved, group=self.proc_group)
+        failures = sorted({name for names in gathered for name in names})
+        if failures:
+            msg = (
+                f"Cannot find the address of the dataset cache server on other nodes: {', '.join(failures)}. "
+                f"Make sure that system.hardware.hostname_suffix ({self.hostname_suffix!r}) is correct for "
+                "this system, or set it to null."
+            )
+            raise RuntimeError(msg)
 
     def _check_dataset_ids(self):
         """Make sure that all ranks use the same dataset_ids, else they cannot share records."""
