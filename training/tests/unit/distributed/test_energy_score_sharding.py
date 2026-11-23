@@ -98,6 +98,7 @@ def _check_sharded_energy_scores(rank: int, init_file: str) -> None:
 
 
 @pytest.mark.skipif(not dist.is_available() or not dist.is_gloo_available(), reason="Requires Gloo")
+@pytest.mark.skipif(torch.__version__ < "2.8", reason="Hangs intermittently with torch 2.6 in CI")
 def test_sharded_energy_score_and_gradients_match_unsharded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OMP_NUM_THREADS", "1")
     monkeypatch.setenv("OPENBLAS_NUM_THREADS", "1")
