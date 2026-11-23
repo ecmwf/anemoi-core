@@ -4,6 +4,12 @@ pin_memory: True
 # full dataset is indexed regardless of dates (e.g. for cloned datasets).
 ignore_metadata: False
 
+# Number of blosc threads in each dataloader worker, for the decompression of
+# zarr chunks and for the dataset cache. If null, blosc uses one thread in a
+# worker. Keep (GPUs per node) x (workers per GPU) x blosc_threads below the
+# number of CPU cores of the node.
+blosc_threads: 8
+
 # ============
 # read_group_size:
 #   Form subgroups of model comm groups that read data together.

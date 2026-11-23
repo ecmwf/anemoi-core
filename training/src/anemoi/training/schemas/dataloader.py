@@ -150,3 +150,5 @@ class DataLoaderSchema(PydanticBaseModel):
     "If True, drop start, end and frequency before open_dataset so the full dataset is indexed (e.g. cloned datasets)."
     multiprocessing_context: str | None = Field(default=None, examples=[None, "spawn", "fork", "forkserver"])
     "Multiprocessing context to use for workers. If None, the default context will be used"
+    blosc_threads: PositiveInt | None = Field(default=8)
+    "Number of blosc threads in each dataloader worker. If None, blosc uses one thread in a worker."
