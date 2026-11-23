@@ -65,61 +65,251 @@ def create_stretched_tri_nodes(
     base_resolution: int,
     lam_resolution: int,
     area_mask_builder: AreaMaskBuilder | None = None,
+    transition_band_widths_km: list[float] | None = None,
 ) -> tuple[nx.DiGraph, np.ndarray, list[int]]:
-    """Creates a global mesh with 2 levels of resolution.
+    """Create a stretched icosahedral mesh with optional transition bands.
 
-    The base resolution is used to define the nodes outside the Area Of Interest (AOI),
-    while the lam_resolution is used to define the nodes inside the AOI.
+    When transition_band_widths_km is None, preserve the original
+    two-resolution Anemoi construction.
 
-    Parameters
-    ---------
-    base_resolution : int
-        Global resolution level.
-    lam_resolution : int
-        Local resolution level.
-    area_mask_builder : AreaMaskBuilder
-        Builder used to generate the Area Of Interest (AOI) mask that limits the mesh area.
+    When provided, retain:
+      - Global coarse vertices everywhere.
+      - Intermediate-level vertices in progressively smaller regions.
+      - Finest-level vertices inside the original regional mask.
 
-    Returns
-    -------
-    nx_graph : nx.DiGraph
-        The graph with the added nodes.
-    coords_rad : np.ndarray
-        The node coordinates (not ordered) in radians.
-    node_ordering : list[int]
-        Order of the node coordinates to be sorted by latitude and longitude.
+    Example:
+        base_resolution = 7
+        lam_resolution = 10
+        margin_radius_km = 100
+        transition_band_widths_km = [250, 100]
+
+    This gives:
+        Level 7: globally
+        Level 8: within 350 km of regional reference nodes
+        Level 9: within 200 km of regional reference nodes
+        Level 10: within 100 km of regional reference nodes
+
+    Band widths are ADDITIONAL margins beyond margin_radius_km.
+
+    The output preserves the finest icosphere's original vertex IDs,
+    which are needed by MultiScaleEdges.
     """
-    assert area_mask_builder is not None, "AOI mask builder must be provided to build refined grid."
-    # Get the low resolution nodes
-    base_coords_rad = get_latlon_coords_icosphere(base_resolution)
 
-    # Define the low resolution outside AOI mask
-    base_area_mask = ~area_mask_builder.get_mask(base_coords_rad)
-    base_area_mask = base_area_mask.cpu().numpy()
+    if area_mask_builder is None:
+        raise ValueError("area_mask_builder is required for stretched meshes.")
 
-    # Get the high resolution nodes
+    if not (0 <= base_resolution <= lam_resolution):
+        raise ValueError("Require 0 <= base_resolution <= lam_resolution.")
+
+    # -------------------------------------------------------------
+    # ORIGINAL ANEMOI BEHAVIOR
+    # -------------------------------------------------------------
+    if transition_band_widths_km is None:
+
+        base_coords_rad = get_latlon_coords_icosphere(base_resolution)
+
+        base_area_mask = (~area_mask_builder.get_mask(base_coords_rad)).cpu().numpy()
+
+        coords_rad = get_latlon_coords_icosphere(lam_resolution)
+
+        lam_area_mask = (area_mask_builder.get_mask(coords_rad)).cpu().numpy()
+
+        base_area_mask_padded = np.pad(
+            base_area_mask,
+            (0, len(lam_area_mask) - len(base_area_mask)),
+            mode="constant",
+        )
+
+        keep = np.logical_or(
+            base_area_mask_padded,
+            lam_area_mask,
+        )
+
+        node_ordering = get_coordinates_ordering(coords_rad)
+        node_ordering = node_ordering[keep[node_ordering]]
+
+        nx_graph = create_nx_graph_from_tri_coords(
+            coords_rad,
+            node_ordering,
+        )
+
+        return nx_graph, coords_rad, list(node_ordering)
+
+    # -------------------------------------------------------------
+    # NEW: GRADED STRETCHED MESH
+    # -------------------------------------------------------------
+
+    widths = list(transition_band_widths_km)
+
+    expected_bands = lam_resolution - base_resolution - 1
+
+    if len(widths) != expected_bands:
+        raise ValueError(
+            f"Expected {expected_bands} transition bands "
+            f"for resolutions {base_resolution}->{lam_resolution}, "
+            f"but got {len(widths)}."
+        )
+
+    if any(w <= 0 for w in widths):
+        raise ValueError("Transition band widths must be positive.")
+
+    if any(a <= b for a, b in zip(widths, widths[1:])):
+        raise ValueError(
+            "Transition widths must decrease from coarse to fine. "
+            "Example: [250, 100]."
+        )
+
+    # Full finest-level coordinates.
     coords_rad = get_latlon_coords_icosphere(lam_resolution)
 
-    # Get the node ordering for all high resolution nodes
+    n_full = len(coords_rad)
+
+    keep = np.zeros(n_full, dtype=bool)
+
+    # -------------------------------------------------------------
+    # 1. Keep global coarse nodes everywhere.
+    # -------------------------------------------------------------
+
+    n_base = 10 * (4**base_resolution) + 2
+
+    keep[:n_base] = True
+
+    LOGGER.info(
+        "Graded mesh: keeping %d global coarse vertices at level %d",
+        n_base,
+        base_resolution,
+    )
+
+    # -------------------------------------------------------------
+    # 2. Add intermediate levels.
+    # -------------------------------------------------------------
+
+    original_margin = area_mask_builder.margin_radius_km
+
+    try:
+        for level, extra_margin in zip(
+            range(base_resolution + 1, lam_resolution),
+            widths,
+        ):
+
+            n_level = 10 * (4**level) + 2
+
+            total_margin = original_margin + extra_margin
+
+            # Temporarily expand the original AOI mask.
+            area_mask_builder.margin_radius_km = total_margin
+
+            level_mask = area_mask_builder.get_mask(coords_rad[:n_level]).cpu().numpy()
+
+            keep[:n_level] |= level_mask
+
+            LOGGER.info(
+                "Graded mesh: level %d, margin %.1f km, " "selected %d vertices",
+                level,
+                total_margin,
+                int(level_mask.sum()),
+            )
+
+    finally:
+        # Always restore original mask configuration.
+        area_mask_builder.margin_radius_km = original_margin
+
+    # -------------------------------------------------------------
+    # 3. Preserve original high-resolution MEPS region.
+    # -------------------------------------------------------------
+
+    fine_mask = area_mask_builder.get_mask(coords_rad).cpu().numpy()
+
+    keep |= fine_mask
+
+    LOGGER.info(
+        "Graded mesh: finest level %d, selected %d vertices",
+        lam_resolution,
+        int(fine_mask.sum()),
+    )
+
+    # -------------------------------------------------------------
+    # 4. Preserve Anemoi's coordinate ordering.
+    # -------------------------------------------------------------
+
     node_ordering = get_coordinates_ordering(coords_rad)
 
-    # Define the high resolution inside AOI mask
-    lam_area_mask = area_mask_builder.get_mask(coords_rad)
-    lam_area_mask = lam_area_mask.cpu().numpy()
+    node_ordering = node_ordering[keep[node_ordering]]
 
-    # Pad the low resolution ~(AOI mask) to match the high resolution AOI mask
-    base_area_mask_padded = np.pad(base_area_mask, (0, len(lam_area_mask) - len(base_area_mask)), mode="constant")
+    nx_graph = create_nx_graph_from_tri_coords(
+        coords_rad,
+        node_ordering,
+    )
 
-    # Define the final mask (low resolution outside AOI | high resolution inside AOI )
-    area_mask = np.logical_or(base_area_mask_padded, lam_area_mask)
-
-    # Redefine the node ordering to include final node selection
-    node_ordering = node_ordering[area_mask[node_ordering]]
-
-    # Creates the graph, with the nodes sorted by latitude and longitude.
-    nx_graph = create_nx_graph_from_tri_coords(coords_rad, node_ordering)
+    LOGGER.info(
+        "Created graded stretched mesh with %d nodes " "(global=%d, regional=%d)",
+        len(node_ordering),
+        n_base,
+        int(fine_mask.sum()),
+    )
 
     return nx_graph, coords_rad, list(node_ordering)
+
+
+# def create_stretched_tri_nodes(
+#     base_resolution: int,
+#     lam_resolution: int,
+#     area_mask_builder: AreaMaskBuilder | None = None,
+# ) -> tuple[nx.DiGraph, np.ndarray, list[int]]:
+#     """Creates a global mesh with 2 levels of resolution.
+
+#     The base resolution is used to define the nodes outside the Area Of Interest (AOI),
+#     while the lam_resolution is used to define the nodes inside the AOI.
+
+#     Parameters
+#     ---------
+#     base_resolution : int
+#         Global resolution level.
+#     lam_resolution : int
+#         Local resolution level.
+#     area_mask_builder : AreaMaskBuilder
+#         Builder used to generate the Area Of Interest (AOI) mask that limits the mesh area.
+
+#     Returns
+#     -------
+#     nx_graph : nx.DiGraph
+#         The graph with the added nodes.
+#     coords_rad : np.ndarray
+#         The node coordinates (not ordered) in radians.
+#     node_ordering : list[int]
+#         Order of the node coordinates to be sorted by latitude and longitude.
+#     """
+#     assert area_mask_builder is not None, "AOI mask builder must be provided to build refined grid."
+#     # Get the low resolution nodes
+#     base_coords_rad = get_latlon_coords_icosphere(base_resolution)
+
+#     # Define the low resolution outside AOI mask
+#     base_area_mask = ~area_mask_builder.get_mask(base_coords_rad)
+#     base_area_mask = base_area_mask.cpu().numpy()
+
+#     # Get the high resolution nodes
+#     coords_rad = get_latlon_coords_icosphere(lam_resolution)
+
+#     # Get the node ordering for all high resolution nodes
+#     node_ordering = get_coordinates_ordering(coords_rad)
+
+#     # Define the high resolution inside AOI mask
+#     lam_area_mask = area_mask_builder.get_mask(coords_rad)
+#     lam_area_mask = lam_area_mask.cpu().numpy()
+
+#     # Pad the low resolution ~(AOI mask) to match the high resolution AOI mask
+#     base_area_mask_padded = np.pad(base_area_mask, (0, len(lam_area_mask) - len(base_area_mask)), mode="constant")
+
+#     # Define the final mask (low resolution outside AOI | high resolution inside AOI )
+#     area_mask = np.logical_or(base_area_mask_padded, lam_area_mask)
+
+#     # Redefine the node ordering to include final node selection
+#     node_ordering = node_ordering[area_mask[node_ordering]]
+
+#     # Creates the graph, with the nodes sorted by latitude and longitude.
+#     nx_graph = create_nx_graph_from_tri_coords(coords_rad, node_ordering)
+
+#     return nx_graph, coords_rad, list(node_ordering)
 
 
 def get_latlon_coords_icosphere(resolution: int) -> np.ndarray:
@@ -140,15 +330,21 @@ def get_latlon_coords_icosphere(resolution: int) -> np.ndarray:
     return coords_rad
 
 
-def create_nx_graph_from_tri_coords(coords_rad: np.ndarray, node_ordering: np.ndarray) -> nx.DiGraph:
+def create_nx_graph_from_tri_coords(
+    coords_rad: np.ndarray, node_ordering: np.ndarray
+) -> nx.DiGraph:
     """Creates the networkx graph from the coordinates and the node ordering."""
     graph = nx.DiGraph()
     for i, coords in enumerate(coords_rad[node_ordering]):
         node_id = node_ordering[i]
         graph.add_node(node_id, hcoords_rad=coords)
 
-    assert list(graph.nodes.keys()) == list(node_ordering), "Nodes are not correctly added to the graph."
-    assert graph.number_of_nodes() == len(node_ordering), "The number of nodes must be the same."
+    assert list(graph.nodes.keys()) == list(
+        node_ordering
+    ), "Nodes are not correctly added to the graph."
+    assert graph.number_of_nodes() == len(
+        node_ordering
+    ), "The number of nodes must be the same."
     return graph
 
 
@@ -166,7 +362,11 @@ def add_1_hop_edges(
     # Loop over the edge_resolutions to get edges at all refinement levels
     for subdivisions in edge_resolutions:
         sphere = trimesh.creation.icosphere(subdivisions=subdivisions, radius=1.0)
-        LOGGER.debug("Adding %d unmasked 1-hop edges for resolution %d", sphere.edges.shape[0], subdivisions)
+        LOGGER.debug(
+            "Adding %d unmasked 1-hop edges for resolution %d",
+            sphere.edges.shape[0],
+            subdivisions,
+        )
         hop_1_edges.append(sphere.edges)
 
     # Concatenate all edges from different resolutions and transpose to get shape (2, num_edges)
@@ -175,11 +375,13 @@ def add_1_hop_edges(
     # Map the edges to the node ordering
     #  - Calculate the total (unmasked) number of nodes
     unmasked_nodes = cartesian_to_latlon_rad(
-        trimesh.creation.icosphere(subdivisions=max(node_resolutions), radius=1.0).vertices
+        trimesh.creation.icosphere(
+            subdivisions=max(node_resolutions), radius=1.0
+        ).vertices
     )
-    assert np.all((nodes_coords_rad.cpu().numpy() - unmasked_nodes[node_ordering]) == 0), (
-        "Node coordates do not match coordinates used for multi-scale edge building"
-    )
+    assert np.all(
+        (nodes_coords_rad.cpu().numpy() - unmasked_nodes[node_ordering]) == 0
+    ), "Node coordates do not match coordinates used for multi-scale edge building"
     LOGGER.debug("unmasked_nodes shape[0]: %d", unmasked_nodes.shape[0])
     if area_mask_builder is not None:
         # Take care of the edges with start- or end-point outside the mask
@@ -228,7 +430,9 @@ def add_edges_to_nx_graph(
     """
     assert x_hops > 0, "x_hops == 0, graph would have no edges ..."
 
-    graph_vertices = np.array([graph.nodes[i]["hcoords_rad"] for i in sorted(graph.nodes)])
+    graph_vertices = np.array(
+        [graph.nodes[i]["hcoords_rad"] for i in sorted(graph.nodes)]
+    )
     tree = BallTree(graph_vertices, metric="haversine")
 
     # Build the multi-scale connections
@@ -245,11 +449,17 @@ def add_edges_to_nx_graph(
         else:
             valid_nodes = None
 
-        node_neighbours = get_neighbours_within_hops(r_sphere, x_hops, valid_nodes=valid_nodes)
+        node_neighbours = get_neighbours_within_hops(
+            r_sphere, x_hops, valid_nodes=valid_nodes
+        )
 
         _, vertex_mapping_index = tree.query(r_vertices_rad, k=1)
-        neighbour_pairs = create_node_neighbours_list(graph, node_neighbours, vertex_mapping_index)
-        LOGGER.debug("Adding %d edges for resolution %d", len(neighbour_pairs), resolution)
+        neighbour_pairs = create_node_neighbours_list(
+            graph, node_neighbours, vertex_mapping_index
+        )
+        LOGGER.debug(
+            "Adding %d edges for resolution %d", len(neighbour_pairs), resolution
+        )
         graph.add_edges_from(neighbour_pairs)
     return graph
 
@@ -284,7 +494,10 @@ def get_neighbours_within_hops(
     graph = nx.from_edgelist(edges)
 
     neighbours = {
-        i: set(nx.ego_graph(graph, i, radius=x_hops, center=False) if i in graph else []) for i in valid_nodes
+        i: set(
+            nx.ego_graph(graph, i, radius=x_hops, center=False) if i in graph else []
+        )
+        for i in valid_nodes
     }
 
     return neighbours
@@ -367,7 +580,10 @@ def create_node_neighbours_list(
         vertex_mapping_index = np.arange(len(graph.nodes)).reshape(len(graph.nodes), 1)
 
     neighbour_pairs = [
-        (graph_nodes_idx[vertex_mapping_index[node_neighbour][0]], graph_nodes_idx[vertex_mapping_index[node][0]])
+        (
+            graph_nodes_idx[vertex_mapping_index[node_neighbour][0]],
+            graph_nodes_idx[vertex_mapping_index[node][0]],
+        )
         for node, neighbours in node_neighbours.items()
         for node_neighbour in neighbours
         if node != node_neighbour or (self_loops and node == node_neighbour)

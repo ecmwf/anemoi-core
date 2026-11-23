@@ -24,9 +24,9 @@ LOGGER = logging.getLogger(__name__)
 
 
 class AnemoiDatasetNodeSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.AnemoiDatasetNodes", "anemoi.graphs.nodes.ZarrDatasetNodes"] = Field(
-        ..., alias="_target_"
-    )
+    target_: Literal[
+        "anemoi.graphs.nodes.AnemoiDatasetNodes", "anemoi.graphs.nodes.ZarrDatasetNodes"
+    ] = Field(..., alias="_target_")
     "Nodes from Anemoi dataset class implementation from anemoi.graphs.nodes."
     dataset: str | list | dict | None  # TODO(Helen): Discuss schema with Baudouin
     "The dataset containing the nodes."
@@ -66,7 +66,9 @@ class XArrayNodeSchema(BaseModel):
 
 
 class ReducedGaussianGridNodeSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.ReducedGaussianGridNodes"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.graphs.nodes.ReducedGaussianGridNodes"] = Field(
+        ..., alias="_target_"
+    )
     "Nodes from NPZ grids class implementation from anemoi.graphs.nodes."
     grid: Literal["o16", "o32", "o48", "o96", "o160", "o256", "o320", "n320", "o1280"]
     "Reduced gaussian grid."
@@ -88,15 +90,23 @@ class ICONMeshNodeSchema(BaseModel):
 
 
 class LimitedAreaNPZFileNodesSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.LimitedAreaNPZFileNodes"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.graphs.nodes.LimitedAreaNPZFileNodes"] = Field(
+        ..., alias="_target_"
+    )
     "Class implementation for nodes from NPZ grids using an area of interest from anemoi.graphs.nodes."
     grid_definition_path: str
     "Path to the folder containing the grid definition files."
-    resolution: str = Field(examples=["o48", "o96", "n320"])  # TODO(Helen): Discuss with Mario about the refactor
+    resolution: str = Field(
+        examples=["o48", "o96", "n320"]
+    )  # TODO(Helen): Discuss with Mario about the refactor
     "The grid resolution."
-    reference_node_name: str  # TODO(Helen): Check that reference nodes exists in the config
+    reference_node_name: (
+        str  # TODO(Helen): Check that reference nodes exists in the config
+    )
     "Name of the reference nodes in the graph to consider for the Area Mask."
-    mask_attr_name: Optional[str]  # TODO(Helen): Check that mask_attr_name exists in the dataset config
+    mask_attr_name: Optional[
+        str
+    ]  # TODO(Helen): Check that mask_attr_name exists in the dataset config
     "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
     margin_radius_km: PositiveFloat = Field(example=100.0)
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
@@ -128,16 +138,22 @@ class LimitedAreaIcosahedralandHealPixNodeSchema(BaseModel):
     "Class implementations for Icosahedral and HEAL Pix nodes using an area of interest from anemoi.graphs.nodes."
     resolution: PositiveInt
     "Refinement level of the mesh."
-    reference_node_name: str  # TODO(Helen): Discuss check that reference nodes exists in the config
+    reference_node_name: (
+        str  # TODO(Helen): Discuss check that reference nodes exists in the config
+    )
     "Name of the reference nodes in the graph to consider for the Area Mask."
-    mask_attr_name: Optional[str]  # TODO(Helen): Discuss check that mask_attr_name exists in the dataset config
+    mask_attr_name: Optional[
+        str
+    ]  # TODO(Helen): Discuss check that mask_attr_name exists in the dataset config
     "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
     margin_radius_km: PositiveFloat = Field(example=100.0)
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
 
 
 class StretchedIcosahdralNodeSchema(BaseModel):
-    target_: Literal["anemoi.graphs.nodes.StretchedTriNodes"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.graphs.nodes.StretchedTriNodes"] = Field(
+        ..., alias="_target_"
+    )
     "Class implementation for nodes based on iterative refinements of an icosahedron with 2 different resolutions."
     global_resolution: PositiveInt
     "Refinement level of the mesh on the global area."
@@ -149,6 +165,7 @@ class StretchedIcosahdralNodeSchema(BaseModel):
     "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
     margin_radius_km: PositiveFloat = Field(example=100.0)
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
+    transition_band_widths_km: list[PositiveFloat] | None = None
 
 
 NodeBuilderSchemas = Annotated[

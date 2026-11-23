@@ -44,22 +44,30 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
             error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
             raise TypeError(error_msg)
 
-    def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
+    def subset_node_information(
+        self, source_nodes: NodeStorage, target_nodes: NodeStorage
+    ) -> PairTensor:
         if self.node_attr_name in source_nodes:
             source_nodes_data = source_nodes[self.node_attr_name].to(self.device)
         else:
             source_nodes_data = None
-            LOGGER.warning("The attribute %s is not in the source nodes.", self.node_attr_name)
+            LOGGER.warning(
+                "The attribute %s is not in the source nodes.", self.node_attr_name
+            )
 
         if self.node_attr_name in target_nodes:
             target_nodes_data = target_nodes[self.node_attr_name].to(self.device)
         else:
             target_nodes_data = None
-            LOGGER.warning("The attribute %s is not in the target nodes.", self.node_attr_name)
+            LOGGER.warning(
+                "The attribute %s is not in the target nodes.", self.node_attr_name
+            )
 
         return source_nodes_data, target_nodes_data
 
-    def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
+    def forward(
+        self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None
+    ) -> torch.Tensor:
         x = self.subset_node_information(*x)
         return self.propagate(edge_index.to(self.device), x=x, size=size)
 
@@ -74,7 +82,9 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
 
         return edge_features
 
-    def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
+    def aggregate(
+        self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None
+    ) -> torch.Tensor:
         return self.normalise(edge_features, index, dim_size)
 
 
@@ -119,7 +129,9 @@ class DirectionalHarmonics(EdgeDirection):
         Compute directional harmonics from edge directions.
     """
 
-    def __init__(self, order: int = 3, norm: str | None = None, dtype: str = "float32") -> None:
+    def __init__(
+        self, order: int = 3, norm: str | None = None, dtype: str = "float32"
+    ) -> None:
         self.order = order
         super().__init__(norm=norm, dtype=dtype)
 
@@ -169,7 +181,9 @@ class Azimuth(BasePositionalBuilder):
             * torch.cos(x_j[..., self._idx_lon] - x_i[..., self._idx_lon])
         )
         a1 = a11 - a12
-        a2 = torch.sin(x_j[..., self._idx_lon] - x_i[..., self._idx_lon]) * torch.cos(x_j[:, self._idx_lat])
+        a2 = torch.sin(x_j[..., self._idx_lon] - x_i[..., self._idx_lon]) * torch.cos(
+            x_j[:, self._idx_lat]
+        )
         edge_dirs = torch.atan2(a2, a1)
 
         return edge_dirs
@@ -191,13 +205,15 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
         self.node_attr_name = node_attr_name
         super().__init__()
         if self.nodes_axis is None:
-            raise AttributeError(f"{self.__class__.__name__} class must set 'nodes_axis' attribute.")
+            raise AttributeError(
+                f"{self.__class__.__name__} class must set 'nodes_axis' attribute."
+            )
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         node_attr = (x_j, x_i)[self.nodes_axis.value]
-        assert node_attr is not None, (
-            f"The node attribute specified for {self.node_attr_name} cannot be found in the nodes."
-        )
+        assert (
+            node_attr is not None
+        ), f"The node attribute specified for {self.node_attr_name} cannot be found in the nodes."
         return node_attr
 
 
@@ -299,14 +315,16 @@ class RadialBasisFeatures(EdgeLength):
             self.centers = [c / self.r_scale for c in self.centers]
 
         # Check that centers are in the range [0, 1]
-        assert all(0.0 <= c <= 1.0 for c in self.centers), (
-            f"RBF centers must be in range [0, 1] (or [0, r_scale] if r_scale is set). Got centers: {centers}, r_scale: {r_scale}"
-        )
+        assert all(
+            0.0 <= c <= 1.0 for c in self.centers
+        ), f"RBF centers must be in range [0, 1] (or [0, r_scale] if r_scale is set). Got centers: {centers}, r_scale: {r_scale}"
 
         self.sigma = sigma
         super().__init__(norm=norm, dtype=dtype)
 
-    def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
+    def aggregate(
+        self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None
+    ) -> torch.Tensor:
         """Aggregate edge features with per-node scaling and per-target-node normalization.
 
         Parameters
@@ -333,7 +351,9 @@ class RadialBasisFeatures(EdgeLength):
         # Compute scale factor per destination node
         if self.r_scale is None:
             # Per-node max edge length scaling
-            max_dists = scatter(edge_features, index.long(), dim=0, dim_size=dim_size, reduce="max")
+            max_dists = scatter(
+                edge_features, index.long(), dim=0, dim_size=dim_size, reduce="max"
+            )
 
             # Clamp to epsilon to avoid division by zero
             max_dists = torch.clamp(max_dists, min=self.epsilon)
@@ -373,3 +393,303 @@ class GaussianDistanceWeights(EdgeLength):
         dists = super().compute(x_i, x_j)
         gaussian_weights = torch.exp(-(dists**2) / (2 * self.sigma**2))
         return gaussian_weights
+
+
+class RelativeEdgeLength(EdgeLength):
+    """Relative edge length using local mesh spacing.
+
+    For each processor edge j -> i:
+
+        r_ij = log(l_ij / sqrt(h_i * h_j))
+
+    where:
+        l_ij = great-circle edge length
+        h_i  = mean length of the K nearest distinct incoming
+               processor-edge neighbors of node i
+
+    Uses raw haversine distances, independently of EdgeLength
+    normalization.
+
+    Intended for homogeneous hidden-to-hidden processor graphs.
+
+    Output:
+        Tensor of shape [num_edges, 1].
+    """
+
+    def __init__(
+        self,
+        num_local_neighbors: int = 5,
+        chunk_size: int = 250_000,
+        dtype: str = "float32",
+    ) -> None:
+        super().__init__(norm=None, dtype=dtype)
+
+        if num_local_neighbors < 1:
+            raise ValueError("num_local_neighbors must be >= 1")
+
+        if chunk_size < 1:
+            raise ValueError("chunk_size must be >= 1")
+
+        self.num_local_neighbors = num_local_neighbors
+        self.chunk_size = chunk_size
+
+    @torch.no_grad()
+    def forward(
+        self,
+        x: tuple[NodeStorage, NodeStorage],
+        edge_index: Adj,
+        size: Size = None,
+    ) -> torch.Tensor:
+
+        source_nodes, target_nodes = x
+
+        if source_nodes is not target_nodes:
+            raise ValueError(
+                "RelativeEdgeLength currently supports "
+                "homogeneous hidden-to-hidden graphs only."
+            )
+
+        # --------------------------------------------------
+        # 1. Extract coordinates and processor connectivity.
+        # --------------------------------------------------
+
+        device = edge_index.device
+
+        coords = source_nodes.x.to(
+            device=device,
+            dtype=torch.float64,
+        )
+
+        edge_index = edge_index.to(
+            device=device,
+            dtype=torch.long,
+        )
+
+        src, dst = edge_index
+
+        num_nodes = coords.shape[0]
+        num_edges = src.numel()
+
+        if coords.ndim != 2 or coords.shape[1] != 2:
+            raise ValueError(
+                "Expected coordinates [num_nodes, 2] "
+                "containing latitude and longitude in radians."
+            )
+
+        if num_edges == 0:
+            raise ValueError("Processor graph has no edges.")
+
+        if (
+            src.min() < 0
+            or dst.min() < 0
+            or src.max() >= num_nodes
+            or dst.max() >= num_nodes
+        ):
+            raise ValueError("Invalid processor edge indices.")
+
+        # --------------------------------------------------
+        # 2. Calculate physical edge lengths.
+        # --------------------------------------------------
+
+        lengths = torch.empty(
+            num_edges,
+            device=device,
+            dtype=torch.float64,
+        )
+
+        for begin in range(0, num_edges, self.chunk_size):
+
+            end = min(begin + self.chunk_size, num_edges)
+
+            s = src[begin:end]
+            d = dst[begin:end]
+
+            lengths[begin:end] = haversine_distance(
+                coords[s],
+                coords[d],
+            )
+
+        # Haversine distances are in radians.
+        # Since we only use ratios, Earth radius cancels.
+
+        valid_edges = (src != dst) & torch.isfinite(lengths) & (lengths > 0)
+
+        if not valid_edges.any():
+            raise ValueError("No valid non-self processor edges available.")
+
+        # --------------------------------------------------
+        # 3. Calculate local node spacing h_i.
+        #
+        # Select the K shortest DISTINCT incoming neighbors.
+        # This avoids repeatedly selecting duplicate edges.
+        # --------------------------------------------------
+
+        eligible = valid_edges.clone()
+
+        neighbor_sum = torch.zeros(
+            num_nodes,
+            dtype=torch.float64,
+            device=device,
+        )
+
+        neighbor_count = torch.zeros(
+            num_nodes,
+            dtype=torch.float64,
+            device=device,
+        )
+
+        edge_ids = torch.arange(
+            num_edges,
+            dtype=torch.long,
+            device=device,
+        )
+
+        for _ in range(self.num_local_neighbors):
+
+            if not eligible.any():
+                break
+
+            # Shortest eligible edge for every destination.
+            minimum_length = torch.full(
+                (num_nodes,),
+                float("inf"),
+                dtype=torch.float64,
+                device=device,
+            )
+
+            masked_lengths = lengths.masked_fill(
+                ~eligible,
+                float("inf"),
+            )
+
+            minimum_length.scatter_reduce_(
+                0,
+                dst,
+                masked_lengths,
+                reduce="amin",
+                include_self=True,
+            )
+
+            # Identify shortest edges.
+            is_minimum = eligible & (lengths == minimum_length[dst])
+
+            # Deterministically select one edge per node.
+            candidate_ids = torch.where(
+                is_minimum,
+                edge_ids,
+                num_edges,
+            )
+
+            best_id = torch.full(
+                (num_nodes,),
+                num_edges,
+                dtype=torch.long,
+                device=device,
+            )
+
+            best_id.scatter_reduce_(
+                0,
+                dst,
+                candidate_ids,
+                reduce="amin",
+                include_self=True,
+            )
+
+            has_neighbor = best_id != num_edges
+
+            if not has_neighbor.any():
+                break
+
+            selected = best_id[has_neighbor]
+
+            selected_dst = dst[selected]
+            selected_src = src[selected]
+
+            neighbor_sum.index_add_(
+                0,
+                selected_dst,
+                lengths[selected],
+            )
+
+            neighbor_count.index_add_(
+                0,
+                selected_dst,
+                torch.ones_like(lengths[selected]),
+            )
+
+            # Exclude all edges from the selected source
+            # for each destination in subsequent iterations.
+            selected_sources = torch.full(
+                (num_nodes,),
+                -1,
+                dtype=torch.long,
+                device=device,
+            )
+
+            selected_sources[has_neighbor] = selected_src
+
+            eligible &= src != selected_sources[dst]
+
+        # Mean distance of up to K local neighbors.
+        h = neighbor_sum / neighbor_count.clamp_min(1)
+
+        # Ensure spacing exists for every used endpoint.
+        used_nodes = torch.unique(
+            torch.cat(
+                [
+                    src[valid_edges],
+                    dst[valid_edges],
+                ]
+            )
+        )
+
+        if (neighbor_count[used_nodes] == 0).any():
+            raise ValueError(
+                "Some processor-edge endpoints have no "
+                "incoming neighbors. Check graph connectivity."
+            )
+
+        # --------------------------------------------------
+        # 4. Compute relative edge lengths.
+        #
+        # log(l_ij / sqrt(h_i * h_j))
+        # = log(l_ij) - 0.5 * (log(h_i) + log(h_j))
+        # --------------------------------------------------
+
+        log_h = torch.zeros_like(h)
+
+        has_spacing = neighbor_count > 0
+
+        log_h[has_spacing] = h[has_spacing].log()
+
+        relative_length = torch.zeros(
+            num_edges,
+            dtype=torch.float64,
+            device=device,
+        )
+
+        s = src[valid_edges]
+        d = dst[valid_edges]
+
+        relative_length[valid_edges] = lengths[valid_edges].log() - 0.5 * (
+            log_h[s] + log_h[d]
+        )
+
+        # Self-edges and zero-length edges receive zero.
+        # They are excluded from the local-spacing estimate.
+
+        if not torch.isfinite(relative_length).all():
+            raise ValueError("Non-finite relative edge lengths produced.")
+
+        LOGGER.info(
+            "RelativeEdgeLength: %d nodes, %d edges, " "K=%d, range=[%.4f, %.4f]",
+            num_nodes,
+            num_edges,
+            self.num_local_neighbors,
+            relative_length.min().item(),
+            relative_length.max().item(),
+        )
+
+        return relative_length.unsqueeze(-1).to(
+            dtype=getattr(torch, self.dtype),
+        )
