@@ -72,7 +72,7 @@ the following to the config you're using:
 
    training:
       optimization:
-         lr: 5e-4
+         learning_rate: 5e-4
 
 You can also change the GPU count to whatever you have available:
 

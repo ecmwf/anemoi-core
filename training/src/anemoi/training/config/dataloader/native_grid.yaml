@@ -31,7 +31,7 @@ batch_size:
 # Default effective batch_size for training is 16
 # For the o96 resolution, default per-gpu batch_size is 2 (8 gpus required)
 # Changing the effective batch_size may call for a different
-# training.optimization.lr
+# training.optimization.learning_rate
 # ============
 
 # runs only N training batches [N = integer | null]

@@ -518,7 +518,7 @@ Anemoi training uses the ``CosineLRScheduler`` from ``timm`` as its
 default learning rate scheduler. Docs for this scheduler can be found here
 https://github.com/huggingface/pytorch-image-models/blob/main/timm/scheduler/cosine_lr.py
 The user can configure the maximum learning rate by setting
-``config.training.optimization.lr``.
+``config.training.optimization.learning_rate``.
 
 The user can also control the rate at which the learning rate decreases
 by setting the total number of scheduler steps -

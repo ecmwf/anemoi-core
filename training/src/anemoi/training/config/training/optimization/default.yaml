@@ -3,7 +3,7 @@ defaults:
   - lr_scheduler: cosine_scheduler
   - _self_
 
-lr: 1.0e-3 # peak learning rate
+learning_rate: 1.0e-3 # peak learning rate
 
 # Lightning scheduler integration: controls how Lightning calls the scheduler
 # during training (step vs epoch, metric to monitor for ReduceLROnPlateau, etc.).

@@ -38,7 +38,7 @@ training:
   max_epochs: 1
   num_sanity_val_steps: 0
   optimization:
-    lr: 10e-5
+    learning_rate: 10e-5
     lr_scheduler:
       warmup_t: 1
 

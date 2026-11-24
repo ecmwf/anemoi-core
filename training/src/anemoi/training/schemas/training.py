@@ -85,8 +85,8 @@ class WeightAveragingSchema(GenericSchema):
 class OptimizationSchema(BaseModel):
     """Optimizer and LR scheduler configuration."""
 
-    lr: NonNegativeFloat = Field(example=1.0e-3)
-    "Peak learning rate."
+    learning_rate: NonNegativeFloat = Field(example=1.0e-3)
+    "Peak learning rate, passed to the optimizer as is."
     optimizer: OptimizerSchema
     """Hydra instantiation config for the optimizer."""
     lr_scheduler: LRSchedulerSchema | None = None

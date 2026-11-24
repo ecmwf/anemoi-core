@@ -29,7 +29,7 @@ def mocked_module(mocker: MockerFixture) -> BaseTrainingModule:
 
     # Default config: no scheduler
     module.config = mocker.MagicMock()
-    module.config.training.optimization.lr = 0.001
+    module.config.training.optimization.learning_rate = 0.001
     module.config.training.optimization.lr_scheduler = None
 
     # Bind real methods from the class so they work on this mock
@@ -53,7 +53,7 @@ def test_create_optimizer_from_config(mocked_module: BaseTrainingModule) -> None
 
     assert isinstance(result, torch.optim.Adam)
     param_group = result.param_groups[0]
-    assert param_group["lr"] == pytest.approx(mocked_module.config.training.optimization.lr)
+    assert param_group["lr"] == pytest.approx(mocked_module.config.training.optimization.learning_rate)
     assert param_group["weight_decay"] == pytest.approx(0.1)
     assert result.defaults["betas"] == (0.9, 0.95)
 
@@ -71,7 +71,7 @@ def test_create_optimizer_from_config_ademamix(mocked_module: BaseTrainingModule
 
     assert isinstance(result, torch.optim.Optimizer)
     param_group = result.param_groups[0]
-    assert param_group["lr"] == pytest.approx(mocked_module.config.training.optimization.lr)
+    assert param_group["lr"] == pytest.approx(mocked_module.config.training.optimization.learning_rate)
     assert param_group["weight_decay"] == pytest.approx(0.1)
     assert result.defaults["betas"] == (0.9, 0.95, 0.9999)
 
@@ -135,7 +135,10 @@ def test_lr_scheduler_step_uses_step_update_for_step_interval(
     mocked_module: BaseTrainingModule,
     mocker: MockerFixture,
 ) -> None:
-    optimizer = torch.optim.Adam(mocked_module.parameters(), lr=mocked_module.config.training.optimization.lr)
+    optimizer = torch.optim.Adam(
+        mocked_module.parameters(),
+        lr=mocked_module.config.training.optimization.learning_rate,
+    )
     scheduler = CosineLRScheduler(optimizer, t_initial=1000, warmup_t=100, t_in_epochs=False)
     step_update = mocker.patch.object(scheduler, "step_update")
     step = mocker.patch.object(scheduler, "step")
@@ -152,7 +155,10 @@ def test_lr_scheduler_step_uses_epoch_step_for_epoch_interval(
     mocked_module: BaseTrainingModule,
     mocker: MockerFixture,
 ) -> None:
-    optimizer = torch.optim.Adam(mocked_module.parameters(), lr=mocked_module.config.training.optimization.lr)
+    optimizer = torch.optim.Adam(
+        mocked_module.parameters(),
+        lr=mocked_module.config.training.optimization.learning_rate,
+    )
     scheduler = CosineLRScheduler(optimizer, t_initial=10, warmup_t=1, t_in_epochs=True)
     step_update = mocker.patch.object(scheduler, "step_update")
     step = mocker.patch.object(scheduler, "step")

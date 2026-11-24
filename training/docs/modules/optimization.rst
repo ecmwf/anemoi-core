@@ -36,7 +36,7 @@ integration options:
      - lr_scheduler: cosine_scheduler
      - _self_
 
-   lr: 1.0e-3  # peak learning rate
+   learning_rate: 1.0e-3  # peak learning rate
 
    # Lightning scheduler integration settings.
    # See https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.core.LightningModule.html#lightning.pytorch.core.LightningModule.configure_optimizers
@@ -61,7 +61,7 @@ config group. The default is AdamW:
    _target_: torch.optim.AdamW
    betas: [0.9, 0.95]
 
-The learning rate is set separately via ``config.training.optimization.lr``
+The learning rate is set separately via ``config.training.optimization.learning_rate``
 and is not part of the optimizer config. ``BaseGraphModule`` passes it
 as the ``lr`` argument when instantiating the optimizer.
 

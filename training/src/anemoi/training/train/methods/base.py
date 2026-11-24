@@ -1359,7 +1359,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """Create optimizer and LR scheduler based on Hydra config."""
         optimization_config = self.config.training.optimization
         params = filter(lambda p: p.requires_grad, self.parameters())
-        optimizer = instantiate(optimization_config.optimizer, params=params, lr=optimization_config.lr)
+        optimizer = instantiate(optimization_config.optimizer, params=params, lr=optimization_config.learning_rate)
         self.log_optimizer(optimizer)
 
         if not getattr(optimization_config, "lr_scheduler", None):
