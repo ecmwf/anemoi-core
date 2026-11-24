@@ -9,6 +9,8 @@
 
 
 import logging
+import os
+import warnings
 
 from torch.utils.data import get_worker_info
 
@@ -22,6 +24,11 @@ def set_blosc_threads(blosc_threads: int | None) -> None:
     worker, blosc uses one thread. This function lets blosc use ``blosc_threads`` threads in the
     worker, for the decompression of zarr chunks and for the dataset cache.
 
+    In a process that is a fork of the process that imported numcodecs, numcodecs always uses one
+    thread, also when ``use_threads`` is True. The reason is that the blosc thread pool of the
+    parent process is not in the fork. Thus, in a fork, this function starts blosc again and tells
+    numcodecs that this process imported it.
+
     Parameters
     ----------
     blosc_threads : int | None
@@ -32,8 +39,14 @@ def set_blosc_threads(blosc_threads: int | None) -> None:
         return
     import numcodecs.blosc
 
+    if os.getpid() != numcodecs.blosc._importer_pid:
+        # a fork: start blosc again, so that this process has its own thread pool
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            numcodecs.blosc.destroy()
+            numcodecs.blosc.init()
+        numcodecs.blosc._importer_pid = os.getpid()
     numcodecs.blosc.use_threads = True
-    # set the number again in the worker: the thread pool of the parent process is not in the fork
     numcodecs.blosc.set_nthreads(blosc_threads)
 
 

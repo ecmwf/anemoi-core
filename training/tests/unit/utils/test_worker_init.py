@@ -48,7 +48,11 @@ def test_sets_blosc_threads() -> None:
 
 
 class BloscSettings(Dataset):
-    """Each item compresses an array and returns the blosc settings of the worker."""
+    """Each item compresses an array and returns the blosc settings of the worker.
+
+    The first value is the decision of numcodecs (``_get_use_threads``), not only the
+    ``use_threads`` setting: in a fork, numcodecs uses one thread also when ``use_threads`` is True.
+    """
 
     def __len__(self) -> int:
         return 2
@@ -57,14 +61,21 @@ class BloscSettings(Dataset):
         value = np.arange(100_000, dtype=np.float32) + index
         codec = Blosc(cname="lz4", clevel=5, shuffle=Blosc.BITSHUFFLE)
         assert np.array_equal(np.frombuffer(codec.decode(codec.encode(value)), dtype=np.float32), value)
-        return torch.tensor([int(bool(numcodecs.blosc.use_threads)), numcodecs.blosc.get_nthreads()])
+        return torch.tensor([int(numcodecs.blosc._get_use_threads()), numcodecs.blosc.get_nthreads()])
 
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         pass
 
 
+@pytest.mark.usefixtures("restore_blosc")
 @pytest.mark.parametrize("context", ["fork", "spawn"])
-def test_workers_use_the_blosc_threads(context: str) -> None:
+@pytest.mark.parametrize("parent_threads", [False, True])
+def test_workers_use_the_blosc_threads(context: str, parent_threads: bool) -> None:
+    if parent_threads:
+        # the parent process started its blosc thread pool before the fork
+        set_blosc_threads(2)
+        codec = Blosc(cname="lz4", clevel=5, shuffle=Blosc.BITSHUFFLE)
+        codec.decode(codec.encode(np.arange(1_000_000, dtype=np.float32)))
     loader = DataLoader(
         BloscSettings(),
         batch_size=None,
