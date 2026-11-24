@@ -9,7 +9,8 @@
 
 import datetime
 import logging
-from functools import cached_property, wraps
+from functools import cached_property
+from functools import wraps
 
 import numpy as np
 import torch
@@ -42,14 +43,17 @@ def cache_sample(get_sample):
                 else np.atleast_1d(positions).tolist()
             )
             source_positions = [requested[index] for index in missing]
-            source = get_sample(self, sequence, source_positions, grid_shard_indices)
-            source = rearrange(
-                source.numpy(),
-                "dates ensemble gridpoints variables -> dates variables ensemble gridpoints",
-            )
+            # if possible, the cache keeps the compressed chunks of the source and does not compress again
+            source = cache.read_source_records(self._cache_dataset_id, sequence, source_positions, grid_shard_indices)
+            if source is None:
+                source = get_sample(self, sequence, source_positions, grid_shard_indices)
+                source = rearrange(
+                    source.numpy(),
+                    "dates ensemble gridpoints variables -> dates variables ensemble gridpoints",
+                )
+                cache.store_records(self._cache_dataset_id, sequence, source_positions, source, grid_shard_indices)
             for index, value in zip(missing, source):
                 cached[index] = value
-            cache.store_records(self._cache_dataset_id, sequence, source_positions, source, grid_shard_indices)
 
         values = rearrange(
             np.stack(cached),

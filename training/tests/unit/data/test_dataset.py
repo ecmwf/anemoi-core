@@ -160,6 +160,9 @@ def test_native_grid_dataset_reads_and_stores_only_cache_misses() -> None:
         def check_cache(self, dataset_id, sequence, positions, grid_indices=None):
             return [data[positions[0], ..., grid_indices], None], [1]
 
+        def read_source_records(self, dataset_id, sequence, positions, grid_indices=None):
+            return None  # the source has no chunks that the cache can use
+
         def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
             stored["positions"] = positions
             stored["values"] = values
@@ -173,6 +176,31 @@ def test_native_grid_dataset_reads_and_stores_only_cache_misses() -> None:
     assert stored["positions"] == [3]
     assert stored["grid_indices"] == slice(0, 4)
     np.testing.assert_array_equal(stored["values"], data[[3], ..., :4])
+
+
+def test_native_grid_dataset_uses_source_chunk_records() -> None:
+    data = np.arange(5 * 3 * 2 * 6).reshape(5, 3, 2, 6)
+    dataset = NativeGridDataset.__new__(NativeGridDataset)
+    dataset.data = None  # the reader must not read the dataset
+    dataset._cache_dataset_id = "analysis"
+    requests = []
+
+    class FakeCache:
+        def check_cache(self, dataset_id, sequence, positions, grid_indices=None):
+            return [data[positions[0]], None], [1]
+
+        def read_source_records(self, dataset_id, sequence, positions, grid_indices=None):
+            requests.append((positions, grid_indices))
+            return [data[position] for position in positions]
+
+        def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
+            raise AssertionError("read_source_records already stored the records")
+
+    dataset._cache = FakeCache()
+    sample = dataset.get_sample(sequence=0, positions=[1, 3], grid_shard_indices=slice(None))
+
+    np.testing.assert_array_equal(sample.numpy(), np.transpose(data[[1, 3]], (0, 2, 3, 1)))
+    assert requests == [([3], slice(None))]
 
 
 @skip_if_offline

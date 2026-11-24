@@ -20,6 +20,7 @@ import pickle
 import shutil
 import socket
 import threading
+from collections.abc import Callable
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -73,6 +74,16 @@ def encode_cache_array(value: np.ndarray) -> bytes:
     return header.getvalue() + _BLOSC.encode(value)
 
 
+def encode_cache_header(shape: tuple[int, ...], dtype: np.dtype | str) -> bytes:
+    """Return the uncompressed .npy header of a C-order record with this shape and dtype."""
+    header = io.BytesIO()
+    np.lib.format.write_array_header_1_0(
+        header,
+        {"descr": np.lib.format.dtype_to_descr(np.dtype(dtype)), "fortran_order": False, "shape": tuple(shape)},
+    )
+    return header.getvalue()
+
+
 def save_cache_array(target, value):
     target.write(encode_cache_array(value))
 
@@ -92,6 +103,71 @@ def read_cache_payload(entries_path, sequence, position, grid_id="all") -> bytes
         return cache_entry_path(entries_path, sequence, position, grid_id).read_bytes()
     except FileNotFoundError:
         return None
+
+
+class SourceChunks:
+    """Read the records of a dataset as the compressed chunks of its zarr array.
+
+    In the source zarr of an analysis dataset, each chunk is often one date with all the
+    variables, ensemble members and grid points, compressed with blosc. Then one chunk holds the
+    same data as one cache record. On a cache miss, the cache writes the chunk bytes as the record.
+    It does not compress the record again. blosc data holds its own settings, thus
+    decode_cache_array can decode these records, also on other nodes.
+
+    from_dataset returns None for all other datasets. Then the cache reads each record with the
+    dataset reader and compresses it.
+    """
+
+    def __init__(self, array: object, indices: list[int] | None, missing: set[int]) -> None:
+        self.array = array
+        self.indices = indices  # position in the dataset -> index in the zarr array; None: the same
+        self.missing = missing
+        self.header = encode_cache_header(array.shape[1:], array.dtype)
+
+    @classmethod
+    def from_dataset(cls, data: object) -> "SourceChunks | None":
+        """Return a SourceChunks for a zarr dataset or a date subset of one, else None."""
+        indices = None
+        # open_dataset with start, end or frequency gives a Subset: a list of dates of the zarr
+        while type(data).__name__ == "Subset" and hasattr(data, "indices") and hasattr(data, "dataset"):
+            subset = [int(index) for index in data.indices]
+            indices = subset if indices is None else [subset[index] for index in indices]
+            data = data.dataset
+        if type(data).__name__ != "GriddedZarr":
+            return None
+        array = getattr(data, "data", None)
+        if (
+            array is None
+            or getattr(getattr(array, "compressor", None), "codec_id", None) != "blosc"
+            or getattr(array, "filters", None)
+            or getattr(array, "order", None) != "C"
+            or len(array.shape) != 4
+            or tuple(array.chunks) != (1, *array.shape[1:])
+            or not hasattr(array, "_chunk_key")
+            or not hasattr(array, "chunk_store")
+        ):
+            return None
+        return cls(array, indices, set(getattr(data, "missing", ())))
+
+    def covers_grid(self, grid_indices: slice | np.ndarray | None) -> bool:
+        """Return True if grid_indices select all the grid points, in their order."""
+        if grid_indices is None:
+            return True
+        if isinstance(grid_indices, slice):
+            size = self.array.shape[-1]
+            return grid_indices.indices(size) == (0, size, 1)
+        return False
+
+    def read(self, position: int) -> bytes | None:
+        """Return the record of a position (a .npy header and the chunk bytes), or None if there is no chunk."""
+        index = position if self.indices is None else self.indices[position]
+        if index in self.missing:
+            return None
+        try:
+            chunk = self.array.chunk_store[self.array._chunk_key((index, 0, 0, 0))]
+        except KeyError:  # the chunk is not in the store: zarr gives the fill value
+            return None
+        return self.header + chunk
 
 
 def _is_capacity_error(error: OSError) -> bool:
@@ -167,6 +243,10 @@ class DatasetCacheNamespace:
         self.sequence_lengths = [int(reader.sequence_length(index)) for index in range(self.num_sequences)]
         self.path = root / hashlib.sha256(dataset_id.encode()).hexdigest()[:20]
         self.entries_path = self.path / "entries"
+        # only analysis datasets: one sequence, and the position is the date
+        self.source_chunks = (
+            SourceChunks.from_dataset(getattr(reader, "data", None)) if self.num_sequences == 1 else None
+        )
         self.locks_path = self.path / "locks"
         for path in (self.entries_path, self.locks_path):
             path.mkdir(parents=True, exist_ok=True)
@@ -203,11 +283,25 @@ class DatasetCacheNamespace:
         return read_cache_entry(self.entries_path, sequence, position, grid_id)
 
     def store(self, sequence, position, value, grid_id="all", sync=False):
+        return self.store_payload(sequence, position, lambda: encode_cache_array(value), grid_id, sync=sync)
+
+    def store_payload(
+        self,
+        sequence: int,
+        position: int,
+        payload: bytes | Callable[[], bytes],
+        grid_id: str = "all",
+        sync: bool = False,
+    ) -> bool:
+        """Write one record. payload is the record bytes, or a function that returns them.
+
+        The function is called only if the record is not in the cache.
+        """
         entry, lock = self.paths(sequence, position, grid_id)
         with self.lock(lock):
             if entry.exists():
                 return False
-            payload = encode_cache_array(value)
+            payload = payload() if callable(payload) else payload
             if self.budget is not None and not self.budget.reserve(len(payload)):
                 msg = (
                     f"cache limit of {self.budget.limit_bytes / 1e9:.1f} GB or free-space limit of "
@@ -276,6 +370,7 @@ class DatasetCache(pl.LightningDataModule):
         self.cache_full = Value("b", False)
         self.cache_writes_skipped = Value("q", 0)
         self.cache_remote_errors = Value("q", 0)
+        self.cache_source_records = Value("q", 0)
         # update_global_view() runs in the training process, but check_cache() runs in dataloader
         # workers, which are forked once and persist across epochs. The view is therefore published
         # to a file and workers reload it whenever this shared version counter changes.
@@ -314,6 +409,16 @@ class DatasetCache(pl.LightningDataModule):
                 budget=self.budget,
             )
             reader.set_cache(self, dataset_id)
+            if getattr(self, "global_rank", 0) == 0:
+                LOGGER.info(
+                    "Dataset cache for %s: %s",
+                    dataset_id,
+                    (
+                        "misses store the compressed zarr chunks of the source"
+                        if self.namespaces[dataset_id].source_chunks is not None
+                        else "misses read the dataset and compress each record"
+                    ),
+                )
         self._datasets.add(id(dataset))
         return dataset
 
@@ -522,13 +627,16 @@ class DatasetCache(pl.LightningDataModule):
         self._increment(self.cache_misses, len(missing))
         return values, missing
 
-    def _store_records(self, dataset_id, sequence, positions, values, grid_id, sync=False):
+    def _store_records(self, dataset_id, sequence, positions, values, grid_id, sync=False, encoded=False):
         if self.cache_full.value:
             return
         namespace = self.namespaces[dataset_id]
         try:
             for position, value in zip(positions, values):
-                namespace.store(sequence, position, value, grid_id, sync=sync)
+                if encoded:
+                    namespace.store_payload(sequence, position, value, grid_id, sync=sync)
+                else:
+                    namespace.store(sequence, position, value, grid_id, sync=sync)
         except CacheFullError as error:
             # the cache stays locked at its size: no records are added or removed after this
             with self.cache_full.get_lock():
@@ -563,6 +671,33 @@ class DatasetCache(pl.LightningDataModule):
             False,
         )
 
+    def read_source_records(
+        self,
+        dataset_id: str,
+        sequence: int,
+        positions: list[int] | slice,
+        grid_indices: slice | np.ndarray | None = None,
+    ) -> list[np.ndarray] | None:
+        """Read records from the compressed chunks of the source zarr, and add them to the cache.
+
+        Return the decoded records. Return None if the source cannot give the records in this way
+        (see SourceChunks). Then the caller reads the records with the dataset reader and calls
+        store_records.
+        """
+        namespace = self.namespaces[dataset_id]
+        chunks = namespace.source_chunks
+        if chunks is None or not chunks.covers_grid(grid_indices):
+            return None
+        positions = self._positions(namespace, sequence, positions)
+        payloads = [chunks.read(namespace.normalize(sequence, position)[1]) for position in positions]
+        if any(payload is None for payload in payloads):
+            return None
+        values = [decode_cache_array(payload) for payload in payloads]
+        # the write does not compress, thus it is short: do it now, also when async_writes is set
+        self._store_records(dataset_id, sequence, positions, payloads, self._grid_id(grid_indices), encoded=True)
+        self._increment(self.cache_source_records, len(positions))
+        return values
+
     def wait_for_pending_writes(self) -> None:
         if self._pending_write is not None:
             self._pending_write.result()
@@ -594,13 +729,15 @@ class DatasetCache(pl.LightningDataModule):
                 locations.setdefault(CacheKey(dataset_id, sequence, position, grid_id), set()).add(node)
         self._publish_view(locations)
         LOGGER.info(
-            "Rank %d had %d fetches (%d local hits, %d remote hits, %d misses, %d remote errors)",
+            "Rank %d had %d fetches (%d local hits, %d remote hits, %d misses, %d remote errors, "
+            "%d records from source chunks)",
             self.global_rank,
             self.total_fetches.value,
             self.cache_hits_local.value,
             self.cache_hits_remote.value,
             self.cache_misses.value,
             self.cache_remote_errors.value,
+            self.cache_source_records.value,
         )
 
     def teardown(self, stage=None):
