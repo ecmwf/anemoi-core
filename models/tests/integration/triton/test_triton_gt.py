@@ -23,14 +23,22 @@ if is_triton_available():
 
 @pytest.fixture(autouse=True)
 def setup_torch():
-    """Skip when CUDA/Triton are unavailable and set up torch defaults for all tests."""
+    """Skip when CUDA/Triton are unavailable and set up torch defaults for each test.
+
+    The default device and dtype apply only while the test runs, so tests collected after this file
+    in the same process still start from torch's defaults.
+    """
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
     if not is_triton_available():
         pytest.skip("Triton not available")
-    torch.set_default_device("cuda")
+    dtype = torch.get_default_dtype()
     torch.set_default_dtype(torch.float32)
-    yield
+    try:
+        with torch.device("cuda"):
+            yield
+    finally:
+        torch.set_default_dtype(dtype)
 
 
 def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:

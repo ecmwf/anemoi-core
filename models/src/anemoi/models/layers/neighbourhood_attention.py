@@ -13,15 +13,18 @@ A model component picks a grid family and its settings in the config, e.g.::
 
     attention_implementation: neighbourhood
     neighbourhood:
-      grid: <family>
+      grid: octahedral
+      kernel_size: [7, 13]
       backend: triton
-      ...  # the family's own settings
 
 The node coordinates then fix the resolution and the order of the points.
 
 This module holds what the grid families share: the registry :data:`GRID_FAMILIES`, the backends
-:data:`NEIGHBOURHOOD_BACKENDS` and the base classes each family implements. Each family lives in its
-own module and is listed in :data:`GRID_FAMILIES`.
+:data:`NEIGHBOURHOOD_BACKENDS` and the base classes each family implements. The families live in
+their own modules:
+
+- ``octahedral`` and ``healpix``: :mod:`anemoi.models.layers.reduced_grid_neighbourhood`
+- ``icosahedral``: :mod:`anemoi.models.layers.icosahedral_neighbourhood`
 
 The kernels compare queries and keys by content only; positions come from rotary embeddings
 (:mod:`anemoi.models.layers.spherical_rotary`).
@@ -85,9 +88,31 @@ class GridFamily:
     "Triton kernel for self attention."
     cross_attention: Optional[str] = None
     "Triton kernel for cross attention; None if the family only does self attention."
+    is_member: Optional[str] = None
+    "Reduced grids only: test whether a grid belongs to the family."
 
 
-GRID_FAMILIES: dict[str, GridFamily] = {}
+GRID_FAMILIES: dict[str, GridFamily] = {
+    "octahedral": GridFamily(
+        description="octahedral reduced Gaussian grids O<N>: rows of 20, 24, 28, ... points from each pole",
+        neighbourhood="anemoi.models.layers.reduced_grid_neighbourhood:ReducedGridNeighbourhood",
+        self_attention="anemoi.models.triton.reduced_grid_attention:reduced_grid_attention",
+        cross_attention="anemoi.models.triton.reduced_grid_cross_attention:reduced_grid_cross_attention",
+        is_member="anemoi.models.layers.reduced_grid_neighbourhood:is_octahedral",
+    ),
+    "healpix": GridFamily(
+        description="HEALPix grids in ring or nested ordering: 12 * nside**2 points",
+        neighbourhood="anemoi.models.layers.reduced_grid_neighbourhood:ReducedGridNeighbourhood",
+        self_attention="anemoi.models.triton.reduced_grid_attention:reduced_grid_attention",
+        cross_attention="anemoi.models.triton.reduced_grid_cross_attention:reduced_grid_cross_attention",
+        is_member="anemoi.models.layers.reduced_grid_neighbourhood:is_healpix",
+    ),
+    "icosahedral": GridFamily(
+        description="refined icosahedra in diamond order (anemoi-graphs TriNodes, ordering: diamonds): 10 * 4**r + 2 points",
+        neighbourhood="anemoi.models.layers.icosahedral_neighbourhood:IcosahedralGridNeighbourhood",
+        self_attention="anemoi.models.triton.icosahedral_attention:icosahedral_attention",
+    ),
+}
 """Grid families with neighbourhood attention, by config name."""
 
 
@@ -245,9 +270,9 @@ class NeighbourhoodAttention(AttentionWrapper, ABC):
 class NeighbourhoodBand:
     """A set of query points and the key points they reach.
 
-    Each grid family decides what a band is: for example a run of whole rows of a grid of latitude
-    rows, or the points one GPU owns, with keys made of those points followed by the ones fetched
-    from other GPUs. In self attention the keys include the queries.
+    On reduced grids a band is a run of whole query rows. On the icosahedron it is the points one
+    GPU owns, and its keys are those points followed by the ones fetched from other GPUs. In self
+    attention the keys include the queries.
     """
 
     query_points: slice
