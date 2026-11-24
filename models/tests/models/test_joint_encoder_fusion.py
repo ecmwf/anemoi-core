@@ -10,7 +10,7 @@
 """Encoders with ``dataset_fusing_strategy: joint``.
 
 The spatial downscaler setup of ``test_transport_tendency_reference``: ``lres`` and ``hres`` on the
-same grid, ``hres`` predicted as residuals against ``lres``, here with one joint encoder for both.
+same grid, ``hres`` predicted as tendencies against ``lres``, here with one joint encoder for both.
 """
 
 import pytest

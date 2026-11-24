@@ -661,7 +661,7 @@ def test_batch_output_plot_shows_the_reference_as_input_of_each_snapshot() -> No
     for step, call in enumerate(calls):
         np.testing.assert_array_equal(call.kwargs["x"][:, 0], reference[0, step, 0, :, 0].numpy())
         np.testing.assert_array_equal(call.kwargs["y_true"], batch["data"].values[0, step, 0].numpy())
-        # a has a reference, so it gets the input and residual panels; b stays an output only.
+        # a has a reference, so it gets the input and tendency panels; b stays an output only.
         assert call.kwargs["parameters"] == {0: ("a", False), 1: ("b", True)}
 
 
