@@ -733,3 +733,48 @@ def test_setup_limits_the_cache_to_a_fraction_of_the_disk(tmp_path: Path, monkey
             cache.teardown("fit")
     finally:
         dist.destroy_process_group()
+
+
+class TestPartition:
+    def cache(self, tmp_path: Path, sample_data: np.ndarray, node_id: int, num_nodes: int = 2) -> DatasetCache:
+        namespace = DatasetCacheNamespace(tmp_path, "analysis:part", TestDatasetCacheNamespace.FakeReader(sample_data))
+        cache = DatasetCache(object(), tmp_path, partition=True)
+        cache.namespaces[namespace.dataset_id] = namespace
+        cache.node_id, cache.num_nodes, cache.budget = node_id, num_nodes, None
+        return cache
+
+    def test_each_date_has_one_node(self, tmp_path: Path, sample_data: np.ndarray) -> None:
+        caches = [self.cache(tmp_path / str(node), sample_data, node, num_nodes=3) for node in range(3)]
+        owners = [
+            [node for node, cache in enumerate(caches) if cache.owns(cache.namespaces["analysis:part"], 0, position)]
+            for position in range(sample_data.shape[0])
+        ]
+        assert all(len(nodes) == 1 for nodes in owners)
+        # the parts are contiguous and in node order
+        assert [nodes[0] for nodes in owners] == sorted(nodes[0] for nodes in owners)
+        assert {nodes[0] for nodes in owners} == {0, 1, 2}
+
+    def test_negative_position_is_normalized(self, tmp_path: Path, sample_data: np.ndarray) -> None:
+        cache = self.cache(tmp_path, sample_data, node_id=1)
+        namespace = cache.namespaces["analysis:part"]
+        assert cache.owns(namespace, 0, -1) == cache.owns(namespace, 0, sample_data.shape[0] - 1)
+
+    def test_only_owned_records_are_stored(self, tmp_path: Path, sample_data: np.ndarray) -> None:
+        cache = self.cache(tmp_path, sample_data, node_id=0)
+        positions = list(range(sample_data.shape[0]))  # 10 dates: node 0 owns 0-4
+        cache.store_records("analysis:part", 0, positions, list(sample_data))
+        namespace = cache.namespaces["analysis:part"]
+        stored = [position for position in positions if namespace.paths(0, position)[0].exists()]
+        assert stored == [0, 1, 2, 3, 4]
+        assert cache.cache_not_owned.value == 5
+
+    def test_without_partition_all_records_are_stored(self, tmp_path: Path, sample_data: np.ndarray) -> None:
+        cache = self.cache(tmp_path, sample_data, node_id=0)
+        cache.partition = False
+        cache.store_records("analysis:part", 0, [7, 8], list(sample_data[[7, 8]]))
+        assert all(cache.namespaces["analysis:part"].paths(0, position)[0].exists() for position in (7, 8))
+
+    def test_single_node_owns_all(self, tmp_path: Path, sample_data: np.ndarray) -> None:
+        cache = self.cache(tmp_path, sample_data, node_id=0, num_nodes=1)
+        namespace = cache.namespaces["analysis:part"]
+        assert all(cache.owns(namespace, 0, position) for position in range(sample_data.shape[0]))

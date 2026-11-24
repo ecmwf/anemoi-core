@@ -6,4 +6,5 @@ num_gpus_per_model: 1
 cache_dir: ${oc.decode:${oc.env:TMPDIR}} #if not none, will cache input data under cache_dir
 cache_async_writes: false
 cache_max_fraction: 0.9 # largest cache size, as a fraction of the total disk size
+cache_partition: false # if true, each node caches only its part of the dates, read the other dates from the other nodes
 hostname_suffix: null # text to add to hostnames for cache connections between nodes

@@ -145,3 +145,18 @@ def test_missing_date_or_chunk_falls_back(tmp_path: Path) -> None:
     assert cache.read_source_records(dataset_id, 0, [4]) is None
     # nothing was written for the request that fell back
     assert not cache.namespaces[dataset_id].paths(0, 2)[0].exists()
+
+
+def test_partition_stores_only_owned_source_records(tmp_path: Path) -> None:
+    array, values = make_array(tmp_path)
+    cache, dataset_id = make_cache(tmp_path, GriddedZarr(array), SHAPE[0])
+    cache.partition, cache.num_nodes = True, 2  # node 0 owns dates 0-2 of 6
+
+    records = cache.read_source_records(dataset_id, 0, [1, 4])
+
+    # the sample has all the records, but only the owned record is in the cache
+    np.testing.assert_array_equal(np.stack(records), values[[1, 4]])
+    namespace = cache.namespaces[dataset_id]
+    assert namespace.paths(0, 1)[0].exists()
+    assert not namespace.paths(0, 4)[0].exists()
+    assert cache.cache_not_owned.value == 1

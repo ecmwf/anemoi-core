@@ -348,6 +348,7 @@ class DatasetCache(pl.LightningDataModule):
         proc_group=None,
         async_writes=False,
         max_fraction: float = 0.9,
+        partition: bool = False,
     ):
         super().__init__()
         self.ds = ds  # must be set before any attribute access can reach __getattr__
@@ -359,6 +360,9 @@ class DatasetCache(pl.LightningDataModule):
             msg = f"max_fraction must be in (0, 1], got {max_fraction}"
             raise ValueError(msg)
         self.max_fraction = max_fraction
+        # each node caches only the records in its part of the dataset (see owns)
+        self.partition = partition
+        self.num_nodes = 1  # set in setup()
         self.budget = None  # set in setup(); None means no size limit
         self.initialized = False
         self.namespaces, self._locations, self._connections = {}, {}, {}
@@ -371,6 +375,7 @@ class DatasetCache(pl.LightningDataModule):
         self.cache_writes_skipped = Value("q", 0)
         self.cache_remote_errors = Value("q", 0)
         self.cache_source_records = Value("q", 0)
+        self.cache_not_owned = Value("q", 0)
         # update_global_view() runs in the training process, but check_cache() runs in dataloader
         # workers, which are forked once and persist across epochs. The view is therefore published
         # to a file and workers reload it whenever this shared version counter changes.
@@ -448,6 +453,12 @@ class DatasetCache(pl.LightningDataModule):
         dist.all_gather_object(hosts, host, group=self.proc_group)
         unique_hosts = sorted(set(hosts))
         self.node_id = unique_hosts.index(host)
+        self.num_nodes = len(unique_hosts)
+        if self.partition and self.global_rank == 0:
+            LOGGER.info(
+                "Dataset cache partition: each of the %d nodes caches only its part of the dates of each dataset",
+                self.num_nodes,
+            )
         self._leaders = {node: hosts.index(name) for node, name in enumerate(unique_hosts)}
         self.is_node_leader = self.global_rank == self._leaders[self.node_id]
         self.hostnames = [name + self.hostname_suffix for name in hosts]
@@ -645,9 +656,47 @@ class DatasetCache(pl.LightningDataModule):
             if first:
                 LOGGER.warning("Dataset cache on node %s is full, no more records are cached: %s", self.node_id, error)
 
+    def owns(self, namespace: DatasetCacheNamespace, sequence: int, position: int) -> bool:
+        """Return True if this node caches the record.
+
+        Without partition, each node caches all the records that its ranks read. Then most dates
+        are in the cache of each node, because each date is in more than one sample. With
+        partition, the dates of each dataset are divided into one contiguous part for each node,
+        and each node caches only the records of its part. The records of other parts are read
+        from the cache of the other node, or from the dataset.
+        """
+        if not self.partition or self.num_nodes <= 1:
+            return True
+        sequence, position = namespace.normalize(sequence, position)
+        if namespace.num_sequences == 1:
+            index, size = position, namespace.sequence_lengths[0]
+        else:  # forecast datasets: one part of the sequences (base dates) for each node
+            index, size = sequence, namespace.num_sequences
+        return index * self.num_nodes // size == self.node_id
+
+    def _owned(
+        self,
+        namespace: DatasetCacheNamespace,
+        sequence: int,
+        positions: list[int],
+        values: list,
+    ) -> tuple[list[int], list]:
+        """Return only the positions and values of the records that this node caches."""
+        owned = [
+            (position, value)
+            for position, value in zip(positions, values, strict=True)
+            if self.owns(namespace, sequence, position)
+        ]
+        if len(owned) < len(positions):
+            self._increment(self.cache_not_owned, len(positions) - len(owned))
+        return [position for position, _ in owned], [value for _, value in owned]
+
     def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
         namespace = self.namespaces[dataset_id]
         positions = self._positions(namespace, sequence, positions)
+        positions, values = self._owned(namespace, sequence, positions, values)
+        if not positions:
+            return
         grid_id = self._grid_id(grid_indices)
         if not self.async_writes:
             self._store_records(dataset_id, sequence, positions, values, grid_id)
@@ -694,7 +743,15 @@ class DatasetCache(pl.LightningDataModule):
             return None
         values = [decode_cache_array(payload) for payload in payloads]
         # the write does not compress, thus it is short: do it now, also when async_writes is set
-        self._store_records(dataset_id, sequence, positions, payloads, self._grid_id(grid_indices), encoded=True)
+        owned_positions, owned_payloads = self._owned(namespace, sequence, positions, payloads)
+        self._store_records(
+            dataset_id,
+            sequence,
+            owned_positions,
+            owned_payloads,
+            self._grid_id(grid_indices),
+            encoded=True,
+        )
         self._increment(self.cache_source_records, len(positions))
         return values
 
@@ -730,7 +787,7 @@ class DatasetCache(pl.LightningDataModule):
         self._publish_view(locations)
         LOGGER.info(
             "Rank %d had %d fetches (%d local hits, %d remote hits, %d misses, %d remote errors, "
-            "%d records from source chunks)",
+            "%d records from source chunks, %d records not cached on this node because of the partition)",
             self.global_rank,
             self.total_fetches.value,
             self.cache_hits_local.value,
@@ -738,6 +795,7 @@ class DatasetCache(pl.LightningDataModule):
             self.cache_misses.value,
             self.cache_remote_errors.value,
             self.cache_source_records.value,
+            self.cache_not_owned.value,
         )
 
     def teardown(self, stage=None):

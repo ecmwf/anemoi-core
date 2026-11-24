@@ -25,6 +25,9 @@ Use these settings in ``system.hardware``:
        # Largest size of the cache on each node, as a fraction of the
        # total size of the disk.
        cache_max_fraction: 0.9
+       # Divide the dates of each dataset into one part for each node.
+       # Each node caches only the records of its part.
+       cache_partition: false
        # Text to add to each hostname for connections between nodes.
        # Use the hostname of the high-speed network interface,
        # for example "-ib". Null uses the hostname.
@@ -41,13 +44,24 @@ cache.
 
 -  Each node has one cache. All the GPUs on the node use the same cache.
 -  The cache is deleted at the start of each run.
--  The records are compressed with Blosc (lz4).
+-  The records are compressed with Blosc (lz4). If each chunk of the
+   source zarr is one date with Blosc compression, the cache writes the
+   chunk as it is. It does not compress the record again.
 
 When the training uses more than one node, a worker can read records
 from the cache of a different node. Each node has a cache server for
 this purpose. At the end of each epoch, the nodes share a list of the
 records in each cache. Thus, the first epoch reads records only from the
 local cache or from the filesystem.
+
+Each date is in more than one sample, for example in 3 samples when the
+model uses 2 input dates and 1 output date. Thus, without a partition,
+each node caches most of the dates: with 2 nodes, approximately 87% of
+the dates are in the cache of each node. With ``cache_partition: true``,
+the dates of each dataset are divided into one contiguous part for each
+node. Each node caches only the records of its part, and reads the
+other records from the other nodes. This uses less disk space on each
+node, but more records come from other nodes.
 
 *************
  Limitations
