@@ -308,7 +308,7 @@ class Timedeltas(BaseEdgeAttributeBuilder):
         return timedeltas / self.scale_seconds
 
 
-class NodeFeatures(BaseEdgeAttributeBuilder):
+class AttributeFromNodeToEdge(BaseEdgeAttributeBuilder):
     """Propagate runtime floating-point node features from one endpoint to each edge."""
 
     node_attr_name = "features"
@@ -340,7 +340,7 @@ class NodeFeatures(BaseEdgeAttributeBuilder):
     def _get_endpoint_values(self, nodes: NodeStorage) -> torch.Tensor:
         if self.node_attr_name not in nodes:
             raise ValueError(
-                f"NodeFeatures requires the selected {self.node_axis} nodes to contain a "
+                f"AttributeFromNodeToEdge requires the selected {self.node_axis} nodes to contain a "
                 f"'{self.node_attr_name}' attribute."
             )
 
@@ -377,7 +377,7 @@ class NodeFeatures(BaseEdgeAttributeBuilder):
     def compute(self, x_i: torch.Tensor | None, x_j: torch.Tensor | None) -> torch.Tensor:
         features = x_j if self.node_axis == "source" else x_i
         if features is None:
-            raise ValueError(f"NodeFeatures could not read the selected {self.node_axis} endpoint values.")
+            raise ValueError(f"AttributeFromNodeToEdge could not read the selected {self.node_axis} endpoint values.")
         return features
 
 

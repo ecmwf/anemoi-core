@@ -340,7 +340,7 @@ first batch.
 
 For dynamic decoder graphs, ``target_edge_features`` selects output-time
 forcing variables by name, in the configured order. Their preprocessed values
-are copied to each incoming edge by a ``NodeFeatures`` attribute builder:
+are copied to each incoming edge by an ``AttributeFromNodeToEdge`` builder:
 
 .. code:: yaml
 
@@ -354,7 +354,7 @@ are copied to each incoming edge by a ``NodeFeatures`` attribute builder:
 
    # Under the hidden -> obs graph edge's attributes:
    level_from_obs:
-     _target_: anemoi.graphs.edges.attributes.NodeFeatures
+     _target_: anemoi.graphs.edges.attributes.AttributeFromNodeToEdge
      node_axis: target
      num_features: 1
 

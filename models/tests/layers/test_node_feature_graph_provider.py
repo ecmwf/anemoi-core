@@ -10,7 +10,7 @@ import unittest
 
 import torch
 
-from anemoi.graphs.edges.attributes import NodeFeatures
+from anemoi.graphs.edges.attributes import AttributeFromNodeToEdge
 from anemoi.models.layers.graph_provider import DynamicGraphProvider
 
 
@@ -27,7 +27,7 @@ def _provider(endpoint="target"):
     provider = DynamicGraphProvider.__new__(DynamicGraphProvider)
     torch.nn.Module.__init__(provider)
     provider.edge_builder = _AllEdges()
-    provider.attributes_config = {"level": NodeFeatures(node_axis=endpoint, num_features=1)}
+    provider.attributes_config = {"level": AttributeFromNodeToEdge(node_axis=endpoint, num_features=1)}
     provider._edge_dim = 1
     provider._capture_request = None
     provider._captured_graph = None

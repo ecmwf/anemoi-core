@@ -9,18 +9,28 @@
 import unittest
 
 import torch
+from hydra.utils import instantiate
 from torch_geometric.data.storage import NodeStorage
 
-from anemoi.graphs.edges.attributes import NodeFeatures
+from anemoi.graphs.edges.attributes import AttributeFromNodeToEdge
+from anemoi.graphs.schemas.edge_attributes_schemas import AttributeFromNodeToEdgeSchema
 
 
-class TestNodeFeatures(unittest.TestCase):
+class TestAttributeFromNodeToEdge(unittest.TestCase):
+    def test_config_target(self):
+        config = AttributeFromNodeToEdgeSchema(
+            _target_="anemoi.graphs.edges.attributes.AttributeFromNodeToEdge",
+            node_axis="target",
+            num_features=1,
+        )
+        self.assertIsInstance(instantiate(config.model_dump(by_alias=True)), AttributeFromNodeToEdge)
+
     def test_endpoint_values_follow_edge_indices(self):
         edges = torch.tensor([[0, 1, 0], [1, 0, 1]])
         nodes = NodeStorage(x=torch.zeros(2, 2), features=torch.tensor([[10.0, 11.0], [20.0, 21.0]]))
         for endpoint, axis in (("source", 0), ("target", 1)):
             with self.subTest(endpoint=endpoint):
-                builder = NodeFeatures(node_axis=endpoint, num_features=2, dtype="float64")
+                builder = AttributeFromNodeToEdge(node_axis=endpoint, num_features=2, dtype="float64")
                 actual = builder(x=(nodes, nodes), edge_index=edges)
                 expected = nodes.features[edges[axis]].to(device=actual.device, dtype=torch.float64)
                 torch.testing.assert_close(actual, expected)
@@ -29,7 +39,7 @@ class TestNodeFeatures(unittest.TestCase):
     def test_invalid_configuration(self):
         for kwargs in ({"node_axis": "other"}, {"num_features": 0}, {"dtype": "int64"}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
-                NodeFeatures(**({"node_axis": "target", "num_features": 1} | kwargs))
+                AttributeFromNodeToEdge(**({"node_axis": "target", "num_features": 1} | kwargs))
 
     def test_missing_or_misaligned_features(self):
         for features in (None, torch.ones(2, 2), torch.ones(3, 1), torch.ones(2, 1, 1)):
@@ -37,7 +47,8 @@ class TestNodeFeatures(unittest.TestCase):
             if features is not None:
                 nodes.features = features
             with self.subTest(features=features), self.assertRaises(ValueError):
-                NodeFeatures(node_axis="target", num_features=1)(x=(nodes, nodes), edge_index=torch.tensor([[0], [0]]))
+                builder = AttributeFromNodeToEdge(node_axis="target", num_features=1)
+                builder(x=(nodes, nodes), edge_index=torch.tensor([[0], [0]]))
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ graph:
           _target_: anemoi.graphs.edges.attributes.EdgeDirection
           norm: unit-std
         level_from_obs:
-          _target_: anemoi.graphs.edges.attributes.NodeFeatures
+          _target_: anemoi.graphs.edges.attributes.AttributeFromNodeToEdge
           node_axis: target
           num_features: 1
         time_from_obs:
