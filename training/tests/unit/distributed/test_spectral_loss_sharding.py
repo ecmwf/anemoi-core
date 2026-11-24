@@ -21,15 +21,23 @@ import torch.multiprocessing as mp
 
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.spectral_transforms import octahedral_lons_per_lat
+from anemoi.training.losses import FourierCorrelationLoss
+from anemoi.training.losses import LogSpectralDistance
+from anemoi.training.losses import PowerSpectrumLoss
 from anemoi.training.losses import SpectralAMSELoss
 from anemoi.training.losses import SpectralCRPSLoss
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.utils.enums import TensorDim
 
 NLAT = 8
 OCTAHEDRAL_POINTS = sum(octahedral_lons_per_lat(NLAT))
 REGULAR_POINTS = NLAT * 2 * NLAT
 CARTESIAN = {"x_dim": 8, "y_dim": 13}
 CARTESIAN_POINTS = CARTESIAN["x_dim"] * CARTESIAN["y_dim"]
+# Length of the spectral dimension of the losses. The SHTs on NLAT = 8 latitudes have truncation 3, so
+# 16 (l, m) entries or 4 degrees. The 8 x 13 Cartesian grid has 104 coefficients in 8 radial bands.
+SHT_MODES, SHT_DEGREES = 16, 4
+CARTESIAN_MODES, CARTESIAN_BANDS = CARTESIAN_POINTS, 8
 N_TIME = 2
 N_MEMBERS = 3
 GRID_AXIS = 3
@@ -37,37 +45,73 @@ GRID_AXIS = 3
 # variables are shared out for the transforms.
 VARIABLE_COUNTS = (1, 2, 4)
 
-# Each loss with its number of grid points and ensemble members.
-LOSSES: dict[str, tuple[Callable[[], BaseLoss], int, int]] = {
+# Each loss with its number of grid points, ensemble members and length of the spectral dimension.
+LOSSES: dict[str, tuple[Callable[[], BaseLoss], int, int, int]] = {
     "spectral CRPS, octahedral, ring FFTs": (
         lambda: SpectralCRPSLoss(transform="octahedral_sht", nlat=NLAT),
         OCTAHEDRAL_POINTS,
         N_MEMBERS,
+        SHT_MODES,
     ),
     "spectral CRPS, octahedral, padded FFTs": (
         lambda: SpectralCRPSLoss(transform="octahedral_sht", nlat=NLAT, fft_backend="padded"),
         OCTAHEDRAL_POINTS,
         N_MEMBERS,
+        SHT_MODES,
     ),
     "spectral CRPS, regular": (
         lambda: SpectralCRPSLoss(transform="regular_sht", nlat=NLAT, nlon=2 * NLAT),
         REGULAR_POINTS,
         N_MEMBERS,
+        SHT_MODES,
+    ),
+    "log spectral distance, octahedral": (
+        lambda: LogSpectralDistance(transform="octahedral_sht", nlat=NLAT),
+        OCTAHEDRAL_POINTS,
+        1,
+        SHT_MODES,
+    ),
+    "Fourier correlation, octahedral": (
+        lambda: FourierCorrelationLoss(transform="octahedral_sht", nlat=NLAT),
+        OCTAHEDRAL_POINTS,
+        1,
+        SHT_MODES,
+    ),
+    "power spectrum, octahedral": (
+        lambda: PowerSpectrumLoss(transform="octahedral_sht", nlat=NLAT),
+        OCTAHEDRAL_POINTS,
+        1,
+        SHT_DEGREES,
     ),
     "spectral AMSE, octahedral, ring FFTs": (
         lambda: SpectralAMSELoss(transform="octahedral_sht", nlat=NLAT),
         OCTAHEDRAL_POINTS,
         1,
+        SHT_DEGREES,
     ),
     "spectral CRPS, fft2d": (
         lambda: SpectralCRPSLoss(transform="fft2d", **CARTESIAN),
         CARTESIAN_POINTS,
         N_MEMBERS,
+        CARTESIAN_MODES,
+    ),
+    "log spectral distance, fft2d": (
+        lambda: LogSpectralDistance(transform="fft2d", **CARTESIAN),
+        CARTESIAN_POINTS,
+        1,
+        CARTESIAN_MODES,
+    ),
+    "Fourier correlation, fft2d": (
+        lambda: FourierCorrelationLoss(transform="fft2d", **CARTESIAN),
+        CARTESIAN_POINTS,
+        1,
+        CARTESIAN_MODES,
     ),
     "spectral AMSE, fft2d": (
         lambda: SpectralAMSELoss(transform="fft2d", **CARTESIAN),
         CARTESIAN_POINTS,
         1,
+        CARTESIAN_BANDS,
     ),
 }
 if importlib.util.find_spec("torch_dct") is not None:
@@ -75,7 +119,15 @@ if importlib.util.find_spec("torch_dct") is not None:
         lambda: SpectralCRPSLoss(transform="dct2d", **CARTESIAN),
         CARTESIAN_POINTS,
         N_MEMBERS,
+        CARTESIAN_MODES,
     )
+
+
+def _build(build: Callable[[], BaseLoss], n_spectral: int) -> BaseLoss:
+    """Build the loss with a different weight per spectral entry, so each rank must scale its own modes."""
+    loss = build()
+    loss.add_scaler(TensorDim.GRID, torch.linspace(0.5, 1.5, n_spectral), name="spectral")
+    return loss
 
 
 def _inputs(n_grid: int, n_members: int, n_variables: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -91,7 +143,7 @@ def _loss_and_gradient(
     target: torch.Tensor,
     group: dist.ProcessGroup | None,
 ) -> tuple[torch.Tensor, torch.Tensor, slice]:
-    """Evaluate the loss on this rank's part of the grid, or on the whole grid without a group."""
+    """Evaluate the loss per variable on this rank's part of the grid, or on the whole grid without a group."""
     if group is None:
         local, kwargs = slice(None), {}
     else:
@@ -100,8 +152,8 @@ def _loss_and_gradient(
         local = slice(start, start + shard_sizes[group.rank()])
         kwargs = {"grid_shard_slice": local, "group": group, "grid_shard_sizes": shard_sizes, "grid_dim": -2}
     local_prediction = prediction[:, :, :, local].clone().requires_grad_()
-    value = loss(local_prediction, target[:, :, :, local].clone(), **kwargs)
-    value.backward()
+    value = loss(local_prediction, target[:, :, :, local].clone(), squash=False, **kwargs)
+    value.sum().backward()
     return value.detach(), local_prediction.grad, local
 
 
@@ -120,12 +172,12 @@ def _check_sharded_losses(rank: int, world_size: int, init_file: str) -> None:
         mismatches = []
         # Every rank runs every case before any check fails, so no rank is left waiting in a
         # collective that the others never reach.
-        for name, (build, n_grid, n_members) in LOSSES.items():
+        for name, (build, n_grid, n_members, n_spectral) in LOSSES.items():
             for n_variables in VARIABLE_COUNTS:
                 case = f"{name}, {n_variables} variable(s)"
                 prediction, target = _inputs(n_grid, n_members, n_variables)
-                expected, expected_grad, _ = _loss_and_gradient(build(), prediction, target, None)
-                actual, actual_grad, local = _loss_and_gradient(build(), prediction, target, group)
+                expected, expected_grad, _ = _loss_and_gradient(_build(build, n_spectral), prediction, target, None)
+                actual, actual_grad, local = _loss_and_gradient(_build(build, n_spectral), prediction, target, group)
                 if not torch.allclose(actual, expected, rtol=1e-10, atol=1e-12):
                     mismatches.append(f"{case}: loss {actual} differs from {expected}")
                 if actual_grad is None:
@@ -148,6 +200,7 @@ def test_grid_sharded_spectral_losses_match_single_process(
 
     The grid splits unevenly over 3 ranks, and some cases have fewer variables than ranks. A rank without
     variables transforms no fields and still takes part in the exchanges of the forward and backward pass.
+    Each loss has a different weight per spectral entry, which every rank applies to its own modes.
     """
     monkeypatch.setenv("OMP_NUM_THREADS", "1")
     monkeypatch.setenv("OPENBLAS_NUM_THREADS", "1")

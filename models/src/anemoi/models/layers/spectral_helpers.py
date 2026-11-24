@@ -347,6 +347,11 @@ class SphericalHarmonicTransform(Module):
         Highest degree. The coefficients include the degrees 0 to truncation.
     n_grid_points : int
         Total number of grid points in the global grid.
+    mode_weights : torch.Tensor
+        Weight of each ``(l, m)`` entry of the output, shape ``(truncation + 1, truncation + 1)``:
+        1 for m = 0, 2 for 0 < m <= l and 0 for m > l. The output only has m >= 0, and for a real
+        field the coefficient at -m is the complex conjugate of the one at m, so m > 0 counts
+        twice. Entries with m > l are always zero. The weights add up to ``(truncation + 1)**2``.
 
     Methods
     -------
@@ -406,6 +411,11 @@ class SphericalHarmonicTransform(Module):
         else:
             self.rfft_rings = self.rfft_rings_regular
         LOGGER.info(f"SphericalHarmonicTransform: Using {self.rfft_rings.__name__} for rfft_rings")
+
+        zonal_wavenumber = torch.arange(self.truncation + 1)
+        total_wavenumber = zonal_wavenumber.unsqueeze(-1)
+        mode_weights = (zonal_wavenumber <= total_wavenumber) * torch.where(zonal_wavenumber > 0, 2.0, 1.0)
+        self.register_buffer("mode_weights", mode_weights, persistent=False)
 
     def rfft_rings_reduced(self, x: Tensor) -> Tensor:
         """Compute the Fourier coefficients ``[..., latitude, m]`` on each ring of a reduced grid, up to the truncation.
