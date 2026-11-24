@@ -8,6 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 
+import pytest
+from pydantic import ValidationError
+
 from anemoi.training.schemas.data import DataSchema
 
 _TARGET = "anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector"
@@ -18,6 +21,60 @@ _MINIMAL_DATA = {
 }
 
 _MINIMAL_DATASET = {"processors": {}}
+
+
+class TestDatasetDataSchemaWithTargetSmoothing:
+    def test_target_smoothing_absent_by_default(self) -> None:
+        schema = DataSchema(**_MINIMAL_DATA, datasets={"data": _MINIMAL_DATASET})
+        assert schema.datasets["data"].target_smoothing is None
+
+    def test_target_smoothing_block(self) -> None:
+        schema = DataSchema(
+            **_MINIMAL_DATA,
+            datasets={
+                "data": {
+                    **_MINIMAL_DATASET,
+                    "target_smoothing": {
+                        "variables": ["tc_mask"],
+                        "matrix_path": "/path/to/matrix.npz",
+                        "normalisation": "row",
+                    },
+                },
+            },
+        )
+        smoothing = schema.datasets["data"].target_smoothing
+        assert smoothing.variables == ["tc_mask"]
+        assert smoothing.normalisation == "row"
+
+    def test_target_smoothing_from_graph_edges(self) -> None:
+        schema = DataSchema(
+            **_MINIMAL_DATA,
+            datasets={
+                "data": {
+                    **_MINIMAL_DATASET,
+                    "target_smoothing": {
+                        "variables": ["tc_mask"],
+                        "edges_name": ["data", "to", "data"],
+                        "edge_weight_attribute": "gauss_weight",
+                    },
+                },
+            },
+        )
+        smoothing = schema.datasets["data"].target_smoothing
+        assert smoothing.edges_name == ("data", "to", "data")
+        assert smoothing.normalisation == "none"
+
+    def test_target_smoothing_rejects_unknown_normalisation(self) -> None:
+        with pytest.raises(ValidationError):
+            DataSchema(
+                **_MINIMAL_DATA,
+                datasets={
+                    "data": {
+                        **_MINIMAL_DATASET,
+                        "target_smoothing": {"variables": ["tc_mask"], "matrix_path": "m.npz", "normalisation": "x"},
+                    },
+                },
+            )
 
 
 class TestDatasetDataSchemaWithSpatialProcessor:

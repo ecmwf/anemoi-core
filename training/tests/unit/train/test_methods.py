@@ -16,11 +16,13 @@ from typing import Any
 from typing import ClassVar
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from scipy import sparse
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data import Source
@@ -64,9 +66,12 @@ from anemoi.training.train.methods.transport_base import PreparedTransportObject
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
+from anemoi.training.utils.target_smoothing import build_target_smoothers
 from tests.batch_builders import build_batch
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from anemoi.training.train.step_output import TrainingStepOutput
 
 
@@ -315,6 +320,140 @@ def test_after_batch_transfer_gathers_then_projects(keep_batch_sharded: bool) ->
         assert calls == [("project", batch, comm_group)]
     else:
         assert calls == [("gather", batch), ("project", gathered, comm_group)]
+
+
+_SMOOTHING_NAME_TO_INDEX = {"t": 0, "mask": 1, "other": 2}
+_SMOOTHING_MATRIX = np.array(
+    [[1.0, 0.5, 0.0, 0.0], [0.5, 1.0, 0.5, 0.0], [0.0, 0.5, 1.0, 0.5], [0.0, 0.0, 0.5, 1.0]],
+    dtype=np.float32,
+)
+
+
+def _smoothing_module(tmp_path: Path, *, clamp_max: float | None, smooth: bool = True) -> SingleTraining:
+    """A module whose batch hook smooths the diagnostic ``mask`` and whose pre-processors normalise (mean-std)."""
+    path = tmp_path / "smoothing.npz"
+    sparse.save_npz(path, sparse.csr_matrix(_SMOOTHING_MATRIX))
+    data_indices = {
+        "data": IndexCollection(
+            DictConfig({"forcing": [], "diagnostic": ["mask"], "target": []}),
+            _SMOOTHING_NAME_TO_INDEX,
+        ),
+    }
+    smoothing = {"variables": ["mask"], "matrix_path": str(path), "clamp_max": clamp_max}
+    normaliser = InputNormalizer(config=DictConfig({"default": "mean-std"}))
+    module = SingleTraining.__new__(SingleTraining)
+    pl.LightningModule.__init__(module)
+    module.keep_batch_sharded = True
+    module.model_comm_group = None
+    module.target_smoothers = (
+        build_target_smoothers({"data": {"target_smoothing": smoothing}}, data_indices, grid_sizes={"data": 4})
+        if smooth
+        else {}
+    )
+    module.model = SimpleNamespace(
+        apply_spatial_pre_processors=lambda batch, **_: batch,
+        pre_processors={"data": Processors([("normalizer", normaliser)])},
+    )
+    return module
+
+
+def _smoothing_batch(raw: torch.Tensor) -> Batch:
+    statistics = {
+        "mean": torch.tensor([1.0, 0.3, -2.0]),
+        "stdev": torch.tensor([2.0, 0.4, 4.0]),
+        "minimum": torch.zeros(3),
+        "maximum": torch.ones(3),
+    }
+    return build_batch(
+        values={"data": raw},
+        coordinates={"data": torch.zeros(4, 2)},
+        metadata={"static_coords": frozenset({"data"})},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": list(_SMOOTHING_NAME_TO_INDEX)},
+        statistics={"data": statistics},
+    )
+
+
+@pytest.mark.parametrize("clamp_max", [None, 1.0])
+def test_target_smoothing_runs_on_raw_values_before_target_normalisation(
+    tmp_path: Path,
+    clamp_max: float | None,
+) -> None:
+    """The normalised target is normalise(clamp(smooth(raw))), NaN stays NaN, inputs are unchanged.
+
+    The smoother and ``clamp_max`` work in physical units, so smoothing must see raw values. Normalising first
+    would give a different result (checked below). The mean-std normaliser is not the identity.
+    """
+    raw = torch.rand(2, 2, 1, 4, 3)
+    raw[..., 1] = torch.tensor([0.0, 1.0, 1.0, 0.0])  # a mask whose blobs overlap, so clamp_max matters
+    raw[0, 1, 0, 2, 1] = torch.nan  # missing point in the smoothed variable
+    raw[1, 0, 0, :, 2] = torch.nan  # missing field in a variable that is not smoothed
+    original = raw.clone()
+    mean, stdev = torch.tensor(0.3), torch.tensor(0.4)  # statistics of ``mask``
+
+    module = _smoothing_module(tmp_path, clamp_max=clamp_max)
+    transferred = module.on_after_batch_transfer(_smoothing_batch(raw), 0)
+    targets = module.preprocess_targets(transferred)["data"].values
+
+    # Expected: smooth the raw values (NaN ignored, restored afterwards), clamp, then normalise.
+    matrix = torch.from_numpy(_SMOOTHING_MATRIX)
+    mask = original[..., 1]
+    smoothed = torch.einsum("ij,btej->btei", matrix, mask.nan_to_num(0.0))
+    if clamp_max is not None:
+        assert smoothed.max() > clamp_max  # the clamp is active
+        smoothed = smoothed.clamp(max=clamp_max)
+    smoothed = smoothed.masked_fill(mask.isnan(), torch.nan)
+    torch.testing.assert_close(targets[..., 1], (smoothed - mean) / stdev, equal_nan=True)
+    assert torch.isnan(targets[0, 1, 0, 2, 1])
+
+    # Normalising first and smoothing afterwards would give a different result.
+    wrong = torch.einsum("ij,btej->btei", matrix, ((mask - mean) / stdev).nan_to_num(0.0))
+    assert not torch.allclose(wrong, targets[..., 1].nan_to_num(0.0))
+
+    # Inputs are unchanged: the other variables hold the raw values (NaN included) in the batch and normalise
+    # exactly as in a module without smoothing, and the tensor of the incoming batch was not modified.
+    reference_module = _smoothing_module(tmp_path, clamp_max=clamp_max, smooth=False)
+    reference = reference_module.on_after_batch_transfer(_smoothing_batch(original.clone()), 0)
+    others = [_SMOOTHING_NAME_TO_INDEX["t"], _SMOOTHING_NAME_TO_INDEX["other"]]
+    torch.testing.assert_close(transferred["data"].values[..., others], original[..., others], equal_nan=True)
+    torch.testing.assert_close(
+        targets[..., others],
+        reference_module.preprocess_targets(reference)["data"].values[..., others],
+        equal_nan=True,
+    )
+    torch.testing.assert_close(raw, original, equal_nan=True)
+
+
+def test_target_smoothing_hook_follows_the_spatial_preprocessors() -> None:
+    """The smoother sees the batch the spatial pre-processors return, on the model communication group."""
+    calls = []
+    projected = _make_gridded_batch(torch.full((1, 1, 1, 2, 1), 2.0))
+
+    class Smoother:
+        def __call__(self, source: Source, model_comm_group: object | None = None) -> Source:
+            calls.append(("smooth", source.values.shape[-2], model_comm_group))
+            return source.map_data(lambda values: values + 10)
+
+    def apply_spatial_pre_processors(batch: Batch, model_comm_group: object | None = None) -> Batch:
+        del batch, model_comm_group
+        calls.append(("project",))
+        return projected
+
+    comm_group = object()
+    module = SingleTraining.__new__(SingleTraining)
+    pl.LightningModule.__init__(module)
+    module.keep_batch_sharded = True
+    module.model_comm_group = comm_group
+    module.model = SimpleNamespace(apply_spatial_pre_processors=apply_spatial_pre_processors)
+    module.target_smoothers = {"data": Smoother(), "absent": Smoother()}
+
+    result = module.on_after_batch_transfer(_make_gridded_batch(torch.zeros(1, 1, 1, 4, 1)), 0)
+
+    assert calls == [("project",), ("smooth", 2, comm_group)]
+    assert torch.all(result["data"].values == 12.0)
+    # Plain objects, not submodules: nothing enters the state dict or the inference model.
+    assert "target_smoothers" not in dict(module.named_modules())
+    assert not module.state_dict()
 
 
 def _projection_graph() -> HeteroData:

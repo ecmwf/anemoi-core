@@ -757,6 +757,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         file_path: Optional[str | Path] = None,
         row_normalize: bool = False,
         edge_mask: Optional[Tensor] = None,
+        warn_if_not_row_normalized: bool = True,
     ) -> None:
         """Initialize ProjectionGraphProvider.
 
@@ -776,8 +777,12 @@ class ProjectionGraphProvider(BaseGraphProvider):
             Whether to normalize weights per row (target node) so each row sums to 1
         edge_mask : Tensor, optional
             Boolean mask which selects graph edges before constructing the matrix
+        warn_if_not_row_normalized : bool
+            Whether to warn when the rows of the final matrix do not sum to 1, by default True.
+            Set to False for matrices that are not meant to be row-normalized (e.g. smoothing kernels).
         """
         super().__init__()
+        self._warn_if_not_row_normalized = warn_if_not_row_normalized
 
         if (file_path is None and edges_name is None) or (file_path is not None and edges_name is not None):
             raise ValueError("Exactly one of file_path or edges_name must be provided.")
@@ -873,7 +878,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
             matrix = self._row_normalize_matrix(matrix)
 
         row_sums = np.asarray(matrix.sum(axis=1)).ravel()
-        if not np.allclose(row_sums, np.ones_like(row_sums), atol=1e-5):
+        if self._warn_if_not_row_normalized and not np.allclose(row_sums, np.ones_like(row_sums), atol=1e-5):
             LOGGER.warning(
                 "Projection matrix rows do not sum to 1 (min=%.4f, max=%.4f, mean=%.4f). "
                 "This is unexpected; please check your matrix. "

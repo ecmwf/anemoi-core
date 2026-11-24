@@ -423,6 +423,143 @@ normalisation. Another option is to impute with a given constant.
                _target_: anemoi.models.preprocessing.imputer.InputImputer
                config: ${data.datasets.your_dataset_name.imputer}
 
+.. _usage-target_smoothing:
+
+******************
+ Target Smoothing
+******************
+
+Target smoothing replaces selected variables of the training batch by a
+spatially smoothed version, for example to train against a Gaussian blob
+instead of a single grid point per event (a "mask" of cyclone centres).
+It is applied once per batch, in ``on_after_batch_transfer``, on the raw
+values, after the batch is gathered and spatially pre-processed and
+before any normalisation, so the smoothing and ``clamp_max`` work in
+physical units. Training and validation targets are both smoothed.
+
+Only variables that are not model inputs (``diagnostic`` or ``target``
+variables) can be selected, so the model inputs are never altered. The
+smoother belongs to the training module and is not part of the model: it
+is not stored in the checkpoint and inference is unchanged. The model
+output is not mapped back, it predicts the smoothed field.
+
+The matrix (rows are the output grid points, columns the input grid
+points) is given either as a file or as an edge set of the training
+graph, exactly one of the two:
+
+.. code:: yaml
+
+   data:
+      datasets:
+         your_dataset_name:
+            diagnostic: [tc_mask]
+            target_smoothing:
+               variables: [tc_mask]
+               # either a sparse matrix file ...
+               matrix_path: /path/to/gauss_weight-data_to_data.npz
+               # ... or a weighted edge set of the training graph:
+               # edges_name: [data, to, data]
+               # edge_weight_attribute: gauss_weight
+               # src_node_weight_attribute: null # optional, multiplied into the weights
+               normalisation: none # or row
+               clamp_max: 1.0 # optional upper bound, e.g. for overlapping blobs
+
+``normalisation``
+   ``none`` (default) uses the matrix as given. If its diagonal is 1 on
+   every grid point, a single grid point with value 1 becomes a blob
+   with maximum exactly 1 at that point, so the matrix must have weight
+   1 on the diagonal for a peak of 1 (for example built with
+   ``GaussianDistanceWeights`` and ``norm: null``, see below). A warning
+   naming the minimum and maximum diagonal value is logged at start-up
+   when the diagonal is not 1 (tolerance 1e-6). ``row`` rescales rows to
+   sum to 1, which gives a local weighted mean (constant fields are
+   preserved, a single point keeps its mass but its peak is much lower
+   than 1).
+
+``clamp_max``
+   Optional upper bound applied after smoothing, useful in ``none`` mode
+   where blobs of nearby events add up.
+
+Missing values: a NaN point (including a field that is entirely NaN) is
+treated as 0 while smoothing and is restored to NaN afterwards, so NaNs
+never spread into finite values and ``allow_nans`` / ``ignore_nans``
+behave as without smoothing.
+
+The matrix must be square and have the dataset grid size (checked at
+start-up and per batch). With ``edges_name`` the edge set and its
+attributes must exist in the training graph, and its source and target
+nodes must have the same size. The matrix is held in float32 on the batch
+device, the smoothing is computed in float32 and the result is cast back
+to the batch dtype. When the batch is sharded over the model-parallel
+group, the selected variables are gathered, smoothed and sharded again.
+
+**Building the matrix with anemoi-graphs**
+
+Use a recipe with a ``data -> data`` edge set within a cut-off radius and
+Gaussian distance weights. The example below uses a Gaussian with sigma
+= 100 km cut at 250 km on N320. The ``sigma`` of
+``GaussianDistanceWeights`` is in radians on the unit sphere (100 km /
+6371 km = 0.015696). ``norm: null`` keeps the raw weights
+``exp(-d^2 / (2 sigma^2))``, which have weight 1 on the diagonal; the
+default ``norm: l1`` would give row-normalised weights whose diagonal is
+not 1 (use ``normalisation: row`` with those).
+
+.. code:: yaml
+
+   nodes:
+     data:
+       node_builder:
+         _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+         grid: n320 # N320 reduced Gaussian grid, 542080 points
+
+   edges:
+     - source_name: data
+       target_name: data
+       edge_builders:
+         - _target_: anemoi.graphs.edges.CutOffEdges
+           cutoff_distance_km: 250
+           max_num_neighbours: 512 # must exceed the largest neighbourhood (317 at 250 km)
+       attributes:
+         gauss_weight:
+           _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+           sigma: 0.015696 # 100 km / 6371 km
+           norm: null
+
+With ``edges_name: [data, to, data]`` and ``edge_weight_attribute:
+gauss_weight`` the training graph built from this recipe is used
+directly. Alternatively export the matrix to a file with
+:ref:`export_to_sparse <anemoi-graphs:usage-create_sparse_matrices>` and
+use ``matrix_path``:
+
+.. code:: bash
+
+   anemoi-graphs export_to_sparse tc_smoothing.yaml smoothing_matrices/ \
+       --edge-attribute-name gauss_weight --edges-name data data
+   # writes smoothing_matrices/gauss_weight-data_to_data.npz
+
+The ``max_num_neighbours`` default (64) would drop neighbours (randomly
+with pyg-lib, possibly including the point itself), so always set it
+above the largest neighbourhood. Self-loops are included by
+``CutOffEdges`` (checked on a small grid: diagonal 1, symmetric matrix).
+
+**Size on N320 (542080 points)**, counted with a KD-tree on the n320
+grid. The matrix is held with ``float32`` values and ``int32`` indices,
+replicated on every rank and moved to the GPU on first use. With
+``edges_name`` the edge set also stays in the training graph (about 112 M
+edges at 250 km, i.e. roughly 2 GB of int64 indices and float32 weights)
+on top of the CSR copy held by the smoother; with ``matrix_path`` only
+the matrix is held:
+
+-  200 km (weight 0.135 at the cut-off): 136 neighbours per point on
+   average (225 max), 74 M non-zeros, 0.6 GB.
+-  250 km (weight 0.044 at the cut-off): 208 on average (317 max), 112 M
+   non-zeros, 0.9 GB.
+-  300 km (weight 0.011 at the cut-off): 300 on average (441 max), 163 M
+   non-zeros, 1.3 GB.
+
+Exporting needs several GB of CPU memory at these sizes (the COO indices
+are int64 during export).
+
 ****************
  Loss Functions
 ****************

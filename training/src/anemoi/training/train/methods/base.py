@@ -52,6 +52,7 @@ from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.seeding import seed_random_generators
 from anemoi.training.utils.seeding import set_base_seed
+from anemoi.training.utils.target_smoothing import build_target_smoothers
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
@@ -371,6 +372,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.reader_group_size = self.config.dataloader.read_group_size
 
         self._validate_spatial_processor_target_grid(self.model.graph_data)
+
+        # Training-only smoothing of selected target variables. Plain objects, not submodules,
+        # so nothing is added to the state dict or the inference model.
+        self.target_smoothers = build_target_smoothers(
+            get_multiple_datasets_config(config.data),
+            data_indices,
+            grid_sizes={name: graph_data[name].num_nodes for name in self.dataset_names},
+            graph_data=graph_data,
+        )
 
         self.grid_dim = -2
 
@@ -1146,10 +1156,28 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
         return f"{dataset_name}_{loss_name}_loss"
 
+    def _smooth_targets(self, batch: Batch) -> Batch:
+        """Smooth the configured non-input variables of each dataset, in raw physical units.
+
+        Runs once per batch in :meth:`on_after_batch_transfer`, before every normalisation: all target
+        normalisation goes through :meth:`preprocess_targets` (training, validation and the diagnostics
+        callbacks), which only ever sees the batch returned by that hook. Smoothing here therefore happens
+        before target normalisation on every target path, exactly once, and the smoother and ``clamp_max``
+        work in physical space. Only non-input variables are smoothed (checked when the smoothers are built),
+        so the model inputs are unchanged.
+        """
+        for dataset_name, smoother in getattr(self, "target_smoothers", {}).items():
+            if dataset_name in batch:
+                batch = batch.replace(
+                    dataset_name,
+                    smoother(batch[dataset_name], model_comm_group=self.model_comm_group),
+                )
+        return batch
+
     def on_after_batch_transfer(self, batch: Batch, _: int) -> Batch:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
 
-        Also normalize the batch in-place if needed.
+        Also smooths the configured target variables (raw values, before normalisation).
 
         Parameters
         ----------
@@ -1169,6 +1197,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Spatial preprocessing (e.g. CrossGridProjector for downscaling).
         # Owned by the model; applied before normalization so projectors see raw values.
         batch = self.model.apply_spatial_pre_processors(batch, model_comm_group=self.model_comm_group)
+
+        # Target smoothing of selected non-input variables, on raw values before any normalisation.
+        batch = self._smooth_targets(batch)
 
         # Debug-log the batch contents (per-dataset shape + layout) so that
         # layout/shape mismatches can be diagnosed from a real run.
