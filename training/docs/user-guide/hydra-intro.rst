@@ -67,6 +67,104 @@ added to the training command like so:
 
    anemoi-training train --config-name=debug
 
+Generating Only the Top-Level Configs
+=====================================
+
+If you would prefer to keep all of your changes in a single file, you can
+generate only the top-level configs using the ``--top-level-only`` flag:
+
+.. code:: bash
+
+   anemoi-training config generate --top-level-only
+
+This writes the top-level YAML files, such as ``config.yaml`` and
+``lam.yaml``, but none of the config group directories (``data/``,
+``model/``, ``training/``, ...).
+
+When composing a config, Hydra looks for each file first in the
+directory you run from (or the directory given with ``--config-path``),
+and then in the configs shipped with the installed ``anemoi-training``
+package. As the group directories are not present locally, every group
+listed in the ``defaults`` of your top-level config is loaded from the
+package. You can customise them from the top-level file, either by
+selecting a different option in the ``defaults`` list or by overriding
+individual values in the body of the file, e.g.:
+
+.. code:: yaml
+
+   defaults:
+   - data: zarr
+   - dataloader: native_grid
+   - diagnostics: evaluation
+   - system: example
+   - graph: multi_scale
+   - model: transformer   # select a different model config (current default is gnn)
+   - task: forecaster
+   - training: single
+   - _self_
+
+   training:
+      max_epochs: 10  # override a single value from training/single.yaml
+
+The available options for each group can be browsed in the
+``anemoi/training/config`` directory of the installed package, or in the
+`anemoi-core repository
+<https://github.com/ecmwf/anemoi-core/tree/main/training/src/anemoi/training/config>`__.
+
+Because the group configs always come from the installed package,
+migrating to a new version of ``anemoi-training`` only requires updating
+the overrides and ``defaults`` in your top-level file. This also means
+that defaults you have not overridden **can change** when you upgrade to
+a new version of ``anemoi-training``.
+
+To keep a record of the composed config, write it to a separate file
+with ``anemoi-training config dump``:
+
+.. code:: bash
+
+   anemoi-training config dump --config-name config --output config_dump.yaml
+
+Do not dump to ``config.yaml`` in the same directory since it is the default
+output path and is overwritten without confirmation. Note that interpolations
+such as ``${...}`` are written unresolved.
+
+Some users may prefer to use the normal ``generate`` command alongside the
+``--top-level-only`` flag as a reference, to see the full set of default
+configs without having to search through where the code is installed.
+In this case, you can use the normal ``generate`` command with the
+``--output`` (``-o``) flag to write all configs into a separate directory,
+e.g.:
+
+.. code:: bash
+
+   cd <directory>
+   anemoi-training config generate --top-level-only
+   anemoi-training config generate --output=reference_configs
+
+Hydra does not search inside ``reference_configs/``, so its files are
+not used for training. Do not name this directory ``config``: if a
+``config`` directory exists, Hydra searches it instead of the directory
+you run from. Your top-level files are ignored, and the group files
+inside ``config/`` are used instead of the packaged ones. Also avoid config
+group names (``data``, ``model``, ``training``, ...), as the reference
+files would then show up as extra options for that group. Note that the
+copy is not updated when you upgrade ``anemoi-training``. To refresh it,
+delete the directory and generate it again.
+
+.. note::
+
+   Local config group directories take precedence over the package. If
+   group directories already exist where you run from, for example from
+   an earlier full ``anemoi-training config generate``, their files are
+   used instead of the packaged ones. ``--top-level-only`` does not
+   remove existing directories.
+
+   This is decided file by file: with a local ``model/gnn.yaml``,
+   ``model: gnn`` uses the local file, while ``model: transformer`` is
+   still loaded from the package. A local file replaces the packaged file
+   completely; the two are not merged. Remove any leftover group
+   directories if you want the packaged configs to be used.
+
 ****************************
  Important Config Overrides
 ****************************
