@@ -668,8 +668,13 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: list[dict[str, Source]],
         members: int | list[int] | None = 0,
+        skip_output_constraints: bool = False,
     ) -> np.ndarray:
-        """Post-process and mask per-step output Sources for plotting."""
+        """Post-process and mask per-step output Sources for plotting.
+
+        ``skip_output_constraints`` leaves out the post-processors that bound predicted states (such as a
+        ReLU), for fields that are not predictions, such as the noised target.
+        """
         post_processor = self.post_processors[dataset_name]
         output_indices_full = pl_module.data_indices[dataset_name].data.output.full
 
@@ -679,7 +684,11 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 Source,
             ), f"Expected a prediction of type Source, got {type(prediction)}."
             aligned = self._align_output_metadata(prediction, output_indices_full)
-            processed = post_processor(aligned.map_data(lambda t: t.detach().cpu()), in_place=False).values
+            processed = post_processor(
+                aligned.map_data(lambda t: t.detach().cpu()),
+                in_place=False,
+                skip_output_constraints=skip_output_constraints,
+            ).values
             # Gridded views wrap a single ``(batch, ...)`` tensor; tabular/obs views wrap a
             # list of per-sample tensors. Select the requested sample, keeping a leading
             # size-1 axis so per-step outputs can be concatenated along dim 0.
@@ -834,12 +843,13 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         target_view = target_batch[dataset_name]
         y_true, output_latlons = _field_and_coords(target_view)
 
-        def _output_field(output: Batch | Source) -> np.ndarray:
+        def _output_field(output: Batch | Source, skip_output_constraints: bool = False) -> np.ndarray:
             output_view = output[dataset_name] if isinstance(output, Batch) else output
             output_view = self._align_output_metadata(output_view, feature_indices)
             output_view = self.post_processors[dataset_name](
                 output_view.map_data(lambda t: t.detach().cpu()),
                 in_place=False,
+                skip_output_constraints=skip_output_constraints,
             )
             return _select_pred_members(output_view.values[self.sample_idx], output_view).numpy()
 
@@ -848,7 +858,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         auxiliary = None
         if auxiliary_output is not None and dataset_name in auxiliary_output:
-            auxiliary = _output_field(auxiliary_output[dataset_name])
+            # The noised target is no prediction, so the bounds on predicted states do not apply to it.
+            auxiliary = _output_field(auxiliary_output[dataset_name], skip_output_constraints=True)
 
         return input_latlons, output_latlons, x, y_true, y_pred, auxiliary
 
@@ -1182,6 +1193,8 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                     dataset_name,
                     [auxiliary_output],
                     members=self._get_process_members(pl_module),
+                    # The noised target is no prediction, so the bounds on predicted states do not apply to it.
+                    skip_output_constraints=True,
                 )
             )
             input_tensor = None

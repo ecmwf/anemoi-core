@@ -319,11 +319,21 @@ def _make_pl_module_temporal_downscaler(*, nlatlon=50) -> MagicMock:
 def _identity_post_processor() -> Callable[[torch.Tensor | Any], torch.Tensor | Any]:
     """Return a callable that returns the input tensor (for shape-preserving mock)."""
 
-    def _call(x, in_place=False) -> torch.Tensor | Any:
+    def _call(x, in_place=False, **_kwargs) -> torch.Tensor | Any:
         del in_place
         return x.clone() if isinstance(x, torch.Tensor) else x
 
     return _call
+
+
+class _BoundingProcessor:
+    """Post-processor that bounds predicted states at 0, unless asked to skip the output constraints."""
+
+    def __call__(self, x, in_place=False, skip_output_constraints=False, **_kwargs) -> Any:
+        del in_place
+        if skip_output_constraints:
+            return x
+        return x.map_data(torch.relu)
 
 
 class _IdentityProcessor:
@@ -331,7 +341,7 @@ class _IdentityProcessor:
 
     processors: ClassVar[dict] = {}
 
-    def __call__(self, x, in_place=False) -> torch.Tensor | Any:
+    def __call__(self, x, in_place=False, **_kwargs) -> torch.Tensor | Any:
         del in_place
         return x.clone() if isinstance(x, torch.Tensor) else x
 
@@ -537,6 +547,39 @@ def test_batch_output_plot_sparse_forwards_auxiliary_output() -> None:
     assert kwargs["output_latlons"].shape == (3, 2)
 
 
+def test_sparse_auxiliary_output_is_not_bounded_like_a_prediction() -> None:
+    """The noised target is shown as it is; only the prediction is bounded."""
+    callback = _sample_plot(sample_idx=0, parameters=["a", "b"], accumulation_levels_plot=[0.5], dataset_names=["obs"])
+    callback.post_processors = {"obs": _BoundingProcessor()}
+    callback.plot_fn = MagicMock(return_value=MagicMock())
+    callback._output_figure = MagicMock()
+    pl_module = _make_pl_module_forecaster(validation_rollout=1)
+    data_indices = MagicMock()
+    data_indices.data.output.full = slice(None)
+    data_indices.data.input.todict.return_value = {"name_to_index": {"a": 0, "b": 1}, "diagnostic": []}
+    data_indices.model.output.name_to_index = {"a": 0, "b": 1}
+    pl_module.data_indices = {"obs": data_indices}
+    batch = _make_sparse_batch()
+    output_view = batch["obs"].select_time(1)
+    prediction = output_view.clone(values=[torch.full_like(output_view.values[0], -2.0)])
+    auxiliary = output_view.clone(values=[torch.full_like(output_view.values[0], -3.0)])
+
+    callback._plot(
+        MagicMock(),
+        pl_module,
+        ["obs"],
+        _step_output([{"obs": prediction}]),
+        batch,
+        batch_idx=0,
+        epoch=0,
+        auxiliary_output={"obs": auxiliary},
+    )
+
+    kwargs = callback.plot_fn.call_args.kwargs
+    torch.testing.assert_close(torch.as_tensor(kwargs["y_pred"]), torch.zeros(3, 2))
+    torch.testing.assert_close(torch.as_tensor(kwargs["auxiliary"]), torch.full((3, 2), -3.0))
+
+
 # ---- Reference input of the spatial downscaler ----
 
 
@@ -619,6 +662,35 @@ def test_batch_output_plot_shows_the_reference_as_input_of_each_snapshot() -> No
         np.testing.assert_array_equal(call.kwargs["y_true"], batch["data"].values[0, step, 0].numpy())
         # a has a reference, so it gets the input and residual panels; b stays an output only.
         assert call.kwargs["parameters"] == {0: ("a", False), 1: ("b", True)}
+
+
+def test_gridded_auxiliary_output_is_not_bounded_like_a_prediction() -> None:
+    """The noised target is shown as it is; only the prediction is bounded."""
+    callback = _sample_plot(sample_idx=0, parameters=["a", "b"], dataset_names=["data"])
+    callback.plot_fn = MagicMock(return_value=None)
+    callback.post_processors = {"data": _BoundingProcessor()}
+    pl_module = _make_pl_module_spatial_downscaler()
+    batch_size, nlatlon = 2, 20
+    batch = _make_gridded_batch(torch.randn(batch_size, 2, 1, nlatlon, 2))
+    outputs = _step_output([{"data": torch.full((batch_size, 2, 1, nlatlon, 2), -2.0)}])
+    auxiliary = _pred_view(torch.full((batch_size, 2, 1, nlatlon, 2), -3.0))
+
+    callback._plot(
+        MagicMock(),
+        pl_module,
+        ["data"],
+        outputs,
+        batch,
+        batch_idx=0,
+        epoch=0,
+        auxiliary_output={"data": auxiliary},
+    )
+
+    calls = callback.plot_fn.call_args_list
+    assert len(calls) == 2
+    for call in calls:
+        np.testing.assert_array_equal(call.kwargs["y_pred"], np.zeros((nlatlon, 2)))
+        np.testing.assert_array_equal(call.kwargs["auxiliary"], np.full((nlatlon, 2), -3.0))
 
 
 def test_batch_output_plot_gathers_the_reference_without_auxiliary_output() -> None:
