@@ -68,9 +68,9 @@ class WindowNeighbourhood(Neighbourhood):
     total_queries: int
     total_keys: int
     is_self_attention: bool
-    num_bands: int = 1
-    queries: slice = slice(0, 0)
-    keys: slice = slice(0, 0)
+    num_bands: int
+    queries: slice
+    keys: slice
 
     @classmethod
     def from_config(
