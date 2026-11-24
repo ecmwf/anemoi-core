@@ -826,8 +826,12 @@ wavenumber :math:`m`, the loss is
 
 .. math::
 
-   \mathcal{L} = \sum_l \Bigl( \sum_m |\hat{F}_{lm}|^2
-                              - \sum_m |F_{lm}|^2 \Bigr)^{2}.
+   \mathcal{L} = \sum_l \Bigl( \sum_{m=-l}^{l} |\hat{F}_{lm}|^2
+                              - \sum_{m=-l}^{l} |F_{lm}|^2 \Bigr)^{2}.
+
+The spherical harmonic transforms only store :math:`m \ge 0`. For a real
+field :math:`|F_{l,-m}| = |F_{lm}|`, so terms with :math:`m > 0` are counted
+twice.
 
 The chosen spectral transform must provide a ``power_spectral_density``
 method: the SHT-based transforms (``regular_sht``, ``reduced_sht``,
@@ -857,7 +861,7 @@ Example configuration (octahedral SHT)
        your_dataset_name:
          _target_: anemoi.training.losses.PowerSpectrumLoss
          transform: octahedral_sht
-         truncation: 192
+         truncation: 191
          nlat: 192
          scalers: ['pressure_level', 'general_variable', 'spectral_dim_mean']
 
@@ -1054,9 +1058,33 @@ modes rather than grid points. Anemoi-training checks that every
 grid-dimension scaler attached to a spectral loss is sized to the
 spectral dimension.
 
-``n_spectral_modes`` is the number of spectral modes (for spherical
-harmonic transforms this is the number of total wavenumbers
-``L = truncation + 1``) considered by the loss.
+Spectral losses sum over the spectral dimension and use these scalers
+for normalisation, just as grid-point losses use node weights to
+normalise over grid points.
+
+The scale of the loss depends on the transform's coefficients. For
+spherical harmonic transforms, the total power across all wavenumbers is
+``(4 * pi)**2`` times the area-weighted mean square of the field. This
+means that, at perfect coherence, ``SpectralAMSELoss`` is
+``(4 * pi)**2`` times the area-weighted MSE. When combining a spectral
+loss with other losses, use the scalers or loss weights to account for
+this factor.
+
+``n_spectral_modes`` is the number of spectral modes considered by the
+loss. It depends on the shape of the loss tensor:
+
+-  Losses that sum over the zonal wavenumber (``PowerSpectrumLoss``,
+   ``SpectralAMSELoss``) have one entry per total wavenumber, so use
+   ``n_spectral_modes = spectral_dims = truncation + 1``; for
+   ``fft2d``/``dct2d``, the number of radial bands, see :ref:`spectral-amse`.
+-  Losses that score each coefficient (``SpectralCRPSLoss``,
+   ``LogSpectralDistance``, ``FourierCorrelationLoss``) keep the flattened
+   ``(L, M)`` array, so use
+   ``n_spectral_modes = spectral_dims = (truncation + 1)**2``. The SHT only
+   stores ``m >= 0`` on this array and entries with ``m > l`` are unused, so
+   these losses count ``m > 0`` twice and ignore ``m > l``. The weights add
+   up to ``(truncation + 1)**2``, the number of coefficients in the full
+   spectrum, so the scaler gives the mean over all coefficients.
 
 .. note::
 
@@ -1073,15 +1101,15 @@ The following spectral scaler is available:
 
 Example: averaging over total wavenumbers for an SHT-based loss that
 reduces over the zonal wavenumber (e.g. ``PowerSpectrumLoss`` or
-``SpectralAMSELoss``) with ``truncation = 192``
-(so :math:`L = 193`):
+``SpectralAMSELoss``) with ``truncation = 191``
+(so :math:`L = 192`):
 
 .. code:: yaml
 
    # config.training.scalers
    spectral_dim_mean:
       _target_: anemoi.training.losses.scalers.SpectralDimensionScaler
-      n_spectral_modes: 193
+      n_spectral_modes: 192
 
 Then reference it from the loss:
 
@@ -1092,7 +1120,7 @@ Then reference it from the loss:
          your_dataset_name:
             _target_: anemoi.training.losses.PowerSpectrumLoss
             transform: octahedral_sht
-            truncation: 192
+            truncation: 191
             nlat: 192 # o96 grid
             scalers: ['pressure_level', 'general_variable', 'spectral_dim_mean']
 
