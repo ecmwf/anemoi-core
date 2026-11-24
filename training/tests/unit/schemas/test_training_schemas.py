@@ -333,3 +333,54 @@ def test_checkpoint_pipeline_schema_loading_requires_target() -> None:
     """A loading block without _target_ is rejected."""
     with pytest.raises(ValidationError):
         CheckpointPipelineSchema(loading={"strict": True})
+
+
+def _combined_with_variables(*variables: list[str] | str | None) -> CombinedLossSchema:
+    losses = []
+    for selection in variables:
+        loss = {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["node_weights"]}
+        if selection is not None:
+            loss["predicted_variables"] = selection
+        losses.append(loss)
+    return CombinedLossSchema(**{**_COMBINED_LOSS_BASE, "losses": losses})
+
+
+def test_combined_loss_remaining_variables_valid() -> None:
+    schema = _combined_with_variables("remaining", ["tc_mask"])
+    assert schema.losses[0].predicted_variables == "remaining"
+    assert schema.losses[1].predicted_variables == ["tc_mask"]
+
+
+def test_combined_loss_remaining_variables_wrapped_loss_valid() -> None:
+    CombinedLossSchema(
+        **{
+            **_COMBINED_LOSS_BASE,
+            "losses": [
+                {
+                    "_target_": "anemoi.training.losses.aggregate.TimeAggregateLossWrapper",
+                    "time_aggregation_types": ["mean"],
+                    "loss_fn": {
+                        "_target_": "anemoi.training.losses.MSELoss",
+                        "scalers": [],
+                        "predicted_variables": "remaining",
+                    },
+                },
+                {"_target_": "anemoi.training.losses.MSELoss", "scalers": [], "predicted_variables": ["tp"]},
+            ],
+        },
+    )
+
+
+def test_combined_loss_unknown_predicted_variables_string_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _combined_with_variables("everything", ["tc_mask"])
+
+
+def test_combined_loss_multiple_remaining_rejected() -> None:
+    with pytest.raises(ValidationError, match="Only one child loss"):
+        _combined_with_variables("remaining", "remaining")
+
+
+def test_combined_loss_remaining_with_sibling_covering_all_variables_rejected() -> None:
+    with pytest.raises(ValidationError, match="covers all variables"):
+        _combined_with_variables("remaining", None)
