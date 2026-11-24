@@ -325,9 +325,9 @@ class SpectralAMSELoss(SpectralLoss):
 
     .. math::
 
-        S_L = \sum_M \left| c_{L,M} \right|^2, \qquad
+        S_L = \sum_{M=-L}^{L} \left| c_{L,M} \right|^2, \qquad
         \gamma_L = \frac{
-            \operatorname{Re}\!\left[\sum_M c^\text{pred}_{L,M}
+            \operatorname{Re}\!\left[\sum_{M=-L}^{L} c^\text{pred}_{L,M}
                 \overline{c^\text{target}_{L,M}}\right]
         }{
             \sqrt{S^\text{pred}_L}\,\sqrt{S^\text{target}_L} + \varepsilon
@@ -341,11 +341,19 @@ class SpectralAMSELoss(SpectralLoss):
     - ``regular_sht`` / ``octahedral_sht`` / ``reduced_sht``: :math:`L` is the total wavenumber
       and :math:`M` is the zonal wavenumber, consistent with the original paper.
       The sum over :math:`M` gives per-total-wavenumber power spectra.
+      Only :math:`M \ge 0` is stored. For a real field the :math:`M < 0` terms equal
+      those at :math:`M > 0`, so the latter are counted twice.
+      With the transform's coefficients, :math:`\sum_L S_L` is :math:`(4\pi)^2` times the
+      area-weighted mean square of the field.
     - ``fft2d`` / ``dct2d``: the ``(ky, kx)`` spectral plane is binned into integer
       radial-wavenumber bands :math:`L = \mathrm{round}(\sqrt{k_y^2 + k_x^2})`, and the
       sum is taken over each band. :math:`L` is then the radial wavenumber; the per-band
       terms have a slightly different physical meaning than under the SHT but the
       formulation is unchanged. Patch-wise FFT2D (``patch_size`` set) is not supported.
+
+    The loss uses the transform's coefficients as they are and sums over :math:`L`. Like
+    the other spectral losses, it leaves the normalisation over the spectral dimension to
+    the spectral scalers (see ``SpectralDimensionScaler``).
     """
 
     def __init__(self, *args, eps: float = 1e-8, **kwargs) -> None:
@@ -440,10 +448,11 @@ class PowerSpectrumLoss(SpectralLoss):
     1. Apply the spectral transform to ``pred`` and ``target``.
        The result has shape ``(..., L, M, variables)`` where ``L`` is the total
        wavenumber and ``M`` is the zonal wavenumber.
-    2. Compute the power per total wavenumber by summing ``|coeff|²`` over the
-       zonal wavenumber dimension ``M``::
+    2. Compute the power per total wavenumber by summing ``|coeff|²`` over
+       ``m = -l..l``. Only ``m >= 0`` is stored, and for a real field
+       ``|X(l, -m)| = |X(l, m)|``, so terms with ``m > 0`` are counted twice::
 
-           amp(x) = sum_m |X(l, m)|²      shape: (..., L, variables)
+           amp(x) = |X(l, 0)|² + 2 * sum_{m>0} |X(l, m)|²      shape: (..., L, variables)
 
     3. Compute the squared difference of the power spectra::
 
@@ -452,8 +461,8 @@ class PowerSpectrumLoss(SpectralLoss):
     4. Apply scalers and reduce to produce the final scalar loss.
 
     .. math::
-        \mathcal{L} = \sum_l \bigl( \sum_m |\hat{F}_{lm}|^2
-                                   - \sum_m |F_{lm}|^2 \bigr)^2 .
+        \mathcal{L} = \sum_l \bigl( \sum_{m=-l}^{l} |\hat{F}_{lm}|^2
+                                   - \sum_{m=-l}^{l} |F_{lm}|^2 \bigr)^2 .
 
     With the 2D Cartesian transforms (``fft2d``, ``dct2d``), the ``(ky, kx)`` plane is
     binned into radial-wavenumber bands :math:`l = \mathrm{round}(\sqrt{k_y^2 + k_x^2})`
@@ -525,7 +534,11 @@ class PowerSpectrumLoss(SpectralLoss):
 
 
 class LogSpectralDistance(SpectralLoss):
-    r"""Log Spectral Distance (LSD)."""
+    r"""Log Spectral Distance (LSD).
+
+    For spherical harmonic transforms, modes with ``m > 0`` are counted twice to account for
+    ``-m``, and the unused entries with ``m > l`` are ignored.
+    """
 
     def forward(
         self,
@@ -561,8 +574,9 @@ class LogSpectralDistance(SpectralLoss):
         power_tgt = torch.abs(target_spectral) ** 2
 
         log_diff = torch.log(power_tgt + eps) - torch.log(power_pred + eps)
-        log_diff, spectral_shard_slice, global_spectral_size = self._reshard_spectral_loss(
-            log_diff,
+        sq_log_diff = self.transform.weight_modes(log_diff**2, mode_dim=-2)
+        sq_log_diff, spectral_shard_slice, global_spectral_size = self._reshard_spectral_loss(
+            sq_log_diff,
             group,
             channel_shard_sizes,
             grid_dim,
@@ -570,7 +584,7 @@ class LogSpectralDistance(SpectralLoss):
 
         _assert_spectral_scalers_compatible(self.scaler, global_spectral_size)
         result = self.scale(
-            log_diff**2,
+            sq_log_diff,
             scaler_indices,
             without_scalers=without_scalers,
             grid_shard_slice=spectral_shard_slice,
@@ -579,7 +593,11 @@ class LogSpectralDistance(SpectralLoss):
 
 
 class FourierCorrelationLoss(SpectralLoss):
-    r"""Fourier Correlation Loss (FCL)."""
+    r"""Fourier Correlation Loss (FCL).
+
+    For spherical harmonic transforms, modes with ``m > 0`` are counted twice to account for
+    ``-m``, and the unused entries with ``m > l`` are ignored.
+    """
 
     def forward(
         self,
@@ -617,8 +635,7 @@ class FourierCorrelationLoss(SpectralLoss):
         denom = torch.sqrt(torch.abs(pred_spectral) ** 2 * torch.abs(target_spectral) ** 2 + eps)
         correlation = torch.clamp(cross / denom, min=-1.0, max=1.0)
 
-        # compute correlation
-        result = 1 - correlation
+        result = self.transform.weight_modes(1 - correlation, mode_dim=-2)
 
         result, spectral_shard_slice, global_spectral_size = self._reshard_spectral_loss(
             result,
@@ -666,6 +683,9 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
       - Regular SHT (Gaussian or equiangular latitudes)
       - Reduced SHT
       - Octahedral SHT
+
+    For spherical harmonic transforms, coefficients with ``m > 0`` are counted twice to account
+    for ``-m``, and the unused entries with ``m > l`` are ignored.
     """
 
     def __init__(
@@ -742,6 +762,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
             pred_spec = einops.rearrange(pred_spec, "b t e m v -> b t v m e")  # ensemble dim last for preds
             tgt_spec = einops.rearrange(tgt_spec, "b t 1 m v -> b t v m 1")
             crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
+            crps = self.transform.weight_modes(crps, mode_dim=-1)
 
         crps = einops.rearrange(crps, "b t v m -> b t 1 m v")  # consistent with tensordim
         crps, spectral_shard_slice, global_spectral_size = self._reshard_spectral_loss(
