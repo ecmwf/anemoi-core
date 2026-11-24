@@ -210,6 +210,8 @@ jobs:
     needs: [build-env, test_benchmark, test_training_cycle, test_accuracy]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
     steps:
       - name: Add failure comment
         uses: peter-evans/create-or-update-comment@v3
