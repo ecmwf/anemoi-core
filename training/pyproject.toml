@@ -53,7 +53,6 @@ dependencies = [
   "torchinfo>=1.8",
   "torchvision>=0.18",
   "tqdm>=4.65",
-  "zarr>=2.14.2",
 ]
 # Optional extras: pip install anemoi-training[azure,tests], etc.
 optional-dependencies.all = []
@@ -161,10 +160,10 @@ lint.select = [
   "FLY",    # Fstrings
   "FURB",   # Modernising code
   "G",      # flake8 logging format
+  "I",      # Import sorting
   "ICN",    # Import conventions
   "ISC",    # Implicit string concatenation
   "LOG",    # Logging
-  # "I", # isort
   "N",      # pep8 naming
   "NPY",    # Numpys
   "PERF",   # Perfomance linting
@@ -201,10 +200,16 @@ lint.ignore = [
   "D105",
   "D401",
   "E203",
+  "FURB192", # new in ruff 0.16
+  "ISC004",  # new in ruff 0.16
+  "LOG004",  # new in ruff 0.16
   "PT018",
+  "RUF036",  # new in ruff 0.16
   "S101",
   "TD003",
   "UP007",
 ]
 lint.flake8-import-conventions.extend-aliases.pytorch_lightning = "pl"
+lint.isort.force-single-line = true
+lint.isort.known-first-party = [ "anemoi" ]
 lint.pydocstyle.convention = "numpy"
