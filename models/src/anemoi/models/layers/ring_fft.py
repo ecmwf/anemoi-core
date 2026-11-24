@@ -243,8 +243,10 @@ class GraphedRingFFT(RingFFTBase):
                 gc.collect()
                 # The capture's buffers are made outside inference mode, so that a capture made during
                 # validation can still take new inputs in training.
-                with torch.inference_mode(False), torch.cuda.device(x.device), torch.amp.autocast(
-                    "cuda", enabled=torch.is_autocast_enabled(), cache_enabled=False
+                with (
+                    torch.inference_mode(False),
+                    torch.cuda.device(x.device),
+                    torch.amp.autocast("cuda", enabled=torch.is_autocast_enabled(), cache_enabled=False),
                 ):
                     samples = tuple((torch.zeros_like(band, requires_grad=requires_grad),) for band in inputs)
                     self._captures[key] = make_graphed_callables(functions, samples)
