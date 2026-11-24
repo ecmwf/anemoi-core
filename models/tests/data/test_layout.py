@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import pytest
+import torch
 
 from anemoi.models.data import TensorLayout
 
@@ -90,3 +91,75 @@ def test_canonical_reorders_the_axes(names, permutation):
 
 def test_canonical_layout_is_returned_unchanged():
     assert EXPLICIT.canonical() is EXPLICIT
+
+
+# --------------------------------------------------------------------------------------
+# conform_to: optional axes and axis order between a caller's layout and the model's
+# --------------------------------------------------------------------------------------
+
+THREE_D = TensorLayout.from_tuple("time", "grid", "variables")
+
+
+def test_conform_to_inserts_a_missing_axis_with_size_one():
+    values = torch.arange(24.0).reshape(2, 4, 3)
+
+    conformed = THREE_D.conform_to(values, EXPLICIT)
+
+    assert conformed.shape == (2, 1, 4, 3)
+    assert torch.equal(conformed[:, 0], values)
+
+
+def test_conform_to_drops_a_size_one_axis():
+    values = torch.arange(24.0).reshape(2, 1, 4, 3)
+
+    conformed = EXPLICIT.conform_to(values, THREE_D)
+
+    assert conformed.shape == (2, 4, 3)
+    assert torch.equal(conformed, values[:, 0])
+
+
+def test_conform_to_refuses_to_drop_several_members():
+    with pytest.raises(ValueError, match="Cannot drop the 'ensemble' axis of size 3"):
+        EXPLICIT.conform_to(torch.zeros(2, 3, 4, 5), THREE_D)
+
+
+def test_conform_to_inserts_and_reorders_together():
+    """(grid, variables, time) in, (time, ensemble, grid, variables) out, and back again."""
+    source = TensorLayout.from_tuple("grid", "variables", "time")
+    values = torch.arange(24.0).reshape(4, 3, 2)
+
+    conformed = source.conform_to(values, EXPLICIT)
+
+    assert conformed.shape == (2, 1, 4, 3)
+    assert torch.equal(conformed[:, 0], values.permute(2, 0, 1))
+    assert torch.equal(EXPLICIT.conform_to(conformed, source), values)
+
+
+def test_conform_to_returns_the_tensor_itself_when_nothing_changes():
+    values = torch.zeros(2, 1, 4, 3)
+    assert EXPLICIT.conform_to(values, EXPLICIT) is values
+
+
+def test_conform_to_needs_the_layout_rank():
+    with pytest.raises(ValueError, match="does not match the layout"):
+        EXPLICIT.conform_to(torch.zeros(2, 4, 3), THREE_D)
+
+
+def test_conform_to_drops_the_batch_axis_of_a_single_sample():
+    values = torch.arange(24.0).reshape(1, 2, 1, 4, 3)
+
+    assert torch.equal(EXPLICIT.with_batch_dim().conform_to(values, THREE_D), values[0, :, 0])
+    with pytest.raises(ValueError, match="Cannot drop the 'batch' axis of size 2"):
+        EXPLICIT.with_batch_dim().conform_to(torch.zeros(2, 2, 1, 4, 3), EXPLICIT)
+
+
+@pytest.mark.parametrize(
+    ("names", "match"),
+    [
+        (("time", "member", "grid", "variables"), "Unknown axis names \\['member'\\]"),
+        (("time", "grid", "grid", "variables"), "names the axes \\['grid'\\] more than once"),
+    ],
+)
+def test_from_tuple_rejects_unknown_and_repeated_names(names, match):
+    with pytest.raises(ValueError, match=match):
+        TensorLayout.from_tuple(*names)

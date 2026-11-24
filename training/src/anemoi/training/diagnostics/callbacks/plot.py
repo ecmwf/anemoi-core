@@ -33,6 +33,7 @@ from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.data import Batch
 from anemoi.models.data import Source
+from anemoi.training.diagnostics.callbacks.plot_adapter import PlotStep
 from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.evaluation.plotting.graph import graph_plot_fn as _default_graph_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as _default_loss_plot_fn
@@ -777,12 +778,14 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: TrainingStepOutput,
         batch: Batch,
+        plot_step: PlotStep,
         auxiliary_output: dict[str, Any] | None = None,
         members: int | list[int] | None = 0,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
-        """Build the plotting fields and coordinates for a tabular observation dataset.
+        """Build the plotting fields and coordinates of one figure for a tabular observation dataset.
 
-        We extract the fields directly from the per-dataset Source using select_time.
+        Each panel holds the observations of a single time window: the input window,
+        the target window and the matching prediction, as chosen by ``plot_step``.
 
         Parameters
         ----------
@@ -794,8 +797,11 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             Validation output containing prediction views.
         batch : Batch
             Validation batch containing sparse inputs and targets.
+        plot_step : PlotStep
+            Input time, target time and prediction to show, from the task's plot adapter.
         auxiliary_output : dict[str, Any] | None, optional
-            Optional conditioned-target views to include in the plot.
+            Optional conditioned-target views to include in the plot. They belong to the
+            first prediction step, so they are shown only in its figures.
         members : int | list[int] | None, optional
             Prediction members to show; None retains all members. Inputs and targets show member zero.
 
@@ -805,12 +811,6 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             Shape: (input_latlons, output_latlons, x, y_true, y_pred, auxiliary).
         """
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
-        task = pl_module.task
-
-        # Analysis-time input step (last input index) and the first validation output step.
-        input_indices = list(task.get_batch_input_indices())
-        step_kwargs = next(iter(task.steps("validation")))
-        output_indices = task.get_batch_output_indices(**step_kwargs)
 
         def _select_member(field: torch.Tensor, view: Source) -> torch.Tensor:
             """Reduce a sparse-obs sample to (grid, vars) by taking one ensemble member (index-0)."""
@@ -833,18 +833,23 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             coords = sub_view.coordinates[self.sample_idx]
             return field.detach().cpu().numpy(), np.rad2deg(coords.detach().cpu().numpy())
 
-        # Input panel: observations at the analysis (last input) timestep.
-        input_batch = batch.select(time={dataset_name: input_indices[-1]}, variables={dataset_name: feature_indices})
-        input_view = input_batch[dataset_name]
-        x, input_latlons = _field_and_coords(input_view)
+        input_batch = batch.select(
+            time={dataset_name: plot_step.input_index},
+            variables={dataset_name: feature_indices},
+        )
+        x, input_latlons = _field_and_coords(input_batch[dataset_name])
 
-        # Target panel: observations at the output timesteps.
-        target_batch = batch.select(time={dataset_name: output_indices}, variables={dataset_name: feature_indices})
-        target_view = target_batch[dataset_name]
-        y_true, output_latlons = _field_and_coords(target_view)
+        target_batch = batch.select(
+            time={dataset_name: plot_step.target_index},
+            variables={dataset_name: feature_indices},
+        )
+        y_true, output_latlons = _field_and_coords(target_batch[dataset_name])
 
         def _output_field(output: Batch | Source, skip_output_constraints: bool = False) -> np.ndarray:
             output_view = output[dataset_name] if isinstance(output, Batch) else output
+            # The prediction holds every output time; keep the one this figure shows,
+            # which sits at the same observation locations as the target window.
+            output_view = output_view.select_time(plot_step.output_step)
             output_view = self._align_output_metadata(output_view, feature_indices)
             output_view = self.post_processors[dataset_name](
                 output_view.map_data(lambda t: t.detach().cpu()),
@@ -853,11 +858,10 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             )
             return _select_pred_members(output_view.values[self.sample_idx], output_view).numpy()
 
-        # Prediction (already at the output/target observation locations).
-        y_pred = _output_field(outputs.predictions[0][dataset_name])
+        y_pred = _output_field(outputs.predictions[plot_step.prediction_step][dataset_name])
 
         auxiliary = None
-        if auxiliary_output is not None and dataset_name in auxiliary_output:
+        if auxiliary_output is not None and dataset_name in auxiliary_output and plot_step.prediction_step == 0:
             # The noised target is no prediction, so the bounds on predicted states do not apply to it.
             auxiliary = _output_field(auxiliary_output[dataset_name], skip_output_constraints=True)
 
@@ -1124,6 +1128,55 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
         return plot_kwargs
 
     @rank_zero_only
+    def _plot_sparse_dataset(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        dataset_name: str,
+        outputs: TrainingStepOutput,
+        batch: Batch,
+        spatial_inputs: dict,
+        *,
+        batch_idx: int,
+        epoch: int,
+        auxiliary_output: dict[str, Any] | None = None,
+    ) -> None:
+        """Plot an observation dataset: one figure per input/target pair the task plots.
+
+        The figures are tagged like the gridded figures of the same task.
+        """
+        for plot_step in pl_module.plot_adapter.plot_steps():
+            input_latlons, output_latlons, x, y_true, y_pred, auxiliary = self._sparse_sample(
+                pl_module,
+                dataset_name,
+                outputs,
+                batch,
+                plot_step,
+                auxiliary_output=auxiliary_output,
+                members=self._get_process_members(pl_module),
+            )
+            fig = self.plot_fn(
+                **spatial_inputs,
+                x=x,
+                y_true=y_true,
+                y_pred=y_pred,
+                latlons=input_latlons,
+                auxiliary=auxiliary,
+                sparse=True,
+                output_latlons=output_latlons,
+                settings=self.plotting_settings,
+            )
+            if fig is None:
+                # plot_fn does not support sparse observations (e.g. spectrum / histogram).
+                LOGGER.warning(
+                    "%s: skipping sparse dataset %r (plot_fn does not support scattered observations).",
+                    type(self).__name__,
+                    dataset_name,
+                )
+                return
+            tag, exp_log_tag = self._figure_tags(dataset_name, plot_step.tag, batch_idx, pl_module.local_rank)
+            self._output_figure(trainer.logger, fig, epoch=epoch, tag=tag, exp_log_tag=exp_log_tag)
+
     def _plot(
         self,
         trainer: pl.Trainer,
@@ -1145,37 +1198,17 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
             local_rank = pl_module.local_rank
 
             if _is_sparse_dataset(batch, dataset_name):
-                input_latlons, output_latlons, x, y_true, y_pred, auxiliary = self._sparse_sample(
+                self._plot_sparse_dataset(
+                    trainer,
                     pl_module,
                     dataset_name,
                     outputs,
                     batch,
+                    spatial_inputs,
+                    batch_idx=batch_idx,
+                    epoch=epoch,
                     auxiliary_output=auxiliary_output,
-                    members=self._get_process_members(pl_module),
                 )
-                fig = self.plot_fn(
-                    **spatial_inputs,
-                    x=x,
-                    y_true=y_true,
-                    y_pred=y_pred,
-                    latlons=input_latlons,
-                    auxiliary=auxiliary,
-                    sparse=True,
-                    output_latlons=output_latlons,
-                    settings=self.plotting_settings,
-                )
-                if fig is None:
-                    # plot_fn does not support sparse observations (e.g. spectrum / histogram).
-                    LOGGER.warning(
-                        "%s: skipping sparse dataset %r (plot_fn does not support scattered observations).",
-                        type(self).__name__,
-                        dataset_name,
-                    )
-                    continue
-                step_kwargs = next(iter(pl_module.task.steps("validation")))
-                tag_suffix = f"rstep{step_kwargs.get('rollout_step', 0):02d}_out00"
-                tag, exp_log_tag = self._figure_tags(dataset_name, tag_suffix, batch_idx, local_rank)
-                self._output_figure(logger, fig, epoch=epoch, tag=tag, exp_log_tag=exp_log_tag)
                 continue
 
             data_latlons, data, output_tensor = self.process(

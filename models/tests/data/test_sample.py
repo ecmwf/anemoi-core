@@ -362,3 +362,59 @@ def test_collate_rejects_a_tabular_sample_with_an_extra_axis():
 def test_collate_rejects_gridded_data_with_a_missing_axis():
     with pytest.raises(ValueError, match="describes 5 axes but the collated data has 4 dimensions"):
         Batch.collate([{"ds": _direct_gridded(torch.zeros(2, 1, 3, 2)[..., 0])}])
+
+
+# --------------------------------------------------------------------------------------
+# optional axes: a payload may leave out the ensemble axis
+# --------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("build", "names"),
+    [
+        (_gridded, ("time", "grid", "variables")),
+        (_gridded, ("grid", "variables", "time")),
+        (_tabular, ("grid", "variables")),
+    ],
+)
+def test_an_ensemble_axis_left_out_is_one_member(build, names):
+    """Without an ensemble axis the sample is the one with an explicit single-member axis."""
+    reference = build()
+    explicit = TensorLayout.from_tuple(*reference.layout.axis_names)
+    without = TensorLayout.from_tuple(*names)
+    values = explicit.conform_to(reference.values, without)
+    assert values.ndim == reference.values.ndim - 1
+
+    sample = build(values=values, layout=names)
+
+    assert sample.layout == reference.layout
+    assert torch.equal(sample.values, reference.values)
+
+
+@pytest.mark.parametrize("build", [_gridded, _tabular])
+def test_a_template_without_an_ensemble_axis_gets_one(build):
+    names = tuple(name for name in build().layout.axis_names if name != "ensemble")
+    template = build(values=None, layout=names, **TEMPLATE_SIZES)
+    assert template.layout == build(values=None, **TEMPLATE_SIZES).layout
+
+
+def test_reader_layouts_are_kept_as_they_are():
+    """The training readers pass a TensorLayout with every axis: the tensor is not copied."""
+    reference = _gridded()
+    values = reference.values.clone()
+    sample = _gridded(values=values, layout=TensorLayout(time=0, ensemble=1, grid=2, variables=3))
+    assert sample.values is values
+
+
+@pytest.mark.parametrize(
+    ("build", "layout", "match"),
+    [
+        (_gridded, ("ensemble", "grid", "variables"), "'gridded' layout must name .* lacks \\['time'\\]"),
+        (_gridded, ("time", "ensemble", "variables"), "lacks \\['grid'\\]"),
+        (_tabular, ("ensemble", "grid"), "'tabular' layout must name .* lacks \\['variables'\\]"),
+    ],
+)
+def test_layout_must_name_the_required_axes(build, layout, match):
+    values = torch.zeros(*(1 for _ in layout))
+    with pytest.raises(ValueError, match=match):
+        build(values=values, layout=layout)
