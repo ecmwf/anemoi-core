@@ -19,9 +19,6 @@ Use these settings in ``system.hardware``:
        # Keep the cache under $TMPDIR.
        # To disable the cache, set cache_dir to null.
        cache_dir: ${oc.decode:${oc.env:TMPDIR}}
-       # Write records in a background thread.
-       # When a write is in progress, the next record is not written.
-       cache_async_writes: false
        # Largest size of the cache on each node, as a fraction of the
        # total size of the disk.
        cache_max_fraction: 0.9

@@ -22,7 +22,6 @@ import socket
 import threading
 from collections.abc import Callable
 from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from multiprocessing import Value
 from pathlib import Path
@@ -346,7 +345,6 @@ class DatasetCache(pl.LightningDataModule):
         cache_root,
         hostname_suffix=None,
         proc_group=None,
-        async_writes=False,
         max_fraction: float = 0.9,
         partition: bool = False,
     ):
@@ -355,7 +353,6 @@ class DatasetCache(pl.LightningDataModule):
         self.cache_root = Path(cache_root)
         self.hostname_suffix = hostname_suffix or ""
         self.initial_proc_group = proc_group
-        self.async_writes = async_writes
         if not 0 < max_fraction <= 1:
             msg = f"max_fraction must be in (0, 1], got {max_fraction}"
             raise ValueError(msg)
@@ -372,7 +369,6 @@ class DatasetCache(pl.LightningDataModule):
         self.cache_misses = Value("q", 0)
         self.total_fetches = Value("q", 0)
         self.cache_full = Value("b", False)
-        self.cache_writes_skipped = Value("q", 0)
         self.cache_remote_errors = Value("q", 0)
         self.cache_source_records = Value("q", 0)
         self.cache_not_owned = Value("q", 0)
@@ -382,8 +378,6 @@ class DatasetCache(pl.LightningDataModule):
         self._view_version = Value("q", 0)
         self._view_loaded = 0
         self._view_path = self.cache_root / f"global-view-{os.getpid()}.pkl"
-        self._writer = None
-        self._pending_write = None
 
     def __getattr__(self, name):
         if name == "ds":
@@ -697,28 +691,7 @@ class DatasetCache(pl.LightningDataModule):
         positions, values = self._owned(namespace, sequence, positions, values)
         if not positions:
             return
-        grid_id = self._grid_id(grid_indices)
-        if not self.async_writes:
-            self._store_records(dataset_id, sequence, positions, values, grid_id)
-            return
-
-        if self._writer is None:
-            self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dataset-cache-writer")
-        if self._pending_write is not None:
-            if not self._pending_write.done():
-                self._increment(self.cache_writes_skipped, len(positions))
-                return
-            self._pending_write.result()
-        copied_values = [np.array(value, copy=True) for value in values]
-        self._pending_write = self._writer.submit(
-            self._store_records,
-            dataset_id,
-            sequence,
-            positions,
-            copied_values,
-            grid_id,
-            False,
-        )
+        self._store_records(dataset_id, sequence, positions, values, self._grid_id(grid_indices))
 
     def read_source_records(
         self,
@@ -742,7 +715,6 @@ class DatasetCache(pl.LightningDataModule):
         if any(payload is None for payload in payloads):
             return None
         values = [decode_cache_array(payload) for payload in payloads]
-        # the write does not compress, thus it is short: do it now, also when async_writes is set
         owned_positions, owned_payloads = self._owned(namespace, sequence, positions, payloads)
         self._store_records(
             dataset_id,
@@ -754,17 +726,6 @@ class DatasetCache(pl.LightningDataModule):
         )
         self._increment(self.cache_source_records, len(positions))
         return values
-
-    def wait_for_pending_writes(self) -> None:
-        if self._pending_write is not None:
-            self._pending_write.result()
-            self._pending_write = None
-
-    def close_writer(self) -> None:
-        if self._writer is not None:
-            self.wait_for_pending_writes()
-            self._writer.shutdown(wait=True)
-            self._writer = None
 
     def update_global_view(self):
         """Update which nodes have each cached record."""
@@ -799,7 +760,6 @@ class DatasetCache(pl.LightningDataModule):
         )
 
     def teardown(self, stage=None):
-        self.close_writer()
         for connection in self._connections.values():
             connection.close()
         if self.is_node_leader:
