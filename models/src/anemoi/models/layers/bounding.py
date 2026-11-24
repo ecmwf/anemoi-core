@@ -82,6 +82,29 @@ class ReluBounding(BaseBounding):
         return data
 
 
+class SigmoidBounding(BaseBounding):
+    """Bounding with a sigmoid activation, mapping the variables to (min_val, max_val).
+
+    Parameters
+    ----------
+    variables : list[str]
+        Variables that will be bounded.
+    min_val : float
+        The lower limit of the output range. Defaults to 0.
+    max_val : float
+        The upper limit of the output range. Defaults to 1.
+    """
+
+    def __init__(self, *, variables: list[str], min_val: float = 0.0, max_val: float = 1.0, **kwargs) -> None:
+        super().__init__(variables=variables)
+        self.min_val = min_val
+        self.max_val = max_val
+
+    def bound(self, data: torch.Tensor, indices: torch.Tensor, **_kwargs) -> torch.Tensor:
+        data[..., indices] = self.min_val + (self.max_val - self.min_val) * torch.sigmoid(data[..., indices])
+        return data
+
+
 class LeakyReluBounding(BaseBounding):
     """Bounding with a Leaky ReLU activation / zero clamping."""
 

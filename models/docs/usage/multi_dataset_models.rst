@@ -399,6 +399,22 @@ first batch.
    dataset's ``name_to_index`` mapping, a ``KeyError`` is raised at
    construction time.
 
+The available bounding layers, all defined in
+:mod:`anemoi.models.layers.bounding`, are:
+
+-  ``ReluBounding`` and ``LeakyReluBounding``: clamp (or leakily clamp)
+   the listed variables to be non-negative.
+-  ``NormalizedReluBounding`` and ``NormalizedLeakyReluBounding``: as
+   above, with a lower threshold given in physical units.
+-  ``SigmoidBounding``: apply a sigmoid to the listed variables, mapping
+   them to the open interval (``min_val``, ``max_val``), which defaults
+   to (0, 1). Useful for probabilities, for example when training with a
+   binary cross-entropy loss.
+-  ``HardtanhBounding`` and ``LeakyHardtanhBounding``: clamp the listed
+   variables between ``min_val`` and ``max_val``.
+-  ``FractionBounding`` and ``LeakyFractionBounding``: bound the listed
+   variables to a fraction of ``total_var``.
+
 
 A complete example is available in
 ``training/src/anemoi/training/config/model/graphtransformer_multi.yaml``.
