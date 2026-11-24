@@ -12,10 +12,7 @@ import logging
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import colormaps as mpl_colormaps
-from matplotlib.colors import BoundaryNorm
-from matplotlib.colors import Colormap
-from matplotlib.colors import Normalize
-from matplotlib.colors import TwoSlopeNorm
+from matplotlib.colors import BoundaryNorm, Colormap, Normalize, TwoSlopeNorm
 from matplotlib.figure import Figure
 
 from anemoi.training.diagnostics.evaluation.geospatial.projections import MapProjection

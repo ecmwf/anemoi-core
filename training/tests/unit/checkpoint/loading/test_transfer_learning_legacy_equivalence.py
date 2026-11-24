@@ -28,8 +28,7 @@ value would load the unmigrated weights and fail the comparison.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest

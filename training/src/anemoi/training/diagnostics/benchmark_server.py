@@ -15,21 +15,16 @@ import os.path
 import re
 import shutil
 import tarfile
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Callable
-from datetime import UTC
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import Any
-from typing import Final
+from typing import Any, Final
 
 import pandas as pd
 import yaml
-from git import GitCommandError
-from git import InvalidGitRepositoryError
-from git import Repo
+from git import GitCommandError, InvalidGitRepositoryError, Repo
 from omegaconf import DictConfig
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.cuda import memory_stats

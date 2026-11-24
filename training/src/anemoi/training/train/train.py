@@ -10,8 +10,7 @@
 
 import datetime
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from functools import cached_property
 from pathlib import Path
 from typing import Any
@@ -21,37 +20,26 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from packaging import version
 from pytorch_lightning.loggers.logger import Logger
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
-from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
-from anemoi.graphs.utils import load_graph_from_file
-from anemoi.graphs.utils import validate_loaded_graph
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME, uses_fused_dataset_graph
+from anemoi.graphs.utils import load_graph_from_file, validate_loaded_graph
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.checkpoint.runner import checkpoint_pipeline_configured
-from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
+from anemoi.training.checkpoint.runner import checkpoint_pipeline_configured, run_checkpoint_pipeline
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-from anemoi.training.diagnostics.callbacks import CallbacksContext
-from anemoi.training.diagnostics.callbacks import get_callbacks
-from anemoi.training.diagnostics.logger import get_mlflow_logger
-from anemoi.training.diagnostics.logger import get_wandb_logger
-from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
-from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.diagnostics.callbacks import CallbacksContext, get_callbacks
+from anemoi.training.diagnostics.logger import get_mlflow_logger, get_wandb_logger
+from anemoi.training.schemas.base_schema import BaseSchema, UnvalidatedBaseSchema, convert_to_omegaconf
 from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.compile import prepare_compilation
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
-from anemoi.training.utils.seeding import SeedContext
-from anemoi.training.utils.seeding import choose_base_seed
-from anemoi.training.utils.seeding import derive_seed
-from anemoi.training.utils.seeding import set_base_seed
+from anemoi.training.utils.seeding import SeedContext, choose_base_seed, derive_seed, set_base_seed
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)

@@ -8,12 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 from enum import Enum
-from typing import Annotated
-from typing import Literal
-from typing import Self
+from typing import Annotated, Literal, Self
 
-from pydantic import Field
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from anemoi.utils.schemas import BaseModel
 

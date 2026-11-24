@@ -15,20 +15,15 @@ from pathlib import Path
 
 import pytest
 import torch
-from hydra import compose
-from hydra import initialize_config_module
+from hydra import compose, initialize_config_module
 from hydra.utils import instantiate
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.utilities import rank_zero_only
 
 import anemoi.training
 from anemoi.training.checkpoint.base import CheckpointContext
-from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
-from anemoi.training.checkpoint.builder import build_resume_source
-from anemoi.training.checkpoint.builder import resumes_via_lightning
-from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+from anemoi.training.checkpoint.builder import build_checkpoint_pipeline, build_resume_source, resumes_via_lightning
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError, CheckpointLoadError
 from anemoi.training.checkpoint.loading.base import LoadingStrategy
 from anemoi.training.checkpoint.loading.strategies import WarmStartLoader
 from anemoi.training.checkpoint.runner import run_checkpoint_pipeline

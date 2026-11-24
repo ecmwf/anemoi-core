@@ -11,8 +11,7 @@ from collections.abc import Callable
 
 import pytest
 import torch
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from pydantic import TypeAdapter
 from pytest_mock import MockerFixture
 from torch.utils.checkpoint import checkpoint
@@ -20,23 +19,26 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.compile import mark_for_compilation
-from anemoi.training.losses import CRPS
-from anemoi.training.losses import CombinedLoss
-from anemoi.training.losses import GraphEdgeCRPSLoss
-from anemoi.training.losses import GraphEdgeEnergyScoreLoss
-from anemoi.training.losses import GraphEnergyScoreLoss
-from anemoi.training.losses import GraphVariogramScoreLoss
-from anemoi.training.losses import MultiscaleLossWrapper
-from anemoi.training.losses import get_loss_function
+from anemoi.training.losses import (
+    CRPS,
+    CombinedLoss,
+    GraphEdgeCRPSLoss,
+    GraphEdgeEnergyScoreLoss,
+    GraphEnergyScoreLoss,
+    GraphVariogramScoreLoss,
+    MultiscaleLossWrapper,
+    get_loss_function,
+)
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.graph_edge_operations import compute_edge_validity
-from anemoi.training.losses.graph_edge_operations import edge_difference
-from anemoi.training.losses.graph_edge_operations import weighted_edge_row_l2_norm
-from anemoi.training.losses.graph_edge_operations import weighted_row_l2_norm
+from anemoi.training.losses.graph_edge_operations import (
+    compute_edge_validity,
+    edge_difference,
+    weighted_edge_row_l2_norm,
+    weighted_row_l2_norm,
+)
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 from anemoi.training.losses.variable_mapper import LossVariableMapper
-from anemoi.training.schemas.training import CombinedLossSchema
-from anemoi.training.schemas.training import LossSchemas
+from anemoi.training.schemas.training import CombinedLossSchema, LossSchemas
 from anemoi.training.utils.index_space import IndexSpace
 
 

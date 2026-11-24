@@ -10,9 +10,7 @@
 import pytest
 import torch
 
-from anemoi.training.tasks import Autoencoder
-from anemoi.training.tasks import Forecaster
-from anemoi.training.tasks import TemporalDownscaler
+from anemoi.training.tasks import Autoencoder, Forecaster, TemporalDownscaler
 
 
 @pytest.mark.parametrize("rollout_steps", [1, 6, 12])

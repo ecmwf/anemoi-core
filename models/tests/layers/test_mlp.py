@@ -11,8 +11,7 @@
 import pytest
 import torch
 
-from anemoi.models.layers.mlp import MLP
-from anemoi.models.layers.mlp import GatedMLPLayer
+from anemoi.models.layers.mlp import MLP, GatedMLPLayer
 from anemoi.models.layers.utils import load_layer_kernels
 
 

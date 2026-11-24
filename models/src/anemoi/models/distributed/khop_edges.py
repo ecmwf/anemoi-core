@@ -9,27 +9,19 @@
 
 
 import os
-from dataclasses import dataclass
-from dataclasses import replace
-from typing import Optional
-from typing import Tuple
-from typing import Union
+from dataclasses import dataclass, replace
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.typing import Adj
-from torch_geometric.typing import PairTensor
-from torch_geometric.utils import degree
-from torch_geometric.utils import index_sort
+from torch_geometric.typing import Adj, PairTensor
+from torch_geometric.utils import degree, index_sort
 
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.graph import sync_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes, get_partition_range
+from anemoi.models.distributed.graph import shard_tensor, sync_tensor
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, ShardSizes
 from anemoi.models.distributed.utils import model_is_distributed
 
 ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
@@ -639,8 +631,7 @@ def _get_k_hop_edges(
     tuple[Adj, Tensor]
         K-hop subgraph of edge attributes and edge index.
     """
-    from torch_geometric.utils import k_hop_subgraph
-    from torch_geometric.utils import mask_to_index
+    from torch_geometric.utils import k_hop_subgraph, mask_to_index
 
     _, edge_index_k, _, edge_mask_k = k_hop_subgraph(
         node_idx=nodes,

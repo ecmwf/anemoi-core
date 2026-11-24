@@ -24,8 +24,7 @@ def _make_projector(n_src: int = 8, n_dst: int = 4) -> CrossGridProjector:
     import tempfile
 
     import numpy as np
-    from scipy.sparse import csr_matrix
-    from scipy.sparse import save_npz
+    from scipy.sparse import csr_matrix, save_npz
 
     ratio = n_src // n_dst
     # Rows are destinations and columns are sources, matching W @ x.

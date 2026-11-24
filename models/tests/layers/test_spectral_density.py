@@ -10,9 +10,7 @@
 import pytest
 import torch
 
-from anemoi.models.layers.spectral_transforms import DCT2D
-from anemoi.models.layers.spectral_transforms import FFT2D
-from anemoi.models.layers.spectral_transforms import OctahedralSHT
+from anemoi.models.layers.spectral_transforms import DCT2D, FFT2D, OctahedralSHT
 
 _DENSITY_TRANSFORMS = ["fft2d", "dct2d", "sht"]
 

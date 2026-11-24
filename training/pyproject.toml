@@ -210,6 +210,5 @@ lint.ignore = [
   "UP007",
 ]
 lint.flake8-import-conventions.extend-aliases.pytorch_lightning = "pl"
-lint.isort.force-single-line = true
 lint.isort.known-first-party = [ "anemoi" ]
 lint.pydocstyle.convention = "numpy"

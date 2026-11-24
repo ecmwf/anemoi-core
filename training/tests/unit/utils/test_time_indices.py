@@ -7,8 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.training.utils.time_indices import normalize_time_indices
-from anemoi.training.utils.time_indices import offset_time_indices
+from anemoi.training.utils.time_indices import normalize_time_indices, offset_time_indices
 
 
 def test_normalize_time_indices_collapses_contiguous_ranges() -> None:

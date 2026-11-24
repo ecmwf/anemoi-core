@@ -11,8 +11,7 @@
 import logging
 from functools import lru_cache
 
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from anemoi.transform.variables import Variable
 

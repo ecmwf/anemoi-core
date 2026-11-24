@@ -14,15 +14,19 @@ import pytest
 import torch
 from torch.nn import functional as F
 
-from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
-from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
-from anemoi.models.layers.spectral_helpers import latitude_quadrature
-from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
-from anemoi.models.layers.spectral_transforms import InverseReducedSHT
-from anemoi.models.layers.spectral_transforms import InverseRegularSHT
-from anemoi.models.layers.spectral_transforms import OctahedralSHT
-from anemoi.models.layers.spectral_transforms import ReducedSHT
-from anemoi.models.layers.spectral_transforms import RegularSHT
+from anemoi.models.layers.spectral_helpers import (
+    InverseSphericalHarmonicTransform,
+    SphericalHarmonicTransform,
+    latitude_quadrature,
+)
+from anemoi.models.layers.spectral_transforms import (
+    InverseOctahedralSHT,
+    InverseReducedSHT,
+    InverseRegularSHT,
+    OctahedralSHT,
+    ReducedSHT,
+    RegularSHT,
+)
 
 """
 Random array of complex spectral coefficients.

@@ -10,8 +10,7 @@
 import pytest
 import torch
 
-from anemoi.training.losses.graph_score_base import csr_matmul
-from anemoi.training.losses.graph_score_base import safe_sqrt
+from anemoi.training.losses.graph_score_base import csr_matmul, safe_sqrt
 
 
 def test_csr_matmul_matches_dense_for_arbitrary_leading_dimensions() -> None:

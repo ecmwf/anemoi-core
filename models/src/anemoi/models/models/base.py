@@ -15,20 +15,15 @@ from typing import Optional
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.graph import gather_tensor, shard_tensor
+from anemoi.models.distributed.shapes import DatasetShardSizes, ShardSizes, get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.target_features import DecodingTargetFeature
-from anemoi.models.layers.target_features import create_decoding_target_features
+from anemoi.models.layers.target_features import DecodingTargetFeature, create_decoding_target_features
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 

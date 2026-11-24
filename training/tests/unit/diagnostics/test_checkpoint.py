@@ -16,8 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import torch
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.demos.boring_classes import BoringModel
 from torch import nn

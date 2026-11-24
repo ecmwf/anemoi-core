@@ -16,8 +16,7 @@ from pathlib import Path
 import pytorch_lightning as pl
 from pytorch_lightning.utilities import rank_zero_only
 
-from anemoi.utils.dates import frequency_to_string
-from anemoi.utils.dates import frequency_to_timedelta
+from anemoi.utils.dates import frequency_to_string, frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
 

@@ -36,8 +36,7 @@ from __future__ import annotations
 import importlib
 import logging
 from abc import abstractmethod
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from anemoi.training.checkpoint.base import PipelineStage
 

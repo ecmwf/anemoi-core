@@ -20,9 +20,7 @@ import pytest
 import torch
 
 from anemoi.training.checkpoint.base import CheckpointContext
-from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError, CheckpointLoadError, CheckpointNotFoundError
 from anemoi.training.checkpoint.sources.local import LocalSource
 
 if TYPE_CHECKING:

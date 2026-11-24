@@ -64,16 +64,13 @@ through ``run_checkpoint_pipeline``. Any other config can be driven directly::
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-from typing import Any
-from typing import Union
+from typing import TYPE_CHECKING, Any, Union
 
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 if TYPE_CHECKING:
-    from .base import CheckpointContext
-    from .base import PipelineStage
+    from .base import CheckpointContext, PipelineStage
 
 LOGGER = logging.getLogger(__name__)
 

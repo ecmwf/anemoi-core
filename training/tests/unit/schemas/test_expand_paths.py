@@ -11,8 +11,7 @@ from pathlib import Path
 from typing import Union
 
 import pytest
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from anemoi.training.schemas.base_schema import expand_paths
 

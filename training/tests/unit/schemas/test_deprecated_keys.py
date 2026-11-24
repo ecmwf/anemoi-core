@@ -22,11 +22,8 @@ import pytest
 from omegaconf import OmegaConf
 from pydantic import ValidationError
 
-from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
-from anemoi.training.checkpoint.builder import build_resume_source
-from anemoi.training.schemas.base_schema import _DEPRECATED_KEYS
-from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.checkpoint.builder import build_checkpoint_pipeline, build_resume_source
+from anemoi.training.schemas.base_schema import _DEPRECATED_KEYS, BaseSchema, UnvalidatedBaseSchema
 from anemoi.training.schemas.training import CheckpointPipelineSchema
 
 _RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"

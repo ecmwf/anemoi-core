@@ -15,14 +15,16 @@ from pathlib import Path
 
 import pytest
 
-from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-from anemoi.training.checkpoint.exceptions import CheckpointError
-from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
-from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
-from anemoi.training.checkpoint.exceptions import CheckpointSourceError
-from anemoi.training.checkpoint.exceptions import CheckpointTimeoutError
-from anemoi.training.checkpoint.exceptions import CheckpointValidationError
+from anemoi.training.checkpoint.exceptions import (
+    CheckpointConfigError,
+    CheckpointError,
+    CheckpointIncompatibleError,
+    CheckpointLoadError,
+    CheckpointNotFoundError,
+    CheckpointSourceError,
+    CheckpointTimeoutError,
+    CheckpointValidationError,
+)
 
 
 class TestCheckpointError:

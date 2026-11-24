@@ -20,8 +20,7 @@ from anemoi.training.checkpoint.catalog import ComponentCatalog
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from unittest.mock import MagicMock
 
 

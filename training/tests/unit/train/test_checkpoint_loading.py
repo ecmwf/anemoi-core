@@ -17,23 +17,18 @@ from unittest.mock import MagicMock
 
 import pytest
 import torch
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
-from anemoi.models.preprocessing import Processors
-from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.models.preprocessing import Processors, StepwiseProcessors
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import reject_unsupported_warm_start
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-from anemoi.training.checkpoint.runner import checkpoint_pipeline_configured
-from anemoi.training.checkpoint.runner import run_checkpoint_pipeline
+from anemoi.training.checkpoint.runner import checkpoint_pipeline_configured, run_checkpoint_pipeline
 from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils import seeding
-from anemoi.training.utils.seeding import SeedContext
-from anemoi.training.utils.seeding import derive_seed
-from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.seeding import SeedContext, derive_seed, get_base_seed
 
 
 class DummyIndex:

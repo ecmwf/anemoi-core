@@ -9,19 +9,16 @@
 
 
 import functools
-from collections.abc import Callable
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.base import LossFactoryContextKey
+from anemoi.training.losses.base import BaseLoss, LossFactoryContextKey
 from anemoi.training.losses.loss import get_loss_function
-from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
-from anemoi.training.losses.scaler_tensor import ScaleTensor
+from anemoi.training.losses.scaler_tensor import TENSOR_SPEC, ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 
 

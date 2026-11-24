@@ -8,8 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
-from unittest.mock import MagicMock
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -17,13 +16,15 @@ from hydra.errors import InstantiationException
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
-from anemoi.training.losses import CombinedLoss
-from anemoi.training.losses import MAELoss
-from anemoi.training.losses import MSELoss
-from anemoi.training.losses import PowerSpectrumLoss
-from anemoi.training.losses import SpectralCRPSLoss
-from anemoi.training.losses import WeightedMSELoss
-from anemoi.training.losses import get_loss_function
+from anemoi.training.losses import (
+    CombinedLoss,
+    MAELoss,
+    MSELoss,
+    PowerSpectrumLoss,
+    SpectralCRPSLoss,
+    WeightedMSELoss,
+    get_loss_function,
+)
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.index_space import IndexSpace

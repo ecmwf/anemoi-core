@@ -11,20 +11,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
 
-from anemoi.training.checkpoint import CheckpointContext
-from anemoi.training.checkpoint import CheckpointError
-from anemoi.training.checkpoint import CheckpointPipeline
-from anemoi.training.checkpoint import PipelineStage
-from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+from anemoi.training.checkpoint import CheckpointContext, CheckpointError, CheckpointPipeline, PipelineStage
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError, CheckpointLoadError
 from anemoi.training.checkpoint.loading.base import LoadingStrategy
 from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
 from anemoi.training.checkpoint.modifiers.base import ModelModifier

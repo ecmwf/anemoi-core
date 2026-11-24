@@ -13,8 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from hydra import compose
-from hydra import initialize_config_module
+from hydra import compose, initialize_config_module
 from omegaconf import OmegaConf
 
 from anemoi.training.commands.config import ConfigGenerator

@@ -42,19 +42,17 @@ from pathlib import Path
 
 import mlflow
 import yaml
-from mlflow.entities import Metric
-from mlflow.entities import Param
-from mlflow.entities import RunStatus
-from mlflow.entities import RunTag
+from mlflow.entities import Metric, Param, RunStatus, RunTag
 from mlflow.exceptions import MlflowException
 from mlflow.utils.mlflow_tags import MLFLOW_USER
-from mlflow.utils.validation import MAX_METRICS_PER_BATCH
-from mlflow.utils.validation import MAX_PARAMS_TAGS_PER_BATCH
+from mlflow.utils.validation import MAX_METRICS_PER_BATCH, MAX_PARAMS_TAGS_PER_BATCH
 
-from anemoi.training.diagnostics.mlflow.utils import check_params_length
-from anemoi.training.diagnostics.mlflow.utils import clean_config_params
-from anemoi.training.diagnostics.mlflow.utils import get_max_params_length
-from anemoi.training.diagnostics.mlflow.utils import rewrite_lineage
+from anemoi.training.diagnostics.mlflow.utils import (
+    check_params_length,
+    clean_config_params,
+    get_max_params_length,
+    rewrite_lineage,
+)
 
 LOGGER = logging.getLogger(__name__)
 

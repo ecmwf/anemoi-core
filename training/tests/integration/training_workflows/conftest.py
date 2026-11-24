@@ -13,11 +13,8 @@ from typing import Any
 
 import pytest
 import torch
-from hydra import compose
-from hydra import initialize_config_module
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
-from omegaconf import open_dict
+from hydra import compose, initialize_config_module
+from omegaconf import DictConfig, OmegaConf, open_dict
 
 from anemoi.models.migrations import Migrator
 from anemoi.training.testing import GetTmpPath

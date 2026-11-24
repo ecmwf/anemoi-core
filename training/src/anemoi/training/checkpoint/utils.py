@@ -16,18 +16,14 @@ import logging
 import time
 import urllib.error
 import urllib.request
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 import torch
 
-from .exceptions import CheckpointLoadError
-from .exceptions import CheckpointSourceError
-from .exceptions import CheckpointTimeoutError
-from .exceptions import CheckpointValidationError
+from .exceptions import CheckpointLoadError, CheckpointSourceError, CheckpointTimeoutError, CheckpointValidationError
 
 LOGGER = logging.getLogger(__name__)
 

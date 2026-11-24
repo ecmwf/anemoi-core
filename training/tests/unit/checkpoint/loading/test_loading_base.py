@@ -19,8 +19,7 @@ import torch
 import torch.nn as nn
 
 from anemoi.training.checkpoint.base import CheckpointContext
-from anemoi.training.checkpoint.loading.base import LoadingStrategy
-from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
+from anemoi.training.checkpoint.loading.base import LoadingStrategy, preserve_anemoi_metadata
 
 if TYPE_CHECKING:
     from typing import Any

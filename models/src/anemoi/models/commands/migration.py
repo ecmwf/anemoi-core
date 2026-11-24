@@ -10,8 +10,7 @@
 
 import logging
 import subprocess
-from argparse import ArgumentParser
-from argparse import Namespace
+from argparse import ArgumentParser, Namespace
 from datetime import datetime
 from pathlib import Path
 from shutil import copy2
@@ -19,9 +18,7 @@ from shutil import copy2
 from jinja2 import Environment
 from rich.console import Console
 
-from ..migrations import MIGRATION_PATH
-from ..migrations import IncompatibleCheckpointException
-from ..migrations import Migrator
+from ..migrations import MIGRATION_PATH, IncompatibleCheckpointException, Migrator
 from ..migrations.migrator import LOGGER as migrator_logger
 from . import Command
 

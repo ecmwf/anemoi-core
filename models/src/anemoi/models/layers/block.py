@@ -10,41 +10,25 @@
 
 import logging
 import os
-from abc import ABC
-from abc import abstractmethod
-from typing import Optional
-from typing import Union
+from abc import ABC, abstractmethod
+from typing import Optional, Union
 
 import einops
 import torch
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.typing import Adj
-from torch_geometric.typing import OptPairTensor
-from torch_geometric.typing import Size
+from torch_geometric.typing import Adj, OptPairTensor, Size
 
-from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.graph import halo_exchange
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.graph import sync_tensor
+from anemoi.models.distributed.graph import all_to_all_transpose, halo_exchange, shard_tensor, sync_tensor
 from anemoi.models.distributed.halo import HaloInfo
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, GraphShardInfo, ShardSizes, get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
-from anemoi.models.layers.attention import MultiHeadCrossAttention
-from anemoi.models.layers.attention import MultiHeadSelfAttention
-from anemoi.models.layers.conv import GraphConv
-from anemoi.models.layers.conv import GraphTransformerConv
-from anemoi.models.layers.mlp import MLP
-from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.models.layers.mlp import build_feedforward_layer
+from anemoi.models.layers.attention import MultiHeadCrossAttention, MultiHeadSelfAttention
+from anemoi.models.layers.conv import GraphConv, GraphTransformerConv
+from anemoi.models.layers.mlp import MLP, MLPImplementation, build_feedforward_layer
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
-from anemoi.models.triton.utils import edge_index_to_csc
-from anemoi.models.triton.utils import is_triton_available
+from anemoi.models.triton.utils import edge_index_to_csc, is_triton_available
 from anemoi.utils.config import DotDict
 
 if is_triton_available():

@@ -24,8 +24,7 @@ import torch
 import torch.distributed as dist
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.khop_edges import shard_edges_1hop
-from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
+from anemoi.models.distributed.khop_edges import shard_edges_1hop, sort_edge_index_by_dst
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers import processor as processor_module
 from anemoi.models.layers.processor import GraphTransformerProcessor

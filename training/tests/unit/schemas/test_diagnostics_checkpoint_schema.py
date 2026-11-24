@@ -17,10 +17,12 @@ from pydantic import ValidationError
 from anemoi.training.commands.checkpoint import Checkpoint
 from anemoi.training.schemas.diagnostics import CheckpointSchema
 from anemoi.training.train.methods.base import BaseTrainingModule
-from anemoi.training.utils.hyperparameters import HYPERPARAMETERS_FOR_RESUME
-from anemoi.training.utils.hyperparameters import INIT_HYPERPARAMETERS
-from anemoi.training.utils.hyperparameters import OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION
-from anemoi.training.utils.hyperparameters import REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION
+from anemoi.training.utils.hyperparameters import (
+    HYPERPARAMETERS_FOR_RESUME,
+    INIT_HYPERPARAMETERS,
+    OPTIONAL_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION,
+    REQUIRED_HYPERPARAMETERS_FOR_INFERENCE_CONVERSION,
+)
 
 
 def test_init_hyperparameters_match_training_module_signature() -> None:

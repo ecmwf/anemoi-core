@@ -18,8 +18,7 @@ now one function whose order is pinned here.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn as nn

@@ -8,8 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from typing import Any
-from typing import Union
+from typing import Any, Union
 
 import pytorch_lightning as pl
 import torch

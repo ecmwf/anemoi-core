@@ -9,12 +9,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated
-from typing import Literal
-from typing import Union
+from typing import Annotated, Literal, Union
 
-from pydantic import Field
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from anemoi.utils.schemas import BaseModel
 

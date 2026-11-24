@@ -10,11 +10,13 @@
 import pytest
 from pydantic import TypeAdapter
 
-from anemoi.models.schemas.aggregator import AggregatorSchema
-from anemoi.models.schemas.aggregator import ConcatAggregatorSchema
-from anemoi.models.schemas.aggregator import MeanAggregatorSchema
-from anemoi.models.schemas.aggregator import PointwiseCrossAttentionAggregatorSchema
-from anemoi.models.schemas.aggregator import SumAggregatorSchema
+from anemoi.models.schemas.aggregator import (
+    AggregatorSchema,
+    ConcatAggregatorSchema,
+    MeanAggregatorSchema,
+    PointwiseCrossAttentionAggregatorSchema,
+    SumAggregatorSchema,
+)
 
 
 @pytest.mark.parametrize(

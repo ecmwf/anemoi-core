@@ -11,9 +11,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.training.losses.graph_energy_score_base import BaseGraphEnergyScoreLoss
-from anemoi.training.losses.graph_score_base import csr_matmul
-from anemoi.training.losses.graph_score_base import safe_sqrt
-from anemoi.training.losses.graph_score_base import scale_node_differences
+from anemoi.training.losses.graph_score_base import csr_matmul, safe_sqrt, scale_node_differences
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 

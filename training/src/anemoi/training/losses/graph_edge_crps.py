@@ -10,10 +10,12 @@
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.training.losses.graph_edge_operations import aggregate_edge_values
-from anemoi.training.losses.graph_edge_operations import compute_edge_validity
-from anemoi.training.losses.graph_edge_operations import compute_node_validity
-from anemoi.training.losses.graph_edge_operations import edge_difference
+from anemoi.training.losses.graph_edge_operations import (
+    aggregate_edge_values,
+    compute_edge_validity,
+    compute_node_validity,
+    edge_difference,
+)
 from anemoi.training.losses.graph_score_base import BaseGraphScoreLoss
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 

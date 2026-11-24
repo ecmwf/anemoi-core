@@ -14,8 +14,7 @@ import torch
 from torch.nn import functional as F
 
 from anemoi.models.layers.ring_fft import RingFFT
-from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
-from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
+from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform, SphericalHarmonicTransform
 
 
 @pytest.fixture(params=["cpu", "cuda"])

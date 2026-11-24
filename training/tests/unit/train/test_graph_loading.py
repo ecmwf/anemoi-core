@@ -8,8 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from pathlib import Path
-from unittest.mock import MagicMock
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import torch
 from omegaconf import OmegaConf

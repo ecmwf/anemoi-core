@@ -14,9 +14,7 @@ import logging
 import os
 import types
 from pathlib import Path
-from typing import TYPE_CHECKING
-from typing import Any
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pytorch_lightning.loggers.mlflow import _convert_params
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
@@ -33,8 +31,7 @@ try:
 
     from azure.ai.ml import MLClient
     from azure.ai.ml.identity import AzureMLOnBehalfOfCredential
-    from azure.identity import DefaultAzureCredential
-    from azure.identity import ManagedIdentityCredential
+    from azure.identity import DefaultAzureCredential, ManagedIdentityCredential
 
     # NOTE: Lightweight dependency for Python 3.10.
     # Replace with `from enum import StrEnum` when deprecating 3.10.
@@ -48,8 +45,7 @@ except ModuleNotFoundError as e:
     raise ModuleNotFoundError(msg) from e
 
 
-from anemoi.training.diagnostics.mlflow import LOG_MODEL
-from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
+from anemoi.training.diagnostics.mlflow import LOG_MODEL, MAX_PARAMS_LENGTH
 from anemoi.training.diagnostics.mlflow.logger import BaseAnemoiMLflowLogger
 from anemoi.utils.mlflow.auth import NoAuth
 

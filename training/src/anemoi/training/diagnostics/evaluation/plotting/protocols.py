@@ -39,9 +39,7 @@ Pass it in the YAML config::
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING
-from typing import Any
-from typing import runtime_checkable
+from typing import TYPE_CHECKING, Any, runtime_checkable
 
 from typing_extensions import Protocol
 
