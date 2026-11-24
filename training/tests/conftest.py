@@ -115,6 +115,13 @@ def pytest_configure(config: pytest.Config) -> None:
         raise pytest.UsageError(msg)
 
 
+def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
+    # The multi-GPU tests run under srun with one process per GPU: no xdist workers with -n logical (pytest.ini).
+    if config.getoption("--multigpu"):
+        return 0
+    return None
+
+
 @pytest.fixture
 def mlflow_server(pytestconfig: Any) -> str:
     return pytestconfig.getoption("mlflow_server")

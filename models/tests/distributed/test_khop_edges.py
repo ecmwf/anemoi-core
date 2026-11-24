@@ -85,9 +85,9 @@ def _edges_cover_same_set(
         )
 
         # Same number of edges (same dst nodes → same edges in 1-hop)
-        assert (
-            attr_a.shape[0] == attr_b.shape[0]
-        ), f"Chunk {i}: different number of edges ({attr_a.shape[0]} vs {attr_b.shape[0]})"
+        assert attr_a.shape[0] == attr_b.shape[0], (
+            f"Chunk {i}: different number of edges ({attr_a.shape[0]} vs {attr_b.shape[0]})"
+        )
 
         # Edges should be the same set (sort by (src, dst) to compare)
         def _sort_edges(edge_index, edge_attr):
@@ -144,9 +144,9 @@ class TestSortEdges1hopChunksBipartite:
         )
 
         for i, (attr_chunk, idx_chunk) in enumerate(zip(attr_list, idx_list)):
-            assert (
-                attr_chunk.shape[0] == partition.edge_splits[i]
-            ), f"Chunk {i}: attr size {attr_chunk.shape[0]} != partition split {partition.edge_splits[i]}"
+            assert attr_chunk.shape[0] == partition.edge_splits[i], (
+                f"Chunk {i}: attr size {attr_chunk.shape[0]} != partition split {partition.edge_splits[i]}"
+            )
             assert idx_chunk.shape[1] == partition.edge_splits[i]
 
     def test_total_edges_preserved(self):
