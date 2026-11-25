@@ -49,6 +49,7 @@ triggers = ["upstream-change", "rebuild-request"]
 packages = ["anemoi-graphs", "anemoi-models", "anemoi-training"]
 
 [matrix.test.defaults]
+sccache = false
 job-script = "./.ci/test.sh.j2"
 runs-on = "ubuntu-24.04"
 platform = "gh-ubuntu-24.04"
