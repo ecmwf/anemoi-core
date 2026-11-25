@@ -13,5 +13,5 @@
 /.github/ @ecmwf/anemoi_admins @ecmwf/anemoi_security
 /.ci/ @ecmwf/anemoi_admins @ecmwf/anemoi_security
 /CODEOWNERS @ecmwf/anemoi_admins @ecmwf/anemoi_security
-/docs/CODEOWNERS @ecmwf/anemoi_admins @ecmwf/anemoi_security 
+/docs/CODEOWNERS @ecmwf/anemoi_admins @ecmwf/anemoi_security
 # END org baseline
