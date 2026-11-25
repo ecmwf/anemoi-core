@@ -10,11 +10,14 @@
 
 import logging
 from abc import abstractmethod
+from collections.abc import Callable
 from collections.abc import Sequence
+from typing import TypeVar
 
 import numpy as np
 import pytorch_lightning as pl
 import torch
+from pytorch_lightning.plugins.environments import LightningEnvironment
 from pytorch_lightning.strategies.ddp import DDPStrategy
 
 from anemoi.training.distributed.groups import build_ensemble_layout
@@ -31,6 +34,8 @@ from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.seeding import set_base_seed
 
 LOGGER = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 def register_gradient_scaling_hooks(
@@ -82,6 +87,28 @@ def seed_rnd(model_comm_group_id: int, global_rank: int) -> None:
         rnd_seed,
         sanity_rnd,
     )
+
+
+def setup_process_group_early(strategy: pl.strategies.Strategy) -> None:
+    """Start the process group before ``trainer.fit``, so that ranks can share objects while the model is built.
+
+    Lightning does not start the process group again in ``trainer.fit``. Do nothing with
+    ``LightningEnvironment``, because then Lightning can start the processes in ``trainer.fit``.
+    """
+    environment = getattr(strategy, "cluster_environment", None)
+    if (
+        isinstance(strategy, DDPStrategy)
+        and not isinstance(environment, LightningEnvironment)
+        and not torch.distributed.is_initialized()
+    ):
+        strategy.setup_environment()
+
+
+def broadcast_from_rank_zero(make: Callable[[], T]) -> T:
+    """Call ``make`` on global rank 0 and send the result to all ranks. The other ranks wait for rank 0."""
+    obj = [make() if torch.distributed.get_rank() == 0 else None]
+    torch.distributed.broadcast_object_list(obj, src=0)
+    return obj[0]
 
 
 class BaseDDPStrategy(DDPStrategy):

@@ -25,6 +25,7 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from packaging import version
 from pytorch_lightning.loggers.logger import Logger
+from pytorch_lightning.utilities import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
@@ -40,6 +41,8 @@ from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
+from anemoi.training.distributed.strategy import broadcast_from_rank_zero
+from anemoi.training.distributed.strategy import setup_process_group_early
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -258,15 +261,26 @@ class AnemoiTrainer(ABC):
                 )
                 raise ValueError(msg)
 
-        # Try loading existing saved graph before rebuilding.
-        overwrite = graph_cfg.get("overwrite", False)
+        if torch.distributed.is_initialized():
+            # Only rank 0 loads or builds the graph. The other ranks wait for it.
+            return broadcast_from_rank_zero(lambda: self._load_or_build_graph(graph_config, save_path, write=True))
+        # Without a process group, each rank gets the graph, but only global rank 0 writes it.
+        return self._load_or_build_graph(graph_config, save_path, write=rank_zero_only.rank == 0)
+
+    def _load_or_build_graph(self, graph_config: DictConfig, save_path: Path | None, write: bool) -> HeteroData:
+        """Load the graph from ``save_path`` if possible, else build it. Write a built graph only if ``write``."""
+        overwrite = self.config.graph.get("overwrite", False)
         if save_path and save_path.exists() and not overwrite:
-            fused = uses_fused_dataset_graph(graph_cfg, dataset_names)
-            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
+            fused = uses_fused_dataset_graph(self.config.graph, self._dataset_names)
+            required = self._dataset_names if fused else [DEFAULT_DATASET_NAME]
             graph = load_graph_from_file(save_path)
             validate_loaded_graph(graph, required)
             return graph
 
+        if not write:
+            # Rank 0 writes the graph, thus do not warn that this rank does not write it.
+            logging.getLogger("anemoi.graphs.create").setLevel(logging.ERROR)
+            save_path = None
         return GraphCreator(graph_config).create(save_path=save_path, overwrite=overwrite)
 
     def _validate_transfer_learning_datasets(
@@ -808,6 +822,9 @@ class AnemoiTrainer(ABC):
             enable_checkpointing=self.config.diagnostics.enable_checkpointing,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
+
+        # Start the process group before the model is built, so that only rank 0 builds the graph.
+        setup_process_group_early(trainer.strategy)
 
         self.model = prepare_compilation(self.model, self.config.model, self.config.training)
 

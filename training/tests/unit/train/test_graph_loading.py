@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+import pytest
 import torch
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
@@ -147,3 +148,40 @@ def test_graph_build_drops_schema_keys_from_node_builder() -> None:
     )
     assert captured_dataset["dataset"] == dataset_config["dataset"]
     assert captured_dataset["check_variables_compatibility"] == dataset_config["check_variables_compatibility"]
+
+
+@pytest.mark.parametrize(("rank", "expect_written"), [(0, True), (1, False)])
+def test_graph_build_without_process_group_writes_graph_only_on_rank_zero(
+    tmp_path: Path,
+    rank: int,
+    expect_written: bool,
+) -> None:
+    graph_path = tmp_path / "graph.pt"
+    trainer = _build_trainer_config_with_dataset_config({"dataset": "/path/to/dataset.zarr"})
+    trainer.config.system.input.graph = str(graph_path)
+    mock_creator = MagicMock()
+
+    with (
+        patch("anemoi.training.train.train.GraphCreator", return_value=mock_creator),
+        patch("anemoi.training.train.train.rank_zero_only.rank", rank),
+    ):
+        trainer.graph_data
+
+    assert mock_creator.create.call_args.kwargs["save_path"] == (graph_path if expect_written else None)
+
+
+def test_graph_build_with_process_group_is_broadcast_from_rank_zero(tmp_path: Path) -> None:
+    graph_path = tmp_path / "graph.pt"
+    trainer = _build_trainer_config_with_dataset_config({"dataset": "/path/to/dataset.zarr"})
+    trainer.config.system.input.graph = str(graph_path)
+    mock_creator = MagicMock()
+
+    with (
+        patch("anemoi.training.train.train.GraphCreator", return_value=mock_creator),
+        patch("torch.distributed.is_initialized", return_value=True),
+        patch("anemoi.training.train.train.broadcast_from_rank_zero", side_effect=lambda make: make()) as broadcast,
+    ):
+        trainer.graph_data
+
+    broadcast.assert_called_once()
+    assert mock_creator.create.call_args.kwargs["save_path"] == graph_path
