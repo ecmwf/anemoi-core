@@ -10,14 +10,16 @@ shared filesystem.
  Settings
 **********
 
-Use these settings in ``system.hardware``:
+The cache is off by default (``cache_dir: null``). To turn it on, set
+``cache_dir`` to a directory on a local disk of each node, for example
+``$TMPDIR``. Use these settings in ``system.hardware``:
 
 .. code:: yaml
 
    system:
      hardware:
        # Keep the cache under $TMPDIR.
-       # To disable the cache, set cache_dir to null.
+       # The default is null: no cache.
        cache_dir: ${oc.decode:${oc.env:TMPDIR}}
        # Largest size of the cache on each node, as a fraction of the
        # total size of the disk.
@@ -74,9 +76,21 @@ node, but more records come from other nodes.
    After this, the cache does not change until the end of the run. The
    cache does not remove old records.
 
--  The cache gives a benefit only when the filesystem is slow or has a
-   high load. On a node with no other load, a read from the cache can
-   take the same time as a read from the filesystem.
+-  The cache gives a benefit only when a read from the filesystem
+   costs more than a training step, and a read from the cache costs
+   less. Examples:
+
+   -  The training uses only some variables of the dataset (``select``
+      or ``drop``), or only one part of the grid (model sharding). Each
+      zarr chunk holds all the variables and all the grid points. Thus,
+      without the cache, each read gets and decompresses the full
+      chunk. The cache keeps only the part that the training uses.
+   -  The filesystem is slow or has a high load.
+
+   If a read from the filesystem is fast, or if the training step is
+   longer than the read, the cache gives no benefit. The first epoch
+   writes the cache and takes approximately the same time as a run
+   with no cache.
 
 -  At the start of the run, each rank makes sure that it can find the
    address of each other node (the hostname and ``hostname_suffix``).

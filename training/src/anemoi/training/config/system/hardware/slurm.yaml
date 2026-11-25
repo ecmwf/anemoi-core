@@ -3,7 +3,7 @@ accelerator: cuda  # Run on GPU (for historical reasons, this is still called "c
 num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE}}
 num_nodes: ${oc.decode:${oc.env:SLURM_NNODES}}
 num_gpus_per_model: 1
-cache_dir: ${oc.decode:${oc.env:TMPDIR}} #if not none, will cache input data under cache_dir
+cache_dir: null # directory on a local disk for the dataset cache, for example ${oc.decode:${oc.env:TMPDIR}}; null: no cache
 cache_max_fraction: 0.9 # largest cache size, as a fraction of the total disk size
 cache_partition: false # if true, each node caches only its part of the dates, read the other dates from the other nodes
 hostname_suffix: null # text to add to hostnames for cache connections between nodes
