@@ -47,7 +47,6 @@ dependencies = [
   "nvidia-ml-py>=13.580.82",
   "pydantic>=2.9",
   "pytorch-lightning>=2.1",
-  "pyzmq>=25",
   "timm>=0.9.2",
   "torch>=2.2,<2.11",
   "torch-geometric>=2.3.1",
@@ -57,8 +56,11 @@ dependencies = [
   "zarr>=2.14.2",
 ]
 # Optional extras: pip install anemoi-training[azure,tests], etc.
-optional-dependencies.all = [ "anemoi-training[remote]" ]
+optional-dependencies.all = [ "anemoi-training[cache,remote]" ]
 optional-dependencies.azure = [ "azure-ai-ml", "azure-identity", "azureml-mlflow>=1.6", "strenum" ]
+optional-dependencies.cache = [
+  "pyzmq>=25",
+]
 optional-dependencies.dev = [
   "anemoi-training[all,docs,tests]",
   "pre-commit>=3.3.3",
@@ -94,7 +96,7 @@ optional-dependencies.s3 = [
 optional-dependencies.tests = [
   "anemoi-graphs[tri]",                                     # required to load the gnn checkpoint as part of the tests
   "anemoi-models[spectral]",                                # required to test the DCT2D spectral loss
-  "anemoi-training[azure,mlflow,plotting,remote,s3,wandb]", # AzureMlflowLogger / remote checkpoints / S3Source / plotting integration
+  "anemoi-training[azure,cache,mlflow,plotting,remote,s3,wandb]", # AzureMlflowLogger / remote checkpoints / S3Source / plotting integration
   "hypothesis>=6.11",
   "pytest>=8",
   "pytest-asyncio>=0.23",                                   # required for async checkpoint tests

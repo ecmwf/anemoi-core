@@ -9,6 +9,7 @@
 
 import datetime
 import logging
+from collections.abc import Callable
 from functools import cached_property
 from functools import wraps
 
@@ -26,34 +27,42 @@ from anemoi.training.utils.time_indices import TimeIndices
 LOGGER = logging.getLogger(__name__)
 
 
-def cache_sample(get_sample):
-    """Read cached records and ask the reader only for unresolved positions."""
+def cache_sample(get_sample: Callable[..., torch.Tensor]) -> Callable[..., torch.Tensor]:
+    """Read the records of a sample from the dataset cache, and read only the other records from the dataset."""
 
     @wraps(get_sample)
-    def wrapper(self, sequence, positions, grid_shard_indices=None):
-        cache = getattr(self, "_cache", None)
-        if cache is None:
+    def wrapper(
+        self: "BaseAnemoiReader",
+        sequence: int,
+        positions: TimeIndices,
+        grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> torch.Tensor:
+        if self._cache is None:
             return get_sample(self, sequence, positions, grid_shard_indices)
 
-        cached, missing = cache.check_cache(self._cache_dataset_id, sequence, positions, grid_shard_indices)
+        positions = self.position_list(sequence, positions)
+        records, missing = self._cache.check_cache(self._cache_dataset_id, sequence, positions, grid_shard_indices)
         if missing:
-            requested = (
-                list(range(*positions.indices(self.sequence_length(sequence))))
-                if isinstance(positions, slice)
-                else np.atleast_1d(positions).tolist()
-            )
-            source_positions = [requested[index] for index in missing]
+            source_positions = [positions[index] for index in missing]
             source = get_sample(self, sequence, source_positions, grid_shard_indices)
+            # The records keep the order of the dimensions of the zarr store. Then the values of
+            # one variable are next to each other, and the blosc bitshuffle compresses them better.
             source = rearrange(
                 source.numpy(),
                 "dates ensemble gridpoints variables -> dates variables ensemble gridpoints",
             )
-            cache.store_records(self._cache_dataset_id, sequence, source_positions, source, grid_shard_indices)
-            for index, value in zip(missing, source):
-                cached[index] = value
+            self._cache.store_records(
+                self._cache_dataset_id,
+                sequence,
+                source_positions,
+                source,
+                grid_shard_indices,
+            )
+            for index, value in zip(missing, source, strict=True):
+                records[index] = value
 
         values = rearrange(
-            np.stack(cached),
+            np.stack(records),
             "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
         )
         return torch.from_numpy(values)
@@ -129,6 +138,10 @@ class BaseAnemoiReader:
     per initialisation (base date), with the forecast step as the position.
     """
 
+    # the dataset cache (see set_cache); None: read all records from the dataset
+    _cache = None
+    _cache_dataset_id = None
+
     def __init__(
         self,
         dataset: str | dict | None = None,
@@ -142,22 +155,21 @@ class BaseAnemoiReader:
             msg = "Either dataset or dataset_config must be provided."
             raise ValueError(msg)
         self.data = open_dataset(_normalize_dataset_config(source), start=start, end=end)
-        self._cache = None
-        self._cache_dataset_id = None
         #: Sampling config used by :meth:`compute_anchors`.
         #: ``{"stride": 1}`` keeps every valid position;
         #: ``{"stride": None}`` uses stride = window size (non-overlapping).
         self.default_sampling: dict = {"stride": 1}
 
     def set_cache(self, cache: object, dataset_id: str) -> None:
-        """Route sample reads through ``cache`` using the given dataset namespace."""
+        """Send the sample reads through the dataset cache, as the records of ``dataset_id``."""
         self._cache = cache
         self._cache_dataset_id = dataset_id
 
-    def clear_cache(self) -> None:
-        """Restore direct reads from the source dataset."""
-        self._cache = None
-        self._cache_dataset_id = None
+    def position_list(self, sequence: int, positions: slice | list[int] | np.ndarray | int) -> list[int]:
+        """Return the positions as a list of integers."""
+        if isinstance(positions, slice):
+            return list(range(*positions.indices(self.sequence_length(sequence))))
+        return np.atleast_1d(positions).tolist()
 
     # ------------------------------------------------------------------
     # Sequence / position geometry
@@ -338,6 +350,7 @@ class BaseAnemoiReader:
         For analysis datasets there is a single sequence, so ``sequence`` is
         ignored and ``positions`` index the time axis directly.
         """
+        del sequence  # analysis datasets have a single sequence
         if isinstance(grid_shard_indices, slice):
             x = self.data[positions, :, :, grid_shard_indices]
         else:
@@ -433,8 +446,6 @@ class TrajectoryDataset(BaseAnemoiReader):
         if end is not None:
             open_kwargs["base_end"] = end
         self.data = open_dataset(_normalize_dataset_config(source), **open_kwargs)
-        self._cache = None
-        self._cache_dataset_id = None
         self.default_sampling = sampling if sampling is not None else {"stride": None}
 
     @property
@@ -475,10 +486,7 @@ class TrajectoryDataset(BaseAnemoiReader):
         grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
         """Load forecast steps ``positions`` of initialisation ``sequence``."""
-        if isinstance(positions, slice):
-            positions = list(range(*positions.indices(self.sequence_length(sequence))))
-        else:
-            positions = np.atleast_1d(positions).tolist()
+        positions = self.position_list(sequence, positions)
 
         # data[sequence] -> (variables, ensembles, steps, cells)
         x = self.data[sequence]

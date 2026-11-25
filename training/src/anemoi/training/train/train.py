@@ -38,7 +38,6 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
-from anemoi.training.diagnostics.callbacks.cache_sync import CacheSyncCallback
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -49,7 +48,6 @@ from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.compile import prepare_compilation
-from anemoi.training.utils.dataset_cache import DatasetCache
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import SeedContext
@@ -717,21 +715,9 @@ class AnemoiTrainer(ABC):
         """Training entry point."""
         LOGGER.debug("Setting up trainer..")
 
-        callbacks = list(self.callbacks)
-        if getattr(self.config.system.hardware, "cache_dir", None) is not None:
-            LOGGER.info("Caching datasets under '%s'", self.config.system.hardware.cache_dir)
-            self.datamodule = DatasetCache(
-                ds=self.datamodule,
-                cache_root=self.config.system.hardware.cache_dir,
-                hostname_suffix=getattr(self.config.system.hardware, "hostname_suffix", None),
-                max_fraction=getattr(self.config.system.hardware, "cache_max_fraction", 0.9),
-                partition=getattr(self.config.system.hardware, "cache_partition", True),
-            )
-            callbacks.append(CacheSyncCallback(cache=self.datamodule))
-
         trainer = pl.Trainer(
             accelerator=self.accelerator,
-            callbacks=callbacks,
+            callbacks=self.callbacks,
             deterministic=self.config.training.deterministic,
             detect_anomaly=self.config.diagnostics.debug.anomaly_detection,
             strategy=self.strategy,
@@ -755,6 +741,7 @@ class AnemoiTrainer(ABC):
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
+
         self.model = prepare_compilation(self.model, self.config.model, self.config.training)
 
         LOGGER.debug("Starting training..")

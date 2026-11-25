@@ -21,12 +21,9 @@ The cache is off by default (``cache_dir: null``). To turn it on, set
        # Keep the cache under $TMPDIR.
        # The default is null: no cache.
        cache_dir: ${oc.decode:${oc.env:TMPDIR}}
-       # Largest size of the cache on each node, as a fraction of the
-       # total size of the disk.
+       # The cache stops writing when less than
+       # (1 - cache_max_fraction) of the disk is free.
        cache_max_fraction: 0.9
-       # Divide the dates of each dataset into one part for each node.
-       # Each node caches only the records of its part (default).
-       cache_partition: true
        # Text to add to each hostname for connections between nodes.
        # Use the hostname of the high-speed network interface,
        # for example "-ib". Null uses the hostname.
@@ -46,44 +43,31 @@ cache.
 -  The records are compressed with Blosc (lz4). A record holds only the
    variables and grid points that the training uses.
 
-When the training uses more than one node, a worker can read records
-from the cache of a different node. Each node has a cache server for
-this purpose. At the end of each epoch, the nodes share a list of the
-records in each cache. Thus, the first epoch reads records only from the
-local cache or from the filesystem.
+When the training uses more than one node, the dates of each dataset are
+divided into one contiguous part for each node. Each node caches only the
+records of its part. Each node has a cache server. When a record is not
+in the local cache, the worker asks the node of its part for the record.
+If that node does not have the record, the worker reads it from the
+filesystem. Thus, the nodes together can keep a dataset that is too
+large for the disk of one node.
 
-By default (``cache_partition: true``), the dates of each dataset are
-divided into one contiguous part for each node. Each node caches only
-the records of its part, and reads the other records from the other
-nodes. Thus, the nodes together can keep a dataset that is too large
-for the disk of one node. The partition applies only to records of the
-full grid. With model sharding, each node caches all the grid shards
-that its ranks read, because the other nodes possibly do not read the
-same shards.
+A node caches a record of its part only when one of its ranks reads that
+record. Thus, in the first epochs, some records are not in any cache, and
+the workers read them from the filesystem.
 
-With ``cache_partition: false``, each node caches all the records that
-its ranks read. Each date is in more than one sample, for example in 3
-samples when the model uses 2 input dates and 1 output date. Thus, each
-node caches most of the dates: with 2 nodes, approximately 87% of the
-dates are in the cache of each node.
-
-With the partition, more records come from other nodes. In a test on 2
-nodes, a read from another node took the same time as a local read. But
-the second and third epochs have more misses: a node does not keep a
-record that is not in its part. If the node of that part did not read
-the record in the first epoch, no node has it yet.
+With model sharding, a record is one grid shard of one date. Each node
+caches all the grid shards that its ranks read, because the other nodes
+possibly do not read the same shards. A worker does not ask other nodes
+for grid shards.
 
 *************
  Limitations
 *************
 
--  The size of the cache on each node is limited to
-   ``cache_max_fraction`` of the total size of the disk. All the
-   processes on the node use the same limit. The cache also keeps
-   ``1 - cache_max_fraction`` of the disk free. This limit includes
-   other files on the disk, for example checkpoints. When the cache
-   gets to a limit, or when the disk is full, the cache stops writing
-   new records.
+-  The cache keeps ``1 - cache_max_fraction`` of the disk free. This
+   limit includes other files on the disk, for example checkpoints.
+   When less space is free, or when the disk is full, the cache stops
+   writing new records.
    After this, the cache does not change until the end of the run. The
    cache does not remove old records.
 

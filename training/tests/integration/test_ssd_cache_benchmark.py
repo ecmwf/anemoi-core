@@ -27,7 +27,6 @@ from omegaconf import DictConfig
 from pytorch_lightning.profilers import SimpleProfiler
 
 from anemoi.training.train.train import AnemoiTrainer
-from anemoi.training.utils.dataset_cache import DatasetCache
 
 LOGGER = logging.getLogger(__name__)
 
@@ -48,8 +47,8 @@ class _EpochTimer(pl.Callback):
 
     @staticmethod
     def _cache_counts(trainer):
-        cache = trainer.datamodule
-        if not isinstance(cache, DatasetCache):
+        cache = trainer.datamodule.cache
+        if cache is None:
             return None
         return tuple(
             counter.value

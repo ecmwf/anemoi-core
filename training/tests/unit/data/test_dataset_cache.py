@@ -10,285 +10,126 @@
 """Unit tests for anemoi.training.utils.dataset_cache."""
 
 import errno
-import multiprocessing
+import os
 import socket
-import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from anemoi.training.utils.dataset_cache import CacheClient
+from anemoi.training.utils import cache_format
+from anemoi.training.utils.cache_format import FULL_GRID
+from anemoi.training.utils.cache_transport import CacheServer
+from anemoi.training.utils.cache_transport import RemoteCacheError
 from anemoi.training.utils.dataset_cache import CacheFullError
-from anemoi.training.utils.dataset_cache import CacheKey
-from anemoi.training.utils.dataset_cache import CacheServer
 from anemoi.training.utils.dataset_cache import DatasetCache
 from anemoi.training.utils.dataset_cache import DatasetCacheNamespace
-from anemoi.training.utils.dataset_cache import Endpoint
-from anemoi.training.utils.dataset_cache import NodeCacheBudget
-from anemoi.training.utils.dataset_cache import RemoteCacheMiss
-from anemoi.training.utils.dataset_cache import _is_capacity_error
-from anemoi.training.utils.dataset_cache import encode_cache_array
-from anemoi.training.utils.dataset_cache import save_cache_array
+from anemoi.training.utils.dataset_cache import _dataset_id
 
-# ---------------------------------------------------------------------------
-# Helpers / Fixtures
-# ---------------------------------------------------------------------------
+DATASET_ID = "analysis:fingerprint"
+
+
+class FakeReader:
+    """Analysis data (dates, variables, ensemble, gridpoints), or trajectory data with one more dimension first."""
+
+    def __init__(self, data: np.ndarray) -> None:
+        self.data = data
+
+    @property
+    def num_sequences(self) -> int:
+        return 1 if self.data.ndim == 4 else self.data.shape[0]
+
+    def sequence_length(self, sequence: int = 0) -> int:
+        del sequence
+        return self.data.shape[0] if self.data.ndim == 4 else self.data.shape[-2]
+
+    @property
+    def grid_size(self) -> int:
+        return self.data.shape[-1]
 
 
 @pytest.fixture
-def sample_data():
-    """4D sample data: (time=10, channels=3, levels=2, grid=5)."""
-    rng = np.random.default_rng(42)
-    return rng.standard_normal((10, 3, 2, 5)).astype(np.float32)
+def sample_data() -> np.ndarray:
+    """(dates=10, variables=3, ensemble=2, gridpoints=5)."""
+    return np.random.default_rng(42).standard_normal((10, 3, 2, 5)).astype(np.float32)
 
 
-class TestCapacityErrors:
-    @pytest.mark.parametrize(
-        "error",
-        [
-            OSError(errno.ENOSPC, "No space left on device"),
-            OSError("Not enough free space to write 1045875200 bytes after offset 128"),
-            OSError("Disk quota exceeded"),
-        ],
-    )
-    def test_recognizes_capacity_errors(self, error):
-        assert _is_capacity_error(error)
+def make_cache(cache_path: Path, data: np.ndarray, node_id: int = 0, num_nodes: int = 1) -> DatasetCache:
+    """Return a cache of one node, without torch distributed."""
+    cache = DatasetCache(cache_path)
+    cache.cache_path, cache.min_free_bytes, cache.global_rank = cache_path, 0, 0
+    cache.node_id, cache.num_nodes = node_id, num_nodes
+    cache.namespaces[DATASET_ID] = DatasetCacheNamespace(cache_path, DATASET_ID, FakeReader(data))
+    return cache
 
-    def test_does_not_hide_unrelated_io_error(self):
-        assert not _is_capacity_error(OSError(errno.EACCES, "Permission denied"))
+
+def stored_positions(cache: DatasetCache, grid_id: str = FULL_GRID) -> list[int]:
+    namespace = cache.namespaces[DATASET_ID]
+    positions = range(namespace.sequence_lengths[0])
+    return [position for position in positions if namespace.path(0, position, grid_id).exists()]
 
 
 # ---------------------------------------------------------------------------
-# Tests for ProcessZMQCacheServer + ZMQCacheClient
+# Records of one dataset on one node
 # ---------------------------------------------------------------------------
-
-
-class TestProcessZMQCacheServerClient:
-    """Integration tests for the ZeroMQ cache server and client."""
-
-    @pytest.fixture
-    def cache_data(self):
-        """Create fake cached entries keyed by dataset, sequence, and position."""
-        rng = np.random.default_rng(99)
-        return {CacheKey("dataset", 0, index): rng.standard_normal((3, 5)).astype(np.float32) for index in range(20)}
-
-    @pytest.fixture
-    def running_server(self, cache_data, tmp_path):
-        """Start the production process server and yield it."""
-        entries = {dataset_id: tmp_path / dataset_id for dataset_id in ("dataset", "other-dataset")}
-        for key, value in cache_data.items():
-            path = entries[key.dataset_id] / key.grid_id / str(key.sequence) / f"{key.position}.npy.blosc"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("wb") as target:
-                save_cache_array(target, value)
-        context = multiprocessing.get_context("spawn")
-        server = CacheServer({key: str(path) for key, path in entries.items()})
-        server.start()
-        yield server
-        server.close()
-
-    def endpoint(self, server):
-        return Endpoint("127.0.0.1", server.port, 0)
-
-    def test_single_fetch(self, cache_data, running_server):
-        client = CacheClient(self.endpoint(running_server))
-        try:
-            key = CacheKey("dataset", 0, 5)
-            result = client.fetch(key)
-            np.testing.assert_array_equal(result, cache_data[key])
-        finally:
-            client.close()
-
-    def test_multiple_fetches(self, cache_data, running_server):
-        client = CacheClient(self.endpoint(running_server))
-        try:
-            for idx in [0, 7, 13, 19]:
-                key = CacheKey("dataset", 0, idx)
-                result = client.fetch(key)
-                np.testing.assert_array_equal(result, cache_data[key])
-        finally:
-            client.close()
-
-    def test_dataset_id_is_part_of_remote_key(self, cache_data, running_server):
-        key = CacheKey("other-dataset", 0, 5)
-        expected = np.full((3, 5), 17, dtype=np.float32)
-        cache_data[key] = expected
-        path = (
-            Path(running_server.entries[key.dataset_id]) / key.grid_id / str(key.sequence) / f"{key.position}.npy.blosc"
-        )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("wb") as target:
-            save_cache_array(target, expected)
-        client = CacheClient(self.endpoint(running_server))
-        try:
-            np.testing.assert_array_equal(client.fetch(key), expected)
-            np.testing.assert_array_equal(
-                client.fetch(CacheKey("dataset", 0, 5)),
-                cache_data[CacheKey("dataset", 0, 5)],
-            )
-        finally:
-            client.close()
-
-    @pytest.mark.parametrize("dataset_id", ["dataset", "unknown-dataset"])
-    def test_missing_entry(self, running_server, dataset_id):
-        client = CacheClient(self.endpoint(running_server))
-        try:
-            with pytest.raises(RemoteCacheMiss):
-                client.fetch(CacheKey(dataset_id, 0, 100))
-        finally:
-            client.close()
-
-    def test_concurrent_clients(self, cache_data, running_server):
-        """Multiple clients can connect simultaneously."""
-        results = {}
-        errors = []
-
-        def worker(idx):
-            try:
-                c = CacheClient(self.endpoint(running_server))
-                key = CacheKey("dataset", 0, idx)
-                results[idx] = c.fetch(key)
-                c.close()
-            except Exception as e:
-                errors.append(e)
-
-        threads = [threading.Thread(target=worker, args=(i,)) for i in range(5)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=5)
-
-        assert not errors, f"Errors in concurrent fetch: {errors}"
-        for idx in range(5):
-            np.testing.assert_array_equal(results[idx], cache_data[CacheKey("dataset", 0, idx)])
-
-    def test_request_for_several_positions(self, cache_data, running_server):
-        client = CacheClient(self.endpoint(running_server))
-        try:
-            result = client.request_shard(CacheKey("dataset", 0, 2), [2, 9, 4])
-            assert len(result) == 3
-            for value, position in zip(result, (2, 9, 4)):
-                np.testing.assert_array_equal(value, cache_data[CacheKey("dataset", 0, position)])
-        finally:
-            client.close()
-
-    def test_server_sends_the_compressed_file(self, cache_data, running_server):
-        from anemoi.training.utils.cache_transport import _read
-
-        key = CacheKey("dataset", 0, 5)
-        request = {"dataset_id": key.dataset_id, "sequence": 0, "positions": [5], "grid_id": key.grid_id}
-        (payload,) = _read(running_server.entries, request)
-        assert payload == encode_cache_array(cache_data[key])
-
-    def test_ephemeral_port_and_clean_shutdown(self, cache_data, running_server):
-        assert running_server.port > 0
-        client = CacheClient(self.endpoint(running_server))
-        key = CacheKey("dataset", 0, 3)
-        np.testing.assert_array_equal(client.fetch(key), cache_data[key])
-        client.close()
-
-        running_server.close()
-        assert not running_server.process.is_alive()
-
-
-def make_budget(tmp_path: Path, limit_bytes: int) -> NodeCacheBudget:
-    budget = NodeCacheBudget(tmp_path / "usage", limit_bytes)
-    budget.reset()
-    return budget
-
-
-class TestNodeCacheBudget:
-    def test_reserve_and_release(self, tmp_path: Path) -> None:
-        budget = make_budget(tmp_path, limit_bytes=100)
-
-        assert budget.reserve(60)
-        assert not budget.reserve(41)  # would exceed the limit: nothing is reserved
-        assert budget.used() == 60
-        assert budget.reserve(40)
-        budget.release(30)
-        assert budget.used() == 70
-
-    def test_reserve_keeps_free_space_on_the_disk(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from types import SimpleNamespace
-
-        disk = SimpleNamespace(total=1000, used=850, free=150)
-        monkeypatch.setattr("anemoi.training.utils.dataset_cache.shutil.disk_usage", lambda _path: disk)
-        budget = NodeCacheBudget(tmp_path / "usage", limit_bytes=900, min_free_bytes=100)
-        budget.reset()
-
-        assert budget.reserve(50)  # leaves 100 bytes free
-        disk.free = 100  # other files on the disk use the space
-        assert not budget.reserve(1)  # the cache limit allows this, but the disk would get too full
-        assert budget.used() == 50
-
-    def test_budget_is_shared_between_processes(self, tmp_path: Path) -> None:
-        budget = make_budget(tmp_path, limit_bytes=1000)
-
-        def reserve(count: int) -> None:
-            for _ in range(count):
-                budget.reserve(7)
-
-        context = multiprocessing.get_context("fork")
-        processes = [context.Process(target=reserve, args=(50,)) for _ in range(4)]
-        for process in processes:
-            process.start()
-        for process in processes:
-            process.join()
-
-        # 200 attempts of 7 bytes: no process may go past the limit, and no update may be lost
-        assert budget.used() == 1000 // 7 * 7
 
 
 class TestDatasetCacheNamespace:
-    class FakeReader:
-        def __init__(self, data):
-            self.data = data
+    def namespace(self, tmp_path: Path, data: np.ndarray) -> DatasetCacheNamespace:
+        return DatasetCacheNamespace(tmp_path, DATASET_ID, FakeReader(data))
 
-        @property
-        def num_sequences(self):
-            return 1 if self.data.ndim == 4 else self.data.shape[0]
+    def test_record_is_stored_once(self, tmp_path: Path, sample_data: np.ndarray) -> None:
+        namespace = self.namespace(tmp_path, sample_data)
+        assert namespace.store(0, 3, sample_data[3], FULL_GRID, 0)
+        assert not namespace.store(0, 3, np.zeros_like(sample_data[3]), FULL_GRID, 0)
+        np.testing.assert_array_equal(namespace.local(0, 3, FULL_GRID), sample_data[3])
+        assert namespace.local(0, 4, FULL_GRID) is None
 
-        def sequence_length(self, sequence=0):
-            return self.data.shape[0] if self.data.ndim == 4 else self.data.shape[-2]
-
-    def test_analysis_entry_is_stored_once(self, tmp_path, sample_data):
-        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
-
-        first = sample_data[3]
-        assert namespace.store(0, 3, first)
-        assert not namespace.store(0, 3, np.zeros_like(first))
-
-        np.testing.assert_array_equal(namespace.local(0, 3), sample_data[3])
-        assert list(namespace.committed()) == [("all", 0, 3)]
-
-    def test_trajectory_sequences_do_not_collide(self, tmp_path):
+    def test_trajectory_sequences_do_not_collide(self, tmp_path: Path) -> None:
         data = np.arange(2 * 3 * 1 * 4 * 5).reshape(2, 3, 1, 4, 5)
-        namespace = DatasetCacheNamespace(tmp_path, "trajectory:fingerprint", self.FakeReader(data))
+        namespace = self.namespace(tmp_path, data)
+        namespace.store(0, 2, data[0, :, :, 2, :], FULL_GRID, 0)
+        namespace.store(1, 2, data[1, :, :, 2, :], FULL_GRID, 0)
+        np.testing.assert_array_equal(namespace.local(0, 2, FULL_GRID), data[0, :, :, 2, :])
+        np.testing.assert_array_equal(namespace.local(1, 2, FULL_GRID), data[1, :, :, 2, :])
 
-        value_0 = data[0, :, :, 2, :]
-        value_1 = data[1, :, :, 2, :]
-        namespace.store(0, 2, value_0)
-        namespace.store(1, 2, value_1)
+    def test_writer_that_loses_the_race_does_not_replace_the_record(
+        self,
+        tmp_path: Path,
+        sample_data: np.ndarray,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        namespace = self.namespace(tmp_path, sample_data)
+        entry = namespace.path(0, 3, FULL_GRID)
+        real_link = os.link
 
-        np.testing.assert_array_equal(namespace.local(0, 2), data[0, :, :, 2, :])
-        np.testing.assert_array_equal(namespace.local(1, 2), data[1, :, :, 2, :])
+        def other_writer_first(source: Path, target: Path) -> None:
+            target.write_bytes(cache_format.encode(sample_data[3]))  # another process wins the race
+            real_link(source, target)
 
-    def test_failed_write_removes_partial_entry(self, tmp_path, sample_data, monkeypatch):
-        budget = make_budget(tmp_path, limit_bytes=10**9)
-        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), budget)
+        monkeypatch.setattr("anemoi.training.utils.dataset_cache.os.link", other_writer_first)
+        assert not namespace.store(0, 3, np.zeros_like(sample_data[3]), FULL_GRID, 0)
+        np.testing.assert_array_equal(namespace.local(0, 3, FULL_GRID), sample_data[3])
+        assert not list(entry.parent.glob("*.tmp"))
 
-        def fail_replace(_source: Path, _target: Path) -> None:
-            raise OSError("Not enough free space to write array")
+    def test_disk_full_removes_partial_record(
+        self,
+        tmp_path: Path,
+        sample_data: np.ndarray,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        namespace = self.namespace(tmp_path, sample_data)
 
-        monkeypatch.setattr("anemoi.training.utils.dataset_cache.os.replace", fail_replace)
-        with pytest.raises(CacheFullError, match="Not enough free space"):
-            namespace.store(0, 3, sample_data[3])
+        def disk_full(_source: Path, _target: Path) -> None:
+            raise OSError(errno.ENOSPC, "No space left on device")
 
-        entry, _ = namespace.paths(0, 3)
+        monkeypatch.setattr("anemoi.training.utils.dataset_cache.os.link", disk_full)
+        with pytest.raises(CacheFullError, match="No space left"):
+            namespace.store(0, 3, sample_data[3], FULL_GRID, 0)
+        entry = namespace.path(0, 3, FULL_GRID)
         assert not entry.exists()
         assert not list(entry.parent.glob("*.tmp"))
-        assert budget.used() == 0  # the reserved space is released
 
     def test_unrelated_write_error_is_not_cache_full(
         self,
@@ -296,104 +137,88 @@ class TestDatasetCacheNamespace:
         sample_data: np.ndarray,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
+        namespace = self.namespace(tmp_path, sample_data)
 
-        def fail_replace(_source: Path, _target: Path) -> None:
+        def no_permission(_source: Path, _target: Path) -> None:
             raise PermissionError(errno.EACCES, "Permission denied")
 
-        monkeypatch.setattr("anemoi.training.utils.dataset_cache.os.replace", fail_replace)
+        monkeypatch.setattr("anemoi.training.utils.dataset_cache.os.link", no_permission)
         with pytest.raises(PermissionError):
-            namespace.store(0, 3, sample_data[3])
+            namespace.store(0, 3, sample_data[3], FULL_GRID, 0)
 
-    def test_store_stops_at_the_limit(self, tmp_path: Path, sample_data: np.ndarray) -> None:
-        record_bytes = len(encode_cache_array(sample_data[0]))
-        budget = make_budget(tmp_path, limit_bytes=2 * record_bytes)
-        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), budget)
+    def test_store_keeps_free_space_on_the_disk(
+        self,
+        tmp_path: Path,
+        sample_data: np.ndarray,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        namespace = self.namespace(tmp_path, sample_data)
+        record_bytes = len(cache_format.encode(sample_data[0]))
+        disk = SimpleNamespace(total=10**6, used=0, free=1000 + record_bytes)
+        monkeypatch.setattr("anemoi.training.utils.dataset_cache.shutil.disk_usage", lambda _path: disk)
 
-        assert namespace.store(0, 0, sample_data[0])
-        assert namespace.store(0, 1, sample_data[1])
-        with pytest.raises(CacheFullError, match="cache limit"):
-            namespace.store(0, 2, sample_data[2])
+        assert namespace.store(0, 0, sample_data[0], FULL_GRID, min_free_bytes=1000)  # leaves 1000 bytes free
+        disk.free = 999 + record_bytes  # other files on the disk use the space
+        with pytest.raises(CacheFullError, match="free on the disk"):
+            namespace.store(0, 1, sample_data[1], FULL_GRID, min_free_bytes=1000)
 
-        assert sorted(position for _, _, position in namespace.committed()) == [0, 1]
-        assert budget.used() == sum(path.stat().st_size for path in namespace.entries_path.rglob("*.npy.blosc"))
-
-    def test_negative_position(self, tmp_path, sample_data):
-        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
-        namespace.store(0, -1, sample_data[-1])
-        np.testing.assert_array_equal(namespace.local(0, -1), sample_data[-1])
-
-    def test_blosc_compression(self, tmp_path):
+    def test_records_are_compressed(self, tmp_path: Path) -> None:
         data = np.zeros((10, 3, 2, 500), dtype=np.float32)
-        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(data))
+        namespace = self.namespace(tmp_path, data)
+        assert namespace.store(0, 3, data[3], FULL_GRID, 0)
+        np.testing.assert_array_equal(namespace.local(0, 3, FULL_GRID), data[3])
+        assert namespace.path(0, 3, FULL_GRID).stat().st_size < data[3].nbytes / 2
 
-        assert namespace.store(0, 3, data[3])
-        np.testing.assert_array_equal(namespace.local(0, 3), data[3])
+    @pytest.mark.parametrize("grid_indices", [None, slice(None), slice(0, 5), slice(0, None, 1)])
+    def test_full_grid(self, tmp_path: Path, sample_data: np.ndarray, grid_indices: slice | None) -> None:
+        # training gives slice(0, grid_size) for the full grid
+        assert self.namespace(tmp_path, sample_data).grid_id(grid_indices) == FULL_GRID
 
-        entry, _ = namespace.paths(0, 3)
-        assert entry.suffixes[-2:] == [".npy", ".blosc"]
-        assert entry.stat().st_size < data[3].nbytes / 2
+    def test_grid_shards_have_different_ids(self, tmp_path: Path, sample_data: np.ndarray) -> None:
+        namespace = self.namespace(tmp_path, sample_data)
+        ids = {namespace.grid_id(indices) for indices in (slice(0, 2), slice(2, 5), np.array([0, 3]))}
+        assert len(ids) == 3
+        assert FULL_GRID not in ids
 
 
-class TestDatasetIdentity:
-    class FakeData:
-        shape = (4, 2, 1, 5)
-        dtype = np.dtype("float32")
-        path = "/data/dataset.zarr"
+# ---------------------------------------------------------------------------
+# Set-up
+# ---------------------------------------------------------------------------
 
-    class FakeReader:
-        num_sequences = 1
-        variables = ("a", "b")
-        resolution = "o96"
 
-        def __init__(self, metadata):
-            self.data = TestDatasetIdentity.FakeData()
-            self.metadata = metadata
-            self.cache = None
+class FakeData:
+    shape = (4, 2, 1, 5)
+    dtype = np.dtype("float32")
+    path = "/data/dataset.zarr"
 
-        def sequence_length(self, sequence=0):
-            return 4
 
-        def set_cache(self, cache, dataset_id):
-            self.cache = dataset_id
+class IdentityReader:
+    variables = ("a", "b")
+    resolution = "o96"
 
-    def dataset_id(self, tmp_path, metadata):
-        from types import SimpleNamespace
+    def __init__(self, metadata: dict) -> None:
+        self.data = FakeData()
+        self.metadata = metadata
 
-        cache = DatasetCache(object(), tmp_path)
-        cache.initialized, cache.cache_path, cache.budget = True, tmp_path, None
-        reader = self.FakeReader(metadata)
-        cache._dataset(SimpleNamespace(data_readers={"data": reader}))
-        return reader.cache
 
-    def test_dataset_id_does_not_use_metadata(self, tmp_path):
-        # the metadata of a cloned dataset can change between processes (for example an invalid end_date)
-        first = self.dataset_id(tmp_path, {"end_date": "1970-01-01T00:00:00"})
-        second = self.dataset_id(tmp_path, {"end_date": "170884930401-06-20T02:29:53"})
-        assert first == second
+def test_dataset_id_does_not_use_metadata() -> None:
+    # the metadata of a cloned dataset can change between processes (for example an invalid end_date)
+    first = _dataset_id("data", IdentityReader({"end_date": "1970-01-01T00:00:00"}))
+    second = _dataset_id("data", IdentityReader({"end_date": "170884930401-06-20T02:29:53"}))
+    assert first == second
 
-    def test_ranks_with_different_dataset_ids_are_rejected(self, tmp_path, monkeypatch):
-        cache = DatasetCache(object(), tmp_path)
-        cache.world_size, cache.proc_group, cache.namespaces = 2, None, {"data:aaaa": None}
 
-        def all_gather_object(output, value, group=None):
-            output[:] = [value, ["data:bbbb"]]
-
-        monkeypatch.setattr("anemoi.training.utils.dataset_cache.dist.all_gather_object", all_gather_object)
-        with pytest.raises(RuntimeError, match="do not agree"):
-            cache._check_dataset_ids()
+def test_ranks_with_different_dataset_ids_are_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cache = DatasetCache(tmp_path)
+    monkeypatch.setattr(cache, "_gather", lambda value: [value, ["data:bbbb"]])
+    with pytest.raises(RuntimeError, match="do not agree"):
+        cache.attach({"data": IdentityReader({})})
 
 
 class TestHostnameCheck:
-    @staticmethod
-    def all_gather_same(output: list, value: list, **_kwargs: object) -> None:
-        output[:] = [value] * len(output)
-
     def cache(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, known_hosts: set[str]) -> DatasetCache:
-        cache = DatasetCache(object(), tmp_path, hostname_suffix="-ib")
-        cache.world_size, cache.proc_group, cache.node_id = 2, None, 0
-        cache._leaders = {0: 0, 1: 1}
-        cache.hostnames = ["node-a-ib", "node-b-ib"]
+        cache = DatasetCache(tmp_path, hostname_suffix="-ib")
+        cache.node_id, cache.hostnames = 0, ["node-a-ib", "node-b-ib"]
 
         def getaddrinfo(host: str, *_args: object) -> list:
             if host not in known_hosts:
@@ -401,259 +226,179 @@ class TestHostnameCheck:
             return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.0.0.1", 0))]
 
         monkeypatch.setattr("anemoi.training.utils.dataset_cache.socket.getaddrinfo", getaddrinfo)
-        monkeypatch.setattr("anemoi.training.utils.dataset_cache.dist.all_gather_object", self.all_gather_same)
+        monkeypatch.setattr(cache, "_gather", lambda value: [value, value])
         return cache
 
     def test_known_hostnames_pass(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         self.cache(tmp_path, monkeypatch, {"node-a-ib", "node-b-ib"})._check_hostnames()
 
     def test_own_hostname_is_not_checked(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        # node-a-ib is the hostname of this node, so it is not in known_hosts
         self.cache(tmp_path, monkeypatch, {"node-b-ib"})._check_hostnames()
 
     def test_unknown_hostname_stops_the_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        cache = self.cache(tmp_path, monkeypatch, set())
         with pytest.raises(RuntimeError, match=r"node-b-ib.*hostname_suffix \('-ib'\)"):
-            cache._check_hostnames()
+            self.cache(tmp_path, monkeypatch, set())._check_hostnames()
 
     def test_all_ranks_stop_when_one_rank_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cache = self.cache(tmp_path, monkeypatch, {"node-b-ib"})
-
-        def all_gather_object(output: list, value: list, **_kwargs: object) -> None:
-            output[:] = [value, ["node-a-ib (Name or service not known)"]]
-
-        monkeypatch.setattr("anemoi.training.utils.dataset_cache.dist.all_gather_object", all_gather_object)
+        monkeypatch.setattr(cache, "_gather", lambda value: [value, ["node-a-ib (Name or service not known)"]])
         with pytest.raises(RuntimeError, match="node-a-ib"):
             cache._check_hostnames()
 
 
-def test_check_cache_prefers_local(tmp_path, sample_data, monkeypatch):
-    namespace = DatasetCacheNamespace(
-        tmp_path,
-        "analysis:fingerprint",
-        TestDatasetCacheNamespace.FakeReader(sample_data),
-    )
-    namespace.store(0, 3, sample_data[3])
-    cache = DatasetCache(object(), tmp_path)
-    cache.namespaces[namespace.dataset_id] = namespace
-    cache.node_id = 0
-    cache._locations = {CacheKey(namespace.dataset_id, 0, 3): {1}}
-    monkeypatch.setattr(cache, "_remote_cache", lambda node: pytest.fail("remote cache was checked"))
+def test_setup_keeps_a_fraction_of_the_disk_free(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import torch.distributed as dist
 
-    values, missing = cache.check_cache(namespace.dataset_id, 0, [3])
+    disk = SimpleNamespace(total=1000 * 10**9, used=0, free=1000 * 10**9)
+    monkeypatch.setattr("anemoi.training.utils.dataset_cache.shutil.disk_usage", lambda _path: disk)
+    dist.init_process_group("gloo", init_method=f"file://{tmp_path}/store", rank=0, world_size=1)
+    try:
+        cache = DatasetCache(tmp_path / "missing" / "root", max_fraction=0.9)
+        cache.setup()  # makes the cache root
+        try:
+            assert cache.min_free_bytes == 100 * 10**9
+            assert cache.cache_path.is_dir()
+            assert cache.is_node_leader
+            assert cache.ports == [cache.server.port]
+        finally:
+            cache.teardown()
+    finally:
+        dist.destroy_process_group()
 
-    assert missing == []
-    np.testing.assert_array_equal(np.stack(values), sample_data[[3]])
+
+# ---------------------------------------------------------------------------
+# Reads and writes
+# ---------------------------------------------------------------------------
 
 
-def test_check_cache_returns_partial_values_and_missing_indices(tmp_path, sample_data):
-    namespace = DatasetCacheNamespace(
-        tmp_path,
-        "analysis:fingerprint",
-        TestDatasetCacheNamespace.FakeReader(sample_data),
-    )
-    namespace.store(0, 3, sample_data[3])
-    cache = DatasetCache(object(), tmp_path)
-    cache.namespaces[namespace.dataset_id] = namespace
-    cache.node_id = 0
+def test_check_cache_returns_hits_and_missing_indices(tmp_path: Path, sample_data: np.ndarray) -> None:
+    cache = make_cache(tmp_path, sample_data)
+    cache.store_records(DATASET_ID, 0, [3], sample_data[[3]])
 
-    values, missing = cache.check_cache(namespace.dataset_id, 0, [3, 4])
+    values, missing = cache.check_cache(DATASET_ID, 0, [3, 4])
 
     np.testing.assert_array_equal(values[0], sample_data[3])
     assert values[1] is None
     assert missing == [1]
+    assert (cache.cache_hits_local.value, cache.cache_misses.value) == (1, 1)
 
 
-def test_check_cache_reads_missing_records_from_multiple_nodes(tmp_path, sample_data, monkeypatch):
-    namespace = DatasetCacheNamespace(
-        tmp_path,
-        "analysis:fingerprint",
-        TestDatasetCacheNamespace.FakeReader(sample_data),
-    )
-    cache = DatasetCache(object(), tmp_path)
-    cache.namespaces[namespace.dataset_id] = namespace
-    cache.node_id = 0
-    cache._locations = {
-        CacheKey(namespace.dataset_id, 0, 3): {1},
-        CacheKey(namespace.dataset_id, 0, 4): {2},
-    }
-
-    class Remote:
-        def __init__(self, node):
-            self.node = node
-
-        def request_shard(self, key, positions):
-            assert positions == ([3] if self.node == 1 else [4])
-            return sample_data[positions]
-
-    monkeypatch.setattr(cache, "_remote_cache", lambda node: Remote(node))
-
-    values, missing = cache.check_cache(namespace.dataset_id, 0, [3, 4])
-
-    assert missing == []
-    np.testing.assert_array_equal(np.stack(values), sample_data[[3, 4]])
+def test_each_date_has_one_owner_node(tmp_path: Path, sample_data: np.ndarray) -> None:
+    caches = [make_cache(tmp_path / str(node), sample_data, node, num_nodes=3) for node in range(3)]
+    owners = [caches[0].owner(caches[0].namespaces[DATASET_ID], 0, position) for position in range(10)]
+    assert owners == sorted(owners)  # contiguous parts, in node order
+    assert set(owners) == {0, 1, 2}
+    assert all(cache.owner(cache.namespaces[DATASET_ID], 0, 7) == owners[7] for cache in caches)
 
 
-def test_check_cache_does_not_probe_without_location_snapshot(tmp_path, sample_data, monkeypatch):
-    namespace = DatasetCacheNamespace(
-        tmp_path,
-        "analysis:fingerprint",
-        TestDatasetCacheNamespace.FakeReader(sample_data),
-    )
-    cache = DatasetCache(object(), tmp_path)
-    cache.namespaces[namespace.dataset_id] = namespace
-    cache.node_id = 0
-    cache._leaders = {0: 0, 1: 1}
-
-    monkeypatch.setattr(cache, "_remote_cache", lambda node: pytest.fail("unadvertised remote node was checked"))
-
-    values, missing = cache.check_cache(namespace.dataset_id, 0, [3])
-
-    assert values == [None]
-    assert missing == [0]
+def test_node_stores_only_its_part_of_full_grid_records(tmp_path: Path, sample_data: np.ndarray) -> None:
+    cache = make_cache(tmp_path, sample_data, node_id=0, num_nodes=2)
+    cache.store_records(DATASET_ID, 0, list(range(10)), sample_data)
+    assert stored_positions(cache) == [0, 1, 2, 3, 4]
 
 
-def test_check_cache_falls_back_after_stale_remote_batch(tmp_path, sample_data, monkeypatch, caplog):
-    namespace = DatasetCacheNamespace(
-        tmp_path,
-        "analysis:fingerprint",
-        TestDatasetCacheNamespace.FakeReader(sample_data),
-    )
-    cache = DatasetCache(object(), tmp_path)
-    cache.namespaces[namespace.dataset_id] = namespace
-    cache.node_id = 0
-    cache._locations = {
-        CacheKey(namespace.dataset_id, 0, 3): {1},
-        CacheKey(namespace.dataset_id, 0, 4): {1},
-    }
+def test_node_stores_all_grid_shard_records_that_it_reads(tmp_path: Path, sample_data: np.ndarray) -> None:
+    # with model sharding, the ranks that read a shard can all be on one node: no other node caches it
+    cache = make_cache(tmp_path, sample_data, node_id=0, num_nodes=2)
+    shard = slice(0, 2)
+    cache.store_records(DATASET_ID, 0, [7, 8], sample_data[[7, 8], ..., shard], shard)
+    assert stored_positions(cache, cache.namespaces[DATASET_ID].grid_id(shard)) == [7, 8]
 
-    class Remote:
-        def request_shard(self, key, positions):
-            raise RemoteCacheMiss(key)
 
-    monkeypatch.setattr(cache, "_remote_cache", lambda node: Remote())
+def test_grid_shard_records_are_not_read_from_other_nodes(
+    tmp_path: Path,
+    sample_data: np.ndarray,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = make_cache(tmp_path, sample_data, node_id=0, num_nodes=2)
+    monkeypatch.setattr(cache, "_request", lambda *_args: pytest.fail("a shard record was requested"))
+    values, missing = cache.check_cache(DATASET_ID, 0, [7], slice(0, 2))
+    assert (values, missing) == ([None], [0])
 
-    values, missing = cache.check_cache(namespace.dataset_id, 0, [3, 4])
 
-    assert values == [None, None]
-    assert missing == [0, 1]
-    assert cache._locations[CacheKey(namespace.dataset_id, 0, 3)] == set()
-    assert cache._locations[CacheKey(namespace.dataset_id, 0, 4)] == set()
+def test_missing_records_are_requested_from_their_owner(
+    tmp_path: Path,
+    sample_data: np.ndarray,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = make_cache(tmp_path, sample_data, node_id=0, num_nodes=2)
+    requests = []
+
+    def request(node: int, _dataset_id: str, _sequence: int, _grid_id: str, positions: list[int]) -> list:
+        requests.append((node, positions))
+        return [sample_data[7], None]  # the owner does not have date 8 yet
+
+    monkeypatch.setattr(cache, "_request", request)
+    values, missing = cache.check_cache(DATASET_ID, 0, [2, 7, 8])  # node 0 owns date 2
+
+    assert requests == [(1, [7, 8])]
+    np.testing.assert_array_equal(values[1], sample_data[7])
+    assert missing == [0, 2]
+    assert (cache.cache_hits_remote.value, cache.cache_misses.value) == (1, 2)
+
+
+def test_unavailable_node_gives_misses(
+    tmp_path: Path,
+    sample_data: np.ndarray,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    cache = make_cache(tmp_path, sample_data, node_id=0, num_nodes=2)
+    cache.hostnames, cache.ports = ["node-a", "node-b"], [0, 0]
+
+    def unavailable(*_args: object) -> list:
+        msg = "timeout"
+        raise RemoteCacheError(msg)
+
+    monkeypatch.setattr("anemoi.training.utils.dataset_cache.CacheClient.request", unavailable)
+    values, missing = cache.check_cache(DATASET_ID, 0, [7, 8])
+
+    assert (values, missing) == ([None, None], [0, 1])
     assert cache.cache_remote_errors.value == 1
-    assert "Remote cache read from node 1 (unknown host) failed: RemoteCacheMiss" in caplog.text
+    assert "Remote cache read from node 1 failed: timeout" in caplog.text
 
 
-def test_check_cache_tries_only_one_advertised_node(tmp_path, sample_data, monkeypatch):
-    namespace = DatasetCacheNamespace(
-        tmp_path,
-        "analysis:fingerprint",
-        TestDatasetCacheNamespace.FakeReader(sample_data),
-    )
-    cache = DatasetCache(object(), tmp_path)
-    cache.namespaces[namespace.dataset_id] = namespace
-    cache.node_id = 0
-    key = CacheKey(namespace.dataset_id, 0, 3)
-    cache._locations = {key: {1, 2}}
-    requested = []
+def test_full_cache_stays_full(
+    tmp_path: Path,
+    sample_data: np.ndarray,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    cache = make_cache(tmp_path, sample_data)
+    record_bytes = len(cache_format.encode(sample_data[0]))
+    disk = SimpleNamespace(total=10**6, used=0, free=2 * record_bytes)
+    monkeypatch.setattr("anemoi.training.utils.dataset_cache.shutil.disk_usage", lambda _path: disk)
 
-    class Remote:
-        def request_shard(self, key, positions):
-            requested.append((1, positions))
-            raise RemoteCacheMiss(key)
+    def write(positions: list[int]) -> None:
+        for position in positions:
+            cache.store_records(DATASET_ID, 0, [position], sample_data[[position]])
+            disk.free -= record_bytes
 
-    def remote_cache(node):
-        assert node == 1
-        return Remote()
-
-    monkeypatch.setattr(cache, "_remote_cache", remote_cache)
-
-    values, missing = cache.check_cache(namespace.dataset_id, 0, [3])
-
-    assert values == [None]
-    assert missing == [0]
-    assert requested == [(1, [3])]
-    assert cache._locations[key] == {2}
-
-
-def test_grid_shards_are_cached_separately(tmp_path, sample_data):
-    namespace = DatasetCacheNamespace(
-        tmp_path,
-        "analysis:fingerprint",
-        TestDatasetCacheNamespace.FakeReader(sample_data),
-    )
-    cache = DatasetCache(object(), tmp_path)
-    cache.cache_path = tmp_path
-    cache.namespaces[namespace.dataset_id] = namespace
-    cache.node_id = 0
-    positions = [3]
-
-    cache.store_records(namespace.dataset_id, 0, positions, sample_data[positions, ..., :2], slice(0, 2))
-
-    values, missing = cache.check_cache(namespace.dataset_id, 0, positions, slice(0, 2))
-    assert missing == []
-    np.testing.assert_array_equal(np.stack(values), sample_data[positions, ..., :2])
-    values, missing = cache.check_cache(namespace.dataset_id, 0, positions, slice(2, 4))
-    assert values == [None]
-    assert missing == [0]
-
-
-def test_full_cache_stays_locked(tmp_path: Path, sample_data: np.ndarray, caplog: pytest.LogCaptureFixture) -> None:
-    record_bytes = len(encode_cache_array(sample_data[0]))
-    budget = make_budget(tmp_path, limit_bytes=2 * record_bytes)
-    namespace = DatasetCacheNamespace(
-        tmp_path,
-        "analysis:fingerprint",
-        TestDatasetCacheNamespace.FakeReader(sample_data),
-        budget,
-    )
-    cache = DatasetCache(object(), tmp_path)
-    cache.namespaces[namespace.dataset_id] = namespace
-    cache.node_id = 0
-
-    cache.store_records(namespace.dataset_id, 0, [0, 1, 2], sample_data[[0, 1, 2]])  # no exception
+    write([0, 1, 2])  # no exception
     assert cache.cache_full.value
     assert "Dataset cache on node 0 is full" in caplog.text
 
-    budget.release(record_bytes)  # space is free again, but the cache does not take more records
-    cache.store_records(namespace.dataset_id, 0, [3], sample_data[[3]])
-
-    assert sorted(position for _, _, position in namespace.committed()) == [0, 1]
-
-
-@pytest.mark.parametrize("max_fraction", [0, -0.1, 1.5])
-def test_max_fraction_must_be_a_fraction(tmp_path: Path, max_fraction: float) -> None:
-    with pytest.raises(ValueError, match="max_fraction"):
-        DatasetCache(object(), tmp_path, max_fraction=max_fraction)
+    disk.free = 10**6  # space is free again, but the cache does not take more records
+    write([3])
+    assert stored_positions(cache) == [0, 1]
 
 
-def test_global_view_reaches_persistent_dataloader_workers(tmp_path, sample_data, monkeypatch):
-    """Workers forked before update_global_view() must still see the new view.
-
-    check_cache() runs in dataloader workers that persist across epochs, while the view is
-    updated in the training process at the end of each epoch.
-    """
+def test_remote_read_from_a_forked_dataloader_worker(tmp_path: Path, sample_data: np.ndarray) -> None:
+    """Node 0 reads the records of node 1 from its server, in a persistent forked worker."""
     from torch.utils.data import DataLoader
     from torch.utils.data import IterableDataset
 
-    namespace = DatasetCacheNamespace(
-        tmp_path,
-        "analysis:fingerprint",
-        TestDatasetCacheNamespace.FakeReader(sample_data),
-    )
-    cache = DatasetCache(object(), tmp_path)
-    cache.namespaces[namespace.dataset_id] = namespace
-    cache.node_id = 0
-
-    class Remote:
-        def request_shard(self, key, positions):
-            return sample_data[positions]
-
-    monkeypatch.setattr(cache, "_remote_cache", lambda node: Remote())
+    node_1 = make_cache(tmp_path / "node-1", sample_data, node_id=1, num_nodes=2)
+    node_1.store_records(DATASET_ID, 0, [7, 8], sample_data[[7, 8]])
+    server = CacheServer(node_1.cache_path)
+    server.start()
+    node_0 = make_cache(tmp_path / "node-0", sample_data, node_id=0, num_nodes=2)
+    node_0.hostnames, node_0.ports = ["127.0.0.1", "127.0.0.1"], [0, server.port]
 
     class Reads(IterableDataset):
         def __iter__(self):
-            _, missing = cache.check_cache(namespace.dataset_id, 0, [3, 4])
-            yield len(missing)
+            values, missing = node_0.check_cache(DATASET_ID, 0, [7, 8, 9])
+            yield np.stack(values[:2]), missing
 
     loader = DataLoader(
         Reads(),
@@ -662,114 +407,62 @@ def test_global_view_reaches_persistent_dataloader_workers(tmp_path, sample_data
         persistent_workers=True,
         multiprocessing_context="fork",
     )
+    try:
+        for _ in range(2):  # two epochs in the same worker process
+            ((values, missing),) = list(loader)
+            np.testing.assert_array_equal(values, sample_data[[7, 8]])
+            assert missing == [2]  # node 1 does not have date 9
+        assert node_0.cache_hits_remote.value == 4
+    finally:
+        del loader
+        server.close()
 
-    assert list(loader) == [2]  # epoch 0: nothing advertised yet
-    cache._publish_view({CacheKey(namespace.dataset_id, 0, p): {1} for p in (3, 4)})
-    assert list(loader) == [0]  # epoch 1: same worker process, served by node 1
-    assert cache.cache_hits_remote.value == 2
+
+# ---------------------------------------------------------------------------
+# Datamodule
+# ---------------------------------------------------------------------------
 
 
-def test_setup_limits_the_cache_to_a_fraction_of_the_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from types import SimpleNamespace
+class AttachableReader(FakeReader, IdentityReader):
+    def __init__(self, data: np.ndarray) -> None:
+        FakeReader.__init__(self, data)
+        self.metadata, self.variables, self.resolution = {}, ("a", "b", "c"), "o96"
+        self.cache = None
 
+    def set_cache(self, cache: DatasetCache, dataset_id: str) -> None:
+        self.cache = (cache, dataset_id)
+
+
+@pytest.mark.parametrize("cache_dir", [None, "cache"])
+def test_datamodule_starts_and_stops_the_cache(tmp_path: Path, sample_data: np.ndarray, cache_dir: str | None) -> None:
     import torch.distributed as dist
+    from omegaconf import OmegaConf
 
-    class FakeDatamodule:
-        ds_train = SimpleNamespace(data_readers={})
+    from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
-        def setup(self, stage: str | None = None) -> None:
-            pass
+    datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
+    datamodule.cache = None
+    hardware = {"cache_max_fraction": 0.9, "hostname_suffix": None}
+    if cache_dir is not None:
+        hardware["cache_dir"] = str(tmp_path / cache_dir)
+    datamodule.config = OmegaConf.create({"system": {"hardware": hardware}})
+    readers = {"train": AttachableReader(sample_data), "valid": AttachableReader(sample_data[:4])}
+    datamodule.__dict__["ds_train"] = SimpleNamespace(data_readers={"data": readers["train"]})
+    datamodule.__dict__["ds_valid"] = SimpleNamespace(data_readers={"data": readers["valid"]})
 
-        def teardown(self, stage: str | None = None) -> None:
-            pass
-
-    disk = SimpleNamespace(total=1000 * 10**9, used=0, free=1000 * 10**9)
-    monkeypatch.setattr("anemoi.training.utils.dataset_cache.shutil.disk_usage", lambda _path: disk)
     dist.init_process_group("gloo", init_method=f"file://{tmp_path}/store", rank=0, world_size=1)
     try:
-        cache = DatasetCache(FakeDatamodule(), tmp_path / "missing" / "root", max_fraction=0.9)
-        cache.setup("fit")  # creates the cache root
-        try:
-            assert cache.budget.limit_bytes == 900 * 10**9
-            assert cache.budget.min_free_bytes == 100 * 10**9
-            assert cache.budget.used() == 0
-            assert cache.budget.path.parent == cache.cache_path
-        finally:
-            cache.teardown("fit")
+        datamodule.setup("fit")
+        if cache_dir is None:
+            assert datamodule.cache is None
+            assert readers["train"].cache is None
+            return
+        cache = datamodule.cache
+        assert readers["train"].cache[0] is cache
+        assert readers["train"].cache[1] != readers["valid"].cache[1]  # other dates: other records
+        assert len(cache.namespaces) == 2
+        datamodule.teardown("fit")
+        assert datamodule.cache is None
+        assert cache.server is None
     finally:
         dist.destroy_process_group()
-
-
-class TestPartition:
-    def cache(self, tmp_path: Path, sample_data: np.ndarray, node_id: int, num_nodes: int = 2) -> DatasetCache:
-        namespace = DatasetCacheNamespace(tmp_path, "analysis:part", TestDatasetCacheNamespace.FakeReader(sample_data))
-        cache = DatasetCache(object(), tmp_path, partition=True)
-        cache.namespaces[namespace.dataset_id] = namespace
-        cache.node_id, cache.num_nodes, cache.budget = node_id, num_nodes, None
-        return cache
-
-    def test_each_date_has_one_node(self, tmp_path: Path, sample_data: np.ndarray) -> None:
-        caches = [self.cache(tmp_path / str(node), sample_data, node, num_nodes=3) for node in range(3)]
-        owners = [
-            [node for node, cache in enumerate(caches) if cache.owns(cache.namespaces["analysis:part"], 0, position)]
-            for position in range(sample_data.shape[0])
-        ]
-        assert all(len(nodes) == 1 for nodes in owners)
-        # the parts are contiguous and in node order
-        assert [nodes[0] for nodes in owners] == sorted(nodes[0] for nodes in owners)
-        assert {nodes[0] for nodes in owners} == {0, 1, 2}
-
-    def test_negative_position_is_normalized(self, tmp_path: Path, sample_data: np.ndarray) -> None:
-        cache = self.cache(tmp_path, sample_data, node_id=1)
-        namespace = cache.namespaces["analysis:part"]
-        assert cache.owns(namespace, 0, -1) == cache.owns(namespace, 0, sample_data.shape[0] - 1)
-
-    def test_only_owned_records_are_stored(self, tmp_path: Path, sample_data: np.ndarray) -> None:
-        cache = self.cache(tmp_path, sample_data, node_id=0)
-        positions = list(range(sample_data.shape[0]))  # 10 dates: node 0 owns 0-4
-        cache.store_records("analysis:part", 0, positions, list(sample_data))
-        namespace = cache.namespaces["analysis:part"]
-        stored = [position for position in positions if namespace.paths(0, position)[0].exists()]
-        assert stored == [0, 1, 2, 3, 4]
-        assert cache.cache_not_owned.value == 5
-
-    def test_without_partition_all_records_are_stored(self, tmp_path: Path, sample_data: np.ndarray) -> None:
-        cache = self.cache(tmp_path, sample_data, node_id=0)
-        cache.partition = False
-        cache.store_records("analysis:part", 0, [7, 8], list(sample_data[[7, 8]]))
-        assert all(cache.namespaces["analysis:part"].paths(0, position)[0].exists() for position in (7, 8))
-
-    @pytest.mark.parametrize("grid_indices", [None, slice(None), slice(0, 5), slice(0, None, 1)])
-    def test_full_grid_records_follow_the_partition(
-        self,
-        tmp_path: Path,
-        sample_data: np.ndarray,
-        grid_indices: slice | None,
-    ) -> None:
-        cache = self.cache(tmp_path, sample_data, node_id=0)
-        namespace = cache.namespaces["analysis:part"]
-        namespace.grid_size = sample_data.shape[-1]  # training passes slice(0, grid_size) for the full grid
-        assert cache.owns(namespace, 0, 2, grid_indices)
-        assert not cache.owns(namespace, 0, 7, grid_indices)
-
-    @pytest.mark.parametrize("grid_indices", [slice(0, 2), slice(2, 5), np.arange(5), np.array([0, 3])])
-    def test_grid_shard_records_are_stored_by_the_node_that_reads_them(
-        self,
-        tmp_path: Path,
-        sample_data: np.ndarray,
-        grid_indices: slice | np.ndarray,
-    ) -> None:
-        # with model sharding, the ranks that read a shard can all be on one node: no other node caches it
-        cache = self.cache(tmp_path, sample_data, node_id=0)
-        namespace = cache.namespaces["analysis:part"]
-        namespace.grid_size = sample_data.shape[-1]
-        values = [sample_data[7][..., grid_indices], sample_data[8][..., grid_indices]]
-        cache.store_records("analysis:part", 0, [7, 8], values, grid_indices)  # node 0 does not own dates 7 and 8
-        grid_id = cache._grid_id(grid_indices)
-        assert all(namespace.paths(0, position, grid_id)[0].exists() for position in (7, 8))
-        assert cache.cache_not_owned.value == 0
-
-    def test_single_node_owns_all(self, tmp_path: Path, sample_data: np.ndarray) -> None:
-        cache = self.cache(tmp_path, sample_data, node_id=0, num_nodes=1)
-        namespace = cache.namespaces["analysis:part"]
-        assert all(cache.owns(namespace, 0, position) for position in range(sample_data.shape[0]))

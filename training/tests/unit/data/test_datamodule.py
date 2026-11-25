@@ -117,6 +117,7 @@ def test_set_epoch_updates_all_constructed_datasets(mocker: MockFixture) -> None
     """set_epoch updates every already-cached dataset and leaves lazy datasets untouched."""
     datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
     datamodule.epoch = 0
+    datamodule.cache = None
     datamodule.task = mocker.Mock()
     datamodule.task.steps.side_effect = lambda label: tuple(
         {} for _ in range({"training": 1, "validation": 2, "test": 3}[label])

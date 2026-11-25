@@ -63,6 +63,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             LOGGER.info("Data loader memory pinning disabled.")
 
         self.epoch = 0
+        self.cache = None  # the dataset cache, made in setup() if system.hardware.cache_dir is set
 
     @cached_property
     def statistics(self) -> dict:
@@ -141,9 +142,41 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             rollout=len(tuple(self.task.steps(label))),
         )
 
+    def setup(self, stage: str | None = None) -> None:
+        """Start the dataset cache if ``system.hardware.cache_dir`` is set.
+
+        Lightning calls this method on each rank, after it starts torch distributed.
+        """
+        del stage
+        hardware = self.config.system.hardware
+        # configs that are not validated can have no cache_dir: then there is no cache
+        if getattr(hardware, "cache_dir", None) is None or self.cache is not None:
+            return
+        # imported here because the cache needs pyzmq, an optional dependency
+        from anemoi.training.utils.dataset_cache import DatasetCache
+
+        LOGGER.info("Caching datasets under '%s'", hardware.cache_dir)
+        self.cache = DatasetCache(
+            hardware.cache_dir,
+            hostname_suffix=hardware.hostname_suffix,
+            max_fraction=hardware.cache_max_fraction,
+        )
+        self.cache.setup()
+        self.cache.attach(self.ds_train.data_readers)
+        self.cache.attach(self.ds_valid.data_readers)
+
+    def teardown(self, stage: str | None = None) -> None:
+        """Stop the dataset cache."""
+        del stage
+        if self.cache is not None:
+            self.cache.teardown()
+            self.cache = None
+
     def set_epoch(self, epoch: int) -> None:
         """Update the epoch for each dataset. This will take effect once the DataLoader workers are re-started."""
         self.epoch = epoch
+        if self.cache is not None:
+            self.cache.log_counters()
 
         for dataset_name, label in (("ds_train", "training"), ("ds_valid", "validation"), ("ds_test", "test")):
             if dataset_name not in self.__dict__:

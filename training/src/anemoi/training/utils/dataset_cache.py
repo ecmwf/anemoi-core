@@ -7,408 +7,188 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Node-local dataset cache with cross-node reads over ZeroMQ."""
+"""Node-local dataset cache, with reads from the caches of the other nodes.
+
+Each node has one cache on its local disk. All the ranks and dataloader workers of the node use it.
+A record is one date of one dataset, or one grid shard of that date.
+
+The dates of each dataset are divided into one contiguous part for each node. A node caches only the
+full-grid records of its part. A worker gets a full-grid record from the cache of its node, then
+from the node that owns the record, then from the dataset. A grid-shard record is cached by each node
+that reads it, and is never read from other nodes.
+"""
 
 import errno
-import fcntl
 import hashlib
-import io
 import json
 import logging
 import os
-import pickle
 import shutil
 import socket
-import threading
-from collections.abc import Callable
-from collections.abc import Iterator
-from contextlib import contextmanager
 from multiprocessing import Value
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any
 
 import numpy as np
-import pytorch_lightning as pl
 import torch.distributed as dist
-from numcodecs import Blosc
 
+from anemoi.training.utils import cache_format
+from anemoi.training.utils.cache_format import FULL_GRID
 from anemoi.training.utils.cache_transport import CacheClient
-from anemoi.training.utils.cache_transport import CacheKey
 from anemoi.training.utils.cache_transport import CacheServer
-from anemoi.training.utils.cache_transport import Endpoint
-from anemoi.training.utils.cache_transport import RemoteCacheMiss
-from anemoi.training.utils.cache_transport import RemoteCacheUnavailable
+from anemoi.training.utils.cache_transport import RemoteCacheError
 
 LOGGER = logging.getLogger(__name__)
 
-# Records are read and written inside dataloader workers, where numcodecs runs blosc
-# single-threaded (it only uses threads in the main process). lz4 decodes ~2x and
-# encodes ~3-8x faster than zstd there, for a similar compression ratio.
-_BLOSC = Blosc(cname="lz4", clevel=5, shuffle=Blosc.BITSHUFFLE)
-
-
-def decode_cache_array(data) -> np.ndarray:
-    """Decode an uncompressed .npy header followed by the blosc-compressed array data."""
-    view = memoryview(data)
-    # a version 1.0 .npy header: 6-byte magic string, 2-byte version, 2-byte header length
-    header_end = 10 + int.from_bytes(view[8:10], "little")
-    source = io.BytesIO(view[:header_end])
-    np.lib.format.read_magic(source)
-    shape, fortran_order, dtype = np.lib.format.read_array_header_1_0(source)
-    value = np.empty(shape, dtype=dtype, order="F" if fortran_order else "C")
-    _BLOSC.decode(view[header_end:], out=value)
-    return value
-
-
-def load_cache_array(path):
-    """Read an uncompressed .npy header followed by the blosc-compressed array data."""
-    return decode_cache_array(path.read_bytes())
-
-
-def encode_cache_array(value: np.ndarray) -> bytes:
-    """Return an uncompressed .npy header followed by the blosc-compressed array data."""
-    value = np.ascontiguousarray(value)
-    header = io.BytesIO()
-    np.lib.format.write_array_header_1_0(header, np.lib.format.header_data_from_array_1_0(value))
-    return header.getvalue() + _BLOSC.encode(value)
-
-
-def save_cache_array(target, value):
-    target.write(encode_cache_array(value))
-
-
-def cache_entry_path(entries_path, sequence, position, grid_id="all") -> Path:
-    return Path(entries_path) / grid_id / str(sequence) / f"{position}.npy.blosc"
-
-
-def read_cache_entry(entries_path, sequence, position, grid_id="all"):
-    entry = cache_entry_path(entries_path, sequence, position, grid_id)
-    return load_cache_array(entry) if entry.exists() else None
-
-
-def read_cache_payload(entries_path, sequence, position, grid_id="all") -> bytes | None:
-    """Return the compressed bytes of a record, or None if it is not in the cache."""
-    try:
-        return cache_entry_path(entries_path, sequence, position, grid_id).read_bytes()
-    except FileNotFoundError:
-        return None
-
-
-def _is_capacity_error(error: OSError) -> bool:
-    errnos = {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}
-    messages = ("disk quota exceeded", "no space left on device", "not enough free space")
-    return error.errno in errnos or any(message in str(error).lower() for message in messages)
-
 
 class CacheFullError(OSError):
-    """The node cache has reached its size limit, or its disk is full."""
-
-
-class NodeCacheBudget:
-    """Size limit for the cache of one node, shared by all processes on the node.
-
-    A small file holds the number of bytes that the cache uses. Each change to this file
-    occurs under an flock. Thus, all ranks and dataloader workers on the node use the same
-    budget. A writer reserves space before it writes a record. Thus, concurrent writers
-    cannot go over the limit.
-
-    The budget also keeps ``min_free_bytes`` free on the disk. This limit includes files
-    that are not in the cache, for example checkpoints and logs.
-    """
-
-    def __init__(self, path: Path, limit_bytes: int, min_free_bytes: int = 0):
-        self.path = Path(path)
-        self.limit_bytes = int(limit_bytes)
-        self.min_free_bytes = int(min_free_bytes)
-
-    def reset(self) -> None:
-        self.path.write_bytes((0).to_bytes(8, "little"))
-
-    @contextmanager
-    def _locked(self) -> Iterator[BinaryIO]:
-        with self.path.open("r+b") as counter:
-            fcntl.flock(counter, fcntl.LOCK_EX)
-            try:
-                yield counter
-            finally:
-                fcntl.flock(counter, fcntl.LOCK_UN)
-
-    def used(self) -> int:
-        with self._locked() as counter:
-            return int.from_bytes(counter.read(8), "little")
-
-    def _add(self, nbytes: int, limit: bool) -> bool:
-        with self._locked() as counter:
-            used = int.from_bytes(counter.read(8), "little")
-            if limit and used + nbytes > self.limit_bytes:
-                return False
-            if limit and shutil.disk_usage(self.path.parent).free - nbytes < self.min_free_bytes:
-                return False
-            counter.seek(0)
-            counter.write(max(used + nbytes, 0).to_bytes(8, "little"))
-            return True
-
-    def reserve(self, nbytes: int) -> bool:
-        """Reserve ``nbytes``. If this goes over a limit, reserve nothing and return False."""
-        return self._add(nbytes, limit=True)
-
-    def release(self, nbytes: int) -> None:
-        self._add(-nbytes, limit=False)
+    """The cache has reached its size limit, or its disk is full."""
 
 
 class DatasetCacheNamespace:
-    """Atomic file-per-record cache for one dataset reader."""
+    """The records of one dataset in the cache of this node."""
 
-    def __init__(self, root: Path, dataset_id: str, reader, budget: NodeCacheBudget | None = None):
+    def __init__(self, cache_path: Path, dataset_id: str, reader: Any) -> None:
         self.dataset_id = dataset_id
-        self.reader = reader
-        self.budget = budget
         self.num_sequences = int(reader.num_sequences)
         self.sequence_lengths = [int(reader.sequence_length(index)) for index in range(self.num_sequences)]
-        try:
-            self.grid_size = int(reader.grid_size)
-        except (AttributeError, TypeError, ValueError):
-            self.grid_size = None
-        self.path = root / hashlib.sha256(dataset_id.encode()).hexdigest()[:20]
-        self.entries_path = self.path / "entries"
-        self.locks_path = self.path / "locks"
-        for path in (self.entries_path, self.locks_path):
-            path.mkdir(parents=True, exist_ok=True)
+        self.grid_size = int(reader.grid_size)
+        self.entries_path = cache_format.entries_path(cache_path, dataset_id)
+        self.entries_path.mkdir(parents=True, exist_ok=True)
 
-    def covers_grid(self, grid_indices: slice | np.ndarray | None) -> bool:
-        """Return True if grid_indices select all the grid points of the dataset, in their order."""
+    def grid_id(self, grid_indices: slice | np.ndarray | None) -> str:
+        """Return FULL_GRID if grid_indices select all the grid points in order, else a name for the shard."""
         if grid_indices is None:
-            return True
-        if not isinstance(grid_indices, slice):  # an index array: a shard, or a reordered grid
-            return False
-        if grid_indices == slice(None):
-            return True
-        return self.grid_size is not None and grid_indices.indices(self.grid_size) == (0, self.grid_size, 1)
+            return FULL_GRID
+        if isinstance(grid_indices, slice):
+            if grid_indices.indices(self.grid_size) == (0, self.grid_size, 1):
+                return FULL_GRID
+            value = [grid_indices.start, grid_indices.stop, grid_indices.step]
+        else:
+            value = np.asarray(grid_indices).tolist()
+        return hashlib.sha256(json.dumps(value).encode()).hexdigest()[:16]
 
-    def normalize(self, sequence, position):
-        sequence, position = int(sequence), int(position)
-        if sequence < 0:
-            sequence += self.num_sequences
-        if not 0 <= sequence < self.num_sequences:
-            raise IndexError(sequence)
-        if position < 0:
-            position += self.sequence_lengths[sequence]
-        if not 0 <= position < self.sequence_lengths[sequence]:
-            raise IndexError(position)
-        return sequence, position
+    def path(self, sequence: int, position: int, grid_id: str) -> Path:
+        return cache_format.record_path(self.entries_path, sequence, position, grid_id)
 
-    def paths(self, sequence, position, grid_id="all"):
-        sequence, position = self.normalize(sequence, position)
-        return (
-            self.entries_path / grid_id / str(sequence) / f"{position}.npy.blosc",
-            self.locks_path / grid_id / str(sequence) / f"{position}.lock",
-        )
+    def local(self, sequence: int, position: int, grid_id: str) -> np.ndarray | None:
+        """Return the record from the cache of this node, or None if it is not there."""
+        payload = cache_format.read_payload(self.path(sequence, position, grid_id))
+        return None if payload is None else cache_format.decode(payload)
 
-    @contextmanager
-    def lock(self, path):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            yield
-            fcntl.flock(lock, fcntl.LOCK_UN)
+    def store(self, sequence: int, position: int, value: np.ndarray, grid_id: str, min_free_bytes: int) -> bool:
+        """Write one record, if it is not in the cache. Return True if this call wrote it.
 
-    def local(self, sequence, position, grid_id="all"):
-        sequence, position = self.normalize(sequence, position)
-        return read_cache_entry(self.entries_path, sequence, position, grid_id)
-
-    def store(self, sequence, position, value, grid_id="all", sync=False):
-        return self.store_payload(sequence, position, lambda: encode_cache_array(value), grid_id, sync=sync)
-
-    def store_payload(
-        self,
-        sequence: int,
-        position: int,
-        payload: bytes | Callable[[], bytes],
-        grid_id: str = "all",
-        sync: bool = False,
-    ) -> bool:
-        """Write one record. payload is the record bytes, or a function that returns them.
-
-        The function is called only if the record is not in the cache.
+        The record is written to a temporary file, then linked to its path. The link fails if
+        the record exists. Thus, readers never see a partial record, and two writers of the same
+        record do not interfere.
         """
-        entry, lock = self.paths(sequence, position, grid_id)
-        with self.lock(lock):
-            if entry.exists():
-                return False
-            payload = payload() if callable(payload) else payload
-            if self.budget is not None and not self.budget.reserve(len(payload)):
-                msg = (
-                    f"cache limit of {self.budget.limit_bytes / 1e9:.1f} GB or free-space limit of "
-                    f"{self.budget.min_free_bytes / 1e9:.1f} GB reached, cannot add {len(payload) / 1e9:.2f} GB"
-                )
-                raise CacheFullError(msg)
-            entry.parent.mkdir(parents=True, exist_ok=True)
-            temporary = entry.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
-            try:
-                with temporary.open("wb") as target:
-                    target.write(payload)
-                    if sync:
-                        target.flush()
-                        os.fsync(target.fileno())
-                os.replace(temporary, entry)
-                return True
-            except OSError as error:
-                temporary.unlink(missing_ok=True)
-                if self.budget is not None:
-                    self.budget.release(len(payload))
-                if _is_capacity_error(error):
-                    raise CacheFullError(str(error)) from error
-                raise
-
-    def committed(self):
-        return (
-            (grid.name, int(sequence.name), int(entry.name.removesuffix(".npy.blosc")))
-            for grid in self.entries_path.iterdir()
-            if grid.is_dir()
-            for sequence in grid.iterdir()
-            if sequence.is_dir()
-            for entry in sequence.glob("*.npy.blosc")
-        )
+        entry = self.path(sequence, position, grid_id)
+        if entry.exists():
+            return False
+        payload = cache_format.encode(value)
+        if shutil.disk_usage(self.entries_path).free - len(payload) < min_free_bytes:
+            msg = f"less than {min_free_bytes / 1e9:.1f} GB would stay free on the disk"
+            raise CacheFullError(msg)
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        temporary = entry.with_name(f"{entry.name}.{os.getpid()}.tmp")
+        try:
+            temporary.write_bytes(payload)
+            os.link(temporary, entry)
+        except FileExistsError:
+            return False
+        except OSError as error:
+            if error.errno in (errno.ENOSPC, errno.EDQUOT):
+                raise CacheFullError(str(error)) from error
+            raise
+        finally:
+            temporary.unlink(missing_ok=True)
+        return True
 
 
-class DatasetCache(pl.LightningDataModule):
-    """Datamodule proxy coordinating one SSD cache per node."""
+def _dataset_id(name: str, reader: Any) -> str:
+    """Return a name for the dataset of a reader that is the same in all processes.
 
-    def __init__(
-        self,
-        ds,
-        cache_root,
-        hostname_suffix=None,
-        proc_group=None,
-        max_fraction: float = 0.9,
-        partition: bool = True,
-    ):
-        super().__init__()
-        self.ds = ds  # must be set before any attribute access can reach __getattr__
+    Do not use the dataset metadata: for a cloned dataset, the dates can be invalid, and then the
+    metadata changes from one process to the next.
+    """
+    identity = {
+        "name": name,
+        "shape": tuple(int(size) for size in reader.data.shape),
+        "dtype": str(reader.data.dtype),
+        "source": str(getattr(reader.data, "path", type(reader.data).__name__)),
+        "variables": list(reader.variables),
+        "resolution": str(reader.resolution),
+    }
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    return f"{name}:{digest}"
+
+
+class DatasetCache:
+    """The cache of this node, and the connections to the caches of the other nodes.
+
+    Make it before the dataloader workers start: the workers share its counters.
+    """
+
+    def __init__(self, cache_root: str | Path, hostname_suffix: str | None = None, max_fraction: float = 0.9) -> None:
         self.cache_root = Path(cache_root)
         self.hostname_suffix = hostname_suffix or ""
-        self.initial_proc_group = proc_group
-        if not 0 < max_fraction <= 1:
-            msg = f"max_fraction must be in (0, 1], got {max_fraction}"
-            raise ValueError(msg)
         self.max_fraction = max_fraction
-        # each node caches only the records in its part of the dataset (see owns)
-        self.partition = partition
-        self.num_nodes = 1  # set in setup()
-        self.budget = None  # set in setup(); None means no size limit
-        self.initialized = False
-        self.namespaces, self._locations, self._connections = {}, {}, {}
-        self._datasets = set()
+        self.namespaces: dict[str, DatasetCacheNamespace] = {}
+        self.node_id, self.num_nodes = 0, 1
+        self.server = None
+        self._clients: dict[tuple[int, int], CacheClient] = {}
+        self.total_fetches = Value("q", 0)
         self.cache_hits_local = Value("q", 0)
         self.cache_hits_remote = Value("q", 0)
         self.cache_misses = Value("q", 0)
-        self.total_fetches = Value("q", 0)
-        self.cache_full = Value("b", False)
         self.cache_remote_errors = Value("q", 0)
-        self.cache_not_owned = Value("q", 0)
-        # update_global_view() runs in the training process, but check_cache() runs in dataloader
-        # workers, which are forked once and persist across epochs. The view is therefore published
-        # to a file and workers reload it whenever this shared version counter changes.
-        self._view_version = Value("q", 0)
-        self._view_loaded = 0
-        self._view_path = self.cache_root / f"global-view-{os.getpid()}.pkl"
+        self.cache_full = Value("b", False)
 
-    def __getattr__(self, name):
-        if name == "ds":
-            raise AttributeError(name)
-        return getattr(self.ds, name)
+    # ------------------------------------------------------------------
+    # Set-up. All ranks must call these methods in the same order.
+    # ------------------------------------------------------------------
 
-    def _dataset(self, dataset):
-        if not self.initialized or id(dataset) in self._datasets:
-            return dataset
-        for name, reader in dataset.data_readers.items():
-            # Use only fields that are the same in every process. Do not use the dataset metadata:
-            # for a cloned dataset, the dates can be invalid, and then the metadata changes from
-            # one process to the next. Each rank then gets a different dataset_id and cache.
-            identity = {
-                "name": name,
-                "shape": tuple(int(size) for size in reader.data.shape),
-                "dtype": str(reader.data.dtype),
-                "source": str(getattr(reader.data, "path", type(reader.data).__name__)),
-                "variables": list(reader.variables),
-                "resolution": str(reader.resolution),
-            }
-            digest = hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()[:16]
-            dataset_id = f"{name}:{digest}"
-            self.namespaces[dataset_id] = DatasetCacheNamespace(
-                self.cache_path,
-                dataset_id,
-                reader,
-                budget=self.budget,
-            )
-            reader.set_cache(self, dataset_id)
-        self._datasets.add(id(dataset))
-        return dataset
+    def _gather(self, value: Any) -> list:
+        gathered = [None] * dist.get_world_size()
+        dist.all_gather_object(gathered, value, group=self.group)
+        return gathered
 
-    @property
-    def ds_train(self):
-        return self._dataset(self.ds.ds_train)
-
-    @property
-    def ds_valid(self):
-        return self._dataset(self.ds.ds_valid)
-
-    @property
-    def ds_test(self):
-        return self._dataset(self.ds.ds_test)
-
-    def setup(self, stage=None):
-        if self.initialized:
-            return
-        self.ds.setup(stage)
+    def setup(self) -> None:
+        """Find the nodes, empty the cache of this node, and start the cache server of this node."""
         if not dist.is_initialized():
-            raise RuntimeError("Torch distributed must be initialized before dataset caching")
-        self.global_rank = dist.get_rank(self.initial_proc_group)
-        self.world_size = dist.get_world_size(self.initial_proc_group)
-        self.proc_group = dist.new_group(backend="gloo")
+            msg = "Torch distributed must be initialized before dataset caching"
+            raise RuntimeError(msg)
+        self.group = dist.new_group(backend="gloo")
+        self.global_rank = dist.get_rank()
         host = socket.gethostname()
-        hosts = [None] * self.world_size
-        dist.all_gather_object(hosts, host, group=self.proc_group)
+        hosts = self._gather(host)
         unique_hosts = sorted(set(hosts))
-        self.node_id = unique_hosts.index(host)
-        self.num_nodes = len(unique_hosts)
-        if self.partition and self.global_rank == 0:
-            LOGGER.info(
-                "Dataset cache partition: each of the %d nodes caches only its part of the dates of each dataset",
-                self.num_nodes,
-            )
-        self._leaders = {node: hosts.index(name) for node, name in enumerate(unique_hosts)}
-        self.is_node_leader = self.global_rank == self._leaders[self.node_id]
-        self.hostnames = [name + self.hostname_suffix for name in hosts]
+        self.node_id, self.num_nodes = unique_hosts.index(host), len(unique_hosts)
+        leaders = [hosts.index(name) for name in unique_hosts]  # the first rank on each node
+        self.is_node_leader = self.global_rank == leaders[self.node_id]
+        self.hostnames = [name + self.hostname_suffix for name in unique_hosts]
         self._check_hostnames()
-        self.cache_path = self.cache_root / f"cache-{hashlib.sha256(host.encode()).hexdigest()[:12]}"
+
         self.cache_root.mkdir(parents=True, exist_ok=True)
+        self.cache_path = self.cache_root / f"cache-{hashlib.sha256(host.encode()).hexdigest()[:12]}"
         disk_bytes = shutil.disk_usage(self.cache_root).total
         # the cache and all other files together must not use more than max_fraction of the disk
-        limit_bytes = int(self.max_fraction * disk_bytes)
-        self.budget = NodeCacheBudget(self.cache_path / "usage", limit_bytes, min_free_bytes=disk_bytes - limit_bytes)
+        self.min_free_bytes = disk_bytes - int(self.max_fraction * disk_bytes)
         if self.is_node_leader:
             shutil.rmtree(self.cache_path, ignore_errors=True)
             self.cache_path.mkdir(parents=True)
-            self.budget.reset()
             LOGGER.info(
-                "Dataset cache on node %d is limited to %.1f GB (%.0f%% of %.1f GB)",
+                "Dataset cache on node %d (%s) keeps %.1f GB of %.1f GB free",
                 self.node_id,
-                self.budget.limit_bytes / 1e9,
-                100 * self.max_fraction,
+                self.cache_path,
+                self.min_free_bytes / 1e9,
                 disk_bytes / 1e9,
             )
-        dist.barrier(group=self.proc_group)
-        self.initialized = True
-        self._dataset(self.ds.ds_train)
-        self._check_dataset_ids()
-        if self.is_node_leader:
-            entries = {name: str(namespace.entries_path) for name, namespace in self.namespaces.items()}
-            self.server = CacheServer(entries)
+            self.server = CacheServer(self.cache_path)
             self.server.start()
-        ports = [None] * self.world_size
-        dist.all_gather_object(ports, self.server.port if self.is_node_leader else None, group=self.proc_group)
-        self._ports = {node: ports[rank] for node, rank in self._leaders.items()}
+        ports = self._gather(self.server.port if self.is_node_leader else None)
+        self.ports = [ports[rank] for rank in leaders]
 
     def _check_hostnames(self) -> None:
         """Make sure that each rank can find the address of the cache server on each other node.
@@ -419,17 +199,15 @@ class DatasetCache(pl.LightningDataModule):
         the run at the start and shows the hostname that is not correct.
         """
         unresolved = []
-        for node, rank in self._leaders.items():
+        for node, hostname in enumerate(self.hostnames):
             if node == self.node_id:
                 continue
             try:
-                socket.getaddrinfo(self.hostnames[rank], None)
+                socket.getaddrinfo(hostname, None)
             except socket.gaierror as error:
-                unresolved.append(f"{self.hostnames[rank]} ({error})")
+                unresolved.append(f"{hostname} ({error})")
         # all ranks must stop together, else the other ranks wait in a collective
-        gathered = [None] * self.world_size
-        dist.all_gather_object(gathered, unresolved, group=self.proc_group)
-        failures = sorted({name for names in gathered for name in names})
+        failures = sorted({name for names in self._gather(unresolved) for name in names})
         if failures:
             msg = (
                 f"Cannot find the address of the dataset cache server on other nodes: {', '.join(failures)}. "
@@ -438,229 +216,122 @@ class DatasetCache(pl.LightningDataModule):
             )
             raise RuntimeError(msg)
 
-    def _check_dataset_ids(self):
-        """Make sure that all ranks use the same dataset_ids, else they cannot share records."""
-        dataset_ids = [None] * self.world_size
-        dist.all_gather_object(dataset_ids, sorted(self.namespaces), group=self.proc_group)
-        if any(ids != dataset_ids[0] for ids in dataset_ids):
-            msg = f"Ranks do not agree on the cached dataset_ids: {dataset_ids}"
+    def attach(self, readers: dict[str, Any]) -> None:
+        """Send the sample reads of each reader through the cache."""
+        dataset_ids = {name: _dataset_id(name, reader) for name, reader in readers.items()}
+        gathered = self._gather(sorted(dataset_ids.values()))
+        if any(ids != gathered[0] for ids in gathered):
+            msg = f"Ranks do not agree on the cached dataset_ids: {gathered}"
             raise RuntimeError(msg)
+        for name, reader in readers.items():
+            dataset_id = dataset_ids[name]
+            self.namespaces[dataset_id] = DatasetCacheNamespace(self.cache_path, dataset_id, reader)
+            reader.set_cache(self, dataset_id)
 
-    def train_dataloader(self):
-        return self.ds._get_dataloader(self.ds_train, "training")
+    # ------------------------------------------------------------------
+    # Reads and writes, in the dataloader workers
+    # ------------------------------------------------------------------
 
-    def val_dataloader(self):
-        return self.ds._get_dataloader(self.ds_valid, "validation")
-
-    def test_dataloader(self):
-        return self.ds._get_dataloader(self.ds_test, "test")
-
-    def _positions(self, namespace, sequence, positions):
-        if isinstance(positions, slice):
-            return list(range(*positions.indices(namespace.sequence_lengths[int(sequence)])))
-        values = np.asarray(positions)
-        return [int(values)] if values.ndim == 0 else [int(value) for value in values]
-
-    def _grid_id(self, grid_indices):
-        if grid_indices is None:
-            return "all"
-        if isinstance(grid_indices, slice):
-            if grid_indices == slice(None):
-                return "all"
-            value = (grid_indices.start, grid_indices.stop, grid_indices.step)
-        else:
-            indices = np.asarray(grid_indices)
-            value = (indices.dtype.str, indices.shape, indices.tolist())
-        return hashlib.sha256(json.dumps(value).encode()).hexdigest()[:16]
-
-    def _endpoint(self, node):
-        rank = self._leaders[node]
-        return Endpoint(self.hostnames[rank], self._ports[node], node)
-
-    def _remote_cache(self, node):
-        key = (os.getpid(), node)
-        if key not in self._connections:
-            self._connections[key] = CacheClient(self._endpoint(node))
-        return self._connections[key]
+    def owner(self, namespace: DatasetCacheNamespace, sequence: int, position: int) -> int:
+        """Return the node that caches this full-grid record."""
+        if namespace.num_sequences == 1:
+            index, size = position, namespace.sequence_lengths[0]
+        else:  # forecast datasets: one part of the sequences (base dates) for each node
+            index, size = sequence, namespace.num_sequences
+        return index * self.num_nodes // size
 
     @staticmethod
     def _increment(counter: Value, amount: int) -> None:
         with counter.get_lock():
             counter.value += amount
 
-    def _publish_view(self, locations):
-        """Make a new global view visible to this process and its dataloader workers."""
-        temporary = self._view_path.with_suffix(".tmp")
-        with temporary.open("wb") as target:
-            pickle.dump(locations, target, protocol=pickle.HIGHEST_PROTOCOL)
-        os.replace(temporary, self._view_path)
-        with self._view_version.get_lock():
-            self._view_version.value += 1
-            self._view_loaded = self._view_version.value
-        self._locations = locations
+    def _request(self, node: int, dataset_id: str, sequence: int, grid_id: str, positions: list[int]) -> list:
+        """Return the records from the cache of another node. None means that the node does not have it."""
+        key = (os.getpid(), node)  # one connection for each process: a socket must not cross a fork
+        if key not in self._clients:
+            self._clients[key] = CacheClient(self.hostnames[node], self.ports[node])
+        try:
+            return self._clients[key].request(dataset_id, sequence, grid_id, positions)
+        except RemoteCacheError as error:
+            self._increment(self.cache_remote_errors, 1)
+            LOGGER.warning("Remote cache read from node %d failed: %s", node, error)
+            return [None] * len(positions)
 
-    def _refresh_view(self):
-        """Reload the global view if the training process published a newer one."""
-        version = self._view_version.value
-        if version == self._view_loaded:
-            return
-        with self._view_path.open("rb") as source:
-            self._locations = pickle.load(source)
-        self._view_loaded = version
-
-    def check_cache(self, dataset_id, sequence, positions, grid_indices=None):
-        self._refresh_view()
+    def check_cache(
+        self,
+        dataset_id: str,
+        sequence: int,
+        positions: list[int],
+        grid_indices: slice | np.ndarray | None = None,
+    ) -> tuple[list[np.ndarray | None], list[int]]:
+        """Return the records from the caches, and the indices in positions of the records that no cache has."""
         namespace = self.namespaces[dataset_id]
-        positions = self._positions(namespace, sequence, positions)
-        if not positions:
-            return [], []
-
-        grid_id = self._grid_id(grid_indices)
-        keys = [CacheKey(dataset_id, int(sequence), position, grid_id) for position in positions]
+        grid_id = namespace.grid_id(grid_indices)
         values = [namespace.local(sequence, position, grid_id) for position in positions]
         missing = [index for index, value in enumerate(values) if value is None]
         self._increment(self.total_fetches, len(positions))
         self._increment(self.cache_hits_local, len(positions) - len(missing))
 
-        unresolved = set(missing)
-        remote_batches = {}
-        for index in missing:
-            nodes = self._locations.get(keys[index], set()) - {self.node_id}
-            if nodes:
-                remote_batches.setdefault(min(nodes), []).append(index)
-
-        for node, batch in remote_batches.items():
-            try:
-                remote_positions = [positions[index] for index in batch]
-                connection = self._remote_cache(node)
-                remote = connection.request_shard(keys[batch[0]], remote_positions)
-                for index, value in zip(batch, remote):
+        if grid_id == FULL_GRID:
+            remote = {}
+            for index in missing:
+                node = self.owner(namespace, sequence, positions[index])
+                if node != self.node_id:
+                    remote.setdefault(node, []).append(index)
+            for node, indices in remote.items():
+                records = self._request(node, dataset_id, sequence, grid_id, [positions[index] for index in indices])
+                for index, value in zip(indices, records, strict=True):
                     values[index] = value
-                    self._locations.setdefault(keys[index], set()).add(node)
-                unresolved.difference_update(batch)
-                self._increment(self.cache_hits_remote, len(batch))
-            except (RemoteCacheMiss, RemoteCacheUnavailable) as error:
-                self._increment(self.cache_remote_errors, 1)
-                leader = getattr(self, "_leaders", {}).get(node)
-                LOGGER.warning(
-                    "Remote cache read from node %d (%s) failed: %s: %s",
-                    node,
-                    self.hostnames[leader] if leader is not None else "unknown host",
-                    type(error).__name__,
-                    error,
-                )
-                for index in batch:
-                    self._locations[keys[index]].discard(node)
+            unresolved = [index for index in missing if values[index] is None]
+            self._increment(self.cache_hits_remote, len(missing) - len(unresolved))
+            missing = unresolved
 
-        missing = sorted(unresolved)
         self._increment(self.cache_misses, len(missing))
         return values, missing
 
-    def _store_records(self, dataset_id, sequence, positions, values, grid_id, sync=False):
+    def store_records(
+        self,
+        dataset_id: str,
+        sequence: int,
+        positions: list[int],
+        values: np.ndarray,
+        grid_indices: slice | np.ndarray | None = None,
+    ) -> None:
+        """Write the records that this node caches. When the cache is full, it does not change after that."""
         if self.cache_full.value:
             return
         namespace = self.namespaces[dataset_id]
+        grid_id = namespace.grid_id(grid_indices)
         try:
-            for position, value in zip(positions, values):
-                namespace.store(sequence, position, value, grid_id, sync=sync)
+            for position, value in zip(positions, values, strict=True):
+                if grid_id != FULL_GRID or self.owner(namespace, sequence, position) == self.node_id:
+                    namespace.store(sequence, position, value, grid_id, self.min_free_bytes)
         except CacheFullError as error:
-            # the cache stays locked at its size: no records are added or removed after this
             with self.cache_full.get_lock():
                 first = not self.cache_full.value
                 self.cache_full.value = True
             if first:
-                LOGGER.warning("Dataset cache on node %s is full, no more records are cached: %s", self.node_id, error)
+                LOGGER.warning("Dataset cache on node %d is full, no more records are cached: %s", self.node_id, error)
 
-    def owns(
-        self,
-        namespace: DatasetCacheNamespace,
-        sequence: int,
-        position: int,
-        grid_indices: slice | np.ndarray | None = None,
-    ) -> bool:
-        """Return True if this node caches the record.
+    # ------------------------------------------------------------------
+    # End of epoch and end of run
+    # ------------------------------------------------------------------
 
-        Without partition, each node caches all the records that its ranks read. Then most dates
-        are in the cache of each node, because each date is in more than one sample. With
-        partition, the dates of each dataset are divided into one contiguous part for each node,
-        and each node caches only the records of its part. The records of other parts are read
-        from the cache of the other node, or from the dataset.
-
-        The partition applies only to records of the full grid. A record of one grid shard (model
-        sharding) is read only by the ranks that read that shard, and these ranks can all be on
-        one node. Then no other node caches the record. Thus, each node caches all the shard
-        records that it reads.
-        """
-        if not self.partition or self.num_nodes <= 1 or not namespace.covers_grid(grid_indices):
-            return True
-        sequence, position = namespace.normalize(sequence, position)
-        if namespace.num_sequences == 1:
-            index, size = position, namespace.sequence_lengths[0]
-        else:  # forecast datasets: one part of the sequences (base dates) for each node
-            index, size = sequence, namespace.num_sequences
-        return index * self.num_nodes // size == self.node_id
-
-    def _owned(
-        self,
-        namespace: DatasetCacheNamespace,
-        sequence: int,
-        positions: list[int],
-        values: list,
-        grid_indices: slice | np.ndarray | None = None,
-    ) -> tuple[list[int], list]:
-        """Return only the positions and values of the records that this node caches."""
-        owned = [
-            (position, value)
-            for position, value in zip(positions, values, strict=True)
-            if self.owns(namespace, sequence, position, grid_indices)
-        ]
-        if len(owned) < len(positions):
-            self._increment(self.cache_not_owned, len(positions) - len(owned))
-        return [position for position, _ in owned], [value for _, value in owned]
-
-    def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
-        namespace = self.namespaces[dataset_id]
-        positions = self._positions(namespace, sequence, positions)
-        positions, values = self._owned(namespace, sequence, positions, values, grid_indices)
-        if not positions:
-            return
-        self._store_records(dataset_id, sequence, positions, values, self._grid_id(grid_indices))
-
-    def update_global_view(self):
-        """Update which nodes have each cached record."""
-        # rank 0 on each node collects the local cache state
-        local = []
-        if self.is_node_leader:
-            for dataset_id, namespace in self.namespaces.items():
-                local.extend(
-                    (dataset_id, sequence, position, grid_id, self.node_id)
-                    for grid_id, sequence, position in namespace.committed()
-                )
-        # each process gathers the local cache state from all nodes
-        gathered = [None] * self.world_size
-        dist.all_gather_object(gathered, local, group=self.proc_group)
-        locations = {}
-        # each process updates its view of the global cache state
-        for entries in gathered:
-            for dataset_id, sequence, position, grid_id, node in entries:
-                locations.setdefault(CacheKey(dataset_id, sequence, position, grid_id), set()).add(node)
-        self._publish_view(locations)
+    def log_counters(self) -> None:
         LOGGER.info(
-            "Rank %d had %d fetches (%d local hits, %d remote hits, %d misses, %d remote errors, "
-            "%d records not cached on this node because of the partition)",
+            "Dataset cache, rank %d: %d fetches (%d local hits, %d remote hits, %d misses, %d remote errors)",
             self.global_rank,
             self.total_fetches.value,
             self.cache_hits_local.value,
             self.cache_hits_remote.value,
             self.cache_misses.value,
             self.cache_remote_errors.value,
-            self.cache_not_owned.value,
         )
 
-    def teardown(self, stage=None):
-        for connection in self._connections.values():
-            connection.close()
-        if self.is_node_leader:
+    def teardown(self) -> None:
+        for client in self._clients.values():
+            client.close()
+        self._clients.clear()
+        if self.server is not None:
             self.server.close()
-        self._view_path.unlink(missing_ok=True)
-        self.ds.teardown(stage)
+            self.server = None
