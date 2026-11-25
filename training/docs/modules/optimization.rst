@@ -62,7 +62,8 @@ config group. The default is AdamW:
    betas: [0.9, 0.95]
 
 The learning rate is set separately via ``config.training.optimization.learning_rate``
-and is not part of the optimizer config. ``BaseGraphModule`` passes it
+and is not part of the optimizer config. It is the peak learning rate,
+reached at the end of the scheduler's warmup. ``BaseGraphModule`` passes it
 as the ``lr`` argument when instantiating the optimizer.
 
 To override the optimizer at the command line:
