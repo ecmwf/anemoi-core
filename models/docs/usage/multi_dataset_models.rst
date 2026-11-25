@@ -217,20 +217,27 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
    the merge order of the non-principal dataset latents is shuffled during training and follows
    the configured order in evaluation.
 
-   With ``zero_init_value: true`` the output projection of each block's
-   value MLP is zero-initialised, so every block starts as an exact
-   identity while its gate stays open and gradients flow. This makes it
-   possible to add a dataset to a trained model: with the
-   ``transfer_learning`` loading strategy the new dataset's fusion block is
-   missing from the checkpoint and keeps this initialisation, so the
-   model's predictions are unchanged at the start of fine-tuning.
+   ``value_init_scale`` scales the default initialisation of the output
+   projection of each block's value MLP (and zeroes its bias), while the
+   gate stays open. With ``value_init_scale: 0.0`` every block starts as an
+   exact identity. This makes it possible to add a dataset to a trained
+   model: with the ``transfer_learning`` loading strategy the new dataset's
+   fusion block is missing from the checkpoint and keeps this
+   initialisation, so the model's predictions are unchanged at the start of
+   fine-tuning.
+
+   Because the block's output then does not depend on the new dataset, its
+   encoder gets no gradient at first and learns slowly for the first
+   steps. A small positive value (e.g. ``1e-3``) starts the block as a
+   near-identity instead, and the new encoder gets gradient from the first
+   step.
 
    .. code:: yaml
 
       latent_aggregator:
         _target_: anemoi.models.layers.aggregator.GatedFusionAggregator
         principal_source: era5
-        zero_init_value: false
+        value_init_scale: null
         gradient_checkpointing: false
 
 *********************************

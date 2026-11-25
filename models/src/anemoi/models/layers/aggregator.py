@@ -255,15 +255,26 @@ class GatedLatentFusion(nn.Module):
     ----------
     hidden_dim : int
         Channel dimension of both latents.
-    zero_init_value : bool, optional
-        Zero-initialise the output projection of the value MLP so the block is
-        an exact identity at initialisation while gradients still flow (the
-        gate stays open). Closing the sigmoid gate instead would saturate it
-        and stall learning. Default False.
+    value_init_scale : float, optional
+        Multiply the default initialisation of the value MLP's output
+        projection weight by this factor and zero its bias, so the block
+        starts as (near-)identity while the gate stays open. Closing the
+        sigmoid gate instead would saturate it and stall learning. Default
+        None (default initialisation).
+
+        ``0.0`` makes the block an exact identity at initialisation. Its
+        output then does not depend on ``encoder_output``, so the encoder
+        feeding it gets no gradient at first; that gradient grows as the
+        value projection moves away from zero, so a newly added encoder
+        learns slowly for the first steps of training. A small positive value
+        (e.g. ``1e-3``) gives a near-identity whose encoder gets gradient from
+        the first step.
     """
 
-    def __init__(self, hidden_dim: int, zero_init_value: bool = False) -> None:
+    def __init__(self, hidden_dim: int, value_init_scale: float | None = None) -> None:
         super().__init__()
+        if value_init_scale is not None and value_init_scale < 0:
+            raise ValueError(f"value_init_scale must be non-negative, got {value_init_scale}.")
         # Separate norms: the running latent and a fresh encoder output have
         # different scales and distributions.
         self.norm_latent = nn.LayerNorm(hidden_dim)
@@ -277,9 +288,10 @@ class GatedLatentFusion(nn.Module):
             nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
-        if zero_init_value:
-            nn.init.zeros_(self.to_value[-1].weight)
-            nn.init.zeros_(self.to_value[-1].bias)
+        if value_init_scale is not None:
+            with torch.no_grad():
+                self.to_value[-1].weight.mul_(value_init_scale)
+                self.to_value[-1].bias.zero_()
 
     def forward(self, latent: Tensor, encoder_output: Tensor) -> Tensor:
         """Fold ``encoder_output`` into the running ``latent``.
@@ -315,10 +327,12 @@ class GatedFusionAggregator(BaseLatentAggregator):
     All sources must share the same channel dimension, which is also the
     output width.
 
-    With ``zero_init_value=True`` every fusion block starts as an exact
+    With ``value_init_scale=0.0`` every fusion block starts as an exact
     identity, so a dataset added to a trained model (e.g. through transfer
     learning, where its block is missing from the checkpoint) leaves the
-    model's predictions unchanged at the start of fine-tuning.
+    model's predictions unchanged at the start of fine-tuning. A small
+    positive ``value_init_scale`` instead gives a near-identity whose new
+    encoder gets gradient from the first step (see :class:`GatedLatentFusion`).
 
     ```
     latent_aggregator:
@@ -333,7 +347,7 @@ class GatedFusionAggregator(BaseLatentAggregator):
         input_channels: int,
         source_channels: Mapping[str, int],
         principal_source: str | None = None,
-        zero_init_value: bool = False,
+        value_init_scale: float | None = None,
         gradient_checkpointing: bool = False,
     ) -> None:
         super().__init__(
@@ -357,7 +371,10 @@ class GatedFusionAggregator(BaseLatentAggregator):
 
         self.fusion = nn.ModuleDict(
             {
-                name: GatedLatentFusion(hidden_dim=self._hidden_dim, zero_init_value=zero_init_value)
+                name: GatedLatentFusion(
+                    hidden_dim=self._hidden_dim,
+                    value_init_scale=value_init_scale,
+                )
                 for name in self.source_names
                 if name != self.principal_source
             },

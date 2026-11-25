@@ -180,8 +180,8 @@ def test_gated_fusion_aggregator_propagates_gradients_to_all_active_sources(grad
     assert all(p.grad is not None for p in aggregator.parameters())
 
 
-def test_gated_fusion_aggregator_zero_init_is_an_identity_that_still_learns() -> None:
-    aggregator = _gated_aggregator(zero_init_value=True)
+def test_gated_fusion_aggregator_zero_value_init_scale_is_an_identity_that_still_learns() -> None:
+    aggregator = _gated_aggregator(value_init_scale=0.0)
     data = torch.randn(6, 4)
     latents = {"data": data, "waves": torch.randn(6, 4), "ocean": torch.randn(6, 4)}
 
@@ -195,6 +195,31 @@ def test_gated_fusion_aggregator_zero_init_is_an_identity_that_still_learns() ->
         assert torch.count_nonzero(block.to_value[-1].bias.grad) > 0
 
 
+def test_gated_fusion_aggregator_value_init_scale_gives_encoder_gradient_from_the_start() -> None:
+    torch.manual_seed(0)
+    reference = GatedFusionAggregator(input_channels=3, source_channels={"data": 4, "waves": 4})
+    torch.manual_seed(0)
+    scaled = GatedFusionAggregator(input_channels=3, source_channels={"data": 4, "waves": 4}, value_init_scale=1e-3)
+    torch.testing.assert_close(
+        scaled.fusion["waves"].to_value[-1].weight, 1e-3 * reference.fusion["waves"].to_value[-1].weight
+    )
+
+    zero = _gated_aggregator(value_init_scale=0.0)
+    data = torch.randn(6, 4)
+    encoder_grads = {}
+    for name, aggregator in (("scaled", scaled), ("zero", zero)):
+        waves = torch.randn(6, 4, requires_grad=True)
+        output = aggregator(torch.randn(6, 3), {"data": data, "waves": waves})
+        # Near-identity: the update is small compared with the latent.
+        assert (output - data).abs().max() < 1e-2 * data.abs().max()
+        output.sum().backward()
+        encoder_grads[name] = waves.grad
+
+    # Unlike zero init, the encoder feeding the block gets gradient from the first step.
+    assert torch.count_nonzero(encoder_grads["zero"]) == 0
+    assert torch.count_nonzero(encoder_grads["scaled"]) > 0
+
+
 def test_gated_fusion_aggregator_validates_sources() -> None:
     with pytest.raises(ValueError, match="same channel dimension"):
         GatedFusionAggregator(input_channels=3, source_channels={"data": 4, "waves": 5})
@@ -202,3 +227,5 @@ def test_gated_fusion_aggregator_validates_sources() -> None:
         GatedFusionAggregator(input_channels=3, source_channels={"data": 4}, principal_source="waves")
     with pytest.raises(ValueError, match="requires the principal source 'data'"):
         _gated_aggregator()(torch.randn(6, 3), {"waves": torch.randn(6, 4)})
+    with pytest.raises(ValueError, match="must be non-negative"):
+        _gated_aggregator(value_init_scale=-1.0)
