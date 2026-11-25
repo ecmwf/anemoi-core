@@ -177,6 +177,10 @@ Trade-offs and tips
    compute does when scaling out. Allocate enough CPU cores per task,
    tune ``dataloader.num_workers``, and consider ``read_group_size`` for
    sharded reads — see the :doc:`performance-optimisation` guide.
+-  **Graph.** Rank 0 builds the graph, writes it to
+   ``system.input.graph`` and sends it to the other ranks. The other
+   ranks wait for rank 0. To make each rank build the graph and write
+   it to the same path, set ``graph.build_graph_on_all_ranks: true``.
 -  **Reproducibility.** Because ordering of the ``all-reduce`` is
    deterministic per-world-size, changing the number of GPUs will
    produce numerically different (but statistically equivalent) runs

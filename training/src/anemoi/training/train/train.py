@@ -261,6 +261,8 @@ class AnemoiTrainer(ABC):
                 )
                 raise ValueError(msg)
 
+        if graph_cfg.get("build_graph_on_all_ranks", False):
+            return self._load_or_build_graph(graph_config, save_path, write=True)
         if torch.distributed.is_initialized():
             # Only rank 0 loads or builds the graph. The other ranks wait for it.
             return broadcast_from_rank_zero(lambda: self._load_or_build_graph(graph_config, save_path, write=True))

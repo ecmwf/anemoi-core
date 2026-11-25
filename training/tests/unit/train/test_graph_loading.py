@@ -185,3 +185,22 @@ def test_graph_build_with_process_group_is_broadcast_from_rank_zero(tmp_path: Pa
 
     broadcast.assert_called_once()
     assert mock_creator.create.call_args.kwargs["save_path"] == graph_path
+
+
+def test_graph_build_on_all_ranks_writes_graph_on_every_rank(tmp_path: Path) -> None:
+    graph_path = tmp_path / "graph.pt"
+    trainer = _build_trainer_config_with_dataset_config({"dataset": "/path/to/dataset.zarr"})
+    trainer.config.system.input.graph = str(graph_path)
+    trainer.config.graph.build_graph_on_all_ranks = True
+    mock_creator = MagicMock()
+
+    with (
+        patch("anemoi.training.train.train.GraphCreator", return_value=mock_creator),
+        patch("anemoi.training.train.train.rank_zero_only.rank", 1),
+        patch("torch.distributed.is_initialized", return_value=True),
+        patch("anemoi.training.train.train.broadcast_from_rank_zero") as broadcast,
+    ):
+        trainer.graph_data
+
+    broadcast.assert_not_called()
+    assert mock_creator.create.call_args.kwargs["save_path"] == graph_path
