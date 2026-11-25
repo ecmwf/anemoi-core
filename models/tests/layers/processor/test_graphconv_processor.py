@@ -218,9 +218,9 @@ def _build_processor_graph(world_size: int, num_channels: int, device: torch.dev
             dst_start,
         ], f"Missing remote source entering rank {rank}"
         local_dst = edge_index[1, edge_start : edge_start + edge_splits[rank]]
-        assert (
-            (local_dst >= starts[rank]) & (local_dst < starts[rank] + node_splits[rank])
-        ).all(), f"Edge split does not match destination ownership on rank {rank}"
+        assert ((local_dst >= starts[rank]) & (local_dst < starts[rank] + node_splits[rank])).all(), (
+            f"Edge split does not match destination ownership on rank {rank}"
+        )
 
     return _ProcessorGraph(
         node_features=x,
@@ -274,9 +274,9 @@ def _test_gnn_processor_matches_unsharded_rank(
     gradient_tolerances = {"rtol": 1e-4, "atol": 1e-7}
     assert x_full.grad is not None, "Missing reference node-input gradient"
     allowed_error = gradient_tolerances["atol"] + gradient_tolerances["rtol"] * x_full.grad[start:stop].abs()
-    assert (
-        remote_gradient[start:stop].abs() > 10 * allowed_error
-    ).any(), f"Remote node-gradient contributions are too small to test communication on rank {rank}"
+    assert (remote_gradient[start:stop].abs() > 10 * allowed_error).any(), (
+        f"Remote node-gradient contributions are too small to test communication on rank {rank}"
+    )
 
     x_local = x[start:stop].clone().requires_grad_(True)
     edge_start = sum(edge_splits[:rank])

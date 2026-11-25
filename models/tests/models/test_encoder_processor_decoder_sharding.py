@@ -100,9 +100,9 @@ def _build_graphconv_model(graph: HeteroData) -> AnemoiModelEncProcDec:
         graph_data=graph,
     )
     # Two variables + four coordinate features + two trainable data features = eight.
-    assert (
-        model.input_dim["data"] == model.target_dim["data"] == model.latent_aggregator.hidden_dim == 8
-    ), "This fixture requires assembled data inputs, decoder target features and hidden latent features to have width eight"
+    assert model.input_dim["data"] == model.target_dim["data"] == model.latent_aggregator.hidden_dim == 8, (
+        "This fixture requires assembled data inputs, decoder target features and hidden latent features to have width eight"
+    )
     return model
 
 
@@ -123,9 +123,9 @@ def _test_graphconv_model_matches_unsharded_rank(
         src_start, src_stop = sum(src_splits[:rank]), sum(src_splits[: rank + 1])
         dst_start, dst_stop = sum(dst_splits[:rank]), sum(dst_splits[: rank + 1])
         sources = edge_index[0, (edge_index[1] >= dst_start) & (edge_index[1] < dst_stop)]
-        assert (
-            (sources < src_start) | (sources >= src_stop)
-        ).any(), f"{relation} must have a remote source dependency for rank {rank}"
+        assert ((sources < src_start) | (sources >= src_stop)).any(), (
+            f"{relation} must have a remote source dependency for rank {rank}"
+        )
     torch.manual_seed(43)
     reference_model = _build_graphconv_model(graph).to(device)
     # Row-varying learned features expose ownership/order mistakes hidden by
@@ -152,9 +152,9 @@ def _test_graphconv_model_matches_unsharded_rank(
         distributed_model.processor_graph_provider.trainable,
         distributed_model.decoder_graph_provider["data"].trainable,
     )
-    assert all(
-        isinstance(module, TrainableTensor) and module.trainable is not None for module in table_modules
-    ), "Both node tables and all three relation tables must be enabled TrainableTensor modules"
+    assert all(isinstance(module, TrainableTensor) and module.trainable is not None for module in table_modules), (
+        "Both node tables and all three relation tables must be enabled TrainableTensor modules"
+    )
     table_parameter_ids = {id(module.trainable) for module in table_modules}
     assert table_parameter_ids == {
         id(module.trainable) for module in distributed_model.modules() if isinstance(module, TrainableTensor)
@@ -189,9 +189,9 @@ def _test_graphconv_model_matches_unsharded_rank(
     )
     assert set(distributed_outputs) == {"data"}, "Each rank must return the configured data dataset"
     distributed_output = distributed_outputs["data"]
-    assert (
-        distributed_output.shape == distributed_input.shape
-    ), "Predictions must match the supplied external data-grid layout"
+    assert distributed_output.shape == distributed_input.shape, (
+        "Predictions must match the supplied external data-grid layout"
+    )
     if input_is_sharded:
         local_loss = (
             weights[..., start:stop, :] * (distributed_output - target[..., start:stop, :]).square()

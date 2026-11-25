@@ -423,9 +423,9 @@ def _test_gnn_mapper_matches_unsharded_rank(
     allowed_gradient_error = gradient_tolerances["atol"] + gradient_tolerances["rtol"] * (
         reference_src_input.grad[src_start:src_stop].abs()
     )
-    assert (
-        remote_src_gradient[src_start:src_stop].abs() > 10 * allowed_gradient_error
-    ).any(), f"Remote source-gradient contributions are too small to test communication on rank {rank}"
+    assert (remote_src_gradient[src_start:src_stop].abs() > 10 * allowed_gradient_error).any(), (
+        f"Remote source-gradient contributions are too small to test communication on rank {rank}"
+    )
 
     # Destination inputs remain owned rows even when source inputs are replicated.
     # Production prepares edge shards from the full edge input.
