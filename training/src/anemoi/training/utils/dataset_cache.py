@@ -240,6 +240,10 @@ class DatasetCacheNamespace:
         self.budget = budget
         self.num_sequences = int(reader.num_sequences)
         self.sequence_lengths = [int(reader.sequence_length(index)) for index in range(self.num_sequences)]
+        try:
+            self.grid_size = int(reader.grid_size)
+        except (AttributeError, TypeError, ValueError):
+            self.grid_size = None
         self.path = root / hashlib.sha256(dataset_id.encode()).hexdigest()[:20]
         self.entries_path = self.path / "entries"
         # only analysis datasets: one sequence, and the position is the date
@@ -249,6 +253,16 @@ class DatasetCacheNamespace:
         self.locks_path = self.path / "locks"
         for path in (self.entries_path, self.locks_path):
             path.mkdir(parents=True, exist_ok=True)
+
+    def covers_grid(self, grid_indices: slice | np.ndarray | None) -> bool:
+        """Return True if grid_indices select all the grid points of the dataset, in their order."""
+        if grid_indices is None:
+            return True
+        if not isinstance(grid_indices, slice):  # an index array: a shard, or a reordered grid
+            return False
+        if grid_indices == slice(None):
+            return True
+        return self.grid_size is not None and grid_indices.indices(self.grid_size) == (0, self.grid_size, 1)
 
     def normalize(self, sequence, position):
         sequence, position = int(sequence), int(position)
@@ -346,7 +360,7 @@ class DatasetCache(pl.LightningDataModule):
         hostname_suffix=None,
         proc_group=None,
         max_fraction: float = 0.9,
-        partition: bool = False,
+        partition: bool = True,
     ):
         super().__init__()
         self.ds = ds  # must be set before any attribute access can reach __getattr__
@@ -650,7 +664,13 @@ class DatasetCache(pl.LightningDataModule):
             if first:
                 LOGGER.warning("Dataset cache on node %s is full, no more records are cached: %s", self.node_id, error)
 
-    def owns(self, namespace: DatasetCacheNamespace, sequence: int, position: int) -> bool:
+    def owns(
+        self,
+        namespace: DatasetCacheNamespace,
+        sequence: int,
+        position: int,
+        grid_indices: slice | np.ndarray | None = None,
+    ) -> bool:
         """Return True if this node caches the record.
 
         Without partition, each node caches all the records that its ranks read. Then most dates
@@ -658,8 +678,13 @@ class DatasetCache(pl.LightningDataModule):
         partition, the dates of each dataset are divided into one contiguous part for each node,
         and each node caches only the records of its part. The records of other parts are read
         from the cache of the other node, or from the dataset.
+
+        The partition applies only to records of the full grid. A record of one grid shard (model
+        sharding) is read only by the ranks that read that shard, and these ranks can all be on
+        one node. Then no other node caches the record. Thus, each node caches all the shard
+        records that it reads.
         """
-        if not self.partition or self.num_nodes <= 1:
+        if not self.partition or self.num_nodes <= 1 or not namespace.covers_grid(grid_indices):
             return True
         sequence, position = namespace.normalize(sequence, position)
         if namespace.num_sequences == 1:
@@ -674,12 +699,13 @@ class DatasetCache(pl.LightningDataModule):
         sequence: int,
         positions: list[int],
         values: list,
+        grid_indices: slice | np.ndarray | None = None,
     ) -> tuple[list[int], list]:
         """Return only the positions and values of the records that this node caches."""
         owned = [
             (position, value)
             for position, value in zip(positions, values, strict=True)
-            if self.owns(namespace, sequence, position)
+            if self.owns(namespace, sequence, position, grid_indices)
         ]
         if len(owned) < len(positions):
             self._increment(self.cache_not_owned, len(positions) - len(owned))
@@ -688,7 +714,7 @@ class DatasetCache(pl.LightningDataModule):
     def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
         namespace = self.namespaces[dataset_id]
         positions = self._positions(namespace, sequence, positions)
-        positions, values = self._owned(namespace, sequence, positions, values)
+        positions, values = self._owned(namespace, sequence, positions, values, grid_indices)
         if not positions:
             return
         self._store_records(dataset_id, sequence, positions, values, self._grid_id(grid_indices))
@@ -715,7 +741,7 @@ class DatasetCache(pl.LightningDataModule):
         if any(payload is None for payload in payloads):
             return None
         values = [decode_cache_array(payload) for payload in payloads]
-        owned_positions, owned_payloads = self._owned(namespace, sequence, positions, payloads)
+        owned_positions, owned_payloads = self._owned(namespace, sequence, positions, payloads, grid_indices)
         self._store_records(
             dataset_id,
             sequence,

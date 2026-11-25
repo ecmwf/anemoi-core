@@ -725,7 +725,7 @@ class AnemoiTrainer(ABC):
                 cache_root=self.config.system.hardware.cache_dir,
                 hostname_suffix=getattr(self.config.system.hardware, "hostname_suffix", None),
                 max_fraction=getattr(self.config.system.hardware, "cache_max_fraction", 0.9),
-                partition=getattr(self.config.system.hardware, "cache_partition", False),
+                partition=getattr(self.config.system.hardware, "cache_partition", True),
             )
             callbacks.append(CacheSyncCallback(cache=self.datamodule))
 

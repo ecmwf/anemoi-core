@@ -5,5 +5,5 @@ num_nodes: ${oc.decode:${oc.env:SLURM_NNODES}}
 num_gpus_per_model: 1
 cache_dir: null # directory on a local disk for the dataset cache, for example ${oc.decode:${oc.env:TMPDIR}}; null: no cache
 cache_max_fraction: 0.9 # largest cache size, as a fraction of the total disk size
-cache_partition: false # if true, each node caches only its part of the dates, read the other dates from the other nodes
+cache_partition: true # each node caches only its part of the dates, and reads the other dates from the other nodes; false: each node caches all the dates that it reads
 hostname_suffix: null # text to add to hostnames for cache connections between nodes

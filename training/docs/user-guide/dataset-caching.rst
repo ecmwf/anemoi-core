@@ -25,8 +25,8 @@ The cache is off by default (``cache_dir: null``). To turn it on, set
        # total size of the disk.
        cache_max_fraction: 0.9
        # Divide the dates of each dataset into one part for each node.
-       # Each node caches only the records of its part.
-       cache_partition: false
+       # Each node caches only the records of its part (default).
+       cache_partition: true
        # Text to add to each hostname for connections between nodes.
        # Use the hostname of the high-speed network interface,
        # for example "-ib". Null uses the hostname.
@@ -53,14 +53,26 @@ this purpose. At the end of each epoch, the nodes share a list of the
 records in each cache. Thus, the first epoch reads records only from the
 local cache or from the filesystem.
 
-Each date is in more than one sample, for example in 3 samples when the
-model uses 2 input dates and 1 output date. Thus, without a partition,
-each node caches most of the dates: with 2 nodes, approximately 87% of
-the dates are in the cache of each node. With ``cache_partition: true``,
-the dates of each dataset are divided into one contiguous part for each
-node. Each node caches only the records of its part, and reads the
-other records from the other nodes. This uses less disk space on each
-node, but more records come from other nodes.
+By default (``cache_partition: true``), the dates of each dataset are
+divided into one contiguous part for each node. Each node caches only
+the records of its part, and reads the other records from the other
+nodes. Thus, the nodes together can keep a dataset that is too large
+for the disk of one node. The partition applies only to records of the
+full grid. With model sharding, each node caches all the grid shards
+that its ranks read, because the other nodes possibly do not read the
+same shards.
+
+With ``cache_partition: false``, each node caches all the records that
+its ranks read. Each date is in more than one sample, for example in 3
+samples when the model uses 2 input dates and 1 output date. Thus, each
+node caches most of the dates: with 2 nodes, approximately 87% of the
+dates are in the cache of each node.
+
+With the partition, more records come from other nodes. In a test on 2
+nodes, a read from another node took the same time as a local read. But
+the second and third epochs have more misses: a node does not keep a
+record that is not in its part. If the node of that part did not read
+the record in the first epoch, no node has it yet.
 
 *************
  Limitations

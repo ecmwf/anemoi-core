@@ -739,6 +739,36 @@ class TestPartition:
         cache.store_records("analysis:part", 0, [7, 8], list(sample_data[[7, 8]]))
         assert all(cache.namespaces["analysis:part"].paths(0, position)[0].exists() for position in (7, 8))
 
+    @pytest.mark.parametrize("grid_indices", [None, slice(None), slice(0, 5), slice(0, None, 1)])
+    def test_full_grid_records_follow_the_partition(
+        self,
+        tmp_path: Path,
+        sample_data: np.ndarray,
+        grid_indices: slice | None,
+    ) -> None:
+        cache = self.cache(tmp_path, sample_data, node_id=0)
+        namespace = cache.namespaces["analysis:part"]
+        namespace.grid_size = sample_data.shape[-1]  # training passes slice(0, grid_size) for the full grid
+        assert cache.owns(namespace, 0, 2, grid_indices)
+        assert not cache.owns(namespace, 0, 7, grid_indices)
+
+    @pytest.mark.parametrize("grid_indices", [slice(0, 2), slice(2, 5), np.arange(5), np.array([0, 3])])
+    def test_grid_shard_records_are_stored_by_the_node_that_reads_them(
+        self,
+        tmp_path: Path,
+        sample_data: np.ndarray,
+        grid_indices: slice | np.ndarray,
+    ) -> None:
+        # with model sharding, the ranks that read a shard can all be on one node: no other node caches it
+        cache = self.cache(tmp_path, sample_data, node_id=0)
+        namespace = cache.namespaces["analysis:part"]
+        namespace.grid_size = sample_data.shape[-1]
+        values = [sample_data[7][..., grid_indices], sample_data[8][..., grid_indices]]
+        cache.store_records("analysis:part", 0, [7, 8], values, grid_indices)  # node 0 does not own dates 7 and 8
+        grid_id = cache._grid_id(grid_indices)
+        assert all(namespace.paths(0, position, grid_id)[0].exists() for position in (7, 8))
+        assert cache.cache_not_owned.value == 0
+
     def test_single_node_owns_all(self, tmp_path: Path, sample_data: np.ndarray) -> None:
         cache = self.cache(tmp_path, sample_data, node_id=0, num_nodes=1)
         namespace = cache.namespaces["analysis:part"]

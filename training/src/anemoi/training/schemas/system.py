@@ -39,7 +39,7 @@ class HardwareSchema(BaseModel):
     "Directory for the node-local dataset cache."
     cache_max_fraction: Annotated[float, Field(gt=0, le=1)] = 0.9
     "Largest size of the cache on each node, as a fraction of the total size of its disk."
-    cache_partition: bool = False
+    cache_partition: bool = True
     "Divide the dates of each dataset into one part for each node. Each node caches only its part."
     hostname_suffix: str | None = None
     "Text to add to each hostname for cache connections between nodes, for example the high-speed network name."
