@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import random
 from abc import ABC
 from abc import abstractmethod
 from collections.abc import Mapping
@@ -400,7 +399,9 @@ class GatedFusionAggregator(BaseLatentAggregator):
         x_latent = latents[self.principal_source]
         remaining = [name for name in source_names if name != self.principal_source]
         if self.training:
-            random.shuffle(remaining)
+            # torch RNG, not Python's ``random``: checkpointing restores the torch RNG state for the
+            # recompute in backward, so the merge order matches the forward pass.
+            remaining = [remaining[i] for i in torch.randperm(len(remaining)).tolist()]
         for name in remaining:
             x_latent = self.fusion[name](x_latent, latents[name])
         return x_latent

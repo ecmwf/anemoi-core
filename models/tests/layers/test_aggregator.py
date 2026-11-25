@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import random
+
 import pytest
 import torch
 
@@ -178,6 +180,32 @@ def test_gated_fusion_aggregator_propagates_gradients_to_all_active_sources(grad
 
     assert all(latent.grad is not None and torch.count_nonzero(latent.grad) > 0 for latent in latents.values())
     assert all(p.grad is not None for p in aggregator.parameters())
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_gated_fusion_aggregator_checkpointing_keeps_shuffled_order_in_backward(seed: int) -> None:
+    # The recompute in backward must use the same (shuffled) merge order as the forward pass.
+    source_channels = {"data": 4, "waves": 4, "ocean": 4, "ice": 4}
+    plain = GatedFusionAggregator(input_channels=3, source_channels=source_channels).train()
+    checkpointed = GatedFusionAggregator(
+        input_channels=3,
+        source_channels=source_channels,
+        gradient_checkpointing=True,
+    ).train()
+    checkpointed.load_state_dict(plain.state_dict())
+    hidden = torch.randn(6, 3)
+    inputs = {name: torch.randn(6, 4) for name in source_channels}
+
+    grads = []
+    for aggregator in (plain, checkpointed):
+        random.seed(seed)
+        torch.manual_seed(seed)
+        latents = {name: tensor.clone().requires_grad_() for name, tensor in inputs.items()}
+        aggregator(hidden, latents).square().sum().backward()
+        grads.append([latents[name].grad for name in source_channels] + [p.grad for p in aggregator.parameters()])
+
+    for plain_grad, checkpointed_grad in zip(*grads, strict=True):
+        torch.testing.assert_close(checkpointed_grad, plain_grad)
 
 
 def test_gated_fusion_aggregator_zero_value_init_scale_is_an_identity_that_still_learns() -> None:
