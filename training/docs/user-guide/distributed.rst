@@ -149,7 +149,10 @@ Because each replica processes ``batch_size.training`` samples per
 step, adding more data-parallel replicas increases the *effective*
 batch size linearly. The default configs assume ``B_eff = 16``. If
 you change the effective batch size, you may want to adjust the
-learning rate ``training.optimization.learning_rate``.
+learning rate ``training.optimization.learning_rate``. Alternatively,
+set ``training.optimization.learning_rate_per_replica``, which is
+multiplied by the number of data-parallel replicas, so the learning rate
+grows with the effective batch size (see :doc:`../modules/optimization`).
 
 Trade-offs and tips
 ===================

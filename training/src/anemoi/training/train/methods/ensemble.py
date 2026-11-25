@@ -104,6 +104,11 @@ class EnsembleTraining(BaseTrainingModule):
         self.ens_comm_subgroup_num_groups = 1
         self.ens_comm_subgroup_size = 1
 
+    def _num_model_replicas(self) -> int:
+        """Number of ensemble groups that train side by side, each on its own batch."""
+        hardware = self.config.system.hardware
+        return hardware.num_nodes * hardware.num_gpus_per_node // hardware.num_gpus_per_ensemble
+
     def set_ens_comm_group(
         self,
         ens_comm_group: ProcessGroup,

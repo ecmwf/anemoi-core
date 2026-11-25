@@ -654,8 +654,6 @@ class AnemoiTrainer(ABC):
                 num_forcing_features,
             )
 
-        LOGGER.info("Learning rate: %.3e", self.config.training.optimization.learning_rate)
-
         if self.config.training.max_epochs is not None and self.config.training.max_steps not in (None, -1):
             lr_scheduler_cfg = getattr(self.config.training.optimization, "lr_scheduler", None)
             LOGGER.info(

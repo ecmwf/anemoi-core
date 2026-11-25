@@ -85,8 +85,17 @@ class WeightAveragingSchema(GenericSchema):
 class OptimizationSchema(BaseModel):
     """Optimizer and LR scheduler configuration."""
 
-    learning_rate: NonNegativeFloat = Field(example=1.0e-3)
-    "Peak learning rate, passed to the optimizer as is."
+    learning_rate: NonNegativeFloat | None = Field(default=None, example=1.0e-3)
+    "Peak learning rate for the whole run. Set this or learning_rate_per_replica."
+    learning_rate_per_replica: NonNegativeFloat | None = Field(default=None, example=6.25e-5)
+    """Peak learning rate per model replica, multiplied by the number of model replicas.
+    Set this or learning_rate."""
+    learning_rate_minimum: NonNegativeFloat | None = Field(default=None, example=3.0e-7)
+    """Minimum learning rate for the whole run, passed to the scheduler as lr_min.
+    Set this, learning_rate_per_replica_minimum or neither."""
+    learning_rate_per_replica_minimum: NonNegativeFloat | None = Field(default=None, example=3.0e-7)
+    """Minimum learning rate per model replica, multiplied by the number of model replicas and
+    passed to the scheduler as lr_min. Set this, learning_rate_minimum or neither."""
     optimizer: OptimizerSchema
     """Hydra instantiation config for the optimizer."""
     lr_scheduler: LRSchedulerSchema | None = None
