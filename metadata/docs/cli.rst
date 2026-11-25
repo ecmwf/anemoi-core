@@ -23,29 +23,46 @@ The CLI is installed automatically with the package:
    pip install anemoi-metadata
 
 
+Global options
+--------------
+
+``--version``, ``-V``
+   Show the version and exit.
+
+``--debug``, ``-d``
+   Debug mode.
+
+``--rich``
+   Use ``rich`` for logging.
+
+These go before the command name, for example
+``anemoi-metadata --debug info model.ckpt``.  Every command takes the path of
+the checkpoint as its first argument.  Reading commands work on any metadata
+format.  The commands that change a checkpoint (``load``, ``edit``, ``remove``)
+do not validate the metadata: see :ref:`lenient-and-strict`.
+
+
 Commands
 --------
 
 info
 ^^^^
 
-Show a human-readable summary of checkpoint metadata.
+Show a summary of checkpoint metadata: the format version, the version of each
+component, the task and its timing, and for each dataset the data type, grid
+size and variables.  It ends with the full metadata as JSON.  When the
+datasets have different timings, the timing of each dataset is listed.
 
 **Usage**:
 
 .. code-block:: bash
 
-   anemoi-metadata info <checkpoint> [options]
+   anemoi-metadata info <path>
 
 **Arguments**:
 
-``checkpoint``
+``path``
    Path to the checkpoint file.
-
-**Options**:
-
-``--no-migrate``
-   Do not migrate metadata to the latest schema version before displaying.
 
 **Example**:
 
@@ -53,35 +70,50 @@ Show a human-readable summary of checkpoint metadata.
 
    anemoi-metadata info model.ckpt
 
-**Example output**:
+**Example output** (a checkpoint with a gridded and a tabular dataset):
 
 .. code-block:: text
 
-   Schema version: 1.0.0
-   Created at:     2026-01-15 10:30:00+00:00
+   Version:            3.1
+   Component versions: {'data': '1.0', 'task': '1.0'}
+   Created at:         2026-11-23 00:00:00+00:00
 
-   Datasets:           ['data']
-   Task:               None
+   Task:               forecaster
    Timestep:           6h
-   Multi-step input:   3
-   Multi-step output:  2
+   Steps in / out:     2 / 1
 
-   Variables (101 total, first 10):
-     - 10u
-     - 10v
-     - 2d
-     - 2t
-     - lsm
-     - msl
-     - q
-     - sp
-     - t
-     - tp
-     ... and 91 more
+   Datasets:           ['data', 'obs']
+
+   [data]
+     Data type:        gridded
+     Grid size:        40320
+     Variables:        101 (99 input, 88 output)
+       - 10u
+       - 10v
+       - 2d
+       - 2t
+       - cos_julian_day
+       - cos_latitude
+       - cos_local_time
+       - cos_longitude
+       - insolation
+       - lsm
+       ... and 91 more
+
+   [obs]
+     Data type:        tabular
+     Grid size:        None
+     Variables:        6 (5 input, 4 output)
+       - 2t
+       - 2d
+       - msl
+       - cos_julian_day
+       - sin_julian_day
+       - tp
 
    Full metadata:
    {
-     "schema_version": "1.0.0",
+     "version": "3.1",
      ...
    }
 
@@ -90,17 +122,17 @@ dump
 ^^^^
 
 Extract raw metadata from a checkpoint and print it as JSON or YAML,
-without pydantic validation or migration.
+exactly as stored.
 
 **Usage**:
 
 .. code-block:: bash
 
-   anemoi-metadata dump <checkpoint> [options]
+   anemoi-metadata dump <path> [options]
 
 **Arguments**:
 
-``checkpoint``
+``path``
    Path to the checkpoint file.
 
 **Options**:
@@ -133,17 +165,19 @@ load
 ^^^^
 
 Load metadata from a JSON or YAML file into a checkpoint, replacing any
-existing metadata.
+existing metadata.  The file is written as it is, without strict validation
+and without changing its ``version``.  If the checkpoint has no metadata yet,
+a warning is logged and the metadata is added.
 
 **Usage**:
 
 .. code-block:: bash
 
-   anemoi-metadata load <checkpoint> --input <file> [options]
+   anemoi-metadata load <path> --input <file> [options]
 
 **Arguments**:
 
-``checkpoint``
+``path``
    Path to the checkpoint file.
 
 **Options**:
@@ -155,7 +189,9 @@ existing metadata.
    Treat the input file as YAML (requires PyYAML).
 
 ``--json``
-   Treat the input file as JSON (default; also inferred from ``.json`` extension).
+   Treat the input file as JSON (default).  The format is also taken from the
+   extension: ``.json``, ``.yaml`` or ``.yml``.  Any other extension needs
+   ``--json`` or ``--yaml``.
 
 **Example**:
 
@@ -169,17 +205,18 @@ edit
 
 Open checkpoint metadata in an external editor and write any changes back
 to the checkpoint on exit.  The checkpoint is left unmodified if no changes
-are made.
+are made.  The edited metadata is written as it is, without strict
+validation.
 
 **Usage**:
 
 .. code-block:: bash
 
-   anemoi-metadata edit <checkpoint> [options]
+   anemoi-metadata edit <path> [options]
 
 **Arguments**:
 
-``checkpoint``
+``path``
    Path to the checkpoint file.
 
 **Options**:
@@ -211,11 +248,11 @@ is never modified.
 
 .. code-block:: bash
 
-   anemoi-metadata view <checkpoint> [options]
+   anemoi-metadata view <path> [options]
 
 **Arguments**:
 
-``checkpoint``
+``path``
    Path to the checkpoint file.
 
 **Options**:
@@ -247,11 +284,11 @@ the checkpoint in-place or writes a cleaned copy to a new file.
 
 .. code-block:: bash
 
-   anemoi-metadata remove <checkpoint> (--inplace | --output <file>)
+   anemoi-metadata remove <path> (--inplace | --output FILE)
 
 **Arguments**:
 
-``checkpoint``
+``path``
    Path to the checkpoint file.
 
 **Options**:
@@ -282,22 +319,23 @@ Write a cleaned copy:
 get
 ^^^
 
-Navigate metadata via a dot-separated key path and print the value.
+Navigate the raw metadata via a dot-separated key path and print the value.
 Use ``'.'`` as the key to list all top-level keys.  Append a trailing dot
-to any path segment to list keys at that level.
+to any path segment to list keys at that level.  A key that is not found
+raises a ``KeyError``.
 
 **Usage**:
 
 .. code-block:: bash
 
-   anemoi-metadata get <checkpoint> <path> [options]
+   anemoi-metadata get <path> <key> [options]
 
 **Arguments**:
 
-``checkpoint``
+``path``
    Path to the checkpoint file.
 
-``path``
+``key``
    Dot-separated key path into the metadata dict
    (e.g. ``config.model.type``).  Use ``'.'`` to list top-level keys.
 
@@ -337,15 +375,17 @@ Print the name, shape, and dtype of every supporting array stored in the
 checkpoint.  Supporting arrays are numpy arrays stored alongside the metadata
 (e.g. latitudes, longitudes, land-sea mask).
 
+Arrays grouped by dataset are listed as ``<dataset>/<name>``.
+
 **Usage**:
 
 .. code-block:: bash
 
-   anemoi-metadata arrays <checkpoint>
+   anemoi-metadata arrays <path>
 
 **Arguments**:
 
-``checkpoint``
+``path``
    Path to the checkpoint file.
 
 **Example**:

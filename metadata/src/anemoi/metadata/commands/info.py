@@ -12,8 +12,13 @@
 import json
 from argparse import ArgumentParser
 from argparse import Namespace
+from typing import TYPE_CHECKING
 
+from anemoi.metadata.components.task import TaskTimingError
 from anemoi.utils.cli import Command
+
+if TYPE_CHECKING:
+    from anemoi.metadata.interface import Metadata
 
 _PREVIEW_LIMIT = 10
 
@@ -30,11 +35,6 @@ class InfoCommand(Command):
             Parser to which arguments are added.
         """
         command_parser.add_argument("path", help="Path to the checkpoint file.")
-        command_parser.add_argument(
-            "--no-migrate",
-            action="store_true",
-            help="Do not migrate metadata to the latest schema version.",
-        )
 
     def run(self, args: Namespace) -> None:
         """Execute the info command.
@@ -44,48 +44,68 @@ class InfoCommand(Command):
         args : Namespace
             Parsed command-line arguments.
         """
-        from ..interface import Metadata
+        from anemoi.metadata.interface import Metadata
 
-        migrate = not args.no_migrate
-        metadata = Metadata.from_checkpoint(args.path, migrate=migrate)
+        metadata = Metadata.from_checkpoint(args.path)
         _print_summary(metadata)
 
 
-def _print_summary(metadata) -> None:
+def _print_summary(metadata: "Metadata") -> None:
     """Print a human-readable summary of typed metadata fields.
 
-    Displays envelope fields (schema version, creation timestamp), inference
-    contract fields (datasets, task, timestep, multi-step counts), a variable
-    preview, and a full indented JSON dump.
+    Displays the checkpoint level (version, component versions, creation
+    timestamp, task and its timing), then per dataset the data kind, grid size
+    and variable counts with a variable preview, and a full indented JSON dump.
+    Nothing is taken from "the first dataset".
 
     Parameters
     ----------
     metadata : Metadata
         Loaded metadata instance to summarise.
     """
-    # --- Envelope ---
-    print(f"Schema version: {metadata.schema_version}")
-    print(f"Created at:     {metadata.created_at}")
+    # --- Checkpoint level ---
+    print(f"Version:            {metadata.version}")
+    print(f"Component versions: {metadata.component_versions}")
+    print(f"Created at:         {metadata.sections.timestamp}")
     print()
 
-    # --- Inference contract ---
+    # --- Task ---
+    task = metadata.task
+    print(f"Task:               {task.task_name}")
+    try:
+        timing = task.timing
+    except TaskTimingError as exc:
+        print(f"Timing:             differs between datasets ({exc})")
+        timings = task.timings()
+    else:
+        print(f"Timestep:           {timing.timestep}")
+        print(f"Steps in / out:     {timing.n_step_input} / {timing.n_step_output}")
+        timings = {}
+    for name, dataset_timing in timings.items():
+        print(
+            f"  {name}: timestep {dataset_timing.timestep}, "
+            f"steps in / out {dataset_timing.n_step_input} / {dataset_timing.n_step_output}",
+        )
+    print()
+
+    # --- Datasets ---
     print(f"Datasets:           {metadata.dataset_names}")
-    print(f"Task:               {metadata.task}")
-    print(f"Timestep:           {metadata.timestep}")
-    print(f"Multi-step input:   {metadata.multi_step_input}")
-    print(f"Multi-step output:  {metadata.multi_step_output}")
-    print()
-
-    # --- Variable preview ---
-    variables = metadata.variables
-    total = metadata.num_variables
-    preview = variables[:_PREVIEW_LIMIT]
-
-    print(f"Variables ({total} total, first {min(total, _PREVIEW_LIMIT)}):")
-    for var in preview:
-        print(f"  - {var}")
-    if total > _PREVIEW_LIMIT:
-        print(f"  ... and {total - _PREVIEW_LIMIT} more")
+    for name, view in metadata.datasets.items():
+        data = view.data
+        variables = data.variables()
+        total = len(variables)
+        print()
+        print(f"[{name}]")
+        print(f"  Data type:        {data.data_type()}")
+        print(f"  Grid size:        {data.grid_size()}")
+        print(
+            f"  Variables:        {total} "
+            f"({len(data.variable_indices())} input, {len(data.output_variable_indices())} output)",
+        )
+        for var in variables[:_PREVIEW_LIMIT]:
+            print(f"    - {var}")
+        if total > _PREVIEW_LIMIT:
+            print(f"    ... and {total - _PREVIEW_LIMIT} more")
     print()
 
     # --- Full dump ---

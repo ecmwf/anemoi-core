@@ -19,56 +19,61 @@ import json
 import logging
 import zipfile
 from pathlib import Path
-from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
 from typing import overload
 
 import anemoi.utils.checkpoints as checkpoints_utils
 
+from .base import CheckpointAdapter
 from .exceptions import CheckpointError
-from .registry import MetadataRegistry
-
-if TYPE_CHECKING:
-    from .base import MetadataContract
+from .write_schema import validate_for_write
 
 LOG = logging.getLogger(__name__)
 
 
 def _resolve_metadata(
-    metadata: "MetadataContract | dict[str, Any]",
-) -> "MetadataContract":
-    """Coerce *metadata* to a validated :class:`MetadataContract` instance.
+    metadata: "CheckpointAdapter | dict[str, Any]",
+) -> "CheckpointAdapter":
+    """Coerce *metadata* to a :class:`CheckpointAdapter` instance.
 
-    If *metadata* is already a :class:`MetadataContract`, it is returned
-    unchanged.  If it is a ``dict``, it is validated through
-    :meth:`MetadataRegistry.load` (which handles version detection, defaults,
-    and schema validation).
+    If *metadata* is already a :class:`CheckpointAdapter`, it is returned
+    unchanged.  If it is a ``dict``, it is wrapped in a :class:`CheckpointAdapter`
+    (which detects the format and the component versions).  Reading is
+    lenient and the content is never altered.
 
     Parameters
     ----------
-    metadata : MetadataContract | dict[str, Any]
-        Either a validated instance or a raw dict.
+    metadata : CheckpointAdapter | dict[str, Any]
+        Either an adapter or a raw dict.
 
     Returns
     -------
-    MetadataContract
-        Validated metadata instance guaranteed to have ``schema_version``.
+    CheckpointAdapter
+        Adapter holding the metadata.
 
     Raises
     ------
     TypeError
-        If *metadata* is neither a MetadataContract nor a dict.
+        If *metadata* is neither a CheckpointAdapter nor a dict.
     """
-    from .base import MetadataContract as _MC
-
-    if isinstance(metadata, _MC):
+    if isinstance(metadata, CheckpointAdapter):
         return metadata
 
     if isinstance(metadata, dict):
-        return MetadataRegistry.load(metadata, migrate=False)
+        return CheckpointAdapter(metadata)
 
-    raise TypeError(f"metadata must be a MetadataContract instance or a dict, got {type(metadata).__name__}")
+    msg = f"metadata must be a CheckpointAdapter instance or a dict, got {type(metadata).__name__}"
+    raise TypeError(msg)
+
+
+def _metadata_to_write(metadata: "CheckpointAdapter | dict[str, Any]", *, validate: bool) -> dict[str, Any]:
+    """Return the dict to store: strictly validated and stamped, or unchanged when *validate* is false."""
+    if validate and isinstance(metadata, dict):
+        # Validate the dict itself: wrapping it in an adapter first would read it leniently.
+        return validate_for_write(metadata)
+    metadata_dict = _resolve_metadata(metadata).to_dict()
+    return validate_for_write(metadata_dict) if validate else metadata_dict
 
 
 # ---------------------------------------------------------------------------
@@ -105,13 +110,14 @@ def has_metadata(path: str | Path) -> bool:
     try:
         return checkpoints_utils.has_metadata(str(checkpoint_path))
     except zipfile.BadZipFile as exc:
-        raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
+        msg = f"Invalid checkpoint file: {checkpoint_path}"
+        raise CheckpointError(msg) from exc
 
 
 def extract_metadata_dict(path: str | Path) -> dict[str, Any]:
     """Extract raw metadata dictionary from a checkpoint.
 
-    Returns the raw dictionary without validation or migration.
+    Returns the raw dictionary exactly as stored.
     Use :func:`load_metadata` for typed, validated metadata.
 
     Parameters
@@ -134,70 +140,67 @@ def extract_metadata_dict(path: str | Path) -> dict[str, Any]:
     try:
         return checkpoints_utils.load_metadata(str(checkpoint_path), supporting_arrays=False)
     except zipfile.BadZipFile as exc:
-        raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
+        msg = f"Invalid checkpoint file: {checkpoint_path}"
+        raise CheckpointError(msg) from exc
     except FileNotFoundError as exc:
-        raise CheckpointError(f"No metadata found in checkpoint: {checkpoint_path}") from exc
+        msg = f"No metadata found in checkpoint: {checkpoint_path}"
+        raise CheckpointError(msg) from exc
     except json.JSONDecodeError as exc:
-        raise CheckpointError(f"Invalid metadata JSON in {checkpoint_path}") from exc
+        msg = f"Invalid metadata JSON in {checkpoint_path}"
+        raise CheckpointError(msg) from exc
 
 
 @overload
 def load_metadata(
     path: str | Path,
     *,
-    migrate: bool,
-    supporting_arrays: Literal[False],
-) -> "MetadataContract": ...
+    supporting_arrays: Literal[False] = ...,
+) -> "CheckpointAdapter": ...
 
 
 @overload
 def load_metadata(
     path: str | Path,
     *,
-    migrate: bool,
     supporting_arrays: Literal[True],
-) -> "tuple[MetadataContract, dict[str, Any]]": ...
+) -> "tuple[CheckpointAdapter, dict[str, Any]]": ...
 
 
 def load_metadata(
     path: str | Path,
     *,
-    migrate: bool = True,
     supporting_arrays: bool = False,
-) -> "MetadataContract | tuple[MetadataContract, dict[str, Any]]":
+) -> "CheckpointAdapter | tuple[CheckpointAdapter, dict[str, Any]]":
     """Load metadata from a checkpoint file.
 
-    This is the primary function for loading checkpoint metadata.  It handles
-    version detection, validation, and optional migration to the latest version.
+    This is the primary function for loading checkpoint metadata.  It detects
+    the format and the version of each component and returns a
+    :class:`CheckpointAdapter` over the metadata, which is kept unchanged.
 
     Parameters
     ----------
     path : str | Path
         Path to the checkpoint file.
-    migrate : bool, optional
-        If ``True`` (default), auto-migrate to the latest schema version.
     supporting_arrays : bool, optional
         If ``True``, also load numpy arrays stored alongside the metadata.
         Returns a tuple of ``(metadata, arrays_dict)``.
 
     Returns
     -------
-    MetadataContract | tuple[MetadataContract, dict[str, Any]]
-        Validated metadata instance, or a tuple of ``(metadata, arrays)``
+    CheckpointAdapter | tuple[CheckpointAdapter, dict[str, Any]]
+        Adapter over the metadata, or a tuple of ``(metadata, arrays)``
         when *supporting_arrays* is ``True``.
 
     Raises
     ------
     CheckpointError
         If the file is invalid or metadata is missing.
-    UnknownVersionError
-        If the metadata version is not recognised.
 
     Examples
     --------
     >>> metadata = load_metadata("model.ckpt")
-    >>> print(metadata.schema_version)
-    '1.0'
+    >>> print(metadata.version)
+    '2.0'
 
     >>> metadata, arrays = load_metadata("model.ckpt", supporting_arrays=True)
     >>> print(list(arrays.keys()))
@@ -207,25 +210,28 @@ def load_metadata(
 
     try:
         data, arrays = checkpoints_utils.load_metadata(str(checkpoint_path), supporting_arrays=True)
-        metadata = MetadataRegistry.load(data, migrate=migrate)
-
-        if supporting_arrays:
-            return metadata, arrays
-        return metadata
-
+        metadata = CheckpointAdapter(data)
     except zipfile.BadZipFile as exc:
-        raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
+        msg = f"Invalid checkpoint file: {checkpoint_path}"
+        raise CheckpointError(msg) from exc
     except FileNotFoundError as exc:
-        raise CheckpointError(f"No metadata found in checkpoint: {checkpoint_path}") from exc
+        msg = f"No metadata found in checkpoint: {checkpoint_path}"
+        raise CheckpointError(msg) from exc
     except json.JSONDecodeError as exc:
-        raise CheckpointError(f"Invalid metadata JSON in {checkpoint_path}") from exc
+        msg = f"Invalid metadata JSON in {checkpoint_path}"
+        raise CheckpointError(msg) from exc
+
+    if supporting_arrays:
+        return metadata, arrays
+    return metadata
 
 
 def save_metadata(
     path: str | Path,
-    metadata: "MetadataContract | dict[str, Any]",
+    metadata: "CheckpointAdapter | dict[str, Any]",
     *,
     supporting_arrays: dict[str, Any] | None = None,
+    validate: bool = True,
 ) -> None:
     """Save metadata to an existing checkpoint file.
 
@@ -235,90 +241,106 @@ def save_metadata(
     The top-level archive directory is discovered automatically (PyTorch
     checkpoints have exactly one).
 
-    When a raw ``dict`` is passed it is validated through
-    :meth:`MetadataRegistry.load` to ensure it conforms to a registered schema
-    and has ``schema_version`` set.  Prefer passing a :class:`MetadataContract`
-    instance directly to avoid the overhead of re-validation.
+    By default the metadata is validated strictly and stamped with
+    :data:`~anemoi.metadata.write_schema.CURRENT_VERSION` by
+    :func:`~anemoi.metadata.write_schema.validate_for_write`.  With
+    ``validate=False`` the raw content is written unchanged (for editing tools
+    and historical checkpoints).
 
     Parameters
     ----------
     path : str | Path
         Path to the checkpoint file.
-    metadata : MetadataContract | dict[str, Any]
-        Validated metadata instance, or a raw dict that will be validated
-        through the registry before writing.
+    metadata : CheckpointAdapter | dict[str, Any]
+        Adapter over the metadata, or a raw dict.
     supporting_arrays : dict[str, Any] | None, optional
         Optional dictionary of numpy arrays to store alongside the metadata.
+    validate : bool, optional
+        Validate strictly before writing (default).  ``False`` writes the
+        metadata as it is.
 
     Raises
     ------
     CheckpointError
         If the file does not exist, already contains metadata, or if the
         archive structure is invalid (zero or multiple top-level directories).
+    WriteValidationError
+        If *validate* is true and the metadata is not valid for writing.
     TypeError
-        If *metadata* is neither a MetadataContract nor a dict.
+        If *metadata* is neither a CheckpointAdapter nor a dict.
     """
     checkpoint_path = Path(path)
-    metadata_obj = _resolve_metadata(metadata)
-    metadata_dict = metadata_obj.to_dict()
+    metadata_dict = _metadata_to_write(metadata, validate=validate)
 
     if not checkpoint_path.exists():
-        raise CheckpointError(f"Checkpoint file not found: {checkpoint_path}")
+        msg = f"Checkpoint file not found: {checkpoint_path}"
+        raise CheckpointError(msg)
 
     try:
         checkpoints_utils.save_metadata(str(checkpoint_path), metadata_dict, supporting_arrays=supporting_arrays)
     except zipfile.BadZipFile as exc:
-        raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
+        msg = f"Invalid checkpoint file: {checkpoint_path}"
+        raise CheckpointError(msg) from exc
     except ValueError as exc:
-        raise CheckpointError(f"Checkpoint {checkpoint_path} already contains metadata") from exc
+        msg = f"Checkpoint {checkpoint_path} already contains metadata"
+        raise CheckpointError(msg) from exc
 
 
 def replace_metadata(
     path: str | Path,
-    metadata: "MetadataContract | dict[str, Any]",
+    metadata: "CheckpointAdapter | dict[str, Any]",
     *,
     supporting_arrays: dict[str, Any] | None = None,
+    validate: bool = True,
 ) -> None:
     """Replace metadata in an existing checkpoint file.
 
     Rebuilds the ZIP archive, substituting the existing metadata entry with
-    the new one.
-
-    When a raw ``dict`` is passed it is validated through
-    :meth:`MetadataRegistry.load` to ensure it conforms to a registered schema
-    and has ``schema_version`` set.  Prefer passing a :class:`MetadataContract`
-    instance directly.
+    the new one.  By default the metadata is validated strictly and stamped
+    with :data:`~anemoi.metadata.write_schema.CURRENT_VERSION` by
+    :func:`~anemoi.metadata.write_schema.validate_for_write`.  With
+    ``validate=False`` the raw content is written unchanged (for editing tools
+    and historical checkpoints).
 
     Parameters
     ----------
     path : str | Path
         Path to the checkpoint file.
-    metadata : MetadataContract | dict[str, Any]
-        Validated metadata instance, or a raw dict that will be validated
-        through the registry before writing.
+    metadata : CheckpointAdapter | dict[str, Any]
+        Adapter over the metadata, or a raw dict.
     supporting_arrays : dict[str, Any] | None, optional
         Optional dictionary of numpy arrays to store alongside the metadata.
+    validate : bool, optional
+        Validate strictly before writing (default).  ``False`` writes the
+        metadata as it is.
 
     Raises
     ------
     CheckpointError
-        If the checkpoint file does not exist or contains no metadata.
+        If the checkpoint file does not exist, contains no metadata, or (with
+        ``validate=False``) the metadata has no ``version`` key (required by
+        the checkpoint writer).
+    WriteValidationError
+        If *validate* is true and the metadata is not valid for writing.
     TypeError
-        If *metadata* is neither a MetadataContract nor a dict.
+        If *metadata* is neither a CheckpointAdapter nor a dict.
     """
     checkpoint_path = Path(path)
 
     if not checkpoint_path.exists():
-        raise CheckpointError(f"Checkpoint file not found: {checkpoint_path}")
+        msg = f"Checkpoint file not found: {checkpoint_path}"
+        raise CheckpointError(msg)
 
-    metadata_obj = _resolve_metadata(metadata)
-    metadata_dict = metadata_obj.to_dict()
-    metadata_dict.setdefault("version", metadata_obj.schema_version)
+    metadata_dict = _metadata_to_write(metadata, validate=validate)
 
     try:
         checkpoints_utils.replace_metadata(str(checkpoint_path), metadata_dict, supporting_arrays=supporting_arrays)
     except zipfile.BadZipFile as exc:
-        raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
+        msg = f"Invalid checkpoint file: {checkpoint_path}"
+        raise CheckpointError(msg) from exc
+    except ValueError as exc:
+        msg = f"Cannot replace metadata in {checkpoint_path}: {exc}"
+        raise CheckpointError(msg) from exc
 
 
 def remove_metadata(path: str | Path) -> None:
@@ -340,9 +362,11 @@ def remove_metadata(path: str | Path) -> None:
     checkpoint_path = Path(path)
 
     if not checkpoint_path.exists():
-        raise CheckpointError(f"Checkpoint file not found: {checkpoint_path}")
+        msg = f"Checkpoint file not found: {checkpoint_path}"
+        raise CheckpointError(msg)
 
     try:
         checkpoints_utils.remove_metadata(str(checkpoint_path))
     except zipfile.BadZipFile as exc:
-        raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
+        msg = f"Invalid checkpoint file: {checkpoint_path}"
+        raise CheckpointError(msg) from exc

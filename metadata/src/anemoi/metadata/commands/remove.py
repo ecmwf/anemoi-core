@@ -52,7 +52,7 @@ class RemoveCommand(Command):
         args : Namespace
             Parsed command-line arguments.
         """
-        from ..checkpoint import remove_metadata
+        from anemoi.metadata.checkpoint import remove_metadata
 
         if args.inplace:
             target = args.path

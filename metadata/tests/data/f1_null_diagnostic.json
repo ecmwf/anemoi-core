@@ -1,0 +1,152 @@
+{
+ "version": "1.0",
+ "config": {
+  "data": {
+   "diagnostic": null,
+   "forcing": ["lsm", "cos_latitude", "sin_latitude", "cos_longitude", "sin_longitude", "cos_solar_zenith_angle", "cos_julian_day", "cos_local_time", "sin_julian_day", "sin_local_time", "10u", "10v", "2t", "2d", "ssrd", "strd", "tp", "msl"],
+   "timestep": "24h"
+  },
+  "training": {"multistep_input": 2, "precision": "16-mixed"}
+ },
+ "seed": 5678,
+ "run_id": "11111111-2222-4333-8444-555555555555",
+ "dataset": {
+  "shape": [24828, 30, 1, 40320],
+  "variables": ["avg_svn", "avg_sve", "avg_siue", "avg_sivn", "avg_sivol", "avg_snvol", "avg_siconc", "avg_icesalt", "avg_sialb", "avg_tos", "avg_sos", "avg_zos", "cos_latitude", "sin_latitude", "cos_longitude", "sin_longitude", "cos_solar_zenith_angle", "cos_julian_day", "cos_local_time", "sin_julian_day", "sin_local_time", "lsm", "10u", "10v", "2t", "2d", "ssrd", "strd", "tp", "msl"],
+  "variables_metadata": {
+   "10u": {"mars": {"levtype": "sfc", "param": "10u", "step": 0, "stream": "oper", "type": "an"}},
+   "10v": {"mars": {"levtype": "sfc", "param": "10v", "step": 0, "stream": "oper", "type": "an"}},
+   "2d": {"mars": {"levtype": "sfc", "param": "2d", "step": 0, "stream": "oper", "type": "an"}},
+   "2t": {"mars": {"levtype": "sfc", "param": "2t", "step": 0, "stream": "oper", "type": "an"}},
+   "avg_icesalt": {
+    "mars": {"levtype": "o2d", "number": 0, "param": "avg_icesalt", "step": "0-1", "stream": "ocda", "type": "tpa"},
+    "period": [0, 1],
+    "process": "average"
+   },
+   "avg_sialb": {
+    "mars": {"levtype": "o2d", "number": 0, "param": "avg_sialb", "step": "0-1", "stream": "ocda", "type": "tpa"},
+    "period": [0, 1],
+    "process": "average"
+   },
+   "avg_siconc": {
+    "mars": {"levtype": "o2d", "number": 0, "param": "avg_siconc", "step": "0-1", "stream": "ocda", "type": "tpa"},
+    "period": [0, 1],
+    "process": "average"
+   },
+   "avg_siue": {
+    "mars": {"levtype": "o2d", "number": 0, "param": "avg_siue", "step": "0-1", "stream": "ocda", "type": "tpa"},
+    "period": [0, 1],
+    "process": "average"
+   },
+   "avg_sivn": {
+    "mars": {"levtype": "o2d", "number": 0, "param": "avg_sivn", "step": "0-1", "stream": "ocda", "type": "tpa"},
+    "period": [0, 1],
+    "process": "average"
+   },
+   "avg_sivol": {
+    "mars": {"levtype": "o2d", "number": 0, "param": "avg_sivol", "step": "0-1", "stream": "ocda", "type": "tpa"},
+    "period": [0, 1],
+    "process": "average"
+   },
+   "avg_snvol": {
+    "mars": {"levtype": "o2d", "number": 0, "param": "avg_snvol", "step": "0-1", "stream": "ocda", "type": "tpa"},
+    "period": [0, 1],
+    "process": "average"
+   },
+   "avg_sos": {
+    "mars": {"levtype": "o2d", "number": 0, "param": "avg_sos", "step": "0-1", "stream": "ocda", "type": "tpa"},
+    "period": [0, 1],
+    "process": "average"
+   },
+   "avg_sve": {
+    "mars": {"levtype": "o2d", "number": 0, "param": "avg_sve", "step": "0-1", "stream": "ocda", "type": "tpa"},
+    "period": [0, 1],
+    "process": "average"
+   },
+   "avg_svn": {
+    "mars": {"levtype": "o2d", "number": 0, "param": "avg_svn", "step": "0-1", "stream": "ocda", "type": "tpa"},
+    "period": [0, 1],
+    "process": "average"
+   },
+   "avg_tos": {
+    "mars": {"levtype": "o2d", "number": 0, "param": "avg_tos", "step": "0-1", "stream": "ocda", "type": "tpa"},
+    "period": [0, 1],
+    "process": "average"
+   },
+   "avg_zos": {
+    "mars": {"levtype": "o2d", "number": 0, "param": "avg_zos", "step": "0-1", "stream": "ocda", "type": "tpa"},
+    "period": [0, 1],
+    "process": "average"
+   },
+   "cos_julian_day": {"computed_forcing": true, "constant_in_time": false},
+   "cos_latitude": {"computed_forcing": true, "constant_in_time": true},
+   "cos_local_time": {"computed_forcing": true, "constant_in_time": false},
+   "cos_longitude": {"computed_forcing": true, "constant_in_time": true},
+   "cos_solar_zenith_angle": {"computed_forcing": true, "constant_in_time": false},
+   "lsm": {
+    "constant_in_time": true,
+    "mars": {"levtype": "sfc", "param": "lsm", "step": 0, "stream": "oper", "type": "an"}
+   },
+   "msl": {"mars": {"levtype": "sfc", "param": "msl", "step": 0, "stream": "oper", "type": "an"}},
+   "sin_julian_day": {"computed_forcing": true, "constant_in_time": false},
+   "sin_latitude": {"computed_forcing": true, "constant_in_time": true},
+   "sin_local_time": {"computed_forcing": true, "constant_in_time": false},
+   "sin_longitude": {"computed_forcing": true, "constant_in_time": true},
+   "ssrd": {
+    "mars": {"levtype": "sfc", "param": "ssrd", "step": 6, "stream": "oper", "type": "fc"},
+    "period": [0, 6],
+    "process": "accumulation"
+   },
+   "strd": {
+    "mars": {"levtype": "sfc", "param": "strd", "step": 6, "stream": "oper", "type": "fc"},
+    "period": [0, 6],
+    "process": "accumulation"
+   },
+   "tp": {
+    "mars": {"levtype": "sfc", "param": "tp", "step": 6, "stream": "oper", "type": "fc"},
+    "period": [0, 6],
+    "process": "accumulation"
+   }
+  }
+ },
+ "data_indices": {
+  "data": {
+   "input": {
+    "diagnostic": [],
+    "forcing": [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+    "full": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+    "prognostic": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+   },
+   "output": {
+    "diagnostic": [],
+    "forcing": [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+    "full": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    "prognostic": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+   }
+  },
+  "model": {
+   "input": {
+    "diagnostic": [],
+    "forcing": [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+    "full": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+    "prognostic": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+   },
+   "output": {
+    "diagnostic": [],
+    "forcing": [],
+    "full": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    "prognostic": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+   }
+  }
+ },
+ "provenance_training": {
+  "time": "2025-06-02T09:00:00.000000",
+  "python": "3.11.9",
+  "module_versions": {"anemoi.training": "0.0.0", "anemoi.models": "0.0.0", "anemoi.utils": "0.0.0"},
+  "distribution_names": {},
+  "git_versions": {
+   "anemoi.training": {"git": {"sha1": "0000000000000000000000000000000000000000", "modified_files": 0, "untracked_files": 0}}
+  }
+ },
+ "timestamp": "2025-06-02T09:00:00.000000+00:00"
+}

@@ -3,629 +3,335 @@
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
 
-"""Tests for the Metadata user-facing interface (Phase 2).
+"""Tests for the component-organised Metadata interface.
 
-Covers every public property and method on :class:`~anemoi.metadata.interface.Metadata`,
-including typed inference accessors, safe ``get``/``__getitem__`` access for
-permissive sections, mixin delegation, and checkpoint loading.
+Covers the checkpoint level (``version``, ``component_versions``,
+``dataset_names``, ``task``, ``lineage``, ``sections``), the per-dataset
+view (``data``, ``arrays``), the single-dataset shortcuts,
+``with_overrides`` and the guarantee that everything returned is a copy.
 """
 
+import json
+from collections.abc import Callable
 from datetime import datetime
+from datetime import timedelta
+from pathlib import Path
+from typing import Any
 
+import numpy as np
 import pytest
 
-from anemoi.metadata.base import MetadataContract
+from anemoi.metadata.arrays import DatasetArrays
+from anemoi.metadata.exceptions import VersionError
+from anemoi.metadata.interface import DatasetData
+from anemoi.metadata.interface import DatasetSelectionError
+from anemoi.metadata.interface import DatasetView
 from anemoi.metadata.interface import Metadata
-from anemoi.metadata.versions.v1 import MetadataV1
+from anemoi.metadata.interface import SectionsView
+from anemoi.metadata.interface import TaskView
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _arrays(n: int, offset: float = 0.0) -> dict:
+    """Return latitudes and longitudes of *n* points."""
+    return {
+        "latitudes": np.linspace(-90, 90, n) + offset,
+        "longitudes": np.linspace(0, 359, n) + offset,
+    }
+
+
+@pytest.fixture
+def raw(golden_loader: Callable[[str], dict[str, Any]]) -> dict[str, Any]:
+    """Raw dict of ``f6_main`` (one dataset, ``data``)."""
+    return golden_loader("f6_main")
+
+
+@pytest.fixture
+def meta(raw: dict[str, Any]) -> Metadata:
+    """Single-dataset Metadata (``data``)."""
+    return Metadata.from_dict(raw)
+
+
+@pytest.fixture
+def multi_dict(golden_loader: Callable[[str], dict[str, Any]]) -> dict[str, Any]:
+    """Raw dict of ``f3_multi_dataset`` (``era5`` and ``cerra``)."""
+    return golden_loader("f3_multi_dataset")
+
+
+@pytest.fixture
+def multi_meta(multi_dict: dict[str, Any]) -> Metadata:
+    """Two-dataset Metadata."""
+    return Metadata.from_dict(multi_dict)
+
 
 # ---------------------------------------------------------------------------
 # Construction
 # ---------------------------------------------------------------------------
 
 
-class TestMetadataConstruction:
-    """Metadata can be built from a dict or a checkpoint file."""
+class TestConstruction:
+    """Metadata can be built from a dict or a checkpoint file (every golden file: ``test_golden.py``)."""
 
-    def test_from_dict_returns_metadata_instance(self, sample_v1_dict):
-        """from_dict() returns a Metadata instance."""
-        m = Metadata.from_dict(sample_v1_dict)
-        assert isinstance(m, Metadata)
+    def test_from_dict_does_not_keep_the_dict(self, raw: dict[str, Any]) -> None:
+        """Changing the dict after from_dict() does not change the instance."""
+        m = Metadata.from_dict(raw)
+        raw["metadata_inference"]["dataset_names"].append("extra")
+        assert m.dataset_names == ["data"]
 
-    def test_from_dict_migrate_false_still_works(self, sample_v1_dict):
-        """from_dict(migrate=False) still returns a Metadata instance."""
-        m = Metadata.from_dict(sample_v1_dict, migrate=False)
-        assert isinstance(m, Metadata)
-
-    def test_from_checkpoint_returns_metadata_instance(self, tmp_checkpoint):
-        """from_checkpoint() returns a Metadata instance."""
-        m = Metadata.from_checkpoint(tmp_checkpoint)
-        assert isinstance(m, Metadata)
-
-    def test_from_checkpoint_migrate_false(self, tmp_checkpoint):
-        """from_checkpoint(migrate=False) still returns a Metadata instance."""
-        m = Metadata.from_checkpoint(tmp_checkpoint, migrate=False)
-        assert isinstance(m, Metadata)
-
-    def test_from_checkpoint_schema_version(self, tmp_checkpoint):
-        """from_checkpoint() auto-migrates to the latest schema version."""
-        from anemoi.metadata.registry import MetadataRegistry
-
-        m = Metadata.from_checkpoint(tmp_checkpoint)
-        assert m.schema_version == MetadataRegistry.latest_version()
+    def test_repr(self, meta: Metadata) -> None:
+        """repr() names the version and the datasets."""
+        assert repr(meta) == "Metadata(version='2.0', datasets=['data'])"
 
 
 # ---------------------------------------------------------------------------
-# Envelope properties
+# Checkpoint level
 # ---------------------------------------------------------------------------
 
 
-class TestEnvelopeProperties:
-    """schema_version, created_at, raw, and to_dict() expose the envelope."""
+class TestCheckpointLevel:
+    """to_dict and the names that are not on the interface.
 
-    @pytest.fixture()
-    def meta(self, sample_v1_dict):
-        """Return a Metadata instance from the sample V1 dict."""
-        return Metadata.from_dict(sample_v1_dict)
-
-    def test_schema_version_is_string(self, meta):
-        """schema_version returns a str."""
-        assert isinstance(meta.schema_version, str)
-
-    def test_schema_version_value(self, meta):
-        """schema_version returns the latest version after auto-migration."""
-        from anemoi.metadata.registry import MetadataRegistry
-
-        assert meta.schema_version == MetadataRegistry.latest_version()
-
-    def test_created_at_is_datetime(self, meta):
-        """created_at returns a datetime instance."""
-        assert isinstance(meta.created_at, datetime)
-
-    def test_created_at_year(self, meta):
-        """created_at has the expected year from the fixture."""
-        assert meta.created_at.year == 2024
-
-    def test_raw_is_base_metadata(self, meta):
-        """raw returns a MetadataContract instance."""
-        assert isinstance(meta.raw, MetadataContract)
-
-    def test_raw_is_metadata_v1(self, meta):
-        """raw is MetadataV1 (only version registered)."""
-
-        assert isinstance(meta.raw, MetadataV1)
-
-    def test_to_dict_returns_dict(self, meta):
-        """to_dict() returns a plain dict."""
-        assert isinstance(meta.to_dict(), dict)
-
-    def test_to_dict_contains_schema_version(self, meta):
-        """to_dict() output contains schema_version."""
-        from anemoi.metadata.registry import MetadataRegistry
-
-        assert meta.to_dict()["schema_version"] == MetadataRegistry.latest_version()
-
-    def test_to_dict_is_json_serialisable(self, meta):
-        """to_dict() output is fully JSON-serialisable."""
-        import json
-
-        json.dumps(meta.to_dict())  # must not raise
-
-    def test_to_dict_contains_metadata_inference(self, meta):
-        """to_dict() output contains the metadata_inference key."""
-        assert "metadata_inference" in meta.to_dict()
-
-
-# ---------------------------------------------------------------------------
-# Raw access to version-specific internals
-# ---------------------------------------------------------------------------
-
-
-class TestRawAccess:
-    """metadata.raw exposes version-specific internals for advanced users.
-
-    The ``inference`` property has been removed from the public interface.
-    Users who need the typed V1 ``InferenceMetadata`` block can access it
-    via ``metadata.raw.metadata_inference``.
+    Version, component_versions and dataset_names are checked for every golden file in ``test_golden.py``.
     """
 
-    @pytest.fixture()
-    def meta(self, sample_v1_dict):
-        """Return a Metadata instance from the sample V1 dict."""
-        return Metadata.from_dict(sample_v1_dict)
+    def test_to_dict_is_json_serialisable_and_keeps_unknown_keys(self, raw: dict[str, Any]) -> None:
+        """to_dict() is JSON-serialisable and unknown top-level keys survive."""
+        raw["custom_experiment_tag"] = "ablation-v7"
+        stored = Metadata.from_dict(raw).to_dict()
+        json.dumps(stored)
+        assert stored["custom_experiment_tag"] == "ablation-v7"
 
-    def test_raw_metadata_inference_seed(self, meta):
-        """raw.metadata_inference.seed matches the fixture value."""
-        from anemoi.metadata.versions.v1 import InferenceMetadata
-
-        assert isinstance(meta.raw.metadata_inference, InferenceMetadata)
-        assert meta.raw.metadata_inference.seed == 42
-
-    def test_raw_metadata_inference_run_id(self, meta):
-        """raw.metadata_inference.run_id matches the fixture value."""
-        assert meta.raw.metadata_inference.run_id == "train-abc123"
-
-    def test_raw_metadata_inference_task(self, meta):
-        """raw.metadata_inference.task matches the fixture value."""
-        assert meta.raw.metadata_inference.task == "medium-range"
-
-    def test_raw_metadata_inference_dataset_names(self, meta):
-        """raw.metadata_inference.dataset_names contains the expected dataset."""
-        assert "era5_1deg" in meta.raw.metadata_inference.dataset_names
-
-    def test_inference_not_on_interface(self, meta):
-        """The 'inference' property no longer exists on the public interface."""
-        assert not hasattr(meta, "inference")
-
-
-# ---------------------------------------------------------------------------
-# dataset_names
-# ---------------------------------------------------------------------------
-
-
-class TestDatasetNames:
-    """metadata.dataset_names returns the ordered list of dataset names."""
-
-    @pytest.fixture()
-    def meta(self, sample_v1_dict):
-        """Return a Metadata instance from the sample V1 dict."""
-        return Metadata.from_dict(sample_v1_dict)
-
-    def test_dataset_names_is_list(self, meta):
-        """dataset_names returns a list."""
-        assert isinstance(meta.dataset_names, list)
-
-    def test_dataset_names_contains_era5(self, meta):
-        """dataset_names contains 'era5_1deg' from the fixture."""
-        assert "era5_1deg" in meta.dataset_names
-
-    def test_dataset_names_length(self, meta):
-        """dataset_names has exactly one entry for the single-dataset fixture."""
-        assert len(meta.dataset_names) == 1
-
-    def test_dataset_names_element_type(self, meta):
-        """Every element of dataset_names is a str."""
-        assert all(isinstance(n, str) for n in meta.dataset_names)
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "schema_version",
+            "original_schema_version",
+            "grid_points",
+            "is_legacy",
+            "created_at",
+            "raw",
+            "timestep",
+            "multi_step_input",
+            "multi_step_output",
+            "num_variables",
+            "precision",
+            "provenance",
+            "variable_categories",
+            "select_variables",
+            "typed_variables",
+            "variables_metadata",
+            "accumulations",
+            "computed_forcings",
+            "data_request",
+            "data_frequency",
+            "sources",
+            "open_dataset_args",
+            "dataloader_config",
+            "get",
+            "get_environment_info",
+        ],
+    )
+    def test_removed_names_are_not_on_the_interface(self, meta: Metadata, name: str) -> None:
+        """Old names and per-dataset forwards are gone (no aliases)."""
+        assert not hasattr(meta, name)
 
 
 # ---------------------------------------------------------------------------
-# task
+# Task
 # ---------------------------------------------------------------------------
 
 
 class TestTask:
-    """metadata.task returns the optional task label."""
+    """Metadata.task is the checkpoint-level task (task name, timing and conflicts: ``test_golden.py``)."""
 
-    def test_task_returns_string_when_set(self, sample_v1_dict):
-        """task returns a str when the fixture sets it."""
-        m = Metadata.from_dict(sample_v1_dict)
-        assert isinstance(m.task, str)
+    def test_task_is_a_task_view(self, meta: Metadata) -> None:
+        """Task is a read-only TaskView."""
+        assert isinstance(meta.task, TaskView)
+        assert repr(meta.task) == "TaskView(task_name='forecaster')"
 
-    def test_task_value(self, sample_v1_dict):
-        """task returns 'medium-range' from the fixture."""
-        m = Metadata.from_dict(sample_v1_dict)
-        assert m.task == "medium-range"
+    def test_timing_values(self, meta: Metadata) -> None:
+        """Indices and lagged times of the F6 checkpoint (input steps 0 and 1, output step 2, 6h apart)."""
+        task = meta.task
+        assert task.input_relative_date_indices() == [0, 1]
+        assert task.output_relative_date_indices() == [2]
+        assert task.lagged == [timedelta(hours=-6), timedelta(0)]
 
-    def test_task_returns_none_when_absent(self, sample_v1_dict):
-        """task returns None when the field is not set."""
-        sample_v1_dict["metadata_inference"]["task"] = None
-        m = Metadata.from_dict(sample_v1_dict)
-        assert m.task is None
+    def test_timings_by_dataset(self, multi_meta: Metadata) -> None:
+        """timings() has one entry per dataset."""
+        assert list(multi_meta.task.timings()) == ["era5", "cerra"]
 
-
-# ---------------------------------------------------------------------------
-# Per-dataset contract accessors
-# ---------------------------------------------------------------------------
-
-
-class TestPerDatasetAccessors:
-    """Contract methods expose per-dataset inference data without version coupling.
-
-    The ``dataset_config()`` method has been removed from the public interface.
-    Per-dataset data is now accessed via the contract methods:
-    ``get_variable_indices()``, ``get_variable_types()``,
-    ``get_tensor_shapes()``, ``get_timestep()``, etc.
-    """
-
-    @pytest.fixture()
-    def meta(self, sample_v1_dict):
-        """Return a Metadata instance from the sample V1 dict."""
-        return Metadata.from_dict(sample_v1_dict)
-
-    def test_get_variable_indices_default(self, meta):
-        """raw.get_variable_indices() returns the input index mapping."""
-        indices = meta.raw.get_variable_indices()
-        assert isinstance(indices, dict)
-        assert "2t" in indices
-
-    def test_get_variable_indices_named(self, meta):
-        """raw.get_variable_indices('era5_1deg') returns the correct mapping."""
-        indices = meta.raw.get_variable_indices("era5_1deg")
-        assert "2t" in indices
-
-    def test_get_variable_indices_nonexistent_raises(self, meta):
-        """raw.get_variable_indices('nonexistent') raises KeyError."""
-        with pytest.raises(KeyError):
-            meta.raw.get_variable_indices("nonexistent")
-
-    def test_get_output_variable_indices_default(self, meta):
-        """raw.get_output_variable_indices() returns the output index mapping."""
-        indices = meta.raw.get_output_variable_indices()
-        assert isinstance(indices, dict)
-        assert "2t" in indices
-
-    def test_get_variable_types_default(self, meta):
-        """raw.get_variable_types() returns the category dict."""
-        vt = meta.raw.get_variable_types()
-        assert set(vt.keys()) == {"forcing", "prognostic", "diagnostic", "target"}
-
-    def test_get_tensor_shapes_default(self, meta):
-        """raw.get_tensor_shapes() returns the shape dict."""
-        shapes = meta.raw.get_tensor_shapes()
-        assert set(shapes.keys()) == {
-            "variables",
-            "input_timesteps",
-            "ensemble",
-            "grid",
-        }
-
-    def test_get_timestep_named(self, meta):
-        """raw.get_timestep('era5_1deg') returns '6h'."""
-        assert meta.raw.get_timestep("era5_1deg") == "6h"
-
-    def test_dataset_config_not_on_interface(self, meta):
-        """The 'dataset_config' method no longer exists on the public interface."""
-        assert not hasattr(meta, "dataset_config")
+    def test_task_has_no_dataset_forwards_on_dataset_view(self, meta: Metadata) -> None:
+        """DatasetView has no task."""
+        assert not hasattr(meta.dataset(), "task")
+        assert not hasattr(meta.dataset(), "timestep")
 
 
 # ---------------------------------------------------------------------------
-# timestep
+# Lineage
 # ---------------------------------------------------------------------------
 
 
-class TestTimestep:
-    """metadata.timestep returns the frequency string from the first dataset."""
+class TestLineage:
+    """Metadata.lineage reads uuid, parent_uuid and the entries; a value the file does not record raises."""
 
-    @pytest.fixture()
-    def meta(self, sample_v1_dict):
-        """Return a Metadata instance from the sample V1 dict."""
-        return Metadata.from_dict(sample_v1_dict)
+    def test_fresh_run(self, meta: Metadata) -> None:
+        """F6 records the lineage of a fresh run: a uuid, no parent, no entries."""
+        assert meta.lineage.uuid == "11f0410c-d9d2-4255-8232-8cc6602dd1ab"
+        assert meta.lineage.parent_uuid is None
+        assert meta.lineage.entries == []
 
-    def test_timestep_is_string(self, meta):
-        """timestep returns a str."""
-        assert isinstance(meta.timestep, str)
-
-    def test_timestep_value(self, meta):
-        """timestep returns '6h' from the fixture."""
-        assert meta.timestep == "6h"
-
-
-# ---------------------------------------------------------------------------
-# multi_step_input / multi_step_output
-# ---------------------------------------------------------------------------
-
-
-class TestMultiStep:
-    """multi_step_input and multi_step_output return the correct counts."""
-
-    @pytest.fixture()
-    def meta(self, sample_v1_dict):
-        """Return a Metadata instance from the sample V1 dict."""
-        return Metadata.from_dict(sample_v1_dict)
-
-    def test_multi_step_input_is_int(self, meta):
-        """multi_step_input returns an int."""
-        assert isinstance(meta.multi_step_input, int)
-
-    def test_multi_step_input_value(self, meta):
-        """multi_step_input is 2 (fixture has [-1, 0])."""
-        assert meta.multi_step_input == 2
-
-    def test_multi_step_output_is_int(self, meta):
-        """multi_step_output returns an int."""
-        assert isinstance(meta.multi_step_output, int)
-
-    def test_multi_step_output_value(self, meta):
-        """multi_step_output is 1 (fixture has [1])."""
-        assert meta.multi_step_output == 1
-
-    def test_multi_step_input_matches_index_length(self, meta):
-        """multi_step_input equals len(input_relative_date_indices)."""
-        indices = meta.raw.get_input_relative_date_indices()
-        assert meta.multi_step_input == len(indices)
-
-    def test_multi_step_output_matches_index_length(self, meta):
-        """multi_step_output equals len(output_relative_date_indices)."""
-        indices = meta.raw.get_output_relative_date_indices()
-        assert meta.multi_step_output == len(indices)
+    def test_not_recorded_raises(self, raw: dict[str, Any]) -> None:
+        """A file that records no lineage raises VersionError rather than returning None."""
+        for key in ("uuid", "parent_uuid", "checkpoint_lineage"):
+            raw.pop(key, None)
+        lineage = Metadata.from_dict(raw).lineage
+        for name in ("uuid", "parent_uuid", "entries"):
+            with pytest.raises(VersionError, match="lineage"):
+                getattr(lineage, name)
 
 
 # ---------------------------------------------------------------------------
-# VariablesMixin delegation
+# Sections
 # ---------------------------------------------------------------------------
 
 
-class TestVariablesMixinDelegation:
-    """Metadata delegates variable methods to VariablesMixin correctly."""
+class TestSections:
+    """Metadata.sections reads the raw sections."""
 
-    @pytest.fixture()
-    def meta(self, sample_v1_dict):
-        """Return a Metadata instance from the sample V1 dict."""
-        return Metadata.from_dict(sample_v1_dict)
+    def test_is_sections_view(self, meta: Metadata) -> None:
+        """Sections is a SectionsView."""
+        assert isinstance(meta.sections, SectionsView)
 
-    def test_variables_returns_list(self, meta):
-        """variables returns a list."""
-        assert isinstance(meta.variables, list)
+    def test_identity_values(self, meta: Metadata) -> None:
+        """run_id and precision of the F6 checkpoint."""
+        sections = meta.sections
+        assert sections.run_id == "cbe2a8e3-87a2-4bf5-83fd-6ca34970ec82"
+        assert sections.precision == "16-mixed"
 
-    def test_variables_contains_expected_names(self, meta):
-        """variables contains all expected variable names from the fixture."""
-        expected = {"2t", "msl", "10u", "10v", "lsm"}
-        assert set(meta.variables) == expected
+    def test_timestamp_falls_back_to_created_at(self, raw: dict[str, Any]) -> None:
+        """Timestamp is read from created_at when there is no timestamp."""
+        del raw["timestamp"]
+        raw["created_at"] = "2024-06-01T12:00:00"
+        assert Metadata.from_dict(raw).sections.timestamp == datetime.fromisoformat("2024-06-01T12:00:00")
 
-    def test_num_variables_is_int(self, meta):
-        """num_variables returns an int."""
-        assert isinstance(meta.num_variables, int)
+    def test_dumps(self, meta: Metadata, raw: dict[str, Any]) -> None:
+        """config, training, tracker and provenance are dicts as stored; F6 records no environment."""
+        sections = meta.sections
+        assert sections.config == raw["config"]
+        assert sections.config["training"]["precision"] == "16-mixed"
+        assert sections.training == {"current_epoch": 1, "global_step": 6, "elapsed_time": 85.70771217346191}
+        assert sections.tracker == {"null": None}
+        assert sections.provenance == raw["provenance_training"]
+        assert sections.environment == {}
 
-    def test_num_variables_matches_variables_length(self, meta):
-        """num_variables equals len(variables)."""
-        assert meta.num_variables == len(meta.variables)
+    def test_absent_dumps_are_empty(self) -> None:
+        """An absent dump reads as an empty dict, an absent scalar as None."""
+        sections = Metadata.from_dict({"version": "2.0", "metadata_inference": {"dataset_names": []}}).sections
+        assert sections.config == {}
+        assert sections.tracker == {}
+        assert sections.environment == {}
 
-    def test_num_variables_value(self, meta):
-        """num_variables is 5 for the single-dataset fixture."""
-        assert meta.num_variables == 5
-
-    def test_variable_categories_returns_dict(self, meta):
-        """variable_categories() returns a dict."""
-        assert isinstance(meta.variable_categories(), dict)
-
-    def test_variable_categories_has_expected_keys(self, meta):
-        """variable_categories() has forcing, prognostic, diagnostic, target."""
-        cats = meta.variable_categories()
-        assert set(cats.keys()) == {"forcing", "prognostic", "diagnostic", "target"}
-
-    def test_variable_categories_prognostic_correct(self, meta):
-        """prognostic category contains the expected variables."""
-        cats = meta.variable_categories()
-        assert set(cats["prognostic"]) == {"2t", "msl", "10u", "10v"}
-
-    def test_variable_categories_forcing_correct(self, meta):
-        """forcing category contains lsm."""
-        cats = meta.variable_categories()
-        assert "lsm" in cats["forcing"]
-
-    def test_variable_categories_diagnostic_empty(self, meta):
-        """diagnostic category is empty in the fixture."""
-        cats = meta.variable_categories()
-        assert cats["diagnostic"] == []
-
-
-# ---------------------------------------------------------------------------
-# get() – safe section accessor
-# ---------------------------------------------------------------------------
-
-
-class TestGetMethod:
-    """metadata.get() safely accesses permissive sections and nested keys."""
-
-    @pytest.fixture()
-    def meta(self, sample_v1_dict):
-        """Return a Metadata instance from the sample V1 dict."""
-        return Metadata.from_dict(sample_v1_dict)
-
-    def test_get_section_returns_dict(self, meta):
-        """get('config') returns the config dict."""
-        result = meta.get("config")
-        assert isinstance(result, dict)
-
-    def test_get_section_config_has_model_key(self, meta):
-        """get('config') dict contains the 'model' key from the fixture."""
-        assert "model" in meta.get("config")
-
-    def test_get_section_training_returns_dict(self, meta):
-        """get('training') returns the training dict."""
-        result = meta.get("training")
-        assert isinstance(result, dict)
-
-    def test_get_section_with_existing_key(self, meta):
-        """get('config', 'model') returns the nested model dict."""
-        result = meta.get("config", "model")
-        assert isinstance(result, dict)
-        assert result["type"] == "graphtransformer"
-
-    def test_get_section_with_nonexistent_key_returns_none(self, meta):
-        """get('config', 'nonexistent') returns None by default."""
-        assert meta.get("config", "nonexistent") is None
-
-    def test_get_nonexistent_section_returns_none(self, meta):
-        """get('nonexistent_section') returns None by default."""
-        assert meta.get("nonexistent_section") is None
-
-    def test_get_nonexistent_section_with_custom_default(self, meta):
-        """get('nonexistent_section', default=42) returns 42."""
-        assert meta.get("nonexistent_section", default=42) == 42
-
-    def test_get_nonexistent_section_with_string_default(self, meta):
-        """get('nonexistent_section', default='fallback') returns 'fallback'."""
-        assert meta.get("nonexistent_section", default="fallback") == "fallback"
-
-    def test_get_environment_section(self, meta):
-        """get('environment') returns the environment dict."""
-        result = meta.get("environment")
-        assert isinstance(result, dict)
-        assert "python_version" in result
-
-    def test_get_provenance_section(self, meta):
-        """get('provenance') returns the provenance dict."""
-        result = meta.get("provenance")
-        assert isinstance(result, dict)
-
-    def test_get_dataset_section(self, meta):
-        """get('dataset') returns the dataset dict."""
-        result = meta.get("dataset")
-        assert isinstance(result, dict)
-
-
-# ---------------------------------------------------------------------------
-# __getitem__
-# ---------------------------------------------------------------------------
+    def test_get_returns_stored_key_or_default(self, meta: Metadata) -> None:
+        """get() reads any top-level key; absent gives the default."""
+        assert meta.sections.get("version") == "2.0"
+        assert meta.sections.get("nope", 42) == 42
 
 
 class TestGetItem:
-    """metadata[section] returns the section or raises AttributeError."""
+    """metadata[key] returns raw top-level keys only."""
 
-    @pytest.fixture()
-    def meta(self, sample_v1_dict):
-        """Return a Metadata instance from the sample V1 dict."""
-        return Metadata.from_dict(sample_v1_dict)
+    def test_config(self, meta: Metadata, raw: dict[str, Any]) -> None:
+        """metadata['config'] is the config dump."""
+        assert meta["config"] == raw["config"]
+        assert meta["config"]["training"]["precision"] == "16-mixed"
 
-    def test_getitem_config_returns_dict(self, meta):
-        """metadata['config'] returns the config dict."""
-        assert isinstance(meta["config"], dict)
+    def test_version(self, meta: Metadata) -> None:
+        """metadata['version'] is the stored string."""
+        assert meta["version"] == "2.0"
 
-    def test_getitem_training_returns_dict(self, meta):
-        """metadata['training'] returns the training dict."""
-        assert isinstance(meta["training"], dict)
-
-    def test_getitem_environment_returns_dict(self, meta):
-        """metadata['environment'] returns the environment dict."""
-        assert isinstance(meta["environment"], dict)
-
-    def test_getitem_nonexistent_raises_key_error(self, meta):
-        """metadata['nonexistent'] raises KeyError."""
+    @pytest.mark.parametrize("name", ["nonexistent", "to_dict", "dataset_names", "with_overrides", "task", "variables"])
+    def test_methods_and_attributes_are_not_reachable(self, meta: Metadata, name: str) -> None:
+        """Names that are not stored keys raise KeyError, even when they are attributes."""
         with pytest.raises(KeyError):
-            _ = meta["nonexistent"]
-
-    def test_getitem_schema_version_returns_string(self, meta):
-        """metadata['schema_version'] returns the latest version string."""
-        from anemoi.metadata.registry import MetadataRegistry
-
-        assert meta["schema_version"] == MetadataRegistry.latest_version()
+            _ = meta[name]
 
 
 # ---------------------------------------------------------------------------
-# __repr__
+# Selecting a dataset
 # ---------------------------------------------------------------------------
 
 
-class TestRepr:
-    """repr(metadata) returns a sensible, non-crashing string."""
+class TestDatasetSelection:
+    """dataset(name) needs a name unless there is exactly one dataset."""
 
-    @pytest.fixture()
-    def meta(self, sample_v1_dict):
-        """Return a Metadata instance from the sample V1 dict."""
-        return Metadata.from_dict(sample_v1_dict)
+    def test_named(self, multi_meta: Metadata) -> None:
+        """dataset(name) returns the view of that dataset."""
+        assert multi_meta.dataset("cerra").name == "cerra"
 
-    def test_repr_returns_string(self, meta):
-        """repr() returns a str."""
-        assert isinstance(repr(meta), str)
+    def test_single_dataset_name_optional(self, meta: Metadata) -> None:
+        """With one dataset the name may be omitted."""
+        assert meta.dataset().name == "data"
 
-    def test_repr_contains_version(self, meta):
-        """repr() contains the schema version."""
-        from anemoi.metadata.registry import MetadataRegistry
+    def test_multi_dataset_name_required(self, multi_meta: Metadata) -> None:
+        """With several datasets omitting the name raises a clear error."""
+        with pytest.raises(DatasetSelectionError, match=r"era5.*cerra"):
+            multi_meta.dataset()
 
-        assert MetadataRegistry.latest_version() in repr(meta)
+    def test_no_datasets(self, raw: dict[str, Any]) -> None:
+        """With no dataset omitting the name raises a clear error."""
+        raw["metadata_inference"]["dataset_names"] = []
+        with pytest.raises(DatasetSelectionError, match="no datasets"):
+            Metadata.from_dict(raw).dataset()
 
-    def test_repr_contains_dataset_name(self, meta):
-        """repr() contains the dataset name."""
-        assert "era5_1deg" in repr(meta)
+    def test_unknown_name(self, meta: Metadata) -> None:
+        """An unknown name raises KeyError naming the available datasets."""
+        with pytest.raises(KeyError, match=r"nonexistent.*data"):
+            meta.dataset("nonexistent")
 
-    def test_repr_does_not_raise(self, meta):
-        """repr() does not raise any exception."""
-        repr(meta)  # must not raise
+    def test_datasets_mapping(self, multi_meta: Metadata) -> None:
+        """Datasets has one DatasetView per name, in order."""
+        datasets = multi_meta.datasets
+        assert list(datasets) == ["era5", "cerra"]
+        assert all(isinstance(view, DatasetView) for view in datasets.values())
 
-    def test_str_does_not_raise(self, meta):
-        """str() does not raise any exception."""
-        str(meta)  # must not raise
+    def test_datasets_with_empty_dataset_names(self, raw: dict[str, Any]) -> None:
+        """Datasets is empty when there are no datasets."""
+        raw["metadata_inference"]["dataset_names"] = []
+        assert Metadata.from_dict(raw).datasets == {}
 
 
 # ---------------------------------------------------------------------------
-# Envelope property annotations (schema_version, original_schema_version, is_legacy)
+# Single-dataset shortcuts
 # ---------------------------------------------------------------------------
 
 
-class TestEnvelopePropertyAnnotations:
-    """schema_version and original_schema_version can be None; is_legacy is robust."""
+class TestSingleDatasetShortcuts:
+    """latitudes and longitudes work for one dataset only.
 
-    def test_schema_version_none_for_missing_field(self, sample_v1_dict):
-        """schema_version returns None when not set."""
-        # Remove schema_version to simulate a hand-built instance
-        v1_dict_no_version = sample_v1_dict.copy()
-        del v1_dict_no_version["schema_version"]
-        from anemoi.metadata.versions.v1 import MetadataV1
+    Variables, grid_size and the multi-dataset error are covered in ``test_golden.py``.
+    """
 
-        raw = MetadataV1.model_validate(v1_dict_no_version)
-        meta = Metadata(raw)
-        assert meta.schema_version is None
+    def test_latitudes_longitudes_none_without_arrays(self, meta: Metadata) -> None:
+        """Latitudes and longitudes are None when no arrays were given."""
+        assert meta.latitudes is None
+        assert meta.longitudes is None
 
-    def test_original_schema_version_none_for_missing_field(self, sample_v1_dict):
-        """original_schema_version returns None when not set."""
-        # Native V1 instances don't have original_schema_version set
-        v1_dict_no_orig = sample_v1_dict.copy()
-        # original_schema_version defaults to None if not present
-        from anemoi.metadata.versions.v1 import MetadataV1
+    def test_latitudes_longitudes(self, raw: dict[str, Any]) -> None:
+        """Latitudes and longitudes come from the supporting arrays."""
+        arrays = {"data": _arrays(8)}
+        m = Metadata.from_dict(raw, supporting_arrays=arrays)
+        np.testing.assert_array_equal(m.latitudes, arrays["data"]["latitudes"])
+        np.testing.assert_array_equal(m.longitudes, arrays["data"]["longitudes"])
 
-        raw = MetadataV1.model_validate(v1_dict_no_orig)
-        meta = Metadata(raw)
-        # For native V1, original_schema_version is None
-        assert meta.original_schema_version is None
-
-    def test_is_legacy_false_for_v1(self, sample_v1_dict):
-        """is_legacy returns False for a native V1 checkpoint."""
-        m = Metadata.from_dict(sample_v1_dict, migrate=False)
-        assert m.is_legacy is False
-
-    def test_is_legacy_false_for_none_version(self, sample_v1_dict):
-        """is_legacy returns False when original_version is None."""
-        v1_dict_no_version = sample_v1_dict.copy()
-        del v1_dict_no_version["schema_version"]
-        from anemoi.metadata.versions.v1 import MetadataV1
-
-        raw = MetadataV1.model_validate(v1_dict_no_version)
-        meta = Metadata(raw)
-        assert meta.is_legacy is False
-
-    def test_is_legacy_true_for_v0(self):
-        """is_legacy returns True for a V0 checkpoint (original_schema_version "0.0")."""
-        # Construct a MetadataV1 that was migrated from V0
-        from anemoi.metadata.versions.v1 import MetadataV1
-
-        # Build a minimal V1 dict with original_schema_version = "0.0"
-        v0_migrated_dict = {
-            "schema_version": "1.0",
-            "original_schema_version": "0.0",
-            "metadata_inference": {
-                "seed": 42,
-                "run_id": "legacy-run",
-                "task": None,
-                "dataset_names": ["data"],
-                "data": {
-                    "data_indices": {
-                        "input": {"2t": 0},
-                        "output": {"2t": 0},
-                    },
-                    "variable_types": {
-                        "prognostic": ["2t"],
-                        "forcing": [],
-                        "diagnostic": [],
-                        "target": ["2t"],
-                    },
-                    "timesteps": {
-                        "timestep": "6h",
-                        "input_relative_date_indices": [0],
-                        "output_relative_date_indices": [1],
-                        "relative_date_indices_training": [0, 1],
-                    },
-                    "shapes": {
-                        "variables": 1,
-                        "input_timesteps": 1,
-                        "ensemble": 1,
-                        "grid": 1000,
-                    },
-                },
-            },
-        }
-        raw = MetadataV1.model_validate(v0_migrated_dict)
-        meta = Metadata(raw)
-        assert meta.is_legacy is True
+    @pytest.mark.parametrize("name", ["variables", "grid_size", "latitudes", "longitudes"])
+    def test_raise_without_datasets(self, raw: dict[str, Any], name: str) -> None:
+        """With no dataset the shortcuts raise."""
+        raw["metadata_inference"]["dataset_names"] = []
+        with pytest.raises(DatasetSelectionError):
+            getattr(Metadata.from_dict(raw), name)
 
 
 # ---------------------------------------------------------------------------
@@ -634,275 +340,422 @@ class TestEnvelopePropertyAnnotations:
 
 
 class TestDatasetView:
-    """DatasetView provides per-dataset access without repeating the dataset name."""
+    """DatasetView: name, data, arrays."""
 
-    @pytest.fixture()
-    def meta(self, sample_v1_dict):
-        """Return a Metadata instance from the sample V1 dict."""
-        return Metadata.from_dict(sample_v1_dict)
+    def test_members(self, meta: Metadata) -> None:
+        """The view has name, data and arrays."""
+        view = meta.dataset("data")
+        assert view.name == "data"
+        assert isinstance(view.data, DatasetData)
+        assert isinstance(view.arrays, DatasetArrays)
 
-    def test_dataset_default_returns_first(self, meta):
-        """dataset() without arguments returns a view for the first dataset."""
+    def test_repr(self, meta: Metadata) -> None:
+        """repr() names the dataset."""
+        assert repr(meta.dataset()) == "DatasetView(name='data')"
+
+    def test_view_has_nothing_else(self, meta: Metadata) -> None:
+        """No old per-dataset names on the view."""
         view = meta.dataset()
-        assert view.name == "era5_1deg"
-
-    def test_dataset_named_returns_correct_view(self, meta):
-        """dataset('era5_1deg') returns a view bound to that dataset."""
-        view = meta.dataset("era5_1deg")
-        assert view.name == "era5_1deg"
-
-    def test_dataset_nonexistent_raises_key_error(self, meta):
-        """dataset('nonexistent') raises KeyError with available datasets."""
-        with pytest.raises(KeyError, match="nonexistent.*era5_1deg"):
-            meta.dataset("nonexistent")
-
-    def test_dataset_empty_dataset_names_raises_index_error(self, sample_v1_dict):
-        """dataset() raises IndexError when dataset_names is empty."""
-        # Build a V1 dict with empty dataset_names
-        v1_dict_empty = sample_v1_dict.copy()
-        v1_dict_empty["metadata_inference"] = {
-            "seed": 42,
-            "run_id": "empty-run",
-            "task": None,
-            "dataset_names": [],
-            "datasets": {},
-        }
-        from anemoi.metadata.versions.v1 import MetadataV1
-
-        raw = MetadataV1.model_validate(v1_dict_empty)
-        meta = Metadata(raw)
-        with pytest.raises(IndexError, match="dataset_names is empty"):
-            meta.dataset()
-
-    def test_dataset_view_timestep(self, meta):
-        """DatasetView.timestep agrees with raw.get_timestep(name)."""
-        view = meta.dataset("era5_1deg")
-        assert view.timestep == meta.raw.get_timestep("era5_1deg")
-        assert view.timestep == "6h"
-
-    def test_dataset_view_input_relative_date_indices(self, meta):
-        """DatasetView.input_relative_date_indices agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.input_relative_date_indices == meta.raw.get_input_relative_date_indices("era5_1deg")
-        assert view.input_relative_date_indices == [-1, 0]
-
-    def test_dataset_view_output_relative_date_indices(self, meta):
-        """DatasetView.output_relative_date_indices agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.output_relative_date_indices == meta.raw.get_output_relative_date_indices("era5_1deg")
-        assert view.output_relative_date_indices == [1]
-
-    def test_dataset_view_multi_step_input(self, meta):
-        """DatasetView.multi_step_input is len(input_relative_date_indices)."""
-        view = meta.dataset("era5_1deg")
-        assert view.multi_step_input == 2
-        assert view.multi_step_input == len(view.input_relative_date_indices)
-
-    def test_dataset_view_multi_step_output(self, meta):
-        """DatasetView.multi_step_output is len(output_relative_date_indices)."""
-        view = meta.dataset("era5_1deg")
-        assert view.multi_step_output == 1
-        assert view.multi_step_output == len(view.output_relative_date_indices)
-
-    def test_dataset_view_variable_indices(self, meta):
-        """DatasetView.variable_indices agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.variable_indices == meta.raw.get_variable_indices("era5_1deg")
-        assert "2t" in view.variable_indices
-
-    def test_dataset_view_output_variable_indices(self, meta):
-        """DatasetView.output_variable_indices agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.output_variable_indices == meta.raw.get_output_variable_indices("era5_1deg")
-        assert "2t" in view.output_variable_indices
-
-    def test_dataset_view_variable_types(self, meta):
-        """DatasetView.variable_types agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.variable_types == meta.raw.get_variable_types("era5_1deg")
-        assert set(view.variable_types.keys()) == {
-            "forcing",
-            "prognostic",
-            "diagnostic",
-            "target",
-        }
-
-    def test_dataset_view_tensor_shapes(self, meta):
-        """DatasetView.tensor_shapes agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.tensor_shapes == meta.raw.get_tensor_shapes("era5_1deg")
-        assert set(view.tensor_shapes.keys()) == {
+        for name in (
+            "timestep",
             "variables",
-            "input_timesteps",
-            "ensemble",
-            "grid",
+            "variable_indices",
+            "grid_points",
+            "shapes",
+            "multi_step_input",
+        ):
+            assert not hasattr(view, name)
+
+
+class TestDatasetData:
+    """DatasetView.data is the data component bound to the dataset."""
+
+    def test_bound_values_equal_the_adapter_values(self, multi_meta: Metadata) -> None:
+        """The view gives what the per-dataset adapter gives."""
+        adapter = multi_meta.dataset("cerra")._raw.data("cerra")
+        data = multi_meta.dataset("cerra").data
+
+        assert data.variable_indices() == adapter.variable_indices()
+        assert data.output_variable_indices() == adapter.output_variable_indices()
+        assert data.input_index_to_variable() == adapter.input_index_to_variable()
+        assert data.output_index_to_variable() == adapter.output_index_to_variable()
+        assert data.variables() == adapter.variables()
+        assert data.variable_types() == adapter.variable_types()
+        assert data.prognostic_input_mask() == adapter.prognostic_input_mask()
+        assert data.prognostic_output_mask() == adapter.prognostic_output_mask()
+        assert data.variable_categories() == adapter.variable_categories()
+        assert data.variable_categories(per_variable=True) == adapter.variable_categories(per_variable=True)
+        assert data.select_variables(include=["prognostic"]) == adapter.select_variables(include=["prognostic"])
+        assert data.variables_metadata() == adapter.variables_metadata()
+        assert data.accumulations() == adapter.accumulations()
+        assert data.computed_forcings() == adapter.computed_forcings()
+        assert data.grid_size() == adapter.grid_size()
+        assert data.data_request() == adapter.data_request()
+        assert data.grid() == adapter.grid()
+        assert data.area() == adapter.area()
+        assert data.sources() == adapter.sources()
+        assert data.open_dataset_args() == adapter.open_dataset_args()
+        assert data.data_frequency() == adapter.data_frequency()
+        assert data.dataloader_config("validation") == adapter.dataloader_config("validation")
+
+    def test_typed_variables(self, meta: Metadata) -> None:
+        """typed_variables() gives a Variable per variable (anemoi-transform is in the tests extra)."""
+        pytest.importorskip("anemoi.transform")
+        assert set(meta.dataset().data.typed_variables()) == set(meta.variables)
+
+    def test_repr(self, meta: Metadata) -> None:
+        """repr() names the dataset."""
+        assert "data" in repr(meta.dataset().data)
+
+
+# ---------------------------------------------------------------------------
+# Arrays
+# ---------------------------------------------------------------------------
+
+
+class TestArrays:
+    """DatasetView.arrays: coordinates, grid indices, output mask, named masks."""
+
+    @pytest.fixture
+    def arrays(self) -> dict[str, dict[str, Any]]:
+        """Supporting arrays of the two datasets of ``multi_meta``."""
+        return {
+            "era5": {
+                **_arrays(6),
+                "grid_indices": np.arange(6),
+                "output_mask": np.array([True] * 4 + [False] * 2),
+                "cutout_mask": np.array([True, False] * 3),
+            },
+            "cerra": _arrays(4, offset=1.0),
         }
 
-    def test_dataset_view_grid_points(self, meta):
-        """DatasetView.grid_points agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.grid_points == meta.raw.get_grid_points("era5_1deg")
-        assert view.grid_points == 40320
+    def test_per_dataset_arrays(self, multi_dict: dict[str, Any], arrays: dict[str, dict[str, Any]]) -> None:
+        """Each dataset gets its own arrays; absent ones are None."""
+        m = Metadata.from_dict(multi_dict, supporting_arrays=arrays)
 
-    def test_dataset_view_variables_metadata(self, meta):
-        """DatasetView.variables_metadata agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.variables_metadata == meta.raw.get_variables_metadata("era5_1deg")
+        era5 = m.dataset("era5").arrays
+        np.testing.assert_array_equal(era5.latitudes, arrays["era5"]["latitudes"])
+        np.testing.assert_array_equal(era5.longitudes, arrays["era5"]["longitudes"])
+        np.testing.assert_array_equal(era5.grid_indices, np.arange(6))
+        np.testing.assert_array_equal(era5.output_mask, arrays["era5"]["output_mask"])
+        assert list(era5.masks) == ["cutout_mask"]
+        np.testing.assert_array_equal(era5.masks["cutout_mask"], arrays["era5"]["cutout_mask"])
+        np.testing.assert_array_equal(era5.get("cutout_mask"), arrays["era5"]["cutout_mask"])
+        assert "cutout_mask" in era5
+        assert sorted(era5.names) == sorted(arrays["era5"])
 
-    def test_dataset_view_accumulations(self, meta):
-        """DatasetView.accumulations agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.accumulations == meta.raw.get_accumulations("era5_1deg")
+        cerra = m.dataset("cerra").arrays
+        assert cerra.latitudes.shape == (4,)
+        assert cerra.grid_indices is None
+        assert cerra.output_mask is None
+        assert cerra.masks == {}
+        assert cerra.get("cutout_mask") is None
 
-    def test_dataset_view_computed_forcings(self, meta):
-        """DatasetView.computed_forcings agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.computed_forcings == meta.raw.get_computed_forcings("era5_1deg")
+    def test_no_arrays_gives_none(self, meta: Metadata) -> None:
+        """Without supporting arrays every attribute is None or empty."""
+        arrays = meta.dataset().arrays
+        assert arrays.latitudes is None
+        assert arrays.longitudes is None
+        assert arrays.grid_indices is None
+        assert arrays.output_mask is None
+        assert arrays.masks == {}
+        assert len(arrays) == 0
 
-    def test_dataset_view_data_request(self, meta):
-        """DatasetView.data_request agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.data_request == meta.raw.get_data_request("era5_1deg")
+    def test_flat_arrays_belong_to_the_only_dataset(self, golden_loader: Callable[[str], dict[str, Any]]) -> None:
+        """Older single-dataset files (F1) store a flat mapping."""
+        m = Metadata.from_dict(golden_loader("f1_single_dataset"), supporting_arrays=_arrays(4))
+        assert m.latitudes.shape == (4,)
+        assert m.dataset().arrays.longitudes.shape == (4,)
 
-    def test_dataset_view_data_frequency(self, meta):
-        """DatasetView.data_frequency agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.data_frequency == meta.raw.get_data_frequency("era5_1deg")
+    def test_flat_arrays_with_several_datasets_are_dropped(
+        self,
+        multi_dict: dict[str, Any],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Flat arrays cannot be assigned to one of several datasets: dropped with a warning, not given to the first."""
+        with caplog.at_level("WARNING"):
+            m = Metadata.from_dict(multi_dict, supporting_arrays=_arrays(5))
+        assert m.dataset("era5").arrays.latitudes is None
+        assert m.dataset("cerra").arrays.latitudes is None
+        assert "not keyed by dataset name" in caplog.text
 
-    def test_dataset_view_sources(self, meta):
-        """DatasetView.sources agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.sources == meta.raw.get_sources("era5_1deg")
+    def test_from_checkpoint_loads_arrays(
+        self,
+        empty_ckpt: Callable[..., Path],
+        multi_dict: dict[str, Any],
+        arrays: dict[str, dict[str, Any]],
+    ) -> None:
+        """from_checkpoint() reads the supporting arrays stored beside the metadata."""
+        import anemoi.utils.checkpoints as checkpoints_utils
 
-    def test_dataset_view_open_dataset_args(self, meta):
-        """DatasetView.open_dataset_args agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        assert view.open_dataset_args == meta.raw.get_open_dataset_args("era5_1deg")
+        ckpt = empty_ckpt("with_arrays.ckpt")
+        checkpoints_utils.save_metadata(str(ckpt), multi_dict, supporting_arrays=arrays)
 
-    def test_dataset_view_dataloader_config(self, meta):
-        """DatasetView.dataloader_config() agrees with raw."""
-        view = meta.dataset("era5_1deg")
-        result = view.dataloader_config("training")
-        expected = meta.raw.get_dataloader_config("training", "era5_1deg")
-        assert result == expected
+        m = Metadata.from_checkpoint(ckpt)
+        for name, stored in arrays.items():
+            view = m.dataset(name).arrays
+            np.testing.assert_array_equal(view.latitudes, stored["latitudes"])
+            np.testing.assert_array_equal(view.longitudes, stored["longitudes"])
+        np.testing.assert_array_equal(m.dataset("era5").arrays.grid_indices, np.arange(6))
+        assert m.dataset("cerra").arrays.output_mask is None
 
-    def test_dataset_view_dataloader_config_custom_partition(self, meta):
-        """DatasetView.dataloader_config(partition) passes partition correctly."""
-        view = meta.dataset("era5_1deg")
-        result = view.dataloader_config("validation")
-        expected = meta.raw.get_dataloader_config("validation", "era5_1deg")
-        assert result == expected
+    def test_from_checkpoint_without_arrays(self, empty_ckpt: Callable[..., Path], raw: dict[str, Any]) -> None:
+        """A checkpoint without arrays gives None."""
+        import anemoi.utils.checkpoints as checkpoints_utils
 
-    def test_dataset_view_repr(self, meta):
-        """DatasetView.__repr__ contains the dataset name."""
-        view = meta.dataset("era5_1deg")
-        assert "era5_1deg" in repr(view)
-        assert "DatasetView" in repr(view)
+        # The golden file lists array files that this checkpoint does not contain.
+        del raw["supporting_arrays_paths"]
+        ckpt = empty_ckpt("no_arrays.ckpt")
+        checkpoints_utils.save_metadata(str(ckpt), raw)
+        assert Metadata.from_checkpoint(ckpt).latitudes is None
 
-    def test_datasets_mapping_has_all_datasets(self, meta):
-        """Metadata.datasets contains one entry per dataset."""
-        assert len(meta.datasets) == len(meta.dataset_names)
-        assert set(meta.datasets.keys()) == set(meta.dataset_names)
+    def test_repr(self, meta: Metadata) -> None:
+        """repr() lists the array names."""
+        assert repr(meta.dataset().arrays) == "DatasetArrays([])"
 
-    def test_datasets_mapping_values_are_views(self, meta):
-        """Metadata.datasets values are DatasetView instances."""
-        from anemoi.metadata.interface import DatasetView
+    def test_number_of_grid_points_precedence(self, raw: dict[str, Any]) -> None:
+        """grid_indices, else latitudes, else the recorded grid size."""
+        assert Metadata.from_dict(raw).dataset().number_of_grid_points == 40320
+        with_lat = Metadata.from_dict(raw, supporting_arrays={"data": _arrays(6)})
+        assert with_lat.dataset().number_of_grid_points == 6
+        both = Metadata.from_dict(raw, supporting_arrays={"data": {**_arrays(6), "grid_indices": np.arange(4)}})
+        assert both.dataset().number_of_grid_points == 4
 
-        for view in meta.datasets.values():
-            assert isinstance(view, DatasetView)
-
-    def test_datasets_iteration_order_follows_dataset_names(self, meta):
-        """Iteration order of Metadata.datasets follows dataset_names."""
-        assert list(meta.datasets.keys()) == meta.dataset_names
+    def test_number_of_grid_points_of_tabular_dataset(self, golden_loader: Callable[[str], dict[str, Any]]) -> None:
+        """A tabular dataset without arrays has no grid points."""
+        assert Metadata.from_dict(golden_loader("f8_richer_batch")).dataset("obs").number_of_grid_points is None
 
 
 # ---------------------------------------------------------------------------
-# Invalid dataset name handling on per-dataset getters
+# with_overrides
 # ---------------------------------------------------------------------------
 
 
-class TestInvalidDatasetName:
-    """Per-dataset getters raise KeyError for unknown dataset names."""
+class TestWithOverrides:
+    """with_overrides(patch) returns a new Metadata from a deep-merged raw dict."""
 
-    @pytest.fixture()
-    def meta(self, sample_v1_dict):
-        """Return a Metadata instance from the sample V1 dict."""
-        return Metadata.from_dict(sample_v1_dict)
+    def test_returns_new_instance_and_leaves_original(self, meta: Metadata, raw: dict[str, Any]) -> None:
+        """The original is unchanged and the new instance has the patched value."""
+        patched = meta.with_overrides({"config": {"training": {"precision": "32"}}})
 
-    @pytest.mark.parametrize(
-        "call",
-        [
-            lambda m: m.variables_metadata("nope"),
-            lambda m: m.accumulations("nope"),
-            lambda m: m.computed_forcings("nope"),
-            lambda m: m.data_request("nope"),
-            lambda m: m.data_frequency("nope"),
-            lambda m: m.sources("nope"),
-            lambda m: m.open_dataset_args("nope"),
-            lambda m: m.dataloader_config("training", "nope"),
-            lambda m: m.variable_categories("nope"),
-            lambda m: m.select_variables(include=["prognostic"], dataset_name="nope"),
-        ],
-    )
-    def test_invalid_dataset_name_raises_key_error(self, meta, call):
-        """Every per-dataset getter raises KeyError for an unknown name."""
+        assert patched is not meta
+        assert isinstance(patched, Metadata)
+        assert patched["config"]["training"]["precision"] == "32"
+        assert meta["config"]["training"]["precision"] == "16-mixed"
+        assert meta.to_dict() == raw
+
+    def test_deep_merge_keeps_siblings(self, meta: Metadata) -> None:
+        """Keys the patch does not mention are kept."""
+        patched = meta.with_overrides({"config": {"training": {"precision": "32"}}})
+        assert patched["config"]["training"]["method"] == meta["config"]["training"]["method"]
+        assert patched["config"]["task"] == meta["config"]["task"]
+        assert patched["training"] == meta["training"]
+
+    def test_lists_and_scalars_are_replaced(self, meta: Metadata) -> None:
+        """Non-dict values replace the stored value."""
+        before = meta.dataset().data.variable_types()
+        patched = meta.with_overrides({"metadata_inference": {"data": {"variable_types": {"forcing": []}}}})
+        assert patched.dataset().data.variable_types()["forcing"] == []
+        assert patched.dataset().data.variable_types()["prognostic"] == before["prognostic"]
+
+    def test_new_keys_are_added(self, meta: Metadata) -> None:
+        """Keys that are not stored yet are added."""
+        patched = meta.with_overrides({"custom": {"a": 1}})
+        assert patched["custom"] == {"a": 1}
+        assert "custom" not in meta.to_dict()
+
+    def test_patch_is_copied(self, meta: Metadata) -> None:
+        """Changing the patch afterwards does not change the new instance."""
+        patch = {"config": {"extra": {"values": [1, 2]}}}
+        patched = meta.with_overrides(patch)
+        patch["config"]["extra"]["values"].append(3)
+        assert patched["config"]["extra"]["values"] == [1, 2]
+
+    def test_chained_overrides(self, meta: Metadata) -> None:
+        """Overrides can be chained; each step leaves the earlier instance unchanged."""
+        first = meta.with_overrides({"config": {"a": 1}})
+        second = first.with_overrides({"config": {"b": 2}})
+        assert "b" not in first["config"]
+        assert second["config"]["a"] == 1
+        assert second["config"]["b"] == 2
+
+    def test_overrides_change_what_adapters_read(self, meta: Metadata) -> None:
+        """The new instance reads the patched raw dict (adapters are rebuilt)."""
+        patched = meta.with_overrides({"metadata_inference": {"data": {"timesteps": {"timestep": "3h"}}}})
+        assert patched.task.timestep() == "3h"
+        assert meta.task.timestep() == "6h"
+
+    def test_keeps_supporting_arrays(self, raw: dict[str, Any]) -> None:
+        """The supporting arrays are kept, as copies independent of the original."""
+        arrays = {"data": {**_arrays(6), "output_mask": np.ones(6, dtype=bool)}}
+        original = Metadata.from_dict(raw, supporting_arrays=arrays)
+        patched = original.with_overrides({"config": {"a": 1}})
+
+        view = patched.dataset().arrays
+        np.testing.assert_array_equal(view.latitudes, arrays["data"]["latitudes"])
+        np.testing.assert_array_equal(view.longitudes, arrays["data"]["longitudes"])
+        np.testing.assert_array_equal(view.output_mask, np.ones(6, dtype=bool))
+        assert patched.latitudes is not original.latitudes
+
+    def test_keeps_flat_arrays(self, raw: dict[str, Any]) -> None:
+        """Flat arrays given to a single-dataset checkpoint survive too."""
+        patched = Metadata.from_dict(raw, supporting_arrays=_arrays(5)).with_overrides({"a": 1})
+        assert patched.latitudes.shape == (5,)
+
+    def test_keeps_arrays_from_checkpoint(self, empty_ckpt: Callable[..., Path], raw: dict[str, Any]) -> None:
+        """Arrays loaded by from_checkpoint are kept."""
+        import anemoi.utils.checkpoints as checkpoints_utils
+
+        ckpt = empty_ckpt("override.ckpt")
+        checkpoints_utils.save_metadata(str(ckpt), raw, supporting_arrays={"data": _arrays(5)})
+        patched = Metadata.from_checkpoint(ckpt).with_overrides({"config": {"a": 1}})
+        assert patched.latitudes.shape == (5,)
+
+    def test_supporting_arrays_replace_and_add_per_dataset(self, multi_dict: dict[str, Any]) -> None:
+        """Named arrays are replaced or added for their dataset; everything else is kept, as copies."""
+        original = Metadata.from_dict(
+            multi_dict,
+            supporting_arrays={"era5": {**_arrays(6), "cutout_mask": np.ones(6, dtype=bool)}, "cerra": _arrays(4)},
+        )
+        new_lat = np.zeros(3)
+        patched = original.with_overrides(
+            {"config": {"a": 1}},
+            supporting_arrays={"era5": {"latitudes": new_lat, "grid_indices": np.arange(3)}},
+        )
+
+        era5 = patched.dataset("era5").arrays
+        np.testing.assert_array_equal(era5.latitudes, new_lat)
+        np.testing.assert_array_equal(era5.grid_indices, np.arange(3))
+        np.testing.assert_array_equal(era5.longitudes, _arrays(6)["longitudes"])  # kept
+        assert list(era5.masks) == ["cutout_mask"]  # kept
+        assert patched.dataset("era5").number_of_grid_points == 3
+        assert patched.dataset("cerra").arrays.latitudes.shape == (4,)  # other dataset untouched
+
+        new_lat[:] = 9
+        np.testing.assert_array_equal(patched.dataset("era5").arrays.latitudes, np.zeros(3))  # copied
+        assert original.dataset("era5").arrays.latitudes.shape == (6,)  # original unchanged
+        assert original.dataset("era5").arrays.grid_indices is None
+
+    def test_supporting_arrays_can_be_added_to_a_dataset_without(self, meta: Metadata) -> None:
+        """A dataset without arrays gets the given ones."""
+        patched = meta.with_overrides({}, supporting_arrays={"data": _arrays(5)})
+        assert patched.latitudes.shape == (5,)
+        assert meta.latitudes is None
+
+    def test_supporting_arrays_for_unknown_dataset_raise(self, meta: Metadata) -> None:
+        """An array for a dataset the metadata does not have is an error, not silently dropped."""
         with pytest.raises(KeyError, match="nope"):
-            call(meta)
+            meta.with_overrides({}, supporting_arrays={"nope": _arrays(5)})
+
+    def test_tabular_dataset_stays_without_arrays(self, golden_loader: Callable[[str], dict[str, Any]]) -> None:
+        """Arrays of the gridded dataset are kept and the tabular one still has none."""
+        original = Metadata.from_dict(golden_loader("f8_richer_batch"), supporting_arrays={"data": _arrays(3)})
+        patched = original.with_overrides({"config": {"a": 1}})
+        assert patched.dataset("data").arrays.latitudes.shape == (3,)
+        assert patched.dataset("obs").arrays.latitudes is None
 
 
 # ---------------------------------------------------------------------------
-# Multi-dataset fixture tests
+# Copies
 # ---------------------------------------------------------------------------
 
 
-class TestMultiDataset:
-    """Test DatasetView with a multi-dataset fixture."""
+class TestReturnedValuesAreCopies:
+    """Changing a returned list, dict or array never changes the instance.
 
-    @pytest.fixture()
-    def multi_meta(self, multi_dataset_inference_dict):
-        """Build a Metadata instance with two datasets."""
-        from anemoi.metadata.versions.v1 import MetadataV1
+    The task and data components are covered in ``test_component_task.py`` and ``test_component_data.py``.
+    """
 
-        v1_dict = {
-            "schema_version": "1.0",
-            "created_at": "2024-06-01T12:00:00",
-            "metadata_inference": multi_dataset_inference_dict,
-            "config": {},
-            "training": {},
-            "dataset": {},
-            "environment": {},
-            "provenance": {},
-        }
-        raw = MetadataV1.model_validate(v1_dict)
-        return Metadata(raw)
+    def test_dataset_names(self, meta: Metadata) -> None:
+        """dataset_names."""
+        meta.dataset_names.append("x")
+        assert meta.dataset_names == ["data"]
 
-    def test_multi_dataset_has_two_datasets(self, multi_meta):
-        """The multi-dataset fixture has two datasets."""
-        assert len(multi_meta.dataset_names) == 2
-        assert "era5_1deg" in multi_meta.dataset_names
-        assert "cerra_025deg" in multi_meta.dataset_names
+    def test_component_versions(self, meta: Metadata) -> None:
+        """component_versions."""
+        meta.component_versions["data"] = "9.9"
+        assert meta.component_versions["data"] == "0.2"
 
-    def test_multi_dataset_default_is_first(self, multi_meta):
-        """dataset() defaults to the first dataset."""
-        view = multi_meta.dataset()
-        assert view.name == "era5_1deg"
+    def test_datasets(self, meta: Metadata) -> None:
+        """Datasets."""
+        meta.datasets.clear()
+        assert list(meta.datasets) == ["data"]
 
-    def test_multi_dataset_can_access_second(self, multi_meta):
-        """dataset('cerra_025deg') returns the second dataset view."""
-        view = multi_meta.dataset("cerra_025deg")
-        assert view.name == "cerra_025deg"
-        assert view.timestep == "6h"
+    def test_to_dict(self, meta: Metadata, raw: dict[str, Any]) -> None:
+        """to_dict()."""
+        meta.to_dict()["config"]["training"]["precision"] = "changed"
+        assert meta.to_dict() == raw
 
-    def test_multi_dataset_datasets_mapping(self, multi_meta):
-        """datasets contains both datasets."""
-        assert len(multi_meta.datasets) == 2
-        assert "era5_1deg" in multi_meta.datasets
-        assert "cerra_025deg" in multi_meta.datasets
+    def test_getitem(self, meta: Metadata) -> None:
+        """metadata[key]."""
+        meta["config"]["training"]["precision"] = "changed"
+        assert meta["config"]["training"]["precision"] == "16-mixed"
 
-    def test_multi_dataset_views_have_distinct_indices(self, multi_meta):
-        """Each dataset view has its own variable indices."""
-        era5 = multi_meta.dataset("era5_1deg")
-        cerra = multi_meta.dataset("cerra_025deg")
-        # They should have different indices due to var_offset
-        assert era5.variable_indices["2t"] == 0
-        assert cerra.variable_indices["2t"] == 10
+    def test_sections(self, meta: Metadata) -> None:
+        """Every dict returned by sections."""
+        meta.sections.config["training"]["precision"] = "changed"
+        meta.sections.training["global_step"] = 0
+        meta.sections.tracker["x"] = 1
+        meta.sections.provenance["python"] = "0"
+        meta.sections.seeds["seed"] = 0
+        meta.sections.get("config")["training"]["precision"] = "changed"
+        assert meta["config"]["training"]["precision"] == "16-mixed"
+        assert meta["training"]["global_step"] == 6
+        assert meta.sections.tracker == {"null": None}
+        assert meta.sections.provenance["python"] != "0"
+        assert meta.sections.seeds["seed"] == 2102982546
+
+    def test_lineage_entries(self, raw: dict[str, Any]) -> None:
+        """Mutating the returned entries does not change the instance."""
+        raw["checkpoint_lineage"] = [{"loading_strategy": "warm_start", "parent_uuid": "a"}]
+        m = Metadata.from_dict(raw)
+        m.lineage.entries[0]["parent_uuid"] = "b"
+        m.lineage.entries.append({})
+        assert m.lineage.entries == [{"loading_strategy": "warm_start", "parent_uuid": "a"}]
+
+    def test_arrays_returned_are_copies(self, raw: dict[str, Any]) -> None:
+        """Mutating a returned array, or the array given in, does not change the instance."""
+        given = {"data": {**_arrays(6), "cutout_mask": np.ones(6, dtype=bool)}}
+        m = Metadata.from_dict(raw, supporting_arrays=given)
+        expected = np.linspace(-90, 90, 6)
+
+        m.dataset().arrays.latitudes[:] = 0
+        m.latitudes[:] = 0
+        m.dataset().arrays.masks["cutout_mask"][:] = False
+        m.dataset().arrays.get("cutout_mask")[:] = False
+        m.dataset().arrays.masks.clear()
+        given["data"]["latitudes"][:] = 0
+
+        np.testing.assert_array_equal(m.latitudes, expected)
+        np.testing.assert_array_equal(m.dataset().arrays.masks["cutout_mask"], np.ones(6, dtype=bool))
+        assert m.dataset().arrays.latitudes is not m.dataset().arrays.latitudes
+
+    def test_arrays_are_writable_copies_of_read_only_input(self, raw: dict[str, Any]) -> None:
+        """Arrays loaded from a file are read-only buffers; the returned copies can be changed."""
+        buffer = np.frombuffer(np.arange(4, dtype="float64").tobytes(), dtype="float64")
+        assert not buffer.flags.writeable
+        m = Metadata.from_dict(raw, supporting_arrays={"data": {"latitudes": buffer}})
+        m.latitudes[0] = 5.0
+        assert m.latitudes[0] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Every golden file
+# ---------------------------------------------------------------------------
+
+
+class TestGoldenFiles:
+    """Every golden file opens through the interface."""
+
+    def test_every_golden_file_opens_through_the_interface(self, golden_metadata: tuple[str, dict[str, Any]]) -> None:
+        """Every golden file gives checkpoint-level and per-dataset values; none has arrays without being given."""
+        _name, raw = golden_metadata
+        m = Metadata.from_dict(raw)
+
+        assert isinstance(m.component_versions, dict)
+        assert m.task.task_name
+        assert m.sections.seeds is not None
+        for dataset_name, view in m.datasets.items():
+            assert view.name == dataset_name
+            assert isinstance(view.data.variables(), list)
+            assert view.arrays.latitudes is None

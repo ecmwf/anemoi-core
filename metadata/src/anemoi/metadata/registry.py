@@ -7,290 +7,271 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Version registry for metadata schemas."""
+"""Registry of component adapters.
+
+Checkpoint metadata is read through small, layered *component adapters*.  A
+component is a structured part of the metadata that is versioned on its own
+(``data`` and ``task``).  Every adapter registers itself with
+:meth:`ComponentRegistry.register` under ``(component, version)`` plus a
+*name*: the task name for ``task`` adapters (``"forecaster"``, ...; an unnamed
+adapter is the generic one) and the ``data_type`` for ``data`` adapters
+(``"gridded"``, ``"tabular"``).  In practice the adapters of both components are
+built and registered per version by ``register_task_version`` and
+``register_data_version``.
+
+An adapter for a newer or older layout subclasses the nearest registered
+adapter and overrides only what differs, so a new component version needs only
+the code that changed.
+
+Examples
+--------
+>>> @ComponentRegistry.register("task", "1.1", name="forecaster")
+... class Forecaster1_1(ForecasterV1_0):
+...     def _timesteps(self, dataset_name): ...
+>>> ComponentRegistry.resolve("task", "1.1", name="forecaster") is Forecaster1_1
+True
+"""
 
 import warnings
+from collections.abc import Callable
 from typing import TYPE_CHECKING
+from typing import ClassVar
+from typing import TypeVar
 
+from packaging.version import InvalidVersion
 from packaging.version import Version
 
 from .exceptions import UnknownVersionError
 
 if TYPE_CHECKING:
-    from .base import MetadataContract
+    from .components.base import ComponentAdapter
+
+_AdapterT = TypeVar("_AdapterT", bound="ComponentAdapter")
+_Key = tuple[str, str | None, str]
 
 
-class MetadataRegistry:
-    """Registry for metadata versions.
+class ComponentRegistry:
+    """Registry of component adapters.
 
-    Manages registration and retrieval of versioned metadata schemas.
-    Versions are sorted using proper semantic versioning comparison.
+    Adapters are keyed by ``(component, name, version)``: the name is the task
+    name or the data type.  The unnamed entry (``name=None``) is the generic
+    adapter used for task names that have no adapter of their own.
 
-    This class uses class methods exclusively - it is not meant to be
-    instantiated. All state is stored in class variables.
-
-    Examples
-    --------
-    >>> @MetadataRegistry.register("1.0")
-    ... class MetadataV1(MetadataContract):
-    ...     schema_version: str
-    ...     model_name: str
-
-    >>> MetadataRegistry.list_versions()
-    ['1.0']
-
-    >>> cls = MetadataRegistry.get_version("1.0")
-    >>> cls.__name__
-    'MetadataV1'
+    The class uses class methods and class state only and is not meant to be
+    instantiated.  Tests that register adapters should isolate the state with
+    :meth:`snapshot` and :meth:`restore`.
     """
 
-    _versions: dict[str, type["MetadataContract"]] = {}
-    _sorted_versions: list[str] | None = None
+    _adapters: ClassVar[dict[_Key, type["ComponentAdapter"]]] = {}
 
     def __init__(self) -> None:
-        raise RuntimeError("MetadataRegistry is a static class and cannot be instantiated")
+        msg = "ComponentRegistry is a static class and cannot be instantiated"
+        raise RuntimeError(msg)
+
+    # ------------------------------------------------------------------
+    # Registration
+    # ------------------------------------------------------------------
 
     @classmethod
-    def register(cls, version: str):
-        """Decorator to register a metadata version.
+    def register(
+        cls,
+        component: str,
+        version: str,
+        *,
+        name: str | None = None,
+    ) -> Callable[[type[_AdapterT]], type[_AdapterT]]:
+        """Return a class decorator registering an adapter.
 
         Parameters
         ----------
+        component : str
+            Component name (``"data"`` or ``"task"``).
         version : str
-            Semantic version string (e.g., "1.0").
+            Component version the adapter reads (e.g. ``"1.0"``).
+        name : str | None, optional
+            Task name of a task adapter or ``data_type`` of a data adapter;
+            ``None`` registers the generic adapter of the component.
 
         Returns
         -------
         Callable
-            Decorator that registers the metadata class.
+            Decorator that registers the class and records ``component``,
+            ``version`` and ``name`` on it.
 
         Raises
         ------
         ValueError
-            If the version is already registered.
-
-        Examples
-        --------
-        >>> @MetadataRegistry.register("1.0")
-        ... class MetadataV1(MetadataContract):
-        ...     schema_version: str
+            If *version* is not a valid version string or the key is already
+            registered.
         """
+        try:
+            Version(version)
+        except InvalidVersion as exc:
+            msg = f"Invalid component version {version!r}"
+            raise ValueError(msg) from exc
 
-        def decorator(
-            metadata_cls: type["MetadataContract"],
-        ) -> type["MetadataContract"]:
-            if version in cls._versions:
-                raise ValueError(f"Version {version} already registered")
-            cls._versions[version] = metadata_cls
-            cls._sorted_versions = None
-            return metadata_cls
+        def decorator(adapter_cls: type[_AdapterT]) -> type[_AdapterT]:
+            key = (component, name, version)
+            if key in cls._adapters:
+                label = f"{component} {name} {version}" if name else f"{component} {version}"
+                msg = f"Component adapter {label} already registered"
+                raise ValueError(msg)
+            adapter_cls.component = component
+            adapter_cls.version = version
+            adapter_cls.name = name
+            cls._adapters[key] = adapter_cls
+            return adapter_cls
 
         return decorator
 
-    @classmethod
-    def register_minor(cls, version: str) -> None:
-        """Register a minor version that shares its schema class with a base version.
-
-        Use this to add additive minor versions (e.g. "1.1") that reuse the
-        same schema class as a previously registered version (e.g. "1.0").
-        The base version is derived automatically by replacing the last version
-        component with "0" (e.g. "1.1" -> "1.0").
-        The schema class must use ``extra="allow"`` so that new optional fields
-        are accepted without breaking validation.
-
-        This is the recommended pattern for backwards-compatible additions that
-        don't warrant a new schema class.  Migration from the base version is
-        handled automatically by the migrator (a no-op version bump), so no
-        migration registration is needed for schema-sharing minors unless you
-        need to populate or transform fields.
-
-        Parameters
-        ----------
-        version : str
-            New minor version string to register (e.g. "1.1").  The base
-            version is derived by replacing the final component with "0".
-            Must match the pattern ``^\\d+\\.\\d+$`` (major.minor, digits only).
-
-        Raises
-        ------
-        ValueError
-            If *version* is already registered, the derived base version
-            is not registered, or the version format is invalid.
-
-        Examples
-        --------
-        >>> MetadataRegistry.register_minor("1.1")
-        """
-        import re
-
-        if not re.match(r"^\d+\.\d+$", version):
-            raise ValueError(
-                f"Version '{version}' does not match the required format 'major.minor' "
-                f"(e.g. '1.1', '2.3'). Version must be two numeric components separated by a dot."
-            )
-
-        if version in cls._versions:
-            raise ValueError(f"Version {version} already registered")
-
-        base_version = ".".join(version.split(".")[:-1]) + ".0"
-
-        if base_version not in cls._versions:
-            raise ValueError(
-                f"Base version {base_version} not registered; "
-                f"register it first with @MetadataRegistry.register('{base_version}')"
-            )
-        cls._versions[version] = cls._versions[base_version]
-        cls._sorted_versions = None
+    # ------------------------------------------------------------------
+    # Lookup
+    # ------------------------------------------------------------------
 
     @classmethod
-    def get_version(cls, version: str) -> type["MetadataContract"]:
-        """Get metadata class for specific version.
-
-        Parameters
-        ----------
-        version : str
-            Version string to look up.
-
-        Returns
-        -------
-        type[MetadataContract]
-            The metadata class for the specified version.
+    def get(cls, component: str, version: str, name: str | None = None) -> type["ComponentAdapter"]:
+        """Return the adapter registered for exactly ``(component, name, version)``.
 
         Raises
         ------
         UnknownVersionError
-            If version is not registered.
+            If no adapter is registered under that key.
         """
-        if version not in cls._versions:
-            raise UnknownVersionError(f"Unknown metadata version: {version}")
-        return cls._versions[version]
+        try:
+            return cls._adapters[(component, name, version)]
+        except KeyError:
+            raise UnknownVersionError(
+                f"No {component} adapter registered for version {version!r}" + (f" and task {name!r}" if name else ""),
+            ) from None
 
     @classmethod
-    def get_latest(cls) -> type["MetadataContract"]:
-        """Get the latest registered metadata version.
+    def names(cls, component: str) -> list[str]:
+        """Return the sorted names that have named adapters for *component*."""
+        return sorted({n for (c, n, _) in cls._adapters if c == component and n is not None})
 
-        Returns
-        -------
-        type[MetadataContract]
-            The metadata class for the latest version.
+    @classmethod
+    def versions(cls, component: str, name: str | None = None) -> list[str]:
+        """Return the versions registered for ``(component, name)``, oldest first."""
+        found = [v for (c, n, v) in cls._adapters if c == component and n == name]
+        return sorted(found, key=Version)
+
+    @classmethod
+    def newest_version(cls, component: str, name: str | None = None, *, any_name: bool = False) -> str:
+        """Return the newest registered version of a component.
+
+        Parameters
+        ----------
+        component : str
+            Component name.
+        name : str | None, optional
+            Restrict to this task name or data type (``None`` is the generic adapter).
+        any_name : bool, optional
+            If ``True``, consider the adapters of every name.
 
         Raises
         ------
-        RuntimeError
-            If no versions are registered.
+        UnknownVersionError
+            If nothing is registered.
         """
-        if not cls._versions:
-            raise RuntimeError("No metadata versions registered")
-        return cls._versions[cls.latest_version()]
+        found = [v for (c, _, v) in cls._adapters if c == component] if any_name else cls.versions(component, name)
+        if not found:
+            msg = f"No {component} adapters registered"
+            raise UnknownVersionError(msg)
+        return max(found, key=Version)
 
     @classmethod
-    def latest_version(cls) -> str:
-        """Get latest version string.
+    def resolve(cls, component: str, version: str | None, name: str | None = None) -> type["ComponentAdapter"]:
+        """Return the adapter to use for a component version, with fallbacks.
 
-        Returns
-        -------
-        str
-            The latest registered version string.
-        """
-        return cls._list_versions()[-1]
-
-    @classmethod
-    def _list_versions(cls) -> list[str]:
-        """List all versions sorted by semver (internal).
-
-        Returns
-        -------
-        list[str]
-            List of version strings sorted in ascending order.
-        """
-        if cls._sorted_versions is None:
-            cls._sorted_versions = sorted(cls._versions.keys(), key=Version)
-        return cls._sorted_versions
-
-    @classmethod
-    def list_versions(cls) -> list[str]:
-        """List all available versions.
-
-        Returns
-        -------
-        list[str]
-            List of version strings sorted in ascending order.
-        """
-        return cls._list_versions().copy()
-
-    @classmethod
-    def detect_version(cls, data: dict) -> str:
-        """Detect version from metadata dict.
-
-        Checkpoints that pre-date the ``schema_version`` field are classified
-        by their content:
-
-        * If ``metadata_inference`` is present but ``schema_version`` is absent,
-          the checkpoint is a transitional V1 (written after the
-          ``metadata_inference`` block was introduced but before
-          ``schema_version`` was added).  These are routed to ``"1.0"``.
-        * If neither ``schema_version`` nor ``metadata_inference`` is present,
-          the checkpoint is a true legacy V0 (pre-``metadata_inference``).
-          These are routed to ``"0.0"``.
+        * A task *name* without adapters of its own falls back to the generic
+          adapter, with a warning once the component has named adapters.
+        * An exact ``(name, version)`` match is returned as is.
+        * Otherwise the nearest older registered version is used.  A warning
+          is issued when *version* is newer than anything known for the
+          component (a checkpoint from a newer package), unparseable, or
+          older than the oldest adapter available.
 
         Parameters
         ----------
-        data : dict
-            Raw metadata dictionary.
+        component : str
+            Component name.
+        version : str | None
+            Wanted version, from a stamp or inferred from the layout.
+        name : str | None, optional
+            Task name or data type.
 
         Returns
         -------
-        str
-            The schema_version from the data, normalised to a registered
-            version string.
+        type[ComponentAdapter]
+            The adapter class.
+
+        Raises
+        ------
+        UnknownVersionError
+            If no adapter is registered for the component at all.
         """
-        if "schema_version" not in data:
+        chosen = name
+        if name is not None and not cls.versions(component, name):
+            # A component without any named adapter has no name specific
+            # behaviour, so the generic adapter is the expected one.
+            if cls.names(component):
+                warnings.warn(
+                    f"No {component} adapter for {name!r}; using the generic {component} adapter.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+            chosen = None
+
+        available = cls.versions(component, chosen)
+        if not available:
+            msg = f"No {component} adapters registered"
+            raise UnknownVersionError(msg)
+
+        newest_known = cls.newest_version(component, any_name=True)
+
+        try:
+            wanted = Version(version) if version is not None else None
+        except InvalidVersion:
+            wanted = None
+        if wanted is None:
             warnings.warn(
-                "Metadata missing 'schema_version' field. "
-                "This may indicate an older version of metadata. "
-                "Please ensure that the metadata is up-to-date.",
+                f"Unusable {component} version {version!r}; using the newest known adapter ({available[-1]}).",
                 UserWarning,
+                stacklevel=3,
             )
-            # Distinguish between transitional V1 (has metadata_inference) and
-            # true legacy V0 (no metadata_inference, no schema_version).
-            if "metadata_inference" in data:
-                return "1.0"
-            return "0.0"
-        version = data["schema_version"]
-        return version
+            return cls._adapters[(component, chosen, available[-1])]
+
+        if version in available:
+            return cls._adapters[(component, chosen, version)]
+
+        older = [v for v in available if Version(v) <= wanted]
+        if older:
+            use = older[-1]
+            if wanted > Version(newest_known):
+                warnings.warn(
+                    f"Unknown {component} version {version!r}; using the newest known adapter ({use}).",
+                    UserWarning,
+                    stacklevel=3,
+                )
+        else:
+            use = available[0]
+            warnings.warn(
+                f"{component} version {version!r} is older than any known adapter; using {use}.",
+                UserWarning,
+                stacklevel=3,
+            )
+        return cls._adapters[(component, chosen, use)]
+
+    # ------------------------------------------------------------------
+    # Test isolation
+    # ------------------------------------------------------------------
 
     @classmethod
-    def load(cls, data: dict, *, migrate: bool = True, allow_stop: bool = False) -> "MetadataContract":
-        """Load metadata with automatic version detection and optional migration.
+    def snapshot(cls) -> dict[_Key, type["ComponentAdapter"]]:
+        """Return a copy of the registry state, to be passed to :meth:`restore`."""
+        return dict(cls._adapters)
 
-        This is the primary entry point for loading raw metadata dictionaries.
-        It detects the schema version, validates the data, and optionally
-        migrates to the latest version.
-
-        Parameters
-        ----------
-        data : dict
-            Raw metadata dict.
-        migrate : bool, optional
-            If True (default), auto-migrate to latest version.
-        allow_stop : bool, optional
-            If True, allow migration to stop at the latest version
-            that is compatible with the current version. If False
-            (default), migration will always attempt to reach the
-            absolute latest version.
-
-        Returns
-        -------
-        MetadataContract
-            Loaded (and optionally migrated) metadata instance.
-        """
-        version = cls.detect_version(data)
-        if "schema_version" not in data:
-            data = {**data, "schema_version": version}
-        metadata = cls.get_version(version).from_dict(data)
-
-        if migrate:
-            from .migration import MetadataMigrator
-
-            return MetadataMigrator.migrate(metadata, cls.latest_version(), allow_stop=allow_stop)
-        return metadata
+    @classmethod
+    def restore(cls, state: dict[_Key, type["ComponentAdapter"]]) -> None:
+        """Reset the registry to a state returned by :meth:`snapshot`."""
+        cls._adapters = dict(state)

@@ -13,6 +13,7 @@ import contextlib
 import json
 from argparse import ArgumentParser
 from argparse import Namespace
+from pathlib import Path
 
 import yaml
 
@@ -55,12 +56,12 @@ class DumpCommand(Command):
         args : Namespace
             Parsed command-line arguments.
         """
-        from ..checkpoint import extract_metadata_dict
+        from anemoi.metadata.checkpoint import extract_metadata_dict
 
         metadata = extract_metadata_dict(args.path)
 
         with contextlib.ExitStack() as stack:
-            out_file = stack.enter_context(open(args.output, "w")) if args.output else None
+            out_file = stack.enter_context(Path(args.output).open("w")) if args.output else None
             if args.yaml:
                 print(yaml.dump(metadata, indent=2, sort_keys=True), file=out_file)
             else:

@@ -38,17 +38,29 @@ class ArraysCommand(Command):
         args : Namespace
             Parsed command-line arguments.
         """
-        from ..checkpoint import load_metadata
+        from anemoi.metadata.checkpoint import load_metadata
 
         result = load_metadata(args.path, supporting_arrays=True)
-        _, arrays = cast(tuple[Any, dict[str, Any]], result)
+        _, arrays = cast("tuple[Any, dict[str, Any]]", result)
 
         if not arrays:
             print("No supporting arrays found in checkpoint.")
             return
 
-        for name, array in sorted(arrays.items()):
+        for name, array in sorted(_flatten(arrays).items()):
             print(f"{name}: shape={array.shape} dtype={array.dtype}")
+
+
+def _flatten(arrays: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    """Flatten arrays grouped by dataset into ``dataset/name`` keys."""
+    flat: dict[str, Any] = {}
+    for name, value in arrays.items():
+        key = f"{prefix}{name}"
+        if isinstance(value, dict):
+            flat.update(_flatten(value, f"{key}/"))
+        else:
+            flat[key] = value
+    return flat
 
 
 command = ArraysCommand

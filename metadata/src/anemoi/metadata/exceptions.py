@@ -19,27 +19,20 @@ class MetadataError(Exception):
 
 
 class VersionError(MetadataError):
-    """Raised when a feature requires a newer schema version.
+    """Raised when a value needs a newer version of its component than the checkpoint has.
 
-    This occurs when calling a method that is only available from a certain
-    schema version onwards (e.g., calling ``get_provenance()`` on V1 metadata
-    when provenance is only available in V2+).
+    This occurs when calling a component adapter method that is only available
+    from a certain component version onwards (see
+    :func:`~anemoi.metadata.components.base.requires`).
     """
 
 
 class UnknownVersionError(MetadataError):
-    """Raised when an unknown metadata version is encountered.
+    """Raised when no component adapter is registered for a requested key.
 
-    This typically occurs when loading metadata from a checkpoint that
-    was created with a newer version of the package.
-    """
-
-
-class MigrationError(MetadataError):
-    """Raised when a migration between versions fails.
-
-    This can occur if a required migration function is not registered
-    or if the migration logic encounters invalid data.
+    Reading a checkpoint never raises this for an unknown version: it falls
+    back to the newest known adapter with a warning.  It is raised by exact
+    lookups in :class:`~anemoi.metadata.registry.ComponentRegistry`.
     """
 
 

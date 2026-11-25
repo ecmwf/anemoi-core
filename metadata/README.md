@@ -22,7 +22,22 @@ This project is **BETA** and will be **Experimental** for the foreseeable future
 Interfaces and functionality are likely to change, and the project itself may be scrapped.
 **DO NOT** use this software in any project/software that is operational.
 
-Miscellanous tools for training data-driven weather forecasts.
+Read and write the metadata stored inside Anemoi checkpoints.
+
+Checkpoints have been written in several metadata formats. `anemoi-metadata` opens all of them through
+one interface (`Metadata`), reads leniently, and checks the metadata strictly when it writes it.
+
+```python
+from anemoi.metadata import Metadata
+
+metadata = Metadata.from_checkpoint("model.ckpt")
+print(metadata.version, metadata.component_versions)
+print(metadata.task.timestep())
+dataset = metadata.dataset("data")  # the name may be omitted for a single-dataset checkpoint
+print(dataset.data.grid_size(), dataset.arrays.latitudes)
+```
+
+A command line tool is installed too: `anemoi-metadata info model.ckpt`.
 
 ## Documentation
 

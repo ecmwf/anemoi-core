@@ -25,7 +25,7 @@ def create_parser() -> Any:
     Any
         The command-line argument parser.
     """
-    return make_parser(__doc__, COMMANDS)
+    return make_parser(__doc__ or "", COMMANDS)
 
 
 def main() -> None:
@@ -35,7 +35,7 @@ def main() -> None:
     -------
     None
     """
-    cli_main(__version__, __doc__, COMMANDS)
+    cli_main(__version__, __doc__ or "", COMMANDS)
 
 
 if __name__ == "__main__":

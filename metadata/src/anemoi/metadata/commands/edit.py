@@ -9,6 +9,7 @@
 
 """CLI command to edit checkpoint metadata in an external editor."""
 
+import contextlib
 import json
 import logging
 import os
@@ -67,8 +68,8 @@ class EditCommand(Command):
         args : Namespace
             Parsed command-line arguments.
         """
-        from ..checkpoint import extract_metadata_dict
-        from ..checkpoint import replace_metadata
+        from anemoi.metadata.checkpoint import extract_metadata_dict
+        from anemoi.metadata.checkpoint import replace_metadata
 
         use_yaml = args.yaml
         ext = "yaml" if use_yaml else "json"
@@ -90,34 +91,30 @@ class EditCommand(Command):
         original_serialised = _serialise_to_string(metadata, use_yaml)
 
         with TemporaryDirectory() as tmp_dir:
-            tmp_file = os.path.join(tmp_dir, f"checkpoint.{ext}")
+            tmp_file = Path(tmp_dir) / f"checkpoint.{ext}"
 
-            with open(tmp_file, "w") as fh:
+            with tmp_file.open("w") as fh:
                 _serialise(metadata, fh)
 
             cmd_parts = shlex.split(args.editor)
-            extra_flags = _EDITOR_WAIT_FLAGS.get(os.path.basename(cmd_parts[0]), [])
+            extra_flags = _EDITOR_WAIT_FLAGS.get(Path(cmd_parts[0]).name, [])
 
             try:
-                subprocess.check_call([*cmd_parts, *extra_flags, tmp_file])
+                subprocess.check_call([*cmd_parts, *extra_flags, str(tmp_file)])  # noqa: S603 - the user's own editor command
             except (subprocess.CalledProcessError, FileNotFoundError) as exc:
                 # Editor failed or wasn't found. Preserve the edited file.
                 preserved_path = _preserve_edited_file(tmp_file, ext, original_serialised)
                 if preserved_path:
-                    LOG.error(
-                        "Editor command failed: %s\nEdited file preserved at: %s",
-                        exc,
-                        preserved_path,
-                    )
+                    LOG.exception("Editor command failed. Edited file preserved at: %s", preserved_path)
                 else:
-                    LOG.error("Editor command failed: %s", exc)
+                    LOG.exception("Editor command failed")
                 raise SystemExit(1) from exc
 
-            with open(tmp_file) as fh:
+            with tmp_file.open() as fh:
                 edited = _deserialise(fh)
 
             if edited != metadata:
-                replace_metadata(Path(args.path), edited)
+                replace_metadata(Path(args.path), edited, validate=False)
                 LOG.info("Metadata updated in %s", args.path)
             else:
                 LOG.info("No changes detected; checkpoint left unmodified.")
@@ -144,7 +141,7 @@ def _serialise_to_string(data: dict[str, Any], use_yaml: bool) -> str:
 
 
 def _preserve_edited_file(
-    tmp_file: str,
+    tmp_file: str | Path,
     ext: str,
     original_serialised: str,
 ) -> str | None:
@@ -152,7 +149,7 @@ def _preserve_edited_file(
 
     Parameters
     ----------
-    tmp_file : str
+    tmp_file : str | Path
         Path to the temporary edited file.
     ext : str
         File extension (json or yaml).
@@ -164,13 +161,13 @@ def _preserve_edited_file(
     str | None
         Path to the preserved file, or None if file doesn't exist or is unchanged.
     """
-    if not os.path.exists(tmp_file):
+    tmp_file = Path(tmp_file)
+    if not tmp_file.exists():
         return None
 
     try:
-        with open(tmp_file) as f:
-            edited_content = f.read()
-    except Exception:
+        edited_content = tmp_file.read_text()
+    except (OSError, UnicodeError):
         # If we can't read the file, don't preserve it.
         return None
 
@@ -186,14 +183,12 @@ def _preserve_edited_file(
     try:
         with os.fdopen(fd, "w") as f:
             f.write(edited_content)
-        return preserved_path
-    except Exception:
+    except OSError:
         # Clean up on error.
-        try:
-            os.unlink(preserved_path)
-        except Exception:
-            pass
+        with contextlib.suppress(OSError):
+            Path(preserved_path).unlink()
         return None
+    return preserved_path
 
 
 command = EditCommand

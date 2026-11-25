@@ -1,0 +1,2 @@
+# The repository ignores *.json; the golden metadata fixtures are tracked.
+!*.json

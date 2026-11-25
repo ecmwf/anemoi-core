@@ -15,6 +15,7 @@ import shlex
 import subprocess
 from argparse import ArgumentParser
 from argparse import Namespace
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -59,7 +60,7 @@ class ViewCommand(Command):
         args : Namespace
             Parsed command-line arguments.
         """
-        from ..checkpoint import extract_metadata_dict
+        from anemoi.metadata.checkpoint import extract_metadata_dict
 
         ext = "yaml" if args.yaml else "json"
 
@@ -72,12 +73,12 @@ class ViewCommand(Command):
         metadata = extract_metadata_dict(args.path)
 
         with TemporaryDirectory() as tmp_dir:
-            tmp_file = os.path.join(tmp_dir, f"checkpoint.{ext}")
+            tmp_file = Path(tmp_dir) / f"checkpoint.{ext}"
 
-            with open(tmp_file, "w") as fh:
+            with tmp_file.open("w") as fh:
                 _serialise(metadata, fh)
 
-            subprocess.check_call([*shlex.split(args.pager), tmp_file])
+            subprocess.check_call([*shlex.split(args.pager), str(tmp_file)])  # noqa: S603 - the user's own pager command
 
 
 command = ViewCommand

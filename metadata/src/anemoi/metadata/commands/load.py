@@ -11,9 +11,9 @@
 
 import json
 import logging
-import os
 from argparse import ArgumentParser
 from argparse import Namespace
+from pathlib import Path
 
 import yaml
 
@@ -65,31 +65,31 @@ class LoadCommand(Command):
             If the file extension is unknown and neither --json nor --yaml
             is specified.
         """
-        from ..checkpoint import has_metadata
-        from ..checkpoint import replace_metadata
-        from ..checkpoint import save_metadata
+        from anemoi.metadata.checkpoint import has_metadata
+        from anemoi.metadata.checkpoint import replace_metadata
+        from anemoi.metadata.checkpoint import save_metadata
 
-        _, ext = os.path.splitext(args.input)
+        input_path = Path(args.input)
+        ext = input_path.suffix
 
         if ext == ".json" or args.json:
-            with open(args.input) as f:
+            with input_path.open() as f:
                 new_metadata = json.load(f)
         elif ext in (".yaml", ".yml") or args.yaml:
-            with open(args.input) as f:
+            with input_path.open() as f:
                 new_metadata = yaml.safe_load(f)
         else:
-            raise ValueError(
-                f"Unknown file extension '{ext}'." " Use --json or --yaml to specify the format explicitly."
-            )
+            msg = f"Unknown file extension '{ext}'. Use --json or --yaml to specify the format explicitly."
+            raise ValueError(msg)
 
         if has_metadata(args.path):
-            replace_metadata(args.path, new_metadata)
+            replace_metadata(args.path, new_metadata, validate=False)
         else:
             LOG.warning(
                 "Checkpoint %s has no existing metadata; adding new metadata entry.",
                 args.path,
             )
-            save_metadata(args.path, new_metadata)
+            save_metadata(args.path, new_metadata, validate=False)
 
         LOG.info("Metadata written to %s", args.path)
 

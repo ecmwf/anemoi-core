@@ -9,9 +9,14 @@
 
 """Anemoi Metadata Package.
 
-Versioned metadata models for ML checkpoints with a two-layer architecture.
+Layered, component-based reading of ML checkpoint metadata, in two layers.
 
-Layer 1 (Raw Schema): Frozen pydantic models for data validation.
+Layer 1 (adapters): a :class:`CheckpointAdapter` holds the raw metadata
+dictionary and composes one adapter per versioned component (``task``,
+``lineage``, and ``data`` per dataset; registered in :class:`ComponentRegistry`) plus an
+unversioned reader for the raw sections.  A new format or component version
+needs only a version reader that subclasses the nearest one and overrides what
+differs.
 Layer 2 (User API): Metadata class with computed properties and helpers.
 
 Examples
@@ -23,7 +28,7 @@ Examples
 >>>
 >>> # Access properties
 >>> print(m.variables)
->>> print(m.schema_version)
+>>> print(m.version)
 """
 
 try:
@@ -31,16 +36,10 @@ try:
 except ImportError:
     __version__ = "999"
 
-# Import migrations to register migration functions with MetadataMigrator.
-# This must come after versions so that all schema classes are available
-# when the migration modules are imported.
-# Import versions to register them with the registry
-from . import migrations  # noqa: F401
-from . import versions  # noqa: F401
-
 # Public API - Layer 1 (for advanced use cases)
-from .base import MetadataContract
-from .base import requires_version
+# Public API - Layer 2 (recommended for most users)
+from .arrays import DatasetArrays
+from .base import CheckpointAdapter
 
 # Checkpoint I/O
 from .checkpoint import extract_metadata_dict
@@ -49,52 +48,52 @@ from .checkpoint import load_metadata
 from .checkpoint import remove_metadata
 from .checkpoint import replace_metadata
 from .checkpoint import save_metadata
+from .components.base import ComponentAdapter
+from .components.base import requires
 
 # Exceptions
 from .exceptions import CheckpointError
 from .exceptions import MetadataError
-from .exceptions import MigrationError
 from .exceptions import UnknownVersionError
 from .exceptions import VersionError
-
-# Public API - Layer 2 (recommended for most users)
+from .interface import DatasetSelectionError
 from .interface import DatasetView
 from .interface import Metadata
+from .registry import ComponentRegistry
 
-# Migration
-from .migration import MetadataMigrator
-from .registry import MetadataRegistry
-
-# Version schemas (for type hints and advanced usage)
-from .versions import MetadataV0
-from .versions import MetadataV1
+# Strict write
+from .write_schema import COMPONENT_VERSIONS
+from .write_schema import CURRENT_VERSION
+from .write_schema import WriteValidationError
+from .write_schema import validate_for_write
 
 __all__ = [
-    # Version
-    "__version__",
+    "COMPONENT_VERSIONS",
+    "CURRENT_VERSION",
+    # Layer 1 - Adapters
+    "CheckpointAdapter",
+    "CheckpointError",
+    "ComponentAdapter",
+    "ComponentRegistry",
+    "DatasetArrays",
+    "DatasetSelectionError",
+    "DatasetView",
     # Layer 2 - User API
     "Metadata",
-    "DatasetView",
-    # Layer 1 - Raw API
-    "MetadataContract",
-    "MetadataRegistry",
-    "requires_version",
-    # Version schemas
-    "MetadataV0",
-    "MetadataV1",
-    # Checkpoint I/O
-    "load_metadata",
-    "save_metadata",
-    "replace_metadata",
-    "remove_metadata",
-    "has_metadata",
-    "extract_metadata_dict",
-    # Migration
-    "MetadataMigrator",
     # Exceptions
     "MetadataError",
-    "VersionError",
     "UnknownVersionError",
-    "MigrationError",
-    "CheckpointError",
+    "VersionError",
+    "WriteValidationError",
+    # Version
+    "__version__",
+    "extract_metadata_dict",
+    "has_metadata",
+    # Checkpoint I/O
+    "load_metadata",
+    "remove_metadata",
+    "replace_metadata",
+    "requires",
+    "save_metadata",
+    "validate_for_write",
 ]

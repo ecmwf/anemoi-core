@@ -10,12 +10,14 @@
 API Reference
 =============
 
-This page provides the complete API reference for anemoi-metadata.
+This page provides the API reference for anemoi-metadata.  The first sections
+are the interface most users need.  The later ones are for code that reads
+other formats or adds a component version (see :doc:`versions`).
 
-High-Level Interface
+High-level interface
 --------------------
 
-The recommended entry point for most users.
+The recommended entry point.
 
 Metadata
 ^^^^^^^^
@@ -26,10 +28,87 @@ Metadata
    :show-inheritance:
 
 
+DatasetView
+^^^^^^^^^^^
+
+.. autoclass:: anemoi.metadata.interface.DatasetView
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+DatasetData
+^^^^^^^^^^^
+
+The ``data`` component of one dataset.
+
+.. autoclass:: anemoi.metadata.interface.DatasetData
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+DatasetArrays
+^^^^^^^^^^^^^
+
+The supporting arrays of one dataset.
+
+.. autoclass:: anemoi.metadata.arrays.DatasetArrays
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+TaskView
+^^^^^^^^
+
+The task of the checkpoint.
+
+.. autoclass:: anemoi.metadata.interface.TaskView
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+TaskTiming
+^^^^^^^^^^
+
+The timing of the task for one dataset, returned by ``task.timing``,
+``task.for_dataset(name)`` and ``task.timings()``.
+
+.. autoclass:: anemoi.metadata.components.task.TaskTiming
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+LineageView
+^^^^^^^^^^^
+
+Where the checkpoint comes from.  A value the lineage version does not record
+raises :class:`~anemoi.metadata.exceptions.VersionError`.
+
+.. autoclass:: anemoi.metadata.interface.LineageView
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+SectionsView
+^^^^^^^^^^^^
+
+The raw, unversioned sections.
+
+.. autoclass:: anemoi.metadata.interface.SectionsView
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
 Checkpoint I/O
 --------------
 
-Functions for reading and writing metadata from/to checkpoint files.
+Functions for reading and writing metadata from and to checkpoint files.
 
 .. automodule:: anemoi.metadata.checkpoint
    :members:
@@ -37,21 +116,35 @@ Functions for reading and writing metadata from/to checkpoint files.
    :show-inheritance:
 
 
-Registry
---------
-
-Version registry for metadata schemas.
-
-.. autoclass:: anemoi.metadata.registry.MetadataRegistry
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-
-Base Classes
+Strict write
 ------------
 
-Base classes and decorators for metadata schemas.
+Validation of the metadata this package writes (format 3.1).  See
+:ref:`lenient-and-strict`.
+
+.. autodata:: anemoi.metadata.write_schema.CURRENT_VERSION
+
+.. autodata:: anemoi.metadata.write_schema.COMPONENT_VERSIONS
+
+.. autofunction:: anemoi.metadata.write_schema.validate_for_write
+
+.. autoclass:: anemoi.metadata.write_schema.WriteValidationError
+   :show-inheritance:
+
+.. autofunction:: anemoi.metadata.write_schema.register_write_schema
+
+
+Adapters
+--------
+
+The layered adapters that read every format.  The decorator
+:func:`~anemoi.metadata.components.base.requires` gates an adapter method on
+the version of its component (see :ref:`version-gate`).
+
+.. autofunction:: anemoi.metadata.components.base.requires
+
+CheckpointAdapter
+^^^^^^^^^^^^^^^^^
 
 .. automodule:: anemoi.metadata.base
    :members:
@@ -59,12 +152,51 @@ Base classes and decorators for metadata schemas.
    :show-inheritance:
 
 
-Migration
----------
+Component registry
+^^^^^^^^^^^^^^^^^^
 
-Sequential migration system for metadata versions.
+.. autoclass:: anemoi.metadata.registry.ComponentRegistry
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
-.. autoclass:: anemoi.metadata.migration.MetadataMigrator
+
+Format detection
+^^^^^^^^^^^^^^^^
+
+.. automodule:: anemoi.metadata.formats
+   :members:
+   :show-inheritance:
+
+
+Component adapters
+^^^^^^^^^^^^^^^^^^
+
+.. autoclass:: anemoi.metadata.components.base.ComponentAdapter
+   :members:
+   :show-inheritance:
+
+.. automodule:: anemoi.metadata.components.data
+   :members:
+   :show-inheritance:
+
+.. automodule:: anemoi.metadata.components.task
+   :members:
+   :show-inheritance:
+
+.. automodule:: anemoi.metadata.components.lineage
+   :members:
+   :show-inheritance:
+
+.. automodule:: anemoi.metadata.components.legacy
+   :members:
+   :show-inheritance:
+
+
+Sections reader
+^^^^^^^^^^^^^^^
+
+.. autoclass:: anemoi.metadata.sections.SectionsReader
    :members:
    :undoc-members:
    :show-inheritance:
@@ -78,4 +210,7 @@ Custom exceptions for the metadata package.
 .. automodule:: anemoi.metadata.exceptions
    :members:
    :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: anemoi.metadata.interface.DatasetSelectionError
    :show-inheritance:

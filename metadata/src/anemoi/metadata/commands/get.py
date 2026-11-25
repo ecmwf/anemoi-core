@@ -62,7 +62,7 @@ class GetCommand(Command):
         KeyError
             If a key segment is not found in the metadata.
         """
-        from ..checkpoint import extract_metadata_dict
+        from anemoi.metadata.checkpoint import extract_metadata_dict
 
         metadata: Any = extract_metadata_dict(args.path)
         key_path: str = args.key
@@ -84,7 +84,8 @@ class GetCommand(Command):
                 metadata = metadata[key]
             except (KeyError, TypeError) as exc:
                 traversed = ".".join(keys[: i + 1])
-                raise KeyError(f"Key '{traversed}' not found in metadata.") from exc
+                msg = f"Key '{traversed}' not found in metadata."
+                raise KeyError(msg) from exc
 
         # Print the final value.
         print(

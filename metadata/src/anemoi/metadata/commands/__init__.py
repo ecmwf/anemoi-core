@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import os
+from pathlib import Path
 
 from anemoi.utils.cli import Command
 from anemoi.utils.cli import Failed
@@ -16,7 +16,7 @@ from anemoi.utils.cli import register_commands
 __all__ = ["Command"]
 
 COMMANDS = register_commands(
-    os.path.dirname(__file__),
+    str(Path(__file__).parent),
     __name__,
     lambda x: x.command(),
     lambda name, error: Failed(name, error),

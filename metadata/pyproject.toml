@@ -28,6 +28,9 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -52,7 +55,7 @@ optional-dependencies.docs = [
   "sphinx-argparse<0.5",
   "sphinx-rtd-theme",
 ]
-optional-dependencies.tests = [ "pytest>=8" ]
+optional-dependencies.tests = [ "anemoi-transform", "pytest>=8" ]
 urls.Documentation = "https://anemoi.readthedocs.io/projects/metadata"
 urls.Homepage = "https://github.com/ecmwf/anemoi-core/"
 urls.Issues = "https://github.com/ecmwf/anemoi-core/issues"
@@ -73,3 +76,96 @@ root = ".."
 tag_regex = "^metadata-(?P<version>[vV]?[0-9]+[^-]*)"
 fallback_version = "0.0.0"
 git_describe_command = "git describe --dirty --tags --long --match 'metadata-*[0-9]*'"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = [ "src" ]
+exclude = [ "docs/" ]
+lint.select = [
+  "A",      # flake8 builtins
+  # "ANN", # flake8-annotations
+  "ANN001", # Type annotation
+  "ANN201", # Return type public
+  "ANN202", # Return type private
+  "ANN205", # Return type static method
+  "ANN206", # Return type class method
+  "ARG",    # Unused arguments
+  "B",      # flake8-bugbear
+  "BLE",    # Non-specific exceptions
+  "C4",     # Comprehensions
+  "C90",    # Mccabe complexity
+  "COM",    # Commas
+  "CPY",    # Copyright
+  # "C",  # pylint convention
+  "D",      # pydocstyle
+  # "DOC", # pydoclint
+  "DTZ",    # Datetimes
+  "E",      # pycodestyle error
+  "EM",     # Error messages
+  "ERA",    # Found unused code
+  "F",      # flake8 error
+  "FA",     # Future annotations
+  # "EXE", # Executable
+  # "FBT", # Boolean traps
+  "FLY",    # Fstrings
+  "FURB",   # Modernising code
+  "G",      # flake8 logging format
+  "I",      # Import sorting
+  "ICN",    # Import conventions
+  "ISC",    # Implicit string concatenation
+  "LOG",    # Logging
+  "N",      # pep8 naming
+  "NPY",    # Numpys
+  "PERF",   # Perfomance linting
+  "PGH",    # Pygrep hooks
+  "PIE",    # Misc lints
+  # "PL",  # Pylint (superset of C, E, R, W)
+  "PT",     # Pytest
+  "PTH",    # Use Pathlib
+  "Q",      # Quotes
+  "R",      # Refactor
+  "RET",    # Return statements
+  "RSE",    # Raises
+  "RUF",    # Ruff specific
+  "S",      # bandit !IMPORTANT
+  "SIM",    # flake8-simplify
+  "T10",    # Debug statements
+  "T20",    # Print statements
+  "TCH",    # Type checking blocks
+  "TD",     # Todos
+  "TID",    # Tidy imports
+  "TRY",    # Exception handling antipatterns
+  "UP",     # Pyupgrade
+  "W",      # pycodestyle warning
+  "YTT",    # flake8-2020
+]
+lint.ignore = [
+  "B018",
+  "B028",
+  "D100",
+  "D101",
+  "D102",
+  "D103",
+  "D104",
+  "D105",
+  "D401",
+  "E203",
+  "FURB192", # new in ruff 0.16
+  "ISC004",  # new in ruff 0.16
+  "LOG004",  # new in ruff 0.16
+  "PT018",
+  "RUF036",  # new in ruff 0.16
+  "S101",
+  "TD003",
+  "UP007",
+]
+# CLI output is printed on purpose; version-suffixed class names (DataReaderV0_2, ...) follow the component/version convention.
+lint.per-file-ignores."src/anemoi/metadata/commands/**" = [ "T201" ]
+lint.per-file-ignores."src/anemoi/metadata/components/**" = [ "N801" ]
+lint.per-file-ignores."src/anemoi/metadata/write_schema.py" = [ "N801" ]
+lint.per-file-ignores."tests/data/build_fixtures.py" = [ "T201" ]
+lint.flake8-import-conventions.extend-aliases.pytorch_lightning = "pl"
+lint.isort.force-single-line = true
+lint.isort.known-first-party = [ "anemoi" ]
+lint.pydocstyle.convention = "numpy"

@@ -9,1466 +9,772 @@
 
 """User-facing metadata interface.
 
-This module provides the main ``Metadata`` class that users interact with.
-It wraps the raw pydantic schemas and exposes typed properties via the
-version-agnostic contract methods defined on :class:`~anemoi.metadata.base.MetadataContract`.
-Permissive dict sections are accessible via :meth:`get` or :meth:`__getitem__`.
+:class:`Metadata` wraps a :class:`~anemoi.metadata.base.CheckpointAdapter` and
+is organised by component:
 
-The interface never reaches into version-specific internal structure directly;
-all inference data is accessed through the contract methods that each schema
-version implements.
+* checkpoint level: :attr:`Metadata.version`, :attr:`Metadata.component_versions`,
+  :attr:`Metadata.dataset_names`, :attr:`Metadata.task` (one task per checkpoint, see :class:`TaskView`),
+  :attr:`Metadata.lineage` (``uuid``, ``parent_uuid``, ``entries``, see :class:`LineageView`) and
+  :attr:`Metadata.sections` (the raw dumps, see :class:`SectionsView`);
+* per dataset: :meth:`Metadata.dataset` and :attr:`Metadata.datasets` give a
+  :class:`DatasetView` with ``name``, ``data`` (the data component bound to
+  the dataset, see :class:`DatasetData`), ``arrays`` (the supporting arrays,
+  see :class:`~anemoi.metadata.arrays.DatasetArrays`).
+
+There are four single-dataset shortcuts (``variables``, ``grid_size``,
+``latitudes``, ``longitudes``); they raise on a checkpoint with several
+datasets instead of picking the first.
+
+This module holds no knowledge of any metadata format: every value comes from
+a component adapter, the sections reader or the arrays view.  Everything
+returned (lists, dicts, arrays) is a copy, so changing it never changes the
+instance.  :meth:`Metadata.with_overrides` returns a new instance.
 """
 
+import copy
 import sys
-from collections import defaultdict
+from collections.abc import Mapping
 from datetime import datetime
-from functools import cached_property
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import TypedDict
 
-from packaging.version import Version
+import numpy as np
+
+from .arrays import DatasetArrays
+from .arrays import merge_supporting_arrays
+from .arrays import split_by_dataset
+from .exceptions import MetadataError
 
 if TYPE_CHECKING:
-    from .base import MetadataContract
+    from anemoi.transform.variables import Variable
+
+    from .base import CheckpointAdapter
+    from .components.data import DataAdapter
+    from .components.lineage import LineageAdapter
+    from .components.task import TaskAdapter
+    from .components.task import TaskTiming
+    from .sections import SectionsReader
+
+_MISSING = object()
 
 
-class DatasetView:
-    """Read-only per-dataset view over a :class:`Metadata` instance.
+class DatasetSelectionError(MetadataError, ValueError):
+    """Raised when a dataset must be named but was not, or the checkpoint has none."""
 
-    Provides convenient access to per-dataset properties and methods
-    without needing to pass the dataset name to each call. All properties
-    delegate to the underlying contract methods with the bound dataset name.
 
-    The underlying metadata model is frozen (immutable), so all properties
-    that do not require parameters are cached using :func:`functools.cached_property`.
+class VariableTypes(TypedDict):
+    """Variable names by role in the model."""
+
+    forcing: list[str]
+    prognostic: list[str]
+    diagnostic: list[str]
+    target: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Data component bound to one dataset
+# ---------------------------------------------------------------------------
+
+
+class DatasetData:
+    """The data component of one dataset: a read-only view of its data adapter.
+
+    Every method is that of the per-dataset data component adapter
+    (:class:`~anemoi.metadata.components.data.DataAdapter`).  A tabular
+    dataset has no grid: its grid values are ``None`` (*not applicable*),
+    distinct from an empty value (*not recorded*).
 
     Parameters
     ----------
-    raw : MetadataContract
-        The underlying pydantic metadata instance.
+    data : DataAdapter
+        The data component adapter of the dataset.
+    """
+
+    def __init__(self, data: "DataAdapter") -> None:
+        self._data = data
+
+    # -- kind ---------------------------------------------------------------
+
+    def data_type(self) -> str:
+        """Return the dataset kind: ``"gridded"`` or ``"tabular"``."""
+        return self._data.data_type()
+
+    def is_gridded(self) -> bool:
+        """Return whether the dataset is gridded."""
+        return self._data.is_gridded()
+
+    def is_tabular(self) -> bool:
+        """Return whether the dataset is tabular (no grid)."""
+        return self._data.is_tabular()
+
+    def is_input_only(self) -> bool:
+        """Return whether the dataset has input variables but no output variables."""
+        return self._data.is_input_only()
+
+    # -- variables and indices ---------------------------------------------
+
+    def variables(self) -> list[str]:
+        """Return every variable name, inputs (in tensor order) then output-only variables."""
+        return self._data.variables()
+
+    def variable_indices(self) -> dict[str, int]:
+        """Return the input variable name to tensor index mapping."""
+        return self._data.variable_indices()
+
+    def output_variable_indices(self) -> dict[str, int]:
+        """Return the output variable name to tensor index mapping (empty if input-only)."""
+        return self._data.output_variable_indices()
+
+    def input_index_to_variable(self) -> dict[int, str]:
+        """Return the input tensor index to variable name mapping."""
+        return self._data.input_index_to_variable()
+
+    def output_index_to_variable(self) -> dict[int, str]:
+        """Return the output tensor index to variable name mapping."""
+        return self._data.output_index_to_variable()
+
+    def prognostic_input_mask(self) -> list[int]:
+        """Return the sorted input tensor indices of the prognostic variables."""
+        return self._data.prognostic_input_mask()
+
+    def prognostic_output_mask(self) -> list[int]:
+        """Return the sorted output tensor indices of the prognostic variables."""
+        return self._data.prognostic_output_mask()
+
+    def variable_types(self) -> VariableTypes:
+        """Return the variable names by role (forcing, prognostic, diagnostic, target)."""
+        types = self._data.variable_types()
+        return VariableTypes(
+            forcing=types["forcing"],
+            prognostic=types["prognostic"],
+            diagnostic=types["diagnostic"],
+            target=types["target"],
+        )
+
+    def variable_categories(self, *, per_variable: bool = False) -> dict[str, list[str]]:
+        """Categorise the variables by role, adding ``computed``, ``accumulation`` and ``constant``.
+
+        With *per_variable* the result is ``{variable: [category, ...]}``,
+        otherwise ``{category: [variable, ...]}``.
+        """
+        return self._data.variable_categories(per_variable=per_variable)
+
+    def select_variables(self, *, include: list[str] | None = None, exclude: list[str] | None = None) -> list[str]:
+        """Select variables by category expression (``"prognostic"``, ``"prognostic+constant"``).
+
+        Unknown categories raise ``ValueError``; there is no substring matching.
+        """
+        return self._data.select_variables(include=include, exclude=exclude)
+
+    def typed_variables(self) -> "dict[str, Variable]":
+        """Return an ``anemoi.transform`` ``Variable`` per variable (needs ``anemoi-transform``)."""
+        return self._data.typed_variables()
+
+    def variables_metadata(self) -> dict[str, dict[str, Any]]:
+        """Return per-variable metadata (MARS keys, flags, units); empty if not recorded."""
+        return self._data.variables_metadata()
+
+    def accumulations(self) -> list[str]:
+        """Return the variables that are accumulations."""
+        return self._data.accumulations()
+
+    def computed_forcings(self) -> list[str]:
+        """Return the variables computed at inference time."""
+        return self._data.computed_forcings()
+
+    # -- grid and data source ----------------------------------------------
+
+    def grid_size(self) -> int | None:
+        """Return the number of grid points; ``None`` if tabular or not recorded."""
+        return self._data.grid_size()
+
+    def data_request(self) -> dict[str, Any] | None:
+        """Return the data request; ``None`` if tabular, an empty dict if not recorded."""
+        return self._data.data_request()
+
+    def grid(self) -> Any:
+        """Return the grid of the data request (e.g. ``"O96"``); ``None`` if tabular or not recorded."""
+        return self._data.grid()
+
+    def area(self) -> Any:
+        """Return the area of the data request; ``None`` if tabular or not recorded."""
+        return self._data.area()
+
+    def sources(self) -> list[dict[str, Any]]:
+        """Return the source dataset configurations; empty if not recorded."""
+        return self._data.sources()
+
+    def open_dataset_args(self) -> dict[str, Any]:
+        """Return the arguments for opening the training dataset; empty if not recorded."""
+        return self._data.open_dataset_args()
+
+    def data_frequency(self) -> str | None:
+        """Return the data frequency (e.g. ``"6h"``), or ``None`` if not recorded."""
+        return self._data.data_frequency()
+
+    def dataloader_config(self, partition: str = "training") -> dict[str, Any]:
+        """Return the dataloader dataset configuration of a partition; empty if absent."""
+        return self._data.dataloader_config(partition)
+
+    def __repr__(self) -> str:
+        return f"DatasetData(name={self._data.dataset_name!r})"
+
+
+# ---------------------------------------------------------------------------
+# Task component (checkpoint level)
+# ---------------------------------------------------------------------------
+
+
+class TaskView:
+    """Read-only view of the task component of a checkpoint.
+
+    A checkpoint has one task.  Timing values are read from every dataset and
+    exposed as one value when the datasets agree; when they disagree, access
+    without a dataset raises :class:`~anemoi.metadata.components.task.TaskTimingError`
+    and :meth:`for_dataset` gives the timing of one dataset.
+
+    Parameters
+    ----------
+    task : TaskAdapter
+        The task component adapter of the checkpoint.
+    """
+
+    def __init__(self, task: "TaskAdapter") -> None:
+        self._task = task
+
+    @property
+    def task_name(self) -> str:
+        """The task name (``"forecaster"`` when none is recorded)."""
+        return self._task.task_name
+
+    @property
+    def timing(self) -> "TaskTiming":
+        """The timing shared by all datasets (raises ``TaskTimingError`` if they differ)."""
+        return self._task.timing
+
+    def for_dataset(self, dataset_name: str) -> "TaskTiming":
+        """Return the timing of one dataset (``KeyError`` for an unknown name)."""
+        return self._task.for_dataset(dataset_name)
+
+    def timings(self) -> "dict[str, TaskTiming]":
+        """Return the timing of every dataset, by dataset name."""
+        return self._task.timings()
+
+    def timestep(self, dataset_name: str | None = None) -> str | None:
+        """Return the model timestep (e.g. ``"6h"``); the shared value when no dataset is given."""
+        return self._task.timestep(dataset_name)
+
+    def input_relative_date_indices(self, dataset_name: str | None = None) -> list[int]:
+        """Return the relative date indices of the model input."""
+        return self._task.input_relative_date_indices(dataset_name)
+
+    def output_relative_date_indices(self, dataset_name: str | None = None) -> list[int]:
+        """Return the relative date indices of the model output."""
+        return self._task.output_relative_date_indices(dataset_name)
+
+    @property
+    def n_step_input(self) -> int | None:
+        """Number of input steps shared by all datasets."""
+        return self._task.n_step_input
+
+    @property
+    def n_step_output(self) -> int | None:
+        """Number of output steps shared by all datasets."""
+        return self._task.n_step_output
+
+    @property
+    def lagged(self) -> list[timedelta] | None:
+        """Input times relative to the last input, as timedeltas (ascending, not positive)."""
+        return self._task.lagged
+
+    @property
+    def input_offsets(self) -> list[timedelta] | None:
+        """Input times relative to the last input, as timedeltas."""
+        return self._task.input_offsets
+
+    @property
+    def output_offsets(self) -> list[timedelta] | None:
+        """Output times relative to the last input, as timedeltas."""
+        return self._task.output_offsets
+
+    @property
+    def rollout_shift(self) -> timedelta | None:
+        """Time by which each rollout step advances, as a timedelta."""
+        return self._task.rollout_shift
+
+    @property
+    def advance_map(self) -> dict[str, list[tuple[int, int]]] | None:
+        """Index mapping that advances input and output into the next input."""
+        return self._task.advance_map
+
+    @property
+    def input_explicit_times(self) -> list[int] | None:
+        """Times of the input steps in timesteps of the data: the config's explicit times, else the indices."""
+        return self._task.input_explicit_times
+
+    @property
+    def target_explicit_times(self) -> list[int] | None:
+        """Times of the target steps in timesteps of the data: the config's explicit times, else the indices."""
+        return self._task.target_explicit_times
+
+    def __repr__(self) -> str:
+        return f"TaskView(task_name={self.task_name!r})"
+
+
+# ---------------------------------------------------------------------------
+# Lineage component (checkpoint level)
+# ---------------------------------------------------------------------------
+
+
+class LineageView:
+    """Read-only view of the lineage component of a checkpoint.
+
+    Where the checkpoint comes from.  A value that the checkpoint's lineage
+    version does not record raises
+    :class:`~anemoi.metadata.exceptions.VersionError` rather than reading as
+    ``None``; see :mod:`anemoi.metadata.components.lineage` for the versions.
+
+    Parameters
+    ----------
+    lineage : LineageAdapter
+        The lineage component adapter of the checkpoint.
+    """
+
+    def __init__(self, lineage: "LineageAdapter") -> None:
+        self._lineage = lineage
+
+    @property
+    def uuid(self) -> str | None:
+        """The ``uuid`` of the checkpoint."""
+        return self._lineage.uuid
+
+    @property
+    def parent_uuid(self) -> str | None:
+        """The ``uuid`` of the checkpoint this one was loaded from; ``None`` when it has no parent."""
+        return self._lineage.parent_uuid
+
+    @property
+    def entries(self) -> list[dict[str, Any]]:
+        """The ``checkpoint_lineage`` entries, oldest first (a copy); empty for a fresh run."""
+        return self._lineage.entries
+
+    def __repr__(self) -> str:
+        return "LineageView()"
+
+
+# ---------------------------------------------------------------------------
+# Raw sections
+# ---------------------------------------------------------------------------
+
+
+class SectionsView:
+    """Read-only view of the raw, unversioned sections of the metadata.
+
+    Values are returned as stored (copies, with the fallbacks of the sections
+    reader); an absent dump reads as an empty dict, an absent scalar as ``None``.
+
+    Parameters
+    ----------
+    reader : SectionsReader
+        The sections reader of the checkpoint adapter.
+    """
+
+    def __init__(self, reader: "SectionsReader") -> None:
+        self._reader = reader
+
+    def _dict(self, name: str) -> dict[str, Any]:
+        value = self._reader.section(name)
+        return copy.deepcopy(value) if isinstance(value, dict) else {}
+
+    def get(self, name: str, default: Any = None) -> Any:
+        """Return the top-level key *name* as stored (a copy), or *default*."""
+        return copy.deepcopy(self._reader.section(name, default))
+
+    @property
+    def config(self) -> dict[str, Any]:
+        """The training ``config`` dump."""
+        return copy.deepcopy(self._reader.config)
+
+    @property
+    def training(self) -> dict[str, Any]:
+        """The ``training`` dump written by the checkpoint callback."""
+        return self._dict("training")
+
+    @property
+    def tracker(self) -> dict[str, Any]:
+        """The ``tracker`` dump written by the checkpoint callback."""
+        return self._dict("tracker")
+
+    @property
+    def environment(self) -> dict[str, Any]:
+        """The ``environment`` dump."""
+        return self._dict("environment")
+
+    @property
+    def provenance(self) -> dict[str, Any]:
+        """The provenance (``provenance_training``, else ``provenance``)."""
+        return copy.deepcopy(self._reader.provenance)
+
+    @property
+    def timestamp(self) -> datetime | None:
+        """When the metadata was written (``timestamp``, else ``created_at``)."""
+        return self._reader.timestamp
+
+    @property
+    def run_id(self) -> str | None:
+        """The ``run_id``."""
+        return self._reader.run_id
+
+    @property
+    def seeds(self) -> dict[str, Any]:
+        """The recorded ``seed`` and ``base_seed``."""
+        return copy.deepcopy(self._reader.seeds)
+
+    @property
+    def precision(self) -> str | None:
+        """The training precision (e.g. ``"16-mixed"``)."""
+        return self._reader.precision
+
+    def __repr__(self) -> str:
+        return "SectionsView()"
+
+
+# ---------------------------------------------------------------------------
+# Per-dataset view
+# ---------------------------------------------------------------------------
+
+
+class DatasetView:
+    """Read-only view of one dataset of a :class:`Metadata` instance.
+
+    There is no task here: the task is per checkpoint (:attr:`Metadata.task`).
+
+    Parameters
+    ----------
+    raw : CheckpointAdapter
+        The underlying checkpoint adapter.
     name : str
         The dataset name this view is bound to.
+    arrays : DatasetArrays | None, optional
+        The supporting arrays of the dataset; none when omitted.
 
     Examples
     --------
-    >>> metadata = Metadata.from_checkpoint("model.ckpt")
-    >>> view = metadata.dataset("era5")
-    >>> print(view.timestep)
-    '6h'
-    >>> print(view.multi_step_input)
-    2
-    >>> print(view.variable_indices)
+    >>> view = Metadata.from_checkpoint("model.ckpt").dataset("era5")
+    >>> view.data.grid_size()
+    40320
+    >>> view.data.variable_indices()
     {'2t': 0, 'msl': 1, ...}
+    >>> view.arrays.latitudes.shape
+    (40320,)
     """
 
-    def __init__(self, raw: "MetadataContract", name: str) -> None:
-        """Initialise with a raw metadata instance and dataset name.
-
-        Parameters
-        ----------
-        raw : MetadataContract
-            The underlying pydantic metadata instance.
-        name : str
-            The dataset name this view is bound to.
-        """
+    def __init__(self, raw: "CheckpointAdapter", name: str, arrays: DatasetArrays | None = None) -> None:
         self._raw = raw
         self._name = name
+        self._arrays = arrays if arrays is not None else DatasetArrays()
+        self._data = DatasetData(raw.data(name))
 
     @property
     def name(self) -> str:
-        """The dataset name this view is bound to.
-
-        Returns
-        -------
-        str
-            Dataset name.
-        """
+        """The dataset name this view is bound to."""
         return self._name
 
-    @cached_property
-    def timestep(self) -> str:
-        """Model timestep frequency string for this dataset.
+    @property
+    def data(self) -> DatasetData:
+        """The data component bound to this dataset."""
+        return self._data
 
-        Returns
-        -------
-        str
-            Frequency string (e.g. ``"6h"``).
+    @property
+    def arrays(self) -> DatasetArrays:
+        """The supporting arrays of this dataset (each ``None`` when absent, e.g. tabular)."""
+        return self._arrays
+
+    @property
+    def number_of_grid_points(self) -> int | None:
+        """Number of grid points of the dataset.
+
+        The length of ``arrays.grid_indices`` when the dataset has it (a
+        limited-area model keeps a subset of the source grid), else the length
+        of ``arrays.latitudes``, else the grid size recorded in the metadata
+        (``data.grid_size()``); ``None`` when none of them is known (a tabular
+        dataset, for example).
         """
-        return self._raw.get_timestep(self._name)
-
-    @cached_property
-    def input_relative_date_indices(self) -> list[int]:
-        """Input relative date indices for this dataset.
-
-        Returns
-        -------
-        list[int]
-            Relative date indices used as model inputs (e.g. ``[-1, 0]``).
-        """
-        return self._raw.get_input_relative_date_indices(self._name)
-
-    @cached_property
-    def output_relative_date_indices(self) -> list[int]:
-        """Output relative date indices for this dataset.
-
-        Returns
-        -------
-        list[int]
-            Relative date indices produced as model outputs (e.g. ``[1]``).
-        """
-        return self._raw.get_output_relative_date_indices(self._name)
-
-    @cached_property
-    def multi_step_input(self) -> int:
-        """Number of input time-steps the model consumes for this dataset.
-
-        Derived from the length of the input relative date indices.
-
-        Returns
-        -------
-        int
-            Count of input time-steps.
-        """
-        return len(self.input_relative_date_indices)
-
-    @cached_property
-    def multi_step_output(self) -> int:
-        """Number of output time-steps the model produces for this dataset.
-
-        Derived from the length of the output relative date indices.
-
-        Returns
-        -------
-        int
-            Count of output time-steps.
-        """
-        return len(self.output_relative_date_indices)
-
-    @cached_property
-    def variable_indices(self) -> dict[str, int]:
-        """Input variable name to tensor index mapping for this dataset.
-
-        Returns
-        -------
-        dict[str, int]
-            Mapping of variable name to its index in the input tensor.
-        """
-        return self._raw.get_variable_indices(self._name)
-
-    @cached_property
-    def output_variable_indices(self) -> dict[str, int]:
-        """Output variable name to tensor index mapping for this dataset.
-
-        Returns
-        -------
-        dict[str, int]
-            Mapping of variable name to its index in the output tensor.
-        """
-        return self._raw.get_output_variable_indices(self._name)
-
-    @cached_property
-    def variables(self) -> list[str]:
-        """List of all variable names for this dataset (input and output).
-
-        Names are taken from the union of input and output index mappings,
-        ordered by their input tensor index first, then output-only variables
-        appended in their output index order.
-
-        Returns
-        -------
-        list[str]
-            All variable names from both input and output index mappings.
-        """
-        input_vars = self.variable_indices
-        output_vars = self.output_variable_indices
-        # Start with input vars in order
-        result = list(input_vars.keys())
-        # Append output-only vars in their output index order
-        output_only = {k: v for k, v in output_vars.items() if k not in input_vars}
-        result.extend(k for k, _ in sorted(output_only.items(), key=lambda x: x[1]))
-        return result
-
-    @cached_property
-    def num_variables(self) -> int:
-        """Number of variables for this dataset.
-
-        Returns
-        -------
-        int
-            Count of variables.
-        """
-        return len(self.variables)
-
-    @cached_property
-    def variable_types(self) -> dict[str, list[str]]:
-        """Variable categories by role for this dataset.
-
-        Returns
-        -------
-        dict[str, list[str]]
-            Dictionary mapping category names (``"forcing"``, ``"prognostic"``,
-            ``"diagnostic"``, ``"target"``) to lists of variable names.
-        """
-        return self._raw.get_variable_types(self._name)
-
-    @cached_property
-    def tensor_shapes(self) -> dict[str, Any]:
-        """Tensor shape metadata for this dataset.
-
-        Returns
-        -------
-        dict[str, Any]
-            Shape metadata with keys ``"variables"``, ``"input_timesteps"``,
-            ``"ensemble"``, and ``"grid"``.
-        """
-        return self._raw.get_tensor_shapes(self._name)
-
-    @cached_property
-    def grid_points(self) -> int | None:
-        """Number of grid points for this dataset, or ``None`` if unknown.
-
-        Returns
-        -------
-        int or None
-            Number of grid points, or ``None`` if not recorded.
-        """
-        return self._raw.get_grid_points(self._name)
-
-    @cached_property
-    def variables_metadata(self) -> dict[str, dict[str, Any]]:
-        """Per-variable metadata (MARS keys, flags, units) for this dataset.
-
-        Returns
-        -------
-        dict[str, dict[str, Any]]
-            Mapping of variable names to their metadata dicts.
-            Returns an empty dict if not available.
-        """
-        return self._raw.get_variables_metadata(self._name)
-
-    @cached_property
-    def accumulations(self) -> list[str]:
-        """Variables that are accumulations (need de-accumulation) for this dataset.
-
-        Returns
-        -------
-        list[str]
-            Variable names that require de-accumulation at inference time.
-        """
-        return self._raw.get_accumulations(self._name)
-
-    @cached_property
-    def computed_forcings(self) -> list[str]:
-        """Variables computed at inference time (not retrieved from data) for this dataset.
-
-        Returns
-        -------
-        list[str]
-            Variable names that are computed on the fly during inference.
-        """
-        return self._raw.get_computed_forcings(self._name)
-
-    @cached_property
-    def data_request(self) -> dict[str, Any]:
-        """Data request parameters (grid, area, etc.) for this dataset.
-
-        Returns
-        -------
-        dict[str, Any]
-            Data request parameters.  Returns an empty dict if not available.
-        """
-        return self._raw.get_data_request(self._name)
-
-    @cached_property
-    def data_frequency(self) -> str | None:
-        """Data frequency string for this dataset, or ``None`` if not recorded.
-
-        Returns
-        -------
-        str or None
-            Frequency string (e.g. ``"6h"``), or ``None`` if not recorded.
-        """
-        return self._raw.get_data_frequency(self._name)
-
-    @cached_property
-    def sources(self) -> list[dict[str, Any]]:
-        """Source dataset configurations for this dataset.
-
-        Returns
-        -------
-        list[dict[str, Any]]
-            Source dataset configurations.  Returns an empty list if not
-            available.
-        """
-        return self._raw.get_sources(self._name)
-
-    @cached_property
-    def open_dataset_args(self) -> dict[str, Any]:
-        """Arguments for opening the training dataset for this dataset.
-
-        Returns
-        -------
-        dict[str, Any]
-            Arguments for opening the training dataset.  Returns an empty dict
-            if not available.
-        """
-        return self._raw.get_open_dataset_args(self._name)
-
-    def dataloader_config(self, partition: str = "training") -> dict[str, Any]:
-        """Dataloader dataset configuration for a given partition for this dataset.
-
-        Extracts the dataset configuration from
-        ``config.dataloader.<partition>``, handling multi-dataset nesting
-        and the ``dataset_config`` key used by newer checkpoints.
-
-        Parameters
-        ----------
-        partition : str, optional
-            The partition name (e.g. ``"training"``, ``"validation"``),
-            by default ``"training"``.
-
-        Returns
-        -------
-        dict[str, Any]
-            The dataloader dataset configuration.  Returns an empty dict
-            if the partition or config section is absent.
-        """
-        return self._raw.get_dataloader_config(partition, self._name)
-
-    def variable_categories(self, *, per_variable: bool = False) -> dict[str, list[str]]:
-        """Categorize variables by their role in the model for this dataset.
-
-        In addition to the base categories returned by the contract
-        (``"forcing"``, ``"prognostic"``, ``"diagnostic"``, ``"target"``),
-        three derived categories are computed and merged in:
-
-        * ``"computed"``  — variables flagged as computed forcings.
-        * ``"accumulation"`` — variables whose ``process`` is ``"accumulated"``.
-        * ``"constant"`` — variables whose ``constant_in_time`` flag is ``True``.
-
-        Parameters
-        ----------
-        per_variable : bool, optional
-            If ``True``, return a variable-keyed dict where each variable name
-            maps to its sorted list of category strings.  If ``False`` (default),
-            return a category-keyed dict where each category maps to a list of
-            variable names belonging to it.
-
-        Returns
-        -------
-        dict[str, list[str]]
-            Category mapping.  Format depends on *per_variable*:
-
-            * ``per_variable=False`` (default) — ``{category: [var, ...]}``.
-              Only categories that contain at least one variable are present,
-              except for the four base categories which are always included
-              (possibly empty) for backward compatibility.
-            * ``per_variable=True`` — ``{variable: [category, ...]}``.
-              Categories are sorted alphabetically.
-
-        Examples
-        --------
-        >>> cats = view.variable_categories()
-        >>> cats["prognostic"]
-        ['u', 'v', 't', 'q']
-
-        >>> cats = view.variable_categories(per_variable=True)
-        >>> cats["u"]
-        ['prognostic', 'target']
-        """
-        # Base categories from the contract (category -> [variables]).
-        # Always returns the four canonical keys, possibly with empty lists.
-        base = self.variable_types
-
-        if not per_variable:
-            # Start from a shallow copy so we never mutate the contract's data.
-            result: dict[str, list[str]] = {k: list(v) for k, v in base.items()}
-
-            # -- computed forcings -------------------------------------------
-            existing_computed: set[str] = set(result.setdefault("computed", []))
-            for name in self.computed_forcings:
-                if name not in existing_computed:
-                    result["computed"].append(name)
-                    existing_computed.add(name)
-
-            # -- accumulations -----------------------------------------------
-            existing_accum: set[str] = set(result.setdefault("accumulation", []))
-            for name in self.accumulations:
-                if name not in existing_accum:
-                    result["accumulation"].append(name)
-                    existing_accum.add(name)
-
-            # -- constant-in-time --------------------------------------------
-            existing_const: set[str] = set(result.setdefault("constant", []))
-            for name, meta in self.variables_metadata.items():
-                if meta.get("constant_in_time") and name not in existing_const:
-                    result["constant"].append(name)
-                    existing_const.add(name)
-
-            # Drop augmented keys that ended up empty to keep the output tidy
-            # (the four base keys are always kept for backward compatibility).
-            for aug_key in ("computed", "accumulation", "constant"):
-                if not result[aug_key]:
-                    del result[aug_key]
-
-            return result
-
-        # -- per_variable=True: invert to variable -> sorted[categories] -----
-        inverted: defaultdict[str, set[str]] = defaultdict(set)
-
-        for cat, names in base.items():
-            for name in names:
-                inverted[name].add(cat)
-
-        for name in self.computed_forcings:
-            inverted[name].add("computed")
-
-        for name in self.accumulations:
-            inverted[name].add("accumulation")
-
-        for name, meta in self.variables_metadata.items():
-            if meta.get("constant_in_time"):
-                inverted[name].add("constant")
-
-        return {name: sorted(cats) for name, cats in inverted.items()}
-
-    def select_variables(
-        self,
-        *,
-        include: list[str] | None = None,
-        exclude: list[str] | None = None,
-    ) -> list[str]:
-        """Select variables by category expression or substring pattern.
-
-        Each entry in *include* / *exclude* is first parsed as a category
-        expression:
-
-        * A single category name (e.g. ``"prognostic"``) matches all variables
-          belonging to that category.
-        * A compound expression with ``+`` (e.g. ``"prognostic+forcing"``)
-          matches variables belonging to **all** of the listed categories
-          (conjunction / intersection).
-
-        If an entry does not match any known category expression it is treated
-        as a substring pattern matched against variable names (backward-compat).
-
-        Parameters
-        ----------
-        include : list[str] | None, optional
-            If provided, only variables matching at least one of these
-            expressions are kept.
-        exclude : list[str] | None, optional
-            If provided, variables matching any of these expressions are removed.
-
-        Returns
-        -------
-        list[str]
-            Filtered list of variable names, in original order.
-
-        Raises
-        ------
-        ValueError
-            If a compound expression (containing ``+``) references one or more
-            unknown category names.
-
-        Examples
-        --------
-        >>> view.select_variables(include=["prognostic"])
-        ['u', 'v', 't', 'q']
-
-        >>> view.select_variables(include=["prognostic+forcing"])
-        []  # no variable is both prognostic and forcing
-        """
-        # Per-variable mapping used for compound (intersection) matching.
-        per_var = self.variable_categories(per_variable=True)
-        # Category-keyed mapping used to enumerate known category names.
-        cat_keyed = self.variable_categories()
-
-        all_variables = list(self.variables)
-
-        known_categories: set[str] = set(cat_keyed.keys()) | {
-            "computed",
-            "accumulation",
-            "constant",
-        }
-
-        def _parse_expression(expr: str) -> frozenset[str] | None:
-            """Parse a category expression into a frozenset of category names.
-
-            Returns a frozenset when *all* ``+``-separated parts are known
-            category names, or ``None`` when the expression is a single token
-            that does not match any category (substring fallback).
-
-            Raises ``ValueError`` for compound expressions that contain at
-            least one unknown category name.
-            """
-            parts = expr.split("+")
-            if all(p in known_categories for p in parts):
-                return frozenset(parts)
-            if len(parts) == 1:
-                # Single unrecognised token — fall back to substring matching.
-                return None
-            # Compound expression with at least one unknown part: raise.
-            unknown = [p for p in parts if p not in known_categories]
-            raise ValueError(
-                f"Unknown category(ies) {unknown!r} in compound expression "
-                f"{expr!r}. Known: {sorted(known_categories)}"
-            )
-
-        def _matches(variable: str, expressions: list[str]) -> bool:
-            """Return True if *variable* matches any expression in the list."""
-            var_cats = set(per_var.get(variable, []))
-            for expr in expressions:
-                parsed = _parse_expression(expr)
-                if parsed is not None:
-                    # Category expression: variable must belong to ALL parts.
-                    if parsed.issubset(var_cats):
-                        return True
-                else:
-                    # Substring fallback for backward compatibility.
-                    if expr in variable:
-                        return True
-            return False
-
-        result = list(all_variables)
-
-        if include is not None:
-            result = [v for v in result if _matches(v, include)]
-
-        if exclude is not None:
-            result = [v for v in result if not _matches(v, exclude)]
-
-        return result
-
-    def typed_variables(self) -> dict[str, Any]:
-        """Return strongly-typed Variable objects for each variable in this dataset.
-
-        Each variable is wrapped in an :class:`anemoi.transform.variables.Variable`
-        instance constructed from its per-variable metadata dict.  This gives
-        typed access to properties such as ``is_accumulation``,
-        ``is_computed_forcing``, ``is_constant_in_time``, etc.
-
-        Returns
-        -------
-        dict[str, Variable]
-            Mapping of variable names to ``Variable`` instances.
-
-        Raises
-        ------
-        ImportError
-            If ``anemoi-transform`` is not installed.
-
-        Examples
-        --------
-        >>> tvars = view.typed_variables()
-        >>> tvars["cos_latitude"].is_computed_forcing
-        True
-        """
-        try:
-            from anemoi.transform.variables import Variable
-        except ImportError as exc:
-            raise ImportError(
-                "typed_variables() requires anemoi-transform. " "Install it with: pip install anemoi-transform"
-            ) from exc
-
-        var_meta = self.variables_metadata
-        return {name: Variable.from_dict(name, var_meta.get(name, {})) for name in self.variables}
+        grid_indices = self._arrays.grid_indices
+        if grid_indices is not None:
+            return len(grid_indices)
+        latitudes = self._arrays.latitudes
+        if latitudes is not None:
+            return len(latitudes)
+        return self._data.grid_size()
 
     def __repr__(self) -> str:
-        """String representation.
-
-        Returns
-        -------
-        str
-            Repr string showing the dataset name.
-        """
         return f"DatasetView(name={self._name!r})"
+
+
+# ---------------------------------------------------------------------------
+# Metadata
+# ---------------------------------------------------------------------------
+
+
+def _deep_merge(base: dict[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
+    """Return *base* with *patch* merged in: dicts merge recursively, any other value replaces."""
+    for key, value in patch.items():
+        if isinstance(value, Mapping) and isinstance(base.get(key), dict):
+            base[key] = _deep_merge(base[key], value)
+        else:
+            base[key] = copy.deepcopy(value)
+    return base
 
 
 class Metadata:
     """User-facing metadata interface.
 
-    Primary API exposes typed properties via the version-agnostic contract
-    methods on the underlying :class:`~anemoi.metadata.base.MetadataContract`
-    instance.  Permissive sections (``config``, ``training``, ``dataset``,
-    ``environment``, ``provenance``) are accessible via :meth:`get` or
-    :meth:`__getitem__`.
-
-    This class is the primary interface for users working with checkpoint
-    metadata.  It replaces ``anemoi.inference.metadata.Metadata``.
-
     Parameters
     ----------
-    raw : MetadataContract
-        The underlying pydantic metadata instance.
+    raw : CheckpointAdapter
+        The underlying checkpoint adapter.
+    supporting_arrays : Mapping[str, Any] | None, optional
+        The supporting arrays of the checkpoint, as returned by
+        ``load_metadata(path, supporting_arrays=True)`` (keyed by dataset name,
+        or flat for single-dataset checkpoints).  They are copied.
 
     Examples
     --------
     >>> metadata = Metadata.from_checkpoint("model.ckpt")
-    >>> print(metadata.schema_version)
-    '1.0'
-    >>> print(metadata.dataset_names)
-    ['data']
-    >>> print(metadata.timestep)
+    >>> metadata.version
+    '2.0'
+    >>> metadata.dataset_names
+    ['era5']
+    >>> metadata.task.timestep()
     '6h'
+    >>> metadata.dataset("era5").data.grid_size()
+    40320
     """
 
-    def __init__(self, raw: "MetadataContract") -> None:
-        """Initialise with a raw metadata instance.
-
-        Parameters
-        ----------
-        raw : MetadataContract
-            The underlying pydantic metadata instance.
-        """
+    def __init__(self, raw: "CheckpointAdapter", supporting_arrays: Mapping[str, Any] | None = None) -> None:
         self._raw = raw
+        self._arrays = split_by_dataset(supporting_arrays, raw.dataset_names)
 
     # ------------------------------------------------------------------
-    # Class methods
+    # Construction
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_checkpoint(
-        cls,
-        path: str | Path,
-        *,
-        migrate: bool = True,
-    ) -> "Metadata":
-        """Load metadata from a checkpoint file.
+    def from_checkpoint(cls, path: str | Path) -> "Metadata":
+        """Load metadata and supporting arrays from a checkpoint file.
 
         Parameters
         ----------
         path : str | Path
             Path to the checkpoint file.
-        migrate : bool, optional
-            If ``True`` (default), auto-migrate to the latest schema version.
-
-        Returns
-        -------
-        Metadata
-            Loaded metadata instance.
 
         Raises
         ------
         CheckpointError
             If the file is invalid or metadata is missing.
-
-        Examples
-        --------
-        >>> m = Metadata.from_checkpoint("model.ckpt")
-        >>> m = Metadata.from_checkpoint("old_model.ckpt", migrate=False)
         """
         from .checkpoint import load_metadata
 
-        raw = load_metadata(path, migrate=migrate)  # type: ignore[reportCallIssue]
-        return cls(raw)
+        raw, arrays = load_metadata(path, supporting_arrays=True)
+        return cls(raw, arrays)
 
     @classmethod
-    def from_dict(
-        cls,
-        data: dict[str, Any],
-        *,
-        migrate: bool = True,
-    ) -> "Metadata":
-        """Load metadata from a dictionary.
+    def from_dict(cls, data: dict[str, Any], supporting_arrays: Mapping[str, Any] | None = None) -> "Metadata":
+        """Build metadata from a raw dictionary.
 
         Parameters
         ----------
         data : dict[str, Any]
-            Raw metadata dictionary.
-        migrate : bool, optional
-            If ``True`` (default), auto-migrate to the latest schema version.
-
-        Returns
-        -------
-        Metadata
-            Loaded metadata instance.
-
-        Examples
-        --------
-        >>> data = {"schema_version": "1.0", ...}
-        >>> m = Metadata.from_dict(data)
+            Raw metadata dictionary (copied).
+        supporting_arrays : Mapping[str, Any] | None, optional
+            Supporting arrays, keyed by dataset name or flat for a
+            single-dataset checkpoint (copied).
         """
-        from .registry import MetadataRegistry
+        from .base import CheckpointAdapter
 
-        raw = MetadataRegistry.load(data, migrate=migrate)
-        return cls(raw)
+        return cls(CheckpointAdapter(data), supporting_arrays)
 
-    # ------------------------------------------------------------------
-    # Envelope properties
-    # ------------------------------------------------------------------
+    def with_overrides(
+        self,
+        patch: Mapping[str, Any],
+        supporting_arrays: Mapping[str, Mapping[str, np.ndarray]] | None = None,
+    ) -> "Metadata":
+        """Return a new instance whose raw metadata is this one's with *patch* deep-merged in.
 
-    @property
-    def schema_version(self) -> str | None:
-        """The schema version string, or ``None`` if not set.
+        Dicts merge recursively; any other value (lists included) replaces
+        the stored one.  The supporting arrays are kept, except those named in
+        *supporting_arrays*, which are replaced or added.  This instance is not
+        changed.
 
-        Returns
-        -------
-        str or None
-            Semantic version string (e.g., ``"1.0"``), or ``None`` if the
-            schema version is not set.
+        Parameters
+        ----------
+        patch : Mapping[str, Any]
+            Partial raw metadata, e.g. ``{"config": {"data": {"frequency": "3h"}}}``.
+        supporting_arrays : Mapping[str, Mapping[str, numpy.ndarray]] | None, optional
+            Arrays to replace or add, ``{dataset_name: {array_name: array}}``
+            (copied), for example the grid an external graph builder produced.
+            The arrays of other datasets, and the other arrays of these
+            datasets, are kept.
+
+        Raises
+        ------
+        KeyError
+            If *supporting_arrays* names a dataset the new metadata does not have.
         """
-        return self._raw.schema_version
-
-    @property
-    def original_schema_version(self) -> str | None:
-        """The original schema version string, or ``None`` if not set.
-
-        Returns
-        -------
-        str or None
-            Semantic version string (e.g., ``"1.0"``), or ``None`` if the
-            original schema version is not set.
-        """
-        return self._raw.original_schema_version
-
-    @property
-    def is_legacy(self) -> bool:
-        """Whether this metadata is a V0 (pre-``metadata_inference``) checkpoint.
-
-        Returns ``True`` when the checkpoint is a legacy V0 instance (version
-        ``"0.0"``) that has no ``metadata_inference`` block. Returns ``False``
-        for native V1+ checkpoints and for hand-constructed instances with no
-        version information.
-
-        Note that the registry's ``detect_version`` assigns ``"0.0"`` to true
-        legacy data on load, so ``None`` only occurs for hand-constructed
-        instances without version metadata.
-
-        Returns
-        -------
-        bool
-            ``True`` if this is a legacy V0 checkpoint, ``False`` otherwise.
-        """
-        ver = self._raw.original_version
-        return ver is not None and ver < Version("1.0")
-
-    @cached_property
-    def created_at(self) -> datetime | None:
-        """When the metadata was created.
-
-        Returns
-        -------
-        datetime | None
-            Creation timestamp, or ``None`` if not recorded.
-        """
-        return getattr(self._raw, "created_at", None)
-
-    @property
-    def raw(self) -> "MetadataContract":
-        """Access the underlying pydantic model.
-
-        Users who need version-specific internals (e.g. the typed
-        ``InferenceMetadata`` block from V1) can reach them via this
-        property: ``metadata.raw.metadata_inference``.
-
-        Returns
-        -------
-        MetadataContract
-            The raw pydantic metadata instance.
-        """
-        return self._raw
+        merged = _deep_merge(self._raw.to_dict(), patch)
+        arrays = self._arrays
+        if supporting_arrays:
+            arrays = merge_supporting_arrays(self._arrays, supporting_arrays)
+        result = type(self).from_dict(merged, arrays)
+        unknown = [name for name in (supporting_arrays or {}) if name not in result.dataset_names]
+        if unknown:
+            msg = f"Unknown dataset(s) {unknown!r} in supporting_arrays. Available: {result.dataset_names!r}"
+            raise KeyError(msg)
+        return result
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialise to dictionary.
-
-        Returns
-        -------
-        dict[str, Any]
-            Dictionary representation of the metadata, suitable for JSON
-            serialisation.
-        """
+        """Return a copy of the raw metadata dictionary, unchanged (unknown keys included)."""
         return self._raw.to_dict()
 
     # ------------------------------------------------------------------
-    # Typed properties via version-agnostic contract methods
+    # Checkpoint level
     # ------------------------------------------------------------------
 
-    @cached_property
-    def dataset_names(self) -> list[str]:
-        """Ordered list of dataset names referenced by this checkpoint.
+    @property
+    def version(self) -> str | None:
+        """The top-level metadata ``version`` string, or ``None`` if the checkpoint has none."""
+        return self._raw.version
 
-        Returns
-        -------
-        list[str]
-            Dataset names as recorded in the inference metadata.
-        """
-        return self._raw.get_dataset_names()
+    @property
+    def component_versions(self) -> dict[str, str]:
+        """Version of each structured component (``data``, ``task``, ``lineage``): stamped, else inferred."""
+        return self._raw.component_versions
+
+    @property
+    def dataset_names(self) -> list[str]:
+        """Ordered dataset names of the checkpoint."""
+        return self._raw.dataset_names
+
+    @property
+    def task(self) -> TaskView:
+        """The task of the checkpoint (name, timing, offsets, ...)."""
+        return TaskView(self._raw.task)
+
+    @property
+    def lineage(self) -> LineageView:
+        """The lineage of the checkpoint (``uuid``, ``parent_uuid``, ``entries``)."""
+        return LineageView(self._raw.lineage)
+
+    @property
+    def sections(self) -> SectionsView:
+        """The raw sections: config, provenance, timestamp, seeds, ..."""
+        return SectionsView(self._raw.sections)
+
+    # ------------------------------------------------------------------
+    # Datasets
+    # ------------------------------------------------------------------
 
     def dataset(self, name: str | None = None) -> DatasetView:
-        """Return a per-dataset view for convenient access to dataset-specific properties.
-
-        When *name* is ``None`` the view is bound to the first dataset.
-        Multi-dataset consumers can use this method to access per-dataset
-        properties without needing to pass the dataset name to each call.
+        """Return the view of one dataset.
 
         Parameters
         ----------
         name : str | None, optional
-            Dataset name to query.  If ``None`` (default), the first entry
-            in :attr:`dataset_names` is used.
-
-        Returns
-        -------
-        DatasetView
-            Read-only view over the metadata for the specified dataset.
+            Dataset name.  It may be omitted only when the checkpoint has
+            exactly one dataset.
 
         Raises
         ------
-        IndexError
-            If *name* is ``None`` and :attr:`dataset_names` is empty.
+        DatasetSelectionError
+            If *name* is omitted and the checkpoint has no dataset or several.
         KeyError
-            If *name* is not in :attr:`dataset_names`.
-
-        Examples
-        --------
-        >>> metadata = Metadata.from_checkpoint("model.ckpt")
-        >>> view = metadata.dataset("era5_1deg")
-        >>> print(view.timestep)
-        '6h'
-        >>> print(view.multi_step_input)
-        2
-
-        >>> # Default to first dataset
-        >>> first = metadata.dataset()
-        >>> print(first.name)
-        'era5_1deg'
+            If *name* is not a dataset of the checkpoint.
         """
+        names = self.dataset_names
         if name is None:
-            if not self.dataset_names:
-                msg = "Cannot get default dataset: dataset_names is empty"
-                raise IndexError(msg)
-            name = self.dataset_names[0]
-        elif name not in self.dataset_names:
-            msg = f"Dataset {name!r} not found. Available datasets: {self.dataset_names!r}"
+            if len(names) != 1:
+                raise DatasetSelectionError(
+                    f"A dataset name is required: the checkpoint has {len(names)} datasets ({names!r})"
+                    if names
+                    else "The checkpoint has no datasets",
+                )
+            name = names[0]
+        elif name not in names:
+            msg = f"Dataset {name!r} not found. Available datasets: {names!r}"
             raise KeyError(msg)
-        return DatasetView(self._raw, name)
+        return DatasetView(self._raw, name, DatasetArrays(self._arrays.get(name)))
 
-    @cached_property
+    @property
     def datasets(self) -> dict[str, DatasetView]:
-        """Mapping of all dataset names to their views.
-
-        Iteration order follows :attr:`dataset_names`.
-
-        Returns
-        -------
-        dict[str, DatasetView]
-            Dictionary mapping dataset names to their read-only views.
-
-        Examples
-        --------
-        >>> metadata = Metadata.from_checkpoint("multi_dataset.ckpt")
-        >>> for name, view in metadata.datasets.items():
-        ...     print(f"{name}: {view.timestep}")
-        era5_1deg: 6h
-        cerra_025deg: 1h
-        """
-        return {name: DatasetView(self._raw, name) for name in self.dataset_names}
-
-    @cached_property
-    def task(self) -> str | None:
-        """Optional task label for this checkpoint.
-
-        Returns
-        -------
-        str or None
-            Task label (e.g. ``"forecaster"``), or ``None`` if not set.
-        """
-        return self._raw.get_task()
-
-    @cached_property
-    def timestep(self) -> str:
-        """Model timestep frequency string.
-
-        Returns
-        -------
-        str
-            Frequency string (e.g. ``"6h"``).
-        """
-        return self._raw.get_timestep()
-
-    @cached_property
-    def multi_step_input(self) -> int:
-        """Number of input time-steps the model consumes.
-
-        Derived from the length of the input relative date indices for the
-        first dataset.
-
-        Returns
-        -------
-        int
-            Count of input time-steps.
-        """
-        return len(self._raw.get_input_relative_date_indices())
-
-    @cached_property
-    def multi_step_output(self) -> int:
-        """Number of output time-steps the model produces.
-
-        Derived from the length of the output relative date indices for the
-        first dataset.
-
-        Returns
-        -------
-        int
-            Count of output time-steps.
-        """
-        return len(self._raw.get_output_relative_date_indices())
-
-    @cached_property
-    def grid_points(self) -> int | None:
-        """Number of grid points, or ``None`` if unknown.
-
-        Returns
-        -------
-        int or None
-            Number of grid points for the first dataset, or ``None`` if not
-            recorded.
-        """
-        return self._raw.get_grid_points()
-
-    @cached_property
-    def precision(self) -> str | None:
-        """Model precision string, or ``None`` if not recorded.
-
-        Returns
-        -------
-        str or None
-            Precision string (e.g. ``"16-mixed"``, ``"bf16-mixed"``,
-            ``"32"``), or ``None`` if not recorded.
-        """
-        return self._raw.get_precision()
-
-    def variables_metadata(self, dataset_name: str | None = None) -> dict[str, dict[str, Any]]:
-        """Per-variable metadata (MARS keys, flags, units).
-
-        Parameters
-        ----------
-        dataset_name : str | None, optional
-            Dataset to query.  Defaults to the first dataset.
-
-        Returns
-        -------
-        dict[str, dict[str, Any]]
-            Mapping of variable names to their metadata dicts.
-            Returns an empty dict if not available.
-
-        Raises
-        ------
-        IndexError
-            If *dataset_name* is ``None`` and there are no datasets.
-        KeyError
-            If *dataset_name* is not a known dataset.
-        """
-        return self.dataset(dataset_name).variables_metadata
-
-    def accumulations(self, dataset_name: str | None = None) -> list[str]:
-        """Variables that are accumulations (need de-accumulation).
-
-        Parameters
-        ----------
-        dataset_name : str | None, optional
-            Dataset to query.  Defaults to the first dataset.
-
-        Returns
-        -------
-        list[str]
-            Variable names that require de-accumulation at inference time.
-
-        Raises
-        ------
-        IndexError
-            If *dataset_name* is ``None`` and there are no datasets.
-        KeyError
-            If *dataset_name* is not a known dataset.
-        """
-        return self.dataset(dataset_name).accumulations
-
-    def computed_forcings(self, dataset_name: str | None = None) -> list[str]:
-        """Variables computed at inference time (not retrieved from data).
-
-        Parameters
-        ----------
-        dataset_name : str | None, optional
-            Dataset to query.  Defaults to the first dataset.
-
-        Returns
-        -------
-        list[str]
-            Variable names that are computed on the fly during inference.
-
-        Raises
-        ------
-        IndexError
-            If *dataset_name* is ``None`` and there are no datasets.
-        KeyError
-            If *dataset_name* is not a known dataset.
-        """
-        return self.dataset(dataset_name).computed_forcings
-
-    def data_request(self, dataset_name: str | None = None) -> dict[str, Any]:
-        """Data request parameters (grid, area, etc.).
-
-        Parameters
-        ----------
-        dataset_name : str | None, optional
-            Dataset to query.  Defaults to the first dataset.
-
-        Returns
-        -------
-        dict[str, Any]
-            Data request parameters.  Returns an empty dict if not available.
-
-        Raises
-        ------
-        IndexError
-            If *dataset_name* is ``None`` and there are no datasets.
-        KeyError
-            If *dataset_name* is not a known dataset.
-        """
-        return self.dataset(dataset_name).data_request
-
-    def provenance(self) -> dict[str, Any]:
-        """Code and data provenance information.
-
-        Returns
-        -------
-        dict[str, Any]
-            Provenance information (git SHA, hostname, packages, etc.).
-            Returns an empty dict if not available.
-        """
-        return self._raw.get_provenance()
-
-    def data_frequency(self, dataset_name: str | None = None) -> str | None:
-        """Data frequency string, or ``None`` if not recorded.
-
-        Parameters
-        ----------
-        dataset_name : str | None, optional
-            Dataset to query.  Defaults to the first dataset.
-
-        Returns
-        -------
-        str or None
-            Frequency string (e.g. ``"6h"``), or ``None`` if not recorded.
-
-        Raises
-        ------
-        IndexError
-            If *dataset_name* is ``None`` and there are no datasets.
-        KeyError
-            If *dataset_name* is not a known dataset.
-        """
-        return self.dataset(dataset_name).data_frequency
-
-    def sources(self, dataset_name: str | None = None) -> list[dict[str, Any]]:
-        """Source dataset configurations.
-
-        Parameters
-        ----------
-        dataset_name : str | None, optional
-            Dataset to query.  Defaults to the first dataset.
-
-        Returns
-        -------
-        list[dict[str, Any]]
-            Source dataset configurations.  Returns an empty list if not
-            available.
-
-        Raises
-        ------
-        IndexError
-            If *dataset_name* is ``None`` and there are no datasets.
-        KeyError
-            If *dataset_name* is not a known dataset.
-        """
-        return self.dataset(dataset_name).sources
-
-    def open_dataset_args(self, dataset_name: str | None = None) -> dict[str, Any]:
-        """Arguments for opening the training dataset.
-
-        Parameters
-        ----------
-        dataset_name : str | None, optional
-            Dataset to query.  Defaults to the first dataset.
-
-        Returns
-        -------
-        dict[str, Any]
-            Arguments for opening the training dataset.  Returns an empty dict
-            if not available.
-
-        Raises
-        ------
-        IndexError
-            If *dataset_name* is ``None`` and there are no datasets.
-        KeyError
-            If *dataset_name* is not a known dataset.
-        """
-        return self.dataset(dataset_name).open_dataset_args
-
-    def dataloader_config(
-        self,
-        partition: str = "training",
-        dataset_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Dataloader dataset configuration for a given partition.
-
-        Extracts the dataset configuration from
-        ``config.dataloader.<partition>``, handling multi-dataset nesting
-        and the ``dataset_config`` key used by newer checkpoints.
-
-        Parameters
-        ----------
-        partition : str, optional
-            The partition name (e.g. ``"training"``, ``"validation"``),
-            by default ``"training"``.
-        dataset_name : str | None, optional
-            Dataset to query.  Defaults to the first dataset.
-
-        Returns
-        -------
-        dict[str, Any]
-            The dataloader dataset configuration.  Returns an empty dict
-            if the partition or config section is absent.
-
-        Raises
-        ------
-        IndexError
-            If *dataset_name* is ``None`` and there are no datasets.
-        KeyError
-            If *dataset_name* is not a known dataset.
-        """
-        return self.dataset(dataset_name).dataloader_config(partition)
+        """All datasets by name, in :attr:`dataset_names` order."""
+        return {name: self.dataset(name) for name in self.dataset_names}
 
     # ------------------------------------------------------------------
-    # Variable selection and categorisation
+    # Single-dataset shortcuts
     # ------------------------------------------------------------------
 
-    @cached_property
+    @property
     def variables(self) -> list[str]:
-        """List of all variable names in the dataset (input and output).
+        """Variable names of the only dataset (``DatasetSelectionError`` if there are several)."""
+        return self.dataset().data.variables()
 
-        Names are taken from the union of input and output index mappings,
-        ordered by their input tensor index first, then output-only variables
-        appended in their output index order.  Uses the first dataset.
+    @property
+    def grid_size(self) -> int | None:
+        """Grid size of the only dataset (``DatasetSelectionError`` if there are several)."""
+        return self.dataset().data.grid_size()
 
-        Returns
-        -------
-        list[str]
-            All variable names from both input and output index mappings.
-        """
-        return self.dataset().variables
+    @property
+    def latitudes(self) -> np.ndarray | None:
+        """Latitudes of the only dataset (``DatasetSelectionError`` if there are several)."""
+        return self.dataset().arrays.latitudes
 
-    @cached_property
-    def num_variables(self) -> int:
-        """Number of variables in the dataset.
-
-        Returns
-        -------
-        int
-            Count of variables.
-        """
-        return len(self.variables)
-
-    def variable_categories(
-        self,
-        dataset_name: str | None = None,
-        *,
-        per_variable: bool = False,
-    ) -> dict[str, list[str]]:
-        """Categorize variables by their role in the model.
-
-        In addition to the base categories returned by the contract
-        (``"forcing"``, ``"prognostic"``, ``"diagnostic"``, ``"target"``),
-        three derived categories are computed and merged in:
-
-        * ``"computed"``  — variables flagged as computed forcings.
-        * ``"accumulation"`` — variables whose ``process`` is ``"accumulated"``.
-        * ``"constant"`` — variables whose ``constant_in_time`` flag is ``True``.
-
-        Parameters
-        ----------
-        dataset_name : str | None, optional
-            Dataset to query.  Defaults to the first dataset.
-        per_variable : bool, optional
-            If ``True``, return a variable-keyed dict where each variable name
-            maps to its sorted list of category strings.  If ``False`` (default),
-            return a category-keyed dict where each category maps to a list of
-            variable names belonging to it.
-
-        Returns
-        -------
-        dict[str, list[str]]
-            Category mapping.  Format depends on *per_variable*:
-
-            * ``per_variable=False`` (default) — ``{category: [var, ...]}``.
-              Only categories that contain at least one variable are present,
-              except for the four base categories which are always included
-              (possibly empty) for backward compatibility.
-            * ``per_variable=True`` — ``{variable: [category, ...]}``.
-              Categories are sorted alphabetically.
-
-        Raises
-        ------
-        IndexError
-            If *dataset_name* is ``None`` and there are no datasets.
-        KeyError
-            If *dataset_name* is not a known dataset.
-
-        Examples
-        --------
-        >>> cats = metadata.variable_categories()
-        >>> cats["prognostic"]
-        ['u', 'v', 't', 'q']
-
-        >>> cats = metadata.variable_categories(per_variable=True)
-        >>> cats["u"]
-        ['prognostic', 'target']
-        >>> cats["cos_latitude"]
-        ['computed', 'constant', 'forcing']
-        """
-        return self.dataset(dataset_name).variable_categories(per_variable=per_variable)
-
-    def select_variables(
-        self,
-        *,
-        include: list[str] | None = None,
-        exclude: list[str] | None = None,
-        dataset_name: str | None = None,
-    ) -> list[str]:
-        """Select variables by category expression or substring pattern.
-
-        Each entry in *include* / *exclude* is first parsed as a category
-        expression:
-
-        * A single category name (e.g. ``"prognostic"``) matches all variables
-          belonging to that category.
-        * A compound expression with ``+`` (e.g. ``"prognostic+forcing"``)
-          matches variables belonging to **all** of the listed categories
-          (conjunction / intersection).
-
-        If an entry does not match any known category expression it is treated
-        as a substring pattern matched against variable names (backward-compat).
-
-        Parameters
-        ----------
-        include : list[str] | None, optional
-            If provided, only variables matching at least one of these
-            expressions are kept.
-        exclude : list[str] | None, optional
-            If provided, variables matching any of these expressions are removed.
-        dataset_name : str | None, optional
-            Dataset to query.  Defaults to the first dataset.
-
-        Returns
-        -------
-        list[str]
-            Filtered list of variable names, in original order.
-
-        Raises
-        ------
-        ValueError
-            If a compound expression (containing ``+``) references one or more
-            unknown category names.
-        IndexError
-            If *dataset_name* is ``None`` and there are no datasets.
-        KeyError
-            If *dataset_name* is not a known dataset.
-
-        Examples
-        --------
-        >>> metadata.select_variables(include=["prognostic"])
-        ['u', 'v', 't', 'q']
-
-        >>> metadata.select_variables(include=["prognostic+forcing"])
-        []  # no variable is both prognostic and forcing
-
-        >>> metadata.select_variables(include=["computed+constant"])
-        ['cos_latitude', 'sin_latitude']
-        """
-        return self.dataset(dataset_name).select_variables(include=include, exclude=exclude)
-
-    def typed_variables(self, dataset_name: str | None = None) -> dict[str, Any]:
-        """Return strongly-typed Variable objects for each variable.
-
-        Each variable is wrapped in an :class:`anemoi.transform.variables.Variable`
-        instance constructed from its per-variable metadata dict.  This gives
-        typed access to properties such as ``is_accumulation``,
-        ``is_computed_forcing``, ``is_constant_in_time``, etc.
-
-        Parameters
-        ----------
-        dataset_name : str | None, optional
-            Dataset to query.  Defaults to the first dataset.
-
-        Returns
-        -------
-        dict[str, Variable]
-            Mapping of variable names to ``Variable`` instances.
-
-        Raises
-        ------
-        ImportError
-            If ``anemoi-transform`` is not installed.
-        IndexError
-            If *dataset_name* is ``None`` and there are no datasets.
-        KeyError
-            If *dataset_name* is not a known dataset.
-
-        Examples
-        --------
-        >>> tvars = metadata.typed_variables()
-        >>> tvars["cos_latitude"].is_computed_forcing
-        True
-        >>> tvars["cos_latitude"].is_constant_in_time
-        True
-        """
-        return self.dataset(dataset_name).typed_variables()
+    @property
+    def longitudes(self) -> np.ndarray | None:
+        """Longitudes of the only dataset (``DatasetSelectionError`` if there are several)."""
+        return self.dataset().arrays.longitudes
 
     # ------------------------------------------------------------------
-    # Environment validation
+    # Environment
     # ------------------------------------------------------------------
 
     def validate_environment(self) -> list[str]:
-        """Check checkpoint environment against current environment.
-
-        Compares the Python version recorded in the checkpoint's environment
-        dict against the current runtime.  Returns an empty list when the
-        environment dict is missing or empty.
+        """Compare the recorded Python version with the running one.
 
         Returns
         -------
         list[str]
-            List of warning messages for any mismatches found.
-            Empty list if environments match or no environment info is stored.
-
-        Examples
-        --------
-        >>> warnings = metadata.validate_environment()
-        >>> if warnings:
-        ...     for w in warnings:
-        ...         print(f"Warning: {w}")
+            Warning messages; empty when they match or no environment is recorded.
         """
         warnings: list[str] = []
-
-        env: dict = getattr(self._raw, "environment", {})
-        if not env:
-            return warnings
-
-        checkpoint_python: str | None = env.get("python_version")
+        checkpoint_python = self.sections.environment.get("python_version")
         if checkpoint_python is not None:
             current_python = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
             if checkpoint_python != current_python:
                 warnings.append(f"Python version mismatch: checkpoint={checkpoint_python}, current={current_python}")
-
         return warnings
 
-    def get_environment_info(self) -> dict:
-        """Get environment information from the checkpoint.
-
-        Returns the raw environment dict stored in the checkpoint.  The
-        contents are version-dependent; callers should use ``.get()`` for
-        optional keys.
-
-        Returns
-        -------
-        dict
-            Dictionary containing environment details, or an empty dict if
-            no environment information was recorded.
-
-        Examples
-        --------
-        >>> info = metadata.get_environment_info()
-        >>> print(info.get("python_version"))
-        """
-        return getattr(self._raw, "environment", {})
-
     # ------------------------------------------------------------------
-    # Safe access for permissive sections
+    # Raw access and dunders
     # ------------------------------------------------------------------
-
-    def get(self, section: str, key: str | None = None, default: Any = None) -> Any:
-        """Access metadata sections and keys safely.
-
-        Retrieves a top-level section from the raw metadata (e.g. ``"config"``,
-        ``"training"``, ``"dataset"``, ``"environment"``, ``"provenance"``).
-        When *key* is provided the value is looked up within that section.
-
-        Parameters
-        ----------
-        section : str
-            Top-level attribute name on the raw metadata model.
-        key : str | None, optional
-            Key to look up within the section.  When ``None`` the entire
-            section is returned.
-        default : Any, optional
-            Value to return when the section or key is absent.  Defaults to
-            ``None``.
-
-        Returns
-        -------
-        Any
-            The section, the value at *key* within the section, or *default*.
-
-        Examples
-        --------
-        >>> metadata.get("config")
-        {'data': {...}, 'training': {...}}
-        >>> metadata.get("config", "data")
-        {...}
-        >>> metadata.get("missing_section", default=42)
-        42
-        """
-        section_data = self._raw.get_section(section)
-        if section_data is None:
-            return default
-        if key is None:
-            return section_data
-        if isinstance(section_data, dict):
-            return section_data.get(key, default)
-        return getattr(section_data, key, default)
 
     def __getitem__(self, section: str) -> Any:
-        """Return a top-level metadata section by name.
+        """Return a copy of a top-level key of the raw metadata (e.g. ``"config"``).
 
-        Parameters
-        ----------
-        section : str
-            Top-level attribute name on the raw metadata model (e.g.
-            ``"config"``, ``"training"``).
-
-        Returns
-        -------
-        Any
-            The section value.
+        Only stored keys are reachable, never methods or attributes.
 
         Raises
         ------
         KeyError
-            If *section* does not exist on the raw metadata model.
-
-        Examples
-        --------
-        >>> metadata["config"]
-        {'data': {...}}
+            If *section* is not a top-level key of the raw metadata.
         """
-        try:
-            return getattr(self._raw, section)
-        except AttributeError:
-            raise KeyError(section) from None
-
-    # ------------------------------------------------------------------
-    # Dunder helpers
-    # ------------------------------------------------------------------
+        value = self._raw.sections.section(section, _MISSING)
+        if value is _MISSING:
+            raise KeyError(section)
+        return copy.deepcopy(value)
 
     def __repr__(self) -> str:
-        """String representation.
-
-        Returns
-        -------
-        str
-            Repr string showing schema version and dataset names.
-        """
-        return f"Metadata(version={self.schema_version!r}, " f"datasets={self.dataset_names!r})"
+        return f"Metadata(version={self.version!r}, datasets={self.dataset_names!r})"
