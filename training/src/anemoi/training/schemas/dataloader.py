@@ -146,8 +146,6 @@ class DataLoaderSchema(PydanticBaseModel):
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
     trajectory_sampling: TrajectorySamplingSchema | None = Field(default=None)
     "Default trajectory anchor sampling used across all splits. stride=None → non-overlapping; stride=N → step N."
-    ignore_metadata: bool = Field(default=False)
-    "If True, drop start, end and frequency before open_dataset so the full dataset is indexed (e.g. cloned datasets)."
     multiprocessing_context: str | None = Field(default=None, examples=[None, "spawn", "fork", "forkserver"])
     "Multiprocessing context to use for workers. If None, the default context will be used"
     blosc_threads: PositiveInt | None = Field(default=8)

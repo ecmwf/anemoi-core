@@ -20,7 +20,6 @@ from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks import TQDMProgressBar
 
-from anemoi.training.diagnostics.callbacks.cache_sync import CacheSyncCallback
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.plot import PlottingSettings
@@ -64,8 +63,6 @@ class CallbacksContext:
         Whether MLflow logging is enabled
     weight_averaging_config : DictConfig | None
         Weight averaging configuration (config.training.weight_averaging), or None if not set
-    system_hardware_cache_config : DictConfig | None
-        System hardware cache configuration (config.system.hardware.cache), or None if not set
     """
 
     diagnostics: DictConfig
@@ -74,7 +71,6 @@ class CallbacksContext:
     wandb_enabled: bool
     mlflow_enabled: bool
     weight_averaging_config: DictConfig | None = field(default=None)
-    system_hardware_cache_config: DictConfig | None = field(default=None)
 
 
 def _get_checkpoint_callback(diagnostics_cfg: DictConfig, checkpoint_paths_cfg: DictConfig) -> list[AnemoiCheckpoint]:

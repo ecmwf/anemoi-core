@@ -1,9 +1,5 @@
 prefetch_factor: 2
 pin_memory: True
-# If True, drop start, end and frequency before calling open_dataset so the
-# full dataset is indexed regardless of dates (e.g. for cloned datasets).
-ignore_metadata: False
-
 # Number of blosc threads in each dataloader worker, for the decompression of
 # zarr chunks and for the dataset cache. If null, blosc uses one thread in a
 # worker. Keep (GPUs per node) x (workers per GPU) x blosc_threads below the

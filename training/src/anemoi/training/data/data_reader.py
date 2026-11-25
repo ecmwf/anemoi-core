@@ -141,10 +141,7 @@ class BaseAnemoiReader:
         if source is None:
             msg = "Either dataset or dataset_config must be provided."
             raise ValueError(msg)
-        # Only pass start/end when set: even start=None/end=None makes open_dataset build a date
-        # subset from dates[0]..dates[-1], which breaks on datasets with invalid dates (e.g. clones).
-        open_kwargs = {key: value for key, value in {"start": start, "end": end}.items() if value is not None}
-        self.data = open_dataset(_normalize_dataset_config(source), **open_kwargs)
+        self.data = open_dataset(_normalize_dataset_config(source), start=start, end=end)
         self._cache = None
         self._cache_dataset_id = None
         #: Sampling config used by :meth:`compute_anchors`.
@@ -505,29 +502,9 @@ class TrajectoryDataset(BaseAnemoiReader):
         return tree
 
 
-def _strip_date_metadata(dataset_config: dict) -> dict:
-    """Drop start, end and frequency so open_dataset indexes over the entire dataset."""
-    dataset_config.pop("start", None)
-    dataset_config.pop("end", None)
-    inner = _as_dict(dataset_config["dataset_config"])
-    if isinstance(inner, dict):
-        # a frequency subset indexes the dates array, which may be shorter than the data or invalid
-        inner = {key: value for key, value in inner.items() if key != "frequency"}
-    dataset_config["dataset_config"] = inner
-    return dataset_config
-
-
-def create_dataset(dataset_config: dict, ignore_metadata: bool = False, **_kwargs) -> BaseAnemoiReader:
-    """Factory function to create a data reader based on the dataset configuration.
-
-    If ``ignore_metadata`` is True, ``start``, ``end`` and ``frequency`` are dropped
-    before calling ``open_dataset`` so the reader indexes over the entire dataset
-    (e.g. for cloned datasets whose dates do not match the original metadata).
-    """
+def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
+    """Factory function to create a data reader based on the dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
-    if ignore_metadata:
-        LOGGER.info("dataloader.ignore_metadata is set: ignoring start, end and frequency.")
-        dataset_config = _strip_date_metadata(dataset_config)
     trajectory_config = _as_dict(dataset_config.pop("trajectory", None))
 
     if trajectory_config is not None:
