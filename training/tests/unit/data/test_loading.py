@@ -101,7 +101,7 @@ def test_grouped_policy_builds_one_dataset_per_group_combination(mocker: MockFix
     relative_date_indices = {name: [0, 2, 6] for name in data_readers}
     mock_multi_dataset = mocker.patch(
         "anemoi.training.data.loading.MultiDataset",
-        side_effect=lambda readers, **_kwargs: mocker.MagicMock(data_readers=readers),
+        side_effect=lambda readers, _relative_date_indices, **_kwargs: mocker.MagicMock(data_readers=readers),
     )
 
     dataset = policy.build_dataset(data_readers, relative_date_indices, fake_dataloading=True)
