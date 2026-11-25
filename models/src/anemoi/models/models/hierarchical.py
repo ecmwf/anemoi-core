@@ -506,9 +506,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 decoder_edge_attr,
                 decoder_edge_index,
                 dec_edge_shard_sizes,
-            ) = self.decoder_graph_provider[
-                dataset_name
-            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
+            ) = self.decoder_graph_provider[dataset_name].get_edges(
+                batch_size=batch_size, model_comm_group=model_comm_group
+            )
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden_dict[self.hidden_levels[0]],

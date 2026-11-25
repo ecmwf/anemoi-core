@@ -47,9 +47,9 @@ class ReducedGaussianGridNodes(BaseNodeBuilder):
 
     def __init__(self, grid: int, name: str) -> None:
         """Initialize the ReducedGaussianGridNodes builder."""
-        assert re.fullmatch(
-            r"^[oOnN]\d+$", grid
-        ), f"{self.__class__.__name__}.grid must match the format [n|N|o|O]XXX with XXX latitude lines between the pole and equator."
+        assert re.fullmatch(r"^[oOnN]\d+$", grid), (
+            f"{self.__class__.__name__}.grid must match the format [n|N|o|O]XXX with XXX latitude lines between the pole and equator."
+        )
         self.grid = grid
         super().__init__(name)
 

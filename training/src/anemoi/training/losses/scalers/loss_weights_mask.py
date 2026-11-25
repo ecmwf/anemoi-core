@@ -21,7 +21,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 class NaNMaskScaler(BaseUpdatingScaler):
-
     scale_dims: tuple[TensorDim] = (TensorDim.BATCH_SIZE, TensorDim.GRID, TensorDim.VARIABLE)
 
     def __init__(self, norm: str | None = None, use_processors_tendencies: bool = False, **kwargs) -> None:

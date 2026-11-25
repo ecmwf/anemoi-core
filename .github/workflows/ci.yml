@@ -1,36 +1,41 @@
+# GENERATED FILE - DO NOT EDIT.
+# Regenerate via the ci-infrastructure-generate CLI.
+# Source of truth: each repo's .ci/manifest.toml.
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [develop, master, main]
   pull_request:
     types: [opened, reopened, synchronize]
-  schedule:
-    - cron: "9 2 * * 0" # at 9:02 on sunday
   workflow_dispatch:
+  workflow_call:
+  schedule:
+    - cron: "54 2 * * 0"
 
 concurrency:
-  # PRs cancel their superseded runs; every push to main runs to the end (as in ecmwf/eccodes).
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
-  ARTIFACT_POLL_INTERVAL: '30'
+  ARTIFACT_POLL_INTERVAL: ${{ vars.ARTIFACT_POLL_INTERVAL || '60' }}
   ARTIFACT_WAIT_TIMEOUT: ${{ vars.ARTIFACT_WAIT_TIMEOUT || '1800' }}
   ARTIFACT_S3_ENDPOINT: ${{ secrets.ARTIFACT_S3_ENDPOINT }}
   ARTIFACT_S3_BUCKET: ${{ secrets.ARTIFACT_S3_BUCKET }}
+  SCCACHE_BUCKET: ${{ secrets.SCCACHE_BUCKET }}
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
-permissions:
-  contents: read
 
 jobs:
   ci-approval:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       pull-requests: write
+      contents: read
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: ecmwf/ci-infrastructure/actions/require-ci-approval@main
         with:
@@ -38,53 +43,85 @@ jobs:
 
   resolve:
     needs: ci-approval
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
-      # resolve-deps declares matrix-<kind> outputs only for some kinds; json holds them all.
-      test-matrix: ${{ toJSON(fromJSON(steps.r.outputs.json).test) }}
+      matrices: ${{ steps.r.outputs.json }}
+      dispatch-plans: ${{ steps.r.outputs.dispatch-plans }}
     steps:
       - id: mint
-        uses: actions/create-github-app-token@v3
+        uses: ecmwf/ci-infrastructure/actions/mint-token@main
         with:
-          client-id: ${{ secrets.CI_PERMISSIONS_APP_CLIENT_ID }}
-          private-key: ${{ secrets.CI_PERMISSIONS_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+          client-id: ${{ secrets.CI_READER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CI_READER_APP_PRIVATE_KEY }}
+          repositories: anemoi-core,anemoi-datasets,anemoi-transform,anemoi-utils
+          permissions: contents:read actions:read
       - uses: ecmwf/ci-infrastructure/actions/checkout-under-test@main
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          allow-unsafe-pr-checkout: ${{ github.event_name == 'pull_request_target' }}
       - id: r
         uses: ecmwf/ci-infrastructure/actions/resolve-deps@main
         with:
           matrix: test
           token: ${{ steps.mint.outputs.token }}
-          client-id: ${{ secrets.CI_PERMISSIONS_APP_CLIENT_ID }}
-          app-private-key: ${{ secrets.CI_PERMISSIONS_APP_PRIVATE_KEY }}
+          rebuild-missing: 'true'
+      - name: Wait for the deps of test
+        if: steps.r.outputs.dispatch-plans == '[]'
+        uses: ecmwf/ci-infrastructure/actions/wait-for-deps@main
+        with:
+          matrix: ${{ steps.r.outputs.json }}
+          kinds: test
+          token: ${{ steps.mint.outputs.token }}
+    name: resolve + wait-build
+
+  rebuild-producers:
+    needs: [ci-approval, resolve]
+    runs-on: ubuntu-latest
+    steps:
+      - if: needs.resolve.outputs.dispatch-plans != '' && needs.resolve.outputs.dispatch-plans != '[]'
+        uses: ecmwf/ci-infrastructure/actions/dispatch-producers@main
+        with:
+          dispatch-plans: ${{ needs.resolve.outputs.dispatch-plans }}
+          repositories: anemoi-core,anemoi-datasets,anemoi-transform,anemoi-utils
+          client-id: ${{ secrets.CI_DISPATCHER_APP_CLIENT_ID }}
+          app-private-key: ${{ secrets.CI_DISPATCHER_APP_PRIVATE_KEY }}
 
   test:
-    needs: [ci-approval, resolve]
+    needs: [ci-approval, resolve, rebuild-producers]
     name: test (${{ matrix._resolved['job-name'] }})
     runs-on: ${{ matrix['runs-on'] }}
+    container:
+      image: ${{ matrix.container || '' }}
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.resolve.outputs.test-matrix) }}
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrices).test }}
     steps:
+      - name: Announce image
+        uses: ecmwf/ci-infrastructure/actions/announce-image@main
       - id: mint
-        uses: actions/create-github-app-token@v3
+        uses: ecmwf/ci-infrastructure/actions/mint-token@main
         with:
-          client-id: ${{ secrets.CI_PERMISSIONS_APP_CLIENT_ID }}
-          private-key: ${{ secrets.CI_PERMISSIONS_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+          client-id: ${{ secrets.CI_READER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CI_READER_APP_PRIVATE_KEY }}
+          repositories: anemoi-core,anemoi-datasets,anemoi-transform,anemoi-utils
+          permissions: contents:read actions:read
       - uses: ecmwf/ci-infrastructure/actions/checkout-under-test@main
         with:
-          # The version comes from the git tags (setuptools-scm).
+          persist-credentials: false
           fetch-depth: 0
-
+          allow-unsafe-pr-checkout: ${{ github.event_name == 'pull_request_target' }}
       - name: Fetch resolved deps
         id: deps
         uses: ecmwf/ci-infrastructure/actions/fetch-deps@main
         with:
           deps-json: ${{ toJSON(matrix._resolved.deps) }}
           token: ${{ steps.mint.outputs.token }}
-
-      - name: Build and test the wheels
+      - name: Print dependency table
+        uses: ecmwf/ci-infrastructure/actions/print-dep-table@main
+        with:
+          resolved: ${{ toJSON(matrix._resolved) }}
+      - name: Build
         id: build
         uses: ecmwf/ci-infrastructure/actions/run-job-script@main
         with:
@@ -92,37 +129,27 @@ jobs:
           matrix-leg: ${{ toJSON(matrix) }}
           package: anemoi-core
           cmake-prefix-path: ${{ steps.deps.outputs.cmake-prefix-path }}
-
-      # One artifact per package, as the generated workflows publish them.
       - name: Publish anemoi-graphs
         uses: ecmwf/ci-infrastructure/actions/publish-artifact@main
         with:
           install-path: ${{ steps.build.outputs.install-root }}/anemoi-graphs
           artifact-name: ${{ matrix._resolved.packages['anemoi-graphs']['own-artifact-name'] }}
-
       - name: Publish anemoi-models
         uses: ecmwf/ci-infrastructure/actions/publish-artifact@main
         with:
           install-path: ${{ steps.build.outputs.install-root }}/anemoi-models
           artifact-name: ${{ matrix._resolved.packages['anemoi-models']['own-artifact-name'] }}
-
       - name: Publish anemoi-training
         uses: ecmwf/ci-infrastructure/actions/publish-artifact@main
         with:
           install-path: ${{ steps.build.outputs.install-root }}/anemoi-training
           artifact-name: ${{ matrix._resolved.packages['anemoi-training']['own-artifact-name'] }}
 
-      - name: Print dependency table
-        if: always()
-        uses: ecmwf/ci-infrastructure/actions/print-dep-table@main
-        with:
-          resolved: ${{ toJSON(matrix._resolved) }}
-
   ci-result:
     name: collect results
     if: always()
     needs: [ci-approval, resolve, test]
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     permissions:
       statuses: write
     steps:
